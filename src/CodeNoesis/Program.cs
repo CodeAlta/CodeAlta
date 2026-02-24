@@ -5,6 +5,7 @@ using LLama.Common;
 using LLama.Native;
 using System.Diagnostics;
 using System.Numerics.Tensors;
+using System.Text.Json;
 
 /*
 NativeLibraryConfig.All.WithLogCallback((level, message) =>
@@ -61,6 +62,16 @@ for (int i = 0; i < 100; i++)
 return;
 */
 
+var options = CodexClient.CreateJsonSerializerOptions();
+
+var test = new ThreadStartParams()
+{
+    Config = JsonSerializer.SerializeToElement("test", options)
+};
+
+var result = JsonSerializer.Serialize(test, options);
+Console.WriteLine(result);
+
 var codexClient = await CodexClient.StartAsync(new ClientInfo
 {
     Name = "CodeNoesis",
@@ -68,8 +79,19 @@ var codexClient = await CodexClient.StartAsync(new ClientInfo
     Title = "CodeNoesis App"
 });
 
+var config = await codexClient.ConfigReadAsync(new ConfigReadParams()
+{
+    Cwd = AppContext.BaseDirectory
+});
+Console.WriteLine(config);
 
+var models = await codexClient.ModelListAsync(new ModelListParams());
+foreach (var model in models.Data)
+{
+    Console.WriteLine(model);
+}
 
+return;
 var accountRead = await codexClient.AccountReadAsync(new GetAccountParams());
 Console.WriteLine(accountRead.Account);
 

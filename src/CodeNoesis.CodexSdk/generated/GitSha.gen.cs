@@ -6,6 +6,21 @@ using System.Text.Json.Serialization;
 
 namespace CodeNoesis.CodexSdk;
 
+internal sealed class GitShaJsonConverter : JsonConverter<GitSha>
+{
+    public override GitSha Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = JsonSerializer.Deserialize<string>(ref reader, options)!;
+        return new GitSha { Value = value };
+    }
+
+    public override void Write(Utf8JsonWriter writer, GitSha value, JsonSerializerOptions options)
+    {
+        JsonSerializer.Serialize(writer, value.Value, options);
+    }
+}
+
+[JsonConverter(typeof(GitShaJsonConverter))]
 public partial record struct GitSha
 {
     public GitSha() { }

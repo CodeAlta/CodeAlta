@@ -6,6 +6,21 @@ using System.Text.Json.Serialization;
 
 namespace CodeNoesis.CodexSdk;
 
+internal sealed class ThreadIdJsonConverter : JsonConverter<ThreadId>
+{
+    public override ThreadId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = JsonSerializer.Deserialize<string>(ref reader, options)!;
+        return new ThreadId { Value = value };
+    }
+
+    public override void Write(Utf8JsonWriter writer, ThreadId value, JsonSerializerOptions options)
+    {
+        JsonSerializer.Serialize(writer, value.Value, options);
+    }
+}
+
+[JsonConverter(typeof(ThreadIdJsonConverter))]
 public partial record struct ThreadId
 {
     public ThreadId() { }

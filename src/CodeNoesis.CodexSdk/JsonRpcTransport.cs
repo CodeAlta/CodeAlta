@@ -95,6 +95,9 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
             }, cancellationToken).ConfigureAwait(false);
 
             var resultElement = await tcs.Task.ConfigureAwait(false);
+
+            //Console.WriteLine(resultElement.ToString()); // Ensure the JsonElement is fully parsed before we leave the async method, to avoid deferred parsing issues.
+
             return resultElement.Deserialize<TResult>(_jsonOptions)
                 ?? throw new JsonRpcException(-1, $"Failed to deserialize response for '{method}'.");
         }

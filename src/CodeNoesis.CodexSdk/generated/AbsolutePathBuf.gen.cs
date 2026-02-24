@@ -11,6 +11,21 @@ namespace CodeNoesis.CodexSdk;
 /// 
 /// IMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.
 /// </summary>
+internal sealed class AbsolutePathBufJsonConverter : JsonConverter<AbsolutePathBuf>
+{
+    public override AbsolutePathBuf Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = JsonSerializer.Deserialize<string>(ref reader, options)!;
+        return new AbsolutePathBuf { Value = value };
+    }
+
+    public override void Write(Utf8JsonWriter writer, AbsolutePathBuf value, JsonSerializerOptions options)
+    {
+        JsonSerializer.Serialize(writer, value.Value, options);
+    }
+}
+
+[JsonConverter(typeof(AbsolutePathBufJsonConverter))]
 public partial record struct AbsolutePathBuf
 {
     public AbsolutePathBuf() { }

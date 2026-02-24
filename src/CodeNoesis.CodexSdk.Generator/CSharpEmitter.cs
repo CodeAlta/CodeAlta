@@ -545,6 +545,26 @@ public class CSharpEmitter
         WriteDescription(sb, def.Schema.Description);
         var defaultVal = GetDefaultValue(csType);
         var defaultSuffix = defaultVal != null ? $" = {defaultVal};" : "";
+
+        // Generate a converter so the type serializes as the raw underlying
+        // value (e.g. a plain string) instead of an object with a Value property.
+        var converterName = $"{def.Name}JsonConverter";
+        sb.AppendLine($"internal sealed class {converterName} : JsonConverter<{def.Name}>");
+        sb.AppendLine("{");
+        sb.AppendLine($"    public override {def.Name} Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        var value = JsonSerializer.Deserialize<{csType}>(ref reader, options)!;");
+        sb.AppendLine($"        return new {def.Name} {{ Value = value }};");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine($"    public override void Write(Utf8JsonWriter writer, {def.Name} value, JsonSerializerOptions options)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        JsonSerializer.Serialize(writer, value.Value, options);");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        sb.AppendLine();
+
+        sb.AppendLine($"[JsonConverter(typeof({converterName}))]");
         sb.AppendLine($"public partial record struct {def.Name}");
         sb.AppendLine("{");
         if (defaultVal != null)

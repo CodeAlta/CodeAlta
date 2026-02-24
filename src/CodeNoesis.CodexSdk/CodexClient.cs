@@ -1022,7 +1022,10 @@ public sealed class CodexClient : IAsyncDisposable
         };
     }
 
-    private static JsonSerializerOptions CreateJsonSerializerOptions()
+    /// <summary>
+    /// Creates a JSON serializer options.
+    /// </summary>
+    public static JsonSerializerOptions CreateJsonSerializerOptions()
     {
         return new JsonSerializerOptions
         {
