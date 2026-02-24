@@ -5,10 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-    <!-- SYSLIB1031: Auto-discovered types (List<T>/Nullable<T>) with same short name
-         across root and V2 namespaces produce benign collisions. Explicit registrations
-         already use TypeInfoPropertyName for disambiguation. -->
-    <NoWarn>$(NoWarn);SYSLIB1031</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

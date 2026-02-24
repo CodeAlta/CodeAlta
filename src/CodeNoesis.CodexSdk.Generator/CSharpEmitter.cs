@@ -18,6 +18,7 @@ public class CSharpEmitter
     private readonly Dictionary<string, TypeDef> _pointerToTypeDef = new();
     private readonly string _rootNamespace;
     private readonly List<string> _serializableTypes = [];
+    private readonly HashSet<string> _collectionTypes = new(StringComparer.Ordinal);
 
     public CSharpEmitter(IReadOnlyList<TypeDef> allDefs, string rootNamespace)
     {
@@ -36,6 +37,7 @@ public class CSharpEmitter
     {
         var result = new Dictionary<string, List<(string, string)>>();
         _serializableTypes.Clear();
+        _collectionTypes.Clear();
 
         foreach (var def in defs)
         {
@@ -553,8 +555,11 @@ public class CSharpEmitter
             if (schema.Item != null)
             {
                 var itemType = MapType(SchemaWalker.Resolve(schema.Item), contextNs);
-                return $"List<{itemType}>";
+                var listType = $"List<{itemType}>";
+                TrackCollectionType(listType, contextNs);
+                return listType;
             }
+            _collectionTypes.Add("List<System.Text.Json.JsonElement>");
             return "List<JsonElement>";
         }
 
@@ -565,7 +570,9 @@ public class CSharpEmitter
         {
             var valType = MapType(SchemaWalker.Resolve(
                 schema.AdditionalPropertiesSchema), contextNs);
-            return $"Dictionary<string, {valType}>";
+            var dictType = $"Dictionary<string, {valType}>";
+            TrackCollectionType(dictType, contextNs);
+            return dictType;
         }
 
         // Object
@@ -595,7 +602,10 @@ public class CSharpEmitter
         if (type == JsonObjectType.Boolean) return "bool";
         if (type == JsonObjectType.Integer) return MapIntFormat(schema.Format);
         if (type == JsonObjectType.Number) return MapNumberFormat(schema.Format);
-        if (type.HasFlag(JsonObjectType.Array)) return "List<JsonElement>";
+        if (type.HasFlag(JsonObjectType.Array))
+        {
+            return "List<JsonElement>";
+        }
         if (type.HasFlag(JsonObjectType.Object)) return "JsonElement";
         return "JsonElement";
     }
@@ -617,6 +627,92 @@ public class CSharpEmitter
         "double" => "double",
         _ => "double"
     };
+
+    /// <summary>
+    /// Records a collection type (e.g. <c>List&lt;Foo&gt;</c> or <c>Dictionary&lt;string, Foo&gt;</c>)
+    /// with fully-qualified inner type names so that it can be registered with
+    /// <c>[JsonSerializable]</c> in the serializer context.
+    /// </summary>
+    private void TrackCollectionType(string collectionType, string contextNs)
+    {
+        // Expand short type names to fully-qualified for the [JsonSerializable] attribute.
+        // Primitives and well-known BCL types are left as-is; custom types are resolved
+        // against _serializableTypes or assumed to be in contextNs.
+        _collectionTypes.Add(FullyQualifyCollectionType(collectionType, contextNs));
+    }
+
+    private string FullyQualifyCollectionType(string type, string contextNs)
+    {
+        // Recursively resolve inner types for generics like List<Foo> or Dictionary<string, List<Bar>>
+        var openIdx = type.IndexOf('<');
+        if (openIdx < 0)
+            return FullyQualifyTypeName(type, contextNs);
+
+        var outer = type[..openIdx]; // "List" or "Dictionary"
+        var inner = type[(openIdx + 1)..^1]; // strip < and >
+
+        // Split top-level generic arguments (respecting nested <> depth)
+        var args = SplitGenericArgs(inner);
+        var fqArgs = args.Select(a => FullyQualifyCollectionType(a.Trim(), contextNs));
+        return $"{outer}<{string.Join(", ", fqArgs)}>";
+    }
+
+    private string FullyQualifyTypeName(string shortName, string contextNs)
+    {
+        // Already fully qualified
+        if (shortName.Contains('.'))
+            return shortName;
+
+        // Primitives / well-known types
+        if (shortName is "string" or "bool" or "int" or "long" or "short"
+            or "uint" or "ulong" or "ushort" or "float" or "double"
+            or "decimal" or "byte" or "sbyte" or "char" or "object")
+            return shortName;
+
+        if (shortName == "JsonElement")
+            return "System.Text.Json.JsonElement";
+
+        // Look up in known type defs, preferring the one in the context namespace
+        // (mirrors C# short-name resolution: same-namespace type wins).
+        string? fallback = null;
+        foreach (var (_, def) in _pointerToTypeDef)
+        {
+            if (def.Name != shortName)
+                continue;
+
+            if (def.CsNamespace == contextNs)
+                return $"{def.CsNamespace}.{def.Name}";
+
+            fallback ??= $"{def.CsNamespace}.{def.Name}";
+        }
+
+        if (fallback != null)
+            return fallback;
+
+        // Fallback: assume it's in the current context namespace
+        return $"{contextNs}.{shortName}";
+    }
+
+    private static List<string> SplitGenericArgs(string args)
+    {
+        var results = new List<string>();
+        var depth = 0;
+        var start = 0;
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case '<': depth++; break;
+                case '>': depth--; break;
+                case ',' when depth == 0:
+                    results.Add(args[start..i]);
+                    start = i + 1;
+                    break;
+            }
+        }
+        results.Add(args[start..]);
+        return results;
+    }
 
     private string? GetDefinitionPointer(JsonSchema schema)
     {
@@ -762,8 +858,36 @@ public class CSharpEmitter
             }
         }
 
+        // Register collection types (List<T>, Dictionary<K,V>) used in properties
+        // so that STJ source gen can serialize them without reflection.
+        // Use TypeInfoPropertyName to disambiguate collections whose element
+        // types share a short name across namespaces (e.g. List<UserInput> vs
+        // List<V2.UserInput>); without this, SYSLIB1031 duplicates cause the
+        // source generator to silently skip the second registration.
+        foreach (var collectionType in _collectionTypes.Order())
+        {
+            var propName = CollectionTypeToPropName(collectionType);
+            sb.AppendLine($"[JsonSerializable(typeof({collectionType}), TypeInfoPropertyName = \"{propName}\")]");
+        }
+
         sb.AppendLine($"internal partial class {contextClassName};");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Converts a fully-qualified collection type like
+    /// <c>List&lt;CodeNoesis.CodexSdk.V2.UserInput&gt;</c> into a unique property name
+    /// like <c>ListCodeNoesisCodexSdkV2UserInput</c> for the <c>TypeInfoPropertyName</c>.
+    /// </summary>
+    private static string CollectionTypeToPropName(string collectionType)
+    {
+        // Strip namespace dots and angle brackets to produce a valid C# identifier.
+        return collectionType
+            .Replace(".", string.Empty)
+            .Replace("<", string.Empty)
+            .Replace(">", string.Empty)
+            .Replace(",", string.Empty)
+            .Replace(" ", string.Empty);
     }
 
     #endregion
