@@ -18,6 +18,8 @@
   </Folder>
   <Project Path="CodeNoesis.CodexSdk.Generator/CodeNoesis.CodexSdk.Generator.csproj" Id="5e0c386b-10bd-4af7-a98e-5b18779aa19e" />
   <Project Path="CodeNoesis.Agent/CodeNoesis.Agent.csproj" />
+  <Project Path="CodeNoesis.Agent.Codex/CodeNoesis.Agent.Codex.csproj" />
+  <Project Path="CodeNoesis.Agent.Copilot/CodeNoesis.Agent.Copilot.csproj" />
   <Project Path="CodeNoesis.CodexSdk/CodeNoesis.CodexSdk.csproj" Id="4507c156-d675-4280-bd1c-2a5d8285c07f" />
   <Project Path="CodeNoesis.Tests/CodeNoesis.Tests.csproj" />
   <Project Path="CodeNoesis/CodeNoesis.csproj" />

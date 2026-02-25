@@ -4,6 +4,7 @@
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="0.1.26" />
     <PackageVersion Include="LLamaSharp" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Vulkan" Version="0.26.0" />

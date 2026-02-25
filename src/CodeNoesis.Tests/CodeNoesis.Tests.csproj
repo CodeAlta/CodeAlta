@@ -13,6 +13,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeNoesis\CodeNoesis.csproj" />
+    <ProjectReference Include="..\CodeNoesis.Agent\CodeNoesis.Agent.csproj" />
+    <ProjectReference Include="..\CodeNoesis.Agent.Codex\CodeNoesis.Agent.Codex.csproj" />
+    <ProjectReference Include="..\CodeNoesis.Agent.Copilot\CodeNoesis.Agent.Copilot.csproj" />
     <ProjectReference Include="..\CodeNoesis.CodexSdk\CodeNoesis.CodexSdk.csproj" />
   </ItemGroup>
 
