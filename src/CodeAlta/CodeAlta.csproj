@@ -1,13 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!--<OutputType>Library</OutputType>-->
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <IsPackable>true</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <PublishAot>true</PublishAot>
+    <!--<PublishAot>true</PublishAot>-->
 
     <!-- Enable AOT analyzers -->
     <IsAotCompatible>true</IsAotCompatible>
@@ -43,7 +42,9 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="XenoAtom.CommandLine.Terminal" />
     <PackageReference Include="XenoAtom.Logging.Terminal" />
+    <PackageReference Include="XenoAtom.Terminal.UI" />
   </ItemGroup>
 
   <ItemGroup>
