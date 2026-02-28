@@ -1,7 +1,11 @@
+using CodeAlta.DotNet;
 using CodeAlta.Mcp.Tools;
 using CodeAlta.Persistence;
 using CodeAlta.Search;
 using CodeAlta.Workspaces;
+using CodeAlta.Workspaces.Bootstrap;
+using CodeAlta.Workspaces.Roles;
+using CodeAlta.Workspaces.Skills;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -65,12 +69,28 @@ public sealed class CodeAltaMcpServerFactory
         AddForwardedService<SearchService>(serviceCollection);
         AddForwardedService<WorkspaceCatalog>(serviceCollection);
         AddForwardedService<WorkspaceResolver>(serviceCollection);
+        AddForwardedService<RoleProfileStore>(serviceCollection);
+        AddForwardedService<SkillCatalog>(serviceCollection);
+        AddForwardedService<GitService>(serviceCollection);
+        AddForwardedService<GlobalRepoBootstrapper>(serviceCollection);
+        AddForwardedService<GlobalRepoSyncService>(serviceCollection);
+        AddForwardedService<WorkspaceBootstrapPlanner>(serviceCollection);
+        AddForwardedService<WorkspaceBootstrapper>(serviceCollection);
+        AddForwardedService<DotNetWorkspaceService>(serviceCollection);
+        AddForwardedService<SymbolIndexService>(serviceCollection);
+        AddForwardedService<DotNetContextProvider>(serviceCollection);
+        AddForwardedService<DotNetIndexService>(serviceCollection);
+        AddForwardedService<DotNetDiagnosticsService>(serviceCollection);
 
         serviceCollection.AddSingleton<TasksTools>();
         serviceCollection.AddSingleton<ArtifactsTools>();
         serviceCollection.AddSingleton<SearchTools>();
         serviceCollection.AddSingleton<WorkspacesTools>();
         serviceCollection.AddSingleton<AgentsTools>();
+        serviceCollection.AddSingleton<RolesTools>();
+        serviceCollection.AddSingleton<SkillsTools>();
+        serviceCollection.AddSingleton<BootstrapTools>();
+        serviceCollection.AddSingleton<DotNetTools>();
 
         serviceCollection
             .AddMcpServer(options =>
@@ -89,6 +109,10 @@ public sealed class CodeAltaMcpServerFactory
                 typeof(SearchTools),
                 typeof(WorkspacesTools),
                 typeof(AgentsTools),
+                typeof(RolesTools),
+                typeof(SkillsTools),
+                typeof(BootstrapTools),
+                typeof(DotNetTools),
             ]);
 
         var scopedServices = serviceCollection.BuildServiceProvider();

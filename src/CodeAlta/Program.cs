@@ -4,6 +4,9 @@ using CodeAlta.Orchestration;
 using CodeAlta.Persistence;
 using CodeAlta.Search;
 using CodeAlta.Workspaces;
+using CodeAlta.Workspaces.Bootstrap;
+using CodeAlta.Workspaces.Roles;
+using CodeAlta.Workspaces.Skills;
 using Microsoft.Extensions.DependencyInjection;
 
 var cancellationTokenSource = new CancellationTokenSource();
@@ -80,13 +83,16 @@ internal sealed class TerminalHost : IAsyncDisposable
             });
         var workspaceResolver = new WorkspaceResolver(workspaceCatalog);
 
+        var dotNetWorkspaceService = new DotNetWorkspaceService();
+        var symbolIndexService = new SymbolIndexService();
+        var dotNetContextProvider = new DotNetContextProvider(dotNetWorkspaceService, symbolIndexService);
         var dotNetOptions = new DotNetOptions
         {
             ArtifactRoot = Path.Combine(homeRoot, "knowledge", "dotnet"),
         };
         var dotNetIndexService = new DotNetIndexService(
-            new DotNetWorkspaceService(),
-            new SymbolIndexService(),
+            dotNetWorkspaceService,
+            symbolIndexService,
             artifactStore,
             artifactRepository,
             indexer,
@@ -113,6 +119,21 @@ internal sealed class TerminalHost : IAsyncDisposable
         mcpServiceCollection.AddSingleton(searchService);
         mcpServiceCollection.AddSingleton(workspaceCatalog);
         mcpServiceCollection.AddSingleton(workspaceResolver);
+        mcpServiceCollection.AddSingleton(new RoleProfileStore());
+        mcpServiceCollection.AddSingleton(new SkillCatalog());
+        mcpServiceCollection.AddSingleton(new GitService());
+        mcpServiceCollection.AddSingleton(sp => new GlobalRepoBootstrapper(sp.GetRequiredService<GitService>()));
+        mcpServiceCollection.AddSingleton(sp => new GlobalRepoSyncService(sp.GetRequiredService<GitService>()));
+        mcpServiceCollection.AddSingleton(new WorkspaceBootstrapPlanner());
+        mcpServiceCollection.AddSingleton(sp =>
+            new WorkspaceBootstrapper(
+                sp.GetRequiredService<WorkspaceBootstrapPlanner>(),
+                sp.GetRequiredService<GitService>()));
+        mcpServiceCollection.AddSingleton(dotNetWorkspaceService);
+        mcpServiceCollection.AddSingleton(symbolIndexService);
+        mcpServiceCollection.AddSingleton(dotNetContextProvider);
+        mcpServiceCollection.AddSingleton(dotNetIndexService);
+        mcpServiceCollection.AddSingleton(dotNetDiagnosticsService);
         mcpServiceCollection.AddSingleton(mcpOptions);
         mcpServiceCollection.AddSingleton(new McpSessionRegistry());
         var mcpServices = mcpServiceCollection.BuildServiceProvider();

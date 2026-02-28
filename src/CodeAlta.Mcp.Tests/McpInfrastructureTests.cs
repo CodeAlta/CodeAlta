@@ -1,8 +1,12 @@
 using System.Text.Json;
+using CodeAlta.DotNet;
 using CodeAlta.Mcp;
 using CodeAlta.Persistence;
 using CodeAlta.Search;
 using CodeAlta.Workspaces;
+using CodeAlta.Workspaces.Bootstrap;
+using CodeAlta.Workspaces.Roles;
+using CodeAlta.Workspaces.Skills;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
 
@@ -24,6 +28,10 @@ public sealed class McpInfrastructureTests
         CollectionAssert.Contains(names, "codealta.search.query");
         CollectionAssert.Contains(names, "codealta.workspaces.resolve_scope");
         CollectionAssert.Contains(names, "codealta.agents.register");
+        CollectionAssert.Contains(names, "codealta.roles.list");
+        CollectionAssert.Contains(names, "codealta.skills.list");
+        CollectionAssert.Contains(names, "codealta.bootstrap.ensure_global_repo");
+        CollectionAssert.Contains(names, "codealta.dotnet.list_projects");
     }
 
     [TestMethod]
@@ -94,6 +102,97 @@ public sealed class McpInfrastructureTests
         Assert.AreEqual(artifactUri, results[0].GetProperty("sourceId").GetString());
     }
 
+    [TestMethod]
+    public async Task Mcp_Roles_List_ReturnsBuiltIns()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var listResult = await context.Connection.Client.CallToolAsync(
+            "codealta.roles.list",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = "global",
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(listResult));
+        if (payload.RootElement.ValueKind == JsonValueKind.Object &&
+            payload.RootElement.TryGetProperty("error", out var error))
+        {
+            Assert.Fail($"roles.list returned error: {error.GetString()}");
+        }
+
+        Assert.AreEqual(JsonValueKind.Array, payload.RootElement.ValueKind);
+        Assert.IsTrue(payload.RootElement.EnumerateArray().Any(x =>
+            string.Equals(x.GetProperty("roleId").GetString(), "global", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public async Task Mcp_Skills_List_FindsRepoSkills()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var listResult = await context.Connection.Client.CallToolAsync(
+            "codealta.skills.list",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = "workspace",
+                ["workspaceKey"] = "wk-core",
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(listResult));
+        Assert.AreEqual(JsonValueKind.Array, payload.RootElement.ValueKind);
+        Assert.IsTrue(payload.RootElement.EnumerateArray().Any(x =>
+            string.Equals(x.GetProperty("name").GetString(), "sample-skill", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public async Task Mcp_Bootstrap_EnsureGlobalRepo_CreatesRepo()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+        var repoRoot = Path.Combine(context.Temp.Path, "global-repo");
+
+        var result = await context.Connection.Client.CallToolAsync(
+            "codealta.bootstrap.ensure_global_repo",
+            new Dictionary<string, object?>
+            {
+                ["globalRepoRoot"] = repoRoot,
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(result));
+        Assert.AreEqual(Path.GetFullPath(repoRoot), payload.RootElement.GetProperty("globalRepoRoot").GetString());
+        Assert.IsTrue(Directory.Exists(Path.Combine(repoRoot, "workspaces")));
+    }
+
+    [TestMethod]
+    public async Task Mcp_DotNet_ListProjects_DiscoversCsproj()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var repoRoot = Path.Combine(context.Temp.Path, "dotnet-repo");
+        Directory.CreateDirectory(repoRoot);
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, "App.csproj"),
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """).ConfigureAwait(false);
+
+        var result = await context.Connection.Client.CallToolAsync(
+            "codealta.dotnet.list_projects",
+            new Dictionary<string, object?>
+            {
+                ["repoRoot"] = repoRoot,
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(result));
+        Assert.AreEqual(JsonValueKind.Array, payload.RootElement.ValueKind);
+        Assert.IsTrue(payload.RootElement.EnumerateArray().Any(x =>
+            string.Equals(x.GetProperty("name").GetString(), "App", StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static string ReadTextContent(CallToolResult result)
     {
         var text = result.Content
@@ -110,7 +209,15 @@ public sealed class McpInfrastructureTests
 
     private static JsonDocument ParseJson(string json)
     {
-        return JsonDocument.Parse(json);
+        try
+        {
+            return JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            Assert.Fail($"Expected JSON payload but received: {json}\n{ex.Message}");
+            throw;
+        }
     }
 
     private sealed class TestContext : IAsyncDisposable
@@ -159,6 +266,36 @@ public sealed class McpInfrastructureTests
                     GlobalRepoRoot = temp.Path,
                 });
             var workspaceResolver = new WorkspaceResolver(workspaceCatalog);
+
+            await SeedWorkspaceFixtureAsync(temp.Path).ConfigureAwait(false);
+
+            var roles = new RoleProfileStore();
+            var skills = new SkillCatalog();
+            var git = new GitService();
+            var globalRepoBootstrapper = new GlobalRepoBootstrapper(git);
+            var globalRepoSync = new GlobalRepoSyncService(git);
+            var workspaceBootstrapPlanner = new WorkspaceBootstrapPlanner();
+            var workspaceBootstrapper = new WorkspaceBootstrapper(workspaceBootstrapPlanner, git);
+
+            var dotNetWorkspace = new DotNetWorkspaceService();
+            var symbolIndex = new SymbolIndexService();
+            var dotNetContext = new DotNetContextProvider(dotNetWorkspace, symbolIndex);
+            var dotNetOptions = new DotNetOptions
+            {
+                ArtifactRoot = Path.Combine(temp.Path, "knowledge", "dotnet"),
+            };
+            var dotNetIndex = new DotNetIndexService(
+                dotNetWorkspace,
+                symbolIndex,
+                artifactStore,
+                artifactRepository,
+                indexer,
+                dotNetOptions);
+            var dotNetDiagnostics = new DotNetDiagnosticsService(
+                artifactStore,
+                artifactRepository,
+                indexer,
+                dotNetOptions);
             var options = new CodeAltaMcpOptions
             {
                 ServerName = "CodeAlta.Tests",
@@ -175,6 +312,18 @@ public sealed class McpInfrastructureTests
             services.AddSingleton(searchService);
             services.AddSingleton(workspaceCatalog);
             services.AddSingleton(workspaceResolver);
+            services.AddSingleton(roles);
+            services.AddSingleton(skills);
+            services.AddSingleton(git);
+            services.AddSingleton(globalRepoBootstrapper);
+            services.AddSingleton(globalRepoSync);
+            services.AddSingleton(workspaceBootstrapPlanner);
+            services.AddSingleton(workspaceBootstrapper);
+            services.AddSingleton(dotNetWorkspace);
+            services.AddSingleton(symbolIndex);
+            services.AddSingleton(dotNetContext);
+            services.AddSingleton(dotNetIndex);
+            services.AddSingleton(dotNetDiagnostics);
             services.AddSingleton(options);
             services.AddSingleton(new McpSessionRegistry());
 
@@ -186,6 +335,54 @@ public sealed class McpInfrastructureTests
             var connection = await InProcessMcpConnection.CreateAsync(factory).ConfigureAwait(false);
 
             return new TestContext(temp, provider, connection);
+        }
+
+        private static async Task SeedWorkspaceFixtureAsync(string globalRepoRoot)
+        {
+            var workspaceRoot = Path.Combine(globalRepoRoot, "workspaces", "wk-core");
+            var projectsRoot = Path.Combine(workspaceRoot, "projects");
+            Directory.CreateDirectory(projectsRoot);
+
+            var workspaceId = WorkspaceId.NewVersion7();
+            var projectId = ProjectId.NewVersion7();
+            var checkoutRootPath = Path.Combine(globalRepoRoot, "checkouts");
+
+            await File.WriteAllTextAsync(
+                Path.Combine(workspaceRoot, "workspace.yaml"),
+                string.Join(
+                    "\n",
+                    [
+                        $"id: \"{workspaceId}\"",
+                        "key: \"wk-core\"",
+                        "display_name: \"Core Workspace\"",
+                        $"default_checkout_root: '{checkoutRootPath}'",
+                        string.Empty,
+                    ])).ConfigureAwait(false);
+
+            await File.WriteAllTextAsync(
+                Path.Combine(projectsRoot, "repo-main.yaml"),
+                string.Join(
+                    "\n",
+                    [
+                        $"id: \"{projectId}\"",
+                        "key: \"repo-main\"",
+                        "display_name: \"Main Repo\"",
+                        $"repo_url: '{Path.Combine(globalRepoRoot, "remote.git")}'",
+                        "default_branch: \"main\"",
+                        "checkout:",
+                        "  path_template: '{workspaceKey}\\\\{projectKey}'",
+                        string.Empty,
+                    ])).ConfigureAwait(false);
+
+            var skillRoot = Path.Combine(globalRepoRoot, "checkouts", "wk-core", "repo-main", ".codealta", "skills", "sample-skill");
+            Directory.CreateDirectory(skillRoot);
+            await File.WriteAllTextAsync(
+                Path.Combine(skillRoot, "SKILL.md"),
+                """
+                # Sample Skill
+
+                Demo skill used for MCP tests.
+                """).ConfigureAwait(false);
         }
 
         public async ValueTask DisposeAsync()
