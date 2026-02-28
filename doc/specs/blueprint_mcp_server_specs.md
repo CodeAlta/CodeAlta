@@ -104,18 +104,30 @@ Therefore:
 
 ### 4.2 Root directory
 
-Suggested root:
+Artifacts can be stored in multiple roots depending on scope and portability goals:
 
-- Linux/macOS: `$HOME/.codealta/`
-- Windows: `%USERPROFILE%\\.codealta\\`
+- **Repo-local (project-scoped, shareable)**:
+  - `<projectRoot>/.codealta/` (similar to `.github/`)
+  - recommended split:
+    - `.codealta/shared/` (optionally committed)
+    - `.codealta/local/` (gitignored; caches/logs)
+- **Per-user (workspace/global or sensitive)**:
+  - Linux/macOS: `$HOME/.codealta/`
+  - Windows: `%USERPROFILE%\\.codealta\\`
+
+The MCP server should decide the default root based on `(scope, type, policy)`, but callers may provide a storage hint.
 
 ### 4.3 Suggested tools
 
-- `artifact.write(scope, type, title?, content, format="markdown") -> artifactId`
+- `artifact.write(scope, type, title?, content, format="markdown", storageHint?) -> artifactId`
 - `artifact.read(artifactId) -> content`
 - `artifact.list(filter) -> artifacts[]`
 
 Artifacts should be content-addressed (store `contentHash`) so agents can detect staleness.
+
+Recommended artifact format:
+
+- Markdown with YAML frontmatter (ids, scope refs, timestamps, tags), similar to Agent Skills’ `SKILL.md`
 
 ### 4.4 Linking artifacts to SQLite
 
@@ -192,6 +204,12 @@ Suggested tools:
 - `workspace.add_project(workspaceId, path, metadata?)`
 - `workspace.remove_project(workspaceId, projectId)`
 
+Portability tools (multi-machine):
+
+- `workspace.export(workspaceId) -> workspaceManifest`
+- `workspace.import(workspaceManifest) -> workspaceId`
+- `workspace.set_home(workspaceId, homePathOrGitRemote)` (optional: git-backed workspace repo)
+
 These tools are used by the global agent to route work reliably.
 
 ---
@@ -220,4 +238,3 @@ We need three versions:
 - index version (embedding model + chunking strategy)
 
 All should be queryable via a `server.info` tool so agents can adapt.
-

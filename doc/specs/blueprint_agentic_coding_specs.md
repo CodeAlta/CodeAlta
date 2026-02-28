@@ -263,7 +263,16 @@ To survive context compaction and to enable “recoverable memory”, agent work
 Guideline:
 
 - **Project files are the source of truth** and already exist on disk.
-- **Derived/extracted knowledge** (summaries, plans, decisions, retrieval results, run logs) must be stored as **plain files** (Markdown/JSON) in a central CodeAlta directory and linked from SQLite.
+- **Derived/extracted knowledge** (summaries, plans, decisions, retrieval results, run logs) must be stored as **plain files** (Markdown/JSON) and linked from SQLite.
+
+Storage locations (both are useful):
+
+- **Repo-local (`.codealta/`)**: for project-scoped, shareable knowledge that should travel with the repository.
+  - `<projectRoot>/.codealta/` (similar to `.github/`)
+  - recommend splitting:
+    - `.codealta/shared/` (optionally committed)
+    - `.codealta/local/` (gitignored; caches, per-machine logs)
+- **Per-user (`$HOME/.codealta/`)**: for workspace/global artifacts and anything sensitive or machine-specific.
 
 Suggested root directory:
 
@@ -286,6 +295,23 @@ Suggested structure (example):
     runs/<agentId>/
       2026-02-28T12-34-56Z.md
 ```
+
+Repo-local structure (example):
+
+```
+<projectRoot>/.codealta/
+  shared/
+    project.md
+    summaries/
+    decisions/
+  local/
+    cache/
+    runs/
+```
+
+Artifact format:
+
+- prefer Markdown with YAML frontmatter for stable machine parsing (ids, scope, timestamps, tags)
 
 SQLite should store:
 
@@ -317,6 +343,19 @@ Switching workspaces should:
 - keep agent sessions alive (unless user stops them)
 - change routing + default scope for new tasks
 - update pinned context and retrieval scope
+
+### 7.4 Workspace portability (multi-machine)
+
+If a workspace spans multiple repositories, paths are not stable across machines.
+
+Suggested approach:
+
+- allow a workspace to declare a **workspace home**:
+  - local directory (default)
+  - or a **git-backed “workspace repository”** containing workspace manifests + curated artifacts
+- CodeAlta can clone/sync the workspace repo on a new machine, then reconstruct the workspace by:
+  - cloning required project repos (by git remote URL)
+  - applying local path mappings
 
 ---
 

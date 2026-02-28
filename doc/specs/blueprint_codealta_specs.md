@@ -153,10 +153,31 @@ For planner/knowledge (and optionally builder) outputs, store durable artifacts 
 - Retrieval snapshots (“why this was suggested”)
 - Agent run logs (what tools were called, high-level outcomes)
 
-These artifacts should live under a central root such as:
+These artifacts should be stored in a way that supports **portability** and **review**:
 
-- Linux/macOS: `$HOME/.codealta/`
-- Windows: `%USERPROFILE%\.codealta\`
+- **Project-scoped, shareable artifacts**: store under a repo-local folder (similar to `.github`):
+  - `<projectRoot>/.codealta/`
+  - these can be committed when you want knowledge to travel with the repository
+- **User/workspace-scoped or sensitive artifacts**: store under a central per-user root:
+  - Linux/macOS: `$HOME/.codealta/`
+  - Windows: `%USERPROFILE%\.codealta\`
+
+To keep artifacts machine-readable, prefer **Markdown files with YAML frontmatter** (similar to Agent Skills’ `SKILL.md` and optionally project `AGENTS.md`).
+Example:
+
+```md
+---
+id: 9f8b3ad1-0d6f-4e4b-a7e0-6b2e6d1f4c8a
+type: project_summary
+projectId: <projectId>
+workspaceId: <workspaceId>
+createdAt: 2026-02-28T12:34:56Z
+tags: [architecture, onboarding]
+---
+
+# Project summary
+...
+```
 
 The SQLite DB stores metadata + pointers to these files (path + hash), so agents can reload them after compaction.
 
@@ -212,6 +233,12 @@ Recommended approach:
 - Store the workspace registry in a global config file + global SQLite table.
 - Each workspace has its own SQLite DB (or a workspace namespace in a single DB).
 - The global agent routes user requests to the right workspace agent(s).
+
+Portability note (multi-machine):
+
+- For teams or multi-device usage, consider making “workspace metadata” live in a **workspace repository**:
+  - a git repo containing workspace manifests (YAML/Markdown) and curated knowledge artifacts
+  - CodeAlta can clone/sync this repo to reconstruct workspaces on a different machine
 
 ---
 
