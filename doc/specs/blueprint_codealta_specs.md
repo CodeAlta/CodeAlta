@@ -96,7 +96,7 @@ Key constraints:
 
 Suggested identity:
 
-- `workspaceId` (GUID)
+- `workspaceId` (UUID v7, generated via `Guid.CreateVersion7()`)
 - `name`
 - `projects[]` (list of project roots and metadata)
 - `settings` (backend preferences, indexing options, skill directories, etc.)
@@ -118,7 +118,7 @@ Projects are the unit for:
 
 An agent is a long-lived unit of work with an identity and scope.
 
-- `agentId` (GUID)
+- `agentId` (UUID v7, generated via `Guid.CreateVersion7()`)
 - `role` (knowledge / planner / builder / reviewer / …)
 - `scope` (global / workspace / project)
 - `backend` (Codex/Copilot) + backend session/thread id
@@ -145,7 +145,7 @@ Suggested format (compatible superset):
 - Required: `name`, `description`
 - Body: the role prompt/instructions
 - Optional (Copilot-compatible): `tools`, `mcp-server`
-- Optional (CodeAlta extensions): `id` (GUID), `defaultScope`, `capabilities`, `metadata`
+- Optional (CodeAlta extensions): `id` (UUID v7, generated via `Guid.CreateVersion7()`), `defaultScope`, `capabilities`, `metadata`
 
 Built-in roles (knowledge/planner/builder/…) should ship as built-in profiles but remain overrideable by repo/workspace/user profiles.
 
@@ -196,7 +196,7 @@ Example:
 
 ```md
 ---
-id: 9f8b3ad1-0d6f-4e4b-a7e0-6b2e6d1f4c8a
+id: 01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a
 type: project_summary
 projectId: <projectId>
 workspaceId: <workspaceId>

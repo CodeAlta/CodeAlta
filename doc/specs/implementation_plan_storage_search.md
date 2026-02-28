@@ -41,8 +41,8 @@ Proposed subfolders:
 ### 1.3 Workspace-level storage
 
 Workspace metadata lives in the global repo (portable) and references local checkout paths via machine overrides:
-- `~/.codealta/repo/workspaces/<workspaceId>/workspace.yaml`
-- `~/.codealta/repo/workspaces/<workspaceId>/projects/*.yaml`
+- `~/.codealta/repo/workspaces/<workspaceKey>/workspace.yaml`
+- `~/.codealta/repo/workspaces/<workspaceKey>/projects/*.yaml`
 - `~/.codealta/repo/machines/<machineId>.yaml` (per-machine path overrides)
 
 ## 2. Artifact file format (markdown + YAML frontmatter)
@@ -51,14 +51,16 @@ Artifacts are plain markdown, with YAML frontmatter for stable metadata:
 
 ```yaml
 ---
-id: "01J0... (ulid or guid)"
+id: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a" # UUID v7 (`Guid.CreateVersion7()`)
 type: "knowledge.record" # or task.snapshot, plan.output, etc.
 title: "Workspace overview"
-workspace_id: "wk-..."
-project_id: "prj-..." # optional
+workspace_id: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"
+workspace_key: "wk-..." # optional convenience for humans
+project_id: "01963b36-0d70-7a11-b3c2-1f2e3d4c5b6a" # optional
+project_key: "prj-..." # optional convenience for humans
 source:
   kind: "generated"
-  agent_id: "..."
+  agent_id: "01963b36-0d71-7f22-8d33-abcdef012345"
 tags: ["architecture", "indexable"]
 links:
   tasks: ["task-..."]
@@ -113,7 +115,7 @@ We keep the first schema small, and add tables only when we have a consumer.
   - `checkout_path TEXT` (resolved local path)
   - `git_root TEXT` (detected)
 - `agents`
-  - `agent_id TEXT PRIMARY KEY` (GUID/ULID)
+  - `agent_id TEXT PRIMARY KEY` (UUID v7, generated via `Guid.CreateVersion7()`)
   - `role TEXT` (global/knowledge/planner/builder/custom)
   - `scope_kind TEXT` (global/workspace/project)
   - `scope_id TEXT NULL`
@@ -126,7 +128,7 @@ We keep the first schema small, and add tables only when we have a consumer.
   - `created_at TEXT`
   - `last_used_at TEXT`
 - `tasks`
-  - `task_id TEXT PRIMARY KEY` (GUID/ULID)
+  - `task_id TEXT PRIMARY KEY` (UUID v7, generated via `Guid.CreateVersion7()`)
   - `workspace_id TEXT NULL`
   - `project_id TEXT NULL`
   - `parent_task_id TEXT NULL`
@@ -318,4 +320,3 @@ Add MSTest coverage:
 - Hybrid search returns stable source links.
 
 Keep fixtures small and deterministic (no network downloads in unit tests).
-

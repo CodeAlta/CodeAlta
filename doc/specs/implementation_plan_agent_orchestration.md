@@ -40,7 +40,7 @@ Dependencies:
 
 Records:
 - `AgentIdentity`
-  - `AgentId` (GUID/ULID)
+  - `AgentId` (UUID v7, generated via `Guid.CreateVersion7()`)
   - `RoleId` (string)
   - `Scope` (`AgentScope`)
   - `BackendId` (codex/copilot)
@@ -206,4 +206,3 @@ Implementation note:
 - Orchestration flow:
   - planner creates tasks and plan artifact
   - builder marks tasks completed (mock backend or fake session)
-

@@ -26,6 +26,7 @@ Hard choices (requested):
 - Markdown: Markdig.
 - YAML: SharpYaml (frontmatter).
 - Logging: XenoAtom.Logging (bridge where other libs expect `Microsoft.Extensions.Logging`).
+- Identifiers: all generated GUID identifiers use UUID v7 via `Guid.CreateVersion7()`.
 
 Non-functional constraints:
 - Async-first, cancellation-first, non-blocking; UI must remain responsive.
@@ -233,4 +234,3 @@ Milestone 6 — Terminal UI
 - Replace `src/CodeAlta/Program.cs` playground with a real TUI host.
 - Add responsive UI loops, background job views, and scope selection UX.
 - Keep everything else reusable without the UI.
-

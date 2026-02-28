@@ -71,7 +71,7 @@ Optional future roles:
 
 Each agent has:
 
-- `agentId` (GUID)
+- `agentId` (UUID v7, generated via `Guid.CreateVersion7()`)
 - `(role, scope)` tuple
 - `workspaceId` and/or `projectId` depending on scope
 - backend session id (`threadId`/`sessionId`)
@@ -87,7 +87,7 @@ Design goals:
 
 - **Progressive disclosure**: load only `(name, description)` for discovery; load full prompt only when the role is instantiated.
 - **Copilot compatibility**: support `.github/agents/*.md` profiles (GitHub Copilot custom agents format) as an input source.
-- **CodeAlta extensions**: allow extra metadata such as `id` (GUID), default scope, and capability declarations.
+- **CodeAlta extensions**: allow extra metadata such as `id` (UUID v7, generated via `Guid.CreateVersion7()`), default scope, and capability declarations.
 
 At runtime, an agent instance references a role profile (by `name` and/or `id`) and the orchestrator injects the profile prompt into the session context pack.
 
@@ -181,7 +181,7 @@ Statuses:
 
 Required task fields:
 
-- `taskId` (GUID)
+- `taskId` (UUID v7, generated via `Guid.CreateVersion7()`)
 - `title`, `description`
 - `scope` (workspace/project/file refs)
 - `assignedAgentId` (nullable)
@@ -306,9 +306,9 @@ Suggested structure (example):
 
 ```
 ~/.codealta/
-  workspaces/<workspaceId>/
+  workspaces/<workspaceKey>/
     workspace.md
-    projects/<projectId>/
+    projects/<projectKey>/
       project.md
       summaries/
       decisions/

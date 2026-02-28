@@ -40,13 +40,13 @@ Regardless of transport, services should be designed as **idempotent** and **aud
 
 ### 2.1 Goals
 
-- every agent has a stable identity (GUID)
+- every agent has a stable identity (UUID v7, generated via `Guid.CreateVersion7()`)
 - other agents can discover “who can do what”
 - agents can form hierarchies (parent/child)
 
 ### 2.2 Suggested data (minimum)
 
-- `agentId` (GUID)
+- `agentId` (UUID v7, generated via `Guid.CreateVersion7()`)
 - `name`
 - `description`
 - `role` (knowledge/planner/builder/…)
@@ -134,7 +134,7 @@ Recommended artifact format:
 
 SQLite stores:
 
-- `artifactId` (GUID)
+- `artifactId` (UUID v7, generated via `Guid.CreateVersion7()`)
 - `type` (`workspace_summary`, `project_summary`, `task_plan`, `decision_record`, `run_log`, …)
 - scope references (`workspaceId`, `projectId`, `taskId`, `agentId`)
 - `path`, `contentHash`, timestamps
@@ -223,7 +223,7 @@ Suggested profile format (compatible superset):
 - Markdown with YAML frontmatter (`name`, `description` required)
 - Body is the role prompt/instructions
 - Optional (Copilot-compatible): `tools`, `mcp-server`
-- Optional (CodeAlta extensions): `id` (GUID), `defaultScope`, `capabilities`, `metadata`
+- Optional (CodeAlta extensions): `id` (UUID v7, generated via `Guid.CreateVersion7()`), `defaultScope`, `capabilities`, `metadata`
 
 Suggested tools:
 

@@ -69,7 +69,7 @@ public sealed class CodexAgentSession : ICodexAgentSession
         ArgumentNullException.ThrowIfNull(handler);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var key = Guid.NewGuid();
+        var key = Guid.CreateVersion7();
         _subscribers.TryAdd(key, handler);
         return new Unsubscriber(() => _subscribers.TryRemove(key, out _));
     }
