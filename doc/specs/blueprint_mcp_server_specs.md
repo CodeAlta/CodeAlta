@@ -202,7 +202,37 @@ Security:
 
 ---
 
-## 7. Workspace/project services (optional but recommended)
+## 7. Agent role profiles service (custom agents)
+
+Agent roles should be defined as files so new roles can be added without recompiling CodeAlta.
+
+Compatibility goal:
+
+- Support GitHub Copilot “custom agents” profiles (`.github/agents/*.md`) as an input source.
+
+Suggested discovery locations:
+
+- Repo: `.github/agents/*.md` (Copilot-compatible)
+- Repo: `<projectRoot>/.codealta/agents/*.md` (CodeAlta-specific)
+- User: `$HOME/.codealta/agents/*.md`
+- Workspace home/repo (optional): `<workspaceHome>/agents/*.md`
+
+Suggested profile format (compatible superset):
+
+- Markdown with YAML frontmatter (`name`, `description` required)
+- Body is the role prompt/instructions
+- Optional (Copilot-compatible): `tools`, `mcp-server`
+- Optional (CodeAlta extensions): `id` (GUID), `defaultScope`, `capabilities`, `metadata`
+
+Suggested tools:
+
+- `roles.list(scope?) -> [{ name, description, id?, path, metadata? }]`
+- `roles.get(nameOrId) -> { frontmatter, prompt, path }`
+- `roles.validate(path) -> validationResult`
+
+---
+
+## 8. Workspace/project services (optional but recommended)
 
 Suggested tools:
 
@@ -223,7 +253,7 @@ These tools are used by the global agent to route work reliably.
 
 ---
 
-## 8. Security & audit
+## 9. Security & audit
 
 Minimum requirements:
 
@@ -238,7 +268,7 @@ Recommended:
 
 ---
 
-## 9. Versioning
+## 10. Versioning
 
 We need three versions:
 

@@ -120,7 +120,32 @@ An agent is a long-lived unit of work with an identity and scope.
 - `backend` (Codex/Copilot) + backend session/thread id
 - `capabilities[]` (declared services/tools it can provide)
 
-### 4.4 Task and plan
+### 4.4 Agent role profiles (custom agents)
+
+It should be easy to define new agent roles without code changes by using file-based **agent role profiles** (similar to skills).
+
+Compatibility goal:
+
+- Support GitHub Copilot “custom agents” format (`.github/agents/*.md`) so roles can be shared across tools.
+
+Suggested discovery locations (highest precedence first):
+
+- Repo: `.github/agents/*.md` (Copilot-compatible)
+- Repo: `<projectRoot>/.codealta/agents/*.md` (CodeAlta-specific)
+- User: `$HOME/.codealta/agents/*.md`
+- Workspace home/repo (optional): `<workspaceHome>/agents/*.md`
+
+Suggested format (compatible superset):
+
+- Markdown file with YAML frontmatter
+- Required: `name`, `description`
+- Body: the role prompt/instructions
+- Optional (Copilot-compatible): `tools`, `mcp-server`
+- Optional (CodeAlta extensions): `id` (GUID), `defaultScope`, `capabilities`, `metadata`
+
+Built-in roles (knowledge/planner/builder/…) should ship as built-in profiles but remain overrideable by repo/workspace/user profiles.
+
+### 4.5 Task and plan
 
 Tasks are first-class, durable coordination primitives:
 
@@ -131,7 +156,7 @@ Tasks are first-class, durable coordination primitives:
 
 Tasks live in SQLite (via MCP service), not in an agent’s ephemeral memory.
 
-### 4.5 Knowledge record
+### 4.6 Knowledge record
 
 A knowledge record is an indexed unit that can be retrieved later, always with a source link:
 
@@ -141,7 +166,7 @@ A knowledge record is an indexed unit that can be retrieved later, always with a
 - conversation anchor (sessionId + messageId)
 - task / decision entry
 
-### 4.6 Agent artifacts (disk)
+### 4.7 Agent artifacts (disk)
 
 Compaction-safe continuity requires that agent outputs are not only “in the chat”.
 
@@ -181,7 +206,7 @@ tags: [architecture, onboarding]
 
 The SQLite DB stores metadata + pointers to these files (path + hash), so agents can reload them after compaction.
 
-### 4.7 Skill
+### 4.8 Skill
 
 Skills follow the **Agent Skills** format: a directory with `SKILL.md` + optional `scripts/`, `references/`, `assets/`.
 

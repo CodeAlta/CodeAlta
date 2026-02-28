@@ -78,6 +78,18 @@ Each agent has:
 
 Agents register with the MCP server and can be discovered/invoked by other agents.
 
+### 2.4 Role profiles (custom agents)
+
+Roles should be defined as **file-based profiles** so new roles can be added without recompiling CodeAlta.
+
+Design goals:
+
+- **Progressive disclosure**: load only `(name, description)` for discovery; load full prompt only when the role is instantiated.
+- **Copilot compatibility**: support `.github/agents/*.md` profiles (GitHub Copilot custom agents format) as an input source.
+- **CodeAlta extensions**: allow extra metadata such as `id` (GUID), default scope, and capability declarations.
+
+At runtime, an agent instance references a role profile (by `name` and/or `id`) and the orchestrator injects the profile prompt into the session context pack.
+
 ---
 
 ## 3. Core problem: context window management
