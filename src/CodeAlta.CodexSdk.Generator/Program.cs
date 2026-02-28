@@ -110,8 +110,7 @@ var emitter = new CSharpEmitter(defs, rootNamespace);
 var filesByNamespace = emitter.EmitAll(defs);
 
 // Clean output directory before writing
-if (Directory.Exists(outputDir))
-    Directory.Delete(outputDir, recursive: true);
+await OutputDirectoryCleaner.CleanAsync(outputDir).ConfigureAwait(false);
 
 // Write files
 var totalFiles = 0;
