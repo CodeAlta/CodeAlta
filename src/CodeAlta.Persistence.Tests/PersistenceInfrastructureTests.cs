@@ -64,6 +64,46 @@ public sealed class PersistenceInfrastructureTests
     }
 
     [TestMethod]
+    public async Task TaskRepository_ListPageAsync_PaginatesWithCursor()
+    {
+        using var temp = TempDirectory.Create();
+        var dbPath = Path.Combine(temp.Path, "state", "db", "codealta.db");
+        var db = await CreateInitializedDbAsync(dbPath).ConfigureAwait(false);
+        var repository = new TaskRepository(db);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await repository.CreateAsync(
+                new CreateTaskRequest
+                {
+                    WorkspaceId = "workspace-1",
+                    ProjectId = "project-1",
+                    Title = $"task-{i}",
+                }).ConfigureAwait(false);
+        }
+
+        var first = await repository.ListPageAsync(
+            workspaceId: "workspace-1",
+            projectId: "project-1",
+            limit: 2).ConfigureAwait(false);
+
+        Assert.AreEqual(2, first.Tasks.Count);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(first.NextCursor));
+
+        var second = await repository.ListPageAsync(
+            workspaceId: "workspace-1",
+            projectId: "project-1",
+            limit: 2,
+            cursor: first.NextCursor).ConfigureAwait(false);
+
+        Assert.AreEqual(1, second.Tasks.Count);
+        Assert.IsNull(second.NextCursor);
+
+        var ids = first.Tasks.Select(x => x.TaskId.ToString()).Concat(second.Tasks.Select(x => x.TaskId.ToString())).ToArray();
+        Assert.AreEqual(3, ids.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [TestMethod]
     public async Task ArtifactStore_WriteReadAndExtractPlainText_RoundTrips()
     {
         using var temp = TempDirectory.Create();

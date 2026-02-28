@@ -139,16 +139,23 @@ public sealed class TasksTools
     public async Task<string> ListAsync(
         [Description("Optional workspace identifier filter.")] string? workspaceId = null,
         [Description("Optional project identifier filter.")] string? projectId = null,
+        [Description("Optional cursor for pagination.")] string? cursor = null,
         [Description("Maximum number of tasks.")] int limit = 100,
         CancellationToken cancellationToken = default)
     {
-        var tasks = await _taskRepository.ListAsync(
+        var page = await _taskRepository.ListPageAsync(
             workspaceId,
             projectId,
             limit,
+            cursor,
             cancellationToken).ConfigureAwait(false);
 
-        return McpToolJson.Serialize(tasks.Select(ToContract).ToArray());
+        return McpToolJson.Serialize(
+            new
+            {
+                items = page.Tasks.Select(ToContract).ToArray(),
+                nextCursor = page.NextCursor,
+            });
     }
 
     /// <summary>

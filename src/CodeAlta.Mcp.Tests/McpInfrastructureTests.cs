@@ -67,6 +67,54 @@ public sealed class McpInfrastructureTests
     }
 
     [TestMethod]
+    public async Task Mcp_Tasks_List_UsesCursorPagination()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await context.Connection.Client.CallToolAsync(
+                "codealta.tasks.create",
+                new Dictionary<string, object?>
+                {
+                    ["title"] = $"task-{i}",
+                    ["workspaceId"] = "workspace-1",
+                    ["projectId"] = "project-1",
+                }).ConfigureAwait(false);
+        }
+
+        var firstResult = await context.Connection.Client.CallToolAsync(
+            "codealta.tasks.list",
+            new Dictionary<string, object?>
+            {
+                ["workspaceId"] = "workspace-1",
+                ["projectId"] = "project-1",
+                ["limit"] = 2,
+            }).ConfigureAwait(false);
+
+        var firstPayload = ParseJson(ReadTextContent(firstResult));
+        var firstItems = firstPayload.RootElement.GetProperty("items");
+        Assert.AreEqual(2, firstItems.GetArrayLength());
+        var cursor = firstPayload.RootElement.GetProperty("nextCursor").GetString();
+        Assert.IsFalse(string.IsNullOrWhiteSpace(cursor));
+
+        var secondResult = await context.Connection.Client.CallToolAsync(
+            "codealta.tasks.list",
+            new Dictionary<string, object?>
+            {
+                ["workspaceId"] = "workspace-1",
+                ["projectId"] = "project-1",
+                ["limit"] = 2,
+                ["cursor"] = cursor,
+            }).ConfigureAwait(false);
+
+        var secondPayload = ParseJson(ReadTextContent(secondResult));
+        var secondItems = secondPayload.RootElement.GetProperty("items");
+        Assert.AreEqual(1, secondItems.GetArrayLength());
+        Assert.AreEqual(JsonValueKind.Null, secondPayload.RootElement.GetProperty("nextCursor").ValueKind);
+    }
+
+    [TestMethod]
     public async Task Mcp_Search_Query_ReturnsLinkedArtifacts()
     {
         await using var context = await TestContext.CreateAsync().ConfigureAwait(false);

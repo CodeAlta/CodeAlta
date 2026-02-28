@@ -215,7 +215,7 @@ public sealed class TaskRepository
                     FROM tasks
                     WHERE ($workspace_id IS NULL OR workspace_id = $workspace_id)
                       AND ($project_id IS NULL OR project_id = $project_id)
-                    ORDER BY updated_at DESC
+                    ORDER BY updated_at DESC, task_id DESC
                     LIMIT $limit;
                     """;
                 command.Parameters.AddWithValue("$workspace_id", (object?)workspaceId ?? DBNull.Value);
@@ -230,6 +230,83 @@ public sealed class TaskRepository
                 }
 
                 return results;
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists tasks using cursor-based pagination in descending update order.
+    /// </summary>
+    /// <param name="workspaceId">Optional workspace filter.</param>
+    /// <param name="projectId">Optional project filter.</param>
+    /// <param name="limit">Result limit.</param>
+    /// <param name="cursor">Optional cursor returned by a previous page.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A page of tasks plus an optional next cursor.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="limit"/> is not positive.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="cursor"/> is invalid.</exception>
+    public Task<TaskListPage> ListPageAsync(
+        string? workspaceId = null,
+        string? projectId = null,
+        int limit = 100,
+        string? cursor = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be positive.");
+        }
+
+        TaskListCursor? parsedCursor = null;
+        if (!string.IsNullOrWhiteSpace(cursor) &&
+            !TaskListCursor.TryParse(cursor, out parsedCursor))
+        {
+            throw new ArgumentException("Cursor is invalid.", nameof(cursor));
+        }
+
+        return _db.ExecuteReadAsync(
+            async (connection, ct) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    """
+                    SELECT task_id, workspace_id, project_id, parent_task_id, title, status, assigned_agent_id, created_at, updated_at
+                    FROM tasks
+                    WHERE ($workspace_id IS NULL OR workspace_id = $workspace_id)
+                      AND ($project_id IS NULL OR project_id = $project_id)
+                      AND (
+                        $cursor_updated_at IS NULL
+                        OR updated_at < $cursor_updated_at
+                        OR (updated_at = $cursor_updated_at AND task_id < $cursor_task_id)
+                      )
+                    ORDER BY updated_at DESC, task_id DESC
+                    LIMIT $limit;
+                    """;
+                command.Parameters.AddWithValue("$workspace_id", (object?)workspaceId ?? DBNull.Value);
+                command.Parameters.AddWithValue("$project_id", (object?)projectId ?? DBNull.Value);
+                command.Parameters.AddWithValue(
+                    "$cursor_updated_at",
+                    parsedCursor is null ? DBNull.Value : parsedCursor.UpdatedAtText);
+                command.Parameters.AddWithValue(
+                    "$cursor_task_id",
+                    parsedCursor is null ? DBNull.Value : parsedCursor.TaskIdText);
+                command.Parameters.AddWithValue("$limit", limit);
+
+                var results = new List<TaskRecord>();
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    results.Add(ReadTask(reader));
+                }
+
+                string? nextCursor = null;
+                if (results.Count == limit)
+                {
+                    var last = results[^1];
+                    nextCursor = TaskListCursor.FromTask(last).ToString();
+                }
+
+                return new TaskListPage(results, nextCursor);
             },
             cancellationToken);
     }
@@ -411,5 +488,51 @@ public sealed class TaskRepository
             "cancelled" => TaskStatus.Cancelled,
             _ => throw new InvalidDataException($"Unknown task status '{value}'."),
         };
+    }
+
+    private sealed record TaskListCursor(string UpdatedAtText, string TaskIdText)
+    {
+        public static TaskListCursor FromTask(TaskRecord task)
+        {
+            return new TaskListCursor(task.UpdatedAt.ToString("O"), task.TaskId.ToString());
+        }
+
+        public static bool TryParse(string value, out TaskListCursor? cursor)
+        {
+            cursor = null;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var parts = value.Split('|');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (!DateTimeOffset.TryParse(parts[0], provider: null, out var timestamp))
+            {
+                return false;
+            }
+
+            TaskId taskId;
+            try
+            {
+                taskId = TaskId.Parse(parts[1]);
+            }
+            catch
+            {
+                return false;
+            }
+
+            cursor = new TaskListCursor(timestamp.ToString("O"), taskId.ToString());
+            return true;
+        }
+
+        public override string ToString()
+        {
+            return $"{UpdatedAtText}|{TaskIdText}";
+        }
     }
 }
