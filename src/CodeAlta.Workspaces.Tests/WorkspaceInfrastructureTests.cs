@@ -1,6 +1,7 @@
 using CodeAlta.Workspaces;
 using CodeAlta.Workspaces.Bootstrap;
 using CodeAlta.Workspaces.Skills;
+using System.Diagnostics;
 
 namespace CodeAlta.Workspaces.Tests;
 
@@ -212,6 +213,26 @@ public sealed class WorkspaceInfrastructureTests
         Assert.AreEqual("hello", System.Text.Encoding.UTF8.GetString(bytes));
     }
 
+    [TestMethod]
+    public async Task GlobalRepoBootstrapper_EnsureAsync_InitializesGitRepo()
+    {
+        if (!IsGitAvailable())
+        {
+            Assert.Inconclusive("git CLI was not available on PATH.");
+        }
+
+        using var root = TempDirectory.Create();
+        var globalRepoRoot = Path.Combine(root.Path, "repo");
+        var bootstrapper = new GlobalRepoBootstrapper(new GitService());
+
+        var result = await bootstrapper.EnsureAsync(globalRepoRoot).ConfigureAwait(false);
+
+        Assert.AreEqual(Path.GetFullPath(globalRepoRoot), result.GlobalRepoRoot);
+        Assert.IsTrue(Directory.Exists(Path.Combine(globalRepoRoot, ".git")));
+        Assert.IsTrue(Directory.Exists(Path.Combine(globalRepoRoot, "workspaces")));
+        Assert.IsTrue(Directory.Exists(Path.Combine(globalRepoRoot, "machines")));
+    }
+
     private static WorkspaceDescriptor CreateWorkspaceDescriptor()
     {
         return new WorkspaceDescriptor
@@ -242,6 +263,32 @@ public sealed class WorkspaceInfrastructureTests
                 },
             ],
         };
+    }
+
+    private static bool IsGitAvailable()
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo("git", "--version")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+
+            process.WaitForExit(milliseconds: 2000);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private sealed class TempDirectory : IDisposable
