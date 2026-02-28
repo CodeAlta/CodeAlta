@@ -63,16 +63,37 @@ public sealed class SearchService
 
         var embedder = await _embeddingModelManager.GetEmbedderAsync(cancellationToken).ConfigureAwait(false);
         var queryVector = (await embedder.EmbedAsync([query.Text], cancellationToken).ConfigureAwait(false))[0];
-        var embeddings = await _indexStore.GetEmbeddingsAsync(
-            ftsResults.Select(static x => x.DocumentId).ToArray(),
+        var candidateIds = ftsResults.Select(static x => x.DocumentId).ToArray();
+        var vectorDistances = await _indexStore.QueryVectorDistancesAsync(
+            candidateIds,
+            queryVector,
+            query.WorkspaceId,
+            query.ProjectId,
             cancellationToken).ConfigureAwait(false);
+
+        Dictionary<long, float[]>? embeddings = null;
+        if (vectorDistances.Count != ftsResults.Count)
+        {
+            embeddings = await _indexStore.GetEmbeddingsAsync(candidateIds, cancellationToken).ConfigureAwait(false);
+        }
 
         var reranked = new List<SearchResult>(ftsResults.Count);
         foreach (var result in ftsResults)
         {
-            var vectorScore = embeddings.TryGetValue(result.DocumentId, out var embedding)
-                ? Cosine(queryVector, embedding)
-                : 0;
+            double vectorScore;
+            if (vectorDistances.TryGetValue(result.DocumentId, out var distance))
+            {
+                vectorScore = 1.0 / (1.0 + Math.Max(0, distance));
+            }
+            else if (embeddings is not null && embeddings.TryGetValue(result.DocumentId, out var embedding))
+            {
+                vectorScore = Cosine(queryVector, embedding);
+            }
+            else
+            {
+                vectorScore = 0;
+            }
+
             var ftsComponent = result.FtsScore.HasValue
                 ? 1.0 / (1.0 + Math.Abs(result.FtsScore.Value))
                 : 0;

@@ -126,6 +126,64 @@ public sealed class SearchInfrastructureTests
         Assert.IsNotNull(done.LastCompletedAt);
     }
 
+    [TestMethod]
+    public async Task SqliteVec_WhenExtensionAvailable_IndexesVecTable()
+    {
+        var extensionPath = Environment.GetEnvironmentVariable("CODEALTA_SQLITE_VEC_EXTENSION_PATH");
+        if (string.IsNullOrWhiteSpace(extensionPath) || !File.Exists(extensionPath))
+        {
+            Assert.Inconclusive("Set CODEALTA_SQLITE_VEC_EXTENSION_PATH to a valid sqlite-vec extension path to run this test.");
+        }
+
+        using var temp = TempDirectory.Create();
+        var dbPath = Path.Combine(temp.Path, "state", "db", "codealta.db");
+        var db = new CodeAltaDb(
+            new CodeAltaDbOptions
+            {
+                DatabasePath = dbPath,
+                SqliteVecExtensionPath = extensionPath,
+                RequireSqliteVec = false,
+            });
+        await db.InitializeAsync().ConfigureAwait(false);
+
+        var store = new DocumentIndexStore(db);
+        var manager = new EmbeddingModelManager(new HashEmbedder());
+        var queue = new IndexingQueue();
+        var indexer = new Indexer(queue, store, manager);
+
+        await indexer.EnqueueAsync(
+            new IndexingJob
+            {
+                Documents =
+                [
+                    new DocumentInput
+                    {
+                        SourceKind = "artifact",
+                        SourceId = "artifact://wk-core/knowledge/vec",
+                        WorkspaceId = "workspace-1",
+                        ProjectId = "project-1",
+                        Title = "Vec Fixture",
+                        Text = "sqlite-vec fixture document",
+                    },
+                ],
+            }).ConfigureAwait(false);
+
+        await indexer.ProcessNextAsync().ConfigureAwait(false);
+
+        try
+        {
+            await using var connection = await db.CreateOpenConnectionAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM document_embeddings_vec;";
+            var count = (long)(await command.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
+            Assert.AreEqual(1, count);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Assert.Inconclusive($"sqlite-vec extension was not usable: {ex.Message}");
+        }
+    }
+
     private static async Task<(Indexer Indexer, SearchService Service)> CreateSearchPipelineAsync(string rootPath)
     {
         var dbPath = Path.Combine(rootPath, "state", "db", "codealta.db");
