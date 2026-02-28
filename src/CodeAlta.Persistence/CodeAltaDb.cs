@@ -96,10 +96,9 @@ public sealed class CodeAltaDb
             );
 
             CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+                document_id UNINDEXED,
                 title,
-                text,
-                content='documents',
-                content_rowid='document_id'
+                text
             );
 
             CREATE TABLE IF NOT EXISTS document_embeddings (

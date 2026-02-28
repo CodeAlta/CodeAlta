@@ -30,3 +30,15 @@ The persistence layer currently provides:
 - Durable tables for `tasks`, `task_events`, `artifacts`, `artifact_links`, `agents`, and `agent_sessions`.
 - Search foundation tables: `documents`, `documents_fts` (FTS5), and `document_embeddings`.
 - Markdown artifact read/write with YAML frontmatter (`ArtifactStore`) and plain-text extraction for indexing.
+
+## Indexing and Search
+
+Current search infrastructure (`CodeAlta.Search`) includes:
+
+- `IndexingQueue` + `Indexer` for background-capable indexing jobs.
+- `DocumentIndexStore` to upsert documents, maintain FTS rows, and persist embeddings.
+- `SearchService` with:
+  - FTS query mode
+  - hybrid mode (FTS prefilter + vector rerank).
+- A deterministic local `HashEmbedder` for tests and offline indexing.
+- `LlamaSharpEmbedder` for local GGUF-based embeddings when a model path is configured.
