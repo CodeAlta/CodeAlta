@@ -28,10 +28,12 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
     private readonly CodeAltaMcpServerFactory _mcpFactory;
     private readonly McpToolBridge _mcpToolBridge;
     private readonly AgentHub _agentHub;
+    private readonly ChatAgentConnection _chatConnection;
 
     private DockLayout? _root;
     private TextBlock? _header;
     private TextBlock? _status;
+    private Dispatcher? _dispatcher;
 
     private TerminalScreen _screen = TerminalScreen.Home;
     private string? _activeWorkspaceKey;
@@ -49,9 +51,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
     private ChatPromptEditor? _chatInput;
     private Visual? _chatInputView;
     private MarkdownMarkupConverter? _chatMarkdownConverter;
-    private AgentBackendId _chatBackendId = AgentBackendIds.Copilot;
-    private AgentId? _chatAgentId;
-    private IDisposable? _chatEventSubscription;
+    private AgentBackendId _chatBackendId = AgentBackendIds.Codex;
     private bool _chatAutoApprove;
     private StringBuilder? _chatStreamingBuffer;
     private MarkdownControl? _chatStreamingMarkdown;
@@ -89,10 +89,12 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         _mcpFactory = mcpFactory;
         _mcpToolBridge = mcpToolBridge;
         _agentHub = agentHub;
+        _chatConnection = new ChatAgentConnection(agentHub, HandleChatAgentEvent);
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        _dispatcher = Dispatcher.Current;
         _header = new TextBlock
         {
             Wrap = false,
@@ -125,7 +127,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _chatEventSubscription?.Dispose();
+        await _chatConnection.DisposeAsync().ConfigureAwait(false);
     }
 
     private Visual BuildFooter()
@@ -676,9 +678,10 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         _chatStreamingMarkdown = streamingMarkdown;
         _chatStreamingBuffer = new StringBuilder();
 
+        AgentId agentId;
         try
         {
-            await EnsureChatSessionAsync(_chatBackendId).ConfigureAwait(false);
+            agentId = await EnsureChatSessionAsync(_chatBackendId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -689,17 +692,11 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             return;
         }
 
-        if (_chatAgentId is null)
-        {
-            PostToUi(() => streamingMarkdown.Markdown = "**Agent session is not available.**");
-            return;
-        }
-
         SetStatus($"Running agent ({_chatBackendId.Value})...");
         try
         {
             await _agentHub.RunAsync(
-                _chatAgentId.Value,
+                agentId,
                 new AgentSendOptions { Input = AgentInput.Text(text) },
                 CancellationToken.None).ConfigureAwait(false);
         }
@@ -790,7 +787,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
 
     private async Task AbortChatAsync()
     {
-        var agentId = _chatAgentId;
+        var agentId = _chatConnection.CurrentAgentId;
         if (agentId is null)
         {
             SetStatus("No active chat agent session.");
@@ -801,7 +798,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         try
         {
             // Abort is best-effort; we don't currently surface cancellation at the hub level beyond the session abort.
-            await _agentHub.AbortAsync(agentId.Value, CancellationToken.None).ConfigureAwait(false);
+            await _chatConnection.AbortAsync(CancellationToken.None).ConfigureAwait(false);
             SetStatus("Abort requested.");
         }
         catch (Exception ex)
@@ -810,14 +807,17 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         }
     }
 
-    private async Task EnsureChatSessionAsync(AgentBackendId backendId)
+    private async Task<AgentId> EnsureChatSessionAsync(AgentBackendId backendId)
     {
-        if (_chatAgentId is not null && string.Equals(_chatBackendId.Value, backendId.Value, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
         _chatBackendId = backendId;
+
+        if (_chatConnection.IsConnected &&
+            _chatConnection.CurrentAgentId is { } connectedAgentId &&
+            _chatConnection.ConnectedBackendId is { } connectedBackendId &&
+            string.Equals(connectedBackendId.Value, backendId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            return connectedAgentId;
+        }
 
         SetStatus($"Starting chat session ({backendId.Value})...");
 
@@ -825,38 +825,16 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             ? await _mcpToolBridge.GetToolsAsync().ConfigureAwait(false)
             : null;
 
-        var identity = await _agentHub.RegisterAgentAsync(
-                "chat.global",
-                new CodeAlta.Orchestration.AgentScope { Kind = CodeAlta.Orchestration.AgentScopeKind.Global },
+        var agentId = await _chatConnection.EnsureConnectedAsync(
                 backendId,
+                Environment.CurrentDirectory,
+                tools,
+                HandleChatPermissionRequestAsync,
+                HandleChatUserInputRequestAsync,
                 CancellationToken.None)
             .ConfigureAwait(false);
-
-        _chatAgentId = identity.AgentId;
-
-        _chatEventSubscription?.Dispose();
-        _chatEventSubscription = null;
-
-        await _agentHub.StartSessionAsync(
-                identity.AgentId,
-                new AgentSessionCreateOptions
-                {
-                    Streaming = true,
-                    WorkingDirectory = Environment.CurrentDirectory,
-                    Tools = tools,
-                    OnPermissionRequest = HandleChatPermissionRequestAsync,
-                    OnUserInputRequest = HandleChatUserInputRequestAsync,
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
-
-        _chatEventSubscription = await _agentHub.SubscribeSessionEventsAsync(
-                identity.AgentId,
-                HandleChatAgentEvent,
-                CancellationToken.None)
-            .ConfigureAwait(false);
-
         SetStatus($"Chat session ready ({backendId.Value}).");
+        return agentId;
     }
 
     private Task<AgentPermissionDecision> HandleChatPermissionRequestAsync(
@@ -979,7 +957,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
 
     private void PostToUi(Action action)
     {
-        Dispatcher.Current.Post(action);
+        (_dispatcher ?? Dispatcher.Current).Post(action);
     }
 
     private enum TerminalScreen

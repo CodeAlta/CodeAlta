@@ -60,4 +60,8 @@
     <ProjectReference Include="..\CodeAlta.Search\CodeAlta.Search.csproj" />
     <ProjectReference Include="..\CodeAlta.Workspaces\CodeAlta.Workspaces.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+  </ItemGroup>
 </Project>
