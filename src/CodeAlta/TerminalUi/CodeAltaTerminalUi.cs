@@ -33,6 +33,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
     private DockLayout? _root;
     private TextBlock? _header;
     private TextBlock? _status;
+    private Spinner? _statusSpinner;
     private Dispatcher? _dispatcher;
 
     private TerminalScreen _screen = TerminalScreen.Home;
@@ -106,12 +107,26 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             Wrap = true,
             Text = "Ready. Use the buttons below to navigate.",
         };
+        _statusSpinner = new Spinner()
+            .Style(SpinnerStyles.Dots)
+            .Tone(ControlTone.Primary);
+        _statusSpinner.IsActive = false;
+        _statusSpinner.IsVisible = false;
+
+        var statusBar = new HStack(
+            [
+                _statusSpinner,
+                _status,
+            ])
+        {
+            Spacing = 1,
+        };
 
         var footer = BuildFooter();
         var bottom = new VStack(
             [
                 footer,
-                _status,
+                statusBar,
             ])
         {
             Spacing = 1,
@@ -199,6 +214,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             VerticalAlignment = Align.Stretch,
             ItemPadding = new Thickness(1, 1, 0, 0),
         };
+        _chatFlow.ScrollToTail();
 
         var chatInput = new ChatPromptEditor(
                 text => _ = SendChatMessageAsync(text))
@@ -682,7 +698,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             return;
         }
 
-        SetStatus($"Running agent ({_chatBackendId.Value})...");
+        SetStatus($"Running agent ({_chatBackendId.Value})...", showSpinner: true);
         try
         {
             await _agentHub.RunAsync(
@@ -819,7 +835,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             return connectedAgentId;
         }
 
-        SetStatus($"Starting chat session ({backendId.Value})...");
+        SetStatus($"Starting chat session ({backendId.Value})...", showSpinner: true);
 
         var tools = backendId == AgentBackendIds.Copilot
             ? await _mcpToolBridge.GetToolsAsync().ConfigureAwait(false)
@@ -915,6 +931,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         PostToUi(() =>
         {
             markdown.Markdown = text;
+            _chatFlow?.ScrollToTail();
         });
     }
 
@@ -926,6 +943,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             PostToUi(() =>
             {
                 _chatFlow?.Items.Add(CreateAssistantChatItem(content));
+                _chatFlow?.ScrollToTail();
             });
             return;
         }
@@ -933,19 +951,26 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         PostToUi(() =>
         {
             markdown.Markdown = content;
+            _chatFlow?.ScrollToTail();
         });
 
         _chatStreamingMarkdown = null;
         _chatStreamingBuffer = null;
     }
 
-    private void SetStatus(string message)
+    private void SetStatus(string message, bool showSpinner = false)
     {
         PostToUi(() =>
         {
             if (_status is not null)
             {
                 _status.Text = message;
+            }
+
+            if (_statusSpinner is not null)
+            {
+                _statusSpinner.IsVisible = showSpinner;
+                _statusSpinner.IsActive = showSpinner;
             }
         });
     }
