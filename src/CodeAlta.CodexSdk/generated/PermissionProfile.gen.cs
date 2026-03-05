@@ -13,5 +13,5 @@ public sealed partial record PermissionProfile
     [JsonPropertyName("macos")]
     public MacOsPermissions? Macos { get; set; }
     [JsonPropertyName("network")]
-    public bool? Network { get; set; }
+    public NetworkPermissions? Network { get; set; }
 }

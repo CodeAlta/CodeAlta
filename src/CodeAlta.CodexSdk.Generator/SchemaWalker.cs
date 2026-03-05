@@ -26,8 +26,8 @@ public record DiscriminatorVariant(
     JsonSchema Schema);
 
 /// <summary>
-/// Walks the combined schema file and builds a flat list of TypeDefs,
-/// handling the nested v2 namespace convention.
+/// Walks the schema document and builds a flat list of <see cref="TypeDef"/> values,
+/// including supplemental fragments and nested namespace conventions when present.
 /// </summary>
 public static class SchemaWalker
 {
@@ -39,9 +39,11 @@ public static class SchemaWalker
     public static async Task<List<TypeDef>> LoadDefinitionsAsync(
         string schemaFilePath, string rootNamespace)
     {
-        // Pre-process: fix boolean schemas and hoist nested namespaces
+        // Pre-process: merge supplemental fragments, fix boolean schemas, and hoist nested namespaces
         var jsonText = await File.ReadAllTextAsync(schemaFilePath);
-        var node = JsonNode.Parse(jsonText)!;
+        var node = JsonNode.Parse(jsonText) as JsonObject
+            ?? throw new InvalidOperationException($"Schema root in '{schemaFilePath}' must be a JSON object.");
+        MergeSupplementalSchemas(node, schemaFilePath);
         ReplaceBooleanSchemas(node);
 
         // Detect and hoist nested namespace definitions
@@ -122,6 +124,182 @@ public static class SchemaWalker
             }
         }
         return defs;
+    }
+
+    private static void MergeSupplementalSchemas(JsonObject schemaRoot, string schemaFilePath)
+    {
+        ArgumentNullException.ThrowIfNull(schemaRoot);
+        ArgumentNullException.ThrowIfNull(schemaFilePath);
+
+        var schemaDir = Path.GetDirectoryName(schemaFilePath);
+        if (string.IsNullOrEmpty(schemaDir))
+        {
+            return;
+        }
+
+        var definitions = EnsureDefinitionsObject(schemaRoot);
+        foreach (var fragment in EnumerateSupplementalFragments(schemaDir))
+        {
+            MergeSupplementalSchema(
+                definitions,
+                fragment.Path,
+                trimLegacyServerRequests: fragment.TrimLegacyServerRequests);
+        }
+    }
+
+    private static JsonObject EnsureDefinitionsObject(JsonObject schemaRoot)
+    {
+        if (schemaRoot["definitions"] is JsonObject definitions)
+        {
+            return definitions;
+        }
+
+        definitions = [];
+        schemaRoot["definitions"] = definitions;
+        return definitions;
+    }
+
+    private static IEnumerable<(string Path, bool TrimLegacyServerRequests)> EnumerateSupplementalFragments(string schemaDir)
+    {
+        yield return (Path.Combine(schemaDir, "v1", "InitializeResponse.json"), false);
+        yield return (Path.Combine(schemaDir, "ServerRequest.json"), true);
+        yield return (Path.Combine(schemaDir, "CommandExecutionRequestApprovalResponse.json"), false);
+        yield return (Path.Combine(schemaDir, "FileChangeRequestApprovalResponse.json"), false);
+        yield return (Path.Combine(schemaDir, "ToolRequestUserInputResponse.json"), false);
+        yield return (Path.Combine(schemaDir, "DynamicToolCallResponse.json"), false);
+        yield return (Path.Combine(schemaDir, "ChatgptAuthTokensRefreshResponse.json"), false);
+        yield return (Path.Combine(schemaDir, "McpServerElicitationRequestResponse.json"), false);
+    }
+
+    private static void MergeSupplementalSchema(
+        JsonObject targetDefinitions,
+        string fragmentPath,
+        bool trimLegacyServerRequests)
+    {
+        ArgumentNullException.ThrowIfNull(targetDefinitions);
+        ArgumentNullException.ThrowIfNull(fragmentPath);
+
+        if (!File.Exists(fragmentPath))
+        {
+            return;
+        }
+
+        var fragmentRoot = JsonNode.Parse(File.ReadAllText(fragmentPath)) as JsonObject
+            ?? throw new InvalidOperationException($"Supplemental schema '{fragmentPath}' must be a JSON object.");
+
+        if (trimLegacyServerRequests)
+        {
+            TrimLegacyServerRequestVariants(fragmentRoot);
+        }
+
+        var title = fragmentRoot["title"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            throw new InvalidOperationException($"Supplemental schema '{fragmentPath}' is missing a root title.");
+        }
+
+        if (targetDefinitions.ContainsKey(title))
+        {
+            return;
+        }
+
+        var rootDefinition = CreateRootDefinition(fragmentRoot);
+        targetDefinitions[title] = rootDefinition;
+
+        if (fragmentRoot["definitions"] is not JsonObject fragmentDefinitions || fragmentDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        var reachableDefinitions = CollectReachableDefinitions(rootDefinition, fragmentDefinitions);
+        foreach (var definitionName in reachableDefinitions)
+        {
+            if (targetDefinitions.ContainsKey(definitionName))
+            {
+                continue;
+            }
+
+            if (fragmentDefinitions[definitionName] is JsonNode definitionNode)
+            {
+                targetDefinitions[definitionName] = definitionNode.DeepClone();
+            }
+        }
+    }
+
+    private static JsonObject CreateRootDefinition(JsonObject fragmentRoot)
+    {
+        var rootDefinition = (JsonObject)fragmentRoot.DeepClone();
+        rootDefinition.Remove("$schema");
+        rootDefinition.Remove("definitions");
+        return rootDefinition;
+    }
+
+    private static HashSet<string> CollectReachableDefinitions(
+        JsonObject rootDefinition,
+        JsonObject fragmentDefinitions)
+    {
+        var reachableDefinitions = new HashSet<string>(StringComparer.Ordinal);
+        var pendingNodes = new Queue<JsonNode?>();
+        pendingNodes.Enqueue(rootDefinition);
+
+        while (pendingNodes.Count > 0)
+        {
+            var currentNode = pendingNodes.Dequeue();
+            var referencedDefinitions = new HashSet<string>(StringComparer.Ordinal);
+            CollectRootDefinitionRefs(currentNode, referencedDefinitions);
+
+            foreach (var referencedDefinition in referencedDefinitions)
+            {
+                if (!reachableDefinitions.Add(referencedDefinition))
+                {
+                    continue;
+                }
+
+                if (fragmentDefinitions[referencedDefinition] is JsonNode definitionNode)
+                {
+                    pendingNodes.Enqueue(definitionNode);
+                }
+            }
+        }
+
+        return reachableDefinitions;
+    }
+
+    private static void TrimLegacyServerRequestVariants(JsonObject serverRequestRoot)
+    {
+        if (serverRequestRoot["oneOf"] is not JsonArray variants)
+        {
+            return;
+        }
+
+        for (var index = variants.Count - 1; index >= 0; index--)
+        {
+            if (variants[index] is not JsonObject variant)
+            {
+                continue;
+            }
+
+            var method = TryGetSingleMethodValue(variant);
+            if (method is "applyPatchApproval" or "execCommandApproval")
+            {
+                variants.RemoveAt(index);
+            }
+        }
+    }
+
+    private static string? TryGetSingleMethodValue(JsonObject requestVariant)
+    {
+        if (requestVariant["properties"] is not JsonObject properties ||
+            properties["method"] is not JsonObject methodProperty ||
+            methodProperty["enum"] is not JsonArray enumValues ||
+            enumValues.Count != 1 ||
+            enumValues[0] is not JsonValue enumValue ||
+            enumValue.GetValueKind() != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return enumValue.GetValue<string>();
     }
 
     /// <summary>

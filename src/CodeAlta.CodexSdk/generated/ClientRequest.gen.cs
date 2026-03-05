@@ -17,6 +17,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ThreadArchiveRequest), typeDiscriminator: "thread/archive")]
 [JsonDerivedType(typeof(ThreadUnsubscribeRequest), typeDiscriminator: "thread/unsubscribe")]
 [JsonDerivedType(typeof(ThreadNameSetRequest), typeDiscriminator: "thread/name/set")]
+[JsonDerivedType(typeof(ThreadMetadataUpdateRequest), typeDiscriminator: "thread/metadata/update")]
 [JsonDerivedType(typeof(ThreadUnarchiveRequest), typeDiscriminator: "thread/unarchive")]
 [JsonDerivedType(typeof(ThreadCompactStartRequest), typeDiscriminator: "thread/compact/start")]
 [JsonDerivedType(typeof(ThreadRollbackRequest), typeDiscriminator: "thread/rollback")]
@@ -28,6 +29,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(SkillsRemoteExportRequest), typeDiscriminator: "skills/remote/export")]
 [JsonDerivedType(typeof(AppListRequest), typeDiscriminator: "app/list")]
 [JsonDerivedType(typeof(SkillsConfigWriteRequest), typeDiscriminator: "skills/config/write")]
+[JsonDerivedType(typeof(PluginInstallRequest), typeDiscriminator: "plugin/install")]
 [JsonDerivedType(typeof(TurnStartRequest), typeDiscriminator: "turn/start")]
 [JsonDerivedType(typeof(TurnSteerRequest), typeDiscriminator: "turn/steer")]
 [JsonDerivedType(typeof(TurnInterruptRequest), typeDiscriminator: "turn/interrupt")]
@@ -70,7 +72,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadStartParams Params { get; set; } = default!;
+        public ThreadStartParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadResumeRequest : ClientRequest
@@ -78,7 +80,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadResumeParams Params { get; set; } = default!;
+        public ThreadResumeParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadForkRequest : ClientRequest
@@ -86,7 +88,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadForkParams Params { get; set; } = default!;
+        public ThreadForkParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadArchiveRequest : ClientRequest
@@ -94,7 +96,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadArchiveParams Params { get; set; } = default!;
+        public ThreadArchiveParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadUnsubscribeRequest : ClientRequest
@@ -102,7 +104,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadUnsubscribeParams Params { get; set; } = default!;
+        public ThreadUnsubscribeParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadNameSetRequest : ClientRequest
@@ -110,7 +112,15 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadSetNameParams Params { get; set; } = default!;
+        public ThreadSetNameParams Params { get; set; } = default!;
+    }
+
+    public sealed partial record ThreadMetadataUpdateRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public ThreadMetadataUpdateParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadUnarchiveRequest : ClientRequest
@@ -118,7 +128,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadUnarchiveParams Params { get; set; } = default!;
+        public ThreadUnarchiveParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadCompactStartRequest : ClientRequest
@@ -126,7 +136,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadCompactStartParams Params { get; set; } = default!;
+        public ThreadCompactStartParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadRollbackRequest : ClientRequest
@@ -134,7 +144,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadRollbackParams Params { get; set; } = default!;
+        public ThreadRollbackParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadListRequest : ClientRequest
@@ -142,7 +152,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadListParams Params { get; set; } = default!;
+        public ThreadListParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadLoadedListRequest : ClientRequest
@@ -150,7 +160,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadLoadedListParams Params { get; set; } = default!;
+        public ThreadLoadedListParams Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadReadRequest : ClientRequest
@@ -158,7 +168,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadReadParams Params { get; set; } = default!;
+        public ThreadReadParams Params { get; set; } = default!;
     }
 
     public sealed partial record SkillsListRequest : ClientRequest
@@ -166,7 +176,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.SkillsListParams Params { get; set; } = default!;
+        public SkillsListParams Params { get; set; } = default!;
     }
 
     public sealed partial record SkillsRemoteListRequest : ClientRequest
@@ -174,7 +184,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.SkillsRemoteReadParams Params { get; set; } = default!;
+        public SkillsRemoteReadParams Params { get; set; } = default!;
     }
 
     public sealed partial record SkillsRemoteExportRequest : ClientRequest
@@ -182,7 +192,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.SkillsRemoteWriteParams Params { get; set; } = default!;
+        public SkillsRemoteWriteParams Params { get; set; } = default!;
     }
 
     public sealed partial record AppListRequest : ClientRequest
@@ -190,7 +200,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.AppsListParams Params { get; set; } = default!;
+        public AppsListParams Params { get; set; } = default!;
     }
 
     public sealed partial record SkillsConfigWriteRequest : ClientRequest
@@ -198,7 +208,15 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.SkillsConfigWriteParams Params { get; set; } = default!;
+        public SkillsConfigWriteParams Params { get; set; } = default!;
+    }
+
+    public sealed partial record PluginInstallRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public PluginInstallParams Params { get; set; } = default!;
     }
 
     public sealed partial record TurnStartRequest : ClientRequest
@@ -206,7 +224,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnStartParams Params { get; set; } = default!;
+        public TurnStartParams Params { get; set; } = default!;
     }
 
     public sealed partial record TurnSteerRequest : ClientRequest
@@ -214,7 +232,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnSteerParams Params { get; set; } = default!;
+        public TurnSteerParams Params { get; set; } = default!;
     }
 
     public sealed partial record TurnInterruptRequest : ClientRequest
@@ -222,7 +240,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnInterruptParams Params { get; set; } = default!;
+        public TurnInterruptParams Params { get; set; } = default!;
     }
 
     public sealed partial record ReviewStartRequest : ClientRequest
@@ -230,7 +248,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ReviewStartParams Params { get; set; } = default!;
+        public ReviewStartParams Params { get; set; } = default!;
     }
 
     public sealed partial record ModelListRequest : ClientRequest
@@ -238,7 +256,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ModelListParams Params { get; set; } = default!;
+        public ModelListParams Params { get; set; } = default!;
     }
 
     public sealed partial record ExperimentalFeatureListRequest : ClientRequest
@@ -246,7 +264,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ExperimentalFeatureListParams Params { get; set; } = default!;
+        public ExperimentalFeatureListParams Params { get; set; } = default!;
     }
 
     public sealed partial record McpServerOauthLoginRequest : ClientRequest
@@ -254,7 +272,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.McpServerOauthLoginParams Params { get; set; } = default!;
+        public McpServerOauthLoginParams Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigMcpServerReloadRequest : ClientRequest
@@ -270,7 +288,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ListMcpServerStatusParams Params { get; set; } = default!;
+        public ListMcpServerStatusParams Params { get; set; } = default!;
     }
 
     public sealed partial record WindowsSandboxSetupStartRequest : ClientRequest
@@ -278,7 +296,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.WindowsSandboxSetupStartParams Params { get; set; } = default!;
+        public WindowsSandboxSetupStartParams Params { get; set; } = default!;
     }
 
     public sealed partial record AccountLoginStartRequest : ClientRequest
@@ -286,7 +304,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.LoginAccountParams Params { get; set; } = default!;
+        public LoginAccountParams Params { get; set; } = default!;
     }
 
     public sealed partial record AccountLoginCancelRequest : ClientRequest
@@ -294,7 +312,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.CancelLoginAccountParams Params { get; set; } = default!;
+        public CancelLoginAccountParams Params { get; set; } = default!;
     }
 
     public sealed partial record AccountLogoutRequest : ClientRequest
@@ -318,7 +336,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.FeedbackUploadParams Params { get; set; } = default!;
+        public FeedbackUploadParams Params { get; set; } = default!;
     }
 
     /// <summary>
@@ -329,7 +347,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.CommandExecParams Params { get; set; } = default!;
+        public CommandExecParams Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigReadRequest : ClientRequest
@@ -337,7 +355,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ConfigReadParams Params { get; set; } = default!;
+        public ConfigReadParams Params { get; set; } = default!;
     }
 
     public sealed partial record ExternalAgentConfigDetectRequest : ClientRequest
@@ -345,7 +363,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ExternalAgentConfigDetectParams Params { get; set; } = default!;
+        public ExternalAgentConfigDetectParams Params { get; set; } = default!;
     }
 
     public sealed partial record ExternalAgentConfigImportRequest : ClientRequest
@@ -353,7 +371,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ExternalAgentConfigImportParams Params { get; set; } = default!;
+        public ExternalAgentConfigImportParams Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigValueWriteRequest : ClientRequest
@@ -361,7 +379,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ConfigValueWriteParams Params { get; set; } = default!;
+        public ConfigValueWriteParams Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigBatchWriteRequest : ClientRequest
@@ -369,7 +387,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ConfigBatchWriteParams Params { get; set; } = default!;
+        public ConfigBatchWriteParams Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigRequirementsReadRequest : ClientRequest
@@ -385,7 +403,7 @@ public abstract partial record ClientRequest
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.GetAccountParams Params { get; set; } = default!;
+        public GetAccountParams Params { get; set; } = default!;
     }
 
     public sealed partial record FuzzyFileSearchRequest : ClientRequest

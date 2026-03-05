@@ -20,7 +20,7 @@ public abstract partial record UserInput
         public string Text { get; set; } = string.Empty;
         /// <summary>UI-defined spans within `text` used to render or persist special elements.</summary>
         [JsonPropertyName("text_elements")]
-        public List<CodeAlta.CodexSdk.V2.TextElement>? TextElements { get; set; }
+        public List<TextElement>? TextElements { get; set; }
     }
 
     public sealed partial record ImageUserInput : UserInput

@@ -13,7 +13,7 @@ public sealed partial record CollabAgentStatusEntry
     public AgentStatus Status { get; set; } = default!;
     /// <summary>Thread ID of the receiver/new agent.</summary>
     [JsonPropertyName("thread_id")]
-    public CodeAlta.CodexSdk.V2.ThreadId ThreadId { get; set; } = default!;
+    public ThreadId ThreadId { get; set; } = default!;
     /// <summary>Optional nickname assigned to an AgentControl-spawned sub-agent.</summary>
     [JsonPropertyName("agent_nickname")]
     public string? AgentNickname { get; set; }

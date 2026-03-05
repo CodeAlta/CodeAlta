@@ -1,6 +1,4 @@
 using CodeAlta.CodexSdk;
-using CodeAlta.CodexSdk.V2;
-using V2AskForApproval = CodeAlta.CodexSdk.V2.AskForApproval;
 
 namespace CodeAlta.Agent.Codex;
 
@@ -37,5 +35,5 @@ public sealed class CodexAgentBackendOptions
     /// <summary>
     /// Gets or initializes the default approval policy used when creating/resuming threads.
     /// </summary>
-    public V2AskForApproval ApprovalPolicy { get; init; } = new V2AskForApproval.OnRequest();
+    public AskForApproval ApprovalPolicy { get; init; } = new AskForApproval.OnRequest();
 }

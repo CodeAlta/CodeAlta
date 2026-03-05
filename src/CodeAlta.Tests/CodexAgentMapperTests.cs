@@ -1,9 +1,8 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Codex;
 using CodeAlta.CodexSdk;
-using CodeAlta.CodexSdk.V2;
-using V2ReasoningEffort = CodeAlta.CodexSdk.V2.ReasoningEffort;
-using V2UserInput = CodeAlta.CodexSdk.V2.UserInput;
+using V2ReasoningEffort = CodeAlta.CodexSdk.ReasoningEffort;
+using V2UserInput = CodeAlta.CodexSdk.UserInput;
 
 namespace CodeAlta.Tests;
 

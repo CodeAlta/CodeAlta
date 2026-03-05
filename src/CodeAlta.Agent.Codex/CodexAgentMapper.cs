@@ -1,11 +1,10 @@
 using System.Text;
 using System.Text.Json;
 using CodeAlta.CodexSdk;
-using CodeAlta.CodexSdk.V2;
-using CodexThread = CodeAlta.CodexSdk.V2.Thread;
-using V2ReasoningEffort = CodeAlta.CodexSdk.V2.ReasoningEffort;
-using V2AskForApproval = CodeAlta.CodexSdk.V2.AskForApproval;
-using V2UserInput = CodeAlta.CodexSdk.V2.UserInput;
+using CodexThread = CodeAlta.CodexSdk.Thread;
+using V2ReasoningEffort = CodeAlta.CodexSdk.ReasoningEffort;
+using V2AskForApproval = CodeAlta.CodexSdk.AskForApproval;
+using V2UserInput = CodeAlta.CodexSdk.UserInput;
 
 namespace CodeAlta.Agent.Codex;
 

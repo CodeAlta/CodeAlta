@@ -23,24 +23,28 @@ internal sealed class RealtimeEventJsonConverter : JsonConverter<RealtimeEvent>
         {
             using var doc = JsonDocument.ParseValue(ref reader);
             var obj = doc.RootElement;
-            if (obj.TryGetProperty("SessionCreated", out var __SessionCreatedElem))
-            {
-                var __result = new RealtimeEvent.SessionCreated();
-                if (__SessionCreatedElem.TryGetProperty("session_id", out var __SessionIdProp))
-                    __result.SessionId = JsonSerializer.Deserialize<string>(__SessionIdProp, options)!;
-                return __result;
-            }
             if (obj.TryGetProperty("SessionUpdated", out var __SessionUpdatedElem))
             {
                 var __result = new RealtimeEvent.SessionUpdated();
-                if (__SessionUpdatedElem.TryGetProperty("backend_prompt", out var __BackendPromptProp))
-                    __result.BackendPrompt = JsonSerializer.Deserialize<string?>(__BackendPromptProp, options);
+                if (__SessionUpdatedElem.TryGetProperty("session_id", out var __SessionIdProp))
+                    __result.SessionId = JsonSerializer.Deserialize<string>(__SessionIdProp, options)!;
+                if (__SessionUpdatedElem.TryGetProperty("instructions", out var __InstructionsProp))
+                    __result.Instructions = JsonSerializer.Deserialize<string?>(__InstructionsProp, options);
                 return __result;
             }
             if (obj.TryGetProperty("AudioOut", out var __AudioOutElem))
                 return new RealtimeEvent.AudioOut { Value = JsonSerializer.Deserialize<RealtimeAudioFrame>(__AudioOutElem, options)! };
             if (obj.TryGetProperty("ConversationItemAdded", out var __ConversationItemAddedElem))
                 return new RealtimeEvent.ConversationItemAdded { Value = JsonSerializer.Deserialize<JsonElement>(__ConversationItemAddedElem, options)! };
+            if (obj.TryGetProperty("ConversationItemDone", out var __ConversationItemDoneElem))
+            {
+                var __result = new RealtimeEvent.ConversationItemDone();
+                if (__ConversationItemDoneElem.TryGetProperty("item_id", out var __ItemIdProp))
+                    __result.ItemId = JsonSerializer.Deserialize<string>(__ItemIdProp, options)!;
+                return __result;
+            }
+            if (obj.TryGetProperty("HandoffRequested", out var __HandoffRequestedElem))
+                return new RealtimeEvent.HandoffRequested { Value = JsonSerializer.Deserialize<RealtimeHandoffRequested>(__HandoffRequestedElem, options)! };
             if (obj.TryGetProperty("Error", out var __ErrorElem))
                 return new RealtimeEvent.Error { Value = JsonSerializer.Deserialize<string>(__ErrorElem, options)! };
             throw new JsonException($"Unknown RealtimeEvent object variant. Properties: {string.Join(", ", EnumeratePropertyNames(obj))}");
@@ -58,23 +62,16 @@ internal sealed class RealtimeEventJsonConverter : JsonConverter<RealtimeEvent>
     {
         switch (value)
         {
-            case RealtimeEvent.SessionCreated v:
-                writer.WriteStartObject();
-                writer.WritePropertyName("SessionCreated");
-                writer.WriteStartObject();
-                writer.WritePropertyName("session_id");
-                JsonSerializer.Serialize(writer, v.SessionId, options);
-                writer.WriteEndObject();
-                writer.WriteEndObject();
-                break;
             case RealtimeEvent.SessionUpdated v:
                 writer.WriteStartObject();
                 writer.WritePropertyName("SessionUpdated");
                 writer.WriteStartObject();
-                if (v.BackendPrompt is not null)
+                writer.WritePropertyName("session_id");
+                JsonSerializer.Serialize(writer, v.SessionId, options);
+                if (v.Instructions is not null)
                 {
-                    writer.WritePropertyName("backend_prompt");
-                    JsonSerializer.Serialize(writer, v.BackendPrompt, options);
+                    writer.WritePropertyName("instructions");
+                    JsonSerializer.Serialize(writer, v.Instructions, options);
                 }
                 writer.WriteEndObject();
                 writer.WriteEndObject();
@@ -88,6 +85,21 @@ internal sealed class RealtimeEventJsonConverter : JsonConverter<RealtimeEvent>
             case RealtimeEvent.ConversationItemAdded v:
                 writer.WriteStartObject();
                 writer.WritePropertyName("ConversationItemAdded");
+                JsonSerializer.Serialize(writer, v.Value, options);
+                writer.WriteEndObject();
+                break;
+            case RealtimeEvent.ConversationItemDone v:
+                writer.WriteStartObject();
+                writer.WritePropertyName("ConversationItemDone");
+                writer.WriteStartObject();
+                writer.WritePropertyName("item_id");
+                JsonSerializer.Serialize(writer, v.ItemId, options);
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+                break;
+            case RealtimeEvent.HandoffRequested v:
+                writer.WriteStartObject();
+                writer.WritePropertyName("HandoffRequested");
                 JsonSerializer.Serialize(writer, v.Value, options);
                 writer.WriteEndObject();
                 break;
@@ -106,15 +118,12 @@ internal sealed class RealtimeEventJsonConverter : JsonConverter<RealtimeEvent>
 [JsonConverter(typeof(RealtimeEventJsonConverter))]
 public abstract partial record RealtimeEvent
 {
-    public sealed partial record SessionCreated : RealtimeEvent
+    public sealed partial record SessionUpdated : RealtimeEvent
     {
         [JsonPropertyName("session_id")]
         public string SessionId { get; set; } = string.Empty;
-    }
-    public sealed partial record SessionUpdated : RealtimeEvent
-    {
-        [JsonPropertyName("backend_prompt")]
-        public string? BackendPrompt { get; set; }
+        [JsonPropertyName("instructions")]
+        public string? Instructions { get; set; }
     }
     public sealed partial record AudioOut : RealtimeEvent
     {
@@ -123,6 +132,15 @@ public abstract partial record RealtimeEvent
     public sealed partial record ConversationItemAdded : RealtimeEvent
     {
         public JsonElement Value { get; set; }
+    }
+    public sealed partial record ConversationItemDone : RealtimeEvent
+    {
+        [JsonPropertyName("item_id")]
+        public string ItemId { get; set; } = string.Empty;
+    }
+    public sealed partial record HandoffRequested : RealtimeEvent
+    {
+        public RealtimeHandoffRequested Value { get; set; } = default!;
     }
     public sealed partial record Error : RealtimeEvent
     {

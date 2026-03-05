@@ -6,9 +6,6 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
-/// <summary>
-/// ID of a request, which can be either a string or an integer.
-/// </summary>
 internal sealed class RequestIdJsonConverter : JsonConverter<RequestId>
 {
     public override RequestId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

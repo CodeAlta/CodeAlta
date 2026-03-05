@@ -4,12 +4,14 @@ using CodeAlta.CodexSdk;
 using CodeAlta.CodexSdk.Generator;
 
 const string schemaFolderName = "codex_app-server_schema";
-const string combinedSchemaFileName = "codex_app_server_protocol.schemas.json";
+const string mixedSchemaFileName = "codex_app_server_protocol.schemas.json";
+const string flatV2SchemaFileName = "codex_app_server_protocol.v2.schemas.json";
 const string defaultNamespace = "CodeAlta.CodexSdk";
 
 string? schemaFile = null;
-string? outputDir = null;
 var rootNamespace = defaultNamespace;
+var schemaBundle = SchemaBundle.V2;
+var includeExperimentalApi = false;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -18,11 +20,14 @@ for (var i = 0; i < args.Length; i++)
         case "--schema" or "-s" when i + 1 < args.Length:
             schemaFile = args[++i];
             break;
-        case "--output" or "-o" when i + 1 < args.Length:
-            outputDir = args[++i];
-            break;
         case "--namespace" or "-n" when i + 1 < args.Length:
             rootNamespace = args[++i];
+            break;
+        case "--bundle" or "-b" when i + 1 < args.Length:
+            schemaBundle = ParseSchemaBundle(args[++i]);
+            break;
+        case "--experimental":
+            includeExperimentalApi = true;
             break;
     }
 }
@@ -35,61 +40,71 @@ var codexVersionInfo = await CodexVersionDetector.DetectAsync(codexPath).Configu
 
 if (schemaFile is null)
 {
-    var candidate = Path.Combine(schemaDir, combinedSchemaFileName);
-    if (!File.Exists(candidate))
+    var mixedCandidate = Path.Combine(schemaDir, mixedSchemaFileName);
+    var v2Candidate = Path.Combine(schemaDir, flatV2SchemaFileName);
+    SafeDelete(mixedCandidate);
+    SafeDelete(v2Candidate);
+
+    Console.WriteLine($"Schema bundle: {schemaBundle}");
+    Console.WriteLine($"Experimental:  {includeExperimentalApi}");
+    Console.WriteLine();
+    Console.WriteLine("Generating schema via: codex app-server generate-json-schema ...");
+
+    Directory.CreateDirectory(schemaDir);
+
+    // Resolve the codex executable. On Windows it may be a .ps1/.cmd shim
+    // installed via fnm/npm, so fall back to invoking through the shell.
+    var experimentalFlag = includeExperimentalApi ? " --experimental" : "";
+    var codexArgs = $"app-server generate-json-schema --out \"{schemaDir}\"{experimentalFlag}";
+    ProcessStartInfo psi;
+    if (codexPath != null)
     {
-        Console.WriteLine($"Schema not found at {candidate}");
-        Console.WriteLine("Generating schema via: codex app-server generate-json-schema ...");
-
-        Directory.CreateDirectory(schemaDir);
-
-        // Resolve the codex executable. On Windows it may be a .ps1/.cmd shim
-        // installed via fnm/npm, so fall back to invoking through the shell.
-        ProcessStartInfo psi;
-        if (codexPath != null)
-        {
-            psi = CodexProcessHelper.CreateCommandProcessStartInfo(
-                codexPath,
-                $"app-server generate-json-schema --out \"{schemaDir}\"");
-        }
-        else if (OperatingSystem.IsWindows())
-        {
-            // Use pwsh to resolve PATH shims (.ps1 / .cmd wrappers)
-            psi = CodexProcessHelper.CreateCommandProcessStartInfo(
-                "pwsh",
-                $"-NoProfile -NonInteractive -Command \"codex app-server generate-json-schema --out '{schemaDir}'\"");
-        }
-        else
-        {
-            psi = CodexProcessHelper.CreateCommandProcessStartInfo(
-                "/bin/sh",
-                $"-c \"codex app-server generate-json-schema --out '{schemaDir}'\"");
-        }
-
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start codex process.");
-        await proc.WaitForExitAsync().ConfigureAwait(false);
-
-        if (proc.ExitCode != 0)
-        {
-            var stderr = await proc.StandardError.ReadToEndAsync().ConfigureAwait(false);
-            Console.Error.WriteLine($"codex exited with code {proc.ExitCode}: {stderr}");
-            return 1;
-        }
-
-        Console.WriteLine("Schema generated successfully.");
+        psi = CodexProcessHelper.CreateCommandProcessStartInfo(
+            codexPath,
+            codexArgs);
+    }
+    else if (OperatingSystem.IsWindows())
+    {
+        // Use pwsh to resolve PATH shims (.ps1 / .cmd wrappers)
+        psi = CodexProcessHelper.CreateCommandProcessStartInfo(
+            "pwsh",
+            $"-NoProfile -NonInteractive -Command \"codex {codexArgs.Replace('\"', '\'')}\"");
     }
     else
     {
-        Console.WriteLine("Schema folder already exists, skipping generation.");
+        psi = CodexProcessHelper.CreateCommandProcessStartInfo(
+            "/bin/sh",
+            $"-c \"codex {codexArgs.Replace('\"', '\'')}\"");
     }
 
-    schemaFile = candidate;
+    using var proc = Process.Start(psi)
+        ?? throw new InvalidOperationException("Failed to start codex process.");
+    await proc.WaitForExitAsync().ConfigureAwait(false);
+
+    if (proc.ExitCode != 0)
+    {
+        var stderr = await proc.StandardError.ReadToEndAsync().ConfigureAwait(false);
+        Console.Error.WriteLine($"codex exited with code {proc.ExitCode}: {stderr}");
+        return 1;
+    }
+
+    Console.WriteLine("Schema generated successfully.");
+
+    schemaFile = ResolveSchemaFile(
+        mixedCandidate: mixedCandidate,
+        v2Candidate: v2Candidate,
+        schemaBundle: schemaBundle,
+        includeExperimentalApi: includeExperimentalApi);
 }
 
 // Default output: src/CodeAlta.CodexSdk/generated (relative to repo root)
-outputDir ??= Path.GetFullPath(
-    Path.Combine(exeDir, "..", "..", "..", "..", "CodeAlta.CodexSdk", "generated"));
+var outputBaseDir = Path.GetFullPath(Path.Combine(exeDir, "..", "..", "..", "..", "CodeAlta.CodexSdk"));
+if (!Directory.Exists(outputBaseDir))
+{
+    Console.WriteLine($"Error: Expected output base directory not found: {outputBaseDir}");
+    return 1;
+}
+var outputDir = Path.Combine(outputBaseDir, "generated");
 
 Console.WriteLine($"Schema:    {schemaFile}");
 Console.WriteLine($"Output:    {outputDir}");
@@ -98,6 +113,16 @@ Console.WriteLine(
     $"Codex:     {(codexVersionInfo.IsDetected ? codexVersionInfo.Version.ToString() : "unknown")} " +
     $"(raw: {codexVersionInfo.RawOutput})");
 Console.WriteLine();
+
+// Delete output directory
+try
+{
+    Directory.Delete(outputDir, recursive: true);
+    Directory.CreateDirectory(outputDir);
+} catch
+{
+    // ignore
+}
 
 // Load all definitions (retry once after regenerating schema when default schema folder is stale/corrupt)
 List<TypeDef> defs;
@@ -127,24 +152,31 @@ catch (Exception ex) when (schemaFile is not null && schemaFile.StartsWith(schem
 
     Directory.CreateDirectory(schemaDir);
 
+    var mixedCandidate = Path.Combine(schemaDir, mixedSchemaFileName);
+    var v2Candidate = Path.Combine(schemaDir, flatV2SchemaFileName);
+    SafeDelete(mixedCandidate);
+    SafeDelete(v2Candidate);
+
+    var experimentalFlag = includeExperimentalApi ? " --experimental" : "";
+    var codexArgs = $"app-server generate-json-schema --out \"{schemaDir}\"{experimentalFlag}";
     ProcessStartInfo psi;
     if (codexPath != null)
     {
         psi = CodexProcessHelper.CreateCommandProcessStartInfo(
             codexPath,
-            $"app-server generate-json-schema --out \"{schemaDir}\"");
+            codexArgs);
     }
     else if (OperatingSystem.IsWindows())
     {
         psi = CodexProcessHelper.CreateCommandProcessStartInfo(
             "pwsh",
-            $"-NoProfile -NonInteractive -Command \"codex app-server generate-json-schema --out '{schemaDir}'\"");
+            $"-NoProfile -NonInteractive -Command \"codex {codexArgs.Replace('\"', '\'')}\"");
     }
     else
     {
         psi = CodexProcessHelper.CreateCommandProcessStartInfo(
             "/bin/sh",
-            $"-c \"codex app-server generate-json-schema --out '{schemaDir}'\"");
+            $"-c \"codex {codexArgs.Replace('\"', '\'')}\"");
     }
 
     using var proc = Process.Start(psi)
@@ -157,6 +189,12 @@ catch (Exception ex) when (schemaFile is not null && schemaFile.StartsWith(schem
         Console.Error.WriteLine($"codex exited with code {proc.ExitCode}: {stderr}");
         return 1;
     }
+
+    schemaFile = ResolveSchemaFile(
+        mixedCandidate: mixedCandidate,
+        v2Candidate: v2Candidate,
+        schemaBundle: schemaBundle,
+        includeExperimentalApi: includeExperimentalApi);
 
     defs = await SchemaWalker.LoadDefinitionsAsync(schemaFile, rootNamespace);
 }
@@ -176,7 +214,7 @@ var totalFiles = 0;
 foreach (var (ns, files) in filesByNamespace)
 {
     // Map namespace to directory: CodeAlta.CodexSdk -> outputDir,
-    // CodeAlta.CodexSdk.V2 -> outputDir/V2
+    // CodeAlta.CodexSdk.Sub -> outputDir/Sub
     var relPath = ns == rootNamespace
         ? ""
         : ns[(rootNamespace.Length + 1)..].Replace('.', Path.DirectorySeparatorChar);
@@ -251,6 +289,90 @@ static string EmitCodexClientVersionPartial(string rootNamespace, CodexVersionIn
     builder.AppendLine($"    public const string CompiledAgainstVersionRaw = \"{escapedRawOutput}\";");
     builder.AppendLine("}");
     return builder.ToString();
+}
+
+static void SafeDelete(string path)
+{
+    try
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+    catch
+    {
+        // ignore
+    }
+}
+
+static string EnsureSchemaFile(string candidate, SchemaBundle bundle, bool includeExperimentalApi)
+{
+    if (File.Exists(candidate))
+    {
+        return candidate;
+    }
+
+    var experimentalHint = includeExperimentalApi
+        ? ""
+        : " If you're on an older codex build, try passing --experimental (it may be required to emit the flat v2 bundle).";
+
+    throw new FileNotFoundException(
+        $"Schema bundle '{bundle}' was requested but was not found at '{candidate}'.{experimentalHint}");
+}
+
+static string ResolveSchemaFile(
+    string mixedCandidate,
+    string v2Candidate,
+    SchemaBundle schemaBundle,
+    bool includeExperimentalApi)
+{
+    switch (schemaBundle)
+    {
+        case SchemaBundle.V2:
+            if (File.Exists(v2Candidate))
+            {
+                return v2Candidate;
+            }
+
+            if (File.Exists(mixedCandidate))
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine(
+                    $"Warning: '{flatV2SchemaFileName}' was not generated; falling back to '{mixedSchemaFileName}'.");
+                Console.ResetColor();
+                return mixedCandidate;
+            }
+
+            _ = EnsureSchemaFile(v2Candidate, schemaBundle, includeExperimentalApi);
+            _ = EnsureSchemaFile(mixedCandidate, schemaBundle, includeExperimentalApi);
+            throw new InvalidOperationException("Unreachable");
+
+        case SchemaBundle.Mixed:
+            return EnsureSchemaFile(mixedCandidate, schemaBundle, includeExperimentalApi);
+
+        case SchemaBundle.Auto:
+            if (File.Exists(v2Candidate))
+            {
+                return v2Candidate;
+            }
+
+            return EnsureSchemaFile(mixedCandidate, schemaBundle, includeExperimentalApi);
+
+        default:
+            throw new ArgumentOutOfRangeException(nameof(schemaBundle), schemaBundle, null);
+    }
+}
+
+static SchemaBundle ParseSchemaBundle(string value)
+{
+    return value.Trim().ToLowerInvariant() switch
+    {
+        "auto" => SchemaBundle.Auto,
+        "mixed" or "schemas" => SchemaBundle.Mixed,
+        "v2" or "flatv2" or "v2flat" => SchemaBundle.V2,
+        _ => throw new ArgumentException($"Unknown --bundle value: '{value}'. Expected: auto | mixed | v2.")
+    };
 }
 
 static string EscapeStringLiteral(string value)

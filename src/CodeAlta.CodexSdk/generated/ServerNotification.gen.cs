@@ -16,6 +16,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ThreadArchivedNotification), typeDiscriminator: "thread/archived")]
 [JsonDerivedType(typeof(ThreadUnarchivedNotification), typeDiscriminator: "thread/unarchived")]
 [JsonDerivedType(typeof(ThreadClosedNotification), typeDiscriminator: "thread/closed")]
+[JsonDerivedType(typeof(SkillsChangedNotification), typeDiscriminator: "skills/changed")]
 [JsonDerivedType(typeof(ThreadNameUpdatedNotification), typeDiscriminator: "thread/name/updated")]
 [JsonDerivedType(typeof(ThreadTokenUsageUpdatedNotification), typeDiscriminator: "thread/tokenUsage/updated")]
 [JsonDerivedType(typeof(TurnStartedNotification), typeDiscriminator: "turn/started")]
@@ -29,6 +30,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ItemCommandExecutionOutputDeltaNotification), typeDiscriminator: "item/commandExecution/outputDelta")]
 [JsonDerivedType(typeof(ItemCommandExecutionTerminalInteractionNotification), typeDiscriminator: "item/commandExecution/terminalInteraction")]
 [JsonDerivedType(typeof(ItemFileChangeOutputDeltaNotification), typeDiscriminator: "item/fileChange/outputDelta")]
+[JsonDerivedType(typeof(ServerRequestResolvedNotification), typeDiscriminator: "serverRequest/resolved")]
 [JsonDerivedType(typeof(ItemMcpToolCallProgressNotification), typeDiscriminator: "item/mcpToolCall/progress")]
 [JsonDerivedType(typeof(McpServerOauthLoginCompletedNotification), typeDiscriminator: "mcpServer/oauthLogin/completed")]
 [JsonDerivedType(typeof(AccountUpdatedNotification), typeDiscriminator: "account/updated")]
@@ -59,91 +61,97 @@ public abstract partial record ServerNotification
     public sealed partial record ErrorNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ErrorNotification Params { get; set; } = default!;
+        public ErrorNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadStartedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadStartedNotification Params { get; set; } = default!;
+        public ThreadStartedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadStatusChangedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadStatusChangedNotification Params { get; set; } = default!;
+        public ThreadStatusChangedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadArchivedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadArchivedNotification Params { get; set; } = default!;
+        public ThreadArchivedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadUnarchivedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadUnarchivedNotification Params { get; set; } = default!;
+        public ThreadUnarchivedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadClosedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadClosedNotification Params { get; set; } = default!;
+        public ThreadClosedNotification Params { get; set; } = default!;
+    }
+
+    public sealed partial record SkillsChangedNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public SkillsChangedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadNameUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadNameUpdatedNotification Params { get; set; } = default!;
+        public ThreadNameUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadTokenUsageUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadTokenUsageUpdatedNotification Params { get; set; } = default!;
+        public ThreadTokenUsageUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record TurnStartedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnStartedNotification Params { get; set; } = default!;
+        public TurnStartedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record TurnCompletedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnCompletedNotification Params { get; set; } = default!;
+        public TurnCompletedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record TurnDiffUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnDiffUpdatedNotification Params { get; set; } = default!;
+        public TurnDiffUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record TurnPlanUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TurnPlanUpdatedNotification Params { get; set; } = default!;
+        public TurnPlanUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemStartedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ItemStartedNotification Params { get; set; } = default!;
+        public ItemStartedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemCompletedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ItemCompletedNotification Params { get; set; } = default!;
+        public ItemCompletedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemAgentMessageDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.AgentMessageDeltaNotification Params { get; set; } = default!;
+        public AgentMessageDeltaNotification Params { get; set; } = default!;
     }
 
     /// <summary>
@@ -152,73 +160,79 @@ public abstract partial record ServerNotification
     public sealed partial record ItemPlanDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.PlanDeltaNotification Params { get; set; } = default!;
+        public PlanDeltaNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemCommandExecutionOutputDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.CommandExecutionOutputDeltaNotification Params { get; set; } = default!;
+        public CommandExecutionOutputDeltaNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemCommandExecutionTerminalInteractionNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.TerminalInteractionNotification Params { get; set; } = default!;
+        public TerminalInteractionNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemFileChangeOutputDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.FileChangeOutputDeltaNotification Params { get; set; } = default!;
+        public FileChangeOutputDeltaNotification Params { get; set; } = default!;
+    }
+
+    public sealed partial record ServerRequestResolvedNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public ServerRequestResolvedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemMcpToolCallProgressNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.McpToolCallProgressNotification Params { get; set; } = default!;
+        public McpToolCallProgressNotification Params { get; set; } = default!;
     }
 
     public sealed partial record McpServerOauthLoginCompletedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.McpServerOauthLoginCompletedNotification Params { get; set; } = default!;
+        public McpServerOauthLoginCompletedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record AccountUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.AccountUpdatedNotification Params { get; set; } = default!;
+        public AccountUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record AccountRateLimitsUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.AccountRateLimitsUpdatedNotification Params { get; set; } = default!;
+        public AccountRateLimitsUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record AppListUpdatedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.AppListUpdatedNotification Params { get; set; } = default!;
+        public AppListUpdatedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemReasoningSummaryTextDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ReasoningSummaryTextDeltaNotification Params { get; set; } = default!;
+        public ReasoningSummaryTextDeltaNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemReasoningSummaryPartAddedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ReasoningSummaryPartAddedNotification Params { get; set; } = default!;
+        public ReasoningSummaryPartAddedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemReasoningTextDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ReasoningTextDeltaNotification Params { get; set; } = default!;
+        public ReasoningTextDeltaNotification Params { get; set; } = default!;
     }
 
     /// <summary>
@@ -227,25 +241,25 @@ public abstract partial record ServerNotification
     public sealed partial record ThreadCompactedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ContextCompactedNotification Params { get; set; } = default!;
+        public ContextCompactedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ModelReroutedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ModelReroutedNotification Params { get; set; } = default!;
+        public ModelReroutedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record DeprecationNoticeNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.DeprecationNoticeNotification Params { get; set; } = default!;
+        public DeprecationNoticeNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigWarningNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ConfigWarningNotification Params { get; set; } = default!;
+        public ConfigWarningNotification Params { get; set; } = default!;
     }
 
     public sealed partial record FuzzyFileSearchSessionUpdatedNotification : ServerNotification
@@ -263,31 +277,31 @@ public abstract partial record ServerNotification
     public sealed partial record ThreadRealtimeStartedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadRealtimeStartedNotification Params { get; set; } = default!;
+        public ThreadRealtimeStartedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadRealtimeItemAddedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadRealtimeItemAddedNotification Params { get; set; } = default!;
+        public ThreadRealtimeItemAddedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadRealtimeOutputAudioDeltaNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadRealtimeOutputAudioDeltaNotification Params { get; set; } = default!;
+        public ThreadRealtimeOutputAudioDeltaNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadRealtimeErrorNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadRealtimeErrorNotification Params { get; set; } = default!;
+        public ThreadRealtimeErrorNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ThreadRealtimeClosedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.ThreadRealtimeClosedNotification Params { get; set; } = default!;
+        public ThreadRealtimeClosedNotification Params { get; set; } = default!;
     }
 
     /// <summary>
@@ -296,19 +310,19 @@ public abstract partial record ServerNotification
     public sealed partial record WindowsWorldWritableWarningNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.WindowsWorldWritableWarningNotification Params { get; set; } = default!;
+        public WindowsWorldWritableWarningNotification Params { get; set; } = default!;
     }
 
     public sealed partial record WindowsSandboxSetupCompletedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.WindowsSandboxSetupCompletedNotification Params { get; set; } = default!;
+        public WindowsSandboxSetupCompletedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record AccountLoginCompletedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
-        public CodeAlta.CodexSdk.V2.AccountLoginCompletedNotification Params { get; set; } = default!;
+        public AccountLoginCompletedNotification Params { get; set; } = default!;
     }
 
 }

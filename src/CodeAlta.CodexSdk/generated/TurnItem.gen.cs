@@ -12,13 +12,14 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(PlanTurnItem), typeDiscriminator: "Plan")]
 [JsonDerivedType(typeof(ReasoningTurnItem), typeDiscriminator: "Reasoning")]
 [JsonDerivedType(typeof(WebSearchTurnItem), typeDiscriminator: "WebSearch")]
+[JsonDerivedType(typeof(ImageGenerationTurnItem), typeDiscriminator: "ImageGeneration")]
 [JsonDerivedType(typeof(ContextCompactionTurnItem), typeDiscriminator: "ContextCompaction")]
 public abstract partial record TurnItem
 {
     public sealed partial record UserMessageTurnItem : TurnItem
     {
         [JsonPropertyName("content")]
-        public List<CodeAlta.CodexSdk.V2.UserInput> Content { get; set; } = [];
+        public List<UserInput> Content { get; set; } = [];
         [JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
     }
@@ -36,7 +37,7 @@ public abstract partial record TurnItem
         public string Id { get; set; } = string.Empty;
         /// <summary>Optional phase metadata carried through from `ResponseItem::Message`.  This is currently used by TUI rendering to distinguish mid-turn commentary from a final answer and avoid status-indicator jitter.</summary>
         [JsonPropertyName("phase")]
-        public CodeAlta.CodexSdk.V2.MessagePhase? Phase { get; set; }
+        public MessagePhase? Phase { get; set; }
     }
 
     public sealed partial record PlanTurnItem : TurnItem
@@ -60,11 +61,23 @@ public abstract partial record TurnItem
     public sealed partial record WebSearchTurnItem : TurnItem
     {
         [JsonPropertyName("action")]
-        public CodeAlta.CodexSdk.V2.WebSearchAction Action { get; set; } = default!;
+        public WebSearchAction Action { get; set; } = default!;
         [JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
         [JsonPropertyName("query")]
         public string Query { get; set; } = string.Empty;
+    }
+
+    public sealed partial record ImageGenerationTurnItem : TurnItem
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("result")]
+        public string Result { get; set; } = string.Empty;
+        [JsonPropertyName("revised_prompt")]
+        public string? RevisedPrompt { get; set; }
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = string.Empty;
     }
 
     public sealed partial record ContextCompactionTurnItem : TurnItem

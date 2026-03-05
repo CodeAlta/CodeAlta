@@ -1,6 +1,5 @@
 using System.Text.Json;
 using CodeAlta.CodexSdk;
-using CodeAlta.CodexSdk.V2;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace CodeAlta.Tests;
@@ -132,7 +131,7 @@ public sealed class CodexMessageParserTests
         Assert.IsInstanceOfType(notification, typeof(CodexNotification.ServerRequestResolved));
         var typed = (CodexNotification.ServerRequestResolved)notification!;
         Assert.AreEqual("thr_123", typed.Data.ThreadId);
-        Assert.AreEqual(60L, typed.Data.RequestId);
+        Assert.IsInstanceOfType(typed.Data.RequestId, typeof(RequestId.IntegerValue));
+        Assert.AreEqual(60L, ((RequestId.IntegerValue)typed.Data.RequestId).Value);
     }
 }
-

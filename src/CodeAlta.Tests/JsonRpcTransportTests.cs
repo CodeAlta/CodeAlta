@@ -7,7 +7,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.CodexSdk;
-using CodeAlta.CodexSdk.V2;
 
 namespace CodeAlta.Tests;
 

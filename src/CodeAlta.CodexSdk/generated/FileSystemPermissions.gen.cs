@@ -9,7 +9,7 @@ namespace CodeAlta.CodexSdk;
 public sealed partial record FileSystemPermissions
 {
     [JsonPropertyName("read")]
-    public List<string>? Read { get; set; }
+    public List<AbsolutePathBuf>? Read { get; set; }
     [JsonPropertyName("write")]
-    public List<string>? Write { get; set; }
+    public List<AbsolutePathBuf>? Write { get; set; }
 }

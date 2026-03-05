@@ -1,5 +1,4 @@
 using System.Text.Json;
-using CodeAlta.CodexSdk.V2;
 
 namespace CodeAlta.CodexSdk;
 
@@ -209,13 +208,20 @@ internal static class CodexMessageParser
 
         if (!parameters.TryGetProperty("threadId", out var threadIdProp) || threadIdProp.ValueKind != JsonValueKind.String)
             throw new JsonException("serverRequest/resolved missing required 'threadId' string.");
-        if (!parameters.TryGetProperty("requestId", out var requestIdProp) || requestIdProp.ValueKind != JsonValueKind.Number)
-            throw new JsonException("serverRequest/resolved missing required 'requestId' number.");
+        if (!parameters.TryGetProperty("requestId", out var requestIdProp))
+            throw new JsonException("serverRequest/resolved missing required 'requestId'.");
+
+        RequestId requestId = requestIdProp.ValueKind switch
+        {
+            JsonValueKind.Number => new RequestId.IntegerValue { Value = requestIdProp.GetInt64() },
+            JsonValueKind.String => new RequestId.StringValue { Value = requestIdProp.GetString()! },
+            _ => throw new JsonException("serverRequest/resolved 'requestId' must be a number or string.")
+        };
 
         return new ServerRequestResolvedNotification
         {
             ThreadId = threadIdProp.GetString()!,
-            RequestId = requestIdProp.GetInt64()
+            RequestId = requestId
         };
     }
 }

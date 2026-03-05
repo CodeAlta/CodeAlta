@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using CodeAlta.CodexSdk.V2;
 using XenoAtom.Logging;
 
 namespace CodeAlta.CodexSdk;
@@ -877,7 +876,7 @@ public sealed partial class CodexClient : IAsyncDisposable
                 : null
         };
 
-        await _transport.SendRequestAsync<InitializeParams, InitializeResponse>(
+        _ = await _transport.SendRequestAsync<InitializeParams, InitializeResponse>(
             "initialize", initParams, cancellationToken).ConfigureAwait(false);
 
         // Send the required 'initialized' notification to complete the handshake.

@@ -37,6 +37,8 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(McpToolCallEndEventMsg), typeDiscriminator: "mcp_tool_call_end")]
 [JsonDerivedType(typeof(WebSearchBeginEventMsg), typeDiscriminator: "web_search_begin")]
 [JsonDerivedType(typeof(WebSearchEndEventMsg), typeDiscriminator: "web_search_end")]
+[JsonDerivedType(typeof(ImageGenerationBeginEventMsg), typeDiscriminator: "image_generation_begin")]
+[JsonDerivedType(typeof(ImageGenerationEndEventMsg), typeDiscriminator: "image_generation_end")]
 [JsonDerivedType(typeof(ExecCommandBeginEventMsg), typeDiscriminator: "exec_command_begin")]
 [JsonDerivedType(typeof(ExecCommandOutputDeltaEventMsg), typeDiscriminator: "exec_command_output_delta")]
 [JsonDerivedType(typeof(TerminalInteractionEventMsg), typeDiscriminator: "terminal_interaction")]
@@ -93,7 +95,7 @@ public abstract partial record EventMsg
     public sealed partial record ErrorEventMsg : EventMsg
     {
         [JsonPropertyName("codex_error_info")]
-        public CodeAlta.CodexSdk.V2.CodexErrorInfo? CodexErrorInfo { get; set; }
+        public CodexErrorInfo? CodexErrorInfo { get; set; }
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
     }
@@ -142,7 +144,7 @@ public abstract partial record EventMsg
         [JsonPropertyName("from_model")]
         public string FromModel { get; set; } = string.Empty;
         [JsonPropertyName("reason")]
-        public CodeAlta.CodexSdk.V2.ModelRerouteReason Reason { get; set; } = default!;
+        public ModelRerouteReason Reason { get; set; } = default!;
         [JsonPropertyName("to_model")]
         public string ToModel { get; set; } = string.Empty;
     }
@@ -168,7 +170,7 @@ public abstract partial record EventMsg
     public sealed partial record TaskStartedEventMsg : EventMsg
     {
         [JsonPropertyName("collaboration_mode_kind")]
-        public CodeAlta.CodexSdk.V2.ModeKind CollaborationModeKind { get; set; } = default!;
+        public ModeKind CollaborationModeKind { get; set; } = default!;
         [JsonPropertyName("model_context_window")]
         public long? ModelContextWindow { get; set; }
         [JsonPropertyName("turn_id")]
@@ -194,7 +196,7 @@ public abstract partial record EventMsg
         [JsonPropertyName("info")]
         public TokenUsageInfo? Info { get; set; }
         [JsonPropertyName("rate_limits")]
-        public CodeAlta.CodexSdk.V2.RateLimitSnapshot? RateLimits { get; set; }
+        public RateLimitSnapshot? RateLimits { get; set; }
     }
 
     /// <summary>
@@ -205,7 +207,7 @@ public abstract partial record EventMsg
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
         [JsonPropertyName("phase")]
-        public CodeAlta.CodexSdk.V2.MessagePhase? Phase { get; set; }
+        public MessagePhase? Phase { get; set; }
     }
 
     /// <summary>
@@ -223,7 +225,7 @@ public abstract partial record EventMsg
         public string Message { get; set; } = string.Empty;
         /// <summary>UI-defined spans within `message` used to render or persist special elements.</summary>
         [JsonPropertyName("text_elements")]
-        public List<CodeAlta.CodexSdk.V2.TextElement>? TextElements { get; set; }
+        public List<TextElement>? TextElements { get; set; }
     }
 
     /// <summary>
@@ -289,12 +291,12 @@ public abstract partial record EventMsg
     {
         /// <summary>When to escalate for approval for execution</summary>
         [JsonPropertyName("approval_policy")]
-        public CodeAlta.CodexSdk.V2.AskForApproval ApprovalPolicy { get; set; } = default!;
+        public AskForApproval ApprovalPolicy { get; set; } = default!;
         /// <summary>Working directory that should be treated as the *root* of the session.</summary>
         [JsonPropertyName("cwd")]
         public string Cwd { get; set; } = string.Empty;
         [JsonPropertyName("forked_from_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId? ForkedFromId { get; set; }
+        public ThreadId? ForkedFromId { get; set; }
         /// <summary>Current number of entries in the history log.</summary>
         [JsonPropertyName("history_entry_count")]
         public uint HistoryEntryCount { get; set; }
@@ -314,15 +316,17 @@ public abstract partial record EventMsg
         public SessionNetworkProxyRuntime? NetworkProxy { get; set; }
         /// <summary>The effort the model is putting into reasoning about the user's request.</summary>
         [JsonPropertyName("reasoning_effort")]
-        public CodeAlta.CodexSdk.V2.ReasoningEffort? ReasoningEffort { get; set; }
+        public ReasoningEffort? ReasoningEffort { get; set; }
         /// <summary>Path in which the rollout is stored. Can be `None` for ephemeral threads</summary>
         [JsonPropertyName("rollout_path")]
         public string? RolloutPath { get; set; }
         /// <summary>How to sandbox commands executed in the system</summary>
         [JsonPropertyName("sandbox_policy")]
-        public CodeAlta.CodexSdk.V2.SandboxPolicy SandboxPolicy { get; set; } = default!;
+        public SandboxPolicy SandboxPolicy { get; set; } = default!;
+        [JsonPropertyName("service_tier")]
+        public ServiceTier? ServiceTier { get; set; }
         [JsonPropertyName("session_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SessionId { get; set; } = default!;
+        public ThreadId SessionId { get; set; } = default!;
         /// <summary>Optional user-facing thread name (may be unset).</summary>
         [JsonPropertyName("thread_name")]
         public string? ThreadName { get; set; }
@@ -334,7 +338,7 @@ public abstract partial record EventMsg
     public sealed partial record ThreadNameUpdatedEventMsg : EventMsg
     {
         [JsonPropertyName("thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ThreadId { get; set; } = default!;
+        public ThreadId ThreadId { get; set; } = default!;
         [JsonPropertyName("thread_name")]
         public string? ThreadName { get; set; }
     }
@@ -397,11 +401,29 @@ public abstract partial record EventMsg
     public sealed partial record WebSearchEndEventMsg : EventMsg
     {
         [JsonPropertyName("action")]
-        public CodeAlta.CodexSdk.V2.WebSearchAction Action { get; set; } = default!;
+        public WebSearchAction Action { get; set; } = default!;
         [JsonPropertyName("call_id")]
         public string CallId { get; set; } = string.Empty;
         [JsonPropertyName("query")]
         public string Query { get; set; } = string.Empty;
+    }
+
+    public sealed partial record ImageGenerationBeginEventMsg : EventMsg
+    {
+        [JsonPropertyName("call_id")]
+        public string CallId { get; set; } = string.Empty;
+    }
+
+    public sealed partial record ImageGenerationEndEventMsg : EventMsg
+    {
+        [JsonPropertyName("call_id")]
+        public string CallId { get; set; } = string.Empty;
+        [JsonPropertyName("result")]
+        public string Result { get; set; } = string.Empty;
+        [JsonPropertyName("revised_prompt")]
+        public string? RevisedPrompt { get; set; }
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -600,7 +622,7 @@ public abstract partial record EventMsg
         public string CallId { get; set; } = string.Empty;
         /// <summary>Dynamic tool response content items.</summary>
         [JsonPropertyName("content_items")]
-        public List<CodeAlta.CodexSdk.V2.DynamicToolCallOutputContentItem> ContentItems { get; set; } = [];
+        public List<DynamicToolCallOutputContentItem> ContentItems { get; set; } = [];
         /// <summary>The duration of the dynamic tool call.</summary>
         [JsonPropertyName("duration")]
         public Duration Duration { get; set; } = default!;
@@ -622,8 +644,8 @@ public abstract partial record EventMsg
     {
         [JsonPropertyName("id")]
         public RequestId Id { get; set; } = default!;
-        [JsonPropertyName("message")]
-        public string Message { get; set; } = string.Empty;
+        [JsonPropertyName("request")]
+        public ElicitationRequest Request { get; set; } = default!;
         [JsonPropertyName("server_name")]
         public string ServerName { get; set; } = string.Empty;
     }
@@ -688,7 +710,7 @@ public abstract partial record EventMsg
         [JsonPropertyName("additional_details")]
         public string? AdditionalDetails { get; set; }
         [JsonPropertyName("codex_error_info")]
-        public CodeAlta.CodexSdk.V2.CodexErrorInfo? CodexErrorInfo { get; set; }
+        public CodexErrorInfo? CodexErrorInfo { get; set; }
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
     }
@@ -725,7 +747,7 @@ public abstract partial record EventMsg
         public Dictionary<string, FileChange>? Changes { get; set; }
         /// <summary>Completion status for this patch application.</summary>
         [JsonPropertyName("status")]
-        public CodeAlta.CodexSdk.V2.PatchApplyStatus Status { get; set; } = default!;
+        public PatchApplyStatus Status { get; set; } = default!;
         /// <summary>Captured stderr (parser errors, IO failures, etc.).</summary>
         [JsonPropertyName("stderr")]
         public string Stderr { get; set; } = string.Empty;
@@ -767,16 +789,16 @@ public abstract partial record EventMsg
     {
         /// <summary>Authentication status for each configured MCP server.</summary>
         [JsonPropertyName("auth_statuses")]
-        public Dictionary<string, CodeAlta.CodexSdk.V2.McpAuthStatus> AuthStatuses { get; set; } = [];
+        public Dictionary<string, McpAuthStatus> AuthStatuses { get; set; } = [];
         /// <summary>Known resource templates grouped by server name.</summary>
         [JsonPropertyName("resource_templates")]
-        public Dictionary<string, List<CodeAlta.CodexSdk.V2.ResourceTemplate>> ResourceTemplates { get; set; } = [];
+        public Dictionary<string, List<ResourceTemplate>> ResourceTemplates { get; set; } = [];
         /// <summary>Known resources grouped by server name.</summary>
         [JsonPropertyName("resources")]
-        public Dictionary<string, List<CodeAlta.CodexSdk.V2.Resource>> Resources { get; set; } = [];
+        public Dictionary<string, List<Resource>> Resources { get; set; } = [];
         /// <summary>Fully qualified tool name -&gt; tool definition.</summary>
         [JsonPropertyName("tools")]
-        public Dictionary<string, CodeAlta.CodexSdk.V2.Tool> Tools { get; set; } = [];
+        public Dictionary<string, Tool> Tools { get; set; } = [];
     }
 
     /// <summary>
@@ -794,7 +816,7 @@ public abstract partial record EventMsg
     public sealed partial record ListSkillsResponseEventMsg : EventMsg
     {
         [JsonPropertyName("skills")]
-        public List<CodeAlta.CodexSdk.V2.SkillsListEntry> Skills { get; set; } = [];
+        public List<SkillsListEntry> Skills { get; set; } = [];
     }
 
     /// <summary>
@@ -803,7 +825,7 @@ public abstract partial record EventMsg
     public sealed partial record ListRemoteSkillsResponseEventMsg : EventMsg
     {
         [JsonPropertyName("skills")]
-        public List<CodeAlta.CodexSdk.V2.RemoteSkillSummary> Skills { get; set; } = [];
+        public List<RemoteSkillSummary> Skills { get; set; } = [];
     }
 
     /// <summary>
@@ -852,7 +874,7 @@ public abstract partial record EventMsg
     public sealed partial record EnteredReviewModeEventMsg : EventMsg
     {
         [JsonPropertyName("target")]
-        public CodeAlta.CodexSdk.V2.ReviewTarget Target { get; set; } = default!;
+        public ReviewTarget Target { get; set; } = default!;
         [JsonPropertyName("user_facing_hint")]
         public string? UserFacingHint { get; set; }
     }
@@ -869,7 +891,7 @@ public abstract partial record EventMsg
     public sealed partial record RawResponseItemEventMsg : EventMsg
     {
         [JsonPropertyName("item")]
-        public CodeAlta.CodexSdk.V2.ResponseItem Item { get; set; } = default!;
+        public ResponseItem Item { get; set; } = default!;
     }
 
     public sealed partial record ItemStartedEventMsg : EventMsg
@@ -877,7 +899,7 @@ public abstract partial record EventMsg
         [JsonPropertyName("item")]
         public TurnItem Item { get; set; } = default!;
         [JsonPropertyName("thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ThreadId { get; set; } = default!;
+        public ThreadId ThreadId { get; set; } = default!;
         [JsonPropertyName("turn_id")]
         public string TurnId { get; set; } = string.Empty;
     }
@@ -887,7 +909,7 @@ public abstract partial record EventMsg
         [JsonPropertyName("item")]
         public TurnItem Item { get; set; } = default!;
         [JsonPropertyName("thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ThreadId { get; set; } = default!;
+        public ThreadId ThreadId { get; set; } = default!;
         [JsonPropertyName("turn_id")]
         public string TurnId { get; set; } = string.Empty;
     }
@@ -957,7 +979,7 @@ public abstract partial record EventMsg
         public string Prompt { get; set; } = string.Empty;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
     }
 
     /// <summary>
@@ -976,13 +998,13 @@ public abstract partial record EventMsg
         public string? NewAgentRole { get; set; }
         /// <summary>Thread ID of the newly spawned agent, if it was created.</summary>
         [JsonPropertyName("new_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId? NewThreadId { get; set; }
+        public ThreadId? NewThreadId { get; set; }
         /// <summary>Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning.</summary>
         [JsonPropertyName("prompt")]
         public string Prompt { get; set; } = string.Empty;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
         /// <summary>Last known status of the new agent reported to the sender agent.</summary>
         [JsonPropertyName("status")]
         public AgentStatus Status { get; set; } = default!;
@@ -1001,10 +1023,10 @@ public abstract partial record EventMsg
         public string Prompt { get; set; } = string.Empty;
         /// <summary>Thread ID of the receiver.</summary>
         [JsonPropertyName("receiver_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ReceiverThreadId { get; set; } = default!;
+        public ThreadId ReceiverThreadId { get; set; } = default!;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
     }
 
     /// <summary>
@@ -1026,10 +1048,10 @@ public abstract partial record EventMsg
         public string? ReceiverAgentRole { get; set; }
         /// <summary>Thread ID of the receiver.</summary>
         [JsonPropertyName("receiver_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ReceiverThreadId { get; set; } = default!;
+        public ThreadId ReceiverThreadId { get; set; } = default!;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
         /// <summary>Last known status of the receiver agent reported to the sender agent.</summary>
         [JsonPropertyName("status")]
         public AgentStatus Status { get; set; } = default!;
@@ -1048,10 +1070,10 @@ public abstract partial record EventMsg
         public List<CollabAgentRef>? ReceiverAgents { get; set; }
         /// <summary>Thread ID of the receivers.</summary>
         [JsonPropertyName("receiver_thread_ids")]
-        public List<CodeAlta.CodexSdk.V2.ThreadId> ReceiverThreadIds { get; set; } = [];
+        public List<ThreadId> ReceiverThreadIds { get; set; } = [];
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
     }
 
     /// <summary>
@@ -1067,7 +1089,7 @@ public abstract partial record EventMsg
         public string CallId { get; set; } = string.Empty;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
         /// <summary>Last known status of the receiver agents reported to the sender agent.</summary>
         [JsonPropertyName("statuses")]
         public Dictionary<string, AgentStatus> Statuses { get; set; } = [];
@@ -1083,10 +1105,10 @@ public abstract partial record EventMsg
         public string CallId { get; set; } = string.Empty;
         /// <summary>Thread ID of the receiver.</summary>
         [JsonPropertyName("receiver_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ReceiverThreadId { get; set; } = default!;
+        public ThreadId ReceiverThreadId { get; set; } = default!;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
     }
 
     /// <summary>
@@ -1105,10 +1127,10 @@ public abstract partial record EventMsg
         public string? ReceiverAgentRole { get; set; }
         /// <summary>Thread ID of the receiver.</summary>
         [JsonPropertyName("receiver_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ReceiverThreadId { get; set; } = default!;
+        public ThreadId ReceiverThreadId { get; set; } = default!;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
         /// <summary>Last known status of the receiver agent reported to the sender agent before the close.</summary>
         [JsonPropertyName("status")]
         public AgentStatus Status { get; set; } = default!;
@@ -1130,10 +1152,10 @@ public abstract partial record EventMsg
         public string? ReceiverAgentRole { get; set; }
         /// <summary>Thread ID of the receiver.</summary>
         [JsonPropertyName("receiver_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ReceiverThreadId { get; set; } = default!;
+        public ThreadId ReceiverThreadId { get; set; } = default!;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
     }
 
     /// <summary>
@@ -1152,10 +1174,10 @@ public abstract partial record EventMsg
         public string? ReceiverAgentRole { get; set; }
         /// <summary>Thread ID of the receiver.</summary>
         [JsonPropertyName("receiver_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId ReceiverThreadId { get; set; } = default!;
+        public ThreadId ReceiverThreadId { get; set; } = default!;
         /// <summary>Thread ID of the sender.</summary>
         [JsonPropertyName("sender_thread_id")]
-        public CodeAlta.CodexSdk.V2.ThreadId SenderThreadId { get; set; } = default!;
+        public ThreadId SenderThreadId { get; set; } = default!;
         /// <summary>Last known status of the receiver agent reported to the sender agent after resume.</summary>
         [JsonPropertyName("status")]
         public AgentStatus Status { get; set; } = default!;

@@ -13,10 +13,9 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ItemCommandExecutionRequestApprovalRequest), typeDiscriminator: "item/commandExecution/requestApproval")]
 [JsonDerivedType(typeof(ItemFileChangeRequestApprovalRequest), typeDiscriminator: "item/fileChange/requestApproval")]
 [JsonDerivedType(typeof(ItemToolRequestUserInputRequest), typeDiscriminator: "item/tool/requestUserInput")]
+[JsonDerivedType(typeof(McpServerElicitationRequestRequest), typeDiscriminator: "mcpServer/elicitation/request")]
 [JsonDerivedType(typeof(ItemToolCallRequest), typeDiscriminator: "item/tool/call")]
 [JsonDerivedType(typeof(AccountChatgptAuthTokensRefreshRequest), typeDiscriminator: "account/chatgptAuthTokens/refresh")]
-[JsonDerivedType(typeof(ApplyPatchApprovalRequest), typeDiscriminator: "applyPatchApproval")]
-[JsonDerivedType(typeof(ExecCommandApprovalRequest), typeDiscriminator: "execCommandApproval")]
 public abstract partial record ServerRequest
 {
     /// <summary>
@@ -53,6 +52,17 @@ public abstract partial record ServerRequest
     }
 
     /// <summary>
+    /// Request input for an MCP server elicitation.
+    /// </summary>
+    public sealed partial record McpServerElicitationRequestRequest : ServerRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public McpServerElicitationRequestParams Params { get; set; } = default!;
+    }
+
+    /// <summary>
     /// Execute a dynamic tool call on the client.
     /// </summary>
     public sealed partial record ItemToolCallRequest : ServerRequest
@@ -69,28 +79,6 @@ public abstract partial record ServerRequest
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
         public ChatgptAuthTokensRefreshParams Params { get; set; } = default!;
-    }
-
-    /// <summary>
-    /// DEPRECATED APIs below Request to approve a patch. This request is used for Turns started via the legacy APIs (i.e. SendUserTurn, SendUserMessage).
-    /// </summary>
-    public sealed partial record ApplyPatchApprovalRequest : ServerRequest
-    {
-        [JsonPropertyName("id")]
-        public RequestId Id { get; set; } = default!;
-        [JsonPropertyName("params")]
-        public ApplyPatchApprovalParams Params { get; set; } = default!;
-    }
-
-    /// <summary>
-    /// Request to exec a command. This request is used for Turns started via the legacy APIs (i.e. SendUserTurn, SendUserMessage).
-    /// </summary>
-    public sealed partial record ExecCommandApprovalRequest : ServerRequest
-    {
-        [JsonPropertyName("id")]
-        public RequestId Id { get; set; } = default!;
-        [JsonPropertyName("params")]
-        public ExecCommandApprovalParams Params { get; set; } = default!;
     }
 
 }

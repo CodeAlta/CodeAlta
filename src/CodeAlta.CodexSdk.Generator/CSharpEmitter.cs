@@ -1327,17 +1327,20 @@ public class CSharpEmitter
         sb.AppendLine($"namespace {_rootNamespace};");
         sb.AppendLine();
 
+        var serializableTypes = new HashSet<string>(_serializableTypes, StringComparer.Ordinal);
+        var collectionTypes = new HashSet<string>(_collectionTypes, StringComparer.Ordinal);
+
         // Detect duplicate short names across namespaces.
         // Use OrdinalIgnoreCase because STJ source-gen hint names are
         // case-insensitive (e.g. "Subagent" vs "SubAgent" collide).
         var nameCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var fqn in _serializableTypes)
+        foreach (var fqn in serializableTypes)
         {
             var shortName = fqn[(fqn.LastIndexOf('.') + 1)..];
             nameCount[shortName] = nameCount.GetValueOrDefault(shortName) + 1;
         }
 
-        foreach (var typeFqn in _serializableTypes.Order())
+        foreach (var typeFqn in serializableTypes.Order())
         {
             var displayName = typeFqn.StartsWith(_rootNamespace + ".")
                 ? typeFqn[(_rootNamespace.Length + 1)..]
@@ -1362,7 +1365,7 @@ public class CSharpEmitter
         // types share a short name across namespaces (e.g. List<UserInput> vs
         // List<V2.UserInput>); without this, SYSLIB1031 duplicates cause the
         // source generator to silently skip the second registration.
-        foreach (var collectionType in _collectionTypes.Order())
+        foreach (var collectionType in collectionTypes.Order())
         {
             var propName = CollectionTypeToPropName(collectionType);
             sb.AppendLine($"[JsonSerializable(typeof({collectionType}), TypeInfoPropertyName = \"{propName}\")]");
@@ -1394,8 +1397,8 @@ public class CSharpEmitter
 
     /// <summary>
     /// Converts a fully-qualified collection type like
-    /// <c>List&lt;CodeAlta.CodexSdk.V2.UserInput&gt;</c> into a unique property name
-    /// like <c>ListCodeAltaCodexSdkV2UserInput</c> for the <c>TypeInfoPropertyName</c>.
+    /// <c>List&lt;CodeAlta.CodexSdk.UserInput&gt;</c> into a unique property name
+    /// like <c>ListCodeAltaCodexSdkUserInput</c> for the <c>TypeInfoPropertyName</c>.
     /// </summary>
     private static string CollectionTypeToPropName(string collectionType)
     {

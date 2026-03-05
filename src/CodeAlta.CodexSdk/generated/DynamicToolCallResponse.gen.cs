@@ -9,7 +9,7 @@ namespace CodeAlta.CodexSdk;
 public sealed partial record DynamicToolCallResponse
 {
     [JsonPropertyName("contentItems")]
-    public List<CodeAlta.CodexSdk.V2.DynamicToolCallOutputContentItem> ContentItems { get; set; } = [];
+    public List<DynamicToolCallOutputContentItem> ContentItems { get; set; } = [];
     [JsonPropertyName("success")]
     public bool Success { get; set; }
 }

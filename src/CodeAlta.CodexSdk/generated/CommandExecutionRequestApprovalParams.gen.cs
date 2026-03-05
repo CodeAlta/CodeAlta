@@ -22,7 +22,7 @@ public sealed partial record CommandExecutionRequestApprovalParams
     public string? Command { get; set; }
     /// <summary>Best-effort parsed command actions for friendly display.</summary>
     [JsonPropertyName("commandActions")]
-    public List<CodeAlta.CodexSdk.V2.CommandAction>? CommandActions { get; set; }
+    public List<CommandAction>? CommandActions { get; set; }
     /// <summary>The command's working directory.</summary>
     [JsonPropertyName("cwd")]
     public string? Cwd { get; set; }

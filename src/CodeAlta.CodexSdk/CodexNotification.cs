@@ -1,5 +1,4 @@
 using System.Text.Json;
-using CodeAlta.CodexSdk.V2;
 
 namespace CodeAlta.CodexSdk;
 

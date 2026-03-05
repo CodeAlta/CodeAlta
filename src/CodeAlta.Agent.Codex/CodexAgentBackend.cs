@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using CodeAlta.CodexSdk;
-using CodeAlta.CodexSdk.V2;
 
 namespace CodeAlta.Agent.Codex;
 
