@@ -66,6 +66,8 @@ internal sealed class ChatAgentConnection : IAsyncDisposable
                         Streaming = true,
                         WorkingDirectory = workingDirectory,
                         Tools = tools,
+                        //SystemMessage = "You are a global coding agent assistant that helps users on coding tasks and distributing work to other coding agents",
+                        //DeveloperInstructions = "You should not perform coding tasks yourself. You must delegate to other coding agents.",
                         OnPermissionRequest = permissionRequestHandler,
                         OnUserInputRequest = userInputRequestHandler,
                     },

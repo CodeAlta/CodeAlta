@@ -2,7 +2,7 @@ using System.Text;
 using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
-using SharpYaml.Serialization;
+using SharpYaml;
 
 namespace CodeAlta.Persistence;
 
@@ -11,14 +11,11 @@ namespace CodeAlta.Persistence;
 /// </summary>
 public sealed class ArtifactStore
 {
-    private readonly Serializer _yamlSerializer;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ArtifactStore"/> class.
     /// </summary>
     public ArtifactStore()
     {
-        _yamlSerializer = new Serializer();
     }
 
     /// <summary>
@@ -65,7 +62,7 @@ public sealed class ArtifactStore
         document.Frontmatter.UpdatedAt = now;
         document.Frontmatter.Tags ??= [];
 
-        var yaml = NormalizeYaml(_yamlSerializer.Serialize(document.Frontmatter));
+        var yaml = NormalizeYaml(YamlSerializer.Serialize(document.Frontmatter));
         var contents = new StringBuilder()
             .AppendLine("---")
             .AppendLine(yaml)
@@ -103,7 +100,7 @@ public sealed class ArtifactStore
             throw new InvalidDataException("Artifact is missing YAML frontmatter.");
         }
 
-        var frontmatter = _yamlSerializer.Deserialize<ArtifactFrontmatter>(frontmatterText) ?? new ArtifactFrontmatter();
+        var frontmatter = YamlSerializer.Deserialize<ArtifactFrontmatter>(frontmatterText) ?? new ArtifactFrontmatter();
         frontmatter.Tags ??= [];
         frontmatter.Links ??= new ArtifactLinks();
         frontmatter.Links.Tasks ??= [];

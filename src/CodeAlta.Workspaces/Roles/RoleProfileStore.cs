@@ -1,4 +1,5 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
+using SharpYaml;
 
 namespace CodeAlta.Workspaces.Roles;
 
@@ -7,8 +8,6 @@ namespace CodeAlta.Workspaces.Roles;
 /// </summary>
 public sealed class RoleProfileStore
 {
-    private readonly Serializer _serializer = new();
-
     /// <summary>
     /// Lists role profiles from the provided root directories.
     /// </summary>
@@ -78,7 +77,7 @@ public sealed class RoleProfileStore
     {
         if (TrySplitFrontmatter(content, out var frontmatterText, out var body))
         {
-            var frontmatter = _serializer.Deserialize<RoleFrontmatter>(frontmatterText) ?? new RoleFrontmatter();
+            var frontmatter = YamlSerializer.Deserialize<RoleFrontmatter>(frontmatterText) ?? new RoleFrontmatter();
             var id = Coalesce(frontmatter.Id, Path.GetFileNameWithoutExtension(sourcePath));
             var name = Coalesce(frontmatter.Name, id);
             var description = Coalesce(frontmatter.Description, $"{name} role profile.");
@@ -210,28 +209,28 @@ public sealed class RoleProfileStore
 
     private sealed class RoleFrontmatter
     {
-        [YamlMember("id")]
+        [JsonPropertyName("id")]
         public string? Id { get; set; }
 
-        [YamlMember("name")]
+        [JsonPropertyName("name")]
         public string? Name { get; set; }
 
-        [YamlMember("description")]
+        [JsonPropertyName("description")]
         public string? Description { get; set; }
 
-        [YamlMember("tools_allowed")]
+        [JsonPropertyName("tools_allowed")]
         public List<string>? AllowedTools { get; set; }
 
-        [YamlMember("tools_denied")]
+        [JsonPropertyName("tools_denied")]
         public List<string>? DeniedTools { get; set; }
 
-        [YamlMember("default_backend")]
+        [JsonPropertyName("default_backend")]
         public string? DefaultBackend { get; set; }
 
-        [YamlMember("default_model")]
+        [JsonPropertyName("default_model")]
         public string? DefaultModel { get; set; }
 
-        [YamlMember("default_reasoning_effort")]
+        [JsonPropertyName("default_reasoning_effort")]
         public string? DefaultReasoningEffort { get; set; }
     }
 }

@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Persistence;
 
@@ -10,73 +10,73 @@ public sealed class ArtifactFrontmatter
     /// <summary>
     /// Gets or sets artifact identifier.
     /// </summary>
-    [YamlMember("id")]
+    [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets artifact type.
     /// </summary>
-    [YamlMember("type")]
+    [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets optional title.
     /// </summary>
-    [YamlMember("title")]
+    [JsonPropertyName("title")]
     public string? Title { get; set; }
 
     /// <summary>
     /// Gets or sets optional workspace identifier.
     /// </summary>
-    [YamlMember("workspace_id")]
+    [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; set; }
 
     /// <summary>
     /// Gets or sets optional workspace key.
     /// </summary>
-    [YamlMember("workspace_key")]
+    [JsonPropertyName("workspace_key")]
     public string? WorkspaceKey { get; set; }
 
     /// <summary>
     /// Gets or sets optional project identifier.
     /// </summary>
-    [YamlMember("project_id")]
+    [JsonPropertyName("project_id")]
     public string? ProjectId { get; set; }
 
     /// <summary>
     /// Gets or sets optional project key.
     /// </summary>
-    [YamlMember("project_key")]
+    [JsonPropertyName("project_key")]
     public string? ProjectKey { get; set; }
 
     /// <summary>
     /// Gets or sets source metadata.
     /// </summary>
-    [YamlMember("source")]
+    [JsonPropertyName("source")]
     public ArtifactSourceInfo? Source { get; set; }
 
     /// <summary>
     /// Gets or sets tags.
     /// </summary>
-    [YamlMember("tags")]
+    [JsonPropertyName("tags")]
     public List<string> Tags { get; set; } = [];
 
     /// <summary>
     /// Gets or sets structured links.
     /// </summary>
-    [YamlMember("links")]
+    [JsonPropertyName("links")]
     public ArtifactLinks? Links { get; set; }
 
     /// <summary>
     /// Gets or sets creation timestamp in UTC.
     /// </summary>
-    [YamlMember("created_at")]
+    [JsonPropertyName("created_at")]
     public string CreatedAt { get; set; } = DateTimeOffset.UtcNow.ToString("O");
 
     /// <summary>
     /// Gets or sets last update timestamp in UTC.
     /// </summary>
-    [YamlMember("updated_at")]
+    [JsonPropertyName("updated_at")]
     public string UpdatedAt { get; set; } = DateTimeOffset.UtcNow.ToString("O");
 }
 
@@ -88,13 +88,13 @@ public sealed class ArtifactSourceInfo
     /// <summary>
     /// Gets or sets source kind.
     /// </summary>
-    [YamlMember("kind")]
+    [JsonPropertyName("kind")]
     public string? Kind { get; set; }
 
     /// <summary>
     /// Gets or sets optional agent identifier.
     /// </summary>
-    [YamlMember("agent_id")]
+    [JsonPropertyName("agent_id")]
     public string? AgentId { get; set; }
 }
 
@@ -106,13 +106,13 @@ public sealed class ArtifactLinks
     /// <summary>
     /// Gets or sets linked task identifiers.
     /// </summary>
-    [YamlMember("tasks")]
+    [JsonPropertyName("tasks")]
     public List<string> Tasks { get; set; } = [];
 
     /// <summary>
     /// Gets or sets linked file references.
     /// </summary>
-    [YamlMember("files")]
+    [JsonPropertyName("files")]
     public List<ArtifactFileLink> Files { get; set; } = [];
 }
 
@@ -124,13 +124,13 @@ public sealed class ArtifactFileLink
     /// <summary>
     /// Gets or sets file path.
     /// </summary>
-    [YamlMember("path")]
+    [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets optional line range.
     /// </summary>
-    [YamlMember("range")]
+    [JsonPropertyName("range")]
     public ArtifactLineRange? Range { get; set; }
 }
 
@@ -142,12 +142,12 @@ public sealed class ArtifactLineRange
     /// <summary>
     /// Gets or sets start line (1-based).
     /// </summary>
-    [YamlMember("startLine")]
+    [JsonPropertyName("startLine")]
     public int StartLine { get; set; }
 
     /// <summary>
     /// Gets or sets end line (1-based).
     /// </summary>
-    [YamlMember("endLine")]
+    [JsonPropertyName("endLine")]
     public int EndLine { get; set; }
 }

@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using SharpYaml;
 
 namespace CodeAlta.Workspaces;
 
@@ -7,14 +7,11 @@ namespace CodeAlta.Workspaces;
 /// </summary>
 public sealed class WorkspaceYamlSerializer
 {
-    private readonly Serializer _serializer;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="WorkspaceYamlSerializer"/> class.
     /// </summary>
     public WorkspaceYamlSerializer()
     {
-        _serializer = new Serializer();
     }
 
     /// <summary>
@@ -26,7 +23,7 @@ public sealed class WorkspaceYamlSerializer
     public WorkspaceDescriptor DeserializeWorkspace(string yaml)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        var descriptor = _serializer.Deserialize<WorkspaceDescriptor>(yaml) ?? new WorkspaceDescriptor();
+        var descriptor = YamlSerializer.Deserialize<WorkspaceDescriptor>(yaml) ?? new WorkspaceDescriptor();
 
         descriptor.Projects ??= [];
         descriptor.Tags ??= [];
@@ -42,7 +39,7 @@ public sealed class WorkspaceYamlSerializer
     public ProjectDescriptor DeserializeProject(string yaml)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        return _serializer.Deserialize<ProjectDescriptor>(yaml) ?? new ProjectDescriptor();
+        return YamlSerializer.Deserialize<ProjectDescriptor>(yaml) ?? new ProjectDescriptor();
     }
 
     /// <summary>
@@ -55,7 +52,7 @@ public sealed class WorkspaceYamlSerializer
     {
         ArgumentNullException.ThrowIfNull(yaml);
 
-        var profile = _serializer.Deserialize<MachineProfile>(yaml) ?? new MachineProfile();
+        var profile = YamlSerializer.Deserialize<MachineProfile>(yaml) ?? new MachineProfile();
         profile.WorkspaceCheckoutRoots ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         profile.ProjectOverrides ??= new Dictionary<string, MachineProjectOverride>(StringComparer.OrdinalIgnoreCase);
         return profile;
@@ -70,6 +67,6 @@ public sealed class WorkspaceYamlSerializer
     public string SerializeWorkspace(WorkspaceDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        return _serializer.Serialize(descriptor);
+        return YamlSerializer.Serialize(descriptor);
     }
 }

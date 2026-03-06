@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Workspaces;
 
@@ -10,20 +10,20 @@ public sealed class MachineProfile
     /// <summary>
     /// Gets or sets the machine identifier.
     /// </summary>
-    [YamlMember("machine_id")]
+    [JsonPropertyName("machine_id")]
     public string MachineId { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets workspace checkout root overrides by workspace key.
     /// </summary>
-    [YamlMember("workspace_checkout_roots")]
+    [JsonPropertyName("workspace_checkout_roots")]
     public Dictionary<string, string> WorkspaceCheckoutRoots { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets or sets project-level overrides by project key.
     /// </summary>
-    [YamlMember("project_overrides")]
+    [JsonPropertyName("project_overrides")]
     public Dictionary<string, MachineProjectOverride> ProjectOverrides { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 

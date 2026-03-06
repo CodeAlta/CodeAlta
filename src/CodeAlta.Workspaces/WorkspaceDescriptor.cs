@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Workspaces;
 
@@ -10,43 +10,43 @@ public sealed class WorkspaceDescriptor
     /// <summary>
     /// Gets or sets the workspace identifier.
     /// </summary>
-    [YamlMember("id")]
+    [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the workspace key.
     /// </summary>
-    [YamlMember("key")]
+    [JsonPropertyName("key")]
     public string Key { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the display name.
     /// </summary>
-    [YamlMember("display_name")]
+    [JsonPropertyName("display_name")]
     public string DisplayName { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the default checkout root.
     /// </summary>
-    [YamlMember("default_checkout_root")]
+    [JsonPropertyName("default_checkout_root")]
     public string DefaultCheckoutRoot { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the optional description.
     /// </summary>
-    [YamlMember("description")]
+    [JsonPropertyName("description")]
     public string? Description { get; set; }
 
     /// <summary>
     /// Gets or sets optional tags.
     /// </summary>
-    [YamlMember("tags")]
+    [JsonPropertyName("tags")]
     public List<string> Tags { get; set; } = [];
 
     /// <summary>
     /// Gets or sets the projects.
     /// </summary>
-    [YamlMember("projects")]
+    [JsonPropertyName("projects")]
     public List<ProjectDescriptor> Projects { get; set; } = [];
 
     /// <summary>

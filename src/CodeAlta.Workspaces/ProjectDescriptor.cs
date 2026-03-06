@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Workspaces;
 
@@ -10,37 +10,37 @@ public sealed class ProjectDescriptor
     /// <summary>
     /// Gets or sets the project identifier.
     /// </summary>
-    [YamlMember("id")]
+    [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the project key.
     /// </summary>
-    [YamlMember("key")]
+    [JsonPropertyName("key")]
     public string Key { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the display name.
     /// </summary>
-    [YamlMember("display_name")]
+    [JsonPropertyName("display_name")]
     public string DisplayName { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the repository URL.
     /// </summary>
-    [YamlMember("repo_url")]
+    [JsonPropertyName("repo_url")]
     public string RepoUrl { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the default branch.
     /// </summary>
-    [YamlMember("default_branch")]
+    [JsonPropertyName("default_branch")]
     public string DefaultBranch { get; set; } = "main";
 
     /// <summary>
     /// Gets or sets checkout settings.
     /// </summary>
-    [YamlMember("checkout")]
+    [JsonPropertyName("checkout")]
     public CheckoutRule Checkout { get; set; } = new();
 
     /// <summary>

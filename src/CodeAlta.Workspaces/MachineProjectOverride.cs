@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Workspaces;
 
@@ -10,12 +10,12 @@ public sealed class MachineProjectOverride
     /// <summary>
     /// Gets or sets a value indicating whether checkout is disabled.
     /// </summary>
-    [YamlMember("disabled")]
+    [JsonPropertyName("disabled")]
     public bool Disabled { get; set; }
 
     /// <summary>
     /// Gets or sets an absolute checkout path override.
     /// </summary>
-    [YamlMember("checkout_path")]
+    [JsonPropertyName("checkout_path")]
     public string? CheckoutPath { get; set; }
 }

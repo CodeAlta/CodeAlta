@@ -1,4 +1,4 @@
-using SharpYaml.Serialization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Workspaces;
 
@@ -10,18 +10,18 @@ public sealed class CheckoutRule
     /// <summary>
     /// Gets or sets the path template.
     /// </summary>
-    [YamlMember("path_template")]
+    [JsonPropertyName("path_template")]
     public string PathTemplate { get; set; } = "{workspaceKey}\\{projectKey}";
 
     /// <summary>
     /// Gets or sets the optional clone depth.
     /// </summary>
-    [YamlMember("depth")]
+    [JsonPropertyName("depth")]
     public int? Depth { get; set; }
 
     /// <summary>
     /// Gets or sets whether submodules are enabled.
     /// </summary>
-    [YamlMember("submodules")]
+    [JsonPropertyName("submodules")]
     public bool? Submodules { get; set; }
 }
