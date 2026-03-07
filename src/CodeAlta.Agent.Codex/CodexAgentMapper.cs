@@ -14,6 +14,19 @@ internal static class CodexAgentMapper
     {
         ArgumentNullException.ThrowIfNull(model);
 
+        var supportedReasoningEfforts = model.SupportedReasoningEfforts
+            .Select(x => ToAgentReasoningEffort(x.ReasoningEffort))
+            .Distinct()
+            .ToArray();
+        AgentReasoningEffort? defaultReasoningEffort = ToAgentReasoningEffort(model.DefaultReasoningEffort);
+        if (supportedReasoningEfforts.Length > 0 &&
+            defaultReasoningEffort == AgentReasoningEffort.XHigh &&
+            defaultReasoningEffort is { } concreteDefaultReasoningEffort &&
+            Array.IndexOf(supportedReasoningEfforts, concreteDefaultReasoningEffort) < 0)
+        {
+            defaultReasoningEffort = null;
+        }
+
         var capabilities = new Dictionary<string, object?>
         {
             ["isDefault"] = model.IsDefault,
@@ -24,16 +37,13 @@ internal static class CodexAgentMapper
                 .Select(x => x.ReasoningEffort.ToString().ToLowerInvariant())
                 .ToArray()
         };
-        var supportedReasoningEfforts = model.SupportedReasoningEfforts
-            .Select(x => ToAgentReasoningEffort(x.ReasoningEffort))
-            .ToArray();
 
         return new AgentModelInfo(
             model.Id,
             DisplayName: model.DisplayName,
             Description: model.Description,
             Provider: null,
-            DefaultReasoningEffort: ToAgentReasoningEffort(model.DefaultReasoningEffort),
+            DefaultReasoningEffort: defaultReasoningEffort,
             SupportedReasoningEfforts: supportedReasoningEfforts,
             Capabilities: capabilities);
     }
@@ -87,6 +97,7 @@ internal static class CodexAgentMapper
         {
             ApprovalPolicy = approvalPolicy,
             BaseInstructions = options.SystemMessage,
+            Config = CreateThreadConfig(options.ReasoningEffort),
             DeveloperInstructions = options.DeveloperInstructions,
             Cwd = options.WorkingDirectory,
             Model = options.Model
@@ -106,9 +117,30 @@ internal static class CodexAgentMapper
             ThreadId = threadId,
             ApprovalPolicy = approvalPolicy,
             BaseInstructions = options.SystemMessage,
+            Config = CreateThreadConfig(options.ReasoningEffort),
             DeveloperInstructions = options.DeveloperInstructions,
             Cwd = options.WorkingDirectory,
             Model = options.Model
+        };
+    }
+
+    public static TurnStartParams ToTurnStartParams(
+        string threadId,
+        AgentInput input,
+        string? workingDirectory,
+        string? model,
+        AgentReasoningEffort? reasoningEffort)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
+        ArgumentNullException.ThrowIfNull(input);
+
+        return new TurnStartParams
+        {
+            ThreadId = threadId,
+            Input = ToTurnInput(input),
+            Cwd = workingDirectory,
+            Model = model,
+            Effort = ToCodexReasoningEffort(reasoningEffort),
         };
     }
 
@@ -1164,5 +1196,49 @@ internal static class CodexAgentMapper
             V2ReasoningEffort.Xhigh => AgentReasoningEffort.XHigh,
             _ => throw new ArgumentOutOfRangeException(nameof(reasoningEffort), reasoningEffort, "Unsupported reasoning effort.")
         };
+    }
+
+    private static Dictionary<string, JsonElement>? CreateThreadConfig(AgentReasoningEffort? reasoningEffort)
+    {
+        var mappedReasoningEffort = ToCodexReasoningEffort(reasoningEffort);
+        if (mappedReasoningEffort is null)
+        {
+            return null;
+        }
+
+        return new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["model_reasoning_effort"] = CreateStringElement(
+                mappedReasoningEffort.Value.ToString().ToLowerInvariant())
+        };
+    }
+
+    private static V2ReasoningEffort? ToCodexReasoningEffort(AgentReasoningEffort? reasoningEffort)
+    {
+        return reasoningEffort switch
+        {
+            null => null,
+            AgentReasoningEffort.None => V2ReasoningEffort.None,
+            AgentReasoningEffort.Minimal => V2ReasoningEffort.Minimal,
+            AgentReasoningEffort.Low => V2ReasoningEffort.Low,
+            AgentReasoningEffort.Medium => V2ReasoningEffort.Medium,
+            AgentReasoningEffort.High => V2ReasoningEffort.High,
+            AgentReasoningEffort.XHigh => V2ReasoningEffort.Xhigh,
+            _ => throw new ArgumentOutOfRangeException(nameof(reasoningEffort), reasoningEffort, "Unsupported reasoning effort."),
+        };
+    }
+
+    private static JsonElement CreateStringElement(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStringValue(value);
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
     }
 }

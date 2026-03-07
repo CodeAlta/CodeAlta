@@ -37,6 +37,29 @@ public sealed class CodexAgentMapperTests
     }
 
     [TestMethod]
+    public void ToAgentModelInfo_DropsUnsupportedDefaultReasoningEffort()
+    {
+        var model = new Model
+        {
+            Id = "codex-mini",
+            DefaultReasoningEffort = V2ReasoningEffort.Xhigh,
+            SupportedReasoningEfforts =
+            [
+                new ReasoningEffortOption { ReasoningEffort = V2ReasoningEffort.Low, Description = "Low effort" },
+                new ReasoningEffortOption { ReasoningEffort = V2ReasoningEffort.Medium, Description = "Medium effort" },
+                new ReasoningEffortOption { ReasoningEffort = V2ReasoningEffort.High, Description = "High effort" }
+            ]
+        };
+
+        var mapped = CodexAgentMapper.ToAgentModelInfo(model);
+
+        Assert.IsNull(mapped.DefaultReasoningEffort);
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High },
+            mapped.SupportedReasoningEfforts!.ToArray());
+    }
+
+    [TestMethod]
     public void TryExtractRepository_ParsesHttpsAndSsh()
     {
         var httpsRepository = CodexAgentMapper.TryExtractRepository("https://github.com/octo-org/octo-repo.git");
@@ -81,6 +104,44 @@ public sealed class CodexAgentMapperTests
         Assert.IsTrue(fallback.Contains("[directory] src", StringComparison.Ordinal));
         Assert.IsTrue(fallback.Contains("[selection] Selected block", StringComparison.Ordinal));
         Assert.IsTrue(fallback.Contains("Console.WriteLine(\"hi\");", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ToThreadStartParams_MapsReasoningEffortIntoConfig()
+    {
+        var parameters = CodexAgentMapper.ToThreadStartParams(
+            new AgentSessionCreateOptions
+            {
+                Model = "gpt-5-mini",
+                WorkingDirectory = @"C:\repo",
+                ReasoningEffort = AgentReasoningEffort.High,
+                OnPermissionRequest = static (_, _) =>
+                    Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            },
+            new AskForApproval.OnRequest());
+
+        Assert.AreEqual("gpt-5-mini", parameters.Model);
+        Assert.AreEqual(@"C:\repo", parameters.Cwd);
+        Assert.IsNotNull(parameters.Config);
+        Assert.IsTrue(parameters.Config.ContainsKey("model_reasoning_effort"));
+        Assert.AreEqual("high", parameters.Config["model_reasoning_effort"].GetString());
+    }
+
+    [TestMethod]
+    public void ToTurnStartParams_MapsReasoningEffortOverrides()
+    {
+        var parameters = CodexAgentMapper.ToTurnStartParams(
+            "thread-1",
+            AgentInput.Text("hello"),
+            @"C:\repo",
+            "gpt-5-mini",
+            AgentReasoningEffort.Medium);
+
+        Assert.AreEqual("thread-1", parameters.ThreadId);
+        Assert.AreEqual(@"C:\repo", parameters.Cwd);
+        Assert.AreEqual("gpt-5-mini", parameters.Model);
+        Assert.AreEqual(ReasoningEffort.Medium, parameters.Effort);
+        Assert.AreEqual(1, parameters.Input.Count);
     }
 
     [TestMethod]

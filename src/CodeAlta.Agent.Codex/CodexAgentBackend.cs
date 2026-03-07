@@ -149,7 +149,13 @@ public sealed class CodexAgentBackend : ICodexAgentBackend
         var client = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         var parameters = CodexAgentMapper.ToThreadStartParams(options, _options.ApprovalPolicy);
         var response = await client.ThreadStartAsync(parameters, cancellationToken).ConfigureAwait(false);
-        return RegisterSession(response.Thread.Id, options.OnPermissionRequest, options.OnUserInputRequest);
+        return RegisterSession(
+            response.Thread.Id,
+            options.WorkingDirectory,
+            options.Model,
+            options.ReasoningEffort,
+            options.OnPermissionRequest,
+            options.OnUserInputRequest);
     }
 
     /// <inheritdoc />
@@ -165,7 +171,13 @@ public sealed class CodexAgentBackend : ICodexAgentBackend
         var client = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         var parameters = CodexAgentMapper.ToThreadResumeParams(sessionId, options, _options.ApprovalPolicy);
         var response = await client.ThreadResumeAsync(parameters, cancellationToken).ConfigureAwait(false);
-        return RegisterSession(response.Thread.Id, options.OnPermissionRequest, options.OnUserInputRequest);
+        return RegisterSession(
+            response.Thread.Id,
+            options.WorkingDirectory,
+            options.Model,
+            options.ReasoningEffort,
+            options.OnPermissionRequest,
+            options.OnUserInputRequest);
     }
 
     /// <inheritdoc />
@@ -195,6 +207,9 @@ public sealed class CodexAgentBackend : ICodexAgentBackend
 
     private CodexAgentSession RegisterSession(
         string threadId,
+        string? workingDirectory,
+        string? model,
+        AgentReasoningEffort? reasoningEffort,
         AgentPermissionRequestHandler permissionHandler,
         AgentUserInputRequestHandler? userInputHandler)
     {
@@ -203,11 +218,20 @@ public sealed class CodexAgentBackend : ICodexAgentBackend
             static (key, tuple) => new CodexAgentSession(
                 tuple.Backend,
                 key,
+                tuple.WorkingDirectory,
+                tuple.Model,
+                tuple.ReasoningEffort,
                 tuple.PermissionHandler,
                 tuple.UserInputHandler),
-            (Backend: this, PermissionHandler: permissionHandler, UserInputHandler: userInputHandler));
+            (
+                Backend: this,
+                WorkingDirectory: workingDirectory,
+                Model: model,
+                ReasoningEffort: reasoningEffort,
+                PermissionHandler: permissionHandler,
+                UserInputHandler: userInputHandler));
 
-        session.UpdateHandlers(permissionHandler, userInputHandler);
+        session.UpdateSessionOptions(workingDirectory, model, reasoningEffort, permissionHandler, userInputHandler);
         return session;
     }
 

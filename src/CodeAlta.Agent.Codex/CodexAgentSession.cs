@@ -13,6 +13,9 @@ public sealed class CodexAgentSession : ICodexAgentSession
     private readonly Channel<AgentEvent> _eventChannel;
     private readonly ConcurrentDictionary<Guid, Action<AgentEvent>> _subscribers = new();
     private readonly object _handlerLock = new();
+    private string? _workingDirectory;
+    private string? _model;
+    private AgentReasoningEffort? _reasoningEffort;
     private AgentPermissionRequestHandler _permissionHandler;
     private AgentUserInputRequestHandler? _userInputHandler;
     private AgentRunId? _activeRunId;
@@ -21,6 +24,9 @@ public sealed class CodexAgentSession : ICodexAgentSession
     internal CodexAgentSession(
         CodexAgentBackend backend,
         string threadId,
+        string? workingDirectory,
+        string? model,
+        AgentReasoningEffort? reasoningEffort,
         AgentPermissionRequestHandler permissionHandler,
         AgentUserInputRequestHandler? userInputHandler)
     {
@@ -29,6 +35,9 @@ public sealed class CodexAgentSession : ICodexAgentSession
         ArgumentNullException.ThrowIfNull(permissionHandler);
 
         _backend = backend;
+        _workingDirectory = workingDirectory;
+        _model = model;
+        _reasoningEffort = reasoningEffort;
         _permissionHandler = permissionHandler;
         _userInputHandler = userInputHandler;
         ThreadId = threadId;
@@ -79,11 +88,22 @@ public sealed class CodexAgentSession : ICodexAgentSession
         ArgumentNullException.ThrowIfNull(options);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var parameters = new TurnStartParams
+        string? workingDirectory;
+        string? model;
+        AgentReasoningEffort? reasoningEffort;
+        lock (_handlerLock)
         {
-            ThreadId = ThreadId,
-            Input = CodexAgentMapper.ToTurnInput(options.Input)
-        };
+            workingDirectory = _workingDirectory;
+            model = _model;
+            reasoningEffort = _reasoningEffort;
+        }
+
+        var parameters = CodexAgentMapper.ToTurnStartParams(
+            ThreadId,
+            options.Input,
+            workingDirectory,
+            model,
+            reasoningEffort);
 
         var response = await _backend.Client.TurnStartAsync(parameters, cancellationToken).ConfigureAwait(false);
         var runId = new AgentRunId(response.Turn.Id);
@@ -148,7 +168,10 @@ public sealed class CodexAgentSession : ICodexAgentSession
         return ValueTask.CompletedTask;
     }
 
-    internal void UpdateHandlers(
+    internal void UpdateSessionOptions(
+        string? workingDirectory,
+        string? model,
+        AgentReasoningEffort? reasoningEffort,
         AgentPermissionRequestHandler permissionHandler,
         AgentUserInputRequestHandler? userInputHandler)
     {
@@ -156,6 +179,9 @@ public sealed class CodexAgentSession : ICodexAgentSession
 
         lock (_handlerLock)
         {
+            _workingDirectory = workingDirectory;
+            _model = model;
+            _reasoningEffort = reasoningEffort;
             _permissionHandler = permissionHandler;
             _userInputHandler = userInputHandler;
         }
