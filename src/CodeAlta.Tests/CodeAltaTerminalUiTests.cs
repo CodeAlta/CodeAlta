@@ -31,8 +31,7 @@ public sealed class CodeAltaTerminalUiTests
     {
         var markdown = CodeAltaTerminalUi.FormatChatContentMarkdown(AgentContentKind.Reasoning, "Inspecting the project.");
 
-        StringAssert.Contains(markdown, "Reasoning");
-        StringAssert.Contains(markdown, "Inspecting the project.");
+        Assert.AreEqual("Inspecting the project.", markdown);
     }
 
     [TestMethod]
@@ -48,8 +47,7 @@ public sealed class CodeAltaTerminalUiTests
                     new AgentPlanStep("Add regression tests.", AgentPlanStepStatus.Pending),
                 ]));
 
-        StringAssert.Contains(markdown, "Plan");
-        StringAssert.Contains(markdown, "Updated");
+        StringAssert.Contains(markdown, "Updated.");
         StringAssert.Contains(markdown, "Need to update the terminal timeline.");
         StringAssert.Contains(markdown, "[x] Map the new event types.");
         StringAssert.Contains(markdown, "[~] Render activity rows.");
@@ -72,11 +70,26 @@ public sealed class CodeAltaTerminalUiTests
                 "search_workspace",
                 "Searching the workspace."));
 
-        StringAssert.Contains(markdown, "Calling MCP Tool Call");
         StringAssert.Contains(markdown, "Name");
         StringAssert.Contains(markdown, "search_workspace");
         StringAssert.Contains(markdown, "Detail");
         StringAssert.Contains(markdown, "Searching the workspace.");
+    }
+
+    [TestMethod]
+    public void FormatChatSessionUpdateMarkdown_ReturnsMessageOnly()
+    {
+        var markdown = CodeAltaTerminalUi.FormatChatSessionUpdateMarkdown(
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Codex,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentSessionUpdateKind.UsageUpdated,
+                "13116/128000 tokens"));
+
+        Assert.AreEqual("13116/128000 tokens", markdown);
+        StringAssert.Contains(CodeAltaTerminalUi.GetSessionUpdateHeader(AgentSessionUpdateKind.UsageUpdated), "Usage Updated");
     }
 
     [TestMethod]
@@ -91,8 +104,8 @@ public sealed class CodeAltaTerminalUiTests
                 "permission.request",
                 payloadJson.RootElement.Clone()));
 
-        StringAssert.Contains(markdown, "Raw Event");
-        StringAssert.Contains(markdown, "permission.request");
+        StringAssert.Contains(markdown, "Event");
+        StringAssert.Contains(markdown, "`permission.request`");
         StringAssert.Contains(markdown, "\"kind\":\"shell\"");
         StringAssert.Contains(markdown, "\"toolCallId\":\"call-1\"");
     }
@@ -126,7 +139,6 @@ public sealed class CodeAltaTerminalUiTests
                 ProposedExecPolicyAmendment: null,
                 ProposedNetworkPolicyAmendments: null));
 
-        StringAssert.Contains(typedMarkdown, "Permission Request");
         StringAssert.Contains(typedMarkdown, "_The agent is blocked");
         StringAssert.Contains(typedMarkdown, "```shell");
         StringAssert.Contains(typedMarkdown, "dotnet test");
@@ -172,7 +184,6 @@ public sealed class CodeAltaTerminalUiTests
                             AllowFreeform: false)
                     ])));
 
-        StringAssert.Contains(markdown, "User Input Request");
         StringAssert.Contains(markdown, "Terminal question prompts are not implemented yet");
         StringAssert.Contains(markdown, "Which option do you prefer?");
         StringAssert.Contains(markdown, "Search first");

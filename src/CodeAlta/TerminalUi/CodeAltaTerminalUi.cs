@@ -1442,7 +1442,9 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         AppendChatTimelineItem(
             CreateChatMarkdownItem(
                 FormatChatRawEventMarkdown(raw),
-                ChatTimelineTone.Notice).Item);
+                ChatTimelineTone.Notice,
+                headerOverride: "Raw Event",
+                headerSecondary: raw.BackendEventType).Item);
     }
 
     private void AppendChatContent(AgentContentDeltaEvent delta)
@@ -1559,7 +1561,9 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             dictionary: null,
             key: null,
             markdown: FormatChatSessionUpdateMarkdown(update),
-            tone: update.Kind == AgentSessionUpdateKind.Warning ? ChatTimelineTone.Interaction : ChatTimelineTone.Notice);
+            tone: update.Kind == AgentSessionUpdateKind.Warning ? ChatTimelineTone.Interaction : ChatTimelineTone.Notice,
+            headerOverride: "Notice",
+            headerSecondary: GetSessionUpdateHeader(update.Kind));
     }
 
     private void RenderChatError(AgentErrorEvent error)
@@ -1585,14 +1589,14 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             PostToUi(() =>
             {
                 pendingAssistant.Buffer.Append(error.Message);
-                pendingAssistant.Markdown.Markdown = $"**Agent error:** {error.Message}";
+                pendingAssistant.Markdown.Markdown = error.Message;
                 _chatFlow?.ScrollToTail();
             });
             return;
         }
 
         AppendChatTimelineItem(
-            CreateChatMarkdownItem($"**Agent error:** {error.Message}", ChatTimelineTone.Interaction).Item);
+            CreateChatMarkdownItem(error.Message, ChatTimelineTone.Interaction, headerOverride: "Error").Item);
     }
 
     private void RenderRunFailure(string markdown)
@@ -1615,7 +1619,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             return;
         }
 
-        AppendChatTimelineItem(CreateChatMarkdownItem(markdown, ChatTimelineTone.Interaction).Item);
+        AppendChatTimelineItem(CreateChatMarkdownItem(markdown, ChatTimelineTone.Interaction, headerOverride: "Error").Item);
     }
 
     private void TryRenderChatInteraction(Action action, string context)
@@ -1647,7 +1651,9 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             request.InteractionId,
             FormatChatPermissionRequestMarkdown(request),
             null,
-            ChatTimelineTone.Interaction);
+            ChatTimelineTone.Interaction,
+            headerOverride: "Action Required",
+            headerSecondary: "Permission Request");
     }
 
     private void RecordChatUserInputRequest(AgentUserInputRequest request, bool autoApprove)
@@ -1663,7 +1669,9 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             request.InteractionId,
             FormatChatUserInputRequestMarkdown(request, autoApprove),
             null,
-            ChatTimelineTone.Interaction);
+            ChatTimelineTone.Interaction,
+            headerOverride: "Action Required",
+            headerSecondary: "User Input Request");
     }
 
     private ChatContentState GetOrCreateChatContentState(AgentContentKind kind, string contentId)
@@ -1701,7 +1709,10 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
 
     private ChatContentState CreateChatContentState(AgentContentKind kind)
     {
-        var (item, markdown) = CreateChatMarkdownItem(FormatChatContentMarkdown(kind, string.Empty), GetContentTone(kind));
+        var (item, markdown) = CreateChatMarkdownItem(
+            FormatChatContentMarkdown(kind, string.Empty),
+            GetContentTone(kind),
+            headerOverride: GetContentHeader(kind));
         return new ChatContentState(item, markdown, new StringBuilder(), kind);
     }
 
@@ -1709,21 +1720,23 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         Dictionary<string, ChatStatusState>? dictionary,
         string? key,
         string markdown,
-        ChatTimelineTone tone)
+        ChatTimelineTone tone,
+        string? headerOverride = null,
+        string? headerSecondary = null)
     {
         ChatStatusState state;
         lock (_chatTimelineLock)
         {
             if (dictionary is null || key is null)
             {
-                state = CreateChatStatusState(markdown, tone);
+                state = CreateChatStatusState(markdown, tone, headerOverride, headerSecondary);
                 AppendChatTimelineItem(state.Item);
                 return;
             }
 
             if (!dictionary.TryGetValue(key, out state!))
             {
-                state = CreateChatStatusState(markdown, tone);
+                state = CreateChatStatusState(markdown, tone, headerOverride, headerSecondary);
                 dictionary[key] = state;
                 AppendChatTimelineItem(state.Item);
             }
@@ -1742,7 +1755,9 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         string interactionId,
         string? baseMarkdown,
         string? statusMarkdown,
-        ChatTimelineTone tone)
+        ChatTimelineTone tone,
+        string? headerOverride = null,
+        string? headerSecondary = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(interactionId);
 
@@ -1751,7 +1766,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         {
             if (!_chatInteractionStates.TryGetValue(interactionId, out state!))
             {
-                state = CreateChatStatusState(baseMarkdown ?? statusMarkdown ?? string.Empty, tone);
+                state = CreateChatStatusState(baseMarkdown ?? statusMarkdown ?? string.Empty, tone, headerOverride, headerSecondary);
                 _chatInteractionStates[interactionId] = state;
                 AppendChatTimelineItem(state.Item);
             }
@@ -1774,9 +1789,9 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         });
     }
 
-    private ChatStatusState CreateChatStatusState(string markdown, ChatTimelineTone tone)
+    private ChatStatusState CreateChatStatusState(string markdown, ChatTimelineTone tone, string? headerOverride = null, string? headerSecondary = null)
     {
-        var (item, control) = CreateChatMarkdownItem(markdown, tone);
+        var (item, control) = CreateChatMarkdownItem(markdown, tone, headerOverride: headerOverride, headerSecondary: headerSecondary);
         return new ChatStatusState(item, control)
         {
             BaseMarkdown = markdown,
@@ -1822,10 +1837,22 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         };
     }
 
-    private static Visual CreateChatCardHeader(ChatTimelineTone tone, string? headerOverride)
+    private static Visual CreateChatCardHeader(ChatTimelineTone tone, string? headerOverride, string? headerSecondary)
     {
         var (icon, title, toneName) = GetChatCardHeaderParts(tone, headerOverride);
-        return new Markup($"[{toneName}]{icon}[/] [bold]{AnsiMarkup.Escape(title)}[/]");
+        if (string.IsNullOrWhiteSpace(headerSecondary))
+        {
+            return new Markup($"[{toneName}]{icon}[/] [bold]{AnsiMarkup.Escape(title)}[/]");
+        }
+
+        return new HStack(
+            [
+                new Markup($"[{toneName}]{icon}[/] [bold]{AnsiMarkup.Escape(title)}[/]"),
+                new Markup($"[dim]- {AnsiMarkup.Escape(headerSecondary)}[/]"),
+            ])
+        {
+            Spacing = 1,
+        };
     }
 
     private static GroupStyle CreateChatGroupStyle(ChatTimelineTone tone)
@@ -1845,7 +1872,6 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         {
             BorderCellStyle = Style.None.WithForeground(border),
             FocusedBorderCellStyle = Style.None.WithForeground(border) | TextStyle.Bold,
-            LabelBackgroundStyle = Style.None.WithBackground(background),
             BackgroundStyle = Style.None.WithBackground(background),
         };
     }
@@ -1877,15 +1903,17 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         string markdown,
         ChatTimelineTone tone,
         string? headerOverride = null,
+        string? headerSecondary = null,
         int maxCodeBlockHeight = 14)
         => RunOnUiThread(
-            static state => CreateChatMarkdownItemCore(state.markdown, state.tone, state.headerOverride, state.maxCodeBlockHeight),
-            (markdown, tone, headerOverride, maxCodeBlockHeight));
+            static state => CreateChatMarkdownItemCore(state.markdown, state.tone, state.headerOverride, state.headerSecondary, state.maxCodeBlockHeight),
+            (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight));
 
     private static ChatMarkdownEntry CreateChatMarkdownItemCore(
         string markdown,
         ChatTimelineTone tone,
         string? headerOverride,
+        string? headerSecondary,
         int maxCodeBlockHeight)
     {
         var markdownControl = new MarkdownControl(markdown)
@@ -1905,7 +1933,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
                 markdownControl.App?.Terminal.Clipboard.TrySetText(markdownControl.Markdown);
             });
 
-        var group = new Group(CreateChatCardHeader(tone, headerOverride), markdownControl)
+        var group = new Group(CreateChatCardHeader(tone, headerOverride, headerSecondary), markdownControl)
             .TopRightText(copyButton)
             .Padding(1)
             .Style(CreateChatGroupStyle(tone))
@@ -1928,13 +1956,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         return kind switch
         {
             AgentContentKind.Assistant => content,
-            AgentContentKind.Reasoning => FormatChatCalloutMarkdown($"{NerdFont.CodLightbulb}", "Reasoning", content),
-            AgentContentKind.ReasoningSummary => FormatChatCalloutMarkdown($"{NerdFont.MdLightbulbOutline}", "Reasoning Summary", content),
-            AgentContentKind.Plan => FormatChatCalloutMarkdown($"{NerdFont.MdProgressWrench}", "Plan", content),
-            AgentContentKind.CommandOutput => FormatChatOutputMarkdown($"{NerdFont.CodTerminalPowershell}", "Command Output", content),
-            AgentContentKind.FileChangeOutput => FormatChatOutputMarkdown($"{NerdFont.CodEdit}", "File Change Output", content),
-            AgentContentKind.ToolOutput => FormatChatOutputMarkdown($"{NerdFont.CodTools}", "Tool Output", content),
-            AgentContentKind.Notice => FormatChatCalloutMarkdown($"{NerdFont.CodInfo}", "Notice", content),
+            AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput or AgentContentKind.ToolOutput => FormatChatOutputMarkdown(content),
             _ => content,
         };
     }
@@ -1943,16 +1965,19 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var builder = new StringBuilder($"**{NerdFont.MdProgressWrench} Plan");
+        var builder = new StringBuilder();
         if (snapshot.ChangeKind is { } changeKind)
         {
-            builder.Append(' ').Append(SplitPascalCase(changeKind.ToString()));
+            builder.Append("_").Append(SplitPascalCase(changeKind.ToString())).Append("._");
         }
-
-        builder.Append("**");
         if (!string.IsNullOrWhiteSpace(snapshot.Explanation))
         {
-            builder.AppendLine().AppendLine().Append(snapshot.Explanation);
+            if (builder.Length > 0)
+            {
+                builder.AppendLine().AppendLine();
+            }
+
+            builder.Append(snapshot.Explanation);
         }
 
         if (snapshot.Steps is { Count: > 0 } steps)
@@ -1974,16 +1999,10 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(activity);
 
         var builder = new StringBuilder();
-        builder.Append("**")
-            .Append(GetActivityIcon(activity.Kind))
-            .Append(' ')
-            .Append(GetActivityHeadline(activity.Kind, activity.Phase))
-            .Append("**");
 
         if (!string.IsNullOrWhiteSpace(activity.Name))
         {
             builder.AppendLine()
-                .AppendLine()
                 .Append("- Name: `")
                 .Append(activity.Name)
                 .Append('`');
@@ -1991,7 +2010,12 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
 
         if (!string.IsNullOrWhiteSpace(activity.Message))
         {
-            builder.AppendLine()
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder
                 .Append("- Detail: ")
                 .Append(activity.Message);
         }
@@ -2002,8 +2026,11 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
     internal static string FormatChatSessionUpdateMarkdown(AgentSessionUpdateEvent update)
     {
         ArgumentNullException.ThrowIfNull(update);
+        return update.Message ?? string.Empty;
+    }
 
-        var label = update.Kind switch
+    internal static string GetSessionUpdateHeader(AgentSessionUpdateKind kind)
+        => kind switch
         {
             AgentSessionUpdateKind.Info => $"{NerdFont.CodInfo} Info",
             AgentSessionUpdateKind.Warning => $"{NerdFont.CodWarning} Warning",
@@ -2023,22 +2050,14 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
             AgentSessionUpdateKind.Started => $"{NerdFont.MdTimerOutline} Session Started",
             AgentSessionUpdateKind.Resumed => $"{NerdFont.MdAccountArrowRight} Session Resumed",
             AgentSessionUpdateKind.Idle => $"{NerdFont.MdCat} Agent Idle",
-            _ => update.Kind.ToString(),
+            _ => SplitPascalCase(kind.ToString()),
         };
-
-        return string.IsNullOrWhiteSpace(update.Message)
-            ? $"**{label}**"
-            : $"**{label}**\n\n{update.Message}";
-    }
 
     internal static string FormatChatPermissionRequestMarkdown(AgentPermissionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var builder = new StringBuilder($"**{NerdFont.CodLock} Permission Request**");
-        builder.AppendLine()
-            .AppendLine()
-            .Append("_The agent is blocked until this permission request is resolved._");
+        var builder = new StringBuilder("_The agent is blocked until this permission request is resolved._");
 
         switch (request)
         {
@@ -2119,7 +2138,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(raw);
 
         var builder = new StringBuilder()
-            .AppendLine($"**󰒓 Raw Event** `{raw.BackendEventType}`");
+            .AppendLine($"- Event: `{raw.BackendEventType}`");
 
         var payload = raw.Raw.ValueKind == JsonValueKind.Undefined
             ? "{}"
@@ -2141,10 +2160,7 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var builder = new StringBuilder($"**{NerdFont.MdHelpBox} User Input Request**");
-        builder.AppendLine()
-            .AppendLine()
-            .Append(
+        var builder = new StringBuilder(
                 autoApprove
                     ? "_The agent asked a question. Auto-Approve will prefer continue/inspect-style choices or use a neutral fallback answer so the run can continue._"
                     : "_The agent asked a question. Terminal question prompts are not implemented yet, so CodeAlta returns empty answers for now._");
@@ -2380,25 +2396,29 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         };
     }
 
-    private static string FormatChatCalloutMarkdown(string icon, string title, string content)
+    private static string FormatChatOutputMarkdown(string content)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
-            return $"**{icon} {title}**";
+            return string.Empty;
         }
 
-        return $"**{icon} {title}**\n\n{content}";
+        return FormatChatCodeFence(content, "text");
     }
 
-    private static string FormatChatOutputMarkdown(string icon, string title, string content)
-    {
-        if (string.IsNullOrWhiteSpace(content))
+    private static string? GetContentHeader(AgentContentKind kind)
+        => kind switch
         {
-            return $"**{icon} {title}**";
-        }
-
-        return $"**{icon} {title}**\n\n{FormatChatCodeFence(content, "text")}";
-    }
+            AgentContentKind.Assistant => null,
+            AgentContentKind.Reasoning => "Reasoning",
+            AgentContentKind.ReasoningSummary => "Reasoning Summary",
+            AgentContentKind.Plan => "Plan",
+            AgentContentKind.CommandOutput => "Command Output",
+            AgentContentKind.FileChangeOutput => "File Change Output",
+            AgentContentKind.ToolOutput => "Tool Output",
+            AgentContentKind.Notice => "Notice",
+            _ => SplitPascalCase(kind.ToString()),
+        };
 
     private static string FormatChatCodeFence(string content, string language)
     {
