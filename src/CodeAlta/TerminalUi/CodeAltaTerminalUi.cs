@@ -1328,31 +1328,33 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         _ = cancellationToken;
-        RecordChatPermissionRequest(request);
 
         AgentPermissionDecision decision;
         if (_chatAutoApproveState.Value)
         {
             decision = new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce);
-            UpsertChatInteraction(
-                request.InteractionId,
-                null,
-                FormatChatImmediatePermissionDecisionMarkdown(decision, autoApprove: true),
-                ChatTimelineTone.Interaction);
-            SetStatus($"Auto-approved permission request ({request.Kind}).", showSpinner: true);
         }
         else
         {
             decision = new AgentPermissionDecision(AgentPermissionDecisionKind.Deny);
-            UpsertChatInteraction(
-                request.InteractionId,
-                null,
-                FormatChatImmediatePermissionDecisionMarkdown(decision, autoApprove: false),
-                ChatTimelineTone.Interaction);
-            SetStatus(
-                "Permission requested. Auto-Approve is off, so CodeAlta denied it because terminal approval UI is not implemented yet.",
-                showSpinner: true);
         }
+
+        TryRenderChatInteraction(
+            () =>
+            {
+                RecordChatPermissionRequest(request);
+                UpsertChatInteraction(
+                    request.InteractionId,
+                    null,
+                    FormatChatImmediatePermissionDecisionMarkdown(decision, _chatAutoApproveState.Value),
+                    ChatTimelineTone.Interaction);
+                SetStatus(
+                    _chatAutoApproveState.Value
+                        ? $"Auto-approved permission request ({request.Kind})."
+                        : "Permission requested. Auto-Approve is off, so CodeAlta denied it because terminal approval UI is not implemented yet.",
+                    showSpinner: true);
+            },
+            "permission request");
 
         return Task.FromResult(decision);
     }
@@ -1362,22 +1364,27 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         _ = cancellationToken;
-        RecordChatUserInputRequest(request, _chatAutoApproveState.Value);
 
         var response = CreateChatUserInputResponse(request, _chatAutoApproveState.Value);
         var hasMeaningfulAnswer = response.Answers.Values.Any(static value => !string.IsNullOrWhiteSpace(value));
-        UpsertChatInteraction(
-            request.InteractionId,
-            null,
-            FormatChatImmediateUserInputResponseMarkdown(response, _chatAutoApproveState.Value),
-            ChatTimelineTone.Interaction);
-        SetStatus(
-            _chatAutoApproveState.Value
-                ? hasMeaningfulAnswer
-                    ? "Interactive question received. Auto-Approve selected a default answer so the run can continue."
-                    : "Interactive question received. Auto-Approve could not infer a safe answer, so CodeAlta returned an empty response."
-                : "Interactive question received. Auto-Approve is off, so CodeAlta returned an empty response because terminal question prompts are not implemented yet.",
-            showSpinner: true);
+        TryRenderChatInteraction(
+            () =>
+            {
+                RecordChatUserInputRequest(request, _chatAutoApproveState.Value);
+                UpsertChatInteraction(
+                    request.InteractionId,
+                    null,
+                    FormatChatImmediateUserInputResponseMarkdown(response, _chatAutoApproveState.Value),
+                    ChatTimelineTone.Interaction);
+                SetStatus(
+                    _chatAutoApproveState.Value
+                        ? hasMeaningfulAnswer
+                            ? "Interactive question received. Auto-Approve selected a default answer so the run can continue."
+                            : "Interactive question received. Auto-Approve could not infer a safe answer, so CodeAlta returned an empty response."
+                        : "Interactive question received. Auto-Approve is off, so CodeAlta returned an empty response because terminal question prompts are not implemented yet.",
+                    showSpinner: true);
+            },
+            "user input request");
         return Task.FromResult(response);
     }
 
@@ -1608,6 +1615,21 @@ internal sealed class CodeAltaTerminalUi : IAsyncDisposable
         }
 
         AppendChatTimelineItem(CreateChatMarkdownItem(markdown, ChatTimelineTone.Interaction).Item);
+    }
+
+    private void TryRenderChatInteraction(Action action, string context)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentException.ThrowIfNullOrWhiteSpace(context);
+
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Failed to render chat {context}: {ex.Message}", showSpinner: true);
+        }
     }
 
     private void RecordChatPermissionRequest(AgentPermissionRequest request)

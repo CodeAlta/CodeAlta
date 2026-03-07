@@ -471,7 +471,7 @@ public sealed class CopilotLiveIntegrationTests
             agentId = await connection.EnsureConnectedAsync(
                     AgentBackendIds.Copilot,
                     uiWorkingDirectory,
-                    model: "gpt-5-mini",
+                    model: "gpt-5.1-codex-mini",
                     reasoningEffort: null,
                     tools,
                     permissionRequestHandler: static (_, _) =>
