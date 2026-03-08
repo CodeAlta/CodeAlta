@@ -122,16 +122,18 @@ codealta:
 
 These should be treated as first-class canonical fields:
 
-- `name`
-- `description`
-- `tools`
-- `mcp-servers`
-- `model`
-- `handoffs`
-- `target`
-- `disable-model-invocation`
-- `user-invocable`
-- `metadata`
+| Field | Type | Required | Purpose |
+| --- | --- | --- | --- |
+| `name` | string | No | Human-friendly display name. If present, must match the filename-derived `agent-key`. |
+| `description` | string | Yes | Short description used for delegation, discovery, and UI presentation. |
+| `tools` | string or string list | No | Tool allow-list. If omitted, backend/platform defaults apply. |
+| `mcp-servers` | object or list | No | Additional MCP servers or MCP server references, kept for Copilot compatibility. |
+| `model` | string | No | Default model preference. It is a preference, not a runtime guarantee. |
+| `handoffs` | string list | No | Optional downstream agent handoff hints when supported by the backend/runtime. |
+| `target` | string | No | Environment targeting hint retained for compatibility. |
+| `disable-model-invocation` | boolean | No | Copilot-compatible flag that disables automatic model-driven agent invocation. |
+| `user-invocable` | boolean | No | Copilot-compatible flag that controls whether users can select the agent directly. |
+| `metadata` | string map | No | Pass-through string key/value metadata for compatibility and annotations. |
 
 Rules:
 
@@ -157,14 +159,16 @@ CodeAlta-specific fields should live under:
 
 Recommended fields:
 
-- `scope`: `global | workspace | project`
-- `default_backend`: `codex | copilot | ...`
-- `builtin`: `true | false`
-- `tags`: string list
-- `skills`: string list of skill keys
-- `permission_mode`: optional local execution/approval hint
-- `hooks`: optional local lifecycle hooks
-- `notes_visibility`: optional hint for UI/export behavior
+| Field | Type | Required | Purpose |
+| --- | --- | --- | --- |
+| `scope` | enum | No | Preferred scope for the agent: `global`, `workspace`, or `project`. |
+| `default_backend` | enum/string | No | Preferred backend, for example `codex` or `copilot`. |
+| `builtin` | boolean | No | Marks whether the agent is shipped by CodeAlta rather than user-authored. |
+| `tags` | string list | No | Free-form classification tags for filtering, grouping, or selection. |
+| `skills` | string list | No | Skill keys associated with the agent. |
+| `permission_mode` | string | No | Local execution/approval hint, mainly for Claude-style permission mapping. |
+| `hooks` | object or list | No | Optional lifecycle hooks for agent setup/teardown or other runtime integration. |
+| `notes_visibility` | string | No | UI/export hint controlling how notes or sidecar content should be surfaced. |
 
 Why use a nested block:
 
