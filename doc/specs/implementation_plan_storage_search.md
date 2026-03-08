@@ -16,16 +16,20 @@ We treat **files** as the source of truth for “knowledge” and human-readable
 Default: `~/.codealta/` (platform-specific HOME).
 
 Proposed subfolders:
-- `~/.codealta/repo/`  
-  Git-backed “global knowledge repository” (portable, can be cloned on another machine).
-- `~/.codealta/state/`  
+- `~/.codealta/`  
+  Git-backed portable metadata catalog.
+- `~/.codealta/machine/`  
   Machine-local state: SQLite database, caches, download models, logs. Not committed.
-- `~/.codealta/state/db/codealta.db`  
+- `~/.codealta/machine/codealta.db`  
   Main SQLite database.
-- `~/.codealta/state/models/`  
+- `~/.codealta/machine/models/`  
   Downloaded embedding models (GGUF).
-- `~/.codealta/state/extensions/`  
+- `~/.codealta/machine/extensions/`  
   Native extensions like sqlite-vec (`.dll`/`.so`).
+- `~/.codealta/machine/logs/`  
+  Rolling diagnostic logs.
+- `~/.codealta/machine/cache/`  
+  Rebuildable local caches.
 
 ### 1.2 Repo-local root
 
@@ -40,10 +44,10 @@ Proposed subfolders:
 
 ### 1.3 Workspace-level storage
 
-Workspace metadata lives in the global repo (portable) and references local checkout paths via machine overrides:
-- `~/.codealta/repo/workspaces/<workspaceKey>/workspace.yaml`
-- `~/.codealta/repo/workspaces/<workspaceKey>/projects/*.yaml`
-- `~/.codealta/repo/machines/<machineId>.yaml` (per-machine path overrides)
+Workspace metadata lives in the portable `~/.codealta/` catalog and references local checkout paths via machine overrides:
+- `~/.codealta/workspaces/<workspaceKey>/readme.md`
+- `~/.codealta/projects/<projectKey>/readme.md`
+- `~/.codealta/machine/config.yaml` (per-machine path overrides)
 
 ## 2. Artifact file format (markdown + YAML frontmatter)
 
@@ -87,15 +91,15 @@ SQLite is perfect for:
 - “what exists” indexes (artifacts, knowledge records)
 - fast retrieval (FTS5 and vector search)
 
-But it is **not** the only durable copy of “knowledge”. Any important agent-produced knowledge must be persisted as files (repo-local `.codealta/` or global repo), so we can recover after context compaction and across machines.
+But it is **not** the only durable copy of “knowledge”. Any important agent-produced knowledge must be persisted as files (repo-local `.codealta/` or the portable `~/.codealta/` catalog), so we can recover after context compaction and across machines.
 
 ### 3.2 DB location
 
 Machine-local (not in git):
-- `~/.codealta/state/db/codealta.db`
+- `~/.codealta/machine/codealta.db`
 
 Rationale:
-- avoids large binary diffs in global repo
+- avoids large binary diffs in the portable `~/.codealta/` git repo
 - allows local caching, rebuilds, and migrations without git noise
 - still portable because the “real” knowledge is in markdown artifacts
 
@@ -107,7 +111,7 @@ We keep the first schema small, and add tables only when we have a consumer.
 - `workspaces`
   - `workspace_id TEXT PRIMARY KEY`
   - `display_name TEXT`
-  - `config_uri TEXT` (points to yaml in global repo)
+  - `config_uri TEXT` (points to markdown/frontmatter in the filesystem catalog)
 - `projects`
   - `project_id TEXT PRIMARY KEY`
   - `workspace_id TEXT NOT NULL`
@@ -201,7 +205,7 @@ Testing:
 ### 4.1 Inputs (indexable sources)
 
 First-class indexable sources (v1):
-- markdown artifacts from `.codealta/**` and `~/.codealta/repo/**`
+- markdown artifacts from `.codealta/**` and `~/.codealta/**` excluding `~/.codealta/machine/**`
 - task notes/events (exported into artifact markdown + indexed)
 - selected repo files (opt-in rules; default to `.md`, `.cs`, `.csproj`, `.slnx`, `AGENTS.md`)
 
@@ -303,7 +307,7 @@ SQLite rows store this in `documents.source_kind/source_id`, plus optional struc
 ## 7. Native extension loading (sqlite-vec)
 
 We need a controlled way to load sqlite-vec:
-- store the extension binary under `~/.codealta/state/extensions/`
+- store the extension binary under `~/.codealta/machine/extensions/`
 - during DB initialization:
   - open connection
   - `EnableExtensions(true)`

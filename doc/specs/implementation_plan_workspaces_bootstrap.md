@@ -1,9 +1,9 @@
 # Implementation Plan: Workspaces, Bootstrap, and Global Knowledge Repo (Draft)
 
-This document details the implementation plan for multi-workspace support and the global git-backed knowledge repository under `~/.codealta/repo/`.
+This document details the implementation plan for multi-workspace support and the global git-backed metadata catalog rooted at `~/.codealta/`.
 
 Related specs:
-- `doc/specs/blueprint_codealta_specs.md` (multi-workspace + global repo)
+- `doc/specs/blueprint_codealta_specs.md` (multi-workspace + portable metadata root)
 - `doc/specs/blueprint_agentic_coding_specs.md` (workspace portability)
 
 ## 1. Goals
@@ -13,7 +13,7 @@ Related specs:
 - Switching workspaces is fast and does not lose context (because durable artifacts exist on disk).
 - Persist global knowledge/config in a git repository so a new machine can “bootstrap” quickly.
 - Allow per-machine overrides (different checkout roots on different machines).
-- Provide “setup my dev experience” automation: clone global repo, then clone/update workspace repos using templated rules.
+- Provide “setup my dev experience” automation: clone the portable `~/.codealta/` metadata repo, then clone/update workspace repos using templated rules.
 
 ## 2. Project (`CodeAlta.Workspaces`)
 
@@ -35,40 +35,52 @@ Dependencies:
 ### 3.1 Global repo layout
 
 Location (default):
-- `~/.codealta/repo/` (git repo)
+- `~/.codealta/` (git repo root for portable metadata)
 
 Proposed layout:
 - `workspaces/`
-  - `<workspaceKey>/workspace.yaml`
-  - `<workspaceKey>/projects/<projectKey>.yaml`
-  - `<workspaceKey>/knowledge/` (global workspace-level artifacts, optional)
+  - `<workspaceKey>/readme.md`
+  - `<workspaceKey>/projects/` (optional nested workspace-local references)
+  - `<workspaceKey>/artifacts/` (workspace-owned artifacts)
 - `machines/`
-  - `<machineId>.yaml` (override checkout roots, auth hints, etc.)
+  - optional portable machine descriptors when explicitly shared
+- `projects/`
+  - `<projectKey>/readme.md`
+- `agents/`
+  - `<agentKey>/agent.md`
+- `skills/`
+  - `<skillKey>/SKILL.md`
+- `machine/`
+  - `config.yaml`
+  - `codealta.db`
+  - `logs/`
+  - other machine-local state ignored by git
 - `templates/`
   - checkout templates and macros (optional)
-- `README.md` (human guidance)
+- `readme.md` (human guidance)
+- `.gitignore` (must ignore `machine/`)
 
-### 3.2 Workspace descriptor (`workspace.yaml`)
+### 3.2 Workspace descriptor (`readme.md`)
 
 Minimal fields:
-- `id` (UUID v7, generated via `Guid.CreateVersion7()`), `key`, `display_name`
+- `uid` (UUID v7, generated via `Guid.CreateVersion7()`), `slug`, `display_name`
 - `default_checkout_root` (logical; machine override can remap)
-- `projects` (or references to per-project yaml files)
+- `project_refs` (references to project UIDs)
 - `tags`, `description` (optional)
 
-### 3.3 Project descriptor (`projects/<projectKey>.yaml`)
+### 3.3 Project descriptor (`projects/<projectKey>/readme.md`)
 
 Minimal fields:
-- `id` (UUID v7, generated via `Guid.CreateVersion7()`), `key`, `display_name`
+- `uid` (UUID v7, generated via `Guid.CreateVersion7()`), `slug`, `display_name`
 - `repo_url` (git URL)
 - `default_branch`
 - `checkout` rule:
   - `path_template` (e.g. `C:\\code\\{workspaceKey}\\{projectKey}`)
   - `depth`, `submodules`, etc. (optional)
 
-### 3.4 Machine profile (`machines/<machineId>.yaml`)
+### 3.4 Machine-local profile (`machine/config.yaml`)
 
-Purpose: allow machine-specific overrides without forking the entire global repo model.
+Purpose: allow machine-specific overrides without contaminating the portable git-backed catalog.
 
 Examples:
 - default base directories for workspaces (Windows vs Linux paths)
@@ -83,7 +95,7 @@ Plan:
 - `WorkspaceId` and `ProjectId` are UUID v7 values (generated via `Guid.CreateVersion7()`).
 - `workspaceKey` / `projectKey` are stable human-friendly ids (slugs) used for:
   - UI scope selection (`:ws <workspaceKey>`, `:proj <projectKey>`)
-  - global repo folder names (`workspaces/<workspaceKey>/...`)
+  - catalog folder names (`workspaces/<workspaceKey>/...`)
 - Validate keys as `^[a-z0-9][a-z0-9\\-_.]{1,63}$` (implementation detail).
 
 ### 4.2 Scope selectors (user-facing)
@@ -107,11 +119,12 @@ Bootstrap is a background-capable operation (progress + cancellation).
 ### 5.1 Global repo bootstrap
 
 `GlobalRepoBootstrapper`:
-- ensures `~/.codealta/repo/` exists
+- ensures `~/.codealta/` exists
 - if missing:
   - clone from configured remote URL (user/machine config)
   - or create a new repo and set remote later
 - pull latest on startup (optional) or on explicit command
+- ensure `.gitignore` contains `machine/`
 
 ### 5.2 Workspace bootstrap
 
@@ -138,7 +151,7 @@ Implementation detail:
 
 ### 5.4 Per-machine defaults
 
-Store per-machine config in `~/.codealta/state/config.yaml` (machine-local, not in git), e.g.:
+Store per-machine config in `~/.codealta/machine/config.yaml` (machine-local, not in git), e.g.:
 - `machine_id`
 - `global_repo_remote`
 - default checkout roots for new workspaces
@@ -147,9 +160,9 @@ Machine id generation:
 - first run generates a stable id and stores it.
 - do not rely on hostnames (they change).
 
-## 6. Git sync policy (global repo)
+## 6. Git sync policy (portable metadata repo)
 
-We want the global repo to be “always up to date” without being annoying.
+We want the portable `~/.codealta/` git repo to be “always up to date” without being annoying.
 
 Plan:
 - `GlobalRepoSyncService` (background):
