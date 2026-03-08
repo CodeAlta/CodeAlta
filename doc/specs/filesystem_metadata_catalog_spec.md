@@ -170,14 +170,14 @@ Folder-owned entities can contain:
 
 Single-file entities can use an optional sidecar folder when they need owned artifacts or logs:
 
-- definition file: `agents/security-expert.agent.md`
-- sidecar folder: `agents/security-expert/`
+- definition file: `agents/<agent-slug>.agent.md`
+- sidecar folder: `agents/<agent-slug>/`
 
 Examples:
 
 - `~/.codealta/workspaces/<workspace-slug>/readme.md`
 - `~/.codealta/projects/<project-slug>/readme.md`
-- `~/.codealta/agents/security-expert.agent.md`
+- `~/.codealta/agents/<agent-slug>.agent.md`
 - `~/.codealta/skills/<skill-slug>/SKILL.md`
 
 The markdown body is free text intended for humans.
@@ -252,9 +252,9 @@ Canonical definition shape:
 
 Examples:
 
-- `~/.codealta/agents/security-expert.agent.md`
-- `~/.codealta/agents/builtin/planner.agent.md`
-- sidecar folder when needed: `~/.codealta/agents/security-expert/`
+- `~/.codealta/agents/<agent-slug>.agent.md`
+- `~/.codealta/agents/builtin/<agent-slug>.agent.md`
+- sidecar folder when needed: `~/.codealta/agents/<agent-slug>/`
 
 This is a major architectural rule:
 
@@ -420,8 +420,8 @@ Examples:
 
 - `~/.codealta/workspaces/platform/activity/2026-03.jsonl`
 - `~/.codealta/projects/tomlyn/activity/2026-03.jsonl`
-- `~/.codealta/agents/architect/activity/2026-03.jsonl`
-  - owned by `~/.codealta/agents/architect.agent.md`
+- `~/.codealta/agents/<agent-slug>/activity/2026-03.jsonl`
+  - owned by `~/.codealta/agents/<agent-slug>.agent.md`
 
 Why JSONL:
 
