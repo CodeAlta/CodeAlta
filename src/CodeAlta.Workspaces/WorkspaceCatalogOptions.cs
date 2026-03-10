@@ -24,4 +24,9 @@ public sealed class WorkspaceCatalogOptions
     /// Gets the machine configuration root path under the global repository.
     /// </summary>
     public string MachinesRoot => Path.Combine(GlobalRepoRoot, "machines");
+
+    /// <summary>
+    /// Gets the machine-local runtime root path under the global repository.
+    /// </summary>
+    public string MachineRoot => Path.Combine(GlobalRepoRoot, "machine");
 }

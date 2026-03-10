@@ -85,13 +85,13 @@ The list is intentionally ordered, but it is not rigid in the wrong way:
 - [x] Finalize the workspace metadata model, identity rules, and loading rules.
 - [x] Finalize project descriptors and project-to-workspace attachment rules.
 - [x] Implement catalog loading for workspaces, projects, and agents from `~/.codealta/` and project overlays.
-- [ ] Introduce `WorkThread` as the primary user-facing unit.
-- [ ] Support both `Global Thread` and `Workspace Thread`.
-- [ ] Enforce workspace selection before the first prompt in a workspace thread.
-- [ ] Enforce workspace lock after the first prompt in a workspace thread.
-- [ ] Allow project focus to evolve only within the owning workspace.
-- [ ] Persist durable thread metadata, summaries, and status.
-- [ ] Restore open threads/tabs and their scope after restart.
+- [x] Introduce `WorkThread` as the primary user-facing unit.
+- [x] Support both `Global Thread` and `Workspace Thread`.
+- [x] Enforce workspace selection before the first prompt in a workspace thread.
+- [x] Enforce workspace lock after the first prompt in a workspace thread.
+- [x] Allow project focus to evolve only within the owning workspace.
+- [x] Persist durable thread metadata, summaries, and status.
+- [x] Restore open threads/tabs and their scope after restart.
 - [ ] Load file-based global and project-local agents.
 - [ ] Compose coordinator and general-agent instructions consistently across Copilot and Codex.
 - [ ] Keep Copilot and Codex sessions usable as thread execution backends.

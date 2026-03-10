@@ -48,6 +48,11 @@ public sealed class WorkspaceCatalog
         foreach (var markdownPath in Directory.EnumerateFiles(workspaceRoot, "readme.md", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IsThreadMetadataPath(markdownPath))
+            {
+                continue;
+            }
+
             var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
             var descriptor = _serializer.DeserializeWorkspaceMarkdown(markdown);
             descriptor.SourcePath = markdownPath;
@@ -223,5 +228,11 @@ public sealed class WorkspaceCatalog
             SourcePath = project.SourcePath,
             MarkdownBody = project.MarkdownBody,
         };
+    }
+
+    private static bool IsThreadMetadataPath(string markdownPath)
+    {
+        var segments = markdownPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return segments.Any(static segment => string.Equals(segment, "threads", StringComparison.OrdinalIgnoreCase));
     }
 }

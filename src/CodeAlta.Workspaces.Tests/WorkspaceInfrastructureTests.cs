@@ -249,6 +249,216 @@ public sealed class WorkspaceInfrastructureTests
     }
 
     [TestMethod]
+    public void WorkThreadYamlSerializer_MarkdownRoundTrip_Works()
+    {
+        var serializer = new WorkThreadYamlSerializer();
+        var descriptor = CreateWorkspaceThreadDescriptor();
+        descriptor.MarkdownBody = "# Review sqlitevec integration";
+
+        var markdown = serializer.SerializeThreadMarkdown(descriptor);
+        var reloaded = serializer.DeserializeThreadMarkdown(markdown);
+        reloaded.Validate();
+
+        Assert.AreEqual(descriptor.ThreadId, reloaded.ThreadId);
+        Assert.AreEqual(descriptor.Kind, reloaded.Kind);
+        Assert.AreEqual(descriptor.ScopeMode, reloaded.ScopeMode);
+        CollectionAssert.AreEqual(descriptor.ProjectRefs, reloaded.ProjectRefs);
+        Assert.AreEqual(descriptor.StartedAt, reloaded.StartedAt);
+    }
+
+    [TestMethod]
+    public async Task WorkThreadCatalog_SaveAndLoadAsync_PersistsWorkspaceAndGlobalThreads()
+    {
+        using var root = TempDirectory.Create();
+        var options = new WorkspaceCatalogOptions { GlobalRepoRoot = root.Path };
+        var catalog = new WorkspaceCatalog(options);
+        var project = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Key = "repo-main",
+            DisplayName = "Main Repo",
+            RepoUrl = "https://example.com/repo-main.git",
+            DefaultBranch = "main",
+            Checkout = new CheckoutRule { PathTemplate = @"{workspaceKey}\{projectKey}" },
+            MarkdownBody = "# Main Repo",
+        };
+
+        await catalog.SaveProjectAsync(project).ConfigureAwait(false);
+
+        var workspace = new WorkspaceDescriptor
+        {
+            Id = WorkspaceId.NewVersion7().ToString(),
+            Key = "wk-core",
+            DisplayName = "Core Workspace",
+            DefaultCheckoutRoot = @"C:\code",
+            ProjectRefs = [project.Id],
+            MarkdownBody = "# Core Workspace",
+        };
+
+        await catalog.SaveWorkspaceAsync(workspace).ConfigureAwait(false);
+
+        var threadCatalog = new WorkThreadCatalog(catalog, options);
+        var timestamp = new DateTimeOffset(2026, 03, 10, 12, 0, 0, TimeSpan.Zero);
+        var workspaceThread = new WorkThreadDescriptor
+        {
+            ThreadId = "platform-search-review",
+            Kind = WorkThreadKind.WorkspaceThread,
+            WorkspaceRef = workspace.Id,
+            ProjectRefs = [project.Id],
+            ScopeMode = WorkThreadScopeMode.SingleProject,
+            Title = "Review sqlitevec integration",
+            Status = WorkThreadStatus.Active,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp,
+            LastActiveAt = timestamp,
+            StartedAt = timestamp,
+            MarkdownBody = "# Review sqlitevec integration",
+        };
+
+        await threadCatalog.SaveAsync(workspaceThread).ConfigureAwait(false);
+
+        var globalThread = new WorkThreadDescriptor
+        {
+            ThreadId = "global",
+            Kind = WorkThreadKind.Global,
+            ScopeMode = WorkThreadScopeMode.AllProjects,
+            Title = "Global Thread",
+            Status = WorkThreadStatus.Active,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp,
+            LastActiveAt = timestamp,
+            MarkdownBody = "# Global Thread",
+        };
+
+        await threadCatalog.SaveAsync(globalThread).ConfigureAwait(false);
+
+        var loaded = await threadCatalog.LoadAsync().ConfigureAwait(false);
+        Assert.AreEqual(2, loaded.Count);
+        Assert.IsTrue(File.Exists(Path.Combine(root.Path, "workspaces", "wk-core", "threads", workspaceThread.ThreadId, "readme.md")));
+        Assert.IsTrue(File.Exists(Path.Combine(root.Path, "threads", "global", "readme.md")));
+        Assert.AreEqual(1, loaded.Count(x => x.Kind == WorkThreadKind.Global));
+        Assert.AreEqual(1, loaded.Count(x => x.Kind == WorkThreadKind.WorkspaceThread));
+
+        var workspaces = await catalog.LoadAsync().ConfigureAwait(false);
+        Assert.AreEqual(1, workspaces.Count);
+        Assert.AreEqual("wk-core", workspaces[0].Key);
+    }
+
+    [TestMethod]
+    public async Task WorkThreadCatalog_SaveAsync_RejectsProjectOutsideWorkspace()
+    {
+        using var root = TempDirectory.Create();
+        var options = new WorkspaceCatalogOptions { GlobalRepoRoot = root.Path };
+        var catalog = new WorkspaceCatalog(options);
+        var projectA = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Key = "repo-main",
+            DisplayName = "Main Repo",
+            RepoUrl = "https://example.com/repo-main.git",
+            DefaultBranch = "main",
+        };
+        var projectB = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Key = "repo-tools",
+            DisplayName = "Tools Repo",
+            RepoUrl = "https://example.com/repo-tools.git",
+            DefaultBranch = "main",
+        };
+
+        await catalog.SaveProjectAsync(projectA).ConfigureAwait(false);
+        await catalog.SaveProjectAsync(projectB).ConfigureAwait(false);
+
+        var workspace = new WorkspaceDescriptor
+        {
+            Id = WorkspaceId.NewVersion7().ToString(),
+            Key = "wk-core",
+            DisplayName = "Core Workspace",
+            DefaultCheckoutRoot = @"C:\code",
+            ProjectRefs = [projectA.Id],
+        };
+
+        await catalog.SaveWorkspaceAsync(workspace).ConfigureAwait(false);
+
+        var threadCatalog = new WorkThreadCatalog(catalog, options);
+        var descriptor = CreateWorkspaceThreadDescriptor();
+        descriptor.WorkspaceRef = workspace.Id;
+        descriptor.ProjectRefs = [projectB.Id];
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => threadCatalog.SaveAsync(descriptor));
+    }
+
+    [TestMethod]
+    public async Task WorkThreadCatalog_SaveAsync_RejectsWorkspaceChangeAfterStart()
+    {
+        using var root = TempDirectory.Create();
+        var options = new WorkspaceCatalogOptions { GlobalRepoRoot = root.Path };
+        var catalog = new WorkspaceCatalog(options);
+        var projectA = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Key = "repo-main",
+            DisplayName = "Main Repo",
+            RepoUrl = "https://example.com/repo-main.git",
+            DefaultBranch = "main",
+        };
+
+        await catalog.SaveProjectAsync(projectA).ConfigureAwait(false);
+
+        var workspaceA = new WorkspaceDescriptor
+        {
+            Id = WorkspaceId.NewVersion7().ToString(),
+            Key = "wk-core",
+            DisplayName = "Core Workspace",
+            DefaultCheckoutRoot = @"C:\code",
+            ProjectRefs = [projectA.Id],
+        };
+        var workspaceB = new WorkspaceDescriptor
+        {
+            Id = WorkspaceId.NewVersion7().ToString(),
+            Key = "wk-alt",
+            DisplayName = "Alt Workspace",
+            DefaultCheckoutRoot = @"C:\code",
+            ProjectRefs = [projectA.Id],
+        };
+
+        await catalog.SaveWorkspaceAsync(workspaceA).ConfigureAwait(false);
+        await catalog.SaveWorkspaceAsync(workspaceB).ConfigureAwait(false);
+
+        var threadCatalog = new WorkThreadCatalog(catalog, options);
+        var descriptor = CreateWorkspaceThreadDescriptor();
+        descriptor.WorkspaceRef = workspaceA.Id;
+        descriptor.ProjectRefs = [projectA.Id];
+        await threadCatalog.SaveAsync(descriptor).ConfigureAwait(false);
+
+        descriptor.WorkspaceRef = workspaceB.Id;
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => threadCatalog.SaveAsync(descriptor));
+    }
+
+    [TestMethod]
+    public async Task WorkThreadCatalog_ViewStateRoundTrip_Works()
+    {
+        using var root = TempDirectory.Create();
+        var options = new WorkspaceCatalogOptions { GlobalRepoRoot = root.Path };
+        var catalog = new WorkspaceCatalog(options);
+        var threadCatalog = new WorkThreadCatalog(catalog, options);
+
+        var viewState = new WorkThreadViewState
+        {
+            OpenThreadIds = ["global", "platform-search-review"],
+            SelectedThreadId = "platform-search-review",
+            UpdatedAt = new DateTimeOffset(2026, 03, 10, 13, 0, 0, TimeSpan.Zero),
+        };
+
+        await threadCatalog.SaveViewStateAsync(viewState).ConfigureAwait(false);
+        var reloaded = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(viewState.OpenThreadIds, reloaded.OpenThreadIds);
+        Assert.AreEqual(viewState.SelectedThreadId, reloaded.SelectedThreadId);
+    }
+
+    [TestMethod]
     public async Task SkillCatalog_ListAndGet_Works()
     {
         using var root = TempDirectory.Create();
@@ -404,6 +614,25 @@ public sealed class WorkspaceInfrastructureTests
                     Checkout = new CheckoutRule { PathTemplate = @"{workspaceKey}\{projectKey}" },
                 },
             ],
+        };
+    }
+
+    private static WorkThreadDescriptor CreateWorkspaceThreadDescriptor()
+    {
+        var timestamp = new DateTimeOffset(2026, 03, 10, 12, 0, 0, TimeSpan.Zero);
+        return new WorkThreadDescriptor
+        {
+            ThreadId = "platform-search-review",
+            Kind = WorkThreadKind.WorkspaceThread,
+            WorkspaceRef = WorkspaceId.NewVersion7().ToString(),
+            ProjectRefs = [ProjectId.NewVersion7().ToString()],
+            ScopeMode = WorkThreadScopeMode.SingleProject,
+            Title = "Review sqlitevec integration",
+            Status = WorkThreadStatus.Active,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp,
+            LastActiveAt = timestamp,
+            StartedAt = timestamp,
         };
     }
 
