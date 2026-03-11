@@ -531,9 +531,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     {
         try
         {
-            var key = _newWorkspaceKeyInput?.Text?.Trim();
-            var name = _newWorkspaceNameInput?.Text?.Trim();
-            var root = _newWorkspaceRootInput?.Text?.Trim();
+            var draft = ReadWorkspaceDraft();
+            var key = draft.Key;
+            var name = draft.Name;
+            var root = draft.Root;
             if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(root))
             {
                 SetStatus("Workspace key, name, and checkout root are required.");
@@ -550,8 +551,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             };
 
             await _workspaceCatalog.SaveWorkspaceAsync(descriptor, CancellationToken.None).ConfigureAwait(false);
-            _newWorkspaceKeyInput!.Text = string.Empty;
-            _newWorkspaceNameInput!.Text = string.Empty;
+            ClearWorkspaceDraft();
             await ReloadCatalogAsync().ConfigureAwait(false);
             _selectedWorkspaceId = descriptor.Id;
             ResetProjectScopeSelection();
@@ -575,10 +575,11 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
         try
         {
-            var key = _newProjectKeyInput?.Text?.Trim();
-            var name = _newProjectNameInput?.Text?.Trim();
-            var repo = _newProjectRepoInput?.Text?.Trim();
-            var branch = _newProjectBranchInput?.Text?.Trim();
+            var draft = ReadProjectDraft();
+            var key = draft.Key;
+            var name = draft.Name;
+            var repo = draft.RepoUrl;
+            var branch = draft.Branch;
             if (string.IsNullOrWhiteSpace(key) ||
                 string.IsNullOrWhiteSpace(name) ||
                 string.IsNullOrWhiteSpace(repo) ||
@@ -609,10 +610,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             }
 
             await _workspaceCatalog.SaveWorkspaceAsync(workspace, CancellationToken.None).ConfigureAwait(false);
-            _newProjectKeyInput!.Text = string.Empty;
-            _newProjectNameInput!.Text = string.Empty;
-            _newProjectRepoInput!.Text = string.Empty;
-            _newProjectBranchInput!.Text = "main";
+            ClearProjectDraft();
             await ReloadCatalogAsync().ConfigureAwait(false);
             _selectedWorkspaceId = workspace.Id;
             ResetProjectScopeSelection();
@@ -636,13 +634,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
         try
         {
-            var selectedProjectRefs = _projectScopeCheckBoxes
-                .Where(static entry => entry.Value.IsChecked)
-                .Select(static entry => entry.Key)
-                .ToArray();
-
-            var scopeMode = ResolveScopeMode(selectedProjectRefs, workspace.Projects.Count, _allProjectsCheckBox?.IsChecked == true);
-            var title = _newThreadTitleInput?.Text?.Trim();
+            var draft = ReadThreadDraft(workspace);
+            var selectedProjectRefs = draft.ProjectRefs;
+            var scopeMode = draft.ScopeMode;
+            var title = draft.Title;
             if (string.IsNullOrWhiteSpace(title))
             {
                 title = BuildDefaultThreadTitle(workspace, selectedProjectRefs, scopeMode);
@@ -665,7 +660,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             };
 
             await _threadCatalog.SaveAsync(thread, CancellationToken.None).ConfigureAwait(false);
-            _newThreadTitleInput!.Text = string.Empty;
+            ClearThreadDraft();
             await ReloadCatalogAsync().ConfigureAwait(false);
             OpenThread(thread.ThreadId);
             SetStatus($"Created thread '{thread.Title}'.");
@@ -686,7 +681,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         }
 
         var tab = EnsureThreadTab(thread);
-        var text = _threadInput?.Text?.Trim();
+        var text = ReadUiValue(() => _threadInput?.Text?.Trim());
         if (string.IsNullOrWhiteSpace(text))
         {
             SetStatus("Prompt text is required.");
@@ -697,7 +692,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         tab.PendingAssistant = new PendingAssistantState(pending.AssistantItem, pending.StreamingMarkdown);
         AppendThreadTimelineItem(tab, pending.UserItem);
         AppendThreadTimelineItem(tab, pending.AssistantItem);
-        _threadInput!.Text = string.Empty;
+        ClearThreadInput();
 
         try
         {
@@ -1890,6 +1885,95 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         (_dispatcher ?? Dispatcher.Current).Post(action);
     }
 
+    private T ReadUiValue<T>(Func<T> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var dispatcher = _dispatcher ?? Dispatcher.Current;
+        return dispatcher.CheckAccess()
+            ? action()
+            : dispatcher.InvokeAsync(action).GetAwaiter().GetResult();
+    }
+
+    private WorkspaceDraft ReadWorkspaceDraft()
+    {
+        return ReadUiValue(
+            () => new WorkspaceDraft(
+                _newWorkspaceKeyInput?.Text?.Trim(),
+                _newWorkspaceNameInput?.Text?.Trim(),
+                _newWorkspaceRootInput?.Text?.Trim()));
+    }
+
+    private void ClearWorkspaceDraft()
+    {
+        ReadUiValue(
+            () =>
+            {
+                _newWorkspaceKeyInput!.Text = string.Empty;
+                _newWorkspaceNameInput!.Text = string.Empty;
+                return 0;
+            });
+    }
+
+    private ProjectDraft ReadProjectDraft()
+    {
+        return ReadUiValue(
+            () => new ProjectDraft(
+                _newProjectKeyInput?.Text?.Trim(),
+                _newProjectNameInput?.Text?.Trim(),
+                _newProjectRepoInput?.Text?.Trim(),
+                _newProjectBranchInput?.Text?.Trim()));
+    }
+
+    private void ClearProjectDraft()
+    {
+        ReadUiValue(
+            () =>
+            {
+                _newProjectKeyInput!.Text = string.Empty;
+                _newProjectNameInput!.Text = string.Empty;
+                _newProjectRepoInput!.Text = string.Empty;
+                _newProjectBranchInput!.Text = "main";
+                return 0;
+            });
+    }
+
+    private ThreadDraft ReadThreadDraft(WorkspaceDescriptor workspace)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+
+        return ReadUiValue(
+            () =>
+            {
+                var selectedProjectRefs = _projectScopeCheckBoxes
+                    .Where(static entry => entry.Value.IsChecked)
+                    .Select(static entry => entry.Key)
+                    .ToArray();
+                var scopeMode = ResolveScopeMode(selectedProjectRefs, workspace.Projects.Count, _allProjectsCheckBox?.IsChecked == true);
+                return new ThreadDraft(selectedProjectRefs, scopeMode, _newThreadTitleInput?.Text?.Trim());
+            });
+    }
+
+    private void ClearThreadDraft()
+    {
+        ReadUiValue(
+            () =>
+            {
+                _newThreadTitleInput!.Text = string.Empty;
+                return 0;
+            });
+    }
+
+    private void ClearThreadInput()
+    {
+        ReadUiValue(
+            () =>
+            {
+                _threadInput!.Text = string.Empty;
+                return 0;
+            });
+    }
+
     private sealed record WorkspaceOption(string WorkspaceId, string Label)
     {
         public override string ToString() => Label;
@@ -1932,4 +2016,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
         public Dictionary<string, AgentUserInputRequest> UserInputRequests { get; } = new(StringComparer.Ordinal);
     }
+
+    private sealed record WorkspaceDraft(string? Key, string? Name, string? Root);
+
+    private sealed record ProjectDraft(string? Key, string? Name, string? RepoUrl, string? Branch);
+
+    private sealed record ThreadDraft(IReadOnlyList<string> ProjectRefs, WorkThreadScopeMode ScopeMode, string? Title);
 }
