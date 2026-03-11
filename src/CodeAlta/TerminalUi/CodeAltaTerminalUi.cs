@@ -37,7 +37,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private TextBlock? _status;
     private Spinner? _statusSpinner;
     private DockLayout? _threadPaneLayout;
-    private VStack? _threadBottomPanel;
+    private Visual? _threadBottomPanel;
     private VSplitter? _threadBodySplitter;
     private ChatPromptEditor? _threadInput;
     private Visual? _threadInputView;
@@ -339,9 +339,9 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     {
         var globalNode = new TreeNode(CreateSidebarHeader(
             "Global",
-            "Cross-project overview and delegation"))
+            _catalogOptions.GlobalRoot))
         {
-            Icon = NerdFont.MdHome,
+            Icon = NerdFont.MdHomeOutline,
             Data = SidebarSelectionTarget.Global(),
             IsExpanded = true,
         };
@@ -361,9 +361,9 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     {
         var projectsNode = new TreeNode(CreateSidebarHeader(
             "Projects",
-            $"{_projects.Count} known"))
+            $"{_projects.Count} known projects"))
         {
-            Icon = NerdFont.FaFolderTree,
+            Icon = NerdFont.MdFolderMultipleOutline,
             IsExpanded = true,
         };
 
@@ -382,9 +382,9 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             .ToArray();
         var projectNode = new TreeNode(CreateSidebarHeader(
             project.DisplayName,
-            threads.Length == 0 ? project.Slug : $"{threads.Length} recent"))
+            project.ProjectPath))
         {
-            Icon = NerdFont.FaFolderOpen,
+            Icon = NerdFont.MdFolderOutline,
             Data = SidebarSelectionTarget.Project(project.Id),
             IsExpanded = string.Equals(project.Id, _selectedProjectId, StringComparison.OrdinalIgnoreCase),
         };
@@ -401,36 +401,34 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     {
         var icon = thread.Kind switch
         {
-            WorkThreadKind.GlobalThread => NerdFont.PlBranch,
-            WorkThreadKind.ProjectThread => NerdFont.FaTerminal,
-            WorkThreadKind.InternalThread => NerdFont.CodDebug,
-            _ => NerdFont.FaTerminal,
+            WorkThreadKind.GlobalThread => NerdFont.MdHomeOutline,
+            WorkThreadKind.ProjectThread => NerdFont.MdChatProcessingOutline,
+            WorkThreadKind.InternalThread => NerdFont.MdAccountCogOutline,
+            _ => NerdFont.MdChatProcessingOutline,
         };
 
         return new TreeNode(CreateSidebarHeader(
-            thread.Title,
-            string.IsNullOrWhiteSpace(thread.LatestSummary) ? thread.Status.ToString() : thread.LatestSummary!))
+            CompactSidebarThreadTitle(thread.Title),
+            BuildThreadSidebarTooltip(thread)))
         {
             Icon = icon,
             Data = SidebarSelectionTarget.Thread(thread.ThreadId),
         };
     }
 
-    private static Visual CreateSidebarHeader(string title, string? subtitle)
+    private static Visual CreateSidebarHeader(string title, string? tooltip)
     {
-        if (string.IsNullOrWhiteSpace(subtitle))
+        var markup = new Markup($"[bold]{AnsiMarkup.Escape(title)}[/]")
         {
-            return new Markup($"[bold]{AnsiMarkup.Escape(title)}[/]");
+            Wrap = false,
+        };
+
+        if (string.IsNullOrWhiteSpace(tooltip))
+        {
+            return markup;
         }
 
-        return new VStack(
-            [
-                new Markup($"[bold]{AnsiMarkup.Escape(title)}[/]"),
-                new Markup($"[muted]{AnsiMarkup.Escape(subtitle)}[/]"),
-            ])
-        {
-            Spacing = 0,
-        };
+        return markup.Tooltip(new Markup($"[code]{AnsiMarkup.Escape(tooltip)}[/]"));
     }
 
     private static IReadOnlyList<SidebarSelectionTarget> FlattenSidebarTargets(IEnumerable<TreeNode> roots)
@@ -539,7 +537,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         _tabStripVisual ??= CreateComputedVisual(BuildOpenTabsContent);
         _threadHeaderVisual ??= CreateComputedVisual(BuildSelectedThreadHeader);
         _threadInput ??= CreatePromptEditor();
-        _threadInputView ??= _threadInput.Scrollable();
+        _threadInputView ??= _threadInput;
         _threadCommandBar ??= new CommandBar
         {
             HorizontalAlignment = Align.Stretch,
@@ -570,28 +568,38 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             ])
         {
             Spacing = 1,
+            HorizontalAlignment = Align.Stretch,
         };
 
-        _threadBottomPanel = new VStack(
+        var selectionLine = new HStack(
             [
-                statusLine,
-                _threadInputView,
-                new HStack(
-                    [
-                        new Button(new TextBlock($"{NerdFont.MdSend} Send")).Click(() => _ = SendSelectedThreadPromptAsync(steer: false)),
-                        _chatBackendSelect,
-                        _chatModelSelect,
-                        _chatReasoningSelect,
-                        _chatAutoApproveCheckBox,
-                        _chatBackendStatusMarkup,
-                    ])
-                {
-                    Spacing = 2,
-                },
-                _threadCommandBar,
+                new Button(new TextBlock($"{NerdFont.MdSend} Send")).Click(() => _ = SendSelectedThreadPromptAsync(steer: false)),
+                _chatBackendSelect,
+                _chatModelSelect,
+                _chatReasoningSelect,
+                _chatAutoApproveCheckBox,
+                _chatBackendStatusMarkup,
             ])
         {
-            Spacing = 0,
+            Spacing = 2,
+            HorizontalAlignment = Align.Stretch,
+        };
+
+        _threadBottomPanel = new DockLayout(
+            top: statusLine,
+            content: _threadInputView,
+            bottom: new VStack(
+                [
+                    selectionLine,
+                    _threadCommandBar,
+                ])
+            {
+                Spacing = 0,
+                HorizontalAlignment = Align.Stretch,
+            })
+        {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
         };
 
         _threadBodySplitter ??= new VSplitter(new TextBlock("Open or create a thread to start working."), _threadBottomPanel)
@@ -2199,12 +2207,25 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         }
     }
 
-    private static string BuildThreadSidebarLabel(WorkThreadDescriptor thread)
+    internal static string CompactSidebarThreadTitle(string title)
     {
-        var summary = string.IsNullOrWhiteSpace(thread.LatestSummary)
-            ? thread.Status.ToString()
-            : thread.LatestSummary;
-        return $"{thread.Title}\n{summary}";
+        const int maxLength = 34;
+        var normalized = title.Trim();
+        return normalized.Length <= maxLength
+            ? normalized
+            : normalized[..Math.Max(1, maxLength - 1)].TrimEnd() + "…";
+    }
+
+    internal static string BuildThreadSidebarTooltip(WorkThreadDescriptor thread)
+    {
+        ArgumentNullException.ThrowIfNull(thread);
+
+        if (string.IsNullOrWhiteSpace(thread.LatestSummary))
+        {
+            return thread.Title;
+        }
+
+        return $"{thread.Title}\n\n{thread.LatestSummary}";
     }
 
     private static Group CreateSectionGroup(string title, Visual content)
@@ -2220,8 +2241,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             .PromptMarkup("[primary]>[/] ")
             .ContinuationPromptMarkup("[muted]·[/] ")
             .EnableWordHints(false)
-            .MinHeight(3)
-            .MaxHeight(9);
+            .MinHeight(3);
 
         editor.AddCommand(new Command
         {

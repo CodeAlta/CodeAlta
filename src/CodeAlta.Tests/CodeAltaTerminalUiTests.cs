@@ -132,6 +132,40 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void CompactSidebarThreadTitle_TrimsLongTitlesToSingleLineLength()
+    {
+        var compact = CodeAltaTerminalUi.CompactSidebarThreadTitle("The lunet-build action in this repository is used like this:");
+
+        Assert.AreEqual("The lunet-build action in this re…", compact);
+        Assert.IsFalse(compact.Contains('\n'));
+    }
+
+    [TestMethod]
+    public void BuildThreadSidebarTooltip_PreservesFullTitleAndSummary()
+    {
+        var thread = new WorkThreadDescriptor
+        {
+            ThreadId = "thread-1",
+            Kind = WorkThreadKind.ProjectThread,
+            BackendId = AgentBackendIds.Codex.Value,
+            BackendSessionId = "backend-thread-1",
+            ProjectRef = "project-1",
+            WorkingDirectory = @"C:\code\CodeAlta",
+            Title = "Review Tomlyn update",
+            LatestSummary = "Check the parser changes and resulting tests.",
+            Status = WorkThreadStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastActiveAt = DateTimeOffset.UtcNow,
+        };
+
+        var tooltip = CodeAltaTerminalUi.BuildThreadSidebarTooltip(thread);
+
+        StringAssert.Contains(tooltip, "Review Tomlyn update");
+        StringAssert.Contains(tooltip, "Check the parser changes and resulting tests.");
+    }
+
+    [TestMethod]
     public void ResolveInitialSelection_DefersSelectedThreadRestoreUntilUiLoopStarts()
     {
         var thread = new WorkThreadDescriptor
