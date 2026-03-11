@@ -99,11 +99,11 @@ The list is intentionally ordered, but it is not rigid in the wrong way:
 - [x] Implement minimal host-owned orchestration for send, steer, dispatch, and explicit thread handoff.
 - [x] Project backend/coordinator/host activity into a curated thread timeline.
 - [x] Hide raw schedule payloads from the normal user timeline.
-- [ ] Implement workspace/project-first sidebar navigation with threads and activity under scope.
-- [ ] Implement thread creation UX for selecting a workspace and initial project scope.
-- [ ] Implement multi-thread UX so several concurrent threads can be continued and steered without confusion.
-- [ ] Make the global thread the cross-workspace overview and delegation surface.
-- [ ] Add regression coverage for workspace/project/thread/orchestration basics before expanding scope.
+- [x] Implement workspace/project-first sidebar navigation with threads and activity under scope.
+- [x] Implement thread creation UX for selecting a workspace and initial project scope.
+- [x] Implement multi-thread UX so several concurrent threads can be continued and steered without confusion.
+- [x] Make the global thread the cross-workspace overview and delegation surface.
+- [x] Add regression coverage for workspace/project/thread/orchestration basics before expanding scope.
 
 ### Phase 1 — Clarify and simplify the active specs
 

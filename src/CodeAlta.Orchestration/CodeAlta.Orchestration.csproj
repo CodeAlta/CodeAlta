@@ -6,10 +6,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
-    <ProjectReference Include="..\CodeAlta.Mcp\CodeAlta.Mcp.csproj" />
     <ProjectReference Include="..\CodeAlta.Persistence\CodeAlta.Persistence.csproj" />
-    <ProjectReference Include="..\CodeAlta.Search\CodeAlta.Search.csproj" />
     <ProjectReference Include="..\CodeAlta.Workspaces\CodeAlta.Workspaces.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="CodeAltaOrchestrationServiceCollectionExtensions.cs" />
+    <Compile Remove="Context\SearchContextProvider.cs" />
+    <Compile Remove="Mcp\**\*.cs" />
   </ItemGroup>
 
 </Project>

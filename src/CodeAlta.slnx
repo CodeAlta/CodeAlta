@@ -30,16 +30,10 @@
   <Project Path="CodeAlta.Agent.Codex/CodeAlta.Agent.Codex.csproj" />
   <Project Path="CodeAlta.Agent.Copilot/CodeAlta.Agent.Copilot.csproj" />
   <Project Path="CodeAlta.CodexSdk/CodeAlta.CodexSdk.csproj" Id="4507c156-d675-4280-bd1c-2a5d8285c07f" />
-  <Project Path="CodeAlta.DotNet.Tests/CodeAlta.DotNet.Tests.csproj" />
-  <Project Path="CodeAlta.DotNet/CodeAlta.DotNet.csproj" />
-  <Project Path="CodeAlta.Mcp.Tests/CodeAlta.Mcp.Tests.csproj" />
-  <Project Path="CodeAlta.Mcp/CodeAlta.Mcp.csproj" />
   <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
   <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
   <Project Path="CodeAlta.Persistence.Tests/CodeAlta.Persistence.Tests.csproj" />
   <Project Path="CodeAlta.Persistence/CodeAlta.Persistence.csproj" />
-  <Project Path="CodeAlta.Search.Tests/CodeAlta.Search.Tests.csproj" />
-  <Project Path="CodeAlta.Search/CodeAlta.Search.csproj" />
   <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
   <Project Path="CodeAlta.Workspaces.Tests/CodeAlta.Workspaces.Tests.csproj" />
   <Project Path="CodeAlta.Workspaces/CodeAlta.Workspaces.csproj" />

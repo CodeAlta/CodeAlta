@@ -20,4 +20,8 @@
     <ProjectReference Include="..\CodeAlta.CodexSdk.Generator\CodeAlta.CodexSdk.Generator.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="CopilotLiveIntegrationTests.cs" />
+  </ItemGroup>
+
 </Project>

@@ -53,11 +53,8 @@
     <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.CodexSdk\CodeAlta.CodexSdk.csproj" />
-    <ProjectReference Include="..\CodeAlta.DotNet\CodeAlta.DotNet.csproj" />
-    <ProjectReference Include="..\CodeAlta.Mcp\CodeAlta.Mcp.csproj" />
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Persistence\CodeAlta.Persistence.csproj" />
-    <ProjectReference Include="..\CodeAlta.Search\CodeAlta.Search.csproj" />
     <ProjectReference Include="..\CodeAlta.Workspaces\CodeAlta.Workspaces.csproj" />
   </ItemGroup>
 

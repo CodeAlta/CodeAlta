@@ -18,8 +18,11 @@
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Persistence\CodeAlta.Persistence.csproj" />
-    <ProjectReference Include="..\CodeAlta.Search\CodeAlta.Search.csproj" />
     <ProjectReference Include="..\CodeAlta.Workspaces\CodeAlta.Workspaces.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="McpToolBridgeTests.cs" />
   </ItemGroup>
 
 </Project>
