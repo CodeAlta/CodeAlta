@@ -96,14 +96,11 @@ internal sealed partial class CodeAltaTerminalUi
                     ? "[bold]"
                     : string.Empty;
                 var reset = selected.Length > 0 ? "[/]" : string.Empty;
-                var status = string.IsNullOrWhiteSpace(state.StatusMessage)
-                    ? string.Empty
-                    : $" [dim]- {AnsiMarkup.Escape(state.StatusMessage)}[/]";
-                return $"{selected}[{tone}]{icon} {AnsiMarkup.Escape(state.DisplayName)}[/]{reset}{status}";
+                return $"{selected}[{tone}]{icon} {AnsiMarkup.Escape(state.DisplayName)}[/]{reset}";
             });
 
         var prefix = isInitializing
-            ? $"[primary]{NerdFont.MdTimerOutline} Detecting backends...[/] "
+            ? $"[primary]{NerdFont.MdTimerOutline} Detecting[/] "
             : string.Empty;
         return prefix + string.Join("   ", items);
     }

@@ -49,6 +49,7 @@ public sealed partial class ProjectCatalog
             cancellationToken.ThrowIfCancellationRequested();
             var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
             var descriptor = _serializer.DeserializeProjectMarkdown(markdown);
+            descriptor.ProjectPath = NormalizePath(descriptor.ProjectPath);
             descriptor.SourcePath = markdownPath;
             descriptor.Validate();
             results.Add(descriptor);
@@ -225,7 +226,17 @@ public sealed partial class ProjectCatalog
 
     private static string NormalizePath(string path)
     {
-        return Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var trimmed = path.Trim();
+        if (trimmed.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = @"\\" + trimmed[8..];
+        }
+        else if (trimmed.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[4..];
+        }
+
+        return Path.GetFullPath(trimmed).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
     private static bool IsInsideGlobalRoot(string path, string globalRoot)

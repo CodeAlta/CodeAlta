@@ -5,14 +5,18 @@ using XenoAtom.Logging;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Threading;
 
 internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 {
     private static readonly Logger UiLogger = LogManager.GetLogger("CodeAlta.UI");
+    private const int MaxRecentThreadsPerProject = 3;
+    private const int MaxTabTitleLength = 18;
 
     private readonly ProjectCatalog _projectCatalog;
     private readonly WorkThreadCatalog _threadCatalog;
@@ -34,8 +38,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private Spinner? _statusSpinner;
     private DockLayout? _threadPaneLayout;
     private VStack? _threadBottomPanel;
+    private VSplitter? _threadBodySplitter;
     private ChatPromptEditor? _threadInput;
     private Visual? _threadInputView;
+    private CommandBar? _threadCommandBar;
     private TextBox? _newThreadTitleInput;
     private Select<ChatBackendOption>? _chatBackendSelect;
     private Select<ChatModelOption>? _chatModelSelect;
@@ -106,19 +112,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         _statusSpinner.IsActive = false;
         _statusSpinner.IsVisible = false;
 
-        var statusBar = new HStack(
-            [
-                _statusSpinner,
-                _status,
-            ])
-        {
-            Spacing = 1,
-        };
-
         var root = new DockLayout(
             top: _header,
             content: BuildMainView(),
-            bottom: statusBar);
+            bottom: null);
 
         _runtimeEventsTask = Task.Run(() => PumpRuntimeEventsAsync(_runtimeEventsCts.Token), CancellationToken.None);
         await Terminal.RunAsync(
@@ -313,7 +310,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private TreeNode CreateSidebarGlobalNode()
     {
         var globalNode = new TreeNode(CreateSidebarHeader(
-            $"{NerdFont.MdHome} Global",
+            "Global",
             "Cross-project overview and delegation"))
         {
             Icon = NerdFont.MdHome,
@@ -324,7 +321,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         foreach (var thread in _threads
                      .Where(static item => item.Kind == WorkThreadKind.GlobalThread)
                      .OrderByDescending(static item => item.LastActiveAt)
-                     .Take(3))
+                     .Take(MaxRecentThreadsPerProject))
         {
             globalNode.Children.Add(CreateThreadNode(thread));
         }
@@ -335,7 +332,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private TreeNode CreateSidebarProjectsNode()
     {
         var projectsNode = new TreeNode(CreateSidebarHeader(
-            $"{NerdFont.FaFolderTree} Projects",
+            "Projects",
             $"{_projects.Count} known"))
         {
             Icon = NerdFont.FaFolderTree,
@@ -353,10 +350,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private TreeNode CreateProjectNode(ProjectDescriptor project)
     {
         var threads = FilterThreadsForProject(_threads, project.Id, includeInternal: true)
-            .Take(3)
+            .Take(MaxRecentThreadsPerProject)
             .ToArray();
         var projectNode = new TreeNode(CreateSidebarHeader(
-            $"{NerdFont.FaFolderOpen} {project.DisplayName}",
+            project.DisplayName,
             threads.Length == 0 ? project.Slug : $"{threads.Length} recent"))
         {
             Icon = NerdFont.FaFolderOpen,
@@ -383,7 +380,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         };
 
         return new TreeNode(CreateSidebarHeader(
-            $"{icon} {thread.Title}",
+            thread.Title,
             string.IsNullOrWhiteSpace(thread.LatestSummary) ? thread.Status.ToString() : thread.LatestSummary!))
         {
             Icon = icon,
@@ -411,20 +408,23 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private static IReadOnlyList<SidebarSelectionTarget> FlattenSidebarTargets(IEnumerable<TreeNode> roots)
     {
         var results = new List<SidebarSelectionTarget>();
+        var rowIndex = 0;
         foreach (var root in roots)
         {
-            AppendVisibleSidebarTargets(root, results);
+            AppendVisibleSidebarTargets(root, results, ref rowIndex);
         }
 
         return results;
     }
 
-    private static void AppendVisibleSidebarTargets(TreeNode node, List<SidebarSelectionTarget> results)
+    private static void AppendVisibleSidebarTargets(TreeNode node, List<SidebarSelectionTarget> results, ref int rowIndex)
     {
         if (node.Data is SidebarSelectionTarget target)
         {
-            results.Add(target);
+            results.Add(target with { TreeRowIndex = rowIndex });
         }
+
+        rowIndex++;
 
         if (!node.IsExpanded)
         {
@@ -433,7 +433,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
         foreach (var child in node.Children)
         {
-            AppendVisibleSidebarTargets(child, results);
+            AppendVisibleSidebarTargets(child, results, ref rowIndex);
         }
     }
 
@@ -445,12 +445,12 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             if (target.Kind == SidebarSelectionKind.Thread &&
                 string.Equals(target.ThreadId, _selectedThreadId, StringComparison.OrdinalIgnoreCase))
             {
-                return index;
+                return target.TreeRowIndex;
             }
 
             if (target.Kind == SidebarSelectionKind.GlobalScope && _selectedThreadId is null && _globalScopeSelected)
             {
-                return index;
+                return target.TreeRowIndex;
             }
 
             if (target.Kind == SidebarSelectionKind.ProjectScope &&
@@ -458,7 +458,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                 !_globalScopeSelected &&
                 string.Equals(target.ProjectId, _selectedProjectId, StringComparison.OrdinalIgnoreCase))
             {
-                return index;
+                return target.TreeRowIndex;
             }
         }
 
@@ -466,7 +466,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         {
             if (visibleTargets[index].Kind == SidebarSelectionKind.GlobalScope)
             {
-                return index;
+                return visibleTargets[index].TreeRowIndex;
             }
         }
 
@@ -487,12 +487,11 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         }
 
         _lastSidebarSelectedIndex = selectedIndex;
-        if ((uint)selectedIndex >= (uint)_sidebarVisibleTargets.Count)
+        var target = _sidebarVisibleTargets.FirstOrDefault(candidate => candidate.TreeRowIndex == selectedIndex);
+        if (target is null)
         {
             return;
         }
-
-        var target = _sidebarVisibleTargets[selectedIndex];
         switch (target.Kind)
         {
             case SidebarSelectionKind.GlobalScope:
@@ -513,6 +512,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         _threadHeaderVisual ??= CreateComputedVisual(BuildSelectedThreadHeader);
         _threadInput ??= CreatePromptEditor();
         _threadInputView ??= _threadInput.Scrollable();
+        _threadCommandBar ??= new CommandBar
+        {
+            HorizontalAlignment = Align.Stretch,
+        };
         _chatBackendSelect ??= new Select<ChatBackendOption>()
             .SelectionChanged((_, e) => OnChatBackendSelectionChanged(e.NewIndex))
             .MinWidth(14)
@@ -532,38 +535,42 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             Wrap = true,
         };
 
-        var controls = new WrapHStack(
+        var statusLine = new HStack(
             [
-                new Button(new TextBlock("Send")).Click(() => _ = SendSelectedThreadPromptAsync(steer: false)),
-                new Button(new TextBlock("Steer")).Click(() => _ = SendSelectedThreadPromptAsync(steer: true)),
-                new Button(new TextBlock("Delegate")).Click(() => _ = DelegateSelectedThreadAsync()),
-                new Button(new TextBlock("Abort")).Click(() => _ = AbortSelectedThreadAsync()),
-                new Button(new TextBlock("Close Tab")).Click(() => _ = CloseSelectedThreadAsync()),
+                _statusSpinner!,
+                _status!,
             ])
         {
-            Spacing = 2,
-            RunSpacing = 1,
+            Spacing = 1,
         };
 
         _threadBottomPanel = new VStack(
             [
+                statusLine,
                 _threadInputView,
-                controls,
-                new WrapHStack(
+                new HStack(
                     [
-                        new VStack([new TextBlock("Backend"), _chatBackendSelect]) { Spacing = 0 },
-                        new VStack([new TextBlock("Model"), _chatModelSelect]) { Spacing = 0 },
-                        new VStack([new TextBlock("Reasoning"), _chatReasoningSelect]) { Spacing = 0 },
-                        new VStack([new TextBlock("Approvals"), _chatAutoApproveCheckBox]) { Spacing = 0 },
+                        new Button(new TextBlock($"{NerdFont.MdSend} Send")).Click(() => _ = SendSelectedThreadPromptAsync(steer: false)),
+                        _chatBackendSelect,
+                        _chatModelSelect,
+                        _chatReasoningSelect,
+                        _chatAutoApproveCheckBox,
+                        _chatBackendStatusMarkup,
                     ])
                 {
                     Spacing = 2,
-                    RunSpacing = 1,
                 },
-                _chatBackendStatusMarkup,
+                _threadCommandBar,
             ])
         {
-            Spacing = 1,
+            Spacing = 0,
+        };
+
+        _threadBodySplitter ??= new VSplitter(new TextBlock("Open or create a thread to start working."), _threadBottomPanel)
+        {
+            Ratio = 0.68,
+            MinFirst = 6,
+            MinSecond = 7,
         };
 
         _threadPaneLayout = new DockLayout(
@@ -573,10 +580,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                     _threadHeaderVisual,
                 ])
             {
-                Spacing = 1,
+                Spacing = 0,
             },
-            content: new TextBlock("Open or create a thread to start working."),
-            bottom: _threadBottomPanel);
+            content: _threadBodySplitter,
+            bottom: null);
 
         RefreshThreadPaneContent();
         return _threadPaneLayout;
@@ -599,15 +606,16 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             }
 
             var isSelected = string.Equals(thread.ThreadId, _selectedThreadId, StringComparison.OrdinalIgnoreCase);
-            var title = isSelected ? $"> {thread.Title}" : thread.Title;
+            var title = CompactTabTitle(thread.Title, isSelected);
+            var openButton = new Button(new TextBlock(title)).Click(() => OpenThread(thread.ThreadId));
             items.Add(
                 new HStack(
                     [
-                        new Button(new TextBlock(title)).Click(() => OpenThread(thread.ThreadId)),
-                        new Button(new TextBlock("x")).Click(() => _ = CloseThreadAsync(thread.ThreadId)),
+                        openButton.Tooltip(new Markup($"[code]{AnsiMarkup.Escape(thread.Title)}[/]")),
+                        new Button(new TextBlock($"{NerdFont.MdClose}")).Click(() => _ = CloseThreadAsync(thread.ThreadId)),
                     ])
                 {
-                    Spacing = 1,
+                    Spacing = 0,
                 });
         }
 
@@ -624,41 +632,22 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         if (thread is null)
         {
             var selectedProject = GetSelectedProject();
-            var title = _globalScopeSelected ? "Global Draft" : "Project Draft";
-            var content = _globalScopeSelected
-                ? new VStack(
-                    [
-                        new TextBlock("Global scope"),
-                        new TextBlock(_catalogOptions.GlobalRoot),
-                        new TextBlock("Send the first prompt to create a global thread."),
-                    ])
-                {
-                    Spacing = 1,
-                }
-                : new VStack(
-                    [
-                        new TextBlock(selectedProject?.DisplayName ?? "Project scope"),
-                        new TextBlock(selectedProject?.ProjectPath ?? "Select a project in the sidebar."),
-                        new TextBlock("Send the first prompt to create a project thread."),
-                    ])
-                {
-                    Spacing = 1,
-                };
-
-            return CreateSectionGroup(title, content);
+            return _globalScopeSelected
+                ? CreateCompactThreadHeader($"{NerdFont.MdHome} Global draft", _catalogOptions.GlobalRoot)
+                : CreateCompactThreadHeader(
+                    $"{NerdFont.FaFolderOpen} {selectedProject?.DisplayName ?? "Project draft"}",
+                    selectedProject?.ProjectPath);
         }
 
-        return CreateSectionGroup(
-            "Thread",
-            new VStack(
-                [
-                    new TextBlock(thread.Title),
-                    new TextBlock(BuildThreadScopeSummary(thread, _projects, _catalogOptions.GlobalRoot)),
-                    new TextBlock($"Backend: {thread.BackendId}"),
-                ])
-            {
-                Spacing = 1,
-            });
+        var title = thread.Kind switch
+        {
+            WorkThreadKind.GlobalThread => $"{NerdFont.PlBranch} {thread.Title}",
+            WorkThreadKind.ProjectThread => $"{NerdFont.FaTerminal} {thread.Title}",
+            WorkThreadKind.InternalThread => $"{NerdFont.CodDebug} {thread.Title}",
+            _ => thread.Title,
+        };
+
+        return CreateCompactThreadHeader(title, ResolveWorkingDirectory(thread));
     }
 
     private async Task ReloadCatalogAsync()
@@ -1693,7 +1682,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
     private void RefreshThreadPaneContent()
     {
-        if (_threadPaneLayout is null)
+        if (_threadPaneLayout is null || _threadBodySplitter is null || _threadInput is null)
         {
             return;
         }
@@ -1702,15 +1691,15 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         if (selectedThread is null)
         {
             RefreshChatSelectorsForDraftScope();
-            _threadPaneLayout.Content = CreateSectionGroup(
-                "Prompt",
-                new TextBlock(BuildDraftPromptMessage(_globalScopeSelected)));
+            _threadInput.Placeholder = BuildPromptPlaceholder(null, GetSelectedProject(), _globalScopeSelected);
+            _threadBodySplitter.First = new TextBlock("No open tabs.");
             return;
         }
 
         var tab = EnsureThreadTab(selectedThread);
+        _threadInput.Placeholder = BuildPromptPlaceholder(selectedThread, GetSelectedProject(), _globalScopeSelected);
         RefreshChatSelectorsForThread(tab);
-        _threadPaneLayout.Content = tab.Flow;
+        _threadBodySplitter.First = tab.Flow;
     }
 
     private void RefreshChatSelectorsForDraftScope(AgentBackendId? preferredBackendId = null)
@@ -1998,12 +1987,12 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         {
             if (globalScopeSelected)
             {
-                return $"CodeAlta | backend={preferredBackendId} | scope=global-draft | cwd={globalRoot}";
+                return $"CodeAlta | {preferredBackendId} | global draft";
             }
 
             if (selectedProject is not null)
             {
-                return $"CodeAlta | backend={preferredBackendId} | project={selectedProject.Slug} | scope=draft";
+                return $"CodeAlta | {preferredBackendId} | {selectedProject.Slug} draft";
             }
 
             return "CodeAlta | no thread selected";
@@ -2011,9 +2000,9 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
         return thread.Kind switch
         {
-            WorkThreadKind.GlobalThread => $"CodeAlta | backend={thread.BackendId} | thread={thread.Title} | scope=global",
-            WorkThreadKind.ProjectThread => $"CodeAlta | backend={thread.BackendId} | project={selectedProject?.Slug ?? "?"} | thread={thread.Title}",
-            WorkThreadKind.InternalThread => $"CodeAlta | backend={thread.BackendId} | internal={thread.Title}",
+            WorkThreadKind.GlobalThread => $"CodeAlta | {thread.BackendId} | {CompactTabTitle(thread.Title, isSelected: false)} | global",
+            WorkThreadKind.ProjectThread => $"CodeAlta | {thread.BackendId} | {selectedProject?.Slug ?? "?"} | {CompactTabTitle(thread.Title, isSelected: false)}",
+            WorkThreadKind.InternalThread => $"CodeAlta | {thread.BackendId} | internal | {CompactTabTitle(thread.Title, isSelected: false)}",
             _ => $"CodeAlta | thread={thread.Title}",
         };
     }
@@ -2022,6 +2011,52 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         => globalScopeSelected
             ? "Send the first prompt to start a global thread."
             : "Send the first prompt to start a thread for the selected project.";
+
+    private static string BuildPromptPlaceholder(
+        WorkThreadDescriptor? thread,
+        ProjectDescriptor? selectedProject,
+        bool globalScopeSelected)
+    {
+        if (thread is not null)
+        {
+            return $"Continue '{thread.Title}'...";
+        }
+
+        if (globalScopeSelected)
+        {
+            return "Start a global thread...";
+        }
+
+        return selectedProject is null
+            ? "Select a project to start a thread..."
+            : $"Start a thread for {selectedProject.DisplayName}...";
+    }
+
+    private static string CompactTabTitle(string title, bool isSelected)
+    {
+        var normalized = title.Trim();
+        var maxLength = isSelected ? MaxTabTitleLength - 2 : MaxTabTitleLength;
+        var compact = normalized.Length <= maxLength
+            ? normalized
+            : normalized[..Math.Max(1, maxLength - 1)].TrimEnd() + "…";
+        return isSelected ? $"> {compact}" : compact;
+    }
+
+    private static Visual CreateCompactThreadHeader(string text, string? tooltip)
+    {
+        Visual header = new TextBlock
+        {
+            Wrap = false,
+            Text = text,
+        };
+
+        if (!string.IsNullOrWhiteSpace(tooltip))
+        {
+            header = header.Tooltip(new Markup($"[code]{AnsiMarkup.Escape(tooltip)}[/]"));
+        }
+
+        return header;
+    }
 
     private void SetStatus(string message, bool showSpinner = false)
     {
@@ -2153,12 +2188,59 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
     private ChatPromptEditor CreatePromptEditor()
     {
-        return new ChatPromptEditor(text => _ = SendSelectedThreadPromptAsync(steer: false))
+        var editor = new ChatPromptEditor(text => _ = SendSelectedThreadPromptAsync(steer: false))
             .PromptMarkup("[primary]>[/] ")
             .ContinuationPromptMarkup("[muted]·[/] ")
             .EnableWordHints(false)
             .MinHeight(3)
             .MaxHeight(9);
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Steer",
+            LabelMarkup = "Steer",
+            DescriptionMarkup = "Send an immediate steering instruction to the selected thread.",
+            Gesture = new KeyGesture(TerminalKey.F6),
+            Importance = CommandImportance.Primary,
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => { _ = SendSelectedThreadPromptAsync(steer: true); },
+            CanExecute = _visual => GetSelectedThread() is not null,
+        });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Delegate",
+            LabelMarkup = "Delegate",
+            DescriptionMarkup = "Create a delegated internal thread from the current project thread.",
+            Gesture = new KeyGesture(TerminalKey.F7),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => { _ = DelegateSelectedThreadAsync(); },
+            CanExecute = _visual => GetSelectedThread() is not null,
+        });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Abort",
+            LabelMarkup = "Abort",
+            DescriptionMarkup = "Abort the selected thread run.",
+            Gesture = new KeyGesture(TerminalKey.F8),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => { _ = AbortSelectedThreadAsync(); },
+            CanExecute = _visual => GetSelectedThread() is not null,
+        });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.CloseTab",
+            LabelMarkup = "Close Tab",
+            DescriptionMarkup = "Close the current thread tab.",
+            Gesture = new KeyGesture(TerminalKey.F9),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => { _ = CloseSelectedThreadAsync(); },
+            CanExecute = _visual => GetSelectedThread() is not null,
+        });
+
+        return editor;
     }
 
     private sealed class ThreadTabState
@@ -2208,7 +2290,8 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private sealed record SidebarSelectionTarget(
         SidebarSelectionKind Kind,
         string? ProjectId,
-        string? ThreadId)
+        string? ThreadId,
+        int TreeRowIndex = -1)
     {
         public static SidebarSelectionTarget Global()
             => new(SidebarSelectionKind.GlobalScope, null, null);

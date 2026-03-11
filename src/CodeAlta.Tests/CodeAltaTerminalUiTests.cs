@@ -120,8 +120,8 @@ public sealed class CodeAltaTerminalUiTests
             preferredBackendId: AgentBackendIds.Copilot.Value,
             globalScopeSelected: false);
 
-        Assert.AreEqual(@"CodeAlta | backend=codex | scope=global-draft | cwd=C:\Users\alexa\.codealta", globalHeader);
-        Assert.AreEqual("CodeAlta | backend=copilot | project=codealta | scope=draft", projectHeader);
+        Assert.AreEqual("CodeAlta | codex | global draft", globalHeader);
+        Assert.AreEqual("CodeAlta | copilot | codealta draft", projectHeader);
     }
 
     [TestMethod]
@@ -443,7 +443,7 @@ public sealed class CodeAltaTerminalUiTests
 
         StringAssert.Contains(markup, "Codex");
         StringAssert.Contains(markup, "Copilot");
-        StringAssert.Contains(markup, "CLI not found");
+        Assert.IsFalse(markup.Contains("CLI not found", StringComparison.Ordinal));
     }
 
     [TestMethod]

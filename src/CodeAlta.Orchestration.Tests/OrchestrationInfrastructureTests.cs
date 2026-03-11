@@ -484,6 +484,61 @@ public sealed class OrchestrationInfrastructureTests
         Assert.IsTrue(recoverable.Any(thread => string.Equals(thread.ThreadId, child.ThreadId, StringComparison.Ordinal)));
     }
 
+    [TestMethod]
+    public async Task WorkThreadRuntimeService_ListRecoverableThreadsAsync_MatchesProjectsWithLongPathPrefix()
+    {
+        using var temp = TempDirectory.Create();
+        var catalogOptions = new CatalogOptions { GlobalRoot = temp.Path };
+        var projectCatalog = new ProjectCatalog(catalogOptions);
+        var threadCatalog = new WorkThreadCatalog(catalogOptions);
+        var roleStore = new RoleProfileStore();
+        var instructionProvider = new AgentInstructionTemplateProvider();
+
+        var project = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Slug = "repo-main",
+            DisplayName = "Main Repo",
+            ProjectPath = Path.Combine(temp.Path, "repo-main"),
+            DefaultBranch = "main",
+        };
+        Directory.CreateDirectory(project.ProjectPath);
+        await projectCatalog.SaveAsync(project).ConfigureAwait(false);
+
+        var backendFactory = new AgentBackendFactory();
+        backendFactory.Register(
+            AgentBackendIds.Codex.Value,
+            () => new FakeBackend(
+                backendId: AgentBackendIds.Codex,
+                sessions:
+                [
+                    new AgentSessionMetadata(
+                        "session-1",
+                        DateTimeOffset.UtcNow.AddMinutes(-5),
+                        DateTimeOffset.UtcNow,
+                        "Review the repo",
+                        Context: null,
+                        WorkspacePath: $@"\\?\{project.ProjectPath}")
+                ]));
+
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        await using var hub = new AgentHub(backendFactory, repository);
+        await using var runtime = new WorkThreadRuntimeService(
+            hub,
+            projectCatalog,
+            threadCatalog,
+            roleStore,
+            instructionProvider,
+            catalogOptions);
+
+        var recoverable = await runtime.ListRecoverableThreadsAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, recoverable.Count);
+        Assert.AreEqual(WorkThreadKind.ProjectThread, recoverable[0].Kind);
+        Assert.AreEqual(project.Id, recoverable[0].ProjectRef);
+    }
+
     private static WorkThreadExecutionOptions CreateExecutionOptions(string workingDirectory)
     {
         return new WorkThreadExecutionOptions
@@ -525,18 +580,24 @@ public sealed class OrchestrationInfrastructureTests
     private sealed class FakeBackend : IAgentBackend
     {
         private int _runCounter;
+        private readonly AgentBackendId _backendId;
         private readonly IReadOnlyList<AgentModelInfo> _models;
+        private readonly IReadOnlyList<AgentSessionMetadata> _sessions;
         private readonly Func<AgentBackendId, string, AgentRunId, IReadOnlyList<AgentEvent>>? _sendEventFactory;
 
         public FakeBackend(
+            AgentBackendId? backendId = null,
             IReadOnlyList<AgentModelInfo>? models = null,
+            IReadOnlyList<AgentSessionMetadata>? sessions = null,
             Func<AgentBackendId, string, AgentRunId, IReadOnlyList<AgentEvent>>? sendEventFactory = null)
         {
+            _backendId = backendId ?? new AgentBackendId("fake");
             _models = models ?? [];
+            _sessions = sessions ?? [];
             _sendEventFactory = sendEventFactory;
         }
 
-        public AgentBackendId BackendId => new("fake");
+        public AgentBackendId BackendId => _backendId;
 
         public string DisplayName => "Fake";
 
@@ -554,7 +615,7 @@ public sealed class OrchestrationInfrastructureTests
         public Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(
             AgentSessionListFilter? filter = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<AgentSessionMetadata>>([]);
+            => Task.FromResult(_sessions);
 
         public Task<IAgentSession> CreateSessionAsync(
             AgentSessionCreateOptions options,

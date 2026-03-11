@@ -546,7 +546,19 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     }
 
     private static string NormalizePath(string path)
-        => Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    {
+        var trimmed = path.Trim();
+        if (trimmed.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = @"\\" + trimmed[8..];
+        }
+        else if (trimmed.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[4..];
+        }
+
+        return Path.GetFullPath(trimmed).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
 
     private AgentScope ToAgentScope(WorkThreadDescriptor thread)
     {

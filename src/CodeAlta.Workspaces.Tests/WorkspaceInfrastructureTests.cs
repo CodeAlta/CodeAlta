@@ -113,7 +113,7 @@ public sealed class WorkspaceInfrastructureTests
                 projectTemplate,
                 ProjectId.NewVersion7(),
                 "codealta-copy",
-                (projectPath + Path.DirectorySeparatorChar).Replace("\\", "\\\\"))).ConfigureAwait(false);
+                ($@"\\?\{projectPath}").Replace("\\", "\\\\"))).ConfigureAwait(false);
 
         var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = catalogRoot });
         var loaded = await catalog.LoadAsync().ConfigureAwait(false);
