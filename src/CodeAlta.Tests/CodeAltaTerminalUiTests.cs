@@ -132,6 +132,46 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void BuildReadyStatusText_ReflectsCurrentSelection()
+    {
+        var project = new ProjectDescriptor
+        {
+            Id = "project-1",
+            Slug = "codealta",
+            DisplayName = "CodeAlta",
+            ProjectPath = @"C:\code\CodeAlta",
+        };
+
+        var thread = new WorkThreadDescriptor
+        {
+            ThreadId = "thread-1",
+            Kind = WorkThreadKind.ProjectThread,
+            BackendId = AgentBackendIds.Codex.Value,
+            BackendSessionId = "backend-thread-1",
+            ProjectRef = "project-1",
+            WorkingDirectory = @"C:\code\CodeAlta",
+            Title = "Review startup",
+            Status = WorkThreadStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastActiveAt = DateTimeOffset.UtcNow,
+        };
+
+        Assert.AreEqual("Prompt ready · Global", CodeAltaTerminalUi.BuildReadyStatusText(null, null, globalScopeSelected: true));
+        Assert.AreEqual("Prompt ready · CodeAlta", CodeAltaTerminalUi.BuildReadyStatusText(null, project, globalScopeSelected: false));
+        Assert.AreEqual("Prompt ready · Review startup", CodeAltaTerminalUi.BuildReadyStatusText(thread, project, globalScopeSelected: false));
+    }
+
+    [TestMethod]
+    public void BuildStatusIconMarkup_ReturnsColoredIconsPerTone()
+    {
+        StringAssert.Contains(CodeAltaTerminalUi.BuildStatusIconMarkup(CodeAltaTerminalUi.StatusTone.Ready), "green");
+        StringAssert.Contains(CodeAltaTerminalUi.BuildStatusIconMarkup(CodeAltaTerminalUi.StatusTone.Warning), "gold");
+        StringAssert.Contains(CodeAltaTerminalUi.BuildStatusIconMarkup(CodeAltaTerminalUi.StatusTone.Error), "red");
+        StringAssert.Contains(CodeAltaTerminalUi.BuildStatusIconMarkup(CodeAltaTerminalUi.StatusTone.Info), "deepskyblue");
+    }
+
+    [TestMethod]
     public void CompactSidebarThreadTitle_TrimsLongTitlesToSingleLineLength()
     {
         var compact = CodeAltaTerminalUi.CompactSidebarThreadTitle("The lunet-build action in this repository is used like this:");

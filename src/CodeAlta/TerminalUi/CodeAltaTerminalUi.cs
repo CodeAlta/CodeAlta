@@ -36,6 +36,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private Dispatcher? _dispatcher;
     private TextBlock? _header;
     private TextBlock? _status;
+    private Markup? _statusIcon;
     private Spinner? _statusSpinner;
     private DockLayout? _threadPaneLayout;
     private Visual? _threadBottomPanel;
@@ -56,6 +57,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private bool _chatSelectorsRefreshing;
     private bool _chatBindingEventsSubscribed;
     private volatile bool _chatAutoApproveEnabled = true;
+    private bool _statusBusy;
     private bool _globalScopeSelected = true;
     private bool _sidebarSelectionSyncEnabled = true;
     private SidebarSelectionTarget? _lastSidebarSelectedTarget;
@@ -106,7 +108,12 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         _status = new TextBlock
         {
             Wrap = true,
-            Text = "Select a project or global thread and start working.",
+            Text = "Prompt ready.",
+        };
+
+        _statusIcon = new Markup(BuildStatusIconMarkup(StatusTone.Ready))
+        {
+            Wrap = false,
         };
 
         _statusSpinner = new Spinner();
@@ -571,6 +578,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var statusLine = new HStack(
             [
                 _statusSpinner!,
+                _statusIcon!,
                 _status!,
             ])
         {
@@ -702,11 +710,11 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             _threads = await _runtimeService.ListRecoverableThreadsAsync().ConfigureAwait(false);
             EnsureSelectionDefaults();
             RefreshView();
-            SetStatus("Catalog refreshed.");
+            SetStatus("Catalog ready.", tone: StatusTone.Ready);
         }
         catch (Exception ex)
         {
-            SetStatus($"Failed to refresh catalog: {ex.Message}");
+            SetStatus($"Failed to refresh catalog: {ex.Message}", tone: StatusTone.Error);
         }
     }
 
@@ -723,12 +731,12 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             var thread = await _runtimeService.CreateGlobalThreadAsync(executionOptions, title).ConfigureAwait(false);
             await RegisterCreatedThreadAsync(thread).ConfigureAwait(false);
             ClearThreadTitleDraft();
-            SetStatus($"Created global thread '{thread.Title}'.");
+            SetStatus($"Prompt ready · {thread.Title}", tone: StatusTone.Ready);
             return thread;
         }
         catch (Exception ex)
         {
-            SetStatus($"Failed to create global thread: {ex.Message}");
+            SetStatus($"Failed to create global thread: {ex.Message}", tone: StatusTone.Error);
             return null;
         }
     }
@@ -738,7 +746,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var project = GetSelectedProject();
         if (project is null)
         {
-            SetStatus("Select a project before creating a project thread.");
+            SetStatus("Select a project before creating a project thread.", tone: StatusTone.Warning);
             return null;
         }
 
@@ -753,12 +761,12 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             var thread = await _runtimeService.CreateProjectThreadAsync(project, executionOptions, title).ConfigureAwait(false);
             await RegisterCreatedThreadAsync(thread).ConfigureAwait(false);
             ClearThreadTitleDraft();
-            SetStatus($"Created thread '{thread.Title}'.");
+            SetStatus($"Prompt ready · {thread.Title}", tone: StatusTone.Ready);
             return thread;
         }
         catch (Exception ex)
         {
-            SetStatus($"Failed to create project thread: {ex.Message}");
+            SetStatus($"Failed to create project thread: {ex.Message}", tone: StatusTone.Error);
             return null;
         }
     }
@@ -781,7 +789,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var thread = FindThread(threadId);
         if (thread is null)
         {
-            SetStatus($"Thread '{threadId}' was not found.");
+            SetStatus($"Thread '{threadId}' was not found.", tone: StatusTone.Warning);
             return;
         }
 
@@ -848,12 +856,12 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             }
 
             tab.HistoryLoaded = true;
-            SetStatus($"Loaded thread '{thread.Title}'.");
+            SetStatus($"Prompt ready · {thread.Title}", tone: StatusTone.Ready);
         }
         catch (Exception ex)
         {
             RenderThreadFailure(tab, $"Failed to load history: {ex.Message}");
-            SetStatus($"Failed to load '{thread.Title}': {ex.Message}");
+            SetStatus($"Failed to load '{thread.Title}': {ex.Message}", tone: StatusTone.Error);
         }
         finally
         {
@@ -868,7 +876,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         {
             if (steer)
             {
-                SetStatus("Send the first prompt before steering a thread.");
+                SetStatus("Start the thread before steering it.", tone: StatusTone.Warning);
                 return;
             }
 
@@ -922,7 +930,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         catch (Exception ex)
         {
             RenderThreadFailure(tab, $"Failed to send prompt: {ex.Message}");
-            SetStatus($"Failed to send prompt: {ex.Message}");
+            SetStatus($"Failed to send prompt: {ex.Message}", tone: StatusTone.Error);
         }
     }
 
@@ -931,7 +939,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var thread = GetSelectedThread();
         if (thread is null)
         {
-            SetStatus("Open a thread before delegating work.");
+            SetStatus("Open a thread before delegating work.", tone: StatusTone.Warning);
             return;
         }
 
@@ -939,14 +947,14 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var prompt = ReadUiValue(() => _threadInput?.Text?.Trim());
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            SetStatus("Enter delegation instructions before creating an internal thread.");
+            SetStatus("Enter delegation instructions before creating an internal thread.", tone: StatusTone.Warning);
             return;
         }
 
         var targetProject = GetProjectById(thread.ProjectRef ?? _selectedProjectId);
         if (targetProject is null)
         {
-            SetStatus("Select a project before delegating internal work.");
+            SetStatus("Select a project before delegating internal work.", tone: StatusTone.Warning);
             return;
         }
 
@@ -1010,14 +1018,14 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                 .ConfigureAwait(false);
 
             ClearThreadInput();
-            SetStatus($"Delegated internal thread '{child.Title}'.");
+            SetStatus($"Delegation started · {child.Title}", tone: StatusTone.Ready);
             await PersistViewStateAsync().ConfigureAwait(false);
             RefreshView();
         }
         catch (Exception ex)
         {
             UiLogger.Error(ex, "Failed to delegate internal thread.");
-            SetStatus($"Failed to delegate internal thread: {ex.Message}");
+            SetStatus($"Failed to delegate internal thread: {ex.Message}", tone: StatusTone.Error);
         }
     }
 
@@ -1032,11 +1040,11 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         try
         {
             await _runtimeService.AbortAsync(thread.ThreadId).ConfigureAwait(false);
-            SetStatus($"Aborted '{thread.Title}'.");
+            SetStatus($"Stopped · {thread.Title}", tone: StatusTone.Warning);
         }
         catch (Exception ex)
         {
-            SetStatus($"Failed to abort '{thread.Title}': {ex.Message}");
+            SetStatus($"Failed to abort '{thread.Title}': {ex.Message}", tone: StatusTone.Error);
         }
     }
 
@@ -1168,7 +1176,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                 if (update.Kind == AgentSessionUpdateKind.Idle)
                 {
                     ReplaceEmptyPendingAssistantPlaceholder(tab);
-                    SetStatus($"Thread '{thread.Title}' is idle.");
+                    SetStatus($"Prompt ready · {thread.Title}", tone: StatusTone.Ready);
                     break;
                 }
 
@@ -1381,7 +1389,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                 UiLogger.Error(ex, $"Failed to render thread {context}");
             }
 
-            SetStatus($"Failed to render thread {context}: {ex.Message}");
+            SetStatus($"Failed to render thread {context}: {ex.Message}", tone: StatusTone.Error);
             tab.PendingAssistant = null;
         }
     }
@@ -1736,6 +1744,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             RefreshChatSelectorsForDraftScope();
             _threadInput.Placeholder = BuildPromptPlaceholder(null, GetSelectedProject(), _globalScopeSelected);
             _threadBodySplitter.First = new TextBlock("No open tabs.");
+            if (!_statusBusy)
+            {
+                SetReadyStatusForCurrentSelection();
+            }
             return;
         }
 
@@ -1743,6 +1755,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         _threadInput.Placeholder = BuildPromptPlaceholder(selectedThread, GetSelectedProject(), _globalScopeSelected);
         RefreshChatSelectorsForThread(tab);
         _threadBodySplitter.First = tab.Flow;
+        if (!_statusBusy)
+        {
+            SetReadyStatusForCurrentSelection();
+        }
     }
 
     private void RefreshChatSelectorsForDraftScope(AgentBackendId? preferredBackendId = null)
@@ -2055,6 +2071,37 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             ? "Send the first prompt to start a global thread."
             : "Send the first prompt to start a thread for the selected project.";
 
+    internal static string BuildReadyStatusText(
+        WorkThreadDescriptor? thread,
+        ProjectDescriptor? selectedProject,
+        bool globalScopeSelected)
+    {
+        if (thread is not null)
+        {
+            return $"Prompt ready · {thread.Title}";
+        }
+
+        if (globalScopeSelected)
+        {
+            return "Prompt ready · Global";
+        }
+
+        return selectedProject is null
+            ? "Prompt ready."
+            : $"Prompt ready · {selectedProject.DisplayName}";
+    }
+
+    internal static string BuildStatusIconMarkup(StatusTone tone)
+    {
+        return tone switch
+        {
+            StatusTone.Ready => $"[green]{NerdFont.MdCheckCircleOutline}[/]",
+            StatusTone.Warning => $"[gold]{NerdFont.MdAlertOutline}[/]",
+            StatusTone.Error => $"[red]{NerdFont.MdAlertCircleOutline}[/]",
+            _ => $"[deepskyblue]{NerdFont.OctInfo}[/]",
+        };
+    }
+
     private static string BuildPromptPlaceholder(
         WorkThreadDescriptor? thread,
         ProjectDescriptor? selectedProject,
@@ -2101,11 +2148,13 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         return header;
     }
 
-    private void SetStatus(string message, bool showSpinner = false)
+    private void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info)
     {
         PostToUi(
             () =>
             {
+                _statusBusy = showSpinner;
+
                 if (_status is not null)
                 {
                     _status.Text = message;
@@ -2116,7 +2165,20 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                     _statusSpinner.IsVisible = showSpinner;
                     _statusSpinner.IsActive = showSpinner;
                 }
+
+                if (_statusIcon is not null)
+                {
+                    _statusIcon.IsVisible = !showSpinner;
+                    _statusIcon.Text = BuildStatusIconMarkup(tone);
+                }
             });
+    }
+
+    private void SetReadyStatusForCurrentSelection()
+    {
+        SetStatus(
+            BuildReadyStatusText(GetSelectedThread(), GetSelectedProject(), _globalScopeSelected),
+            tone: StatusTone.Ready);
     }
 
     private void PostToUi(Action action)
@@ -2248,7 +2310,11 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             .PromptMarkup("[primary]>[/] ")
             .ContinuationPromptMarkup("[muted]·[/] ")
             .EnableWordHints(false)
-            .MinHeight(3);
+            .MinHeight(3)
+            .Style(PromptEditorStyle.Default with
+            {
+                PlaceholderForeground = Colors.SlateGray,
+            });
 
         editor.AddCommand(new Command
         {
@@ -2340,6 +2406,14 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         GlobalScope,
         ProjectScope,
         Thread,
+    }
+
+    internal enum StatusTone
+    {
+        Info,
+        Ready,
+        Warning,
+        Error,
     }
 
     private sealed record SidebarSelectionTarget(
