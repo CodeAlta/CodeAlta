@@ -20,22 +20,34 @@ public sealed class WorkThreadDescriptor
     public WorkThreadKind Kind { get; set; }
 
     /// <summary>
-    /// Gets or sets the owning workspace identifier for workspace threads.
+    /// Gets or sets the backend identifier for the thread.
     /// </summary>
-    [JsonPropertyName("workspace_ref")]
-    public string? WorkspaceRef { get; set; }
+    [JsonPropertyName("backend_id")]
+    public string BackendId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the active project identifiers.
+    /// Gets or sets the backend-owned session identifier.
     /// </summary>
-    [JsonPropertyName("project_refs")]
-    public List<string> ProjectRefs { get; set; } = [];
+    [JsonPropertyName("backend_session_id")]
+    public string BackendSessionId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the project scope mode.
+    /// Gets or sets the owning project identifier for project threads.
     /// </summary>
-    [JsonPropertyName("scope_mode")]
-    public WorkThreadScopeMode ScopeMode { get; set; }
+    [JsonPropertyName("project_ref")]
+    public string? ProjectRef { get; set; }
+
+    /// <summary>
+    /// Gets or sets the parent thread identifier for delegated child work.
+    /// </summary>
+    [JsonPropertyName("parent_thread_id")]
+    public string? ParentThreadId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the session working directory.
+    /// </summary>
+    [JsonPropertyName("working_directory")]
+    public string WorkingDirectory { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the thread title.
@@ -90,12 +102,12 @@ public sealed class WorkThreadDescriptor
     public string? MarkdownBody { get; set; }
 
     /// <summary>
-    /// Gets a value indicating whether the workspace is locked.
+    /// Gets a value indicating whether the thread can no longer change backends.
     /// </summary>
-    public bool IsWorkspaceLocked => Kind == WorkThreadKind.WorkspaceThread && StartedAt is not null;
+    public bool IsBackendLocked => StartedAt is not null;
 
     /// <summary>
-    /// Marks the thread as started and therefore workspace-locked.
+    /// Marks the thread as started.
     /// </summary>
     /// <param name="timestamp">The timestamp to record.</param>
     public void MarkStarted(DateTimeOffset timestamp)
@@ -144,46 +156,41 @@ public sealed class WorkThreadDescriptor
             throw new ArgumentException("LastActiveAt is required.", nameof(LastActiveAt));
         }
 
-        var duplicateRef = ProjectRefs
-            .Where(static x => !string.IsNullOrWhiteSpace(x))
-            .GroupBy(static x => x, StringComparer.OrdinalIgnoreCase)
-            .Where(static x => x.Count() > 1)
-            .Select(static x => x.Key)
-            .FirstOrDefault();
-
-        if (duplicateRef is not null)
+        if (string.IsNullOrWhiteSpace(BackendId))
         {
-            throw new ArgumentException($"Thread '{ThreadId}' contains duplicate project ref '{duplicateRef}'.", nameof(ProjectRefs));
+            throw new ArgumentException("Backend id is required.", nameof(BackendId));
         }
 
-        if (Kind == WorkThreadKind.Global)
+        if (string.IsNullOrWhiteSpace(BackendSessionId))
         {
-            if (!string.IsNullOrWhiteSpace(WorkspaceRef))
-            {
-                throw new ArgumentException("Global threads cannot declare a workspace.", nameof(WorkspaceRef));
-            }
-
-            return;
+            throw new ArgumentException("Backend session id is required.", nameof(BackendSessionId));
         }
 
-        if (!WorkspaceId.TryParse(WorkspaceRef, out _))
+        if (string.IsNullOrWhiteSpace(WorkingDirectory))
         {
-            throw new ArgumentException("Workspace threads require a valid workspace_ref.", nameof(WorkspaceRef));
+            throw new ArgumentException("Working directory is required.", nameof(WorkingDirectory));
         }
 
-        if (ScopeMode == WorkThreadScopeMode.SingleProject && ProjectRefs.Count != 1)
+        switch (Kind)
         {
-            throw new ArgumentException("Single-project threads must declare exactly one project ref.", nameof(ProjectRefs));
-        }
+            case WorkThreadKind.GlobalThread:
+                if (!string.IsNullOrWhiteSpace(ProjectRef))
+                {
+                    throw new ArgumentException("Global threads cannot declare a project.", nameof(ProjectRef));
+                }
 
-        if (ScopeMode == WorkThreadScopeMode.MultiProject && ProjectRefs.Count < 2)
-        {
-            throw new ArgumentException("Multi-project threads must declare at least two project refs.", nameof(ProjectRefs));
-        }
+                break;
 
-        if (ScopeMode == WorkThreadScopeMode.AllProjects && ProjectRefs.Count > 0)
-        {
-            throw new ArgumentException("All-projects threads should not persist explicit project refs.", nameof(ProjectRefs));
+            case WorkThreadKind.ProjectThread:
+                if (!ProjectId.TryParse(ProjectRef, out _))
+                {
+                    throw new ArgumentException("Project threads require a valid project_ref.", nameof(ProjectRef));
+                }
+
+                break;
+
+            case WorkThreadKind.InternalThread:
+                break;
         }
     }
 }

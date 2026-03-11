@@ -1,16 +1,15 @@
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using CodeAlta.Agent;
-using CodeAlta.Persistence;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Roles;
+using CodeAlta.Persistence;
 
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Owns per-thread coordinator sessions and projects sanitized runtime events.
+/// Owns per-thread coordinator sessions, recovers backend-owned project/global threads, and projects sanitized runtime events.
 /// </summary>
 public sealed class WorkThreadRuntimeService : IAsyncDisposable
 {
@@ -19,11 +18,11 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
 
     private readonly AgentHub _agentHub;
-    private readonly WorkspaceCatalog _workspaceCatalog;
+    private readonly ProjectCatalog _projectCatalog;
     private readonly WorkThreadCatalog _threadCatalog;
     private readonly RoleProfileStore _roleProfileStore;
     private readonly AgentInstructionTemplateProvider _instructionTemplateProvider;
-    private readonly WorkspaceCatalogOptions _catalogOptions;
+    private readonly CatalogOptions _catalogOptions;
     private readonly Channel<WorkThreadRuntimeEvent> _events = Channel.CreateUnbounded<WorkThreadRuntimeEvent>();
     private readonly Dictionary<string, ThreadSessionEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _gate = new(initialCount: 1, maxCount: 1);
@@ -34,21 +33,21 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     /// </summary>
     public WorkThreadRuntimeService(
         AgentHub agentHub,
-        WorkspaceCatalog workspaceCatalog,
+        ProjectCatalog projectCatalog,
         WorkThreadCatalog threadCatalog,
         RoleProfileStore roleProfileStore,
         AgentInstructionTemplateProvider instructionTemplateProvider,
-        WorkspaceCatalogOptions catalogOptions)
+        CatalogOptions catalogOptions)
     {
         ArgumentNullException.ThrowIfNull(agentHub);
-        ArgumentNullException.ThrowIfNull(workspaceCatalog);
+        ArgumentNullException.ThrowIfNull(projectCatalog);
         ArgumentNullException.ThrowIfNull(threadCatalog);
         ArgumentNullException.ThrowIfNull(roleProfileStore);
         ArgumentNullException.ThrowIfNull(instructionTemplateProvider);
         ArgumentNullException.ThrowIfNull(catalogOptions);
 
         _agentHub = agentHub;
-        _workspaceCatalog = workspaceCatalog;
+        _projectCatalog = projectCatalog;
         _threadCatalog = threadCatalog;
         _roleProfileStore = roleProfileStore;
         _instructionTemplateProvider = instructionTemplateProvider;
@@ -59,17 +58,104 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     /// Streams sanitized runtime events across all active threads.
     /// </summary>
     public IAsyncEnumerable<WorkThreadRuntimeEvent> StreamEventsAsync(CancellationToken cancellationToken = default)
+        => _events.Reader.ReadAllAsync(cancellationToken);
+
+    /// <summary>
+    /// Lists recoverable user-facing threads from backend session history.
+    /// </summary>
+    public async Task<IReadOnlyList<WorkThreadDescriptor>> ListRecoverableThreadsAsync(CancellationToken cancellationToken = default)
     {
-        return _events.Reader.ReadAllAsync(cancellationToken);
+        var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var internalThreads = await _threadCatalog.LoadInternalAsync(cancellationToken).ConfigureAwait(false);
+        var results = new List<WorkThreadDescriptor>(internalThreads.Count);
+        results.AddRange(internalThreads);
+
+        foreach (var backendId in new[] { AgentBackendIds.Codex, AgentBackendIds.Copilot })
+        {
+            var sessions = await _agentHub.ListSessionsAsync(backendId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            foreach (var session in sessions)
+            {
+                var thread = TryCreateRecoverableThread(backendId, session, projects);
+                if (thread is not null)
+                {
+                    results.Add(thread);
+                }
+            }
+        }
+
+        return results
+            .GroupBy(static thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.First())
+            .OrderByDescending(static thread => thread.LastActiveAt)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Creates a new global thread session and returns its descriptor.
+    /// </summary>
+    public async Task<WorkThreadDescriptor> CreateGlobalThreadAsync(
+        WorkThreadExecutionOptions options,
+        string? title,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var now = DateTimeOffset.UtcNow;
+        var thread = new WorkThreadDescriptor
+        {
+            ThreadId = string.Empty,
+            Kind = WorkThreadKind.GlobalThread,
+            BackendId = options.BackendId.Value,
+            BackendSessionId = string.Empty,
+            WorkingDirectory = options.WorkingDirectory,
+            Title = string.IsNullOrWhiteSpace(title) ? "Global Thread" : title.Trim(),
+            Status = WorkThreadStatus.Draft,
+            CreatedAt = now,
+            UpdatedAt = now,
+            LastActiveAt = now,
+            LatestSummary = "Global overview and coordination thread.",
+        };
+
+        await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
+        return thread;
+    }
+
+    /// <summary>
+    /// Creates a new project thread session and returns its descriptor.
+    /// </summary>
+    public async Task<WorkThreadDescriptor> CreateProjectThreadAsync(
+        ProjectDescriptor project,
+        WorkThreadExecutionOptions options,
+        string? title,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var now = DateTimeOffset.UtcNow;
+        var thread = new WorkThreadDescriptor
+        {
+            ThreadId = string.Empty,
+            Kind = WorkThreadKind.ProjectThread,
+            BackendId = options.BackendId.Value,
+            BackendSessionId = string.Empty,
+            ProjectRef = project.Id,
+            WorkingDirectory = options.WorkingDirectory,
+            Title = string.IsNullOrWhiteSpace(title) ? project.DisplayName : title.Trim(),
+            Status = WorkThreadStatus.Draft,
+            CreatedAt = now,
+            UpdatedAt = now,
+            LastActiveAt = now,
+            LatestSummary = $"Project thread for {project.DisplayName}.",
+        };
+
+        await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
+        return thread;
     }
 
     /// <summary>
     /// Ensures that the thread has an active coordinator session.
     /// </summary>
-    /// <param name="thread">The thread descriptor.</param>
-    /// <param name="options">Execution options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The coordinator agent identifier.</returns>
     public async Task<AgentId> EnsureCoordinatorSessionAsync(
         WorkThreadDescriptor thread,
         WorkThreadExecutionOptions options,
@@ -79,22 +165,11 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.WorkingDirectory);
 
-        var workspaces = await _workspaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var workspace = thread.Kind == WorkThreadKind.Global
-            ? null
-            : workspaces.FirstOrDefault(x => string.Equals(x.Id, thread.WorkspaceRef, StringComparison.OrdinalIgnoreCase));
-        var projects = ResolveProjects(thread, workspace);
-        var coordinatorProfile = await _roleProfileStore.GetByIdAsync(
-                [Path.Combine(_catalogOptions.GlobalRepoRoot, "agents"), .. options.ProjectRoots.Select(static root => Path.Combine(root, ".codealta", "agents"))],
-                "coordinator",
-                cancellationToken)
-            .ConfigureAwait(false)
+        var project = await ResolveProjectAsync(thread, cancellationToken).ConfigureAwait(false);
+        var agentRoots = BuildAgentRoots(options.ProjectRoots);
+        var coordinatorProfile = await _roleProfileStore.GetByIdAsync(agentRoots, "coordinator", cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Coordinator profile was not available.");
-        var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(
-            thread,
-            workspace,
-            projects,
-            coordinatorProfile);
+        var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(thread, project, coordinatorProfile);
 
         ThreadSessionEntry? previousEntry = null;
         AgentId agentId;
@@ -102,13 +177,14 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_entries.TryGetValue(thread.ThreadId, out var existing)
-                && existing.Matches(options))
+            if (!string.IsNullOrWhiteSpace(thread.ThreadId) &&
+                _entries.TryGetValue(thread.ThreadId, out var existing) &&
+                existing.Matches(options, thread.BackendSessionId))
             {
                 return existing.AgentId;
             }
 
-            if (_entries.TryGetValue(thread.ThreadId, out previousEntry))
+            if (!string.IsNullOrWhiteSpace(thread.ThreadId) && _entries.TryGetValue(thread.ThreadId, out previousEntry))
             {
                 _entries.Remove(thread.ThreadId);
             }
@@ -131,33 +207,41 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             .ConfigureAwait(false);
         agentId = identity.AgentId;
 
-        await _agentHub.StartSessionAsync(
-                agentId,
-                new AgentSessionCreateOptions
-                {
-                    Model = options.Model ?? coordinatorProfile.DefaultModel,
-                    ReasoningEffort = options.ReasoningEffort ?? ParseReasoningEffort(coordinatorProfile.DefaultReasoningEffort),
-                    Streaming = true,
-                    WorkingDirectory = options.WorkingDirectory,
-                    SystemMessage = instructions.SystemMessage,
-                    DeveloperInstructions = instructions.DeveloperInstructions,
-                    Tools = options.Tools,
-                    OnPermissionRequest = options.OnPermissionRequest,
-                    OnUserInputRequest = options.OnUserInputRequest,
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
+        var sessionOptions = new AgentSessionResumeOptions
+        {
+            Model = options.Model ?? coordinatorProfile.DefaultModel,
+            ReasoningEffort = options.ReasoningEffort ?? ParseReasoningEffort(coordinatorProfile.DefaultReasoningEffort),
+            Streaming = true,
+            WorkingDirectory = options.WorkingDirectory,
+            SystemMessage = instructions.SystemMessage,
+            DeveloperInstructions = instructions.DeveloperInstructions,
+            Tools = options.Tools,
+            OnPermissionRequest = options.OnPermissionRequest,
+            OnUserInputRequest = options.OnUserInputRequest,
+        };
+
+        string backendSessionId;
+        if (string.IsNullOrWhiteSpace(thread.BackendSessionId))
+        {
+            backendSessionId = await _agentHub.StartSessionAsync(agentId, sessionOptions, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            backendSessionId = await _agentHub.ResumeSessionAsync(agentId, thread.BackendSessionId, sessionOptions, cancellationToken).ConfigureAwait(false);
+        }
+
+        thread.BackendId = options.BackendId.Value;
+        thread.BackendSessionId = backendSessionId;
+        thread.WorkingDirectory = options.WorkingDirectory;
+        thread.ThreadId = CreateThreadId(options.BackendId, backendSessionId);
 
         var projector = new EventProjector(thread.ThreadId, _events.Writer);
-        var subscription = await _agentHub.SubscribeSessionEventsAsync(
-                agentId,
-                projector.Project,
-                cancellationToken)
-            .ConfigureAwait(false);
+        var subscription = await _agentHub.SubscribeSessionEventsAsync(agentId, projector.Project, cancellationToken).ConfigureAwait(false);
 
         var entry = new ThreadSessionEntry(
             agentId,
             options.BackendId,
+            backendSessionId,
             options.WorkingDirectory,
             options.Model ?? coordinatorProfile.DefaultModel,
             options.ReasoningEffort ?? ParseReasoningEffort(coordinatorProfile.DefaultReasoningEffort),
@@ -191,10 +275,9 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sendOptions);
 
         var agentId = await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
-        if (!thread.IsWorkspaceLocked && thread.Kind == WorkThreadKind.WorkspaceThread)
+        if (thread.StartedAt is null)
         {
             thread.MarkStarted(DateTimeOffset.UtcNow);
-            await _threadCatalog.SaveAsync(thread, cancellationToken).ConfigureAwait(false);
         }
 
         return await _agentHub.RunAsync(agentId, sendOptions, cancellationToken).ConfigureAwait(false);
@@ -247,12 +330,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
         var handoffInput = AgentInput.Text(
             $"Handoff from thread '{sourceThread.Title}' ({sourceThread.ThreadId}): {instruction}");
-        return await SendAsync(
-                targetThread,
-                targetOptions,
-                new AgentSendOptions { Input = handoffInput },
-                cancellationToken)
-            .ConfigureAwait(false);
+        return await SendAsync(targetThread, targetOptions, new AgentSendOptions { Input = handoffInput }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -294,6 +372,25 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         _gate.Dispose();
     }
 
+    /// <summary>
+    /// Creates the stable UI thread id for a backend-owned thread.
+    /// </summary>
+    public static string CreateThreadId(AgentBackendId backendId, string backendSessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backendSessionId);
+        return $"{backendId.Value}:{backendSessionId}";
+    }
+
+    private async Task<ProjectDescriptor?> ResolveProjectAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(thread.ProjectRef))
+        {
+            return null;
+        }
+
+        return await _projectCatalog.GetByIdAsync(thread.ProjectRef, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<ThreadSessionEntry> GetEntryAsync(string threadId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(threadId))
@@ -317,32 +414,103 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         }
     }
 
-    private static AgentScope ToAgentScope(WorkThreadDescriptor thread)
+    private WorkThreadDescriptor? TryCreateRecoverableThread(
+        AgentBackendId backendId,
+        AgentSessionMetadata session,
+        IReadOnlyList<ProjectDescriptor> projects)
     {
-        return thread.Kind switch
+        var cwd = session.Context?.Cwd ?? session.WorkspacePath;
+        if (string.IsNullOrWhiteSpace(cwd))
         {
-            WorkThreadKind.Global => new AgentScope { Kind = AgentScopeKind.Global },
-            WorkThreadKind.WorkspaceThread => new AgentScope { Kind = AgentScopeKind.Workspace, Id = thread.WorkspaceRef },
-            _ => throw new InvalidOperationException($"Unsupported thread kind '{thread.Kind}'."),
+            return null;
+        }
+
+        var normalizedCwd = NormalizePath(cwd);
+        if (string.Equals(normalizedCwd, NormalizePath(_catalogOptions.GlobalRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            return new WorkThreadDescriptor
+            {
+                ThreadId = CreateThreadId(backendId, session.SessionId),
+                Kind = WorkThreadKind.GlobalThread,
+                BackendId = backendId.Value,
+                BackendSessionId = session.SessionId,
+                WorkingDirectory = normalizedCwd,
+                Title = BuildThreadTitle(session, "Global Thread"),
+                Status = WorkThreadStatus.Active,
+                CreatedAt = session.CreatedAt,
+                UpdatedAt = session.UpdatedAt,
+                LastActiveAt = session.UpdatedAt,
+                LatestSummary = session.Summary,
+            };
+        }
+
+        var project = projects.FirstOrDefault(candidate =>
+            string.Equals(NormalizePath(candidate.ProjectPath), normalizedCwd, StringComparison.OrdinalIgnoreCase));
+        if (project is null)
+        {
+            return null;
+        }
+
+        return new WorkThreadDescriptor
+        {
+            ThreadId = CreateThreadId(backendId, session.SessionId),
+            Kind = WorkThreadKind.ProjectThread,
+            BackendId = backendId.Value,
+            BackendSessionId = session.SessionId,
+            ProjectRef = project.Id,
+            WorkingDirectory = normalizedCwd,
+            Title = BuildThreadTitle(session, project.DisplayName),
+            Status = WorkThreadStatus.Active,
+            CreatedAt = session.CreatedAt,
+            UpdatedAt = session.UpdatedAt,
+            LastActiveAt = session.UpdatedAt,
+            LatestSummary = session.Summary,
         };
     }
 
-    private static IReadOnlyList<ProjectDescriptor> ResolveProjects(
-        WorkThreadDescriptor thread,
-        WorkspaceDescriptor? workspace)
+    private static string BuildThreadTitle(AgentSessionMetadata session, string fallback)
     {
-        if (workspace is null)
+        if (!string.IsNullOrWhiteSpace(session.Summary))
         {
-            return [];
+            var summary = session.Summary.Trim();
+            var firstLine = summary.Split(['\r', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+            if (!string.IsNullOrWhiteSpace(firstLine))
+            {
+                return firstLine.Length <= 80 ? firstLine : firstLine[..80];
+            }
         }
 
-        return thread.ScopeMode switch
+        return fallback;
+    }
+
+    private static string NormalizePath(string path)
+        => Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private AgentScope ToAgentScope(WorkThreadDescriptor thread)
+    {
+        return thread.Kind switch
         {
-            WorkThreadScopeMode.AllProjects => workspace.Projects.ToArray(),
-            _ => workspace.Projects
-                .Where(project => thread.ProjectRefs.Contains(project.Id, StringComparer.OrdinalIgnoreCase))
-                .ToArray(),
+            WorkThreadKind.GlobalThread => new AgentScope { Kind = AgentScopeKind.Global },
+            WorkThreadKind.ProjectThread => new AgentScope { Kind = AgentScopeKind.Project, Id = thread.ProjectRef },
+            WorkThreadKind.InternalThread when !string.IsNullOrWhiteSpace(thread.ProjectRef) => new AgentScope { Kind = AgentScopeKind.Project, Id = thread.ProjectRef },
+            _ => new AgentScope { Kind = AgentScopeKind.Global },
         };
+    }
+
+    private IReadOnlyList<string> BuildAgentRoots(IReadOnlyList<string> projectRoots, bool includeGlobal = true)
+    {
+        var roots = new List<string>();
+        if (includeGlobal)
+        {
+            roots.Add(_catalogOptions.AgentsRoot);
+        }
+
+        foreach (var projectRoot in projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)))
+        {
+            roots.Add(Path.Combine(projectRoot, ".codealta", "agents"));
+        }
+
+        return roots;
     }
 
     private static AgentReasoningEffort? ParseReasoningEffort(string? value)
@@ -363,6 +531,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         public ThreadSessionEntry(
             AgentId agentId,
             AgentBackendId backendId,
+            string backendSessionId,
             string workingDirectory,
             string? model,
             AgentReasoningEffort? reasoningEffort,
@@ -371,6 +540,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         {
             AgentId = agentId;
             BackendId = backendId;
+            BackendSessionId = backendSessionId;
             WorkingDirectory = workingDirectory;
             Model = model;
             ReasoningEffort = reasoningEffort;
@@ -382,6 +552,8 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
         public AgentBackendId BackendId { get; }
 
+        public string BackendSessionId { get; }
+
         public string WorkingDirectory { get; }
 
         public string? Model { get; }
@@ -392,9 +564,10 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
         public EventProjector Projector { get; }
 
-        public bool Matches(WorkThreadExecutionOptions options)
+        public bool Matches(WorkThreadExecutionOptions options, string backendSessionId)
         {
             return string.Equals(BackendId.Value, options.BackendId.Value, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(BackendSessionId, backendSessionId, StringComparison.Ordinal)
                 && string.Equals(WorkingDirectory, options.WorkingDirectory, StringComparison.Ordinal)
                 && string.Equals(Model, options.Model, StringComparison.Ordinal)
                 && ReasoningEffort == options.ReasoningEffort;
@@ -405,7 +578,6 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             Subscription.Dispose();
             await hub.StopSessionAsync(AgentId).ConfigureAwait(false);
         }
-
     }
 
     private sealed class EventProjector
@@ -484,12 +656,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             }
 
             state.PreviousSanitized = stripped;
-            if (string.IsNullOrEmpty(deltaText))
-            {
-                return null;
-            }
-
-            return delta with { Delta = deltaText };
+            return string.IsNullOrEmpty(deltaText) ? null : delta with { Delta = deltaText };
         }
 
         private AgentEvent? SanitizeCompleted(AgentContentCompletedEvent completed)
@@ -524,4 +691,3 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         }
     }
 }
-

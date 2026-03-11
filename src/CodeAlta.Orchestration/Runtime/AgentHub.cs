@@ -169,6 +169,78 @@ public sealed class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Resumes a backend session for an agent.
+    /// </summary>
+    /// <param name="agentId">Agent id.</param>
+    /// <param name="backendSessionId">The backend session identifier.</param>
+    /// <param name="options">Session resume options.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resumed session id.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the agent is not registered.</exception>
+    public async Task<string> ResumeSessionAsync(
+        AgentId agentId,
+        string backendSessionId,
+        AgentSessionResumeOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backendSessionId);
+        ArgumentNullException.ThrowIfNull(options);
+
+        AgentIdentity identity;
+        SessionEntry? previousEntry = null;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_agents.TryGetValue(agentId, out identity!))
+            {
+                throw new InvalidOperationException($"Agent '{agentId}' is not registered.");
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        var backend = await GetOrCreateBackendAsync(identity.BackendId, cancellationToken).ConfigureAwait(false);
+        var session = await backend.ResumeSessionAsync(backendSessionId, options, cancellationToken).ConfigureAwait(false);
+        var sessionEntry = new SessionEntry(session, backend);
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_sessions.TryGetValue(agentId, out previousEntry))
+            {
+                _sessions.Remove(agentId);
+            }
+
+            _sessions[agentId] = sessionEntry;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (previousEntry is not null)
+        {
+            await previousEntry.DisposeAsync().ConfigureAwait(false);
+        }
+
+        await _agentRepository.UpsertSessionAsync(
+                new AgentSessionRecord
+                {
+                    SessionId = session.SessionId,
+                    AgentId = agentId,
+                    BackendSessionId = session.SessionId,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    LastUsedAt = DateTimeOffset.UtcNow,
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return session.SessionId;
+    }
+
+    /// <summary>
     /// Lists the available models for a backend.
     /// </summary>
     /// <param name="backendId">The backend identifier.</param>
@@ -180,6 +252,22 @@ public sealed class AgentHub : IAsyncDisposable
     {
         var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
         return await backend.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Lists sessions known to a backend.
+    /// </summary>
+    /// <param name="backendId">The backend identifier.</param>
+    /// <param name="filter">Optional backend session filter.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The backend session metadata.</returns>
+    public async Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(
+        AgentBackendId backendId,
+        AgentSessionListFilter? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
+        return await backend.ListSessionsAsync(filter, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -6,13 +6,18 @@ namespace CodeAlta.Catalog;
 public enum WorkThreadKind
 {
     /// <summary>
-    /// The global cross-workspace thread.
+    /// A user-facing global thread rooted at <c>~/.codealta/</c>.
     /// </summary>
-    Global,
+    GlobalThread,
 
     /// <summary>
-    /// A workspace-owned thread.
+    /// A user-facing thread scoped to exactly one project.
     /// </summary>
-    WorkspaceThread,
+    ProjectThread,
+
+    /// <summary>
+    /// A host-owned delegated child thread.
+    /// </summary>
+    InternalThread,
 }
 

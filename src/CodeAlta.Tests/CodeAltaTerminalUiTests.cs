@@ -122,39 +122,6 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
-    public void CreateProjectScopeCheckBoxes_RecreatesCheckboxesAndPreservesSelection()
-    {
-        IReadOnlyList<ProjectDescriptor> projects =
-        [
-            new ProjectDescriptor
-            {
-                Id = "alpha",
-                Slug = "alpha",
-                DisplayName = "Alpha",
-            },
-            new ProjectDescriptor
-            {
-                Id = "beta",
-                Slug = "beta",
-                DisplayName = "Beta",
-            },
-        ];
-
-        var first = CodeAltaTerminalUi.CreateProjectScopeCheckBoxes(
-            projects,
-            new HashSet<string>(["beta"], StringComparer.OrdinalIgnoreCase));
-        var second = CodeAltaTerminalUi.CreateProjectScopeCheckBoxes(
-            projects,
-            new HashSet<string>(["beta"], StringComparer.OrdinalIgnoreCase));
-
-        Assert.AreEqual(2, first.Count);
-        Assert.AreEqual(2, second.Count);
-        Assert.AreNotSame(first["alpha"], second["alpha"]);
-        Assert.IsFalse(first["alpha"].IsChecked);
-        Assert.IsTrue(first["beta"].IsChecked);
-    }
-
-    [TestMethod]
     public void FormatChatPermissionRequestMarkdown_RendersTypedAndGenericDetails()
     {
         var typedMarkdown = CodeAltaTerminalUi.FormatChatPermissionRequestMarkdown(
@@ -453,11 +420,9 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
-    public void FilterThreadsForSidebar_FiltersByWorkspaceAndProject()
+    public void FilterThreadsForProject_FiltersProjectThreadsAndCanIncludeInternal()
     {
         var timestamp = DateTimeOffset.UtcNow;
-        var workspaceA = WorkspaceId.NewVersion7().ToString();
-        var workspaceB = WorkspaceId.NewVersion7().ToString();
         var project1 = ProjectId.NewVersion7().ToString();
         var project2 = ProjectId.NewVersion7().ToString();
 
@@ -466,8 +431,10 @@ public sealed class CodeAltaTerminalUiTests
             new WorkThreadDescriptor
             {
                 ThreadId = "global",
-                Kind = WorkThreadKind.Global,
-                ScopeMode = WorkThreadScopeMode.AllProjects,
+                Kind = WorkThreadKind.GlobalThread,
+                BackendId = "codex",
+                BackendSessionId = "session-global",
+                WorkingDirectory = @"C:\Users\alexa\.codealta",
                 Title = "Global",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = timestamp,
@@ -477,11 +444,12 @@ public sealed class CodeAltaTerminalUiTests
             new WorkThreadDescriptor
             {
                 ThreadId = "thread-a",
-                Kind = WorkThreadKind.WorkspaceThread,
-                WorkspaceRef = workspaceA,
-                ScopeMode = WorkThreadScopeMode.SingleProject,
-                ProjectRefs = [project1],
-                Title = "Workspace A · Project 1",
+                Kind = WorkThreadKind.ProjectThread,
+                BackendId = "codex",
+                BackendSessionId = "session-a",
+                ProjectRef = project1,
+                WorkingDirectory = @"C:\code\project1",
+                Title = "Project 1",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = timestamp,
                 UpdatedAt = timestamp,
@@ -490,10 +458,13 @@ public sealed class CodeAltaTerminalUiTests
             new WorkThreadDescriptor
             {
                 ThreadId = "thread-b",
-                Kind = WorkThreadKind.WorkspaceThread,
-                WorkspaceRef = workspaceA,
-                ScopeMode = WorkThreadScopeMode.AllProjects,
-                Title = "Workspace A · All Projects",
+                Kind = WorkThreadKind.InternalThread,
+                BackendId = "codex",
+                BackendSessionId = "session-b",
+                ProjectRef = project1,
+                ParentThreadId = "thread-a",
+                WorkingDirectory = @"C:\Users\alexa\.codealta\threads\internal\child",
+                Title = "Internal child",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = timestamp,
                 UpdatedAt = timestamp,
@@ -502,11 +473,12 @@ public sealed class CodeAltaTerminalUiTests
             new WorkThreadDescriptor
             {
                 ThreadId = "thread-c",
-                Kind = WorkThreadKind.WorkspaceThread,
-                WorkspaceRef = workspaceB,
-                ScopeMode = WorkThreadScopeMode.SingleProject,
-                ProjectRefs = [project2],
-                Title = "Workspace B · Project 2",
+                Kind = WorkThreadKind.ProjectThread,
+                BackendId = "copilot",
+                BackendSessionId = "session-c",
+                ProjectRef = project2,
+                WorkingDirectory = @"C:\code\project2",
+                Title = "Project 2",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = timestamp,
                 UpdatedAt = timestamp,
@@ -514,43 +486,84 @@ public sealed class CodeAltaTerminalUiTests
             },
         ];
 
-        var filtered = CodeAltaTerminalUi.FilterThreadsForSidebar(threads, workspaceA, project1);
+        var filteredWithoutInternal = CodeAltaTerminalUi.FilterThreadsForProject(threads, project1, includeInternal: false);
+        var filteredWithInternal = CodeAltaTerminalUi.FilterThreadsForProject(threads, project1, includeInternal: true);
 
-        CollectionAssert.AreEqual(new[] { "thread-b", "thread-a" }, filtered.Select(static thread => thread.ThreadId).ToArray());
+        CollectionAssert.AreEqual(new[] { "thread-a" }, filteredWithoutInternal.Select(static thread => thread.ThreadId).ToArray());
+        CollectionAssert.AreEqual(new[] { "thread-b", "thread-a" }, filteredWithInternal.Select(static thread => thread.ThreadId).ToArray());
     }
 
     [TestMethod]
-    public void BuildThreadScopeSummary_UsesWorkspaceDisplayNameAndScopeMode()
+    public void BuildThreadScopeSummary_UsesProjectDisplayNameAndKind()
     {
-        var workspaceId = WorkspaceId.NewVersion7().ToString();
-        WorkspaceDescriptor[] workspaces =
+        var projectId = ProjectId.NewVersion7().ToString();
+        ProjectDescriptor[] projects =
         [
-            new WorkspaceDescriptor
+            new ProjectDescriptor
             {
-                Id = workspaceId,
+                Id = projectId,
                 Slug = "codealta",
                 DisplayName = "CodeAlta",
-                DefaultCheckoutRoot = @"C:\code",
+                ProjectPath = @"C:\code\CodeAlta",
             },
         ];
 
-        var summary = CodeAltaTerminalUi.BuildThreadScopeSummary(
+        var globalSummary = CodeAltaTerminalUi.BuildThreadScopeSummary(
             new WorkThreadDescriptor
             {
-                ThreadId = "thread-1",
-                Kind = WorkThreadKind.WorkspaceThread,
-                WorkspaceRef = workspaceId,
-                ScopeMode = WorkThreadScopeMode.MultiProject,
-                ProjectRefs = [ProjectId.NewVersion7().ToString(), ProjectId.NewVersion7().ToString()],
-                Title = "Thread",
+                ThreadId = "global",
+                Kind = WorkThreadKind.GlobalThread,
+                BackendId = "codex",
+                BackendSessionId = "session-global",
+                WorkingDirectory = @"C:\Users\alexa\.codealta",
+                Title = "Global",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow,
                 LastActiveAt = DateTimeOffset.UtcNow,
             },
-            workspaces);
+            projects,
+            @"C:\Users\alexa\.codealta");
 
-        Assert.AreEqual("CodeAlta · 2 Projects", summary);
+        var projectSummary = CodeAltaTerminalUi.BuildThreadScopeSummary(
+            new WorkThreadDescriptor
+            {
+                ThreadId = "project",
+                Kind = WorkThreadKind.ProjectThread,
+                BackendId = "codex",
+                BackendSessionId = "session-project",
+                ProjectRef = projectId,
+                WorkingDirectory = @"C:\code\CodeAlta",
+                Title = "Project",
+                Status = WorkThreadStatus.Active,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                LastActiveAt = DateTimeOffset.UtcNow,
+            },
+            projects,
+            @"C:\Users\alexa\.codealta");
+
+        var internalSummary = CodeAltaTerminalUi.BuildThreadScopeSummary(
+            new WorkThreadDescriptor
+            {
+                ThreadId = "internal",
+                Kind = WorkThreadKind.InternalThread,
+                BackendId = "codex",
+                BackendSessionId = "session-internal",
+                ProjectRef = projectId,
+                WorkingDirectory = @"C:\Users\alexa\.codealta\threads\internal",
+                Title = "Internal",
+                Status = WorkThreadStatus.Active,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                LastActiveAt = DateTimeOffset.UtcNow,
+            },
+            projects,
+            @"C:\Users\alexa\.codealta");
+
+        Assert.AreEqual(@"Global thread · C:\Users\alexa\.codealta", globalSummary);
+        Assert.AreEqual(@"CodeAlta · C:\code\CodeAlta", projectSummary);
+        Assert.AreEqual("Internal · CodeAlta", internalSummary);
     }
 }
 

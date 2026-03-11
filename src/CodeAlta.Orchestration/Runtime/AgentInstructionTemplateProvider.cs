@@ -42,14 +42,12 @@ public sealed class AgentInstructionTemplateProvider
     /// Builds the instruction bundle for a coordinator session.
     /// </summary>
     /// <param name="thread">The active work thread.</param>
-    /// <param name="workspace">The owning workspace, if any.</param>
-    /// <param name="projects">The active projects.</param>
+    /// <param name="project">The owning project, if any.</param>
     /// <param name="profile">The profile providing backend and role-specific defaults.</param>
     /// <returns>The composed instruction bundle.</returns>
     public AgentInstructionBundle BuildCoordinatorInstructions(
         WorkThreadDescriptor thread,
-        WorkspaceDescriptor? workspace,
-        IReadOnlyList<ProjectDescriptor> projects,
+        ProjectDescriptor? project,
         RoleProfile profile)
     {
         ArgumentNullException.ThrowIfNull(thread);
@@ -57,7 +55,7 @@ public sealed class AgentInstructionTemplateProvider
 
         var developer = new StringBuilder();
         developer.AppendLine("You are operating inside a durable CodeAlta work thread.");
-        AppendThreadScope(developer, thread, workspace, projects);
+        AppendThreadScope(developer, thread, project);
         developer.AppendLine("Scheduling contract:");
         developer.AppendLine("- Answer directly when no coordination is needed.");
         developer.AppendLine("- Emit exactly one fenced `codealta_schedule` YAML block when coordinated work is needed.");
@@ -75,14 +73,12 @@ public sealed class AgentInstructionTemplateProvider
     /// Builds the instruction bundle for a general scoped agent session.
     /// </summary>
     /// <param name="thread">The active work thread.</param>
-    /// <param name="workspace">The owning workspace, if any.</param>
-    /// <param name="projects">The active projects.</param>
+    /// <param name="project">The owning project, if any.</param>
     /// <param name="profile">The profile providing backend and role-specific defaults.</param>
     /// <returns>The composed instruction bundle.</returns>
     public AgentInstructionBundle BuildGeneralInstructions(
         WorkThreadDescriptor thread,
-        WorkspaceDescriptor? workspace,
-        IReadOnlyList<ProjectDescriptor> projects,
+        ProjectDescriptor? project,
         RoleProfile profile)
     {
         ArgumentNullException.ThrowIfNull(thread);
@@ -90,7 +86,7 @@ public sealed class AgentInstructionTemplateProvider
 
         var developer = new StringBuilder();
         developer.AppendLine("You are operating inside a durable CodeAlta work thread.");
-        AppendThreadScope(developer, thread, workspace, projects);
+        AppendThreadScope(developer, thread, project);
         developer.AppendLine("You are not the coordinator for this thread.");
         developer.AppendLine("Handle the assigned work directly and report concrete results and blockers.");
         AppendRoleProfile(developer, profile);
@@ -105,33 +101,42 @@ public sealed class AgentInstructionTemplateProvider
     private static void AppendThreadScope(
         StringBuilder builder,
         WorkThreadDescriptor thread,
-        WorkspaceDescriptor? workspace,
-        IReadOnlyList<ProjectDescriptor> projects)
+        ProjectDescriptor? project)
     {
         builder.Append("Thread: ").AppendLine(thread.Title);
         builder.Append("Thread Kind: ").AppendLine(thread.Kind.ToString());
+        builder.Append("Backend: ").AppendLine(thread.BackendId);
 
-        if (workspace is not null)
+        switch (thread.Kind)
         {
-            builder.Append("Workspace: ").AppendLine($"{workspace.DisplayName} ({workspace.Slug})");
-        }
+            case WorkThreadKind.GlobalThread:
+                builder.AppendLine("Thread Scope: global.");
+                break;
 
-        if (thread.ScopeMode == WorkThreadScopeMode.AllProjects)
-        {
-            builder.AppendLine("Project Scope: all projects in the workspace.");
-            return;
-        }
+            case WorkThreadKind.ProjectThread when project is not null:
+                builder.Append("Project Scope: ")
+                    .Append(project.DisplayName)
+                    .Append(" (")
+                    .Append(project.Slug)
+                    .AppendLine(")");
+                break;
 
-        if (projects.Count == 0)
-        {
-            builder.AppendLine("Project Scope: no projects selected yet.");
-            return;
-        }
+            case WorkThreadKind.InternalThread:
+                builder.AppendLine("Thread Scope: internal delegated work.");
+                if (project is not null)
+                {
+                    builder.Append("Owning Project: ")
+                        .Append(project.DisplayName)
+                        .Append(" (")
+                        .Append(project.Slug)
+                        .AppendLine(")");
+                }
 
-        builder.AppendLine("Project Scope:");
-        foreach (var project in projects)
-        {
-            builder.Append("- ").Append(project.DisplayName).Append(" (").Append(project.Slug).AppendLine(")");
+                break;
+
+            default:
+                builder.AppendLine("Project Scope: unresolved.");
+                break;
         }
     }
 

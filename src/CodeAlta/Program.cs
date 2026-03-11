@@ -21,9 +21,8 @@ internal sealed class TerminalHost : IAsyncDisposable
 {
     private readonly bool _ownsLogging;
     private readonly CodeAltaDb _db;
-    private readonly WorkspaceCatalogOptions _catalogOptions;
-    private readonly WorkspaceCatalog _workspaceCatalog;
-    private readonly WorkspaceResolver _workspaceResolver;
+    private readonly CatalogOptions _catalogOptions;
+    private readonly ProjectCatalog _projectCatalog;
     private readonly WorkThreadCatalog _threadCatalog;
     private readonly AgentHub _agentHub;
     private readonly WorkThreadRuntimeService _runtimeService;
@@ -31,9 +30,8 @@ internal sealed class TerminalHost : IAsyncDisposable
     private TerminalHost(
         bool ownsLogging,
         CodeAltaDb db,
-        WorkspaceCatalogOptions catalogOptions,
-        WorkspaceCatalog workspaceCatalog,
-        WorkspaceResolver workspaceResolver,
+        CatalogOptions catalogOptions,
+        ProjectCatalog projectCatalog,
         WorkThreadCatalog threadCatalog,
         AgentHub agentHub,
         WorkThreadRuntimeService runtimeService)
@@ -41,8 +39,7 @@ internal sealed class TerminalHost : IAsyncDisposable
         _ownsLogging = ownsLogging;
         _db = db;
         _catalogOptions = catalogOptions;
-        _workspaceCatalog = workspaceCatalog;
-        _workspaceResolver = workspaceResolver;
+        _projectCatalog = projectCatalog;
         _threadCatalog = threadCatalog;
         _agentHub = agentHub;
         _runtimeService = runtimeService;
@@ -67,13 +64,13 @@ internal sealed class TerminalHost : IAsyncDisposable
         await db.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
         var agentRepository = new AgentRepository(db);
-        var catalogOptions = new WorkspaceCatalogOptions
+        var catalogOptions = new CatalogOptions
         {
-            GlobalRepoRoot = homeRoot,
+            GlobalRoot = homeRoot,
         };
-        var workspaceCatalog = new WorkspaceCatalog(catalogOptions);
-        var workspaceResolver = new WorkspaceResolver(workspaceCatalog);
-        var threadCatalog = new WorkThreadCatalog(workspaceCatalog, catalogOptions);
+        var projectCatalog = new ProjectCatalog(catalogOptions);
+        await projectCatalog.UpsertFromPathAsync(Environment.CurrentDirectory, cancellationToken).ConfigureAwait(false);
+        var threadCatalog = new WorkThreadCatalog(catalogOptions);
         var roleProfileStore = new RoleProfileStore();
         var instructionTemplateProvider = new AgentInstructionTemplateProvider();
 
@@ -84,7 +81,7 @@ internal sealed class TerminalHost : IAsyncDisposable
         var agentHub = new AgentHub(backendFactory, agentRepository);
         var runtimeService = new WorkThreadRuntimeService(
             agentHub,
-            workspaceCatalog,
+            projectCatalog,
             threadCatalog,
             roleProfileStore,
             instructionTemplateProvider,
@@ -94,8 +91,7 @@ internal sealed class TerminalHost : IAsyncDisposable
             ownsLogging,
             db,
             catalogOptions,
-            workspaceCatalog,
-            workspaceResolver,
+            projectCatalog,
             threadCatalog,
             agentHub,
             runtimeService);
@@ -104,8 +100,7 @@ internal sealed class TerminalHost : IAsyncDisposable
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         await using var ui = new CodeAltaTerminalUi(
-            _workspaceCatalog,
-            _workspaceResolver,
+            _projectCatalog,
             _threadCatalog,
             _runtimeService,
             _catalogOptions,

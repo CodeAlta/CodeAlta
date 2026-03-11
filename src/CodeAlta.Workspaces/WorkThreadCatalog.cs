@@ -1,121 +1,79 @@
 namespace CodeAlta.Catalog;
 
 /// <summary>
-/// Loads and saves durable work-thread metadata and machine-local thread restoration state.
+/// Stores machine-local thread UI state and optional host-owned internal thread linkage metadata.
 /// </summary>
 public sealed class WorkThreadCatalog
 {
-    private readonly WorkspaceCatalog _workspaceCatalog;
-    private readonly WorkspaceCatalogOptions _options;
+    private readonly CatalogOptions _options;
     private readonly WorkThreadYamlSerializer _serializer;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="WorkThreadCatalog"/> class.
     /// </summary>
-    /// <param name="workspaceCatalog">Workspace catalog used for workspace validation and path resolution.</param>
     /// <param name="options">Catalog options.</param>
-    /// <param name="serializer">Optional serializer.</param>
-    /// <exception cref="ArgumentNullException">Thrown when required dependencies are missing.</exception>
-    /// <exception cref="ArgumentException">Thrown when <see cref="WorkspaceCatalogOptions.GlobalRepoRoot"/> is empty.</exception>
-    public WorkThreadCatalog(
-        WorkspaceCatalog workspaceCatalog,
-        WorkspaceCatalogOptions options,
-        WorkThreadYamlSerializer? serializer = null)
+    /// <param name="serializer">Optional YAML serializer.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <see cref="CatalogOptions.GlobalRoot"/> is empty.</exception>
+    public WorkThreadCatalog(CatalogOptions options, WorkThreadYamlSerializer? serializer = null)
     {
-        ArgumentNullException.ThrowIfNull(workspaceCatalog);
         ArgumentNullException.ThrowIfNull(options);
-
-        if (string.IsNullOrWhiteSpace(options.GlobalRepoRoot))
+        if (string.IsNullOrWhiteSpace(options.GlobalRoot))
         {
-            throw new ArgumentException("Global repository root is required.", nameof(options));
+            throw new ArgumentException("Global catalog root is required.", nameof(options));
         }
 
-        _workspaceCatalog = workspaceCatalog;
         _options = options;
         _serializer = serializer ?? new WorkThreadYamlSerializer();
     }
 
     /// <summary>
-    /// Loads all durable work threads.
+    /// Loads all host-owned internal thread linkage records.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The loaded thread descriptors.</returns>
-    public async Task<IReadOnlyList<WorkThreadDescriptor>> LoadAsync(CancellationToken cancellationToken = default)
+    /// <returns>The internal thread descriptors.</returns>
+    public async Task<IReadOnlyList<WorkThreadDescriptor>> LoadInternalAsync(CancellationToken cancellationToken = default)
     {
-        var results = new List<WorkThreadDescriptor>();
-        var workspaces = await _workspaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-
-        foreach (var workspace in workspaces)
+        var root = _options.InternalThreadsRoot;
+        if (!Directory.Exists(root))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var workspaceDirectory = Path.GetDirectoryName(workspace.SourcePath);
-            if (string.IsNullOrWhiteSpace(workspaceDirectory))
-            {
-                continue;
-            }
-
-            var threadsDirectory = Path.Combine(workspaceDirectory, "threads");
-            if (!Directory.Exists(threadsDirectory))
-            {
-                continue;
-            }
-
-            foreach (var threadPath in Directory.EnumerateFiles(threadsDirectory, "readme.md", SearchOption.AllDirectories))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var descriptor = await LoadThreadDescriptorAsync(threadPath, cancellationToken).ConfigureAwait(false);
-                results.Add(descriptor);
-            }
+            return [];
         }
 
-        var globalThreadPath = Path.Combine(_options.GlobalRepoRoot, "threads", "global", "readme.md");
-        if (File.Exists(globalThreadPath))
+        var results = new List<WorkThreadDescriptor>();
+        foreach (var markdownPath in Directory.EnumerateFiles(root, "readme.md", SearchOption.AllDirectories))
         {
-            var descriptor = await LoadThreadDescriptorAsync(globalThreadPath, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
+            var descriptor = _serializer.DeserializeThreadMarkdown(markdown);
+            descriptor.SourcePath = markdownPath;
+            descriptor.Validate();
             results.Add(descriptor);
         }
 
         return results
-            .OrderByDescending(static x => x.LastActiveAt)
-            .ThenBy(static x => x.Title, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(static thread => thread.LastActiveAt)
             .ToArray();
     }
 
     /// <summary>
-    /// Loads a single thread by id.
+    /// Saves a host-owned internal thread linkage record.
     /// </summary>
-    /// <param name="threadId">The thread identifier.</param>
+    /// <param name="thread">The internal thread descriptor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The matching thread when found; otherwise <see langword="null"/>.</returns>
-    public async Task<WorkThreadDescriptor?> GetByIdAsync(string threadId, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(threadId))
-        {
-            throw new ArgumentException("Thread id is required.", nameof(threadId));
-        }
-
-        var threads = await LoadAsync(cancellationToken).ConfigureAwait(false);
-        return threads.FirstOrDefault(x => string.Equals(x.ThreadId, threadId, StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// Saves a durable work-thread descriptor.
-    /// </summary>
-    /// <param name="thread">The thread descriptor.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task SaveAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken = default)
+    public async Task SaveInternalAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(thread);
+        if (thread.Kind != WorkThreadKind.InternalThread)
+        {
+            throw new InvalidOperationException("Only internal thread descriptors are persisted by the thread catalog.");
+        }
+
         thread.Validate();
 
-        var workspaces = await _workspaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var existing = await GetByIdAsync(thread.ThreadId, cancellationToken).ConfigureAwait(false);
-        ValidateThreadScope(thread, workspaces, existing);
-
-        var path = ResolveThreadPath(thread, workspaces);
-        var directory = Path.GetDirectoryName(path)!;
+        var directory = Path.Combine(_options.InternalThreadsRoot, GetInternalDirectoryName(thread.ThreadId));
         Directory.CreateDirectory(directory);
-
+        var path = Path.Combine(directory, "readme.md");
         var markdown = _serializer.SerializeThreadMarkdown(thread);
         await File.WriteAllTextAsync(path, markdown, cancellationToken).ConfigureAwait(false);
         thread.SourcePath = path;
@@ -156,73 +114,23 @@ public sealed class WorkThreadCatalog
         await File.WriteAllTextAsync(path, yaml, cancellationToken).ConfigureAwait(false);
     }
 
-    private static void ValidateThreadScope(
-        WorkThreadDescriptor thread,
-        IReadOnlyList<WorkspaceDescriptor> workspaces,
-        WorkThreadDescriptor? existing)
-    {
-        if (thread.Kind == WorkThreadKind.Global)
-        {
-            return;
-        }
-
-        var workspace = workspaces.FirstOrDefault(x => string.Equals(x.Id, thread.WorkspaceRef, StringComparison.OrdinalIgnoreCase));
-        if (workspace is null)
-        {
-            throw new InvalidDataException($"Thread '{thread.ThreadId}' references unknown workspace '{thread.WorkspaceRef}'.");
-        }
-
-        if (existing is not null
-            && existing.Kind == WorkThreadKind.WorkspaceThread
-            && existing.IsWorkspaceLocked
-            && !string.Equals(existing.WorkspaceRef, thread.WorkspaceRef, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Thread '{thread.ThreadId}' cannot change workspace after the first prompt.");
-        }
-
-        if (thread.ScopeMode == WorkThreadScopeMode.AllProjects)
-        {
-            return;
-        }
-
-        var validProjectRefs = workspace.Projects
-            .Select(static x => x.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var invalidProjectRef = thread.ProjectRefs.FirstOrDefault(projectRef => !validProjectRefs.Contains(projectRef));
-        if (invalidProjectRef is not null)
-        {
-            throw new InvalidDataException(
-                $"Thread '{thread.ThreadId}' references project '{invalidProjectRef}' outside workspace '{workspace.Slug}'.");
-        }
-    }
-
-    private string ResolveThreadPath(WorkThreadDescriptor thread, IReadOnlyList<WorkspaceDescriptor> workspaces)
-    {
-        if (thread.Kind == WorkThreadKind.Global)
-        {
-            return Path.Combine(_options.GlobalRepoRoot, "threads", "global", "readme.md");
-        }
-
-        var workspace = workspaces.First(x => string.Equals(x.Id, thread.WorkspaceRef, StringComparison.OrdinalIgnoreCase));
-        var workspaceDirectory = Path.GetDirectoryName(workspace.SourcePath)
-            ?? throw new InvalidOperationException($"Workspace '{workspace.Slug}' does not have a source path.");
-        return Path.Combine(workspaceDirectory, "threads", thread.ThreadId, "readme.md");
-    }
-
-    private async Task<WorkThreadDescriptor> LoadThreadDescriptorAsync(string path, CancellationToken cancellationToken)
-    {
-        var markdown = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-        var descriptor = _serializer.DeserializeThreadMarkdown(markdown);
-        descriptor.SourcePath = path;
-        descriptor.Validate();
-        return descriptor;
-    }
-
     private string GetViewStatePath()
     {
-        return Path.Combine(_options.GlobalRepoRoot, "machine", "ui-state.yaml");
+        return Path.Combine(_options.MachineRoot, "ui-state.yaml");
+    }
+
+    private static string GetInternalDirectoryName(string threadId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
+
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        Span<char> buffer = stackalloc char[threadId.Length];
+        for (var index = 0; index < threadId.Length; index++)
+        {
+            var character = threadId[index];
+            buffer[index] = invalidCharacters.Contains(character) ? '-' : character;
+        }
+
+        return new string(buffer);
     }
 }
-

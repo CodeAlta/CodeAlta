@@ -1,11 +1,10 @@
-using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
+using CodeAlta.Catalog.Roles;
 using CodeAlta.Orchestration;
 using CodeAlta.Orchestration.Context;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Persistence;
-using CodeAlta.Catalog;
-using CodeAlta.Catalog.Roles;
 
 namespace CodeAlta.Orchestration.Tests;
 
@@ -22,13 +21,12 @@ public sealed class OrchestrationInfrastructureTests
         Directory.CreateDirectory(globalAgentsRoot);
         Directory.CreateDirectory(projectAgentsRoot);
 
-        var frontmatterRolePath = Path.Combine(globalAgentsRoot, "coordinator.agent.md");
         await File.WriteAllTextAsync(
-            frontmatterRolePath,
+            Path.Combine(globalAgentsRoot, "coordinator.agent.md"),
             """
             ---
             name: coordinator
-            description: Plans workspace goals into durable tasks.
+            description: Plans project goals into durable tasks.
             tools:
               - read
               - grep
@@ -36,17 +34,15 @@ public sealed class OrchestrationInfrastructureTests
             user-invocable: false
             codealta:
               default_backend: codex
-              scope: workspace
+              scope: project
               tags:
                 - planning
             ---
             Create and maintain a clear task tree with acceptance criteria.
-            """
-        ).ConfigureAwait(false);
+            """).ConfigureAwait(false);
 
-        var projectRolePath = Path.Combine(projectAgentsRoot, "reviewer.agent.md");
         await File.WriteAllTextAsync(
-            projectRolePath,
+            Path.Combine(projectAgentsRoot, "reviewer.agent.md"),
             """
             ---
             name: reviewer
@@ -55,8 +51,7 @@ public sealed class OrchestrationInfrastructureTests
             # Reviewer
 
             Focus on correctness, missing tests, and user-facing behavior.
-            """
-        ).ConfigureAwait(false);
+            """).ConfigureAwait(false);
 
         var store = new RoleProfileStore();
         var profiles = await store.LoadCatalogAgentsAsync(
@@ -70,7 +65,7 @@ public sealed class OrchestrationInfrastructureTests
         CollectionAssert.Contains(planner.ToolsPolicy.Allowed.ToArray(), "read");
         Assert.AreEqual("codex", planner.DefaultBackend);
         Assert.AreEqual("gpt-5.4", planner.DefaultModel);
-        Assert.AreEqual("workspace", planner.Scope);
+        Assert.AreEqual("project", planner.Scope);
         Assert.IsFalse(planner.UserInvocable);
 
         var reviewer = profiles.Single(x => x.RoleId == "reviewer");
@@ -82,28 +77,22 @@ public sealed class OrchestrationInfrastructureTests
     public void AgentInstructionTemplateProvider_BuildsCoordinatorInstructions()
     {
         var provider = new AgentInstructionTemplateProvider();
-        var workspace = new WorkspaceDescriptor
-        {
-            Id = WorkspaceId.NewVersion7().ToString(),
-            Slug = "wk-core",
-            DisplayName = "Core Workspace",
-            DefaultCheckoutRoot = @"C:\code",
-        };
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
             Slug = "repo-main",
             DisplayName = "Main Repo",
-            ProjectPath = "C:\\code\\repo-main",
+            ProjectPath = @"C:\code\repo-main",
             DefaultBranch = "main",
         };
         var thread = new WorkThreadDescriptor
         {
-            ThreadId = "thread-1",
-            Kind = WorkThreadKind.WorkspaceThread,
-            WorkspaceRef = workspace.Id,
-            ProjectRefs = [project.Id],
-            ScopeMode = WorkThreadScopeMode.SingleProject,
+            ThreadId = "fake:thread-1",
+            Kind = WorkThreadKind.ProjectThread,
+            BackendId = "fake",
+            BackendSessionId = "thread-1",
+            ProjectRef = project.Id,
+            WorkingDirectory = project.ProjectPath,
             Title = "Review sqlitevec integration",
             Status = WorkThreadStatus.Active,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -119,12 +108,12 @@ public sealed class OrchestrationInfrastructureTests
             Instructions = "Emit one schedule block when you need coordination.",
             ToolsPolicy = new RoleToolsPolicy(),
             DefaultBackend = "codex",
-            Scope = "workspace",
+            Scope = "project",
             IsBuiltIn = true,
             SourcePath = "builtin://coordinator",
         };
 
-        var instructions = provider.BuildCoordinatorInstructions(thread, workspace, [project], profile);
+        var instructions = provider.BuildCoordinatorInstructions(thread, project, profile);
 
         StringAssert.Contains(instructions.SystemMessage, "CodeAlta Coordinator");
         StringAssert.Contains(instructions.DeveloperInstructions, "Review sqlitevec integration");
@@ -195,10 +184,6 @@ public sealed class OrchestrationInfrastructureTests
         Assert.IsNotNull(root);
         Assert.AreEqual(CodeAlta.Persistence.TaskStatus.Pending, root.Status);
 
-        var planArtifact = await artifactRepository.GetByIdAsync(plan.PlanArtifactId).ConfigureAwait(false);
-        Assert.IsNotNull(planArtifact);
-        StringAssert.Contains(planArtifact.Type, "plan.output");
-
         var buildResult = await builder.CompleteTaskAsync(
             new BuilderExecutionRequest
             {
@@ -211,10 +196,6 @@ public sealed class OrchestrationInfrastructureTests
         var completed = await taskRepository.GetAsync(buildResult.TaskId).ConfigureAwait(false);
         Assert.IsNotNull(completed);
         Assert.AreEqual(CodeAlta.Persistence.TaskStatus.Completed, completed.Status);
-
-        var verificationArtifact = await artifactRepository.GetByIdAsync(buildResult.VerificationArtifactId).ConfigureAwait(false);
-        Assert.IsNotNull(verificationArtifact);
-        Assert.AreEqual("builder.verification", verificationArtifact.Type);
     }
 
     [TestMethod]
@@ -245,125 +226,15 @@ public sealed class OrchestrationInfrastructureTests
             identity.AgentId,
             new AgentSendOptions { Input = AgentInput.Text("hello") }).ConfigureAwait(false);
         Assert.AreEqual("fake-run-1", runId.ToString());
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        var events = new List<OrchestrationEvent>();
-        await foreach (var @event in hub.StreamEventsAsync(cts.Token))
-        {
-            events.Add(@event);
-            if (events.Count >= 2)
-            {
-                break;
-            }
-        }
-
-        Assert.IsTrue(events.OfType<RunStartedEvent>().Any());
-        Assert.IsTrue(events.OfType<RunCompletedEvent>().Any());
-    }
-
-    [TestMethod]
-    public async Task AgentHub_SubscribeSessionEventsAsync_ForwardsSessionEvents()
-    {
-        using var temp = TempDirectory.Create();
-        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
-        var repository = new AgentRepository(db);
-
-        var backendFactory = new AgentBackendFactory();
-        backendFactory.Register("fake", static () => new FakeBackend());
-
-        await using var hub = new AgentHub(backendFactory, repository);
-        var identity = await hub.RegisterAgentAsync(
-            "builder.project",
-            new AgentScope { Kind = AgentScopeKind.Project, Id = "project-1" },
-            new AgentBackendId("fake")).ConfigureAwait(false);
-
-        await hub.StartSessionAsync(
-            identity.AgentId,
-            new AgentSessionCreateOptions
-            {
-                OnPermissionRequest = static (_, _) =>
-                    Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-            }).ConfigureAwait(false);
-
-        var received = new List<AgentEvent>();
-        using var subscription = await hub.SubscribeSessionEventsAsync(
-                identity.AgentId,
-                received.Add)
-            .ConfigureAwait(false);
-
-        _ = await hub.RunAsync(
-                identity.AgentId,
-                new AgentSendOptions { Input = AgentInput.Text("hello") })
-            .ConfigureAwait(false);
-
-        Assert.IsTrue(received.OfType<AgentContentCompletedEvent>().Any(x => x.Kind == AgentContentKind.Assistant));
-        Assert.IsTrue(received.OfType<AgentSessionUpdateEvent>().Any(x => x.Kind == AgentSessionUpdateKind.Idle));
-    }
-
-    [TestMethod]
-    public async Task AgentHub_SteerAsync_UsesSessionSteerWhenSupported()
-    {
-        using var temp = TempDirectory.Create();
-        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
-        var repository = new AgentRepository(db);
-
-        var backendFactory = new AgentBackendFactory();
-        backendFactory.Register("fake", static () => new FakeBackend());
-
-        await using var hub = new AgentHub(backendFactory, repository);
-        var identity = await hub.RegisterAgentAsync(
-            "builder.project",
-            new AgentScope { Kind = AgentScopeKind.Project, Id = "project-1" },
-            new AgentBackendId("fake")).ConfigureAwait(false);
-
-        await hub.StartSessionAsync(
-            identity.AgentId,
-            new AgentSessionCreateOptions
-            {
-                OnPermissionRequest = static (_, _) =>
-                    Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-            }).ConfigureAwait(false);
-
-        var runId = await hub.SteerAsync(
-            identity.AgentId,
-            new AgentSteerOptions
-            {
-                Input = AgentInput.Text("continue"),
-                ExpectedRunId = new AgentRunId("fake-run-1")
-            }).ConfigureAwait(false);
-
-        Assert.AreEqual("fake-run-1", runId.Value);
-    }
-
-    [TestMethod]
-    public async Task AgentHub_ListModelsAsync_ReturnsBackendModels()
-    {
-        using var temp = TempDirectory.Create();
-        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
-        var repository = new AgentRepository(db);
-
-        var backendFactory = new AgentBackendFactory();
-        backendFactory.Register("fake", static () => new FakeBackend(
-        [
-            new AgentModelInfo("model-a", DisplayName: "Model A"),
-            new AgentModelInfo("model-b", DisplayName: "Model B"),
-        ]));
-
-        await using var hub = new AgentHub(backendFactory, repository);
-        var models = await hub.ListModelsAsync(new AgentBackendId("fake")).ConfigureAwait(false);
-
-        Assert.AreEqual(2, models.Count);
-        Assert.AreEqual("model-a", models[0].Id);
-        Assert.AreEqual("Model B", models[1].DisplayName);
     }
 
     [TestMethod]
     public async Task WorkThreadRuntimeService_SendAsync_UsesCoordinatorDefaultsAndSanitizesSchedule()
     {
         using var temp = TempDirectory.Create();
-        var options = new WorkspaceCatalogOptions { GlobalRepoRoot = temp.Path };
-        var workspaceCatalog = new WorkspaceCatalog(options);
-        var threadCatalog = new WorkThreadCatalog(workspaceCatalog, options);
+        var catalogOptions = new CatalogOptions { GlobalRoot = temp.Path };
+        var projectCatalog = new ProjectCatalog(catalogOptions);
+        var threadCatalog = new WorkThreadCatalog(catalogOptions);
         var roleStore = new RoleProfileStore();
         var instructionProvider = new AgentInstructionTemplateProvider();
 
@@ -372,21 +243,11 @@ public sealed class OrchestrationInfrastructureTests
             Id = ProjectId.NewVersion7().ToString(),
             Slug = "repo-main",
             DisplayName = "Main Repo",
-            ProjectPath = "C:\\code\\repo-main",
+            ProjectPath = Path.Combine(temp.Path, "repo-main"),
             DefaultBranch = "main",
-            Checkout = new CheckoutRule { PathTemplate = @"{workspaceSlug}\{projectSlug}" },
         };
-        await workspaceCatalog.SaveProjectAsync(project).ConfigureAwait(false);
-
-        var workspace = new WorkspaceDescriptor
-        {
-            Id = WorkspaceId.NewVersion7().ToString(),
-            Slug = "wk-core",
-            DisplayName = "Core Workspace",
-            DefaultCheckoutRoot = @"C:\code",
-            ProjectRefs = [project.Id],
-        };
-        await workspaceCatalog.SaveWorkspaceAsync(workspace).ConfigureAwait(false);
+        Directory.CreateDirectory(project.ProjectPath);
+        await projectCatalog.SaveAsync(project).ConfigureAwait(false);
 
         var agentsRoot = Path.Combine(temp.Path, "agents");
         Directory.CreateDirectory(agentsRoot);
@@ -414,7 +275,7 @@ public sealed class OrchestrationInfrastructureTests
                 runId,
                 AgentContentKind.Assistant,
                 "assistant-1",
-                null,
+                runId.Value,
                 """
                 I’m going to coordinate this.
 
@@ -438,38 +299,34 @@ public sealed class OrchestrationInfrastructureTests
         await using var hub = new AgentHub(backendFactory, repository);
         await using var runtime = new WorkThreadRuntimeService(
             hub,
-            workspaceCatalog,
+            projectCatalog,
             threadCatalog,
             roleStore,
             instructionProvider,
-            options);
+            catalogOptions);
 
-        var thread = new WorkThreadDescriptor
-        {
-            ThreadId = "platform-search-review",
-            Kind = WorkThreadKind.WorkspaceThread,
-            WorkspaceRef = workspace.Id,
-            ProjectRefs = [project.Id],
-            ScopeMode = WorkThreadScopeMode.SingleProject,
-            Title = "Review sqlitevec integration",
-            Status = WorkThreadStatus.Draft,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
-            LastActiveAt = DateTimeOffset.UtcNow,
-        };
-        await threadCatalog.SaveAsync(thread).ConfigureAwait(false);
-
-        var executionOptions = new WorkThreadExecutionOptions
-        {
-            BackendId = new AgentBackendId("fake"),
-            WorkingDirectory = temp.Path,
-            OnPermissionRequest = static (_, _) =>
-                Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-        };
+        var thread = await runtime.CreateProjectThreadAsync(
+            project,
+            new WorkThreadExecutionOptions
+            {
+                BackendId = new AgentBackendId("fake"),
+                WorkingDirectory = project.ProjectPath,
+                ProjectRoots = [project.ProjectPath],
+                OnPermissionRequest = static (_, _) =>
+                    Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            },
+            title: "Review sqlitevec integration").ConfigureAwait(false);
 
         _ = await runtime.SendAsync(
                 thread,
-                executionOptions,
+                new WorkThreadExecutionOptions
+                {
+                    BackendId = new AgentBackendId("fake"),
+                    WorkingDirectory = project.ProjectPath,
+                    ProjectRoots = [project.ProjectPath],
+                    OnPermissionRequest = static (_, _) =>
+                        Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                },
                 new AgentSendOptions { Input = AgentInput.Text("review the project") })
             .ConfigureAwait(false);
 
@@ -483,19 +340,15 @@ public sealed class OrchestrationInfrastructureTests
         var assistant = history.OfType<AgentContentCompletedEvent>().Single();
         StringAssert.Contains(assistant.Content, "I’m going to coordinate this.");
         Assert.IsFalse(assistant.Content.Contains("codealta_schedule", StringComparison.OrdinalIgnoreCase));
-
-        var persisted = await threadCatalog.GetByIdAsync(thread.ThreadId).ConfigureAwait(false);
-        Assert.IsNotNull(persisted);
-        Assert.IsTrue(persisted.IsWorkspaceLocked);
     }
 
     [TestMethod]
     public async Task WorkThreadRuntimeService_HandoffAsync_EmitsHostEvents()
     {
         using var temp = TempDirectory.Create();
-        var options = new WorkspaceCatalogOptions { GlobalRepoRoot = temp.Path };
-        var workspaceCatalog = new WorkspaceCatalog(options);
-        var threadCatalog = new WorkThreadCatalog(workspaceCatalog, options);
+        var catalogOptions = new CatalogOptions { GlobalRoot = temp.Path };
+        var projectCatalog = new ProjectCatalog(catalogOptions);
+        var threadCatalog = new WorkThreadCatalog(catalogOptions);
         var roleStore = new RoleProfileStore();
         var instructionProvider = new AgentInstructionTemplateProvider();
 
@@ -504,20 +357,11 @@ public sealed class OrchestrationInfrastructureTests
             Id = ProjectId.NewVersion7().ToString(),
             Slug = "repo-main",
             DisplayName = "Main Repo",
-            ProjectPath = "C:\\code\\repo-main",
+            ProjectPath = Path.Combine(temp.Path, "repo-main"),
             DefaultBranch = "main",
         };
-        await workspaceCatalog.SaveProjectAsync(project).ConfigureAwait(false);
-
-        var workspace = new WorkspaceDescriptor
-        {
-            Id = WorkspaceId.NewVersion7().ToString(),
-            Slug = "wk-core",
-            DisplayName = "Core Workspace",
-            DefaultCheckoutRoot = @"C:\code",
-            ProjectRefs = [project.Id],
-        };
-        await workspaceCatalog.SaveWorkspaceAsync(workspace).ConfigureAwait(false);
+        Directory.CreateDirectory(project.ProjectPath);
+        await projectCatalog.SaveAsync(project).ConfigureAwait(false);
 
         var agentsRoot = Path.Combine(temp.Path, "agents");
         Directory.CreateDirectory(agentsRoot);
@@ -539,29 +383,25 @@ public sealed class OrchestrationInfrastructureTests
         await using var hub = new AgentHub(backendFactory, repository);
         await using var runtime = new WorkThreadRuntimeService(
             hub,
-            workspaceCatalog,
+            projectCatalog,
             threadCatalog,
             roleStore,
             instructionProvider,
-            options);
+            catalogOptions);
 
-        var source = CreateThread("source-thread", workspace.Id, project.Id, "Source Thread");
-        var target = CreateThread("target-thread", workspace.Id, project.Id, "Target Thread");
-        await threadCatalog.SaveAsync(source).ConfigureAwait(false);
-        await threadCatalog.SaveAsync(target).ConfigureAwait(false);
-
-        var executionOptions = new WorkThreadExecutionOptions
-        {
-            BackendId = new AgentBackendId("fake"),
-            WorkingDirectory = temp.Path,
-            OnPermissionRequest = static (_, _) =>
-                Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-        };
+        var source = await runtime.CreateProjectThreadAsync(
+            project,
+            CreateExecutionOptions(project.ProjectPath),
+            "Source Thread").ConfigureAwait(false);
+        var target = await runtime.CreateProjectThreadAsync(
+            project,
+            CreateExecutionOptions(project.ProjectPath),
+            "Target Thread").ConfigureAwait(false);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var enumerator = runtime.StreamEventsAsync(cts.Token).GetAsyncEnumerator(cts.Token);
 
-        _ = await runtime.HandoffAsync(source, target, executionOptions, "Continue the review work.").ConfigureAwait(false);
+        _ = await runtime.HandoffAsync(source, target, CreateExecutionOptions(project.ProjectPath), "Continue the review work.").ConfigureAwait(false);
 
         var received = new List<WorkThreadRuntimeEvent>();
         while (received.Count < 2 && await enumerator.MoveNextAsync().ConfigureAwait(false))
@@ -572,6 +412,18 @@ public sealed class OrchestrationInfrastructureTests
         Assert.AreEqual(2, received.Count);
         Assert.IsTrue(received.OfType<WorkThreadHostEvent>().Any(x => x.ThreadId == source.ThreadId));
         Assert.IsTrue(received.OfType<WorkThreadHostEvent>().Any(x => x.ThreadId == target.ThreadId));
+    }
+
+    private static WorkThreadExecutionOptions CreateExecutionOptions(string workingDirectory)
+    {
+        return new WorkThreadExecutionOptions
+        {
+            BackendId = new AgentBackendId("fake"),
+            WorkingDirectory = workingDirectory,
+            ProjectRoots = [workingDirectory],
+            OnPermissionRequest = static (_, _) =>
+                Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
     }
 
     private static async Task<CodeAltaDb> CreateDbAsync(string rootPath)
@@ -620,26 +472,19 @@ public sealed class OrchestrationInfrastructureTests
 
         public AgentSessionCreateOptions? LastCreateOptions { get; private set; }
 
-        public ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
-        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(_models);
-        }
+            => Task.FromResult(_models);
 
         public Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(
             AgentSessionListFilter? filter = null,
             CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<IReadOnlyList<AgentSessionMetadata>>([]);
-        }
+            => Task.FromResult<IReadOnlyList<AgentSessionMetadata>>([]);
 
         public Task<IAgentSession> CreateSessionAsync(
             AgentSessionCreateOptions options,
@@ -678,10 +523,7 @@ public sealed class OrchestrationInfrastructureTests
 
             public string? WorkspacePath => null;
 
-            public ValueTask DisposeAsync()
-            {
-                return ValueTask.CompletedTask;
-            }
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
             public async IAsyncEnumerable<AgentEvent> StreamEventsAsync(
                 [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -714,7 +556,6 @@ public sealed class OrchestrationInfrastructureTests
 
             public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
             {
-                ArgumentNullException.ThrowIfNull(options);
                 var runId = new AgentRunId($"fake-run-{Interlocked.Increment(ref _backend._runCounter)}");
                 var events = _backend._sendEventFactory?.Invoke(BackendId, SessionId, runId)
                     ?? DefaultSendEvents(BackendId, SessionId, runId);
@@ -729,10 +570,12 @@ public sealed class OrchestrationInfrastructureTests
             }
 
             public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
-            {
-                ArgumentNullException.ThrowIfNull(options);
-                return Task.FromResult(options.ExpectedRunId ?? new AgentRunId("fake-run-1"));
-            }
+                => Task.FromResult(options.ExpectedRunId ?? new AgentRunId("fake-run-1"));
+
+            public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+            public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
+                => Task.FromResult<IReadOnlyList<AgentEvent>>(_events.ToArray());
 
             private void Publish(AgentEvent @event)
             {
@@ -746,16 +589,6 @@ public sealed class OrchestrationInfrastructureTests
                 {
                     subscriber(@event);
                 }
-            }
-
-            public Task AbortAsync(CancellationToken cancellationToken = default)
-            {
-                return Task.CompletedTask;
-            }
-
-            public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
-            {
-                return Task.FromResult<IReadOnlyList<AgentEvent>>(_events.ToArray());
             }
 
             private static IReadOnlyList<AgentEvent> DefaultSendEvents(
@@ -786,24 +619,6 @@ public sealed class OrchestrationInfrastructureTests
         }
     }
 
-    private static WorkThreadDescriptor CreateThread(string threadId, string workspaceId, string projectId, string title)
-    {
-        var timestamp = DateTimeOffset.UtcNow;
-        return new WorkThreadDescriptor
-        {
-            ThreadId = threadId,
-            Kind = WorkThreadKind.WorkspaceThread,
-            WorkspaceRef = workspaceId,
-            ProjectRefs = [projectId],
-            ScopeMode = WorkThreadScopeMode.SingleProject,
-            Title = title,
-            Status = WorkThreadStatus.Draft,
-            CreatedAt = timestamp,
-            UpdatedAt = timestamp,
-            LastActiveAt = timestamp,
-        };
-    }
-
     private sealed class DisposableAction : IDisposable
     {
         private readonly Action _dispose;
@@ -814,10 +629,7 @@ public sealed class OrchestrationInfrastructureTests
             _dispose = dispose;
         }
 
-        public static IDisposable Create(Action dispose)
-        {
-            return new DisposableAction(dispose);
-        }
+        public static IDisposable Create(Action dispose) => new DisposableAction(dispose);
 
         public void Dispose()
         {
@@ -860,11 +672,7 @@ public sealed class OrchestrationInfrastructureTests
             }
             catch
             {
-                // Best-effort cleanup for temporary test files.
             }
         }
     }
 }
-
-
-

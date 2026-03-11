@@ -17,14 +17,20 @@ public sealed class WorkThreadYamlSerializer
         [JsonPropertyName("kind")]
         public string? Kind { get; set; }
 
-        [JsonPropertyName("workspace_ref")]
-        public string? WorkspaceRef { get; set; }
+        [JsonPropertyName("backend_id")]
+        public string? BackendId { get; set; }
 
-        [JsonPropertyName("project_refs")]
-        public List<string>? ProjectRefs { get; set; }
+        [JsonPropertyName("backend_session_id")]
+        public string? BackendSessionId { get; set; }
 
-        [JsonPropertyName("scope_mode")]
-        public string? ScopeMode { get; set; }
+        [JsonPropertyName("project_ref")]
+        public string? ProjectRef { get; set; }
+
+        [JsonPropertyName("parent_thread_id")]
+        public string? ParentThreadId { get; set; }
+
+        [JsonPropertyName("working_directory")]
+        public string? WorkingDirectory { get; set; }
 
         [JsonPropertyName("title")]
         public string? Title { get; set; }
@@ -75,9 +81,11 @@ public sealed class WorkThreadYamlSerializer
         {
             ThreadId = frontMatter.ThreadId ?? string.Empty,
             Kind = ParseKind(frontMatter.Kind),
-            WorkspaceRef = frontMatter.WorkspaceRef,
-            ProjectRefs = frontMatter.ProjectRefs ?? [],
-            ScopeMode = ParseScopeMode(frontMatter.ScopeMode),
+            BackendId = frontMatter.BackendId ?? string.Empty,
+            BackendSessionId = frontMatter.BackendSessionId ?? string.Empty,
+            ProjectRef = frontMatter.ProjectRef,
+            ParentThreadId = frontMatter.ParentThreadId,
+            WorkingDirectory = frontMatter.WorkingDirectory ?? string.Empty,
             Title = frontMatter.Title ?? string.Empty,
             Status = ParseStatus(frontMatter.Status),
             CreatedAt = frontMatter.CreatedAt ?? default,
@@ -103,19 +111,16 @@ public sealed class WorkThreadYamlSerializer
             ThreadId = descriptor.ThreadId,
             Kind = descriptor.Kind switch
             {
-                WorkThreadKind.Global => "global",
-                WorkThreadKind.WorkspaceThread => "workspace_thread",
+                WorkThreadKind.GlobalThread => "global_thread",
+                WorkThreadKind.ProjectThread => "project_thread",
+                WorkThreadKind.InternalThread => "internal_thread",
                 _ => throw new InvalidOperationException($"Unsupported thread kind '{descriptor.Kind}'."),
             },
-            WorkspaceRef = descriptor.WorkspaceRef,
-            ProjectRefs = descriptor.ProjectRefs.Count == 0 ? null : descriptor.ProjectRefs,
-            ScopeMode = descriptor.ScopeMode switch
-            {
-                WorkThreadScopeMode.SingleProject => "single_project",
-                WorkThreadScopeMode.MultiProject => "multi_project",
-                WorkThreadScopeMode.AllProjects => "all_projects",
-                _ => throw new InvalidOperationException($"Unsupported scope mode '{descriptor.ScopeMode}'."),
-            },
+            BackendId = descriptor.BackendId,
+            BackendSessionId = descriptor.BackendSessionId,
+            ProjectRef = descriptor.ProjectRef,
+            ParentThreadId = descriptor.ParentThreadId,
+            WorkingDirectory = descriptor.WorkingDirectory,
             Title = descriptor.Title,
             Status = descriptor.Status switch
             {
@@ -177,20 +182,10 @@ public sealed class WorkThreadYamlSerializer
     {
         return value?.Trim().ToLowerInvariant() switch
         {
-            "global" => WorkThreadKind.Global,
-            "workspace_thread" => WorkThreadKind.WorkspaceThread,
-            _ => WorkThreadKind.WorkspaceThread,
-        };
-    }
-
-    private static WorkThreadScopeMode ParseScopeMode(string? value)
-    {
-        return value?.Trim().ToLowerInvariant() switch
-        {
-            "single_project" => WorkThreadScopeMode.SingleProject,
-            "multi_project" => WorkThreadScopeMode.MultiProject,
-            "all_projects" => WorkThreadScopeMode.AllProjects,
-            _ => WorkThreadScopeMode.AllProjects,
+            "global_thread" or "global" => WorkThreadKind.GlobalThread,
+            "project_thread" => WorkThreadKind.ProjectThread,
+            "internal_thread" => WorkThreadKind.InternalThread,
+            _ => WorkThreadKind.ProjectThread,
         };
     }
 
