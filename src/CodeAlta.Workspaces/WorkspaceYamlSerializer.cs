@@ -14,14 +14,8 @@ public sealed class WorkspaceYamlSerializer
         [JsonPropertyName("id")]
         public string? Id { get; set; }
 
-        [JsonPropertyName("uid")]
-        public string? Uid { get; set; }
-
         [JsonPropertyName("kind")]
         public string? Kind { get; set; }
-
-        [JsonPropertyName("key")]
-        public string? Key { get; set; }
 
         [JsonPropertyName("slug")]
         public string? Slug { get; set; }
@@ -47,14 +41,8 @@ public sealed class WorkspaceYamlSerializer
         [JsonPropertyName("id")]
         public string? Id { get; set; }
 
-        [JsonPropertyName("uid")]
-        public string? Uid { get; set; }
-
         [JsonPropertyName("kind")]
         public string? Kind { get; set; }
-
-        [JsonPropertyName("key")]
-        public string? Key { get; set; }
 
         [JsonPropertyName("slug")]
         public string? Slug { get; set; }
@@ -163,8 +151,8 @@ public sealed class WorkspaceYamlSerializer
 
         return new WorkspaceDescriptor
         {
-            Id = frontMatter.Uid ?? frontMatter.Id ?? string.Empty,
-            Key = frontMatter.Slug ?? frontMatter.Key ?? string.Empty,
+            Id = frontMatter.Id ?? string.Empty,
+            Slug = frontMatter.Slug ?? string.Empty,
             DisplayName = frontMatter.DisplayName ?? string.Empty,
             Description = frontMatter.Description,
             Tags = frontMatter.Tags ?? [],
@@ -188,8 +176,8 @@ public sealed class WorkspaceYamlSerializer
 
         return new ProjectDescriptor
         {
-            Id = frontMatter.Uid ?? frontMatter.Id ?? string.Empty,
-            Key = frontMatter.Slug ?? frontMatter.Key ?? string.Empty,
+            Id = frontMatter.Id ?? string.Empty,
+            Slug = frontMatter.Slug ?? string.Empty,
             DisplayName = frontMatter.DisplayName ?? string.Empty,
             Description = frontMatter.Description,
             RepoUrl = frontMatter.RepoUrl ?? string.Empty,
@@ -213,9 +201,9 @@ public sealed class WorkspaceYamlSerializer
         ArgumentNullException.ThrowIfNull(descriptor);
         var frontMatter = new WorkspaceFrontMatter
         {
-            Uid = descriptor.Id,
+            Id = descriptor.Id,
             Kind = "workspace",
-            Slug = descriptor.Key,
+            Slug = descriptor.Slug,
             DisplayName = descriptor.DisplayName,
             Description = descriptor.Description,
             Tags = descriptor.Tags,
@@ -240,9 +228,9 @@ public sealed class WorkspaceYamlSerializer
         ArgumentNullException.ThrowIfNull(descriptor);
         var frontMatter = new ProjectFrontMatter
         {
-            Uid = descriptor.Id,
+            Id = descriptor.Id,
             Kind = "project",
-            Slug = descriptor.Key,
+            Slug = descriptor.Slug,
             DisplayName = descriptor.DisplayName,
             Description = descriptor.Description,
             RepoUrl = descriptor.RepoUrl,

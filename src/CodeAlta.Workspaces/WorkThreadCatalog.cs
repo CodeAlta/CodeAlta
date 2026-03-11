@@ -194,7 +194,7 @@ public sealed class WorkThreadCatalog
         if (invalidProjectRef is not null)
         {
             throw new InvalidDataException(
-                $"Thread '{thread.ThreadId}' references project '{invalidProjectRef}' outside workspace '{workspace.Key}'.");
+                $"Thread '{thread.ThreadId}' references project '{invalidProjectRef}' outside workspace '{workspace.Slug}'.");
         }
     }
 
@@ -207,7 +207,7 @@ public sealed class WorkThreadCatalog
 
         var workspace = workspaces.First(x => string.Equals(x.Id, thread.WorkspaceRef, StringComparison.OrdinalIgnoreCase));
         var workspaceDirectory = Path.GetDirectoryName(workspace.SourcePath)
-            ?? throw new InvalidOperationException($"Workspace '{workspace.Key}' does not have a source path.");
+            ?? throw new InvalidOperationException($"Workspace '{workspace.Slug}' does not have a source path.");
         return Path.Combine(workspaceDirectory, "threads", thread.ThreadId, "readme.md");
     }
 

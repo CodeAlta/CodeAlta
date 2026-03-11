@@ -40,51 +40,51 @@ public sealed class WorkspaceResolver
             ScopeKind.Global => workspaces
                 .Select(workspace => ResolveWorkspace(workspace, machineProfile))
                 .ToArray(),
-            ScopeKind.Workspace => ResolveWorkspaceByKey(workspaces, selector.WorkspaceKey, machineProfile),
-            ScopeKind.Project => ResolveWorkspaceByProjectKey(workspaces, selector.ProjectKey, machineProfile),
+            ScopeKind.Workspace => ResolveWorkspaceBySlug(workspaces, selector.WorkspaceSlug, machineProfile),
+            ScopeKind.Project => ResolveWorkspaceByProjectSlug(workspaces, selector.ProjectSlug, machineProfile),
             _ => throw new InvalidOperationException($"Unsupported scope kind '{selector.Kind}'."),
         };
     }
 
-    private static IReadOnlyList<WorkspaceResolution> ResolveWorkspaceByKey(
+    private static IReadOnlyList<WorkspaceResolution> ResolveWorkspaceBySlug(
         IReadOnlyList<WorkspaceDescriptor> workspaces,
-        string? workspaceKey,
+        string? workspaceSlug,
         MachineProfile? profile)
     {
-        if (string.IsNullOrWhiteSpace(workspaceKey))
+        if (string.IsNullOrWhiteSpace(workspaceSlug))
         {
-            throw new InvalidOperationException("Workspace selector is missing a workspace key.");
+            throw new InvalidOperationException("Workspace selector is missing a workspace slug.");
         }
 
         var workspace = workspaces.FirstOrDefault(x =>
-            string.Equals(x.Key, workspaceKey, StringComparison.OrdinalIgnoreCase));
+            string.Equals(x.Slug, workspaceSlug, StringComparison.OrdinalIgnoreCase));
 
         if (workspace is null)
         {
-            throw new InvalidOperationException($"Workspace '{workspaceKey}' was not found.");
+            throw new InvalidOperationException($"Workspace '{workspaceSlug}' was not found.");
         }
 
         return [ResolveWorkspace(workspace, profile)];
     }
 
-    private static IReadOnlyList<WorkspaceResolution> ResolveWorkspaceByProjectKey(
+    private static IReadOnlyList<WorkspaceResolution> ResolveWorkspaceByProjectSlug(
         IReadOnlyList<WorkspaceDescriptor> workspaces,
-        string? projectKey,
+        string? projectSlug,
         MachineProfile? profile)
     {
-        if (string.IsNullOrWhiteSpace(projectKey))
+        if (string.IsNullOrWhiteSpace(projectSlug))
         {
-            throw new InvalidOperationException("Project selector is missing a project key.");
+            throw new InvalidOperationException("Project selector is missing a project slug.");
         }
 
         var matching = workspaces
             .SelectMany(workspace => workspace.Projects.Select(project => (workspace, project)))
-            .Where(x => string.Equals(x.project.Key, projectKey, StringComparison.OrdinalIgnoreCase))
+            .Where(x => string.Equals(x.project.Slug, projectSlug, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
         if (matching.Length == 0)
         {
-            throw new InvalidOperationException($"Project '{projectKey}' was not found.");
+            throw new InvalidOperationException($"Project '{projectSlug}' was not found.");
         }
 
         return matching
@@ -92,7 +92,7 @@ public sealed class WorkspaceResolver
             {
                 var resolution = ResolveWorkspace(x.workspace, profile);
                 var project = resolution.Projects.Single(y =>
-                    string.Equals(y.Project.Key, x.project.Key, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(y.Project.Slug, x.project.Slug, StringComparison.OrdinalIgnoreCase));
 
                 return new WorkspaceResolution
                 {
@@ -110,7 +110,7 @@ public sealed class WorkspaceResolver
 
         var baseRoot = workspace.DefaultCheckoutRoot;
         if (profile is not null &&
-            profile.WorkspaceCheckoutRoots.TryGetValue(workspace.Key, out var overrideRoot) &&
+            profile.WorkspaceCheckoutRoots.TryGetValue(workspace.Slug, out var overrideRoot) &&
             !string.IsNullOrWhiteSpace(overrideRoot))
         {
             baseRoot = overrideRoot;
@@ -120,7 +120,7 @@ public sealed class WorkspaceResolver
         foreach (var project in workspace.Projects)
         {
             if (profile is not null &&
-                profile.ProjectOverrides.TryGetValue(project.Key, out var overrideValue) &&
+                profile.ProjectOverrides.TryGetValue(project.Slug, out var overrideValue) &&
                 overrideValue.Disabled)
             {
                 continue;
@@ -152,7 +152,7 @@ public sealed class WorkspaceResolver
         string baseRoot)
     {
         if (profile is not null &&
-            profile.ProjectOverrides.TryGetValue(project.Key, out var projectOverride) &&
+            profile.ProjectOverrides.TryGetValue(project.Slug, out var projectOverride) &&
             !string.IsNullOrWhiteSpace(projectOverride.CheckoutPath))
         {
             return Path.GetFullPath(projectOverride.CheckoutPath);
@@ -166,8 +166,8 @@ public sealed class WorkspaceResolver
 
         var context = new PathTemplateContext
         {
-            WorkspaceKey = workspace.Key,
-            ProjectKey = project.Key,
+            WorkspaceSlug = workspace.Slug,
+            ProjectSlug = project.Slug,
             RepoName = GetRepositoryName(project.RepoUrl),
             MachineId = profile?.MachineId ?? string.Empty,
             WorkspaceId = workspace.WorkspaceId,

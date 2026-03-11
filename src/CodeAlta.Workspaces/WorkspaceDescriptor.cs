@@ -14,10 +14,10 @@ public sealed class WorkspaceDescriptor
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the workspace key.
+    /// Gets or sets the workspace slug.
     /// </summary>
-    [JsonPropertyName("key")]
-    public string Key { get; set; } = string.Empty;
+    [JsonPropertyName("slug")]
+    public string Slug { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the display name.
@@ -79,10 +79,10 @@ public sealed class WorkspaceDescriptor
     {
         if (!WorkspaceId.TryParse(Id, out _))
         {
-            throw new ArgumentException($"Workspace '{Key}' has an invalid id '{Id}'.", nameof(Id));
+            throw new ArgumentException($"Workspace '{Slug}' has an invalid id '{Id}'.", nameof(Id));
         }
 
-        WorkspaceKeyValidator.Validate(Key, nameof(Key));
+        WorkspaceKeyValidator.Validate(Slug, nameof(Slug));
 
         if (string.IsNullOrWhiteSpace(DisplayName))
         {
@@ -95,14 +95,14 @@ public sealed class WorkspaceDescriptor
         }
 
         var duplicateKey = Projects
-            .GroupBy(static x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(static x => x.Slug, StringComparer.OrdinalIgnoreCase)
             .Where(static x => x.Count() > 1)
             .Select(static x => x.Key)
             .FirstOrDefault();
 
         if (duplicateKey is not null)
         {
-            throw new ArgumentException($"Workspace '{Key}' contains duplicate project key '{duplicateKey}'.", nameof(Projects));
+            throw new ArgumentException($"Workspace '{Slug}' contains duplicate project slug '{duplicateKey}'.", nameof(Projects));
         }
 
         var duplicateRef = ProjectRefs
@@ -114,7 +114,7 @@ public sealed class WorkspaceDescriptor
 
         if (duplicateRef is not null)
         {
-            throw new ArgumentException($"Workspace '{Key}' contains duplicate project ref '{duplicateRef}'.", nameof(ProjectRefs));
+            throw new ArgumentException($"Workspace '{Slug}' contains duplicate project ref '{duplicateRef}'.", nameof(ProjectRefs));
         }
 
         foreach (var project in Projects)

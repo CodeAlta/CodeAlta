@@ -6,14 +6,14 @@ namespace CodeAlta.Workspaces;
 public sealed class PathTemplateContext
 {
     /// <summary>
-    /// Gets or sets the workspace key.
+    /// Gets or sets the workspace slug.
     /// </summary>
-    public string WorkspaceKey { get; set; } = string.Empty;
+    public string WorkspaceSlug { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the project key.
+    /// Gets or sets the project slug.
     /// </summary>
-    public string ProjectKey { get; set; } = string.Empty;
+    public string ProjectSlug { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the repository name.

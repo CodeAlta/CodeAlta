@@ -113,7 +113,7 @@ public sealed class AgentInstructionTemplateProvider
 
         if (workspace is not null)
         {
-            builder.Append("Workspace: ").AppendLine($"{workspace.DisplayName} ({workspace.Key})");
+            builder.Append("Workspace: ").AppendLine($"{workspace.DisplayName} ({workspace.Slug})");
         }
 
         if (thread.ScopeMode == WorkThreadScopeMode.AllProjects)
@@ -131,7 +131,7 @@ public sealed class AgentInstructionTemplateProvider
         builder.AppendLine("Project Scope:");
         foreach (var project in projects)
         {
-            builder.Append("- ").Append(project.DisplayName).Append(" (").Append(project.Key).AppendLine(")");
+            builder.Append("- ").Append(project.DisplayName).Append(" (").Append(project.Slug).AppendLine(")");
         }
     }
 

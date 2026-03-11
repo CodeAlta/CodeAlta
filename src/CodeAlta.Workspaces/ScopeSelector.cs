@@ -11,14 +11,14 @@ public sealed record ScopeSelector
     public ScopeKind Kind { get; init; }
 
     /// <summary>
-    /// Gets the optional workspace key.
+    /// Gets the optional workspace slug.
     /// </summary>
-    public string? WorkspaceKey { get; init; }
+    public string? WorkspaceSlug { get; init; }
 
     /// <summary>
-    /// Gets the optional project key.
+    /// Gets the optional project slug.
     /// </summary>
-    public string? ProjectKey { get; init; }
+    public string? ProjectSlug { get; init; }
 
     /// <summary>
     /// Creates a selector for the global scope.
@@ -27,26 +27,26 @@ public sealed record ScopeSelector
     public static ScopeSelector Global() => new() { Kind = ScopeKind.Global };
 
     /// <summary>
-    /// Creates a selector for a workspace key.
+    /// Creates a selector for a workspace slug.
     /// </summary>
-    /// <param name="workspaceKey">The workspace key.</param>
+    /// <param name="workspaceSlug">The workspace slug.</param>
     /// <returns>A workspace selector.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="workspaceKey"/> is invalid.</exception>
-    public static ScopeSelector Workspace(string workspaceKey)
+    /// <exception cref="ArgumentException">Thrown when <paramref name="workspaceSlug"/> is invalid.</exception>
+    public static ScopeSelector Workspace(string workspaceSlug)
     {
-        WorkspaceKeyValidator.Validate(workspaceKey, nameof(workspaceKey));
-        return new ScopeSelector { Kind = ScopeKind.Workspace, WorkspaceKey = workspaceKey };
+        WorkspaceKeyValidator.Validate(workspaceSlug, nameof(workspaceSlug));
+        return new ScopeSelector { Kind = ScopeKind.Workspace, WorkspaceSlug = workspaceSlug };
     }
 
     /// <summary>
-    /// Creates a selector for a project key.
+    /// Creates a selector for a project slug.
     /// </summary>
-    /// <param name="projectKey">The project key.</param>
+    /// <param name="projectSlug">The project slug.</param>
     /// <returns>A project selector.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="projectKey"/> is invalid.</exception>
-    public static ScopeSelector Project(string projectKey)
+    /// <exception cref="ArgumentException">Thrown when <paramref name="projectSlug"/> is invalid.</exception>
+    public static ScopeSelector Project(string projectSlug)
     {
-        WorkspaceKeyValidator.Validate(projectKey, nameof(projectKey));
-        return new ScopeSelector { Kind = ScopeKind.Project, ProjectKey = projectKey };
+        WorkspaceKeyValidator.Validate(projectSlug, nameof(projectSlug));
+        return new ScopeSelector { Kind = ScopeKind.Project, ProjectSlug = projectSlug };
     }
 }

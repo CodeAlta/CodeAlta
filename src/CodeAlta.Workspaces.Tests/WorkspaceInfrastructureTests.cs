@@ -19,10 +19,10 @@ public sealed class WorkspaceInfrastructureTests
         var reloaded = serializer.DeserializeWorkspace(yaml);
         reloaded.Validate();
 
-        Assert.AreEqual(workspace.Key, reloaded.Key);
+        Assert.AreEqual(workspace.Slug, reloaded.Slug);
         Assert.AreEqual(workspace.DisplayName, reloaded.DisplayName);
         Assert.AreEqual(2, reloaded.Projects.Count);
-        Assert.AreEqual("repo-main", reloaded.Projects[0].Key);
+        Assert.AreEqual("repo-main", reloaded.Projects[0].Slug);
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public sealed class WorkspaceInfrastructureTests
         var reloaded = serializer.DeserializeWorkspaceMarkdown(markdown);
         reloaded.Validate();
 
-        Assert.AreEqual(workspace.Key, reloaded.Key);
+        Assert.AreEqual(workspace.Slug, reloaded.Slug);
         Assert.AreEqual(workspace.DisplayName, reloaded.DisplayName);
         CollectionAssert.AreEqual(workspace.ProjectRefs, reloaded.ProjectRefs);
         StringAssert.Contains(reloaded.MarkdownBody, "Shared code and services.");
@@ -56,7 +56,7 @@ public sealed class WorkspaceInfrastructureTests
             Path.Combine(workspaceRoot, "readme.md"),
             """
             ---
-            uid: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"
+            id: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"
             kind: "workspace"
             slug: "wk-core"
             display_name: "Core Workspace"
@@ -78,9 +78,8 @@ public sealed class WorkspaceInfrastructureTests
             Path.Combine(projectsRoot, "readme.md"),
             """
             ---
-            id: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"
             kind: "project"
-            uid: "01963b36-0d70-7a11-b3c2-1f2e3d4c5b6a"
+            id: "01963b36-0d70-7a11-b3c2-1f2e3d4c5b6a"
             slug: "repo-main"
             display_name: "Main Repo"
             repo_url: "https://example.com/repo-main.git"
@@ -97,9 +96,9 @@ public sealed class WorkspaceInfrastructureTests
         var workspaces = await catalog.LoadAsync().ConfigureAwait(false);
 
         Assert.AreEqual(1, workspaces.Count);
-        Assert.AreEqual("wk-core", workspaces[0].Key);
+        Assert.AreEqual("wk-core", workspaces[0].Slug);
         Assert.AreEqual(1, workspaces[0].Projects.Count);
-        Assert.AreEqual("repo-main", workspaces[0].Projects[0].Key);
+        Assert.AreEqual("repo-main", workspaces[0].Projects[0].Slug);
     }
 
     [TestMethod]
@@ -107,8 +106,8 @@ public sealed class WorkspaceInfrastructureTests
     {
         var context = new PathTemplateContext
         {
-            WorkspaceKey = "wk-core",
-            ProjectKey = "repo-main",
+            WorkspaceSlug = "wk-core",
+            ProjectSlug = "repo-main",
             RepoName = "repo-main",
             MachineId = "machine-a",
             WorkspaceId = WorkspaceId.Parse("01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"),
@@ -126,8 +125,8 @@ public sealed class WorkspaceInfrastructureTests
     {
         var context = new PathTemplateContext
         {
-            WorkspaceKey = "wk-core",
-            ProjectKey = "repo-main",
+            WorkspaceSlug = "wk-core",
+            ProjectSlug = "repo-main",
             RepoName = "repo-main",
             MachineId = "machine-a",
             WorkspaceId = WorkspaceId.Parse("01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"),
@@ -152,7 +151,7 @@ public sealed class WorkspaceInfrastructureTests
             Path.Combine(workspaceRoot, "readme.md"),
             """
             ---
-            uid: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"
+            id: "01963b36-0d6f-7e4b-a7e0-6b2e6d1f4c8a"
             kind: "workspace"
             slug: "wk-core"
             display_name: "Core Workspace"
@@ -170,7 +169,7 @@ public sealed class WorkspaceInfrastructureTests
             Path.Combine(projectRoot, "readme.md"),
             """
             ---
-            uid: "01963b36-0d70-7a11-b3c2-1f2e3d4c5b6a"
+            id: "01963b36-0d70-7a11-b3c2-1f2e3d4c5b6a"
             kind: "project"
             slug: "repo-main"
             display_name: "Main Repo"
@@ -217,7 +216,7 @@ public sealed class WorkspaceInfrastructureTests
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
@@ -230,7 +229,7 @@ public sealed class WorkspaceInfrastructureTests
         var workspace = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [project.Id],
@@ -242,10 +241,10 @@ public sealed class WorkspaceInfrastructureTests
         Assert.IsTrue(File.Exists(Path.Combine(root.Path, "projects", "repo-main", "readme.md")));
         Assert.IsTrue(File.Exists(Path.Combine(root.Path, "workspaces", "wk-core", "readme.md")));
 
-        var loaded = await catalog.GetByKeyAsync("wk-core").ConfigureAwait(false);
+        var loaded = await catalog.GetBySlugAsync("wk-core").ConfigureAwait(false);
         Assert.IsNotNull(loaded);
         Assert.AreEqual(1, loaded.Projects.Count);
-        Assert.AreEqual("repo-main", loaded.Projects[0].Key);
+        Assert.AreEqual("repo-main", loaded.Projects[0].Slug);
     }
 
     [TestMethod]
@@ -275,7 +274,7 @@ public sealed class WorkspaceInfrastructureTests
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
@@ -288,7 +287,7 @@ public sealed class WorkspaceInfrastructureTests
         var workspace = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [project.Id],
@@ -341,7 +340,7 @@ public sealed class WorkspaceInfrastructureTests
 
         var workspaces = await catalog.LoadAsync().ConfigureAwait(false);
         Assert.AreEqual(1, workspaces.Count);
-        Assert.AreEqual("wk-core", workspaces[0].Key);
+        Assert.AreEqual("wk-core", workspaces[0].Slug);
     }
 
     [TestMethod]
@@ -353,7 +352,7 @@ public sealed class WorkspaceInfrastructureTests
         var projectA = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
@@ -361,7 +360,7 @@ public sealed class WorkspaceInfrastructureTests
         var projectB = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-tools",
+            Slug = "repo-tools",
             DisplayName = "Tools Repo",
             RepoUrl = "https://example.com/repo-tools.git",
             DefaultBranch = "main",
@@ -373,7 +372,7 @@ public sealed class WorkspaceInfrastructureTests
         var workspace = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [projectA.Id],
@@ -398,7 +397,7 @@ public sealed class WorkspaceInfrastructureTests
         var projectA = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
@@ -409,7 +408,7 @@ public sealed class WorkspaceInfrastructureTests
         var workspaceA = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [projectA.Id],
@@ -417,7 +416,7 @@ public sealed class WorkspaceInfrastructureTests
         var workspaceB = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-alt",
+            Slug = "wk-alt",
             DisplayName = "Alt Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [projectA.Id],
@@ -551,7 +550,7 @@ public sealed class WorkspaceInfrastructureTests
             Workspace = new WorkspaceDescriptor
             {
                 Id = WorkspaceId.NewVersion7().ToString(),
-                Key = "wk-core",
+                Slug = "wk-core",
                 DisplayName = "Core Workspace",
                 DefaultCheckoutRoot = root.Path,
                 Projects = [],
@@ -563,7 +562,7 @@ public sealed class WorkspaceInfrastructureTests
                     Project = new ProjectDescriptor
                     {
                         Id = ProjectId.NewVersion7().ToString(),
-                        Key = "repo-main",
+                        Slug = "repo-main",
                         DisplayName = "Main Repo",
                         RepoUrl = remote,
                         DefaultBranch = "main",
@@ -590,7 +589,7 @@ public sealed class WorkspaceInfrastructureTests
         return new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             Projects =
@@ -598,7 +597,7 @@ public sealed class WorkspaceInfrastructureTests
                 new ProjectDescriptor
                 {
                     Id = ProjectId.NewVersion7().ToString(),
-                    Key = "repo-main",
+                    Slug = "repo-main",
                     DisplayName = "Main Repo",
                     RepoUrl = "https://example.com/repo-main.git",
                     DefaultBranch = "main",
@@ -607,7 +606,7 @@ public sealed class WorkspaceInfrastructureTests
                 new ProjectDescriptor
                 {
                     Id = ProjectId.NewVersion7().ToString(),
-                    Key = "repo-tools",
+                    Slug = "repo-tools",
                     DisplayName = "Tools Repo",
                     RepoUrl = "https://example.com/repo-tools.git",
                     DefaultBranch = "main",

@@ -129,13 +129,13 @@ public sealed class CodeAltaTerminalUiTests
             new ProjectDescriptor
             {
                 Id = "alpha",
-                Key = "alpha",
+                Slug = "alpha",
                 DisplayName = "Alpha",
             },
             new ProjectDescriptor
             {
                 Id = "beta",
-                Key = "beta",
+                Slug = "beta",
                 DisplayName = "Beta",
             },
         ];
@@ -528,7 +528,7 @@ public sealed class CodeAltaTerminalUiTests
             new WorkspaceDescriptor
             {
                 Id = workspaceId,
-                Key = "codealta",
+                Slug = "codealta",
                 DisplayName = "CodeAlta",
                 DefaultCheckoutRoot = @"C:\code",
             },

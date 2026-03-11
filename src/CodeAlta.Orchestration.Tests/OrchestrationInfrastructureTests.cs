@@ -85,14 +85,14 @@ public sealed class OrchestrationInfrastructureTests
         var workspace = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
         };
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
@@ -370,18 +370,18 @@ public sealed class OrchestrationInfrastructureTests
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
-            Checkout = new CheckoutRule { PathTemplate = @"{workspaceKey}\{projectKey}" },
+            Checkout = new CheckoutRule { PathTemplate = @"{workspaceSlug}\{projectSlug}" },
         };
         await workspaceCatalog.SaveProjectAsync(project).ConfigureAwait(false);
 
         var workspace = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [project.Id],
@@ -502,7 +502,7 @@ public sealed class OrchestrationInfrastructureTests
         var project = new ProjectDescriptor
         {
             Id = ProjectId.NewVersion7().ToString(),
-            Key = "repo-main",
+            Slug = "repo-main",
             DisplayName = "Main Repo",
             RepoUrl = "https://example.com/repo-main.git",
             DefaultBranch = "main",
@@ -512,7 +512,7 @@ public sealed class OrchestrationInfrastructureTests
         var workspace = new WorkspaceDescriptor
         {
             Id = WorkspaceId.NewVersion7().ToString(),
-            Key = "wk-core",
+            Slug = "wk-core",
             DisplayName = "Core Workspace",
             DefaultCheckoutRoot = @"C:\code",
             ProjectRefs = [project.Id],

@@ -45,10 +45,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private Markup? _chatBackendStatusMarkup;
     private ChatPromptEditor? _threadInput;
     private Visual? _threadInputView;
-    private TextBox? _newWorkspaceKeyInput;
+    private TextBox? _newWorkspaceSlugInput;
     private TextBox? _newWorkspaceNameInput;
     private TextBox? _newWorkspaceRootInput;
-    private TextBox? _newProjectKeyInput;
+    private TextBox? _newProjectSlugInput;
     private TextBox? _newProjectNameInput;
     private TextBox? _newProjectRepoInput;
     private TextBox? _newProjectBranchInput;
@@ -237,10 +237,10 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             .MinWidth(24)
             .MaxWidth(36);
         _allProjectsCheckBox ??= new CheckBox("All Projects");
-        _newWorkspaceKeyInput ??= new TextBox { Text = string.Empty };
+        _newWorkspaceSlugInput ??= new TextBox { Text = string.Empty };
         _newWorkspaceNameInput ??= new TextBox { Text = string.Empty };
         _newWorkspaceRootInput ??= new TextBox { Text = @"C:\code" };
-        _newProjectKeyInput ??= new TextBox { Text = string.Empty };
+        _newProjectSlugInput ??= new TextBox { Text = string.Empty };
         _newProjectNameInput ??= new TextBox { Text = string.Empty };
         _newProjectRepoInput ??= new TextBox { Text = string.Empty };
         _newProjectBranchInput ??= new TextBox { Text = "main" };
@@ -269,8 +269,8 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                             new TextBlock("Workspace"),
                             _workspaceSelect,
                             new Button(new TextBlock("Reload Catalog")).Click(() => _ = ReloadCatalogAsync()),
-                            new TextBlock("Key"),
-                            _newWorkspaceKeyInput,
+                            new TextBlock("Slug"),
+                            _newWorkspaceSlugInput,
                             new TextBlock("Name"),
                             _newWorkspaceNameInput,
                             new TextBlock("Default Checkout Root"),
@@ -287,8 +287,8 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                             new TextBlock("Filter"),
                             _projectFilterSelect,
                             _projectScopeVisual,
-                            new TextBlock("Project Key"),
-                            _newProjectKeyInput,
+                            new TextBlock("Project Slug"),
+                            _newProjectSlugInput,
                             new TextBlock("Project Name"),
                             _newProjectNameInput,
                             new TextBlock("Repo URL"),
@@ -578,19 +578,19 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         try
         {
             var draft = ReadWorkspaceDraft();
-            var key = draft.Key;
+            var slug = draft.Slug;
             var name = draft.Name;
             var root = draft.Root;
-            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(root))
+            if (string.IsNullOrWhiteSpace(slug) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(root))
             {
-                SetStatus("Workspace key, name, and checkout root are required.");
+                SetStatus("Workspace slug, name, and checkout root are required.");
                 return;
             }
 
             var descriptor = new WorkspaceDescriptor
             {
                 Id = WorkspaceId.NewVersion7().ToString(),
-                Key = key,
+                Slug = slug,
                 DisplayName = name,
                 DefaultCheckoutRoot = root,
                 MarkdownBody = $"# {name}\n",
@@ -602,7 +602,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             _selectedWorkspaceId = descriptor.Id;
             ResetProjectScopeSelection();
             RefreshView();
-            SetStatus($"Created workspace '{descriptor.Key}'.");
+            SetStatus($"Created workspace '{descriptor.Slug}'.");
         }
         catch (Exception ex)
         {
@@ -622,29 +622,29 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         try
         {
             var draft = ReadProjectDraft();
-            var key = draft.Key;
+            var slug = draft.Slug;
             var name = draft.Name;
             var repo = draft.RepoUrl;
             var branch = draft.Branch;
-            if (string.IsNullOrWhiteSpace(key) ||
+            if (string.IsNullOrWhiteSpace(slug) ||
                 string.IsNullOrWhiteSpace(name) ||
                 string.IsNullOrWhiteSpace(repo) ||
                 string.IsNullOrWhiteSpace(branch))
             {
-                SetStatus("Project key, name, repo URL, and branch are required.");
+                SetStatus("Project slug, name, repo URL, and branch are required.");
                 return;
             }
 
             var descriptor = new ProjectDescriptor
             {
                 Id = ProjectId.NewVersion7().ToString(),
-                Key = key,
+                Slug = slug,
                 DisplayName = name,
                 RepoUrl = repo,
                 DefaultBranch = branch,
                 Checkout = new CheckoutRule
                 {
-                    PathTemplate = "{workspaceKey}\\{projectKey}",
+                    PathTemplate = "{workspaceSlug}\\{projectSlug}",
                 },
                 MarkdownBody = $"# {name}\n",
             };
@@ -661,7 +661,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             _selectedWorkspaceId = workspace.Id;
             ResetProjectScopeSelection();
             RefreshView();
-            SetStatus($"Added project '{descriptor.Key}' to workspace '{workspace.Key}'.");
+            SetStatus($"Added project '{descriptor.Slug}' to workspace '{workspace.Slug}'.");
         }
         catch (Exception ex)
         {
@@ -826,7 +826,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var workspace = _workspaces.First(threadWorkspace =>
             string.Equals(threadWorkspace.Id, thread.WorkspaceRef, StringComparison.OrdinalIgnoreCase));
         var resolution = (await _workspaceResolver.ResolveAsync(
-                ScopeSelector.Workspace(workspace.Key),
+                ScopeSelector.Workspace(workspace.Slug),
                 cancellationToken: CancellationToken.None)
             .ConfigureAwait(false))
             .Single();
@@ -1791,7 +1791,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         {
             null => "CodeAlta | no thread selected",
             { Kind: WorkThreadKind.Global } => $"CodeAlta | thread={thread.Title} | scope=global",
-            _ => $"CodeAlta | workspace={workspace?.Key ?? "?"} | {projectPart} | thread={thread.Title}",
+            _ => $"CodeAlta | workspace={workspace?.Slug ?? "?"} | {projectPart} | thread={thread.Title}",
         };
     }
 
@@ -1985,7 +1985,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     {
         return ReadUiValue(
             () => new WorkspaceDraft(
-                _newWorkspaceKeyInput?.Text?.Trim(),
+                _newWorkspaceSlugInput?.Text?.Trim(),
                 _newWorkspaceNameInput?.Text?.Trim(),
                 _newWorkspaceRootInput?.Text?.Trim()));
     }
@@ -1995,7 +1995,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         ReadUiValue(
             () =>
             {
-                _newWorkspaceKeyInput!.Text = string.Empty;
+                _newWorkspaceSlugInput!.Text = string.Empty;
                 _newWorkspaceNameInput!.Text = string.Empty;
                 return 0;
             });
@@ -2005,7 +2005,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     {
         return ReadUiValue(
             () => new ProjectDraft(
-                _newProjectKeyInput?.Text?.Trim(),
+                _newProjectSlugInput?.Text?.Trim(),
                 _newProjectNameInput?.Text?.Trim(),
                 _newProjectRepoInput?.Text?.Trim(),
                 _newProjectBranchInput?.Text?.Trim()));
@@ -2016,7 +2016,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         ReadUiValue(
             () =>
             {
-                _newProjectKeyInput!.Text = string.Empty;
+                _newProjectSlugInput!.Text = string.Empty;
                 _newProjectNameInput!.Text = string.Empty;
                 _newProjectRepoInput!.Text = string.Empty;
                 _newProjectBranchInput!.Text = "main";
@@ -2103,9 +2103,9 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         public Dictionary<string, AgentUserInputRequest> UserInputRequests { get; } = new(StringComparer.Ordinal);
     }
 
-    private sealed record WorkspaceDraft(string? Key, string? Name, string? Root);
+    private sealed record WorkspaceDraft(string? Slug, string? Name, string? Root);
 
-    private sealed record ProjectDraft(string? Key, string? Name, string? RepoUrl, string? Branch);
+    private sealed record ProjectDraft(string? Slug, string? Name, string? RepoUrl, string? Branch);
 
     private sealed record ThreadDraft(IReadOnlyList<string> ProjectRefs, WorkThreadScopeMode ScopeMode, string? Title);
 }

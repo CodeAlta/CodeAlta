@@ -58,11 +58,11 @@ public sealed class WorkspaceCatalog
             descriptor.SourcePath = markdownPath;
 
             var workspaceDirectory = Path.GetDirectoryName(markdownPath)!;
-            var expectedKey = Path.GetFileName(workspaceDirectory);
-            if (!string.Equals(descriptor.Key, expectedKey, StringComparison.Ordinal))
+            var expectedSlug = Path.GetFileName(workspaceDirectory);
+            if (!string.Equals(descriptor.Slug, expectedSlug, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    $"Workspace key '{descriptor.Key}' does not match folder '{expectedKey}'.");
+                    $"Workspace slug '{descriptor.Slug}' does not match folder '{expectedSlug}'.");
             }
 
             foreach (var projectRef in descriptor.ProjectRefs)
@@ -71,7 +71,7 @@ public sealed class WorkspaceCatalog
                 if (!projectsById.TryGetValue(projectRef, out var project))
                 {
                     throw new InvalidDataException(
-                        $"Workspace '{descriptor.Key}' references unknown project '{projectRef}'.");
+                        $"Workspace '{descriptor.Slug}' references unknown project '{projectRef}'.");
                 }
 
                 descriptor.Projects.Add(CloneProject(project));
@@ -82,25 +82,25 @@ public sealed class WorkspaceCatalog
         }
 
         return results
-            .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x.Slug, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
     /// <summary>
     /// Loads a single workspace by key.
     /// </summary>
-    /// <param name="workspaceKey">The workspace key.</param>
+    /// <param name="workspaceSlug">The workspace slug.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The matching workspace descriptor, or <see langword="null"/> when not found.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="workspaceKey"/> is invalid.</exception>
-    public async Task<WorkspaceDescriptor?> GetByKeyAsync(
-        string workspaceKey,
+    public async Task<WorkspaceDescriptor?> GetBySlugAsync(
+        string workspaceSlug,
         CancellationToken cancellationToken = default)
     {
-        WorkspaceKeyValidator.Validate(workspaceKey, nameof(workspaceKey));
+        WorkspaceKeyValidator.Validate(workspaceSlug, nameof(workspaceSlug));
 
         var items = await LoadAsync(cancellationToken).ConfigureAwait(false);
-        return items.FirstOrDefault(x => string.Equals(x.Key, workspaceKey, StringComparison.OrdinalIgnoreCase));
+        return items.FirstOrDefault(x => string.Equals(x.Slug, workspaceSlug, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -140,7 +140,7 @@ public sealed class WorkspaceCatalog
     {
         return (await LoadProjectsByIdAsync(cancellationToken).ConfigureAwait(false))
             .Values
-            .OrderBy(static x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static x => x.Slug, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
@@ -154,7 +154,7 @@ public sealed class WorkspaceCatalog
         ArgumentNullException.ThrowIfNull(workspace);
         workspace.Validate();
 
-        var directory = Path.Combine(_options.WorkspacesRoot, workspace.Key);
+        var directory = Path.Combine(_options.WorkspacesRoot, workspace.Slug);
         Directory.CreateDirectory(directory);
         var markdownPath = Path.Combine(directory, "readme.md");
         var markdown = _serializer.SerializeWorkspaceMarkdown(workspace);
@@ -172,7 +172,7 @@ public sealed class WorkspaceCatalog
         ArgumentNullException.ThrowIfNull(project);
         project.Validate();
 
-        var directory = Path.Combine(_options.ProjectsRoot, project.Key);
+        var directory = Path.Combine(_options.ProjectsRoot, project.Slug);
         Directory.CreateDirectory(directory);
         var markdownPath = Path.Combine(directory, "readme.md");
         var markdown = _serializer.SerializeProjectMarkdown(project);
@@ -196,11 +196,11 @@ public sealed class WorkspaceCatalog
             var descriptor = _serializer.DeserializeProjectMarkdown(markdown);
             descriptor.SourcePath = markdownPath;
 
-            var expectedKey = Path.GetFileName(Path.GetDirectoryName(markdownPath)!);
-            if (!string.Equals(descriptor.Key, expectedKey, StringComparison.Ordinal))
+            var expectedSlug = Path.GetFileName(Path.GetDirectoryName(markdownPath)!);
+            if (!string.Equals(descriptor.Slug, expectedSlug, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    $"Project key '{descriptor.Key}' does not match folder '{expectedKey}'.");
+                    $"Project slug '{descriptor.Slug}' does not match folder '{expectedSlug}'.");
             }
 
             descriptor.Validate();
@@ -215,7 +215,7 @@ public sealed class WorkspaceCatalog
         return new ProjectDescriptor
         {
             Id = project.Id,
-            Key = project.Key,
+            Slug = project.Slug,
             DisplayName = project.DisplayName,
             Description = project.Description,
             RepoUrl = project.RepoUrl,

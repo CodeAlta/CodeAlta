@@ -14,14 +14,14 @@ public sealed class MachineProfile
     public string MachineId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets workspace checkout root overrides by workspace key.
+    /// Gets or sets workspace checkout root overrides by workspace slug.
     /// </summary>
     [JsonPropertyName("workspace_checkout_roots")]
     public Dictionary<string, string> WorkspaceCheckoutRoots { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Gets or sets project-level overrides by project key.
+    /// Gets or sets project-level overrides by project slug.
     /// </summary>
     [JsonPropertyName("project_overrides")]
     public Dictionary<string, MachineProjectOverride> ProjectOverrides { get; set; } =

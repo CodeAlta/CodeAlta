@@ -88,8 +88,8 @@ public sealed class WorkspaceBootstrapper
             results.Add(
                 new WorkspaceCheckoutExecutionResult
                 {
-                    WorkspaceKey = plan.WorkspaceKey,
-                    ProjectKey = plan.ProjectKey,
+                    WorkspaceSlug = plan.WorkspaceSlug,
+                    ProjectSlug = plan.ProjectSlug,
                     CheckoutPath = checkoutPath,
                     Action = plan.Action,
                     Success = success,

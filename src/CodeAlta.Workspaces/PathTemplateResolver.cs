@@ -23,8 +23,10 @@ public static class PathTemplateResolver
         ArgumentNullException.ThrowIfNull(context);
 
         var resolved = template
-            .Replace("{workspaceKey}", context.WorkspaceKey, StringComparison.Ordinal)
-            .Replace("{projectKey}", context.ProjectKey, StringComparison.Ordinal)
+            .Replace("{workspaceSlug}", context.WorkspaceSlug, StringComparison.Ordinal)
+            .Replace("{projectSlug}", context.ProjectSlug, StringComparison.Ordinal)
+            .Replace("{workspaceKey}", context.WorkspaceSlug, StringComparison.Ordinal)
+            .Replace("{projectKey}", context.ProjectSlug, StringComparison.Ordinal)
             .Replace("{repoName}", context.RepoName, StringComparison.Ordinal)
             .Replace("{machineId}", context.MachineId, StringComparison.Ordinal)
             .Replace("{workspaceId}", context.WorkspaceId.ToString(), StringComparison.Ordinal)

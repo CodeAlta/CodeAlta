@@ -24,8 +24,8 @@ public sealed class WorkspaceBootstrapPlanner
 
             plans.Add(new WorkspaceCheckoutPlan
             {
-                WorkspaceKey = resolution.Workspace.Key,
-                ProjectKey = project.Project.Key,
+                WorkspaceSlug = resolution.Workspace.Slug,
+                ProjectSlug = project.Project.Slug,
                 RepoUrl = project.Project.RepoUrl,
                 CheckoutPath = project.CheckoutPath,
                 Action = action,

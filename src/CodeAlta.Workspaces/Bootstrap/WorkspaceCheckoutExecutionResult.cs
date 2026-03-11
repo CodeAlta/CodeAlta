@@ -6,14 +6,14 @@ namespace CodeAlta.Workspaces.Bootstrap;
 public sealed record WorkspaceCheckoutExecutionResult
 {
     /// <summary>
-    /// Gets the workspace key.
+    /// Gets the workspace slug.
     /// </summary>
-    public required string WorkspaceKey { get; init; }
+    public required string WorkspaceSlug { get; init; }
 
     /// <summary>
-    /// Gets the project key.
+    /// Gets the project slug.
     /// </summary>
-    public required string ProjectKey { get; init; }
+    public required string ProjectSlug { get; init; }
 
     /// <summary>
     /// Gets the checkout path.

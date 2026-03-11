@@ -14,10 +14,10 @@ public sealed class ProjectDescriptor
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the project key.
+    /// Gets or sets the project slug.
     /// </summary>
-    [JsonPropertyName("key")]
-    public string Key { get; set; } = string.Empty;
+    [JsonPropertyName("slug")]
+    public string Slug { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the display name.
@@ -79,10 +79,10 @@ public sealed class ProjectDescriptor
     {
         if (!ProjectId.TryParse(Id, out _))
         {
-            throw new ArgumentException($"Project '{Key}' has an invalid id '{Id}'.", nameof(Id));
+            throw new ArgumentException($"Project '{Slug}' has an invalid id '{Id}'.", nameof(Id));
         }
 
-        WorkspaceKeyValidator.Validate(Key, nameof(Key));
+        WorkspaceKeyValidator.Validate(Slug, nameof(Slug));
 
         if (string.IsNullOrWhiteSpace(DisplayName))
         {
