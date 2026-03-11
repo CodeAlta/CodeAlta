@@ -19,11 +19,11 @@
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.1.0" />
     <PackageVersion Include="NJsonSchema" Version="11.5.2" />
     <PackageVersion Include="NJsonSchema.CodeGeneration.CSharp" Version="11.5.2" />
-    <PackageVersion Include="SharpYaml" Version="3.3.0" />
+    <PackageVersion Include="SharpYaml" Version="3.4.0" />
     <PackageVersion Include="XenoAtom.CommandLine.Terminal" Version="2.0.2" />
     <PackageVersion Include="XenoAtom.Logging" Version="1.1.2" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.1.2" />
-    <PackageVersion Include="XenoAtom.Terminal.UI" Version="1.4.0" />
-    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Markdown" Version="1.4.0" />
+    <PackageVersion Include="XenoAtom.Terminal.UI" Version="1.5.0" />
+    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Markdown" Version="1.5.0" />
   </ItemGroup>
 </Project>

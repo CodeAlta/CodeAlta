@@ -176,27 +176,19 @@ public sealed class CodeAltaTerminalUiTests
     {
         Assert.IsTrue(CodeAltaTerminalUi.ShouldRunInlineOnCurrentThread(
             dispatcherHasAccess: false,
-            terminalLoopStarted: false,
-            bootstrapThreadId: 42,
-            currentThreadId: 42));
-
-        Assert.IsFalse(CodeAltaTerminalUi.ShouldRunInlineOnCurrentThread(
-            dispatcherHasAccess: false,
-            terminalLoopStarted: false,
-            bootstrapThreadId: 42,
-            currentThreadId: 7));
+            terminalLoopStarted: false));
 
         Assert.IsTrue(CodeAltaTerminalUi.ShouldRunInlineOnCurrentThread(
             dispatcherHasAccess: true,
-            terminalLoopStarted: true,
-            bootstrapThreadId: 42,
-            currentThreadId: 42));
+            terminalLoopStarted: false));
+
+        Assert.IsTrue(CodeAltaTerminalUi.ShouldRunInlineOnCurrentThread(
+            dispatcherHasAccess: true,
+            terminalLoopStarted: true));
 
         Assert.IsFalse(CodeAltaTerminalUi.ShouldRunInlineOnCurrentThread(
             dispatcherHasAccess: false,
-            terminalLoopStarted: true,
-            bootstrapThreadId: 42,
-            currentThreadId: 42));
+            terminalLoopStarted: true));
     }
 
     [TestMethod]

@@ -58,7 +58,6 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private bool _chatBindingEventsSubscribed;
     private volatile bool _chatAutoApproveEnabled = true;
     private bool _statusBusy;
-    private int _bootstrapThreadId;
     private bool _terminalLoopStarted;
     private bool _globalScopeSelected = true;
     private bool _sidebarSelectionSyncEnabled = true;
@@ -95,7 +94,6 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        _bootstrapThreadId = Environment.CurrentManagedThreadId;
         _dispatcher = Dispatcher.Current;
         SubscribeChatBindingEvents();
 
@@ -2192,9 +2190,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         var dispatcher = _dispatcher ?? Dispatcher.Current;
         if (ShouldRunInlineOnCurrentThread(
                 dispatcher.CheckAccess(),
-                _terminalLoopStarted,
-                _bootstrapThreadId,
-                Environment.CurrentManagedThreadId))
+                _terminalLoopStarted))
         {
             action();
             return;
@@ -2205,17 +2201,14 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
     internal static bool ShouldRunInlineOnCurrentThread(
         bool dispatcherHasAccess,
-        bool terminalLoopStarted,
-        int bootstrapThreadId,
-        int currentThreadId)
+        bool terminalLoopStarted)
     {
-        if (terminalLoopStarted)
+        if (!terminalLoopStarted)
         {
-            return dispatcherHasAccess;
+            return true;
         }
 
-        return bootstrapThreadId != 0 &&
-               currentThreadId == bootstrapThreadId;
+        return dispatcherHasAccess;
     }
 
     private T ReadUiValue<T>(Func<T> action)
