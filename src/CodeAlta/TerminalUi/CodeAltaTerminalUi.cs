@@ -10,6 +10,7 @@ using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
+using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Threading;
 
 internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
@@ -57,8 +58,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private volatile bool _chatAutoApproveEnabled = true;
     private bool _globalScopeSelected = true;
     private bool _sidebarSelectionSyncEnabled = true;
-    private int _lastSidebarSelectedIndex = -1;
-    private IReadOnlyList<SidebarSelectionTarget> _sidebarVisibleTargets = [];
+    private SidebarSelectionTarget? _lastSidebarSelectedTarget;
     private string? _selectedProjectId;
     private string? _selectedThreadId;
     private string? _pendingStartupThreadRestoreId;
@@ -325,9 +325,8 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
                 _sidebarTree.Roots.Add(root);
             }
 
-            _sidebarVisibleTargets = FlattenSidebarTargets(_sidebarTree.Roots);
-            _sidebarTree.SelectedIndex = ResolveSidebarSelectedIndex(_sidebarVisibleTargets);
-            _lastSidebarSelectedIndex = _sidebarTree.SelectedIndex;
+            SelectSidebarNodeForCurrentState();
+            _lastSidebarSelectedTarget = GetSelectedSidebarTarget(_sidebarTree.SelectedNode);
         }
         finally
         {
@@ -342,6 +341,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             _catalogOptions.GlobalRoot))
         {
             Icon = NerdFont.MdHomeOutline,
+            IconStyle = Style.None.WithForeground(Colors.Goldenrod),
             Data = SidebarSelectionTarget.Global(),
             IsExpanded = true,
         };
@@ -364,6 +364,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             $"{_projects.Count} known projects"))
         {
             Icon = NerdFont.MdFolderMultipleOutline,
+            IconStyle = Style.None.WithForeground(Colors.DeepSkyBlue),
             IsExpanded = true,
         };
 
@@ -385,6 +386,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             project.ProjectPath))
         {
             Icon = NerdFont.MdFolderOutline,
+            IconStyle = Style.None.WithForeground(Colors.DeepSkyBlue),
             Data = SidebarSelectionTarget.Project(project.Id),
             IsExpanded = string.Equals(project.Id, _selectedProjectId, StringComparison.OrdinalIgnoreCase),
         };
@@ -412,6 +414,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             BuildThreadSidebarTooltip(thread)))
         {
             Icon = icon,
+            IconStyle = ResolveSidebarThreadIconStyle(thread.Kind),
             Data = SidebarSelectionTarget.Thread(thread.ThreadId),
         };
     }
@@ -431,72 +434,81 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
         return markup.Tooltip(new Markup($"[code]{AnsiMarkup.Escape(tooltip)}[/]"));
     }
 
-    private static IReadOnlyList<SidebarSelectionTarget> FlattenSidebarTargets(IEnumerable<TreeNode> roots)
+    private static Style ResolveSidebarThreadIconStyle(WorkThreadKind kind)
     {
-        var results = new List<SidebarSelectionTarget>();
-        var rowIndex = 0;
-        foreach (var root in roots)
+        return kind switch
         {
-            AppendVisibleSidebarTargets(root, results, ref rowIndex);
-        }
-
-        return results;
+            WorkThreadKind.GlobalThread => Style.None.WithForeground(Colors.Goldenrod),
+            WorkThreadKind.ProjectThread => Style.None.WithForeground(Colors.MediumSeaGreen),
+            WorkThreadKind.InternalThread => Style.None.WithForeground(Colors.MediumPurple),
+            _ => Style.None.WithForeground(Colors.White),
+        };
     }
 
-    private static void AppendVisibleSidebarTargets(TreeNode node, List<SidebarSelectionTarget> results, ref int rowIndex)
+    private static SidebarSelectionTarget? GetSelectedSidebarTarget(TreeNode? node)
     {
-        if (node.Data is SidebarSelectionTarget target)
+        return node?.Data as SidebarSelectionTarget;
+    }
+
+    private SidebarSelectionTarget ResolveSidebarTargetForCurrentState()
+    {
+        if (!string.IsNullOrWhiteSpace(_selectedThreadId))
         {
-            results.Add(target with { TreeRowIndex = rowIndex });
+            return SidebarSelectionTarget.Thread(_selectedThreadId);
         }
 
-        rowIndex++;
+        if (_globalScopeSelected || string.IsNullOrWhiteSpace(_selectedProjectId))
+        {
+            return SidebarSelectionTarget.Global();
+        }
 
-        if (!node.IsExpanded)
+        return SidebarSelectionTarget.Project(_selectedProjectId);
+    }
+
+    private void SelectSidebarNodeForCurrentState()
+    {
+        if (_sidebarTree is null)
         {
             return;
         }
 
-        foreach (var child in node.Children)
+        var selectedTarget = ResolveSidebarTargetForCurrentState();
+        var selectedNode = FindSidebarNode(_sidebarTree.Roots, selectedTarget);
+        if (selectedNode is not null)
         {
-            AppendVisibleSidebarTargets(child, results, ref rowIndex);
+            _sidebarTree.TrySelectNode(selectedNode);
         }
     }
 
-    private int ResolveSidebarSelectedIndex(IReadOnlyList<SidebarSelectionTarget> visibleTargets)
+    private static TreeNode? FindSidebarNode(IEnumerable<TreeNode> roots, SidebarSelectionTarget selectedTarget)
     {
-        for (var index = 0; index < visibleTargets.Count; index++)
+        foreach (var root in roots)
         {
-            var target = visibleTargets[index];
-            if (target.Kind == SidebarSelectionKind.Thread &&
-                string.Equals(target.ThreadId, _selectedThreadId, StringComparison.OrdinalIgnoreCase))
+            if (FindSidebarNode(root, selectedTarget) is { } match)
             {
-                return target.TreeRowIndex;
-            }
-
-            if (target.Kind == SidebarSelectionKind.GlobalScope && _selectedThreadId is null && _globalScopeSelected)
-            {
-                return target.TreeRowIndex;
-            }
-
-            if (target.Kind == SidebarSelectionKind.ProjectScope &&
-                _selectedThreadId is null &&
-                !_globalScopeSelected &&
-                string.Equals(target.ProjectId, _selectedProjectId, StringComparison.OrdinalIgnoreCase))
-            {
-                return target.TreeRowIndex;
+                return match;
             }
         }
 
-        for (var index = 0; index < visibleTargets.Count; index++)
+        return null;
+    }
+
+    private static TreeNode? FindSidebarNode(TreeNode node, SidebarSelectionTarget selectedTarget)
+    {
+        if (node.Data is SidebarSelectionTarget target && target == selectedTarget)
         {
-            if (visibleTargets[index].Kind == SidebarSelectionKind.GlobalScope)
+            return node;
+        }
+
+        foreach (var child in node.Children)
+        {
+            if (FindSidebarNode(child, selectedTarget) is { } match)
             {
-                return visibleTargets[index].TreeRowIndex;
+                return match;
             }
         }
 
-        return -1;
+        return null;
     }
 
     private void SyncSidebarSelection()
@@ -506,18 +518,13 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
             return;
         }
 
-        var selectedIndex = _sidebarTree.SelectedIndex;
-        if (selectedIndex == _lastSidebarSelectedIndex)
+        var target = GetSelectedSidebarTarget(_sidebarTree.SelectedNode);
+        if (target is null || target == _lastSidebarSelectedTarget)
         {
             return;
         }
 
-        _lastSidebarSelectedIndex = selectedIndex;
-        var target = _sidebarVisibleTargets.FirstOrDefault(candidate => candidate.TreeRowIndex == selectedIndex);
-        if (target is null)
-        {
-            return;
-        }
+        _lastSidebarSelectedTarget = target;
         switch (target.Kind)
         {
             case SidebarSelectionKind.GlobalScope:
@@ -2338,8 +2345,7 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private sealed record SidebarSelectionTarget(
         SidebarSelectionKind Kind,
         string? ProjectId,
-        string? ThreadId,
-        int TreeRowIndex = -1)
+        string? ThreadId)
     {
         public static SidebarSelectionTarget Global()
             => new(SidebarSelectionKind.GlobalScope, null, null);
