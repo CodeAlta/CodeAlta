@@ -106,7 +106,7 @@ public abstract partial record ResponseItem
     public sealed partial record WebSearchCallResponseItem : ResponseItem
     {
         [JsonPropertyName("action")]
-        public WebSearchAction? Action { get; set; }
+        public ResponsesApiWebSearchAction? Action { get; set; }
         [JsonPropertyName("id")]
         public string? Id { get; set; }
         [JsonPropertyName("status")]

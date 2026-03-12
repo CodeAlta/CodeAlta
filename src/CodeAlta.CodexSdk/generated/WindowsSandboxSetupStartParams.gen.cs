@@ -11,5 +11,5 @@ public sealed partial record WindowsSandboxSetupStartParams
     [JsonPropertyName("mode")]
     public WindowsSandboxSetupMode Mode { get; set; } = default!;
     [JsonPropertyName("cwd")]
-    public string? Cwd { get; set; }
+    public AbsolutePathBuf? Cwd { get; set; }
 }

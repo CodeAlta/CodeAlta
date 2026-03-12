@@ -13,6 +13,8 @@ public abstract partial record ElicitationRequest
 {
     public sealed partial record Form : ElicitationRequest
     {
+        [JsonPropertyName("_meta")]
+        public JsonElement? Meta { get; set; }
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
         [JsonPropertyName("requested_schema")]
@@ -21,6 +23,8 @@ public abstract partial record ElicitationRequest
 
     public sealed partial record Url : ElicitationRequest
     {
+        [JsonPropertyName("_meta")]
+        public JsonElement? Meta { get; set; }
         [JsonPropertyName("elicitation_id")]
         public string ElicitationId { get; set; } = string.Empty;
         [JsonPropertyName("message")]

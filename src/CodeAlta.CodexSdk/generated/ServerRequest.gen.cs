@@ -14,6 +14,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ItemFileChangeRequestApprovalRequest), typeDiscriminator: "item/fileChange/requestApproval")]
 [JsonDerivedType(typeof(ItemToolRequestUserInputRequest), typeDiscriminator: "item/tool/requestUserInput")]
 [JsonDerivedType(typeof(McpServerElicitationRequestRequest), typeDiscriminator: "mcpServer/elicitation/request")]
+[JsonDerivedType(typeof(ItemPermissionsRequestApprovalRequest), typeDiscriminator: "item/permissions/requestApproval")]
 [JsonDerivedType(typeof(ItemToolCallRequest), typeDiscriminator: "item/tool/call")]
 [JsonDerivedType(typeof(AccountChatgptAuthTokensRefreshRequest), typeDiscriminator: "account/chatgptAuthTokens/refresh")]
 public abstract partial record ServerRequest
@@ -60,6 +61,17 @@ public abstract partial record ServerRequest
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
         public McpServerElicitationRequestParams Params { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Request approval for additional permissions from the user.
+    /// </summary>
+    public sealed partial record ItemPermissionsRequestApprovalRequest : ServerRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public PermissionsRequestApprovalParams Params { get; set; } = default!;
     }
 
     /// <summary>

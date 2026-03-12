@@ -20,13 +20,16 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ThreadNameUpdatedNotification), typeDiscriminator: "thread/name/updated")]
 [JsonDerivedType(typeof(ThreadTokenUsageUpdatedNotification), typeDiscriminator: "thread/tokenUsage/updated")]
 [JsonDerivedType(typeof(TurnStartedNotification), typeDiscriminator: "turn/started")]
+[JsonDerivedType(typeof(HookStartedNotification), typeDiscriminator: "hook/started")]
 [JsonDerivedType(typeof(TurnCompletedNotification), typeDiscriminator: "turn/completed")]
+[JsonDerivedType(typeof(HookCompletedNotification), typeDiscriminator: "hook/completed")]
 [JsonDerivedType(typeof(TurnDiffUpdatedNotification), typeDiscriminator: "turn/diff/updated")]
 [JsonDerivedType(typeof(TurnPlanUpdatedNotification), typeDiscriminator: "turn/plan/updated")]
 [JsonDerivedType(typeof(ItemStartedNotification), typeDiscriminator: "item/started")]
 [JsonDerivedType(typeof(ItemCompletedNotification), typeDiscriminator: "item/completed")]
 [JsonDerivedType(typeof(ItemAgentMessageDeltaNotification), typeDiscriminator: "item/agentMessage/delta")]
 [JsonDerivedType(typeof(ItemPlanDeltaNotification), typeDiscriminator: "item/plan/delta")]
+[JsonDerivedType(typeof(CommandExecOutputDeltaNotification), typeDiscriminator: "command/exec/outputDelta")]
 [JsonDerivedType(typeof(ItemCommandExecutionOutputDeltaNotification), typeDiscriminator: "item/commandExecution/outputDelta")]
 [JsonDerivedType(typeof(ItemCommandExecutionTerminalInteractionNotification), typeDiscriminator: "item/commandExecution/terminalInteraction")]
 [JsonDerivedType(typeof(ItemFileChangeOutputDeltaNotification), typeDiscriminator: "item/fileChange/outputDelta")]
@@ -118,10 +121,22 @@ public abstract partial record ServerNotification
         public TurnStartedNotification Params { get; set; } = default!;
     }
 
+    public sealed partial record HookStartedNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public HookStartedNotification Params { get; set; } = default!;
+    }
+
     public sealed partial record TurnCompletedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
         public TurnCompletedNotification Params { get; set; } = default!;
+    }
+
+    public sealed partial record HookCompletedNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public HookCompletedNotification Params { get; set; } = default!;
     }
 
     public sealed partial record TurnDiffUpdatedNotification : ServerNotification
@@ -161,6 +176,15 @@ public abstract partial record ServerNotification
     {
         [JsonPropertyName("params")]
         public PlanDeltaNotification Params { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Stream base64-encoded stdout/stderr chunks for a running `command/exec` session.
+    /// </summary>
+    public sealed partial record CommandExecOutputDeltaNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public CommandExecOutputDeltaNotification Params { get; set; } = default!;
     }
 
     public sealed partial record ItemCommandExecutionOutputDeltaNotification : ServerNotification

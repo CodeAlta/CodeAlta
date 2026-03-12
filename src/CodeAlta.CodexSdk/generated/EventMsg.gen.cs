@@ -45,6 +45,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ExecCommandEndEventMsg), typeDiscriminator: "exec_command_end")]
 [JsonDerivedType(typeof(ViewImageToolCallEventMsg), typeDiscriminator: "view_image_tool_call")]
 [JsonDerivedType(typeof(ExecApprovalRequestEventMsg), typeDiscriminator: "exec_approval_request")]
+[JsonDerivedType(typeof(RequestPermissionsEventMsg), typeDiscriminator: "request_permissions")]
 [JsonDerivedType(typeof(RequestUserInputEventMsg), typeDiscriminator: "request_user_input")]
 [JsonDerivedType(typeof(DynamicToolCallRequestEventMsg), typeDiscriminator: "dynamic_tool_call_request")]
 [JsonDerivedType(typeof(DynamicToolCallResponseEventMsg), typeDiscriminator: "dynamic_tool_call_response")]
@@ -73,6 +74,8 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(RawResponseItemEventMsg), typeDiscriminator: "raw_response_item")]
 [JsonDerivedType(typeof(ItemStartedEventMsg), typeDiscriminator: "item_started")]
 [JsonDerivedType(typeof(ItemCompletedEventMsg), typeDiscriminator: "item_completed")]
+[JsonDerivedType(typeof(HookStartedEventMsg), typeDiscriminator: "hook_started")]
+[JsonDerivedType(typeof(HookCompletedEventMsg), typeDiscriminator: "hook_completed")]
 [JsonDerivedType(typeof(AgentMessageContentDeltaEventMsg), typeDiscriminator: "agent_message_content_delta")]
 [JsonDerivedType(typeof(PlanDeltaEventMsg), typeDiscriminator: "plan_delta")]
 [JsonDerivedType(typeof(ReasoningContentDeltaEventMsg), typeDiscriminator: "reasoning_content_delta")]
@@ -401,7 +404,7 @@ public abstract partial record EventMsg
     public sealed partial record WebSearchEndEventMsg : EventMsg
     {
         [JsonPropertyName("action")]
-        public WebSearchAction Action { get; set; } = default!;
+        public ResponsesApiWebSearchAction Action { get; set; } = default!;
         [JsonPropertyName("call_id")]
         public string CallId { get; set; } = string.Empty;
         [JsonPropertyName("query")]
@@ -422,6 +425,8 @@ public abstract partial record EventMsg
         public string Result { get; set; } = string.Empty;
         [JsonPropertyName("revised_prompt")]
         public string? RevisedPrompt { get; set; }
+        [JsonPropertyName("saved_path")]
+        public string? SavedPath { get; set; }
         [JsonPropertyName("status")]
         public string Status { get; set; } = string.Empty;
     }
@@ -583,7 +588,24 @@ public abstract partial record EventMsg
         /// <summary>Optional human-readable reason for the approval (e.g. retry without sandbox).</summary>
         [JsonPropertyName("reason")]
         public string? Reason { get; set; }
+        /// <summary>Optional skill metadata when the approval was triggered by a skill script.</summary>
+        [JsonPropertyName("skill_metadata")]
+        public ExecApprovalRequestSkillMetadata? SkillMetadata { get; set; }
         /// <summary>Turn ID that this command belongs to. Uses `#[serde(default)]` for backwards compatibility.</summary>
+        [JsonPropertyName("turn_id")]
+        public string? TurnId { get; set; }
+    }
+
+    public sealed partial record RequestPermissionsEventMsg : EventMsg
+    {
+        /// <summary>Responses API call id for the associated tool call, if available.</summary>
+        [JsonPropertyName("call_id")]
+        public string CallId { get; set; } = string.Empty;
+        [JsonPropertyName("permissions")]
+        public PermissionProfile Permissions { get; set; } = default!;
+        [JsonPropertyName("reason")]
+        public string? Reason { get; set; }
+        /// <summary>Turn ID that this request belongs to. Uses `#[serde(default)]` for backwards compatibility.</summary>
         [JsonPropertyName("turn_id")]
         public string? TurnId { get; set; }
     }
@@ -648,6 +670,9 @@ public abstract partial record EventMsg
         public ElicitationRequest Request { get; set; } = default!;
         [JsonPropertyName("server_name")]
         public string ServerName { get; set; } = string.Empty;
+        /// <summary>Turn ID that this elicitation belongs to, when known.</summary>
+        [JsonPropertyName("turn_id")]
+        public string? TurnId { get; set; }
     }
 
     public sealed partial record ApplyPatchApprovalRequestEventMsg : EventMsg
@@ -912,6 +937,22 @@ public abstract partial record EventMsg
         public ThreadId ThreadId { get; set; } = default!;
         [JsonPropertyName("turn_id")]
         public string TurnId { get; set; } = string.Empty;
+    }
+
+    public sealed partial record HookStartedEventMsg : EventMsg
+    {
+        [JsonPropertyName("run")]
+        public HookRunSummary Run { get; set; } = default!;
+        [JsonPropertyName("turn_id")]
+        public string? TurnId { get; set; }
+    }
+
+    public sealed partial record HookCompletedEventMsg : EventMsg
+    {
+        [JsonPropertyName("run")]
+        public HookRunSummary Run { get; set; } = default!;
+        [JsonPropertyName("turn_id")]
+        public string? TurnId { get; set; }
     }
 
     public sealed partial record AgentMessageContentDeltaEventMsg : EventMsg

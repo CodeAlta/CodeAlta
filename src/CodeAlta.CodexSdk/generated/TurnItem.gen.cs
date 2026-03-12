@@ -61,7 +61,7 @@ public abstract partial record TurnItem
     public sealed partial record WebSearchTurnItem : TurnItem
     {
         [JsonPropertyName("action")]
-        public WebSearchAction Action { get; set; } = default!;
+        public ResponsesApiWebSearchAction Action { get; set; } = default!;
         [JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
         [JsonPropertyName("query")]
@@ -76,6 +76,8 @@ public abstract partial record TurnItem
         public string Result { get; set; } = string.Empty;
         [JsonPropertyName("revised_prompt")]
         public string? RevisedPrompt { get; set; }
+        [JsonPropertyName("saved_path")]
+        public string? SavedPath { get; set; }
         [JsonPropertyName("status")]
         public string Status { get; set; } = string.Empty;
     }

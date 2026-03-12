@@ -24,6 +24,8 @@ public sealed partial record ProfileV2
     public Verbosity? ModelVerbosity { get; set; }
     [JsonPropertyName("service_tier")]
     public ServiceTier? ServiceTier { get; set; }
+    [JsonPropertyName("tools")]
+    public ToolsV2? Tools { get; set; }
     [JsonPropertyName("web_search")]
     public WebSearchMode? WebSearch { get; set; }
 }

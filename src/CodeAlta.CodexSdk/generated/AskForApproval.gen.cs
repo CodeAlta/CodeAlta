@@ -36,6 +36,8 @@ internal sealed class AskForApprovalJsonConverter : JsonConverter<AskForApproval
                     __result.Rules = JsonSerializer.Deserialize<bool>(__RulesProp, options);
                 if (__RejectElem.TryGetProperty("sandbox_approval", out var __SandboxApprovalProp))
                     __result.SandboxApproval = JsonSerializer.Deserialize<bool>(__SandboxApprovalProp, options);
+                if (__RejectElem.TryGetProperty("request_permissions", out var __RequestPermissionsProp))
+                    __result.RequestPermissions = JsonSerializer.Deserialize<bool?>(__RequestPermissionsProp, options);
                 return __result;
             }
             throw new JsonException($"Unknown AskForApproval object variant. Properties: {string.Join(", ", EnumeratePropertyNames(obj))}");
@@ -75,6 +77,11 @@ internal sealed class AskForApprovalJsonConverter : JsonConverter<AskForApproval
                 JsonSerializer.Serialize(writer, v.Rules, options);
                 writer.WritePropertyName("sandbox_approval");
                 JsonSerializer.Serialize(writer, v.SandboxApproval, options);
+                if (v.RequestPermissions is not null)
+                {
+                    writer.WritePropertyName("request_permissions");
+                    JsonSerializer.Serialize(writer, v.RequestPermissions, options);
+                }
                 writer.WriteEndObject();
                 writer.WriteEndObject();
                 break;
@@ -99,5 +106,7 @@ public abstract partial record AskForApproval
         public bool Rules { get; set; }
         [JsonPropertyName("sandbox_approval")]
         public bool SandboxApproval { get; set; }
+        [JsonPropertyName("request_permissions")]
+        public bool? RequestPermissions { get; set; }
     }
 }

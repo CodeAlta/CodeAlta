@@ -32,6 +32,10 @@ internal sealed class RealtimeEventJsonConverter : JsonConverter<RealtimeEvent>
                     __result.Instructions = JsonSerializer.Deserialize<string?>(__InstructionsProp, options);
                 return __result;
             }
+            if (obj.TryGetProperty("InputTranscriptDelta", out var __InputTranscriptDeltaElem))
+                return new RealtimeEvent.InputTranscriptDelta { Value = JsonSerializer.Deserialize<RealtimeTranscriptDelta>(__InputTranscriptDeltaElem, options)! };
+            if (obj.TryGetProperty("OutputTranscriptDelta", out var __OutputTranscriptDeltaElem))
+                return new RealtimeEvent.OutputTranscriptDelta { Value = JsonSerializer.Deserialize<RealtimeTranscriptDelta>(__OutputTranscriptDeltaElem, options)! };
             if (obj.TryGetProperty("AudioOut", out var __AudioOutElem))
                 return new RealtimeEvent.AudioOut { Value = JsonSerializer.Deserialize<RealtimeAudioFrame>(__AudioOutElem, options)! };
             if (obj.TryGetProperty("ConversationItemAdded", out var __ConversationItemAddedElem))
@@ -74,6 +78,18 @@ internal sealed class RealtimeEventJsonConverter : JsonConverter<RealtimeEvent>
                     JsonSerializer.Serialize(writer, v.Instructions, options);
                 }
                 writer.WriteEndObject();
+                writer.WriteEndObject();
+                break;
+            case RealtimeEvent.InputTranscriptDelta v:
+                writer.WriteStartObject();
+                writer.WritePropertyName("InputTranscriptDelta");
+                JsonSerializer.Serialize(writer, v.Value, options);
+                writer.WriteEndObject();
+                break;
+            case RealtimeEvent.OutputTranscriptDelta v:
+                writer.WriteStartObject();
+                writer.WritePropertyName("OutputTranscriptDelta");
+                JsonSerializer.Serialize(writer, v.Value, options);
                 writer.WriteEndObject();
                 break;
             case RealtimeEvent.AudioOut v:
@@ -124,6 +140,14 @@ public abstract partial record RealtimeEvent
         public string SessionId { get; set; } = string.Empty;
         [JsonPropertyName("instructions")]
         public string? Instructions { get; set; }
+    }
+    public sealed partial record InputTranscriptDelta : RealtimeEvent
+    {
+        public RealtimeTranscriptDelta Value { get; set; } = default!;
+    }
+    public sealed partial record OutputTranscriptDelta : RealtimeEvent
+    {
+        public RealtimeTranscriptDelta Value { get; set; } = default!;
     }
     public sealed partial record AudioOut : RealtimeEvent
     {

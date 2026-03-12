@@ -18,8 +18,6 @@ public sealed partial record NetworkRequirements
     public bool? AllowUpstreamProxy { get; set; }
     [JsonPropertyName("dangerouslyAllowAllUnixSockets")]
     public bool? DangerouslyAllowAllUnixSockets { get; set; }
-    [JsonPropertyName("dangerouslyAllowNonLoopbackAdmin")]
-    public bool? DangerouslyAllowNonLoopbackAdmin { get; set; }
     [JsonPropertyName("dangerouslyAllowNonLoopbackProxy")]
     public bool? DangerouslyAllowNonLoopbackProxy { get; set; }
     [JsonPropertyName("deniedDomains")]

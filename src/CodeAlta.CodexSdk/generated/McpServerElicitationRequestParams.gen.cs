@@ -13,14 +13,18 @@ public abstract partial record McpServerElicitationRequestParams
 {
     public sealed partial record Form : McpServerElicitationRequestParams
     {
+        [JsonPropertyName("_meta")]
+        public JsonElement? Meta { get; set; }
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
         [JsonPropertyName("requestedSchema")]
-        public JsonElement RequestedSchema { get; set; }
+        public McpElicitationSchema RequestedSchema { get; set; } = default!;
     }
 
     public sealed partial record Url : McpServerElicitationRequestParams
     {
+        [JsonPropertyName("_meta")]
+        public JsonElement? Meta { get; set; }
         [JsonPropertyName("elicitationId")]
         public string ElicitationId { get; set; } = string.Empty;
         [JsonPropertyName("message")]

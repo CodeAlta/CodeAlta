@@ -6,4 +6,8 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
-public sealed partial record PluginInstallResponse;
+public sealed partial record PluginInstallResponse
+{
+    [JsonPropertyName("appsNeedingAuth")]
+    public List<AppSummary> AppsNeedingAuth { get; set; } = [];
+}

@@ -8,8 +8,8 @@ namespace CodeAlta.CodexSdk;
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(SearchWebSearchAction), typeDiscriminator: "search")]
-[JsonDerivedType(typeof(OpenPageWebSearchAction), typeDiscriminator: "open_page")]
-[JsonDerivedType(typeof(FindInPageWebSearchAction), typeDiscriminator: "find_in_page")]
+[JsonDerivedType(typeof(OpenPageWebSearchAction), typeDiscriminator: "openPage")]
+[JsonDerivedType(typeof(FindInPageWebSearchAction), typeDiscriminator: "findInPage")]
 [JsonDerivedType(typeof(OtherWebSearchAction), typeDiscriminator: "other")]
 public abstract partial record WebSearchAction
 {

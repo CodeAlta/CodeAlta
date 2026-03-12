@@ -6,12 +6,18 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
+/// <summary>
+/// Final buffered result for `command/exec`.
+/// </summary>
 public sealed partial record CommandExecResponse
 {
+    /// <summary>Process exit code.</summary>
     [JsonPropertyName("exitCode")]
     public int ExitCode { get; set; }
+    /// <summary>Buffered stderr capture.  Empty when stderr was streamed via `command/exec/outputDelta`.</summary>
     [JsonPropertyName("stderr")]
     public string Stderr { get; set; } = string.Empty;
+    /// <summary>Buffered stdout capture.  Empty when stdout was streamed via `command/exec/outputDelta`.</summary>
     [JsonPropertyName("stdout")]
     public string Stdout { get; set; } = string.Empty;
 }

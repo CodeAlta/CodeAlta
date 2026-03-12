@@ -25,11 +25,13 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ThreadLoadedListRequest), typeDiscriminator: "thread/loaded/list")]
 [JsonDerivedType(typeof(ThreadReadRequest), typeDiscriminator: "thread/read")]
 [JsonDerivedType(typeof(SkillsListRequest), typeDiscriminator: "skills/list")]
+[JsonDerivedType(typeof(PluginListRequest), typeDiscriminator: "plugin/list")]
 [JsonDerivedType(typeof(SkillsRemoteListRequest), typeDiscriminator: "skills/remote/list")]
 [JsonDerivedType(typeof(SkillsRemoteExportRequest), typeDiscriminator: "skills/remote/export")]
 [JsonDerivedType(typeof(AppListRequest), typeDiscriminator: "app/list")]
 [JsonDerivedType(typeof(SkillsConfigWriteRequest), typeDiscriminator: "skills/config/write")]
 [JsonDerivedType(typeof(PluginInstallRequest), typeDiscriminator: "plugin/install")]
+[JsonDerivedType(typeof(PluginUninstallRequest), typeDiscriminator: "plugin/uninstall")]
 [JsonDerivedType(typeof(TurnStartRequest), typeDiscriminator: "turn/start")]
 [JsonDerivedType(typeof(TurnSteerRequest), typeDiscriminator: "turn/steer")]
 [JsonDerivedType(typeof(TurnInterruptRequest), typeDiscriminator: "turn/interrupt")]
@@ -46,6 +48,9 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(AccountRateLimitsReadRequest), typeDiscriminator: "account/rateLimits/read")]
 [JsonDerivedType(typeof(FeedbackUploadRequest), typeDiscriminator: "feedback/upload")]
 [JsonDerivedType(typeof(CommandExecRequest), typeDiscriminator: "command/exec")]
+[JsonDerivedType(typeof(CommandExecWriteRequest), typeDiscriminator: "command/exec/write")]
+[JsonDerivedType(typeof(CommandExecTerminateRequest), typeDiscriminator: "command/exec/terminate")]
+[JsonDerivedType(typeof(CommandExecResizeRequest), typeDiscriminator: "command/exec/resize")]
 [JsonDerivedType(typeof(ConfigReadRequest), typeDiscriminator: "config/read")]
 [JsonDerivedType(typeof(ExternalAgentConfigDetectRequest), typeDiscriminator: "externalAgentConfig/detect")]
 [JsonDerivedType(typeof(ExternalAgentConfigImportRequest), typeDiscriminator: "externalAgentConfig/import")]
@@ -179,6 +184,14 @@ public abstract partial record ClientRequest
         public SkillsListParams Params { get; set; } = default!;
     }
 
+    public sealed partial record PluginListRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public PluginListParams Params { get; set; } = default!;
+    }
+
     public sealed partial record SkillsRemoteListRequest : ClientRequest
     {
         [JsonPropertyName("id")]
@@ -217,6 +230,14 @@ public abstract partial record ClientRequest
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
         public PluginInstallParams Params { get; set; } = default!;
+    }
+
+    public sealed partial record PluginUninstallRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public PluginUninstallParams Params { get; set; } = default!;
     }
 
     public sealed partial record TurnStartRequest : ClientRequest
@@ -340,7 +361,7 @@ public abstract partial record ClientRequest
     }
 
     /// <summary>
-    /// Execute a command (argv vector) under the server's sandbox.
+    /// Execute a standalone command (argv vector) under the server's sandbox.
     /// </summary>
     public sealed partial record CommandExecRequest : ClientRequest
     {
@@ -348,6 +369,39 @@ public abstract partial record ClientRequest
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
         public CommandExecParams Params { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Write stdin bytes to a running `command/exec` session or close stdin.
+    /// </summary>
+    public sealed partial record CommandExecWriteRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public CommandExecWriteParams Params { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Terminate a running `command/exec` session by client-supplied `processId`.
+    /// </summary>
+    public sealed partial record CommandExecTerminateRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public CommandExecTerminateParams Params { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// Resize a running PTY-backed `command/exec` session by client-supplied `processId`.
+    /// </summary>
+    public sealed partial record CommandExecResizeRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public CommandExecResizeParams Params { get; set; } = default!;
     }
 
     public sealed partial record ConfigReadRequest : ClientRequest

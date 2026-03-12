@@ -8,8 +8,6 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record SessionNetworkProxyRuntime
 {
-    [JsonPropertyName("admin_addr")]
-    public string AdminAddr { get; set; } = string.Empty;
     [JsonPropertyName("http_addr")]
     public string HttpAddr { get; set; } = string.Empty;
     [JsonPropertyName("socks_addr")]

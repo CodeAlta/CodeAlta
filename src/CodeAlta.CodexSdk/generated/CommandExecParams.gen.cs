@@ -6,14 +6,50 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
+/// <summary>
+/// Run a standalone command (argv vector) in the server sandbox without creating a thread or turn.
+/// 
+/// The final `command/exec` response is deferred until the process exits and is sent only after all `command/exec/outputDelta` notifications for that connection have been emitted.
+/// </summary>
 public sealed partial record CommandExecParams
 {
+    /// <summary>Command argv vector. Empty arrays are rejected.</summary>
     [JsonPropertyName("command")]
     public List<string> Command { get; set; } = [];
+    /// <summary>Optional working directory. Defaults to the server cwd.</summary>
     [JsonPropertyName("cwd")]
     public string? Cwd { get; set; }
+    /// <summary>Disable stdout/stderr capture truncation for this request.  Cannot be combined with `outputBytesCap`.</summary>
+    [JsonPropertyName("disableOutputCap")]
+    public bool? DisableOutputCap { get; set; }
+    /// <summary>Disable the timeout entirely for this request.  Cannot be combined with `timeoutMs`.</summary>
+    [JsonPropertyName("disableTimeout")]
+    public bool? DisableTimeout { get; set; }
+    /// <summary>Optional environment overrides merged into the server-computed environment.  Matching names override inherited values. Set a key to `null` to unset an inherited variable.</summary>
+    [JsonPropertyName("env")]
+    public Dictionary<string, string?>? Env { get; set; }
+    /// <summary>Optional per-stream stdout/stderr capture cap in bytes.  When omitted, the server default applies. Cannot be combined with `disableOutputCap`.</summary>
+    [JsonPropertyName("outputBytesCap")]
+    public uint? OutputBytesCap { get; set; }
+    /// <summary>Optional client-supplied, connection-scoped process id.  Required for `tty`, `streamStdin`, `streamStdoutStderr`, and follow-up `command/exec/write`, `command/exec/resize`, and `command/exec/terminate` calls. When omitted, buffered execution gets an internal id that is not exposed to the client.</summary>
+    [JsonPropertyName("processId")]
+    public string? ProcessId { get; set; }
+    /// <summary>Optional sandbox policy for this command.  Uses the same shape as thread/turn execution sandbox configuration and defaults to the user's configured policy when omitted.</summary>
     [JsonPropertyName("sandboxPolicy")]
     public SandboxPolicy? SandboxPolicy { get; set; }
+    /// <summary>Optional initial PTY size in character cells. Only valid when `tty` is true.</summary>
+    [JsonPropertyName("size")]
+    public CommandExecTerminalSize? Size { get; set; }
+    /// <summary>Allow follow-up `command/exec/write` requests to write stdin bytes.  Requires a client-supplied `processId`.</summary>
+    [JsonPropertyName("streamStdin")]
+    public bool? StreamStdin { get; set; }
+    /// <summary>Stream stdout/stderr via `command/exec/outputDelta` notifications.  Streamed bytes are not duplicated into the final response and require a client-supplied `processId`.</summary>
+    [JsonPropertyName("streamStdoutStderr")]
+    public bool? StreamStdoutStderr { get; set; }
+    /// <summary>Optional timeout in milliseconds.  When omitted, the server default applies. Cannot be combined with `disableTimeout`.</summary>
     [JsonPropertyName("timeoutMs")]
     public long? TimeoutMs { get; set; }
+    /// <summary>Enable PTY mode.  This implies `streamStdin` and `streamStdoutStderr`.</summary>
+    [JsonPropertyName("tty")]
+    public bool? Tty { get; set; }
 }

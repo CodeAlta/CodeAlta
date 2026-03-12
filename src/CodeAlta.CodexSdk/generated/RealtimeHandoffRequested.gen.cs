@@ -8,12 +8,12 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record RealtimeHandoffRequested
 {
+    [JsonPropertyName("active_transcript")]
+    public List<RealtimeTranscriptEntry> ActiveTranscript { get; set; } = [];
     [JsonPropertyName("handoff_id")]
     public string HandoffId { get; set; } = string.Empty;
     [JsonPropertyName("input_transcript")]
     public string InputTranscript { get; set; } = string.Empty;
     [JsonPropertyName("item_id")]
     public string ItemId { get; set; } = string.Empty;
-    [JsonPropertyName("messages")]
-    public List<RealtimeHandoffMessage> Messages { get; set; } = [];
 }

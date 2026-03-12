@@ -15,4 +15,7 @@ public sealed partial record ConfigBatchWriteParams
     /// <summary>Path to the config file to write; defaults to the user's `config.toml` when omitted.</summary>
     [JsonPropertyName("filePath")]
     public string? FilePath { get; set; }
+    /// <summary>When true, hot-reload the updated user config into all loaded threads after writing.</summary>
+    [JsonPropertyName("reloadUserConfig")]
+    public bool? ReloadUserConfig { get; set; }
 }

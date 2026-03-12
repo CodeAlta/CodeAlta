@@ -10,10 +10,10 @@ public sealed partial class CodexClient
     /// <summary>
     /// Gets the Codex CLI version used when generating this SDK.
     /// </summary>
-    public static Version CompiledAgainstVersion { get; } = new Version(0, 112, 0);
+    public static Version CompiledAgainstVersion { get; } = new Version(0, 114, 0);
 
     /// <summary>
     /// Gets the raw output reported by <c>codex --version</c> during generation.
     /// </summary>
-    public const string CompiledAgainstVersionRaw = "codex-cli 0.112.0";
+    public const string CompiledAgainstVersionRaw = "codex-cli 0.114.0";
 }

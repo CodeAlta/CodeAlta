@@ -13,4 +13,7 @@ public sealed partial record McpServerElicitationRequestResponse
     /// <summary>Structured user input for accepted elicitations, mirroring RMCP `CreateElicitationResult`.  This is nullable because decline/cancel responses have no content.</summary>
     [JsonPropertyName("content")]
     public JsonElement? Content { get; set; }
+    /// <summary>Optional client metadata for form-mode action handling.</summary>
+    [JsonPropertyName("_meta")]
+    public JsonElement? Meta { get; set; }
 }

@@ -6,10 +6,10 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
-public sealed partial record RealtimeHandoffMessage
+public sealed partial record HookOutputEntry
 {
-    [JsonPropertyName("role")]
-    public string Role { get; set; } = string.Empty;
+    [JsonPropertyName("kind")]
+    public HookOutputEntryKind Kind { get; set; } = default!;
     [JsonPropertyName("text")]
     public string Text { get; set; } = string.Empty;
 }

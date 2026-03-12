@@ -9,11 +9,11 @@ namespace CodeAlta.CodexSdk;
 public sealed partial record MacOsSeatbeltProfileExtensions
 {
     [JsonPropertyName("macos_accessibility")]
-    public bool MacosAccessibility { get; set; }
+    public bool? MacosAccessibility { get; set; }
     [JsonPropertyName("macos_automation")]
     public MacOsAutomationPermission MacosAutomation { get; set; } = default!;
     [JsonPropertyName("macos_calendar")]
-    public bool MacosCalendar { get; set; }
+    public bool? MacosCalendar { get; set; }
     [JsonPropertyName("macos_preferences")]
     public MacOsPreferencesPermission MacosPreferences { get; set; } = default!;
 }

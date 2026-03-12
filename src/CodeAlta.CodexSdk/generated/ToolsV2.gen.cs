@@ -11,5 +11,5 @@ public sealed partial record ToolsV2
     [JsonPropertyName("view_image")]
     public bool? ViewImage { get; set; }
     [JsonPropertyName("web_search")]
-    public bool? WebSearch { get; set; }
+    public WebSearchToolConfig? WebSearch { get; set; }
 }
