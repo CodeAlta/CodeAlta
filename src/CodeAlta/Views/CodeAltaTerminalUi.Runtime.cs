@@ -563,6 +563,11 @@ internal sealed partial class CodeAltaTerminalUi
                 break;
 
             case AgentActivityEvent activity:
+                if (!ShouldDisplayActivity(activity))
+                {
+                    break;
+                }
+
                 UpsertThreadStatus(
                     tab,
                     tab.ActivityStates,
@@ -574,6 +579,11 @@ internal sealed partial class CodeAltaTerminalUi
                 break;
 
             case AgentRawEvent raw:
+                if (!ShouldDisplayRawEvent(raw))
+                {
+                    break;
+                }
+
                 UpsertThreadStatus(
                     tab,
                     dictionary: null,

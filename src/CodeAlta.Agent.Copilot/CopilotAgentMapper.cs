@@ -400,6 +400,16 @@ internal static class CopilotAgentMapper
                 message.Data.ParentToolCallId,
                 message.Data.Content),
 
+            UserMessageEvent userMessage => new AgentContentCompletedEvent(
+                AgentBackendIds.Copilot,
+                sessionId,
+                userMessage.Timestamp,
+                null,
+                AgentContentKind.User,
+                userMessage.Data.InteractionId ?? $"user:{userMessage.Timestamp.ToUnixTimeMilliseconds()}",
+                null,
+                userMessage.Data.Content),
+
             AssistantUsageEvent assistantUsage => CreateSessionUpdate(
                 sessionId,
                 assistantUsage.Timestamp,

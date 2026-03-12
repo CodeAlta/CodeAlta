@@ -392,7 +392,7 @@ internal sealed partial class CodeAltaTerminalUi
 
             builder
                 .Append("- Detail: ")
-                .Append(activity.Message);
+                .Append(SummarizeActivityMessage(activity));
         }
 
         return builder.ToString();
@@ -525,6 +525,40 @@ internal sealed partial class CodeAltaTerminalUi
             .Append("```");
 
         return builder.ToString();
+    }
+
+    internal static bool ShouldDisplayActivity(AgentActivityEvent activity)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+
+        if (activity.Kind == AgentActivityKind.Turn)
+        {
+            return false;
+        }
+
+        if (activity.Kind is AgentActivityKind.ToolCall
+            or AgentActivityKind.CommandExecution
+            or AgentActivityKind.FileChange
+            or AgentActivityKind.McpToolCall
+            or AgentActivityKind.DynamicToolCall
+            or AgentActivityKind.CollabAgentToolCall
+            or AgentActivityKind.Hook
+            or AgentActivityKind.Skill)
+        {
+            return false;
+        }
+
+        return activity.Phase switch
+        {
+            AgentActivityPhase.Requested => false,
+            _ => true,
+        };
+    }
+
+    internal static bool ShouldDisplayRawEvent(AgentRawEvent raw)
+    {
+        ArgumentNullException.ThrowIfNull(raw);
+        return false;
     }
 
     internal static string FormatChatUserInputRequestMarkdown(AgentUserInputRequest request)
@@ -752,6 +786,45 @@ internal sealed partial class CodeAltaTerminalUi
             AgentActivityPhase.Deselected => $"{label} Deselected",
             _ => $"{label} · {GetActivityPhaseLabel(phase)}",
         };
+    }
+
+    private static string SummarizeActivityMessage(AgentActivityEvent activity)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+
+        if (string.IsNullOrWhiteSpace(activity.Message))
+        {
+            return string.Empty;
+        }
+
+        var normalized = activity.Message
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Trim();
+        var lineCount = normalized.Count(static ch => ch == '\n') + 1;
+        var shouldCompact = activity.Kind is AgentActivityKind.ToolCall
+            or AgentActivityKind.CommandExecution
+            or AgentActivityKind.FileChange
+            or AgentActivityKind.McpToolCall
+            or AgentActivityKind.DynamicToolCall
+            or AgentActivityKind.CollabAgentToolCall
+            or AgentActivityKind.Hook
+            or AgentActivityKind.Skill
+            or AgentActivityKind.Subagent;
+
+        if (shouldCompact && (normalized.Length > 220 || lineCount > 6))
+        {
+            var firstLine = normalized.Split('\n')[0].Trim();
+            if (firstLine.Length > 120)
+            {
+                firstLine = firstLine[..117].TrimEnd() + "...";
+            }
+
+            return string.IsNullOrWhiteSpace(firstLine)
+                ? $"Output omitted ({lineCount} lines, {normalized.Length} chars)."
+                : $"{firstLine} _(output omitted: {lineCount} lines, {normalized.Length} chars)_";
+        }
+
+        return normalized;
     }
 
     private static string ToDisplayLabel(AgentCommandPreviewKind kind)

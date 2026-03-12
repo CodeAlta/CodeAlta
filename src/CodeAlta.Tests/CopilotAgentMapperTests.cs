@@ -384,6 +384,29 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
+    public void ToAgentEvent_MapsUserMessageEventToUserContent()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-02-25T12:00:00+00:00");
+        var userMessageEvent = new UserMessageEvent
+        {
+            Timestamp = timestamp,
+            Data = new UserMessageData
+            {
+                Content = "Please investigate the parser failure.",
+                InteractionId = "interaction-1"
+            }
+        };
+
+        var mapped = CopilotAgentMapper.ToAgentEvent("session-1", userMessageEvent);
+
+        Assert.IsInstanceOfType<AgentContentCompletedEvent>(mapped);
+        var content = (AgentContentCompletedEvent)mapped;
+        Assert.AreEqual(AgentContentKind.User, content.Kind);
+        Assert.AreEqual("Please investigate the parser failure.", content.Content);
+        Assert.AreEqual("interaction-1", content.ContentId);
+    }
+
+    [TestMethod]
     public void ToAgentEvent_MapsReasoningPlanAndToolLifecycleEvents()
     {
         var timestamp = DateTimeOffset.Parse("2026-02-25T12:00:00+00:00");

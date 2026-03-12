@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
@@ -75,6 +76,27 @@ public sealed class CodeAltaTerminalUiTests
         StringAssert.Contains(markdown, "search_workspace");
         StringAssert.Contains(markdown, "Detail");
         StringAssert.Contains(markdown, "Searching the workspace.");
+    }
+
+    [TestMethod]
+    public void FormatChatActivityMarkdown_CompactsLargeToolOutputs()
+    {
+        var payload = string.Join('\n', Enumerable.Range(1, 12).Select(static index => $"line {index}"));
+        var markdown = CodeAltaTerminalUi.FormatChatActivityMarkdown(
+            new AgentActivityEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentActivityKind.ToolCall,
+                AgentActivityPhase.Completed,
+                "tool-1",
+                null,
+                "view",
+                payload));
+
+        StringAssert.Contains(markdown.ToLowerInvariant(), "output omitted");
+        Assert.IsFalse(markdown.Contains("line 12", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -312,6 +334,92 @@ public sealed class CodeAltaTerminalUiTests
         StringAssert.Contains(markdown, "`permission.request`");
         StringAssert.Contains(markdown, "\"kind\":\"shell\"");
         StringAssert.Contains(markdown, "\"toolCallId\":\"call-1\"");
+    }
+
+    [TestMethod]
+    public void ShouldDisplayActivity_HidesTurnAndToolStartNoise()
+    {
+        var turn = new AgentActivityEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentActivityKind.Turn,
+            AgentActivityPhase.Started,
+            "turn-1",
+            null,
+            "assistant turn",
+            null);
+        var toolStart = new AgentActivityEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentActivityKind.ToolCall,
+            AgentActivityPhase.Started,
+            "tool-1",
+            null,
+            "view",
+            "Reading file");
+        var toolCompleted = new AgentActivityEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentActivityKind.ToolCall,
+            AgentActivityPhase.Completed,
+            "tool-1",
+            null,
+            "view",
+            "Done");
+
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayActivity(turn));
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayActivity(toolStart));
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayActivity(toolCompleted));
+    }
+
+    [TestMethod]
+    public void ShouldDisplayActivity_KeepsSubagentAndCompactionLifecycle()
+    {
+        var subagent = new AgentActivityEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentActivityKind.Subagent,
+            AgentActivityPhase.Started,
+            "subagent-1",
+            null,
+            "reviewer",
+            "Started reviewer agent");
+        var compaction = new AgentActivityEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentActivityKind.Compaction,
+            AgentActivityPhase.Completed,
+            "compaction-1",
+            null,
+            null,
+            "Compaction completed.");
+
+        Assert.IsTrue(CodeAltaTerminalUi.ShouldDisplayActivity(subagent));
+        Assert.IsTrue(CodeAltaTerminalUi.ShouldDisplayActivity(compaction));
+    }
+
+    [TestMethod]
+    public void ShouldDisplayRawEvent_HidesRawEventsFromTimeline()
+    {
+        using var payloadJson = JsonDocument.Parse("""{"kind":"shell"}""");
+        var raw = new AgentRawEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            "tool.started",
+            payloadJson.RootElement.Clone());
+
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayRawEvent(raw));
     }
 
     [TestMethod]
