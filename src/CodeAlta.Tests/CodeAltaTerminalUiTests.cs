@@ -572,14 +572,14 @@ public sealed class CodeAltaTerminalUiTests
     {
         var states = new[]
         {
-            new CodeAltaTerminalUi.ChatBackendState(AgentBackendIds.Codex, "Codex")
+            new ChatBackendState(AgentBackendIds.Codex, "Codex")
             {
-                Availability = CodeAltaTerminalUi.ChatBackendAvailability.Ready,
+                Availability = ChatBackendAvailability.Ready,
                 StatusMessage = "Connected · 2 models",
             },
-            new CodeAltaTerminalUi.ChatBackendState(AgentBackendIds.Copilot, "Copilot")
+            new ChatBackendState(AgentBackendIds.Copilot, "Copilot")
             {
-                Availability = CodeAltaTerminalUi.ChatBackendAvailability.Unsupported,
+                Availability = ChatBackendAvailability.Unsupported,
                 StatusMessage = "Copilot is unavailable: CLI not found.",
             },
         };
