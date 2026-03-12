@@ -395,7 +395,7 @@ internal static class CopilotAgentMapper
                 sessionId,
                 message.Timestamp,
                 new AgentRunId(message.Data.MessageId),
-                AgentContentKind.Assistant,
+                GetAssistantMessageContentKind(message.Data.Phase),
                 message.Data.MessageId,
                 message.Data.ParentToolCallId,
                 message.Data.Content),
@@ -612,6 +612,14 @@ internal static class CopilotAgentMapper
 
         return events.Select(sessionEvent => ToAgentEvent(sessionId, sessionEvent)).ToArray();
     }
+
+    private static AgentContentKind GetAssistantMessageContentKind(string? phase)
+        => phase switch
+        {
+            "commentary" => AgentContentKind.Reasoning,
+            "final_answer" => AgentContentKind.Assistant,
+            _ => AgentContentKind.Assistant,
+        };
 
     private static PermissionRequestHandler CreatePermissionHandler(
         AgentPermissionRequestHandler handler,

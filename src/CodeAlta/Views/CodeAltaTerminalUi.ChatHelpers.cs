@@ -561,6 +561,18 @@ internal sealed partial class CodeAltaTerminalUi
         return false;
     }
 
+    internal static bool ShouldDisplaySessionUpdate(AgentSessionUpdateEvent update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        if (update.BackendId == AgentBackendIds.Copilot)
+        {
+            return update.Kind == AgentSessionUpdateKind.Warning;
+        }
+
+        return update.Kind != AgentSessionUpdateKind.Idle;
+    }
+
     internal static string FormatChatUserInputRequestMarkdown(AgentUserInputRequest request)
         => FormatChatUserInputRequestMarkdown(request, autoApprove: false);
 

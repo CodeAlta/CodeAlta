@@ -358,6 +358,48 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
+    public void ToAgentEvent_MapsCommentaryAssistantMessagesToReasoning()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-12T20:04:41+00:00");
+        var messageEvent = new AssistantMessageEvent
+        {
+            Timestamp = timestamp,
+            Data = new AssistantMessageData
+            {
+                MessageId = "msg-1",
+                Content = "I’m doing one final status check before handing off.",
+                Phase = "commentary"
+            }
+        };
+
+        var mapped = CopilotAgentMapper.ToAgentEvent("session-1", messageEvent);
+
+        Assert.IsInstanceOfType<AgentContentCompletedEvent>(mapped);
+        Assert.AreEqual(AgentContentKind.Reasoning, ((AgentContentCompletedEvent)mapped).Kind);
+    }
+
+    [TestMethod]
+    public void ToAgentEvent_MapsFinalAnswerAssistantMessagesToAssistant()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-12T20:05:00+00:00");
+        var messageEvent = new AssistantMessageEvent
+        {
+            Timestamp = timestamp,
+            Data = new AssistantMessageData
+            {
+                MessageId = "msg-2",
+                Content = "Fixed issue #6.",
+                Phase = "final_answer"
+            }
+        };
+
+        var mapped = CopilotAgentMapper.ToAgentEvent("session-1", messageEvent);
+
+        Assert.IsInstanceOfType<AgentContentCompletedEvent>(mapped);
+        Assert.AreEqual(AgentContentKind.Assistant, ((AgentContentCompletedEvent)mapped).Kind);
+    }
+
+    [TestMethod]
     public void ToAgentEvent_MapsUsageEventToSessionUpdate()
     {
         var timestamp = DateTimeOffset.Parse("2026-02-25T12:00:00+00:00");

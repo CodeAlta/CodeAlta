@@ -641,6 +641,11 @@ internal sealed partial class CodeAltaTerminalUi
                     break;
                 }
 
+                if (!ShouldDisplaySessionUpdate(update))
+                {
+                    break;
+                }
+
                 UpsertThreadStatus(
                     tab,
                     dictionary: null,

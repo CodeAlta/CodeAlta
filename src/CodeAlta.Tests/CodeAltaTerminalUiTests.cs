@@ -423,6 +423,44 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void ShouldDisplaySessionUpdate_HidesCopilotNoticeNoise()
+    {
+        var copilotUsage = new AgentSessionUpdateEvent(
+            AgentBackendIds.Copilot,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentSessionUpdateKind.UsageUpdated,
+            "token usage");
+        var copilotResumed = new AgentSessionUpdateEvent(
+            AgentBackendIds.Copilot,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentSessionUpdateKind.Resumed,
+            "session resumed");
+        var copilotWarning = new AgentSessionUpdateEvent(
+            AgentBackendIds.Copilot,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentSessionUpdateKind.Warning,
+            "warning");
+        var codexUsage = new AgentSessionUpdateEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            AgentSessionUpdateKind.UsageUpdated,
+            "token usage");
+
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(copilotUsage));
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(copilotResumed));
+        Assert.IsTrue(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(copilotWarning));
+        Assert.IsTrue(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(codexUsage));
+    }
+
+    [TestMethod]
     public void FormatChatPermissionRequestMarkdown_RendersTypedAndGenericDetails()
     {
         var typedMarkdown = CodeAltaTerminalUi.FormatChatPermissionRequestMarkdown(
