@@ -613,12 +613,6 @@ internal sealed partial class CodeAltaTerminalUi
                 _viewModel.StatusText = message;
                 _viewModel.StatusBusy = showSpinner;
                 _viewModel.StatusIconMarkup = BuildStatusIconMarkup(tone);
-
-                if (_statusSpinner is not null)
-                {
-                    _statusSpinner.IsVisible = showSpinner;
-                    _statusSpinner.IsActive = showSpinner;
-                }
             });
     }
 
