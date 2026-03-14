@@ -29,13 +29,6 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
-    public void ShouldCreateOptimisticPendingMessage_DisablesOptimisticCardsForCopilot()
-    {
-        Assert.IsFalse(CodeAltaTerminalUi.ShouldCreateOptimisticPendingMessage(AgentBackendIds.Copilot));
-        Assert.IsTrue(CodeAltaTerminalUi.ShouldCreateOptimisticPendingMessage(AgentBackendIds.Codex));
-    }
-
-    [TestMethod]
     public void FormatChatContentMarkdown_PrefixesReasoningContent()
     {
         var markdown = CodeAltaTerminalUi.FormatChatContentMarkdown(AgentContentKind.Reasoning, "Inspecting the project.");
@@ -430,7 +423,7 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
-    public void ShouldDisplaySessionUpdate_HidesCopilotNoticeNoise()
+    public void ShouldDisplaySessionUpdate_OnlyShowsWarnings()
     {
         var copilotUsage = new AgentSessionUpdateEvent(
             AgentBackendIds.Copilot,
@@ -464,7 +457,7 @@ public sealed class CodeAltaTerminalUiTests
         Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(copilotUsage));
         Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(copilotResumed));
         Assert.IsTrue(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(copilotWarning));
-        Assert.IsTrue(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(codexUsage));
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplaySessionUpdate(codexUsage));
     }
 
     [TestMethod]
@@ -776,6 +769,38 @@ public sealed class CodeAltaTerminalUiTests
             string.Empty);
 
         Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayCompletedContent(completed));
+    }
+
+    [TestMethod]
+    public void ShouldDisplayCompletedContent_HidesCommandOutput()
+    {
+        var completed = new AgentContentCompletedEvent(
+            AgentBackendIds.Codex,
+            "thread-1",
+            DateTimeOffset.Parse("2026-03-14T14:02:50+00:00"),
+            new AgentRunId("turn-1"),
+            AgentContentKind.CommandOutput,
+            "command-1",
+            null,
+            "Exit code: 0");
+
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayCompletedContent(completed));
+    }
+
+    [TestMethod]
+    public void ShouldDisplayContentDelta_HidesCommandOutput()
+    {
+        var delta = new AgentContentDeltaEvent(
+            AgentBackendIds.Codex,
+            "thread-1",
+            DateTimeOffset.Parse("2026-03-14T14:02:50+00:00"),
+            new AgentRunId("turn-1"),
+            AgentContentKind.CommandOutput,
+            "command-1",
+            null,
+            "partial output");
+
+        Assert.IsFalse(CodeAltaTerminalUi.ShouldDisplayContentDelta(delta));
     }
 
     [TestMethod]

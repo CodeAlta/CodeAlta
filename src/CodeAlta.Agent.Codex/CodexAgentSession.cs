@@ -180,14 +180,22 @@ public sealed class CodexAgentSession : ICodexAgentSession
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var response = await _backend.Client.ThreadReadAsync(
-                new ThreadReadParams
-                {
-                    ThreadId = ThreadId,
-                    IncludeTurns = true
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
+        ThreadReadResponse response;
+        try
+        {
+            response = await _backend.Client.ThreadReadAsync(
+                    new ThreadReadParams
+                    {
+                        ThreadId = ThreadId,
+                        IncludeTurns = true
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (JsonRpcException ex) when (IsHistoryUnavailableBeforeFirstMessage(ex))
+        {
+            return [];
+        }
 
         return CodexAgentMapper.ToHistoryEvents(ThreadId, response.Thread);
     }
@@ -248,6 +256,12 @@ public sealed class CodexAgentSession : ICodexAgentSession
         }
 
         Publish(eventData);
+    }
+
+    internal static bool IsHistoryUnavailableBeforeFirstMessage(JsonRpcException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception.Message.Contains("includeTurns is unavailable before first user message", StringComparison.OrdinalIgnoreCase);
     }
 
     private void TrackAgentMessageKind(CodexNotification notification)

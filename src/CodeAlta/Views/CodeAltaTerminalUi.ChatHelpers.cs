@@ -185,9 +185,6 @@ internal sealed partial class CodeAltaTerminalUi
         return new PendingChatMessage(userItem, assistantItem, streamingMarkdown, timestampText);
     }
 
-    internal static bool ShouldCreateOptimisticPendingMessage(AgentBackendId backendId)
-        => !string.Equals(backendId.Value, AgentBackendIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
-
     internal static string FormatChatCardTimestamp(DateTimeOffset timestamp)
         => timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
@@ -570,6 +567,18 @@ internal sealed partial class CodeAltaTerminalUi
         return completed.Kind switch
         {
             AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary => !string.IsNullOrWhiteSpace(completed.Content),
+            AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput or AgentContentKind.ToolOutput or AgentContentKind.Notice => false,
+            _ => true,
+        };
+    }
+
+    internal static bool ShouldDisplayContentDelta(AgentContentDeltaEvent delta)
+    {
+        ArgumentNullException.ThrowIfNull(delta);
+
+        return delta.Kind switch
+        {
+            AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput or AgentContentKind.ToolOutput or AgentContentKind.Notice => false,
             _ => true,
         };
     }
@@ -577,13 +586,7 @@ internal sealed partial class CodeAltaTerminalUi
     internal static bool ShouldDisplaySessionUpdate(AgentSessionUpdateEvent update)
     {
         ArgumentNullException.ThrowIfNull(update);
-
-        if (update.BackendId == AgentBackendIds.Copilot)
-        {
-            return update.Kind == AgentSessionUpdateKind.Warning;
-        }
-
-        return update.Kind != AgentSessionUpdateKind.Idle;
+        return update.Kind == AgentSessionUpdateKind.Warning;
     }
 
     internal static bool ShouldDisplayPermissionRequest(bool autoApproveEnabled)

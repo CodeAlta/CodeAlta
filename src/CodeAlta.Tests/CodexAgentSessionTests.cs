@@ -8,6 +8,16 @@ namespace CodeAlta.Tests;
 public sealed class CodexAgentSessionTests
 {
     [TestMethod]
+    public void IsHistoryUnavailableBeforeFirstMessage_MatchesExpectedCodexError()
+    {
+        var exception = new JsonRpcException(
+            -32603,
+            "thread 019ced98-d6cb-73c0-89db-af6942d10c78 is not materialized yet; includeTurns is unavailable before first user message");
+
+        Assert.IsTrue(CodexAgentSession.IsHistoryUnavailableBeforeFirstMessage(exception));
+    }
+
+    [TestMethod]
     public async Task HandleNotification_MapsCommentaryAgentMessageDeltasToReasoning()
     {
         await using var backend = new CodexAgentBackend(new CodexAgentBackendOptions());

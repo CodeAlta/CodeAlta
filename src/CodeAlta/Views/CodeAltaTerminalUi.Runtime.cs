@@ -244,6 +244,11 @@ internal sealed partial class CodeAltaTerminalUi
 
     private async Task EnsureThreadHistoryLoadedAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken = default)
     {
+        if (thread.StartedAt is null)
+        {
+            return;
+        }
+
         var tab = EnsureThreadTab(thread);
         var loadTask = GetOrStartThreadHistoryLoadTask(
             tab,
@@ -340,14 +345,6 @@ internal sealed partial class CodeAltaTerminalUi
         var tab = EnsureThreadTab(thread);
         await EnsureThreadHistoryLoadedAsync(thread).ConfigureAwait(false);
         ClearThreadInput();
-        if (ShouldCreateOptimisticPendingMessage(tab.BackendId))
-        {
-            var pending = CreatePendingChatMessage(prompt);
-            AppendThreadTimelineItem(tab, pending.UserItem);
-            AppendThreadTimelineItem(tab, pending.AssistantItem);
-            tab.PendingAssistant = new PendingAssistantState(pending.AssistantItem, pending.StreamingMarkdown, pending.TimestampText);
-        }
-
         try
         {
             SetStatus($"Running '{thread.Title}'...", showSpinner: true);
@@ -542,10 +539,20 @@ internal sealed partial class CodeAltaTerminalUi
         switch (@event)
         {
             case AgentContentDeltaEvent delta:
+                if (!ShouldDisplayContentDelta(delta))
+                {
+                    break;
+                }
+
                 AppendThreadContent(tab, delta);
                 break;
 
             case AgentContentCompletedEvent completed:
+                if (ShouldSkipEmptyAssistantCompletion(tab, completed))
+                {
+                    break;
+                }
+
                 if (!ShouldDisplayCompletedContent(completed))
                 {
                     break;
@@ -656,7 +663,6 @@ internal sealed partial class CodeAltaTerminalUi
             case AgentSessionUpdateEvent update:
                 if (update.Kind == AgentSessionUpdateKind.Idle)
                 {
-                    ReplaceEmptyPendingAssistantPlaceholder(tab);
                     SetStatus($"Prompt ready · {thread.Title}", tone: StatusTone.Ready);
                     break;
                 }
@@ -727,6 +733,25 @@ internal sealed partial class CodeAltaTerminalUi
         return completedContent.Length > 0
             ? completedContent
             : bufferedContent.ToString();
+    }
+
+    private static bool ShouldSkipEmptyAssistantCompletion(ThreadTabState tab, AgentContentCompletedEvent completed)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentNullException.ThrowIfNull(completed);
+
+        if (completed.Kind != AgentContentKind.Assistant || !string.IsNullOrWhiteSpace(completed.Content))
+        {
+            return false;
+        }
+
+        var key = CreateChatContentKey(completed.Kind, completed.ContentId);
+        if (tab.ContentStates.TryGetValue(key, out var existing))
+        {
+            return existing.Buffer.Length == 0;
+        }
+
+        return true;
     }
 
     private ChatContentState GetOrCreateThreadContentState(ThreadTabState tab, AgentContentKind kind, string contentId, DateTimeOffset timestamp)
