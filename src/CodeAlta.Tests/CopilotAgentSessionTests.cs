@@ -82,13 +82,15 @@ public sealed class CopilotAgentSessionTests
                     MessageId = "message-1",
                     InteractionId = interactionId,
                     Phase = "final_answer",
-                    Content = "Tomlyn is a .NET TOML library."
+                    Content = "Tomlyn is a .NET TOML library.",
+                    ReasoningText = "Considering project structure"
                 }
             },
             tracker);
 
-        Assert.AreEqual(1, finalAnswerEvents.Count);
-        Assert.AreEqual(AgentContentKind.Assistant, ((AgentContentCompletedEvent)finalAnswerEvents[0]).Kind);
+        Assert.AreEqual(2, finalAnswerEvents.Count);
+        Assert.AreEqual(AgentContentKind.Reasoning, ((AgentContentCompletedEvent)finalAnswerEvents[0]).Kind);
+        Assert.AreEqual(AgentContentKind.Assistant, ((AgentContentCompletedEvent)finalAnswerEvents[1]).Kind);
 
         var completionEvents = CopilotAgentSession.ProjectSessionEvents(
             sessionId,
@@ -106,5 +108,71 @@ public sealed class CopilotAgentSessionTests
         Assert.IsInstanceOfType<AgentActivityEvent>(completionEvents[0]);
         Assert.IsInstanceOfType<AgentSessionUpdateEvent>(completionEvents[1]);
         Assert.AreEqual(AgentSessionUpdateKind.Idle, ((AgentSessionUpdateEvent)completionEvents[1]).Kind);
+    }
+
+    [TestMethod]
+    public void ProjectSessionEvents_SuppressesEmbeddedReasoningWhenExplicitReasoningAlreadyExists()
+    {
+        var tracker = new CopilotAgentSession.CopilotInteractionTracker();
+        const string sessionId = "session-1";
+        const string interactionId = "interaction-1";
+
+        CopilotAgentSession.ProjectSessionEvents(
+            sessionId,
+            new UserMessageEvent
+            {
+                Timestamp = DateTimeOffset.Parse("2026-03-14T13:50:00Z"),
+                Data = new UserMessageData
+                {
+                    Content = "Tell me about Tomlyn.",
+                    InteractionId = interactionId
+                }
+            },
+            tracker);
+
+        CopilotAgentSession.ProjectSessionEvents(
+            sessionId,
+            new AssistantTurnStartEvent
+            {
+                Timestamp = DateTimeOffset.Parse("2026-03-14T13:50:01Z"),
+                Data = new AssistantTurnStartData
+                {
+                    TurnId = "0",
+                    InteractionId = interactionId
+                }
+            },
+            tracker);
+
+        CopilotAgentSession.ProjectSessionEvents(
+            sessionId,
+            new AssistantReasoningEvent
+            {
+                Timestamp = DateTimeOffset.Parse("2026-03-14T13:50:02Z"),
+                Data = new AssistantReasoningData
+                {
+                    ReasoningId = "reasoning-1",
+                    Content = "Explicit reasoning"
+                }
+            },
+            tracker);
+
+        var finalAnswerEvents = CopilotAgentSession.ProjectSessionEvents(
+            sessionId,
+            new AssistantMessageEvent
+            {
+                Timestamp = DateTimeOffset.Parse("2026-03-14T13:50:17Z"),
+                Data = new AssistantMessageData
+                {
+                    MessageId = "message-1",
+                    InteractionId = interactionId,
+                    Phase = "final_answer",
+                    Content = "Tomlyn is a .NET TOML library.",
+                    ReasoningText = "Embedded reasoning"
+                }
+            },
+            tracker);
+
+        Assert.AreEqual(1, finalAnswerEvents.Count);
+        Assert.AreEqual(AgentContentKind.Assistant, ((AgentContentCompletedEvent)finalAnswerEvents[0]).Kind);
     }
 }

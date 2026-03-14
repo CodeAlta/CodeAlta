@@ -421,6 +421,110 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
+    public void ToHistoryEvents_EmitsEmbeddedReasoningWhenNoExplicitReasoningWasSeen()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-14T13:50:17+00:00");
+        var mapped = CopilotAgentMapper.ToHistoryEvents(
+            "session-1",
+            [
+                new UserMessageEvent
+                {
+                    Timestamp = timestamp.AddSeconds(-2),
+                    Data = new UserMessageData
+                    {
+                        Content = "Tell me about Tomlyn.",
+                        InteractionId = "interaction-1"
+                    }
+                },
+                new AssistantTurnStartEvent
+                {
+                    Timestamp = timestamp.AddSeconds(-1),
+                    Data = new AssistantTurnStartData
+                    {
+                        TurnId = "0",
+                        InteractionId = "interaction-1"
+                    }
+                },
+                new AssistantMessageEvent
+                {
+                    Timestamp = timestamp,
+                    Data = new AssistantMessageData
+                    {
+                        MessageId = "msg-4",
+                        InteractionId = "interaction-1",
+                        Phase = "final_answer",
+                        Content = "Final answer",
+                        ReasoningText = "Considering project structure"
+                    }
+                }
+            ]);
+
+        Assert.AreEqual(4, mapped.Count);
+        Assert.AreEqual(AgentContentKind.User, ((AgentContentCompletedEvent)mapped[0]).Kind);
+        Assert.IsInstanceOfType<AgentActivityEvent>(mapped[1]);
+        Assert.AreEqual(AgentContentKind.Reasoning, ((AgentContentCompletedEvent)mapped[2]).Kind);
+        Assert.AreEqual("Considering project structure", ((AgentContentCompletedEvent)mapped[2]).Content);
+        Assert.AreEqual(AgentContentKind.Assistant, ((AgentContentCompletedEvent)mapped[3]).Kind);
+    }
+
+    [TestMethod]
+    public void ToHistoryEvents_SuppressesEmbeddedReasoningWhenExplicitReasoningWasSeen()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-14T13:50:17+00:00");
+        var mapped = CopilotAgentMapper.ToHistoryEvents(
+            "session-1",
+            [
+                new UserMessageEvent
+                {
+                    Timestamp = timestamp.AddSeconds(-3),
+                    Data = new UserMessageData
+                    {
+                        Content = "Tell me about Tomlyn.",
+                        InteractionId = "interaction-1"
+                    }
+                },
+                new AssistantTurnStartEvent
+                {
+                    Timestamp = timestamp.AddSeconds(-2),
+                    Data = new AssistantTurnStartData
+                    {
+                        TurnId = "0",
+                        InteractionId = "interaction-1"
+                    }
+                },
+                new AssistantReasoningEvent
+                {
+                    Timestamp = timestamp.AddSeconds(-1),
+                    Data = new AssistantReasoningData
+                    {
+                        ReasoningId = "reasoning-1",
+                        Content = "Explicit reasoning"
+                    }
+                },
+                new AssistantMessageEvent
+                {
+                    Timestamp = timestamp,
+                    Data = new AssistantMessageData
+                    {
+                        MessageId = "msg-4",
+                        InteractionId = "interaction-1",
+                        Phase = "final_answer",
+                        Content = "Final answer",
+                        ReasoningText = "Embedded reasoning"
+                    }
+                }
+            ]);
+
+        var reasoningContents = mapped
+            .OfType<AgentContentCompletedEvent>()
+            .Where(item => item.Kind == AgentContentKind.Reasoning)
+            .Select(item => item.Content)
+            .ToArray();
+
+        CollectionAssert.AreEqual(new[] { "Explicit reasoning" }, reasoningContents);
+    }
+
+    [TestMethod]
     public void ToAgentEvent_MapsUsageEventToSessionUpdate()
     {
         var timestamp = DateTimeOffset.Parse("2026-02-25T12:00:00+00:00");

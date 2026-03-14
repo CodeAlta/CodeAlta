@@ -170,16 +170,35 @@ public sealed class CopilotAgentSession : ICopilotAgentSession
         ArgumentNullException.ThrowIfNull(sessionEvent);
         ArgumentNullException.ThrowIfNull(tracker);
 
-        var mappedEvent = CopilotAgentMapper.ToAgentEvent(sessionId, sessionEvent);
-        var projection = tracker.Project(sessionId, sessionEvent, mappedEvent);
-        if (projection.SyntheticEvent is null)
+        var mappedEvents = new List<AgentEvent>(capacity: 2);
+        if (sessionEvent is AssistantMessageEvent assistantMessage &&
+            tracker.ShouldEmitEmbeddedReasoning(assistantMessage) &&
+            CopilotAgentMapper.TryCreateEmbeddedReasoningEvent(sessionId, assistantMessage) is { } embeddedReasoningEvent)
         {
-            return projection.PublishMappedEvent ? [mappedEvent] : [];
+            mappedEvents.Add(embeddedReasoningEvent);
         }
 
-        return projection.PublishMappedEvent
-            ? [mappedEvent, projection.SyntheticEvent]
-            : [projection.SyntheticEvent];
+        var primaryEvent = CopilotAgentMapper.ToAgentEvent(sessionId, sessionEvent);
+        mappedEvents.Add(primaryEvent);
+        var projection = tracker.Project(sessionId, sessionEvent, primaryEvent);
+        if (projection.SyntheticEvent is null)
+        {
+            return projection.PublishMappedEvent ? mappedEvents : [];
+        }
+
+        if (!projection.PublishMappedEvent)
+        {
+            return [projection.SyntheticEvent];
+        }
+
+        var result = new AgentEvent[mappedEvents.Count + 1];
+        for (var index = 0; index < mappedEvents.Count; index++)
+        {
+            result[index] = mappedEvents[index];
+        }
+
+        result[^1] = projection.SyntheticEvent;
+        return result;
     }
 
     private void CompleteEventStream()
@@ -230,6 +249,20 @@ public sealed class CopilotAgentSession : ICopilotAgentSession
         private readonly Dictionary<string, InteractionState> _states = new(StringComparer.Ordinal);
         private string? _activeInteractionId;
 
+        public bool ShouldEmitEmbeddedReasoning(AssistantMessageEvent assistantMessage)
+        {
+            ArgumentNullException.ThrowIfNull(assistantMessage);
+
+            if (string.IsNullOrWhiteSpace(assistantMessage.Data.ReasoningText) ||
+                string.IsNullOrWhiteSpace(assistantMessage.Data.InteractionId))
+            {
+                return false;
+            }
+
+            return !_states.TryGetValue(assistantMessage.Data.InteractionId!, out var state) ||
+                   !state.HasExplicitReasoning;
+        }
+
         public SessionEventProjection Project(string sessionId, SessionEvent sessionEvent, AgentEvent mappedEvent)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -246,6 +279,15 @@ public sealed class CopilotAgentSession : ICopilotAgentSession
                 case AssistantTurnStartEvent turnStart when !string.IsNullOrWhiteSpace(turnStart.Data.InteractionId):
                     GetOrCreate(turnStart.Data.InteractionId!).HasAssistantTurn = true;
                     _activeInteractionId = turnStart.Data.InteractionId;
+                    return SessionEventProjection.PublishMapped;
+
+                case AssistantReasoningEvent:
+                case AssistantReasoningDeltaEvent:
+                    if (_activeInteractionId is not null)
+                    {
+                        GetOrCreate(_activeInteractionId).HasExplicitReasoning = true;
+                    }
+
                     return SessionEventProjection.PublishMapped;
 
                 case AssistantMessageEvent assistantMessage
@@ -309,6 +351,8 @@ public sealed class CopilotAgentSession : ICopilotAgentSession
             public bool HasUserMessage { get; set; }
 
             public bool HasAssistantTurn { get; set; }
+
+            public bool HasExplicitReasoning { get; set; }
 
             public bool FinalAnswerSeen { get; set; }
         }

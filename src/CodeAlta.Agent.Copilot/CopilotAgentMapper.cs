@@ -605,12 +605,28 @@ internal static class CopilotAgentMapper
         };
     }
 
+    internal static IReadOnlyList<AgentEvent> ToAgentEvents(string sessionId, SessionEvent sessionEvent)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(sessionEvent);
+
+        return [ToAgentEvent(sessionId, sessionEvent)];
+    }
+
     public static IReadOnlyList<AgentEvent> ToHistoryEvents(string sessionId, IReadOnlyList<SessionEvent> events)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
         ArgumentNullException.ThrowIfNull(events);
 
-        return events.Select(sessionEvent => ToAgentEvent(sessionId, sessionEvent)).ToArray();
+        var tracker = new CopilotAgentSession.CopilotInteractionTracker();
+        var projectedEvents = new List<AgentEvent>(events.Count);
+
+        foreach (var sessionEvent in events)
+        {
+            projectedEvents.AddRange(CopilotAgentSession.ProjectSessionEvents(sessionId, sessionEvent, tracker));
+        }
+
+        return projectedEvents;
     }
 
     internal static AgentContentKind GetAssistantMessageContentKind(string? phase)
@@ -619,6 +635,27 @@ internal static class CopilotAgentMapper
             "final_answer" => AgentContentKind.Assistant,
             _ => AgentContentKind.Reasoning,
         };
+
+    internal static AgentContentCompletedEvent? TryCreateEmbeddedReasoningEvent(string sessionId, AssistantMessageEvent message)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (string.IsNullOrWhiteSpace(message.Data.ReasoningText))
+        {
+            return null;
+        }
+
+        return new AgentContentCompletedEvent(
+            AgentBackendIds.Copilot,
+            sessionId,
+            message.Timestamp,
+            new AgentRunId(message.Data.MessageId),
+            AgentContentKind.Reasoning,
+            $"{message.Data.MessageId}:reasoning",
+            message.Data.ParentToolCallId,
+            message.Data.ReasoningText);
+    }
 
     private static PermissionRequestHandler CreatePermissionHandler(
         AgentPermissionRequestHandler handler,
