@@ -169,12 +169,13 @@ internal sealed partial class CodeAltaTerminalUi
             maxCodeBlockHeight: 10).Item;
 
     private static DocumentFlowItem CreateUserPromptSeparatorItem()
-        => new()
-        {
-            Content = new FlowDocument().Add(new Rule()),
-            Alignment = DocumentFlowAlignment.Stretch,
-            Padding = new Thickness(0, 1, 0, 0),
-        };
+        => RunOnUiThread(
+            static () => new DocumentFlowItem
+            {
+                Content = new FlowDocument().Add(new Rule()),
+                Alignment = DocumentFlowAlignment.Stretch,
+                Padding = new Thickness(0, 1, 0, 0),
+            });
 
     private static DocumentFlowItem CreateAssistantStreamingChatItem(out MarkdownControl markdownControl, out Markup timestampText)
     {

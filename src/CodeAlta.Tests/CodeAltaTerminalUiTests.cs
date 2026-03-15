@@ -54,6 +54,17 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public async Task BuildUserPromptTimelineItems_CanBeCalledFromWorkerThread()
+    {
+        var pending = CodeAltaTerminalUi.CreatePendingChatMessage("hello");
+
+        var items = await Task.Run(() => CodeAltaTerminalUi.BuildUserPromptTimelineItems(pending.UserItem, hasSeenUserPrompt: true));
+
+        Assert.AreEqual(2, items.Count);
+        Assert.IsInstanceOfType<FlowDocument>(items[0].Content);
+    }
+
+    [TestMethod]
     public void FormatChatContentMarkdown_PrefixesReasoningContent()
     {
         var markdown = CodeAltaTerminalUi.FormatChatContentMarkdown(AgentContentKind.Reasoning, "Inspecting the project.");

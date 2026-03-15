@@ -319,6 +319,11 @@ internal sealed partial class CodeAltaTerminalUi
         }
         catch (Exception ex)
         {
+            if (LogManager.IsInitialized && UiLogger.IsEnabled(LogLevel.Error))
+            {
+                UiLogger.Error(ex, $"Failed to load history for thread {thread.ThreadId}");
+            }
+
             RenderThreadFailure(tab, $"Failed to load history: {ex.Message}");
             SetStatus($"Failed to load '{thread.Title}': {ex.Message}", tone: StatusTone.Error);
         }
@@ -385,6 +390,11 @@ internal sealed partial class CodeAltaTerminalUi
         }
         catch (Exception ex)
         {
+            if (LogManager.IsInitialized && UiLogger.IsEnabled(LogLevel.Error))
+            {
+                UiLogger.Error(ex, $"Failed to send prompt for thread {thread.ThreadId}");
+            }
+
             RenderThreadFailure(tab, $"Failed to send prompt: {ex.Message}");
             SetStatus($"Failed to send prompt: {ex.Message}", tone: StatusTone.Error);
         }
