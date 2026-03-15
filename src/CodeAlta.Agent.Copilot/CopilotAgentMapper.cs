@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using GitHub.Copilot.SDK;
@@ -634,6 +636,10 @@ internal static class CopilotAgentMapper
         foreach (var sessionEvent in events)
         {
             projectedEvents.AddRange(CopilotAgentSession.ProjectSessionEvents(sessionId, sessionEvent, tracker));
+            if (sessionEvent is AssistantMessageEvent assistantMessage)
+            {
+                projectedEvents.AddRange(CreateAssistantMessageToolRequestEvents(sessionId, assistantMessage));
+            }
         }
 
         return projectedEvents;
@@ -665,6 +671,168 @@ internal static class CopilotAgentMapper
             $"{message.Data.MessageId}:reasoning",
             message.Data.ParentToolCallId,
             message.Data.ReasoningText);
+    }
+
+    internal static IReadOnlyList<AgentActivityEvent> CreateAssistantMessageToolRequestEvents(string sessionId, AssistantMessageEvent message)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (message.Data.ToolRequests is not { Length: > 0 } toolRequests)
+        {
+            return [];
+        }
+
+        var events = new List<AgentActivityEvent>(toolRequests.Length);
+        foreach (var toolRequest in toolRequests)
+        {
+            if (string.IsNullOrWhiteSpace(toolRequest.ToolCallId))
+            {
+                continue;
+            }
+
+            var toolName = toolRequest.Name;
+
+            events.Add(CreateActivityEvent(
+                sessionId,
+                message.Timestamp,
+                new AgentRunId(message.Data.MessageId),
+                GetCopilotToolActivityKind(toolName ?? "tool", mcpToolName: null),
+                AgentActivityPhase.Requested,
+                toolRequest.ToolCallId!,
+                message.Data.MessageId,
+                toolName,
+                "Tool requested.",
+                CreateAssistantMessageToolRequestDetails(toolRequest)));
+        }
+
+        return events;
+    }
+
+    private static JsonElement CreateAssistantMessageToolRequestDetails(AssistantMessageDataToolRequestsItem toolRequest)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            if (!string.IsNullOrWhiteSpace(toolRequest.ToolCallId))
+            {
+                writer.WriteString("toolCallId", toolRequest.ToolCallId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(toolRequest.Name))
+            {
+                writer.WriteString("name", toolRequest.Name);
+            }
+
+            if (toolRequest.Type is { } type)
+            {
+                writer.WriteString("type", type.ToString().ToLowerInvariant());
+            }
+
+            if (toolRequest.Arguments is not null)
+            {
+                writer.WritePropertyName("arguments");
+                WriteUntypedJsonValue(writer, toolRequest.Arguments);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static void WriteUntypedJsonValue(Utf8JsonWriter writer, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                writer.WriteNullValue();
+                return;
+            case JsonElement element:
+                element.WriteTo(writer);
+                return;
+            case JsonDocument document:
+                document.RootElement.WriteTo(writer);
+                return;
+            case string text:
+                writer.WriteStringValue(text);
+                return;
+            case bool boolean:
+                writer.WriteBooleanValue(boolean);
+                return;
+            case byte number:
+                writer.WriteNumberValue(number);
+                return;
+            case sbyte number:
+                writer.WriteNumberValue(number);
+                return;
+            case short number:
+                writer.WriteNumberValue(number);
+                return;
+            case ushort number:
+                writer.WriteNumberValue(number);
+                return;
+            case int number:
+                writer.WriteNumberValue(number);
+                return;
+            case uint number:
+                writer.WriteNumberValue(number);
+                return;
+            case long number:
+                writer.WriteNumberValue(number);
+                return;
+            case ulong number:
+                writer.WriteNumberValue(number);
+                return;
+            case float number:
+                writer.WriteNumberValue(number);
+                return;
+            case double number:
+                writer.WriteNumberValue(number);
+                return;
+            case decimal number:
+                writer.WriteNumberValue(number);
+                return;
+            case IEnumerable<KeyValuePair<string, object?>> dictionary:
+                writer.WriteStartObject();
+                foreach (var pair in dictionary)
+                {
+                    writer.WritePropertyName(pair.Key);
+                    WriteUntypedJsonValue(writer, pair.Value);
+                }
+
+                writer.WriteEndObject();
+                return;
+            case IDictionary legacyDictionary:
+                writer.WriteStartObject();
+                foreach (DictionaryEntry pair in legacyDictionary)
+                {
+                    if (pair.Key is null)
+                    {
+                        continue;
+                    }
+
+                    writer.WritePropertyName(Convert.ToString(pair.Key, CultureInfo.InvariantCulture) ?? string.Empty);
+                    WriteUntypedJsonValue(writer, pair.Value);
+                }
+
+                writer.WriteEndObject();
+                return;
+            case IEnumerable items:
+                writer.WriteStartArray();
+                foreach (var item in items)
+                {
+                    WriteUntypedJsonValue(writer, item);
+                }
+
+                writer.WriteEndArray();
+                return;
+            default:
+                writer.WriteStringValue(Convert.ToString(value, CultureInfo.InvariantCulture));
+                return;
+        }
     }
 
     private static PermissionRequestHandler CreatePermissionHandler(

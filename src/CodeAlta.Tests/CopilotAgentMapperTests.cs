@@ -525,6 +525,43 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
+    public void ToHistoryEvents_EmitsToolRequestsEmbeddedInAssistantMessage()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-15T13:24:49+00:00");
+        var mapped = CopilotAgentMapper.ToHistoryEvents(
+            "session-1",
+            [
+                new AssistantMessageEvent
+                {
+                    Timestamp = timestamp,
+                    Data = new AssistantMessageData
+                    {
+                        MessageId = "msg-1",
+                        InteractionId = "interaction-1",
+                        Phase = "reasoning",
+                        Content = string.Empty,
+                        ToolRequests =
+                        [
+                            new AssistantMessageDataToolRequestsItem
+                            {
+                                ToolCallId = "call-1",
+                                Name = "view",
+                                Type = AssistantMessageDataToolRequestsItemType.Function,
+                                Arguments = JsonDocument.Parse("""{"path":"C:\\code\\Tomlyn"}""").RootElement.Clone()
+                            }
+                        ]
+                    }
+                }
+            ]);
+
+        var toolRequest = mapped.OfType<AgentActivityEvent>().Single(x => x.ActivityId == "call-1");
+        Assert.AreEqual(AgentActivityPhase.Requested, toolRequest.Phase);
+        Assert.AreEqual("view", toolRequest.Name);
+        Assert.IsTrue(toolRequest.Details.HasValue);
+        Assert.AreEqual("C:\\code\\Tomlyn", toolRequest.Details.Value.GetProperty("arguments").GetProperty("path").GetString());
+    }
+
+    [TestMethod]
     public void ToAgentEvent_MapsUsageEventToSessionUpdate()
     {
         var timestamp = DateTimeOffset.Parse("2026-02-25T12:00:00+00:00");
