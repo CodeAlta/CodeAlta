@@ -74,7 +74,7 @@ public sealed class OrchestrationInfrastructureTests
     }
 
     [TestMethod]
-    public void AgentInstructionTemplateProvider_BuildsCoordinatorInstructions()
+    public void AgentInstructionTemplateProvider_DoesNotOverrideInstructions()
     {
         var provider = new AgentInstructionTemplateProvider();
         var project = new ProjectDescriptor
@@ -115,10 +115,8 @@ public sealed class OrchestrationInfrastructureTests
 
         var instructions = provider.BuildCoordinatorInstructions(thread, project, profile);
 
-        StringAssert.Contains(instructions.SystemMessage, "CodeAlta Coordinator");
-        StringAssert.Contains(instructions.DeveloperInstructions, "Review sqlitevec integration");
-        StringAssert.Contains(instructions.DeveloperInstructions, "Main Repo");
-        StringAssert.Contains(instructions.DeveloperInstructions, "codealta_schedule");
+        Assert.IsNull(instructions.SystemMessage);
+        Assert.IsNull(instructions.DeveloperInstructions);
     }
 
     [TestMethod]
@@ -333,8 +331,8 @@ public sealed class OrchestrationInfrastructureTests
         Assert.IsNotNull(fakeBackend.LastCreateOptions);
         Assert.AreEqual("gpt-5.4", fakeBackend.LastCreateOptions.Model);
         Assert.AreEqual(AgentReasoningEffort.High, fakeBackend.LastCreateOptions.ReasoningEffort);
-        StringAssert.Contains(fakeBackend.LastCreateOptions.SystemMessage, "CodeAlta Coordinator");
-        StringAssert.Contains(fakeBackend.LastCreateOptions.DeveloperInstructions, "Main Repo");
+        Assert.IsNull(fakeBackend.LastCreateOptions.SystemMessage);
+        Assert.IsNull(fakeBackend.LastCreateOptions.DeveloperInstructions);
 
         var history = await runtime.GetHistoryAsync(thread.ThreadId).ConfigureAwait(false);
         var assistant = history.OfType<AgentContentCompletedEvent>().Single();

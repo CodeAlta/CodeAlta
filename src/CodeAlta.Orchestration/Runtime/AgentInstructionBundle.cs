@@ -1,17 +1,22 @@
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Represents the composed instruction bundle used when starting an agent session.
+/// Represents optional instruction overrides used when starting an agent session.
 /// </summary>
 public sealed record AgentInstructionBundle
 {
     /// <summary>
-    /// Gets the system message.
+    /// An empty bundle that leaves backend defaults untouched.
     /// </summary>
-    public required string SystemMessage { get; init; }
+    public static AgentInstructionBundle Empty { get; } = new();
 
     /// <summary>
-    /// Gets the developer instructions.
+    /// Gets the system message override.
     /// </summary>
-    public required string DeveloperInstructions { get; init; }
+    public string? SystemMessage { get; init; }
+
+    /// <summary>
+    /// Gets the developer instructions override.
+    /// </summary>
+    public string? DeveloperInstructions { get; init; }
 }

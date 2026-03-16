@@ -3,6 +3,10 @@
 Status: **Proposal**  
 Audience: implementers of `CodeAlta.Agent*`, `CodeAlta.Orchestration`, UI/session creation paths, and agent/catalog loading.
 
+Current implementation note:
+
+- `AgentInstructionTemplateProvider` is intentionally disabled for now and returns no system/developer overrides, so backend default instructions remain in effect until orchestration prompting is enabled.
+
 Related specs:
 
 - `doc/specs/codealta_adaptive_orchestration_architecture.md`
