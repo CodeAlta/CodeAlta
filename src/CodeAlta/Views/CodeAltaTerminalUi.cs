@@ -228,6 +228,15 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
 
     internal readonly record struct StatusSnapshot(string Message, bool Busy, StatusTone Tone);
 
+    internal enum OpenTabIndicatorKind
+    {
+        Running,
+        Ready,
+        Warning,
+        Error,
+        Info,
+    }
+
     private sealed record SidebarSelectionTarget(
         SidebarSelectionKind Kind,
         string? ProjectId,

@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.ViewModels;
+using XenoAtom.Ansi;
 using XenoAtom.Logging;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -126,8 +127,17 @@ internal sealed partial class CodeAltaTerminalUi
             }
 
             var isSelected = string.Equals(thread.ThreadId, _selectedThreadId, StringComparison.OrdinalIgnoreCase);
-            var title = CompactTabTitle(thread.Title, isSelected);
-            var openButton = new Button(new TextBlock(title)).Click(() => OpenThread(thread.ThreadId));
+            var tab = EnsureThreadTab(thread);
+            var title = CompactTabTitle(thread.Title);
+            var openButton = new Button(
+                new HStack(
+                    [
+                        CreateOpenTabIndicator(tab.StatusBusy, tab.StatusTone),
+                        CreateOpenTabTitle(title, isSelected),
+                    ])
+                {
+                    Spacing = 1,
+                }).Click(() => OpenThread(thread.ThreadId));
             items.Add(
                 new HStack(
                     [
@@ -532,9 +542,9 @@ internal sealed partial class CodeAltaTerminalUi
 
         return thread.Kind switch
         {
-            WorkThreadKind.GlobalThread => $"CodeAlta | {thread.BackendId} | {CompactTabTitle(thread.Title, isSelected: false)} | global",
-            WorkThreadKind.ProjectThread => $"CodeAlta | {thread.BackendId} | {selectedProject?.Slug ?? "?"} | {CompactTabTitle(thread.Title, isSelected: false)}",
-            WorkThreadKind.InternalThread => $"CodeAlta | {thread.BackendId} | internal | {CompactTabTitle(thread.Title, isSelected: false)}",
+            WorkThreadKind.GlobalThread => $"CodeAlta | {thread.BackendId} | {CompactTabTitle(thread.Title)} | global",
+            WorkThreadKind.ProjectThread => $"CodeAlta | {thread.BackendId} | {selectedProject?.Slug ?? "?"} | {CompactTabTitle(thread.Title)}",
+            WorkThreadKind.InternalThread => $"CodeAlta | {thread.BackendId} | internal | {CompactTabTitle(thread.Title)}",
             _ => $"CodeAlta | thread={thread.Title}",
         };
     }
@@ -641,14 +651,63 @@ internal sealed partial class CodeAltaTerminalUi
             : "No chat backend is connected. Browse threads and projects, but prompt sending is unavailable.";
     }
 
-    private static string CompactTabTitle(string title, bool isSelected)
+    private static string CompactTabTitle(string title)
     {
         var normalized = title.Trim();
-        var maxLength = isSelected ? MaxTabTitleLength - 2 : MaxTabTitleLength;
-        var compact = normalized.Length <= maxLength
+        return normalized.Length <= MaxTabTitleLength
             ? normalized
-            : normalized[..Math.Max(1, maxLength - 1)].TrimEnd() + "…";
-        return isSelected ? $"> {compact}" : compact;
+            : normalized[..Math.Max(1, MaxTabTitleLength - 1)].TrimEnd() + "…";
+    }
+
+    internal static OpenTabIndicatorKind ResolveOpenTabIndicatorKind(bool isBusy, StatusTone tone)
+    {
+        if (isBusy)
+        {
+            return OpenTabIndicatorKind.Running;
+        }
+
+        return tone switch
+        {
+            StatusTone.Warning => OpenTabIndicatorKind.Warning,
+            StatusTone.Error => OpenTabIndicatorKind.Error,
+            StatusTone.Info => OpenTabIndicatorKind.Info,
+            _ => OpenTabIndicatorKind.Ready,
+        };
+    }
+
+    private static Visual CreateOpenTabIndicator(bool isBusy, StatusTone tone)
+    {
+        var kind = ResolveOpenTabIndicatorKind(isBusy, tone);
+        if (kind == OpenTabIndicatorKind.Running)
+        {
+            var spinner = new Spinner();
+            spinner.IsActive(() => true);
+            spinner.IsVisible(() => true);
+            return spinner;
+        }
+
+        var statusTone = kind switch
+        {
+            OpenTabIndicatorKind.Warning => StatusTone.Warning,
+            OpenTabIndicatorKind.Error => StatusTone.Error,
+            OpenTabIndicatorKind.Info => StatusTone.Info,
+            _ => StatusTone.Ready,
+        };
+        return new Markup(BuildStatusIconMarkup(statusTone))
+        {
+            Wrap = false,
+        };
+    }
+
+    private static Visual CreateOpenTabTitle(string title, bool isSelected)
+    {
+        var markup = isSelected
+            ? $"[bold][{UiPalette.GetStatusToneMarkup(StatusTone.Info)}]{AnsiMarkup.Escape(title)}[/][/]"
+            : AnsiMarkup.Escape(title);
+        return new Markup(markup)
+        {
+            Wrap = false,
+        };
     }
 
     private static Visual CreateCompactThreadHeader(string text, string? tooltip)
