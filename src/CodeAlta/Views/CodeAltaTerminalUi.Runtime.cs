@@ -58,9 +58,8 @@ internal sealed partial class CodeAltaTerminalUi
     {
         try
         {
-            var modelsTask = InitializeChatBackendsAsync(cancellationToken);
-            var catalogTask = RefreshCatalogFromBackendsAsync(cancellationToken);
-            await Task.WhenAll(modelsTask, catalogTask).ConfigureAwait(false);
+            await InitializeChatBackendsAsync(cancellationToken).ConfigureAwait(false);
+            await RefreshCatalogFromBackendsAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

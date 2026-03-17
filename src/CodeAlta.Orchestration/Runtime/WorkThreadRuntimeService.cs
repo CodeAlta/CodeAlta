@@ -77,7 +77,15 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             {
                 sessions = await _agentHub.ListSessionsAsync(backendId, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (KeyNotFoundException)
+            {
+                continue;
+            }
+            catch
             {
                 continue;
             }
