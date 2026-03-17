@@ -185,7 +185,7 @@ internal sealed partial class CodeAltaTerminalUi
 
     private void UpdateToolCallFromActivity(ToolCallEntryState entry, AgentActivityEvent activity)
     {
-        entry.ActivityKind = activity.Kind;
+        entry.ActivityKind = PreferActivityKind(entry.ActivityKind, activity.Kind);
         entry.Status = ToToolCallDisplayStatus(activity.Phase);
         entry.DisplayName = PreferToolDisplayName(entry.DisplayName, ResolveToolDisplayName(activity), activity);
         entry.ParentToolCallId = PreferLongerText(entry.ParentToolCallId, activity.ParentActivityId);
@@ -208,6 +208,22 @@ internal sealed partial class CodeAltaTerminalUi
         {
             entry.StatusMessage = null;
         }
+    }
+
+    private static AgentActivityKind PreferActivityKind(AgentActivityKind existing, AgentActivityKind candidate)
+    {
+        if (candidate == AgentActivityKind.ToolCall &&
+            existing is AgentActivityKind.CommandExecution
+                or AgentActivityKind.FileChange
+                or AgentActivityKind.McpToolCall
+                or AgentActivityKind.WebSearch
+                or AgentActivityKind.ImageGeneration
+                or AgentActivityKind.Subagent)
+        {
+            return existing;
+        }
+
+        return candidate;
     }
 
     private void AppendToolCallOutput(ToolCallEntryState entry, string? delta, DateTimeOffset timestamp)

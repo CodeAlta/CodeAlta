@@ -652,4 +652,92 @@ public sealed class CopilotAgentMapperTests
         Assert.IsTrue(subagent.Details.HasValue);
         Assert.AreEqual("Executes the task", subagent.Details.Value.GetProperty("agentDescription").GetString());
     }
+
+    [TestMethod]
+    public void ToAgentEvent_MapsPowershellToolExecutionStartToCommandExecution()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-17T12:00:00+00:00");
+        using var argumentsDocument = JsonDocument.Parse(
+            """
+            {
+              "command": "git --no-pager status --short",
+              "description": "Check repo status",
+              "initial_wait": 30
+            }
+            """);
+
+        var toolStartEvent = new ToolExecutionStartEvent
+        {
+            Timestamp = timestamp,
+            Data = new ToolExecutionStartData
+            {
+                ToolCallId = "tool-1",
+                ToolName = "powershell",
+                Arguments = argumentsDocument.RootElement.Clone()
+            }
+        };
+
+        var mapped = CopilotAgentMapper.ToAgentEvent("session-1", toolStartEvent);
+
+        Assert.IsInstanceOfType<AgentActivityEvent>(mapped);
+        var activity = (AgentActivityEvent)mapped;
+        Assert.AreEqual(AgentActivityKind.CommandExecution, activity.Kind);
+        Assert.AreEqual(AgentActivityPhase.Started, activity.Phase);
+        Assert.AreEqual("git --no-pager status --short", activity.Name);
+        Assert.IsTrue(activity.Details.HasValue);
+        Assert.AreEqual("powershell", activity.Details.Value.GetProperty("toolName").GetString());
+        Assert.AreEqual("git --no-pager status --short", activity.Details.Value.GetProperty("command").GetString());
+        Assert.AreEqual("Check repo status", activity.Details.Value.GetProperty("description").GetString());
+    }
+
+    [TestMethod]
+    public void ToAgentEvent_MapsSqlToolExecutionCompleteUsingTypedDetails()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-17T12:00:00+00:00");
+        var toolCompleteEvent = new ToolExecutionCompleteEvent
+        {
+            Timestamp = timestamp,
+            Data = new ToolExecutionCompleteData
+            {
+                ToolCallId = "tool-2",
+                Success = true,
+                Model = "gpt-5.4",
+                InteractionId = "interaction-1",
+                Result = new ToolExecutionCompleteDataResult
+                {
+                    Content = "3 row(s) returned.",
+                    DetailedContent = "SQL: SELECT id, status FROM todos;"
+                },
+                ToolTelemetry = new Dictionary<string, object>
+                {
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["queryType"] = "SELECT"
+                    },
+                    ["restrictedProperties"] = new Dictionary<string, object>
+                    {
+                        ["query"] = "SELECT id, status FROM todos;"
+                    },
+                    ["metrics"] = new Dictionary<string, object>
+                    {
+                        ["rowsReturned"] = 3
+                    }
+                }
+            }
+        };
+
+        var mapped = CopilotAgentMapper.ToAgentEvent("session-1", toolCompleteEvent);
+
+        Assert.IsInstanceOfType<AgentActivityEvent>(mapped);
+        var activity = (AgentActivityEvent)mapped;
+        Assert.AreEqual(AgentActivityKind.ToolCall, activity.Kind);
+        Assert.AreEqual(AgentActivityPhase.Completed, activity.Phase);
+        Assert.AreEqual("sql", activity.Name);
+        Assert.AreEqual("3 row(s) returned.", activity.Message);
+        Assert.IsTrue(activity.Details.HasValue);
+        Assert.AreEqual("sql", activity.Details.Value.GetProperty("toolName").GetString());
+        Assert.AreEqual("SELECT id, status FROM todos;", activity.Details.Value.GetProperty("query").GetString());
+        Assert.AreEqual("SELECT", activity.Details.Value.GetProperty("queryType").GetString());
+        Assert.AreEqual("3 row(s) returned.", activity.Details.Value.GetProperty("result").GetProperty("content").GetString());
+    }
 }

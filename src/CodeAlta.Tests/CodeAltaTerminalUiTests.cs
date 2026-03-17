@@ -148,6 +148,35 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void FormatChatActivityMarkdown_PrefersNormalizedCommandName()
+    {
+        using var detailsJson = JsonDocument.Parse(
+            """
+            {
+              "command": "git remote -v",
+              "rawCommand": "C:\\Program Files\\PowerShell\\7\\pwsh.exe -Command git remote -v"
+            }
+            """);
+
+        var markdown = CodeAltaTerminalUi.FormatChatActivityMarkdown(
+            new AgentActivityEvent(
+                AgentBackendIds.Codex,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentActivityKind.CommandExecution,
+                AgentActivityPhase.Started,
+                "tool-1",
+                null,
+                @"C:\Program Files\PowerShell\7\pwsh.exe -Command git remote -v",
+                null,
+                detailsJson.RootElement.Clone()));
+
+        StringAssert.Contains(markdown, "git remote -v");
+        Assert.IsFalse(markdown.Contains(@"""C:\Program", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void ToolCallDetailMarkdown_DoesNotRenderStatusDetail()
     {
         var method = typeof(CodeAltaTerminalUi).GetMethod("BuildToolCallDetailMarkdown", BindingFlags.Static | BindingFlags.NonPublic);

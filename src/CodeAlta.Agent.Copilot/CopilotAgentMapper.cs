@@ -1,3 +1,5 @@
+using System.Collections;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using GitHub.Copilot.SDK;
@@ -443,9 +445,9 @@ internal static class CopilotAgentMapper
                 AgentActivityPhase.Requested,
                 toolRequested.Data.ToolCallId,
                 null,
-                toolRequested.Data.ToolName,
+                GetCopilotToolDisplayName(toolRequested.Data.ToolName, mcpToolName: null, toolRequested.Data.Arguments),
                 "Tool requested.",
-                CreateSessionEventDetails(toolRequested)),
+                CreateToolUserRequestedDetails(toolRequested.Data)),
 
             ToolExecutionStartEvent toolStart => CreateActivityEvent(
                 sessionId,
@@ -455,9 +457,9 @@ internal static class CopilotAgentMapper
                 AgentActivityPhase.Started,
                 toolStart.Data.ToolCallId,
                 toolStart.Data.ParentToolCallId,
-                toolStart.Data.McpToolName ?? toolStart.Data.ToolName,
+                GetCopilotToolDisplayName(toolStart.Data.ToolName, toolStart.Data.McpToolName, toolStart.Data.Arguments),
                 toolStart.Data.McpServerName,
-                CreateSessionEventDetails(toolStart)),
+                CreateToolExecutionStartDetails(toolStart.Data)),
 
             ToolExecutionProgressEvent toolProgress => CreateActivityEvent(
                 sessionId,
@@ -469,7 +471,7 @@ internal static class CopilotAgentMapper
                 null,
                 null,
                 toolProgress.Data.ProgressMessage,
-                CreateSessionEventDetails(toolProgress)),
+                CreateToolExecutionProgressDetails(toolProgress.Data)),
 
             ToolExecutionPartialResultEvent toolPartialResult => new AgentContentDeltaEvent(
                 AgentBackendIds.Copilot,
@@ -485,15 +487,15 @@ internal static class CopilotAgentMapper
                 sessionId,
                 toolComplete.Timestamp,
                 null,
-                AgentActivityKind.ToolCall,
+                GetCopilotToolActivityKind(toolComplete.Data),
                 toolComplete.Data.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed,
                 toolComplete.Data.ToolCallId,
                 toolComplete.Data.ParentToolCallId,
-                null,
+                GetCopilotToolDisplayName(toolComplete.Data),
                 toolComplete.Data.Success
                     ? toolComplete.Data.Result?.Content
                     : toolComplete.Data.Error?.Message,
-                CreateSessionEventDetails(toolComplete)),
+                CreateToolExecutionCompleteDetails(toolComplete.Data)),
 
             SkillInvokedEvent skillInvoked => CreateActivityEvent(
                 sessionId,
@@ -505,7 +507,7 @@ internal static class CopilotAgentMapper
                 null,
                 skillInvoked.Data.Name,
                 skillInvoked.Data.Path,
-                CreateSessionEventDetails(skillInvoked)),
+                CreateSkillInvokedDetails(skillInvoked.Data)),
 
             SubagentSelectedEvent subagentSelected => CreateActivityEvent(
                 sessionId,
@@ -528,7 +530,7 @@ internal static class CopilotAgentMapper
                 null,
                 subagentStarted.Data.AgentDisplayName,
                 subagentStarted.Data.AgentDescription,
-                CreateSessionEventDetails(subagentStarted)),
+                CreateSubagentStartedDetails(subagentStarted.Data)),
 
             SubagentCompletedEvent subagentCompleted => CreateActivityEvent(
                 sessionId,
@@ -540,7 +542,7 @@ internal static class CopilotAgentMapper
                 null,
                 subagentCompleted.Data.AgentDisplayName,
                 null,
-                CreateSessionEventDetails(subagentCompleted)),
+                CreateSubagentCompletedDetails(subagentCompleted.Data)),
 
             SubagentFailedEvent subagentFailed => CreateActivityEvent(
                 sessionId,
@@ -552,7 +554,7 @@ internal static class CopilotAgentMapper
                 null,
                 subagentFailed.Data.AgentDisplayName,
                 subagentFailed.Data.Error,
-                CreateSessionEventDetails(subagentFailed)),
+                CreateSubagentFailedDetails(subagentFailed.Data)),
 
             SubagentDeselectedEvent => CreateActivityEvent(
                 sessionId,
@@ -575,7 +577,7 @@ internal static class CopilotAgentMapper
                 null,
                 hookStart.Data.HookType,
                 null,
-                CreateSessionEventDetails(hookStart)),
+                CreateHookStartDetails(hookStart.Data)),
 
             HookEndEvent hookEnd => CreateActivityEvent(
                 sessionId,
@@ -587,7 +589,7 @@ internal static class CopilotAgentMapper
                 null,
                 hookEnd.Data.HookType,
                 hookEnd.Data.Error?.Message,
-                CreateSessionEventDetails(hookEnd)),
+                CreateHookEndDetails(hookEnd.Data)),
 
             SystemMessageEvent systemMessage => new AgentContentCompletedEvent(
                 AgentBackendIds.Copilot,
@@ -1022,9 +1024,233 @@ internal static class CopilotAgentMapper
             return AgentActivityKind.McpToolCall;
         }
 
-        return string.Equals(toolName, "task", StringComparison.OrdinalIgnoreCase)
-            ? AgentActivityKind.Subagent
-            : AgentActivityKind.ToolCall;
+        return (toolName ?? string.Empty).Trim() switch
+        {
+            var name when string.Equals(name, "task", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.Subagent,
+            var name when string.Equals(name, "powershell", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.CommandExecution,
+            var name when string.Equals(name, "shell_command", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.CommandExecution,
+            var name when string.Equals(name, "bash", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.CommandExecution,
+            var name when string.Equals(name, "apply_patch", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.FileChange,
+            var name when string.Equals(name, "web_search", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.WebSearch,
+            var name when string.Equals(name, "image_generation", StringComparison.OrdinalIgnoreCase) => AgentActivityKind.ImageGeneration,
+            _ => AgentActivityKind.ToolCall,
+        };
+    }
+
+    private static AgentActivityKind GetCopilotToolActivityKind(ToolExecutionCompleteData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        return GetCopilotToolActivityKind(TryInferCopilotToolName(data) ?? string.Empty, mcpToolName: null);
+    }
+
+    private static string? GetCopilotToolDisplayName(string toolName, string? mcpToolName, object? arguments)
+    {
+        var activityKind = GetCopilotToolActivityKind(toolName, mcpToolName);
+        if (activityKind == AgentActivityKind.CommandExecution &&
+            TryGetNormalizedToolArgument(arguments, out var command, "command"))
+        {
+            return command;
+        }
+
+        return mcpToolName ?? toolName;
+    }
+
+    private static string? GetCopilotToolDisplayName(ToolExecutionCompleteData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var toolName = TryInferCopilotToolName(data);
+        return string.IsNullOrWhiteSpace(toolName) ? null : toolName;
+    }
+
+    private static JsonElement CreateToolUserRequestedDetails(ToolUserRequestedData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var arguments = SerializeRuntimeObject(data.Arguments);
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            writer.WriteString("toolName", data.ToolName);
+            WriteSerializedProperty(writer, "arguments", arguments);
+            WriteKnownToolFields(writer, arguments);
+        });
+    }
+
+    private static JsonElement CreateToolExecutionStartDetails(ToolExecutionStartData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var arguments = SerializeRuntimeObject(data.Arguments);
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            if (!string.IsNullOrWhiteSpace(data.ParentToolCallId))
+                writer.WriteString("parentToolCallId", data.ParentToolCallId);
+            writer.WriteString("toolName", data.ToolName);
+            if (!string.IsNullOrWhiteSpace(data.McpToolName))
+                writer.WriteString("mcpToolName", data.McpToolName);
+            if (!string.IsNullOrWhiteSpace(data.McpServerName))
+                writer.WriteString("mcpServerName", data.McpServerName);
+            WriteSerializedProperty(writer, "arguments", arguments);
+            WriteKnownToolFields(writer, arguments);
+        });
+    }
+
+    private static JsonElement CreateToolExecutionProgressDetails(ToolExecutionProgressData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            if (!string.IsNullOrWhiteSpace(data.ProgressMessage))
+                writer.WriteString("progressMessage", data.ProgressMessage);
+        });
+    }
+
+    private static JsonElement CreateToolExecutionCompleteDetails(ToolExecutionCompleteData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var telemetry = SerializeRuntimeObject(data.ToolTelemetry);
+        var telemetryProperties = TryGetNestedObject(telemetry, "properties");
+        var telemetryRestrictedProperties = TryGetNestedObject(telemetry, "restrictedProperties");
+        var inferredToolName = TryInferCopilotToolName(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            if (!string.IsNullOrWhiteSpace(data.ParentToolCallId))
+                writer.WriteString("parentToolCallId", data.ParentToolCallId);
+            writer.WriteBoolean("success", data.Success);
+            if (!string.IsNullOrWhiteSpace(data.Model))
+                writer.WriteString("model", data.Model);
+            if (!string.IsNullOrWhiteSpace(data.InteractionId))
+                writer.WriteString("interactionId", data.InteractionId);
+            if (!string.IsNullOrWhiteSpace(inferredToolName))
+                writer.WriteString("toolName", inferredToolName);
+            WriteToolExecutionResult(writer, data.Result);
+            WriteToolExecutionError(writer, data.Error);
+            WriteSerializedProperty(writer, "toolTelemetry", telemetry);
+            WriteKnownToolFields(writer, telemetryProperties, telemetryRestrictedProperties);
+        });
+    }
+
+    private static JsonElement CreateSkillInvokedDetails(SkillInvokedData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("name", data.Name);
+            writer.WriteString("path", data.Path);
+        });
+    }
+
+    private static JsonElement CreateSubagentStartedDetails(SubagentStartedData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            writer.WriteString("agentName", data.AgentName);
+            writer.WriteString("agentDisplayName", data.AgentDisplayName);
+            if (!string.IsNullOrWhiteSpace(data.AgentDescription))
+                writer.WriteString("agentDescription", data.AgentDescription);
+        });
+    }
+
+    private static JsonElement CreateSubagentCompletedDetails(SubagentCompletedData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            writer.WriteString("agentDisplayName", data.AgentDisplayName);
+        });
+    }
+
+    private static JsonElement CreateSubagentFailedDetails(SubagentFailedData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("toolCallId", data.ToolCallId);
+            writer.WriteString("agentDisplayName", data.AgentDisplayName);
+            if (!string.IsNullOrWhiteSpace(data.Error))
+                writer.WriteString("error", data.Error);
+        });
+    }
+
+    private static JsonElement CreateHookStartDetails(HookStartData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("hookInvocationId", data.HookInvocationId);
+            writer.WriteString("hookType", data.HookType);
+        });
+    }
+
+    private static JsonElement CreateHookEndDetails(HookEndData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var error = SerializeRuntimeObject(data.Error);
+        return CreateObjectElement(writer =>
+        {
+            writer.WriteString("hookInvocationId", data.HookInvocationId);
+            writer.WriteString("hookType", data.HookType);
+            writer.WriteBoolean("success", data.Success);
+            WriteSerializedProperty(writer, "error", error);
+        });
+    }
+
+    private static void WriteToolExecutionResult(Utf8JsonWriter writer, ToolExecutionCompleteDataResult? result)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        writer.WritePropertyName("result");
+        writer.WriteStartObject();
+        if (!string.IsNullOrWhiteSpace(result.Content))
+            writer.WriteString("content", result.Content);
+        if (!string.IsNullOrWhiteSpace(result.DetailedContent))
+            writer.WriteString("detailedContent", result.DetailedContent);
+        if (result.Contents is { Length: > 0 })
+        {
+            writer.WritePropertyName("contents");
+            WriteUntypedJsonValue(writer, result.Contents);
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteToolExecutionError(Utf8JsonWriter writer, ToolExecutionCompleteDataError? error)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        if (error is null)
+        {
+            return;
+        }
+
+        writer.WritePropertyName("error");
+        writer.WriteStartObject();
+        if (!string.IsNullOrWhiteSpace(error.Message))
+            writer.WriteString("message", error.Message);
+        if (!string.IsNullOrWhiteSpace(error.Code))
+            writer.WriteString("code", error.Code);
+        writer.WriteEndObject();
     }
 
     private static ICollection<AIFunction>? ToCopilotTools(IReadOnlyList<AgentToolDefinition>? tools)
@@ -1321,22 +1547,315 @@ internal static class CopilotAgentMapper
         return document.RootElement.Clone();
     }
 
-    private static JsonElement? CreateSessionEventDetails(SessionEvent sessionEvent)
+    private static JsonElement CreateObjectElement(Action<Utf8JsonWriter> write)
     {
-        ArgumentNullException.ThrowIfNull(sessionEvent);
+        ArgumentNullException.ThrowIfNull(write);
 
-        var raw = ToRawElement(sessionEvent);
-        if (raw.ValueKind != JsonValueKind.Object)
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
         {
-            return raw;
+            writer.WriteStartObject();
+            write(writer);
+            writer.WriteEndObject();
         }
 
-        if (raw.TryGetProperty("data", out var data))
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static JsonElement? SerializeRuntimeObject(object? value)
+    {
+        if (value is null)
         {
-            return data.Clone();
+            return null;
         }
 
-        return raw;
+        return CreateValueElement(writer => WriteUntypedJsonValue(writer, value));
+    }
+
+    private static void WriteSerializedProperty(Utf8JsonWriter writer, string propertyName, JsonElement? value)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(propertyName);
+
+        if (value is not { } element)
+        {
+            return;
+        }
+
+        writer.WritePropertyName(propertyName);
+        element.WriteTo(writer);
+    }
+
+    private static JsonElement CreateValueElement(Action<Utf8JsonWriter> writeValue)
+    {
+        ArgumentNullException.ThrowIfNull(writeValue);
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writeValue(writer);
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static void WriteUntypedJsonValue(Utf8JsonWriter writer, object? value)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        switch (value)
+        {
+            case null:
+                writer.WriteNullValue();
+                return;
+            case JsonElement element:
+                element.WriteTo(writer);
+                return;
+            case JsonDocument document:
+                document.RootElement.WriteTo(writer);
+                return;
+            case string text:
+                writer.WriteStringValue(text);
+                return;
+            case bool boolean:
+                writer.WriteBooleanValue(boolean);
+                return;
+            case byte number:
+                writer.WriteNumberValue(number);
+                return;
+            case short number:
+                writer.WriteNumberValue(number);
+                return;
+            case int number:
+                writer.WriteNumberValue(number);
+                return;
+            case long number:
+                writer.WriteNumberValue(number);
+                return;
+            case float number:
+                writer.WriteNumberValue(number);
+                return;
+            case double number:
+                writer.WriteNumberValue(number);
+                return;
+            case decimal number:
+                writer.WriteNumberValue(number);
+                return;
+            case IDictionary dictionary:
+                writer.WriteStartObject();
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (entry.Key is not string key)
+                    {
+                        continue;
+                    }
+
+                    writer.WritePropertyName(key);
+                    WriteUntypedJsonValue(writer, entry.Value);
+                }
+
+                writer.WriteEndObject();
+                return;
+            case IEnumerable<KeyValuePair<string, object?>> pairs:
+                writer.WriteStartObject();
+                foreach (var pair in pairs)
+                {
+                    writer.WritePropertyName(pair.Key);
+                    WriteUntypedJsonValue(writer, pair.Value);
+                }
+
+                writer.WriteEndObject();
+                return;
+            case IEnumerable enumerable when value is not string:
+                writer.WriteStartArray();
+                foreach (var item in enumerable)
+                {
+                    WriteUntypedJsonValue(writer, item);
+                }
+
+                writer.WriteEndArray();
+                return;
+            default:
+                writer.WriteStringValue(value.ToString());
+                return;
+        }
+    }
+
+    private static void WriteKnownToolFields(Utf8JsonWriter writer, params JsonElement?[] sources)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        WriteKnownToolField(writer, "command", sources);
+        WriteKnownToolField(writer, "description", sources);
+        WriteKnownToolField(writer, "path", sources);
+        WriteKnownToolField(writer, "pattern", sources);
+        WriteKnownToolField(writer, "query", sources);
+        WriteKnownToolField(writer, "intent", sources);
+        WriteKnownToolField(writer, "database", sources);
+        WriteKnownToolField(writer, "viewType", sources);
+        WriteKnownToolField(writer, "queryType", sources);
+    }
+
+    private static void WriteKnownToolField(Utf8JsonWriter writer, string propertyName, params JsonElement?[] sources)
+    {
+        if (TryGetNormalizedToolValue(propertyName, sources) is not { } value)
+        {
+            return;
+        }
+
+        writer.WriteString(propertyName, value);
+    }
+
+    private static bool TryGetNormalizedToolArgument(object? value, out string? normalized, string propertyName)
+    {
+        normalized = TryGetNormalizedToolValue(propertyName, SerializeRuntimeObject(value));
+        return !string.IsNullOrWhiteSpace(normalized);
+    }
+
+    private static string? TryInferCopilotToolName(ToolExecutionCompleteData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        var telemetry = SerializeRuntimeObject(data.ToolTelemetry);
+        if (TryGetNestedString(telemetry, out var toolName, "properties", "command"))
+        {
+            return toolName;
+        }
+
+        if (TryResolveResultString(data.Result, out var content, result => result.Content))
+        {
+            if (string.Equals(content, "Intent logged", StringComparison.Ordinal))
+            {
+                return "report_intent";
+            }
+
+            if (!string.IsNullOrWhiteSpace(content) && LooksLikePathList(content))
+            {
+                return "glob";
+            }
+        }
+
+        if (TryResolveResultString(data.Result, out var detailedContent, result => result.DetailedContent) &&
+            !string.IsNullOrWhiteSpace(detailedContent) &&
+            (detailedContent.Contains("diff --git", StringComparison.Ordinal) ||
+             detailedContent.Contains("--- a/", StringComparison.Ordinal)))
+        {
+            return "view";
+        }
+
+        if (TryGetNormalizedToolValue("query", TryGetNestedObject(telemetry, "restrictedProperties")) is not null)
+        {
+            return "sql";
+        }
+
+        return null;
+    }
+
+    private static bool TryResolveResultString(
+        ToolExecutionCompleteDataResult? result,
+        out string? value,
+        Func<ToolExecutionCompleteDataResult, string?> selector)
+    {
+        value = result is null ? null : selector(result);
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static JsonElement? TryGetNestedObject(JsonElement? root, string propertyName)
+    {
+        if (root is not { } element ||
+            element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.Clone();
+    }
+
+    private static bool TryGetNestedString(JsonElement? root, out string? value, params string[] path)
+    {
+        value = null;
+        if (root is not { } element || element.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var current = element;
+        foreach (var segment in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return false;
+            }
+        }
+
+        if (current.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = current.GetString();
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static string? TryGetNormalizedToolValue(string propertyName, params JsonElement?[] sources)
+    {
+        foreach (var source in sources)
+        {
+            if (source is not { } element || element.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (!element.TryGetProperty(propertyName, out var property))
+            {
+                continue;
+            }
+
+            var value = property.ValueKind switch
+            {
+                JsonValueKind.String => property.GetString(),
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => property.ToString(),
+                _ => null
+            };
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikePathList(string text)
+    {
+        var lines = text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n')
+            .Where(static line => !string.IsNullOrWhiteSpace(line))
+            .Take(12)
+            .ToArray();
+        if (lines.Length < 2)
+        {
+            return false;
+        }
+
+        var matchingPathLines = lines.Count(static line =>
+        {
+            var trimmed = line.Trim().Trim('"', '\'', '`');
+            if (trimmed.Contains('\\', StringComparison.Ordinal) || trimmed.Contains('/', StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return !trimmed.Contains(" ", StringComparison.Ordinal) &&
+                   (!string.IsNullOrWhiteSpace(Path.GetExtension(trimmed)) || trimmed.StartsWith(".", StringComparison.Ordinal));
+        });
+
+        return matchingPathLines >= Math.Max(2, lines.Length - 1);
     }
 
     private static AgentRunId? TryGetRunId(SessionEvent sessionEvent)

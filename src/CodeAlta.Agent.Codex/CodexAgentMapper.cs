@@ -1090,7 +1090,7 @@ internal static class CodexAgentMapper
                 AgentActivityPhase.Started,
                 commandExecution.Id,
                 notification.TurnId,
-                commandExecution.Command,
+                ResolveCommandText(commandExecution.CommandActions, commandExecution.Command),
                 commandExecution.Cwd,
                 CreateCommandExecutionDetails(commandExecution)),
 
@@ -1257,7 +1257,7 @@ internal static class CodexAgentMapper
                 ToActivityPhase(commandExecution.Status),
                 commandExecution.Id,
                 notification.TurnId,
-                commandExecution.Command,
+                ResolveCommandText(commandExecution.CommandActions, commandExecution.Command),
                 commandExecution.AggregatedOutput,
                 CreateCommandExecutionDetails(commandExecution)),
 
@@ -1884,7 +1884,9 @@ internal static class CodexAgentMapper
     {
         return CreateObjectElement(writer =>
         {
-            writer.WriteString("command", item.Command);
+            writer.WriteString("command", ResolveCommandText(item.CommandActions, item.Command));
+            writer.WriteString("rawCommand", item.Command);
+            WriteCommandActions(writer, item.CommandActions);
             writer.WriteString("cwd", item.Cwd);
             writer.WriteString("status", item.Status.ToString());
             if (item.ProcessId is not null)
@@ -2169,6 +2171,24 @@ internal static class CodexAgentMapper
             : string.Empty;
     }
 
+    private static string ResolveCommandText(IReadOnlyList<CommandAction>? commandActions, string? rawCommand)
+    {
+        if (commandActions is { Count: > 0 })
+        {
+            var parsedText = commandActions
+                .Select(GetCommandActionText)
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (parsedText.Length > 0)
+            {
+                return string.Join(" ; ", parsedText);
+            }
+        }
+
+        return rawCommand ?? string.Empty;
+    }
+
     private static string GetParsedCommandText(ParsedCommand parsedCommand)
     {
         ArgumentNullException.ThrowIfNull(parsedCommand);
@@ -2180,6 +2200,20 @@ internal static class CodexAgentMapper
             ParsedCommand.SearchParsedCommand search => search.Cmd,
             ParsedCommand.UnknownParsedCommand unknown => unknown.Cmd,
             _ => parsedCommand.ToString() ?? string.Empty
+        };
+    }
+
+    private static string GetCommandActionText(CommandAction commandAction)
+    {
+        ArgumentNullException.ThrowIfNull(commandAction);
+
+        return commandAction switch
+        {
+            CommandAction.ReadCommandAction read => read.Command,
+            CommandAction.ListFilesCommandAction listFiles => listFiles.Command,
+            CommandAction.SearchCommandAction search => search.Command,
+            CommandAction.UnknownCommandAction unknown => unknown.Command,
+            _ => commandAction.ToString() ?? string.Empty
         };
     }
 
@@ -2213,6 +2247,19 @@ internal static class CodexAgentMapper
 
         writer.WritePropertyName("parsedCommand");
         JsonSerializer.Serialize(writer, parsedCommands, CodexJsonSerializerContext.Default.ListCodeAltaCodexSdkParsedCommand);
+    }
+
+    private static void WriteCommandActions(Utf8JsonWriter writer, IReadOnlyList<CommandAction>? commandActions)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        if (commandActions is not { Count: > 0 })
+        {
+            return;
+        }
+
+        writer.WritePropertyName("commandActions");
+        JsonSerializer.Serialize(writer, commandActions, CodexJsonSerializerContext.Default.ListCodeAltaCodexSdkCommandAction);
     }
 
     private static double GetDurationMilliseconds(Duration duration)
@@ -2358,6 +2405,8 @@ internal static class CodexAgentMapper
                 writer.WriteString("callId", item.CallId);
             if (item.Id is not null)
                 writer.WriteString("id", item.Id);
+            if (TryResolveLocalShellCommandText(item.Action, out var command))
+                writer.WriteString("command", command);
             writer.WritePropertyName("action");
             item.Action.WriteTo(writer);
         });
@@ -2440,10 +2489,13 @@ internal static class CodexAgentMapper
 
     private static string DescribeLocalShellAction(JsonElement action)
     {
+        if (TryResolveLocalShellCommandText(action, out var command))
+        {
+            return command!;
+        }
+
         if (action.ValueKind == JsonValueKind.Object)
         {
-            if (TryGetStringProperty(action, "command") is { } command)
-                return command;
             if (TryGetStringProperty(action, "text") is { } text)
                 return text;
             if (TryGetStringProperty(action, "type") is { } type)
@@ -2451,6 +2503,49 @@ internal static class CodexAgentMapper
         }
 
         return action.GetRawText();
+    }
+
+    private static bool TryResolveLocalShellCommandText(JsonElement action, out string? command)
+    {
+        command = null;
+
+        if (action.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (TryDeserializeCommandAction(action, out var commandAction))
+        {
+            command = GetCommandActionText(commandAction);
+            return !string.IsNullOrWhiteSpace(command);
+        }
+
+        if (TryGetStringProperty(action, "command") is { } commandText)
+        {
+            command = commandText;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryDeserializeCommandAction(JsonElement element, out CommandAction commandAction)
+    {
+        try
+        {
+            commandAction = JsonSerializer.Deserialize(element, CodexJsonSerializerContext.Default.CommandAction)!;
+            return commandAction is not null;
+        }
+        catch (JsonException)
+        {
+            commandAction = null!;
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            commandAction = null!;
+            return false;
+        }
     }
 
     private static string DescribeWebSearchAction(WebSearchAction? action, string? fallbackQuery)

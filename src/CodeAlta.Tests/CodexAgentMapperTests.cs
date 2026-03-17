@@ -425,7 +425,14 @@ public sealed class CodexAgentMapperTests
                 Item = new ThreadItem.CommandExecutionThreadItem
                 {
                     Id = "cmd-1",
-                    Command = "dotnet test",
+                    Command = @"C:\Program Files\PowerShell\7\pwsh.exe -Command git remote -v",
+                    CommandActions =
+                    [
+                        new CommandAction.UnknownCommandAction
+                        {
+                            Command = "git remote -v"
+                        }
+                    ],
                     Cwd = @"C:\repo",
                     Status = CommandExecutionStatus.InProgress
                 }
@@ -437,7 +444,12 @@ public sealed class CodexAgentMapperTests
         Assert.AreEqual(AgentActivityKind.CommandExecution, activity.Kind);
         Assert.AreEqual(AgentActivityPhase.Started, activity.Phase);
         Assert.AreEqual("cmd-1", activity.ActivityId);
-        Assert.AreEqual("dotnet test", activity.Name);
+        Assert.AreEqual("git remote -v", activity.Name);
+        Assert.IsTrue(activity.Details.HasValue);
+        Assert.AreEqual("git remote -v", activity.Details.Value.GetProperty("command").GetString());
+        Assert.AreEqual(
+            @"C:\Program Files\PowerShell\7\pwsh.exe -Command git remote -v",
+            activity.Details.Value.GetProperty("rawCommand").GetString());
     }
 
     [TestMethod]
@@ -541,6 +553,9 @@ public sealed class CodexAgentMapperTests
         Assert.AreEqual("call-1", activity.ActivityId);
         Assert.AreEqual("Get-ChildItem -Path C:\\code\\Tomlyn", activity.Name);
         Assert.AreEqual("completed", activity.Details?.GetProperty("status").GetString()?.ToLowerInvariant());
+        Assert.AreEqual(
+            "Get-ChildItem -Path C:\\code\\Tomlyn",
+            activity.Details?.GetProperty("command").GetString());
     }
 
     [TestMethod]

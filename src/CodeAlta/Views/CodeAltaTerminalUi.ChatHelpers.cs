@@ -420,11 +420,12 @@ internal sealed partial class CodeAltaTerminalUi
         ArgumentNullException.ThrowIfNull(activity);
 
         var builder = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(activity.Name))
+        var displayName = ResolveActivityDisplayName(activity);
+        if (!string.IsNullOrWhiteSpace(displayName))
         {
             builder.AppendLine()
                 .Append("- Name: `")
-                .Append(activity.Name)
+                .Append(displayName)
                 .Append('`');
         }
 
@@ -441,6 +442,20 @@ internal sealed partial class CodeAltaTerminalUi
         }
 
         return builder.ToString();
+    }
+
+    private static string? ResolveActivityDisplayName(AgentActivityEvent activity)
+    {
+        ArgumentNullException.ThrowIfNull(activity);
+
+        if (activity.Details is { } details &&
+            TryGetStringProperty(details, "command", out var command) &&
+            !string.IsNullOrWhiteSpace(command))
+        {
+            return command;
+        }
+
+        return activity.Name;
     }
 
     internal static string FormatChatSessionUpdateMarkdown(AgentSessionUpdateEvent update)
