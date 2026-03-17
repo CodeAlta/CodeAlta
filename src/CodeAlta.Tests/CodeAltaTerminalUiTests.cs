@@ -567,6 +567,36 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void BuildToolCallSummaryMarkup_OmitsRawJsonArgumentPreview()
+    {
+        var method = typeof(CodeAltaTerminalUi).GetMethod("BuildToolCallSummaryMarkup", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.IsNotNull(method);
+
+        var entry = new ToolCallEntryState(
+            "call-1",
+            new Button(new TextBlock("tool")),
+            new Markup("tool"))
+        {
+            ActivityKind = AgentActivityKind.ToolCall,
+            Status = ToolCallDisplayStatus.Running,
+            DisplayName = "glob",
+            ArgumentText =
+                """
+                {
+                  "timeout_ms": 30000,
+                  "justification": "Check repo status"
+                }
+                """,
+        };
+
+        var markup = (string?)method.Invoke(null, [entry]);
+
+        Assert.IsNotNull(markup);
+        Assert.IsFalse(markup.Contains("{", StringComparison.Ordinal));
+        StringAssert.Contains(markup, "glob");
+    }
+
+    [TestMethod]
     public void FormatChatContentMarkdown_SanitizesInlineImagePayloads()
     {
         var markdown = CodeAltaTerminalUi.FormatChatContentMarkdown(

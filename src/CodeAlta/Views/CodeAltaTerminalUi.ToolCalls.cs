@@ -969,7 +969,8 @@ internal sealed partial class CodeAltaTerminalUi
             return detailPreview;
         }
 
-        if (TryBuildCompactContextPreview(entry.ArgumentText, out var argumentPreview))
+        if (!IsJsonPayload(entry.ArgumentText) &&
+            TryBuildCompactContextPreview(entry.ArgumentText, out var argumentPreview))
         {
             return argumentPreview;
         }

@@ -488,13 +488,11 @@ internal static class CopilotAgentMapper
                 toolComplete.Timestamp,
                 null,
                 GetCopilotToolActivityKind(toolComplete.Data),
-                toolComplete.Data.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed,
+                IsCopilotToolExecutionFailure(toolComplete.Data) ? AgentActivityPhase.Failed : AgentActivityPhase.Completed,
                 toolComplete.Data.ToolCallId,
                 toolComplete.Data.ParentToolCallId,
                 GetCopilotToolDisplayName(toolComplete.Data),
-                toolComplete.Data.Success
-                    ? toolComplete.Data.Result?.Content
-                    : toolComplete.Data.Error?.Message,
+                ResolveCopilotToolCompletionMessage(toolComplete.Data),
                 CreateToolExecutionCompleteDetails(toolComplete.Data)),
 
             SkillInvokedEvent skillInvoked => CreateActivityEvent(
@@ -1040,6 +1038,12 @@ internal static class CopilotAgentMapper
     private static AgentActivityKind GetCopilotToolActivityKind(ToolExecutionCompleteData data)
     {
         ArgumentNullException.ThrowIfNull(data);
+
+        if (HasCopilotTerminalResult(data.Result))
+        {
+            return AgentActivityKind.CommandExecution;
+        }
+
         return GetCopilotToolActivityKind(TryInferCopilotToolName(data) ?? string.Empty, mcpToolName: null);
     }
 
@@ -1124,6 +1128,8 @@ internal static class CopilotAgentMapper
             if (!string.IsNullOrWhiteSpace(data.ParentToolCallId))
                 writer.WriteString("parentToolCallId", data.ParentToolCallId);
             writer.WriteBoolean("success", data.Success);
+            if (TryResolveCopilotTerminalExitCode(data.Result, out var exitCode))
+                writer.WriteNumber("exitCode", exitCode);
             if (!string.IsNullOrWhiteSpace(data.Model))
                 writer.WriteString("model", data.Model);
             if (!string.IsNullOrWhiteSpace(data.InteractionId))
@@ -1712,6 +1718,108 @@ internal static class CopilotAgentMapper
     {
         normalized = TryGetNormalizedToolValue(propertyName, SerializeRuntimeObject(value));
         return !string.IsNullOrWhiteSpace(normalized);
+    }
+
+    private static bool IsCopilotToolExecutionFailure(ToolExecutionCompleteData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        if (!data.Success)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(data.Error?.Message) || !string.IsNullOrWhiteSpace(data.Error?.Code))
+        {
+            return true;
+        }
+
+        return TryResolveCopilotTerminalExitCode(data.Result, out var exitCode) && exitCode != 0;
+    }
+
+    private static string? ResolveCopilotToolCompletionMessage(ToolExecutionCompleteData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+
+        if (!IsCopilotToolExecutionFailure(data))
+        {
+            return data.Result?.Content;
+        }
+
+        return !string.IsNullOrWhiteSpace(data.Error?.Message)
+            ? data.Error.Message
+            : data.Result?.Content;
+    }
+
+    private static bool HasCopilotTerminalResult(ToolExecutionCompleteDataResult? result)
+    {
+        if (result is null)
+        {
+            return false;
+        }
+
+        if (result.Contents is { Length: > 0 } contents &&
+            contents.Any(static item => item is ToolExecutionCompleteDataResultContentsItemTerminal))
+        {
+            return true;
+        }
+
+        return ContainsCopilotTerminalExitMarker(result.Content) ||
+               ContainsCopilotTerminalExitMarker(result.DetailedContent);
+    }
+
+    private static bool TryResolveCopilotTerminalExitCode(ToolExecutionCompleteDataResult? result, out int exitCode)
+    {
+        exitCode = 0;
+        if (result is null)
+        {
+            return false;
+        }
+
+        if (result.Contents is { Length: > 0 } contents)
+        {
+            foreach (var content in contents)
+            {
+                if (content is ToolExecutionCompleteDataResultContentsItemTerminal { ExitCode: { } terminalExitCode })
+                {
+                    exitCode = (int)terminalExitCode;
+                    return true;
+                }
+            }
+        }
+
+        return TryExtractCopilotTerminalExitCode(result.Content, out exitCode) ||
+               TryExtractCopilotTerminalExitCode(result.DetailedContent, out exitCode);
+    }
+
+    private static bool ContainsCopilotTerminalExitMarker(string? text)
+        => !string.IsNullOrWhiteSpace(text) &&
+           text.Contains("<exited with exit code ", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryExtractCopilotTerminalExitCode(string? text, out int exitCode)
+    {
+        exitCode = 0;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        const string marker = "<exited with exit code ";
+        var markerIndex = text.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return false;
+        }
+
+        var valueStart = markerIndex + marker.Length;
+        var valueEnd = text.IndexOf('>', valueStart);
+        if (valueEnd < 0)
+        {
+            return false;
+        }
+
+        var exitCodeText = text[valueStart..valueEnd].Trim();
+        return int.TryParse(exitCodeText, out exitCode);
     }
 
     private static string? TryInferCopilotToolName(ToolExecutionCompleteData data)

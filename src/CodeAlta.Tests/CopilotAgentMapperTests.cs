@@ -740,4 +740,35 @@ public sealed class CopilotAgentMapperTests
         Assert.AreEqual("SELECT", activity.Details.Value.GetProperty("queryType").GetString());
         Assert.AreEqual("3 row(s) returned.", activity.Details.Value.GetProperty("result").GetProperty("content").GetString());
     }
+
+    [TestMethod]
+    public void ToAgentEvent_MapsNonZeroTerminalExitAsFailedCommandExecution()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-17T12:00:00+00:00");
+        var toolCompleteEvent = new ToolExecutionCompleteEvent
+        {
+            Timestamp = timestamp,
+            Data = new ToolExecutionCompleteData
+            {
+                ToolCallId = "tool-3",
+                Success = true,
+                Result = new ToolExecutionCompleteDataResult
+                {
+                    Content = "fatal: not a git repository\n<exited with exit code 128>",
+                    DetailedContent = "fatal: not a git repository\n<exited with exit code 128>"
+                }
+            }
+        };
+
+        var mapped = CopilotAgentMapper.ToAgentEvent("session-1", toolCompleteEvent);
+
+        Assert.IsInstanceOfType<AgentActivityEvent>(mapped);
+        var activity = (AgentActivityEvent)mapped;
+        Assert.AreEqual(AgentActivityKind.CommandExecution, activity.Kind);
+        Assert.AreEqual(AgentActivityPhase.Failed, activity.Phase);
+        Assert.AreEqual("fatal: not a git repository\n<exited with exit code 128>", activity.Message);
+        Assert.IsTrue(activity.Details.HasValue);
+        Assert.AreEqual(true, activity.Details.Value.GetProperty("success").GetBoolean());
+        Assert.AreEqual(128, activity.Details.Value.GetProperty("exitCode").GetInt32());
+    }
 }
