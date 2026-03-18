@@ -11,11 +11,23 @@ internal sealed partial class CodeAltaTerminalUi
 {
     private Visual BuildMainView()
     {
-        return new HSplitter(BuildSidebar(), BuildThreadPane())
+        _threadCommandBar ??= new CommandBar
         {
-            Ratio = 0.26,
-            MinFirst = 24,
-            MinSecond = 40,
+            HorizontalAlignment = Align.Stretch,
+        };
+
+        return new DockLayout(
+            top: BuildTopBar(),
+            content: new HSplitter(BuildSidebar(), BuildThreadPane())
+            {
+                Ratio = 0.26,
+                MinFirst = 24,
+                MinSecond = 40,
+            },
+            bottom: _threadCommandBar)
+        {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
         };
     }
 

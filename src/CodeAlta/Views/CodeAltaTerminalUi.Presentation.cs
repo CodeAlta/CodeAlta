@@ -18,29 +18,8 @@ using XenoAtom.Terminal.UI.Threading;
 
 internal sealed partial class CodeAltaTerminalUi
 {
-    private Visual BuildThreadPane()
+    private Visual BuildTopBar()
     {
-        _threadTabControl ??= CreateThreadTabControl();
-        _threadInput ??= CreatePromptEditor();
-        _threadInputView ??= _threadInput.Scrollable();
-        _sendPromptButton ??= new Button(new TextBlock($"{NerdFont.MdSend} Send"))
-            .Click(() => _ = SendSelectedThreadPromptAsync(steer: false));
-        _threadCommandBar ??= new CommandBar
-        {
-            HorizontalAlignment = Align.Stretch,
-        };
-        _chatBackendSelect ??= new Select<ChatBackendOption>()
-            .SelectionChanged((_, e) => OnChatBackendSelectionChanged(e.NewIndex))
-            .MinWidth(14)
-            .MaxWidth(22);
-        _chatModelSelect ??= new Select<ChatModelOption>()
-            .SelectionChanged((_, e) => OnChatModelSelectionChanged(e.NewIndex))
-            .MinWidth(18)
-            .MaxWidth(36);
-        _chatReasoningSelect ??= new Select<ChatReasoningOption>()
-            .SelectionChanged((_, e) => OnChatReasoningSelectionChanged(e.NewIndex))
-            .MinWidth(12)
-            .MaxWidth(22);
         var statusPrefix = new Center(
             new ComputedVisual(
                 () => _viewModel.StatusBusy
@@ -54,7 +33,7 @@ internal sealed partial class CodeAltaTerminalUi
             MaxWidth = StatusPrefixWidth,
         };
 
-        var statusLine = new HStack(
+        return new HStack(
             [
                 statusPrefix,
                 new TextBlock
@@ -68,7 +47,27 @@ internal sealed partial class CodeAltaTerminalUi
             Spacing = 1,
             HorizontalAlignment = Align.Stretch,
         };
+    }
 
+    private Visual BuildThreadPane()
+    {
+        _threadTabControl ??= CreateThreadTabControl();
+        _threadInput ??= CreatePromptEditor();
+        _threadInputView ??= _threadInput.Scrollable();
+        _sendPromptButton ??= new Button(new TextBlock($"{NerdFont.MdSend} Send"))
+            .Click(() => _ = SendSelectedThreadPromptAsync(steer: false));
+        _chatBackendSelect ??= new Select<ChatBackendOption>()
+            .SelectionChanged((_, e) => OnChatBackendSelectionChanged(e.NewIndex))
+            .MinWidth(14)
+            .MaxWidth(22);
+        _chatModelSelect ??= new Select<ChatModelOption>()
+            .SelectionChanged((_, e) => OnChatModelSelectionChanged(e.NewIndex))
+            .MinWidth(18)
+            .MaxWidth(36);
+        _chatReasoningSelect ??= new Select<ChatReasoningOption>()
+            .SelectionChanged((_, e) => OnChatReasoningSelectionChanged(e.NewIndex))
+            .MinWidth(12)
+            .MaxWidth(22);
         var selectionLine = new HStack(
             [
                 _sendPromptButton,
@@ -86,17 +85,9 @@ internal sealed partial class CodeAltaTerminalUi
         };
 
         _threadBottomPanel = new DockLayout(
-            top: statusLine,
+            top: null,
             content: _threadInputView,
-            bottom: new VStack(
-                [
-                    selectionLine,
-                    _threadCommandBar,
-                ])
-            {
-                Spacing = 0,
-                HorizontalAlignment = Align.Stretch,
-            })
+            bottom: selectionLine)
         {
             HorizontalAlignment = Align.Stretch,
             VerticalAlignment = Align.Stretch,
