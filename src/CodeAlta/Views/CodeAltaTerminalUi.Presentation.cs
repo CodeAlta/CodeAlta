@@ -66,19 +66,32 @@ internal sealed partial class CodeAltaTerminalUi
             HorizontalAlignment = Align.Stretch,
         };
 
-        var selectionLine = new HStack(
+        var selectionControls = new HStack(
             [
                 _sendPromptButton,
                 _chatBackendSelect,
                 _chatModelSelect,
                 _chatReasoningSelect,
-                new Markup(() => _viewModel.BackendStatusMarkup),
+            ])
+        {
+            Spacing = 2,
+        };
+
+        var selectionRight = new HStack(
+            [
+                new Markup(() => _viewModel.BackendStatusMarkup)
+                {
+                    Wrap = false,
+                },
                 usageIndicator,
             ])
         {
             Spacing = 2,
-            HorizontalAlignment = Align.Stretch,
         };
+
+        var selectionLine = new StatusBar()
+            .LeftText(selectionControls)
+            .RightText(selectionRight);
 
         _threadBottomPanel = new DockLayout(
             top: statusLine,

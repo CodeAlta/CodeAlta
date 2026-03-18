@@ -9,20 +9,14 @@ using XenoAtom.Terminal.UI.Styling;
 
 internal sealed partial class CodeAltaTerminalUi
 {
-    private const int UsageIndicatorMinWidth = 10;
     private const int UsageTooltipMinWidth = 52;
     private const int UsageTooltipMaxWidth = 76;
 
     private Visual BuildSessionUsageIndicatorVisual()
     {
-        var indicator = new Border(
-            new Markup(() => BuildSessionUsageIndicatorMarkup(GetSelectedSessionUsage()))
-            {
-                Wrap = false,
-            })
+        var indicator = new Markup(() => BuildSessionUsageIndicatorMarkup(GetSelectedSessionUsage()))
         {
-            Padding = new Thickness(1, 0, 1, 0),
-            MinWidth = UsageIndicatorMinWidth,
+            Wrap = false,
         };
 
         return indicator
