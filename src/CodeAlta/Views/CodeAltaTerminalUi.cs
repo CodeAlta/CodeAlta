@@ -59,6 +59,8 @@ internal sealed partial class CodeAltaTerminalUi : IAsyncDisposable
     private Select<ChatBackendOption>? _chatBackendSelect;
     private Select<ChatModelOption>? _chatModelSelect;
     private Select<ChatReasoningOption>? _chatReasoningSelect;
+    private Popup? _sessionUsagePopup;
+    private bool _sessionUsagePopupOpen;
     private TreeView? _sidebarTree;
     private TabControl? _threadTabControl;
     private TabPage? _draftTabPage;

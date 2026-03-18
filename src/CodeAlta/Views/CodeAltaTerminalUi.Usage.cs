@@ -14,22 +14,68 @@ internal sealed partial class CodeAltaTerminalUi
 
     private Visual BuildSessionUsageIndicatorVisual()
     {
-        var indicator = new Markup(() => BuildSessionUsageIndicatorMarkup(GetSelectedSessionUsage()))
+        var button = new Button(new Markup(() => BuildSessionUsageIndicatorMarkup(GetSelectedSessionUsage()))
         {
             Wrap = false,
+        })
+        {
+            HorizontalAlignment = Align.End,
+            VerticalAlignment = Align.Start,
         };
+        button.Click(() => ToggleSessionUsagePopup(button));
 
-        return indicator
-            .Tooltip(CreateComputedVisual(BuildSessionUsageTooltipVisual))
-            .Placement(PopupPlacement.Above)
-            .OffsetY(0)
-            .ShowDelayMilliseconds(150);
+        return button;
     }
 
-    private Visual BuildSessionUsageTooltipVisual()
+    private void ToggleSessionUsagePopup(Visual anchor)
+    {
+        if (_sessionUsagePopupOpen)
+        {
+            CloseSessionUsagePopup();
+            return;
+        }
+
+        ShowSessionUsagePopup(anchor);
+    }
+
+    private void ShowSessionUsagePopup(Visual anchor)
+    {
+        _sessionUsagePopup ??= CreateSessionUsagePopup();
+        _sessionUsagePopup.Anchor = anchor;
+        _sessionUsagePopup.Placement = PopupPlacement.Above;
+        _sessionUsagePopup.OffsetY = 0;
+        _sessionUsagePopup.Content = CreateComputedVisual(BuildSessionUsagePopupContent);
+        _sessionUsagePopup.Show();
+        _sessionUsagePopupOpen = true;
+    }
+
+    private void CloseSessionUsagePopup()
+    {
+        _sessionUsagePopup?.Close();
+    }
+
+    private Popup CreateSessionUsagePopup()
+    {
+        var popup = new Popup
+        {
+            MatchAnchorWidth = false,
+            CloseOnTab = false,
+        };
+        popup.Closed((_, _) => _sessionUsagePopupOpen = false);
+        return popup;
+    }
+
+    private Visual BuildSessionUsagePopupContent()
     {
         var (backendName, modelName) = GetUsageSelectionContext();
-        return BuildSessionUsageTooltipContent(GetSelectedSessionUsage(), backendName, modelName);
+        return BuildSessionUsageDetailsVisual(GetSelectedSessionUsage(), backendName, modelName);
+    }
+
+    private void CopySessionUsageMarkdown()
+    {
+        var (backendName, modelName) = GetUsageSelectionContext();
+        var markdown = BuildSessionUsageMarkdown(GetSelectedSessionUsage(), backendName, modelName);
+        (_sessionUsagePopup?.App ?? _threadPaneLayout?.App)?.Terminal.Clipboard.TrySetText(markdown);
     }
 
     private AgentSessionUsage? GetSelectedSessionUsage()
@@ -125,20 +171,75 @@ internal sealed partial class CodeAltaTerminalUi
         };
     }
 
-    private static Visual BuildSessionUsageTooltipContent(AgentSessionUsage? usage, string backendName, string? modelName)
+    internal static string BuildSessionUsageMarkdown(AgentSessionUsage? usage, string backendName, string? modelName)
+    {
+        var builder = new System.Text.StringBuilder();
+        builder.Append("# ")
+            .Append(backendName)
+            .AppendLine(" context usage");
+        builder.AppendLine();
+        builder.Append("- Model: ")
+            .AppendLine(modelName ?? "(default model)");
+
+        if (usage is null)
+        {
+            builder.AppendLine("- Status: Waiting for usage data from the active session.");
+            return builder.ToString().TrimEnd();
+        }
+
+        builder.Append("- Summary: ")
+            .AppendLine(FormatSessionUsageSummary(usage));
+
+        if (usage.MessageCount is { } messageCount)
+        {
+            builder.Append("- Messages: ")
+                .AppendLine(messageCount.ToString(CultureInfo.InvariantCulture));
+        }
+
+        builder.Append("- Updated: ")
+            .AppendLine(usage.UpdatedAt.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
+
+        switch (usage.Details)
+        {
+            case CodexSessionUsageDetails codex:
+                AppendCodexUsageMarkdown(builder, codex);
+                break;
+            case CopilotSessionUsageDetails copilot:
+                AppendCopilotUsageMarkdown(builder, copilot);
+                break;
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private Visual BuildSessionUsageDetailsVisual(AgentSessionUsage? usage, string backendName, string? modelName)
     {
         var stack = new VStack
         {
             Spacing = 1,
         };
 
-        stack.Add(new Markup($"[bold]{AnsiMarkup.Escape(backendName)} context usage[/]"));
-        stack.Add(new Markup($"[dim]{AnsiMarkup.Escape(modelName ?? "(default model)")}[/]"));
+        var copyButton = new Button(new TextBlock($"{NerdFont.MdContentCopy}"))
+            .Click(CopySessionUsageMarkdown);
+        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose}"))
+            .Click(CloseSessionUsagePopup);
+
+        stack.Add(new StatusBar()
+            .LeftText(new VStack(
+                new Markup($"[bold]{AnsiMarkup.Escape(backendName)} context usage[/]"),
+                new Markup($"[dim]{AnsiMarkup.Escape(modelName ?? "(default model)")}[/]"))
+            {
+                Spacing = 0,
+            })
+            .RightText(new HStack(copyButton, closeButton)
+            {
+                Spacing = 1,
+            }));
 
         if (usage is null)
         {
             stack.Add(new TextBlock("Waiting for usage data from the active session."));
-            return BuildUsageTooltipContainer(stack);
+            return BuildUsagePopupContainer(stack);
         }
 
         stack.Add(new Markup($"[bold]{AnsiMarkup.Escape(FormatSessionUsageSummary(usage))}[/]"));
@@ -173,12 +274,12 @@ internal sealed partial class CodeAltaTerminalUi
                 break;
         }
 
-        return BuildUsageTooltipContainer(stack);
+        return BuildUsagePopupContainer(stack);
     }
 
-    private static Visual BuildUsageTooltipContainer(Visual content)
+    private static Visual BuildUsagePopupContainer(Visual content)
     {
-        return new Border(content)
+        return new Padder(content)
         {
             Padding = new Thickness(1),
             MinWidth = UsageTooltipMinWidth,
@@ -463,4 +564,74 @@ internal sealed partial class CodeAltaTerminalUi
 
     private static string FormatNumber(long? value)
         => value?.ToString("#,0", CultureInfo.InvariantCulture) ?? "?";
+
+    private static void AppendCodexUsageMarkdown(System.Text.StringBuilder builder, CodexSessionUsageDetails details)
+    {
+        if (details.LastTurnUsage is not null)
+        {
+            builder.AppendLine()
+                .AppendLine("## Last turn")
+                .Append("- ")
+                .AppendLine(FormatCodexTokenUsage(details.LastTurnUsage));
+        }
+
+        if (details.TotalUsage is not null)
+        {
+            builder.AppendLine()
+                .AppendLine("## Thread total")
+                .Append("- ")
+                .AppendLine(FormatCodexTokenUsage(details.TotalUsage));
+        }
+
+        if (details.RateLimits is { } rateLimits)
+        {
+            builder.AppendLine()
+                .AppendLine("## Rate limits");
+            builder.Append("- Limit: ")
+                .AppendLine($"{rateLimits.LimitName ?? rateLimits.LimitId ?? "Codex"} · {rateLimits.PlanType ?? "plan unknown"}");
+            if (rateLimits.Primary is not null)
+            {
+                builder.Append("- Primary: ")
+                    .AppendLine(FormatCodexRateLimitWindow(rateLimits.Primary));
+            }
+
+            if (rateLimits.Secondary is not null)
+            {
+                builder.Append("- Secondary: ")
+                    .AppendLine(FormatCodexRateLimitWindow(rateLimits.Secondary));
+            }
+        }
+    }
+
+    private static void AppendCopilotUsageMarkdown(System.Text.StringBuilder builder, CopilotSessionUsageDetails details)
+    {
+        if (details.LastAssistantUsage is { } assistantUsage)
+        {
+            builder.AppendLine()
+                .AppendLine("## Last API call")
+                .Append("- ")
+                .AppendLine(FormatCopilotAssistantUsage(assistantUsage));
+        }
+
+        if (details.LastCompaction is { } compaction)
+        {
+            builder.AppendLine()
+                .AppendLine("## Last compaction")
+                .Append("- ")
+                .AppendLine(FormatCopilotCompaction(compaction));
+        }
+
+        if (details.QuotaSnapshots is { Length: > 0 } quotaSnapshots)
+        {
+            builder.AppendLine()
+                .AppendLine("## Quota snapshots");
+            foreach (var quota in quotaSnapshots)
+            {
+                builder.Append("- ")
+                    .Append(quota.Name)
+                    .Append(": ")
+                    .AppendLine(SummarizeJson(quota.Payload));
+            }
+        }
+    }
 }

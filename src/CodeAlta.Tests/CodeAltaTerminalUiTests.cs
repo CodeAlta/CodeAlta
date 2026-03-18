@@ -1697,6 +1697,46 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void BuildSessionUsageMarkdown_UsesInvariantCultureAndSections()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+
+            var markdown = CodeAltaTerminalUi.BuildSessionUsageMarkdown(
+                new AgentSessionUsage(
+                    CurrentTokens: 50000,
+                    TokenLimit: 120000,
+                    MessageCount: 12,
+                    UpdatedAt: DateTimeOffset.Parse("2026-03-18T21:08:00+00:00"),
+                    Details: new CodexSessionUsageDetails(
+                        LastTurnUsage: new CodexTokenUsage(25, 1000, 200, 10, 1235),
+                        RateLimits: new CodexRateLimitSnapshot(
+                            "requests",
+                            "Requests",
+                            "Pro",
+                            new CodexRateLimitWindow(42, null, 60),
+                            null))),
+                "Codex",
+                "gpt-5-codex");
+
+            StringAssert.Contains(markdown, "# Codex context usage");
+            StringAssert.Contains(markdown, "50,000 / 120,000 tokens (41.7%)");
+            StringAssert.Contains(markdown, "## Last turn");
+            StringAssert.Contains(markdown, "## Rate limits");
+            StringAssert.Contains(markdown, "42% used");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
+    }
+
+    [TestMethod]
     public void ResolveChatBackendSelection_CanPreserveCurrentSelection()
     {
         var selected = CodeAltaTerminalUi.ResolveChatBackendSelection(
