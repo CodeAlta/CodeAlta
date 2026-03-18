@@ -172,11 +172,7 @@ internal sealed partial class CodeAltaTerminalUi
             (timestamp));
 
         tab.ActiveToolCallGroup = group;
-        PostToUi(() =>
-        {
-            tab.Flow.Items.Add(group.Item);
-            tab.Flow.ScrollToTail();
-        });
+        AppendThreadTimelineItem(tab, group.Item, resetActiveToolCallGroup: false);
 
         ApplyChatCardTimestamp(group.TimestampText, timestamp);
         UpdateToolCallGroupVisual(group);

@@ -1768,8 +1768,18 @@ internal sealed partial class CodeAltaTerminalUi
     }
 
     private void AppendThreadTimelineItem(ThreadTabState tab, DocumentFlowItem item)
+        => AppendThreadTimelineItem(tab, item, resetActiveToolCallGroup: true);
+
+    private void AppendThreadTimelineItem(
+        ThreadTabState tab,
+        DocumentFlowItem item,
+        bool resetActiveToolCallGroup)
     {
-        tab.ActiveToolCallGroup = null;
+        if (resetActiveToolCallGroup)
+        {
+            tab.ActiveToolCallGroup = null;
+        }
+
         if (tab.HistoryLoading)
         {
             (tab.BufferedHistoryItems ??= []).Add(item);
