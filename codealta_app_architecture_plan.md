@@ -117,7 +117,7 @@ This document is the implementation checklist companion to the architecture prop
 
 - [x] Move `CreateAsync(...)` out of `CodeAltaApp.Bootstrap.cs` so `CodeAltaApp` no longer has an app-layer partial bootstrap slice.
 - [x] Replace `CodeAltaApp.Sidebar.cs` with a named sidebar coordinator/home.
-- [ ] Replace `CodeAltaApp.Presentation.cs` with named presentation/view helpers.
+- [x] Replace `CodeAltaApp.Presentation.cs` with named presentation/view helpers.
 - [x] Extract shell text, welcome-pane, status, and tab-header helpers out of `CodeAltaApp.Presentation.cs`.
 - [x] Extract selector and prompt-availability coordination out of `CodeAltaApp.Presentation.cs`.
 - [x] Extract tab-strip and workspace sync coordination out of `CodeAltaApp.Presentation.cs`.

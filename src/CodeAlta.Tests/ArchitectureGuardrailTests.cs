@@ -91,62 +91,55 @@ public sealed class ArchitectureGuardrailTests
     public void UiProjectionAndUsageFiles_KeepExplicitBindableAccessGuards()
     {
         var sidebarSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "SidebarCoordinator.cs"));
-        var presentationSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.Presentation.cs"));
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
 
         Assert.IsTrue(sidebarSource.Contains("verifyBindableAccess();", StringComparison.Ordinal));
-        Assert.IsTrue(presentationSource.Contains("private T ReadBindableState<T>(Func<T> read)", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("private T ReadBindableState<T>(Func<T> read)", StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public void CodeAltaAppPresentation_DoesNotRegrowStaticShellHelperBuckets()
+    public void CodeAltaAppPresentationSlice_IsDeletedAndShellHelpersStayExtracted()
     {
-        var presentationSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.Presentation.cs"));
+        var viewsRoot = Path.Combine(GetCodeAltaSourceRoot(), "Views");
+        var appSource = File.ReadAllText(Path.Combine(viewsRoot, "CodeAltaApp.cs"));
 
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildHeaderText(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildDraftPromptMessage(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildDraftTabTitle(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildWelcomeSubtitle(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static IReadOnlyList<string> BuildWelcomeGuidanceLines(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static Visual BuildWelcomePane(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildReadyStatusText(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildThinkingStatusText(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string BuildStatusIconMarkup(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static TextBlockStyle BuildStatusTextStyle(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static string CompactTabTitle(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("internal static OpenTabIndicatorKind ResolveOpenTabIndicatorKind(", StringComparison.Ordinal));
+        Assert.IsFalse(File.Exists(Path.Combine(viewsRoot, "CodeAltaApp.Presentation.cs")));
+        Assert.IsFalse(appSource.Contains("internal static string BuildHeaderText(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string BuildDraftPromptMessage(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string BuildDraftTabTitle(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string BuildWelcomeSubtitle(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static IReadOnlyList<string> BuildWelcomeGuidanceLines(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static Visual BuildWelcomePane(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string BuildReadyStatusText(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string BuildThinkingStatusText(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string BuildStatusIconMarkup(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static TextBlockStyle BuildStatusTextStyle(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static string CompactTabTitle(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static OpenTabIndicatorKind ResolveOpenTabIndicatorKind(", StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public void CodeAltaAppPresentation_DoesNotOwnSelectorAndPromptAvailabilityWorkflow()
+    public void CodeAltaAppPresentationSlice_DelegatesSelectorAndPromptAvailabilityWorkflow()
     {
-        var presentationSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.Presentation.cs"));
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
 
-        Assert.IsFalse(presentationSource.Contains("private void RefreshChatSelectorsForDraftScope(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void RefreshChatSelectorsForThread(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void OnChatBackendSelectionChanged(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void OnChatModelSelectionChanged(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void OnChatReasoningSelectionChanged(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void OnChatAutoScrollChanged(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private AgentBackendId GetPreferredBackendId(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private bool IsChatBackendReady(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private PromptComposerProjection BuildPromptComposerProjection(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private bool TryGetPromptUnavailableStatus(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private bool TrySetPromptUnavailableStatus(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void UpdatePromptAvailabilityUi(", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_chatSelectorCoordinator.RefreshForDraftScope", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_chatSelectorCoordinator.OnBackendSelectionChanged", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_chatSelectorCoordinator.GetPreferredBackendId()", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private PromptComposerProjection BuildPromptComposerProjection(", StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public void CodeAltaAppPresentation_DoesNotOwnTabStripSyncWorkflow()
+    public void CodeAltaAppPresentationSlice_DelegatesTabStripWorkflow()
     {
-        var presentationSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.Presentation.cs"));
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
 
-        Assert.IsFalse(presentationSource.Contains("private void SyncThreadTabControl(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private ThreadTabStripProjection BuildThreadTabStripProjection(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private List<TabPage> BuildDesiredThreadTabPages(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private TabPage EnsureThreadTabPage(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private TabPage EnsureDraftTabPage(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void SyncThreadTabControlSelection(", StringComparison.Ordinal));
-        Assert.IsFalse(presentationSource.Contains("private void OnThreadTabControlSelectionChanged(", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_threadTabStripCoordinator.SyncControl()", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_threadTabStripCoordinator.OnSelectionChanged", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private ThreadTabStripProjection BuildThreadTabStripProjection(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private List<TabPage> BuildDesiredThreadTabPages(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private TabPage EnsureThreadTabPage(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private TabPage EnsureDraftTabPage(", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -161,7 +154,7 @@ public sealed class ArchitectureGuardrailTests
             .ToArray();
 
         Assert.AreEqual(
-            "Views/CodeAltaApp.Presentation.cs|Views/CodeAltaApp.Runtime.cs|Views/CodeAltaApp.cs",
+            "Views/CodeAltaApp.Runtime.cs|Views/CodeAltaApp.cs",
             string.Join("|", partialFiles));
     }
 
