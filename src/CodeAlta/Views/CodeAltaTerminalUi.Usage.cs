@@ -133,7 +133,7 @@ internal sealed partial class CodeAltaTerminalUi
         }
 
         var clampedPercentage = Math.Clamp(percentage, 0d, 999d);
-        return FormattableString.Invariant($"[{GetUsageTone(clampedPercentage)}]Context {clampedPercentage:0}%[/]");
+        return FormattableString.Invariant($"[dim]Context[/] [{GetUsageTone(clampedPercentage)}]{clampedPercentage:0}%[/]");
     }
 
     internal static string FormatSessionUsageSummary(AgentSessionUsage usage)

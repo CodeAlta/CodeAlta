@@ -1651,7 +1651,7 @@ public sealed class CodeAltaTerminalUiTests
             var indicator = CodeAltaTerminalUi.BuildSessionUsageIndicatorMarkup(usage);
             var summary = CodeAltaTerminalUi.FormatSessionUsageSummary(usage);
 
-            Assert.AreEqual("[success]Context 42%[/]", indicator);
+            Assert.AreEqual("[dim]Context[/] [success]42%[/]", indicator);
             Assert.AreEqual("50,000 / 120,000 tokens (41.7%)", summary);
         }
         finally
@@ -1677,7 +1677,7 @@ public sealed class CodeAltaTerminalUiTests
         var indicator = CodeAltaTerminalUi.BuildSessionUsageIndicatorMarkup(usage);
         var summary = CodeAltaTerminalUi.FormatSessionUsageSummary(usage);
 
-        Assert.AreEqual("[success]Context 16%[/]", indicator);
+        Assert.AreEqual("[dim]Context[/] [success]16%[/]", indicator);
         Assert.AreEqual("40,473 / 258,400 tokens (15.7%)", summary);
     }
 
@@ -1703,7 +1703,7 @@ public sealed class CodeAltaTerminalUiTests
         var indicator = CodeAltaTerminalUi.BuildSessionUsageIndicatorMarkup(usage);
         var markdown = CodeAltaTerminalUi.BuildSessionUsageMarkdown(usage, "Codex", "gpt-5.4");
 
-        Assert.AreEqual("[warning]Context 78%[/]", indicator);
+        Assert.AreEqual("[dim]Context[/] [warning]78%[/]", indicator);
         StringAssert.Contains(markdown, "Window: 200,535 / 258,400 tokens (77.6%)");
         StringAssert.Contains(markdown, "Thread total: total 33,641,433");
     }
@@ -1719,7 +1719,7 @@ public sealed class CodeAltaTerminalUiTests
 
         var indicator = CodeAltaTerminalUi.BuildSessionUsageIndicatorMarkup(usage);
 
-        Assert.AreEqual("[error]Context 95%[/]", indicator);
+        Assert.AreEqual("[dim]Context[/] [error]95%[/]", indicator);
     }
 
     [TestMethod]
