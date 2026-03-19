@@ -3,7 +3,6 @@ using CodeAlta.Agent;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
-using XenoAtom.Terminal.UI.Threading;
 
 internal sealed class ThreadTimelinePresenter
 {
@@ -29,7 +28,8 @@ internal sealed class ThreadTimelinePresenter
 
         _uiDispatcher = uiDispatcher;
         _isAutoScrollEnabled = isAutoScrollEnabled;
-        Flow = RunOnUiThread(
+        Flow = UiDispatch.Invoke(
+            _uiDispatcher,
             static () => new DocumentFlow
             {
                 HorizontalAlignment = Align.Stretch,
@@ -80,7 +80,8 @@ internal sealed class ThreadTimelinePresenter
         }
 
         truncatedHistory.CanLoad = false;
-        PostToUi(
+        UiDispatch.Post(
+            _uiDispatcher,
             () =>
             {
                 truncatedHistory.Rule.CenterLabel = new TextBlock(ChatTimelineVisualFactory.BuildTruncatedHistorySummaryText(truncatedHistory.OmittedMessageCount))
@@ -104,7 +105,7 @@ internal sealed class ThreadTimelinePresenter
         var content = state.Buffer.ToString();
         var markdown = ChatMarkdownFormatter.FormatChatContentMarkdown(delta.Kind, content);
         var headerSecondary = ChatMarkdownFormatter.GetChatContentHeaderSecondary(delta.Kind, content);
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             ChatTimelineVisualFactory.ApplyHeader(
                 state.HeaderText,
@@ -126,7 +127,7 @@ internal sealed class ThreadTimelinePresenter
         state.Buffer.Append(content);
         var markdown = ChatMarkdownFormatter.FormatChatContentMarkdown(completed.Kind, content);
         var headerSecondary = ChatMarkdownFormatter.GetChatContentHeaderSecondary(completed.Kind, content);
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             ChatTimelineVisualFactory.ApplyHeader(
                 state.HeaderText,
@@ -205,7 +206,7 @@ internal sealed class ThreadTimelinePresenter
             state.StatusMarkdown = statusMarkdown;
         }
 
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             ChatTimelineVisualFactory.ApplyTimestamp(state.TimestampText, timestamp);
             state.Markdown.Markdown = state.MarkdownValue;
@@ -219,7 +220,8 @@ internal sealed class ThreadTimelinePresenter
         if (pendingAssistant is not null)
         {
             pendingAssistant.Buffer.Append(message);
-            RunOnUiThread(
+            UiDispatch.Invoke(
+                _uiDispatcher,
                 static state =>
                 {
                     state.pendingAssistant.Markdown.Markdown = state.message;
@@ -233,7 +235,8 @@ internal sealed class ThreadTimelinePresenter
 
         var entry = ChatTimelineVisualFactory.CreateMarkdownItem(message, ChatTimelineTone.Interaction, headerOverride: "Error");
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
-        RunOnUiThread(
+        UiDispatch.Invoke(
+            _uiDispatcher,
             static state =>
             {
                 state.flow.Items.Add(state.entry.Item);
@@ -248,7 +251,8 @@ internal sealed class ThreadTimelinePresenter
         if (pendingAssistant is not null)
         {
             pendingAssistant.Buffer.Append(markdown);
-            RunOnUiThread(
+            UiDispatch.Invoke(
+                _uiDispatcher,
                 static state =>
                 {
                     state.pendingAssistant.Markdown.Markdown = state.markdown;
@@ -260,7 +264,8 @@ internal sealed class ThreadTimelinePresenter
         }
 
         var entry = ChatTimelineVisualFactory.CreateMarkdownItem(markdown, ChatTimelineTone.Interaction, headerOverride: "Error");
-        RunOnUiThread(
+        UiDispatch.Invoke(
+            _uiDispatcher,
             static state =>
             {
                 state.flow.Items.Add(state.entry.Item);
@@ -279,7 +284,8 @@ internal sealed class ThreadTimelinePresenter
             return;
         }
 
-        PostToUi(
+        UiDispatch.Post(
+            _uiDispatcher,
             () =>
             {
                 Flow.Items.AddRange(items);
@@ -290,7 +296,7 @@ internal sealed class ThreadTimelinePresenter
     public void Reset()
     {
         ToolCalls.Reset();
-        PostToUi(() => Flow.Items.Clear());
+        UiDispatch.Post(_uiDispatcher, () => Flow.Items.Clear());
         _bufferedHistoryItems = null;
         _contentStates.Clear();
         _activityStates.Clear();
@@ -315,10 +321,9 @@ internal sealed class ThreadTimelinePresenter
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(omittedMessageCount);
         ArgumentNullException.ThrowIfNull(onLoad);
 
-        var dispatcher = Dispatcher.Current;
-        return dispatcher.CheckAccess()
-            ? CreateTruncatedHistoryStateCore(omittedMessageCount, onLoad)
-            : dispatcher.InvokeAsync(() => CreateTruncatedHistoryStateCore(omittedMessageCount, onLoad)).GetAwaiter().GetResult();
+        return UiDispatch.InvokeCurrent(
+            static state => CreateTruncatedHistoryStateCore(state.omittedMessageCount, state.onLoad),
+            (omittedMessageCount, onLoad));
     }
 
     internal static List<DocumentFlowItem> BuildInitialThreadHistoryItems(
@@ -418,7 +423,7 @@ internal sealed class ThreadTimelinePresenter
         }
 
         stateEntry.BaseMarkdown = markdown;
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             ChatTimelineVisualFactory.ApplyTimestamp(stateEntry.TimestampText, timestamp);
             stateEntry.Markdown.Markdown = stateEntry.MarkdownValue;
@@ -454,41 +459,10 @@ internal sealed class ThreadTimelinePresenter
             return;
         }
 
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             Flow.Items.Add(item);
             Flow.ScrollToTailIfEnabled(_isAutoScrollEnabled());
         });
-    }
-
-    private void PostToUi(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        if (_uiDispatcher.CheckAccess())
-        {
-            action();
-            return;
-        }
-
-        _uiDispatcher.Post(action);
-    }
-
-    private T RunOnUiThread<T>(Func<T> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        return _uiDispatcher.CheckAccess()
-            ? action()
-            : _uiDispatcher.InvokeAsync(action).GetAwaiter().GetResult();
-    }
-
-    private T RunOnUiThread<TState, T>(Func<TState, T> action, TState state)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        return _uiDispatcher.CheckAccess()
-            ? action(state)
-            : _uiDispatcher.InvokeAsync(() => action(state)).GetAwaiter().GetResult();
     }
 }

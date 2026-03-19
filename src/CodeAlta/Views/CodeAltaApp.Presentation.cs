@@ -279,11 +279,11 @@ internal sealed partial class CodeAltaApp
     }
 
     private void RefreshShellChrome()
-        => PostToUi(RefreshShellChromeCore);
+        => DispatchToUi(RefreshShellChromeCore);
 
     internal void RefreshCatalogAndThreadWorkspace()
     {
-        PostToUi(
+        DispatchToUi(
             () =>
             {
                 RefreshCatalogAndThreadWorkspaceCore();
@@ -292,7 +292,7 @@ internal sealed partial class CodeAltaApp
 
     private void RefreshHeaderAndThreadWorkspace()
     {
-        PostToUi(
+        DispatchToUi(
             () =>
             {
                 RefreshHeaderAndThreadWorkspaceCore();
@@ -301,7 +301,7 @@ internal sealed partial class CodeAltaApp
 
     private void RefreshSelectionAndThreadWorkspace()
     {
-        PostToUi(
+        DispatchToUi(
             () =>
             {
                 RefreshSelectionAndThreadWorkspaceCore();
@@ -637,7 +637,8 @@ internal sealed partial class CodeAltaApp
 
     private AgentBackendId GetPreferredBackendId()
     {
-        return ReadUiValue(
+        return UiDispatch.Invoke(
+            GetUiDispatcher(),
             () =>
             {
                 var options = ChatBackendPresentation.BuildBackendOptions();
@@ -1183,7 +1184,7 @@ internal sealed partial class CodeAltaApp
 
     internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info)
     {
-        PostToUi(
+        DispatchToUi(
             () =>
             {
                 _shellViewModel.StatusText = message;
@@ -1260,12 +1261,12 @@ internal sealed partial class CodeAltaApp
 
     private void InvalidateThreadChrome()
     {
-        PostToUi(() => _viewRefreshState.Value++);
+        DispatchToUi(() => _viewRefreshState.Value++);
     }
 
     private void InvalidateSelectedSessionUsage()
     {
-        PostToUi(() => _usageRefreshState.Value++);
+        DispatchToUi(() => _usageRefreshState.Value++);
     }
 
     private bool IsSelectedThread(string threadId)
@@ -1302,20 +1303,17 @@ internal sealed partial class CodeAltaApp
         SetStatus(readyMessage, tone: StatusTone.Ready);
     }
 
-    private void PostToUi(Action action)
+    private void DispatchToUi(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
 
         var dispatcher = GetUiDispatcher();
-        if (ShouldRunInlineOnCurrentThread(
+        UiDispatch.Post(
+            dispatcher,
+            action,
+            allowInline: ShouldRunInlineOnCurrentThread(
                 dispatcher.CheckAccess(),
-                _terminalLoopStarted))
-        {
-            action();
-            return;
-        }
-
-        dispatcher.Post(action);
+                _terminalLoopStarted));
     }
 
     internal static bool ShouldRunInlineOnCurrentThread(
@@ -1328,36 +1326,6 @@ internal sealed partial class CodeAltaApp
         }
 
         return dispatcherHasAccess;
-    }
-
-    private T ReadUiValue<T>(Func<T> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var dispatcher = GetUiDispatcher();
-        return dispatcher.CheckAccess()
-            ? action()
-            : dispatcher.InvokeAsync(action).GetAwaiter().GetResult();
-    }
-
-    private T RunOnUiThread<T>(Func<T> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var dispatcher = GetUiDispatcher();
-        return dispatcher.CheckAccess()
-            ? action()
-            : dispatcher.InvokeAsync(action).GetAwaiter().GetResult();
-    }
-
-    private T RunOnUiThread<TState, T>(Func<TState, T> action, TState state)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var dispatcher = GetUiDispatcher();
-        return dispatcher.CheckAccess()
-            ? action(state)
-            : dispatcher.InvokeAsync(() => action(state)).GetAwaiter().GetResult();
     }
 
     private IUiDispatcher GetUiDispatcher()
@@ -1387,7 +1355,8 @@ internal sealed partial class CodeAltaApp
 
     private void ClearThreadInput()
     {
-        ReadUiValue(
+        UiDispatch.Invoke(
+            GetUiDispatcher(),
             () =>
             {
                 _threadInput!.Text = string.Empty;

@@ -55,7 +55,7 @@ internal sealed partial class CodeAltaApp
     private async Task RefreshChatBackendStateAsync(AgentBackendId backendId, CancellationToken cancellationToken)
     {
         var state = _chatBackendStates[backendId.Value];
-        PostToUi(
+        DispatchToUi(
             () =>
             {
                 state.Availability = ChatBackendAvailability.Connecting;
@@ -66,7 +66,7 @@ internal sealed partial class CodeAltaApp
         try
         {
             var models = await _agentHub.ListModelsAsync(backendId, cancellationToken).ConfigureAwait(false);
-            PostToUi(
+            DispatchToUi(
                 () =>
                 {
                     state.Models.Clear();
@@ -83,7 +83,7 @@ internal sealed partial class CodeAltaApp
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             var (availability, statusMessage) = ClassifyBackendInitializationFailure(state, ex);
-            PostToUi(
+            DispatchToUi(
                 () =>
                 {
                     state.Models.Clear();
@@ -195,7 +195,7 @@ internal sealed partial class CodeAltaApp
         try
         {
             SetStatus("Creating global thread...", showSpinner: true);
-            var title = ReadUiValue(() => _sidebarViewModel.DraftThreadTitle?.Trim());
+            var title = UiDispatch.Invoke(GetUiDispatcher(), () => _sidebarViewModel.DraftThreadTitle?.Trim());
             var executionOptions = BuildPreferredExecutionOptions(
                 GetPreferredBackendId(),
                 _catalogOptions.GlobalRoot,
@@ -226,7 +226,7 @@ internal sealed partial class CodeAltaApp
         try
         {
             SetStatus($"Creating thread for '{project.DisplayName}'...", showSpinner: true);
-            var title = ReadUiValue(() => _sidebarViewModel.DraftThreadTitle?.Trim());
+            var title = UiDispatch.Invoke(GetUiDispatcher(), () => _sidebarViewModel.DraftThreadTitle?.Trim());
             var executionOptions = BuildPreferredExecutionOptions(
                 GetPreferredBackendId(),
                 project.ProjectPath,
@@ -497,7 +497,7 @@ internal sealed partial class CodeAltaApp
             return;
         }
 
-        var prompt = ReadUiValue(() => _threadInput?.Text?.Trim());
+        var prompt = UiDispatch.Invoke(GetUiDispatcher(), () => _threadInput?.Text?.Trim());
         if (string.IsNullOrWhiteSpace(prompt))
         {
             return;
@@ -560,7 +560,7 @@ internal sealed partial class CodeAltaApp
         }
 
         var tab = EnsureThreadTab(thread);
-        var prompt = ReadUiValue(() => _threadInput?.Text?.Trim());
+        var prompt = UiDispatch.Invoke(GetUiDispatcher(), () => _threadInput?.Text?.Trim());
         if (string.IsNullOrWhiteSpace(prompt))
         {
             SetStatus("Enter delegation instructions before creating an internal thread.", tone: StatusTone.Warning);
@@ -1192,7 +1192,8 @@ internal sealed partial class CodeAltaApp
         IReadOnlyList<string> projectRoots)
     {
         var backendState = _chatBackendStates[backendId.Value];
-        var model = ReadUiValue(
+        var model = UiDispatch.Invoke(
+            GetUiDispatcher(),
             () =>
             {
                 if (_chatBackendSelect is null || _chatModelSelect is null)
@@ -1214,7 +1215,8 @@ internal sealed partial class CodeAltaApp
                 return backendState.SelectedModelId;
             });
 
-        var reasoning = ReadUiValue(
+        var reasoning = UiDispatch.Invoke(
+            GetUiDispatcher(),
             () =>
             {
                 if (_chatBackendSelect is null || _chatReasoningSelect is null)

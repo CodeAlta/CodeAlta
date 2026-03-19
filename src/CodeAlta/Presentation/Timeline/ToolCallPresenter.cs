@@ -142,7 +142,8 @@ internal sealed class ToolCallPresenter
         }
 
         var group = GetOrCreateGroup(timestamp);
-        var entry = RunOnUiThread(
+        var entry = UiDispatch.Invoke(
+            _uiDispatcher,
             static state =>
             {
                 var summaryText = new Markup(string.Empty) { Wrap = false };
@@ -168,7 +169,7 @@ internal sealed class ToolCallPresenter
         entry.Button.Click(() => OpenDialog(entry));
         group.ToolCalls[toolCallId] = entry;
         _toolCalls[toolCallId] = entry;
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             group.ItemsHost.Children.Add(entry.Button);
             _flow.ScrollToTailIfEnabled(_isAutoScrollEnabled());
@@ -184,7 +185,8 @@ internal sealed class ToolCallPresenter
             return existing;
         }
 
-        var group = RunOnUiThread(
+        var group = UiDispatch.Invoke(
+            _uiDispatcher,
             static timestampValue =>
             {
                 var headerText = new Markup($"[{UiPalette.MutedMarkup}]{NerdFont.CodTools}[/] [bold]Tool Calls[/]");
@@ -243,7 +245,7 @@ internal sealed class ToolCallPresenter
 
     private void UpdateEntryVisual(ToolCallEntryState entry)
     {
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             entry.SummaryText.Text = ToolCallSummaryFormatter.BuildSummaryMarkup(entry);
             entry.Button.Tone = ControlTone.Default;
@@ -258,7 +260,7 @@ internal sealed class ToolCallPresenter
             return;
         }
 
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             group.SummaryText.Text = ToolCallSummaryFormatter.BuildGroupSummaryMarkup(group);
             ChatTimelineVisualFactory.ApplyTimestamp(group.TimestampText, group.LastUpdatedAt);
@@ -267,7 +269,7 @@ internal sealed class ToolCallPresenter
 
     private void OpenDialog(ToolCallEntryState entry)
     {
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             if (entry.DetailDialog is { App: not null })
             {
@@ -311,7 +313,7 @@ internal sealed class ToolCallPresenter
             return;
         }
 
-        PostToUi(() =>
+        UiDispatch.Post(_uiDispatcher, () =>
         {
             entry.DetailMetadata.Markdown = ToolCallSummaryFormatter.BuildDetailMarkdown(entry);
             entry.DetailStatsText.Text = ToolCallSummaryFormatter.BuildStatsMarkup(entry);
@@ -334,7 +336,7 @@ internal sealed class ToolCallPresenter
         entry.DetailStatsText = null;
         if (dialog is not null)
         {
-            PostToUi(dialog.Close);
+            UiDispatch.Post(_uiDispatcher, dialog.Close);
         }
     }
 
@@ -384,20 +386,4 @@ internal sealed class ToolCallPresenter
     private static string? PreferLongerText(string? existing, string? candidate)
         => string.IsNullOrWhiteSpace(candidate) ? existing : string.IsNullOrWhiteSpace(existing) || candidate.Length >= existing.Length ? candidate : existing;
 
-    private void PostToUi(Action action)
-    {
-        if (_uiDispatcher.CheckAccess())
-        {
-            action();
-            return;
-        }
-
-        _uiDispatcher.Post(action);
-    }
-
-    private T RunOnUiThread<T>(Func<T> action)
-        => _uiDispatcher.CheckAccess() ? action() : _uiDispatcher.InvokeAsync(action).GetAwaiter().GetResult();
-
-    private T RunOnUiThread<TState, T>(Func<TState, T> action, TState state)
-        => _uiDispatcher.CheckAccess() ? action(state) : _uiDispatcher.InvokeAsync(() => action(state)).GetAwaiter().GetResult();
 }

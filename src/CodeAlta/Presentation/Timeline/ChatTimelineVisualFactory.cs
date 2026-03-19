@@ -7,7 +7,6 @@ using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Text;
-using XenoAtom.Terminal.UI.Threading;
 
 internal static class ChatTimelineVisualFactory
 {
@@ -44,7 +43,7 @@ internal static class ChatTimelineVisualFactory
     {
         ArgumentNullException.ThrowIfNull(timestampText);
 
-        RunOnUiThread(
+        UiDispatch.InvokeCurrent(
             static state =>
             {
                 state.timestampText.Text = $"[dim]{FormatTimestamp(state.timestamp)}[/]";
@@ -57,7 +56,7 @@ internal static class ChatTimelineVisualFactory
     {
         ArgumentNullException.ThrowIfNull(headerText);
 
-        RunOnUiThread(
+        UiDispatch.InvokeCurrent(
             static state =>
             {
                 state.headerText.Text = CreateChatCardHeader(state.tone, state.headerOverride, state.headerSecondary).Text;
@@ -72,7 +71,7 @@ internal static class ChatTimelineVisualFactory
         string? headerOverride = null,
         string? headerSecondary = null,
         int maxCodeBlockHeight = 14)
-        => RunOnUiThread(
+        => UiDispatch.InvokeCurrent(
             static state => CreateChatMarkdownItemCore(state.markdown, state.tone, state.headerOverride, state.headerSecondary, state.maxCodeBlockHeight),
             (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight));
 
@@ -112,7 +111,7 @@ internal static class ChatTimelineVisualFactory
     {
         ArgumentNullException.ThrowIfNull(action);
 
-        return () => Dispatcher.Current.Post(action);
+        return () => UiDispatch.PostCurrentDeferred(action);
     }
 
     private static DocumentFlowItem CreateUserChatItem(string markdown)
@@ -123,7 +122,7 @@ internal static class ChatTimelineVisualFactory
             maxCodeBlockHeight: 10).Item;
 
     private static DocumentFlowItem CreateUserPromptSeparatorItem()
-        => RunOnUiThread(
+        => UiDispatch.InvokeCurrent(
             static () => new DocumentFlowItem
             {
                 Content = new FlowDocument().Add(new Rule()),
@@ -216,26 +215,6 @@ internal static class ChatTimelineVisualFactory
             markdownControl,
             timestampText,
             headerText);
-    }
-
-    private static T RunOnUiThread<T>(Func<T> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var dispatcher = Dispatcher.Current;
-        return dispatcher.CheckAccess()
-            ? action()
-            : dispatcher.InvokeAsync(action).GetAwaiter().GetResult();
-    }
-
-    private static T RunOnUiThread<TState, T>(Func<TState, T> action, TState state)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var dispatcher = Dispatcher.Current;
-        return dispatcher.CheckAccess()
-            ? action(state)
-            : dispatcher.InvokeAsync(() => action(state)).GetAwaiter().GetResult();
     }
 
     private static string SplitPascalCase(string value)

@@ -22,7 +22,7 @@ This document is the implementation checklist companion to the architecture prop
 - [x] Move runtime event handling entry points into `CodeAltaShellController`.
 - [x] Add a dedicated `RuntimeEventPump`.
 - [x] Ensure runtime events are applied on the UI thread through `IUiDispatcher`.
-- [ ] Remove duplicated UI-thread helper patterns over time (`PostToUi`, `ReadUiValue`, `RunOnUiThread`) in favor of the new dispatcher path.
+- [x] Remove duplicated UI-thread helper patterns over time (`PostToUi`, `ReadUiValue`, `RunOnUiThread`) in favor of the new dispatcher path.
 
 ## Phase 3: Extract real view classes
 
