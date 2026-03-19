@@ -104,8 +104,8 @@ This document is the implementation checklist companion to the architecture prop
 ## Final cleanup
 
 - [x] Verify `CodeAltaApp` is no longer a large partial class spanning unrelated concerns.
-- [ ] Verify `CodeAltaApp` is also no longer a large single-file implementation bucket after the partial removal work.
-- [ ] Verify `CodeAltaApp` owns lifecycle only and does not hold large thread/runtime/session orchestration methods.
+- [x] Verify `CodeAltaApp` is also no longer a large single-file implementation bucket after the partial removal work.
+- [x] Verify `CodeAltaApp` owns lifecycle only and does not hold large thread/runtime/session orchestration methods.
 - [x] Verify there is one explicit UI dispatcher contract in active use.
 - [x] Verify runtime events are applied through one shell/controller path on the UI thread.
 - [x] Verify bindable view models are only accessed on the UI thread.
@@ -131,4 +131,5 @@ This document is the implementation checklist companion to the architecture prop
 - [x] Extract runtime-event classification and thread-summary update helpers out of `CodeAltaApp`.
 - [x] Extract thread command/session orchestration (`send`, `steer`, `delegate`, `abort`, execution options, permission/user-input callbacks) out of `CodeAltaApp`.
 - [x] Extract catalog/open-thread/selection state coordination out of `CodeAltaApp`.
-- [ ] Keep `CodeAltaApp` as a wiring/lifecycle shell that delegates to named collaborators for thread workflows.
+- [x] Extract shell refresh/status/usage workspace coordination out of `CodeAltaApp`.
+- [x] Keep `CodeAltaApp` as a wiring/lifecycle shell that delegates to named collaborators for thread workflows.

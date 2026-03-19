@@ -197,6 +197,29 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void CodeAltaApp_DelegatesWorkspaceRefreshWorkflow()
+    {
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
+
+        Assert.IsTrue(appSource.Contains("_workspaceCoordinator.RefreshShellChrome", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_workspaceCoordinator.SetThreadStatus", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_workspaceCoordinator.CreateComputedVisual", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private readonly State<int> _viewRefreshState", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private readonly State<int> _usageRefreshState", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private void RefreshThreadPaneContent(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private void SyncSelectedSessionUsageViewModel(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void CodeAltaApp_SourceStaysWithinFacadeSizeBudget()
+    {
+        var appPath = Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs");
+        var appSize = new FileInfo(appPath).Length;
+
+        Assert.IsTrue(appSize < 45000, $"CodeAltaApp.cs exceeded the facade size budget: {appSize} bytes.");
+    }
+
+    [TestMethod]
     public void CodeAltaApp_IsNoLongerPartial()
     {
         var codeAltaRoot = GetCodeAltaSourceRoot();
