@@ -95,6 +95,13 @@ Current `.NET` infrastructure (`CodeAlta.DotNet`) includes:
 
 The `CodeAlta` executable now runs as an interactive terminal shell instead of a playground script. Internally, the shell is organized around an explicit controller, UI dispatcher, focused views, and presenter seams rather than one monolithic host bucket.
 
+Launch helpers:
+
+- `dotnet run --project src/CodeAlta -- --test`
+- `dotnet run --project src/CodeAlta -- --test --test-duration 15`
+
+`--test` still starts the real terminal UI, but it schedules cancellation after the requested duration so a smoke test can verify startup and a short steady-state run without manual Ctrl+C. Smoke-test lifecycle markers and normal diagnostic activity are written to `~/.codealta/logs/codealta.log`.
+
 Current terminal shell capabilities:
 
 - Chat (global agent) operations:

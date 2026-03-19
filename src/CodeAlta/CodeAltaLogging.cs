@@ -45,6 +45,7 @@ internal static class CodeAltaLogging
         config.GetLoggerConfig("CodeAlta.ChatAgentConnection").MinimumLevel = LogLevel.Debug;
         config.GetLoggerConfig("CodeAlta.Agent.Copilot.Session").MinimumLevel = LogLevel.Debug;
         config.GetLoggerConfig("CodeAlta.Agent.Copilot.Callbacks").MinimumLevel = LogLevel.Debug;
+        config.GetLoggerConfig("CodeAlta.Program").MinimumLevel = LogLevel.Debug;
 
         LogManager.InitializeForAsync(config);
         return true;
