@@ -724,7 +724,7 @@ internal sealed partial class CodeAltaApp
         switch (@event)
         {
             case AgentContentDeltaEvent delta:
-                if (TryHandleToolTimelineContent(tab, delta))
+                if (tab.ToolCalls.TryHandleContent(delta))
                 {
                     break;
                 }
@@ -738,7 +738,7 @@ internal sealed partial class CodeAltaApp
                 break;
 
             case AgentContentCompletedEvent completed:
-                if (TryHandleToolTimelineContent(tab, completed))
+                if (tab.ToolCalls.TryHandleContent(completed))
                 {
                     break;
                 }
@@ -773,7 +773,7 @@ internal sealed partial class CodeAltaApp
                 break;
 
             case AgentActivityEvent activity:
-                if (TryHandleToolTimelineActivity(tab, activity))
+                if (tab.ToolCalls.TryHandleActivity(activity))
                 {
                     break;
                 }
@@ -1670,7 +1670,14 @@ internal sealed partial class CodeAltaApp
                 ItemSpacing = 0,
             });
 
-        var state = new ThreadTabState(thread, flow);
+        ThreadTabState? state = null;
+        var toolCalls = new ToolCallPresenter(
+            flow,
+            GetUiDispatcher(),
+            () => state!.AutoScroll,
+            item => AppendThreadTimelineItem(state!, item, resetActiveToolCallGroup: false),
+            () => _threadPaneLayout?.GetAbsoluteBounds());
+        state = new ThreadTabState(thread, flow, toolCalls);
         state.BackendId = new AgentBackendId(thread.BackendId);
         state.ViewModel.Title = thread.Title;
         state.StatusMessage = BuildReadyStatusText(thread, GetSelectedProject(), globalScopeSelected: false);
@@ -1684,18 +1691,16 @@ internal sealed partial class CodeAltaApp
 
     private void ResetThreadTab(ThreadTabState tab)
     {
-        CloseToolCallDialogs(tab);
+        tab.ToolCalls.Reset();
         PostToUi(() => tab.Flow.Items.Clear());
         tab.BufferedHistoryItems = null;
         tab.ContentStates.Clear();
         tab.ActivityStates.Clear();
         tab.InteractionStates.Clear();
         tab.PlanStates.Clear();
-        tab.ToolCallStates.Clear();
         tab.PermissionRequests.Clear();
         tab.UserInputRequests.Clear();
         tab.PendingAssistant = null;
-        tab.ActiveToolCallGroup = null;
         tab.TruncatedHistory = null;
         tab.HasSeenUserPrompt = false;
     }
@@ -1710,7 +1715,7 @@ internal sealed partial class CodeAltaApp
     {
         if (resetActiveToolCallGroup)
         {
-            tab.ActiveToolCallGroup = null;
+            tab.ToolCalls.OnNonToolTimelineItemAppended();
         }
 
         if (tab.HistoryLoading)

@@ -186,10 +186,11 @@ internal sealed partial class CodeAltaApp : IAsyncDisposable
 
     private sealed class ThreadTabState
     {
-        public ThreadTabState(WorkThreadDescriptor thread, DocumentFlow flow)
+        public ThreadTabState(WorkThreadDescriptor thread, DocumentFlow flow, ToolCallPresenter toolCalls)
         {
             Thread = thread;
             Flow = flow;
+            ToolCalls = toolCalls;
             Session = new ThreadSessionState();
             ViewModel = new ThreadTabViewModel
             {
@@ -201,6 +202,8 @@ internal sealed partial class CodeAltaApp : IAsyncDisposable
         public WorkThreadDescriptor Thread { get; set; }
 
         public DocumentFlow Flow { get; }
+
+        public ToolCallPresenter ToolCalls { get; }
 
         public ThreadSessionState Session { get; }
 
@@ -275,9 +278,6 @@ internal sealed partial class CodeAltaApp : IAsyncDisposable
         public Dictionary<string, ChatStatusState> InteractionStates { get; } = new(StringComparer.Ordinal);
 
         public Dictionary<string, ChatStatusState> PlanStates { get; } = new(StringComparer.Ordinal);
-
-        public Dictionary<string, ToolCallEntryState> ToolCallStates { get; } = new(StringComparer.Ordinal);
-        public ToolCallGroupState? ActiveToolCallGroup { get; set; }
 
         public TabPage? Page { get; set; }
 

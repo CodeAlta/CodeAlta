@@ -58,10 +58,10 @@ This document is the implementation checklist companion to the architecture prop
 ## Phase 6: Extract timeline and tool-call presenters
 
 - [ ] Create `ThreadTimelinePresenter`.
-- [ ] Create `ToolCallPresenter`.
+- [x] Create `ToolCallPresenter`.
 - [ ] Create `SessionUsagePresenter` if the usage popup remains presenter-driven.
 - [ ] Move `DocumentFlow` ownership into timeline presenters.
-- [ ] Move tool-call chip/dialog state into `ToolCallPresenter`.
+- [x] Move tool-call chip/dialog state into `ToolCallPresenter`.
 - [ ] Move incremental timeline rendering logic out of `CodeAltaApp`.
 - [ ] Keep imperative timeline rendering localized to presenters instead of spreading it through the shell/controller.
 

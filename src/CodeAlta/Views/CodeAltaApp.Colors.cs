@@ -7,6 +7,12 @@ internal sealed partial class CodeAltaApp
     internal static GroupStyle GetChatGroupStyle(ChatTimelineTone tone)
         => UiPalette.GetChatGroupStyle(tone);
 
+    internal static GroupStyle GetToolCallGroupStyle()
+        => UiPalette.GetToolCallGroupStyle();
+
+    internal static ButtonStyle GetToolChipButtonStyle(ToolCallDisplayStatus status)
+        => UiPalette.GetToolChipButtonStyle(status);
+
     internal static string GetToolStatusMarkup(ToolCallDisplayStatus status)
         => UiPalette.GetToolStatusMarkup(status);
 

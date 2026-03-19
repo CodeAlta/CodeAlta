@@ -690,9 +690,6 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void TryInferCopilotToolName_InfersReadAndGlobFromCompletionPayload()
     {
-        var method = typeof(CodeAltaApp).GetMethod("TryInferCopilotToolName", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
         using var globJson = JsonDocument.Parse(
             """
             {
@@ -701,11 +698,10 @@ public sealed class CodeAltaAppTests
               }
             }
             """);
-        object?[] globArgs = [globJson.RootElement.Clone(), null];
-        var globResult = (bool)method.Invoke(null, globArgs)!;
+        var globResult = ToolCallEventInterpreter.TryInferCopilotToolName(globJson.RootElement.Clone(), out var globName);
 
         Assert.IsTrue(globResult);
-        Assert.AreEqual("glob", globArgs[1]);
+        Assert.AreEqual("glob", globName);
 
         using var readJson = JsonDocument.Parse(
             """
@@ -715,19 +711,15 @@ public sealed class CodeAltaAppTests
               }
             }
             """);
-        object?[] readArgs = [readJson.RootElement.Clone(), null];
-        var readResult = (bool)method.Invoke(null, readArgs)!;
+        var readResult = ToolCallEventInterpreter.TryInferCopilotToolName(readJson.RootElement.Clone(), out var readName);
 
         Assert.IsTrue(readResult);
-        Assert.AreEqual("read", readArgs[1]);
+        Assert.AreEqual("read", readName);
     }
 
     [TestMethod]
     public void PreferToolDisplayName_KeepsExplicitCopilotStartNameWhenCompletionIsGeneric()
     {
-        var method = typeof(CodeAltaApp).GetMethod("PreferToolDisplayName", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
         using var completionJson = JsonDocument.Parse(
             """
             {
@@ -751,7 +743,7 @@ public sealed class CodeAltaAppTests
             "done",
             completionJson.RootElement.Clone());
 
-        var chosen = (string?)method.Invoke(null, ["view", "glob", completion]);
+        var chosen = ToolCallEventInterpreter.PreferToolDisplayName("view", "glob", completion);
 
         Assert.AreEqual("view", chosen);
     }
@@ -759,9 +751,6 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ResolveToolArgumentText_FormatsCopilotArgumentsObject()
     {
-        var method = typeof(CodeAltaApp).GetMethod("ResolveToolArgumentText", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
         using var detailsJson = JsonDocument.Parse(
             """
             {
@@ -787,7 +776,7 @@ public sealed class CodeAltaAppTests
             null,
             detailsJson.RootElement.Clone());
 
-        var arguments = (string?)method.Invoke(null, [activity]);
+        var arguments = ToolCallEventInterpreter.ResolveToolArgumentText(activity);
 
         Assert.IsNotNull(arguments);
         StringAssert.Contains(arguments, "\"path\": \"C:\\\\code\\\\Tomlyn\"");
@@ -797,9 +786,6 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ResolveToolCommandText_UsesStructuredCodexFunctionArguments()
     {
-        var method = typeof(CodeAltaApp).GetMethod("ResolveToolCommandText", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
         using var detailsJson = JsonDocument.Parse(
             """
             {
@@ -825,7 +811,7 @@ public sealed class CodeAltaAppTests
             null,
             detailsJson.RootElement.Clone());
 
-        var command = (string?)method.Invoke(null, [activity]);
+        var command = ToolCallEventInterpreter.ResolveToolCommandText(activity);
 
         Assert.AreEqual(@"Get-Content C:\code\Tomlyn\readme.md -TotalCount 250", command);
     }
@@ -833,13 +819,6 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ResolveToolDisplayName_UsesCodexShellCommandVerb()
     {
-        var method = typeof(CodeAltaApp)
-            .GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
-            .Single(m => m.Name == "ResolveToolDisplayName" &&
-                         m.GetParameters().Length == 1 &&
-                         m.GetParameters()[0].ParameterType == typeof(AgentActivityEvent));
-        Assert.IsNotNull(method);
-
         using var detailsJson = JsonDocument.Parse(
             """
             {
@@ -865,7 +844,7 @@ public sealed class CodeAltaAppTests
             null,
             detailsJson.RootElement.Clone());
 
-        var displayName = (string?)method.Invoke(null, [activity]);
+        var displayName = ToolCallEventInterpreter.ResolveToolDisplayName(activity);
 
         Assert.AreEqual("Get-Content", displayName);
     }
@@ -873,10 +852,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ExtractCommandDisplayName_PreservesMeaningfulDotnetSubcommand()
     {
-        var method = typeof(CodeAltaApp).GetMethod("ExtractCommandDisplayName", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
-        var displayName = (string?)method.Invoke(null, ["dotnet test CodeAlta.Tests/CodeAlta.Tests.csproj -c Release"]);
+        var displayName = ToolCallEventInterpreter.ExtractCommandDisplayName("dotnet test CodeAlta.Tests/CodeAlta.Tests.csproj -c Release");
 
         Assert.AreEqual("dotnet test", displayName);
     }
@@ -884,10 +860,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ExtractCommandDisplayName_PreservesMeaningfulGitSubcommand()
     {
-        var method = typeof(CodeAltaApp).GetMethod("ExtractCommandDisplayName", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
-        var displayName = (string?)method.Invoke(null, ["git status --short"]);
+        var displayName = ToolCallEventInterpreter.ExtractCommandDisplayName("git status --short");
 
         Assert.AreEqual("git status", displayName);
     }
@@ -895,10 +868,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ExtractCommandDisplayName_SkipsFlagsForSecondLevelGitCommand()
     {
-        var method = typeof(CodeAltaApp).GetMethod("ExtractCommandDisplayName", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
-        var displayName = (string?)method.Invoke(null, ["git remote -v"]);
+        var displayName = ToolCallEventInterpreter.ExtractCommandDisplayName("git remote -v");
 
         Assert.AreEqual("git remote", displayName);
     }
@@ -906,11 +876,8 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ExtractCommandDisplayName_DoesNotTreatFlagsOrPathsAsSubcommands()
     {
-        var method = typeof(CodeAltaApp).GetMethod("ExtractCommandDisplayName", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
-        var listDisplayName = (string?)method.Invoke(null, ["ls -al"]);
-        var copyDisplayName = (string?)method.Invoke(null, ["cp /mnt/c/source.txt /mnt/c/dest.txt"]);
+        var listDisplayName = ToolCallEventInterpreter.ExtractCommandDisplayName("ls -al");
+        var copyDisplayName = ToolCallEventInterpreter.ExtractCommandDisplayName("cp /mnt/c/source.txt /mnt/c/dest.txt");
 
         Assert.AreEqual("ls", listDisplayName);
         Assert.AreEqual("cp", copyDisplayName);
