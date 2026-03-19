@@ -384,15 +384,13 @@ internal sealed partial class CodeAltaTerminalUi
         if (usage.LastOperation is { } operation)
         {
             stack.Add(new Markup($"[bold]{AnsiMarkup.Escape(operation.Label ?? "Last operation")}[/]"));
-            stack.Add(new Markup(AnsiMarkup.Escape(FormatOperationUsage(operation))));
             if (BuildOperationUsageChart(operation) is { } operationChart)
             {
                 stack.Add(operationChart);
             }
-
-            if (TryFormatOperationExtras(operation, out var extras))
+            if (FormatOperationPopupText(operation) is { Length: > 0 } operationText)
             {
-                stack.Add(new Markup($"[dim]{AnsiMarkup.Escape(extras)}[/]"));
+                stack.Add(new Markup($"[dim]{AnsiMarkup.Escape(operationText)}[/]"));
             }
         }
 
@@ -723,9 +721,39 @@ internal sealed partial class CodeAltaTerminalUi
         return string.Join(" · ", parts);
     }
 
-    private static bool TryFormatOperationExtras(AgentOperationUsageSnapshot usage, out string extras)
+    internal static string? FormatOperationPopupText(AgentOperationUsageSnapshot usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+
+        if (BuildOperationUsageChart(usage) is null)
+        {
+            var summary = FormatOperationUsage(usage);
+            return summary.Length > 0 ? summary : null;
+        }
+
+        return TryFormatOperationPopupMetadata(usage, out var metadata)
+            ? metadata
+            : null;
+    }
+
+    private static bool TryFormatOperationPopupMetadata(AgentOperationUsageSnapshot usage, out string metadata)
     {
         var parts = new List<string>();
+        if (usage.Model is { Length: > 0 } model)
+        {
+            parts.Add(model);
+        }
+
+        if (usage.ReasoningEffort is { Length: > 0 } reasoningEffort)
+        {
+            parts.Add($"effort {reasoningEffort}");
+        }
+
+        if (usage.Initiator is { Length: > 0 } initiator)
+        {
+            parts.Add($"initiator {initiator}");
+        }
+
         if (usage.DurationMs is { } durationMs)
         {
             parts.Add(FormattableString.Invariant($"duration {durationMs:0} ms"));
@@ -741,7 +769,7 @@ internal sealed partial class CodeAltaTerminalUi
             parts.Add($"parent tool {parentToolCallId}");
         }
 
-        extras = string.Join(" · ", parts);
+        metadata = string.Join(" · ", parts);
         return parts.Count > 0;
     }
 
@@ -971,13 +999,13 @@ internal sealed partial class CodeAltaTerminalUi
             builder.Append("- Window: ").AppendLine(FormatSessionUsageSummary(usage));
         }
 
-        if (usage.LastOperation is { } operation)
+            if (usage.LastOperation is { } operation)
         {
             builder.Append("- ")
                 .Append(operation.Label ?? "Last operation")
                 .Append(": ")
                 .AppendLine(FormatOperationUsage(operation));
-            if (TryFormatOperationExtras(operation, out var extras))
+            if (TryFormatOperationPopupMetadata(operation, out var extras))
             {
                 builder.Append("- Operation details: ").AppendLine(extras);
             }

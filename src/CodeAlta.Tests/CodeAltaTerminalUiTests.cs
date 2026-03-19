@@ -1906,6 +1906,38 @@ public sealed class CodeAltaTerminalUiTests
     }
 
     [TestMethod]
+    public void FormatOperationPopupText_UsesMetadataOnlyWhenChartExists()
+    {
+        var popupText = CodeAltaTerminalUi.FormatOperationPopupText(
+            new AgentOperationUsageSnapshot(
+                Model: "gpt-5.4",
+                ReasoningEffort: "high",
+                Initiator: "agent",
+                InputTokens: 103252,
+                OutputTokens: 234,
+                CachedInputTokens: 99968,
+                ReasoningTokens: 164,
+                DurationMs: 45152,
+                Label: "Last API call"));
+
+        Assert.AreEqual("gpt-5.4 · effort high · initiator agent · duration 45152 ms", popupText);
+    }
+
+    [TestMethod]
+    public void FormatOperationPopupText_OmitsCodexTokenSummaryWhenChartExists()
+    {
+        var popupText = CodeAltaTerminalUi.FormatOperationPopupText(
+            new AgentOperationUsageSnapshot(
+                InputTokens: 103252,
+                OutputTokens: 234,
+                CachedInputTokens: 99968,
+                ReasoningTokens: 164,
+                Label: "Last turn"));
+
+        Assert.IsNull(popupText);
+    }
+
+    [TestMethod]
     public void ResolveChatBackendSelection_CanPreserveCurrentSelection()
     {
         var selected = CodeAltaTerminalUi.ResolveChatBackendSelection(
