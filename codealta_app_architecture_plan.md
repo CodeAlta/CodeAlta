@@ -59,7 +59,7 @@ This document is the implementation checklist companion to the architecture prop
 
 - [ ] Create `ThreadTimelinePresenter`.
 - [x] Create `ToolCallPresenter`.
-- [ ] Create `SessionUsagePresenter` if the usage popup remains presenter-driven.
+- [x] Create `SessionUsagePresenter` if the usage popup remains presenter-driven.
 - [ ] Move `DocumentFlow` ownership into timeline presenters.
 - [x] Move tool-call chip/dialog state into `ToolCallPresenter`.
 - [ ] Move incremental timeline rendering logic out of `CodeAltaApp`.

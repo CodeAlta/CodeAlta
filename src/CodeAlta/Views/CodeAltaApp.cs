@@ -55,7 +55,7 @@ internal sealed partial class CodeAltaApp : IAsyncDisposable
     private CodeAltaShellView? _shellView;
     private SidebarView? _sidebarView;
     private ThreadWorkspaceView? _threadWorkspaceView;
-    private SessionUsagePopupView? _sessionUsagePopupView;
+    private SessionUsagePresenter? _sessionUsagePresenter;
     private IUiDispatcher? _uiDispatcher;
     private Spinner? _statusSpinner;
     private Visual? _threadPaneLayout;

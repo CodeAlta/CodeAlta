@@ -21,7 +21,7 @@ internal sealed partial class CodeAltaApp
             _threadWorkspaceViewModel,
             _promptComposerViewModel,
             _statusSpinner!,
-            () => CreateComputedVisual(BuildSessionUsageIndicatorVisual),
+            () => CreateComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual),
             () => _statusTone,
             CreatePromptEditor,
             () => _ = SendSelectedThreadPromptAsync(steer: false),
