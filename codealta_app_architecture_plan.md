@@ -39,7 +39,7 @@ This document is the implementation checklist companion to the architecture prop
 - [x] Move the shell/controller bridge out of `CodeAltaApp` partials.
 - [x] Move backend preference/config coordination out of `CodeAltaApp` partials.
 - [x] Move tab-page cache ownership into `ThreadWorkspaceView`.
-- [ ] Keep `CodeAltaApp` focused on app lifecycle only.
+- [x] Keep `CodeAltaApp` focused on app lifecycle only.
 
 ## Phase 4: Introduce focused bindable view models
 
