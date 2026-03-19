@@ -211,6 +211,18 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void CodeAltaApp_DoesNotConstructPromptEditorControls()
+    {
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
+        var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+
+        Assert.IsFalse(appSource.Contains("private ChatPromptEditor CreatePromptEditor(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("new ChatPromptEditor(", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("private static ChatPromptEditor CreatePromptEditor(", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("new ChatPromptEditor(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void CodeAltaApp_SourceStaysWithinFacadeSizeBudget()
     {
         var appPath = Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs");

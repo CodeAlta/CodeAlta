@@ -132,4 +132,5 @@ This document is the implementation checklist companion to the architecture prop
 - [x] Extract thread command/session orchestration (`send`, `steer`, `delegate`, `abort`, execution options, permission/user-input callbacks) out of `CodeAltaApp`.
 - [x] Extract catalog/open-thread/selection state coordination out of `CodeAltaApp`.
 - [x] Extract shell refresh/status/usage workspace coordination out of `CodeAltaApp`.
+- [x] Move prompt editor control construction and command registration out of `CodeAltaApp`.
 - [x] Keep `CodeAltaApp` as a wiring/lifecycle shell that delegates to named collaborators for thread workflows.

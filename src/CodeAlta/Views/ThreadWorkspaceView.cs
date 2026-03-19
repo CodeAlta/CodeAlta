@@ -1,12 +1,16 @@
 using System.Diagnostics.CodeAnalysis;
 using CodeAlta.ViewModels;
 using XenoAtom.Ansi;
+using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Styling;
+using XenoAtom.Terminal.UI.Text;
 
 internal sealed class ThreadWorkspaceView
 {
@@ -18,8 +22,11 @@ internal sealed class ThreadWorkspaceView
         ThreadWorkspaceViewModel workspaceViewModel,
         PromptComposerViewModel promptComposerViewModel,
         Func<Visual> buildSessionUsageIndicatorVisual,
-        Func<ChatPromptEditor> createPromptEditor,
         Action sendPrompt,
+        Action steerPrompt,
+        Action delegateThread,
+        Action abortThread,
+        Action closeTab,
         Action<int> onThreadTabSelectionChanged,
         Action<int> onChatBackendSelectionChanged,
         Action<int> onChatModelSelectionChanged,
@@ -30,8 +37,11 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(buildSessionUsageIndicatorVisual);
-        ArgumentNullException.ThrowIfNull(createPromptEditor);
         ArgumentNullException.ThrowIfNull(sendPrompt);
+        ArgumentNullException.ThrowIfNull(steerPrompt);
+        ArgumentNullException.ThrowIfNull(delegateThread);
+        ArgumentNullException.ThrowIfNull(abortThread);
+        ArgumentNullException.ThrowIfNull(closeTab);
         ArgumentNullException.ThrowIfNull(onThreadTabSelectionChanged);
         ArgumentNullException.ThrowIfNull(onChatBackendSelectionChanged);
         ArgumentNullException.ThrowIfNull(onChatModelSelectionChanged);
@@ -47,7 +57,13 @@ internal sealed class ThreadWorkspaceView
             .Style(TabControlStyle.NoBorder);
         ThreadTabControl.RegisterDynamicUpdate(_ => onThreadTabSelectionChanged(ThreadTabControl.SelectedIndex));
 
-        ThreadInput = createPromptEditor();
+        ThreadInput = CreatePromptEditor(
+            promptComposerViewModel,
+            sendPrompt,
+            steerPrompt,
+            delegateThread,
+            abortThread,
+            closeTab);
         ThreadInput.RegisterDynamicUpdate(_ => ThreadInput.IsEnabled = promptComposerViewModel.IsEnabled);
         ThreadInputView = ThreadInput.Scrollable();
 
@@ -210,5 +226,99 @@ internal sealed class ThreadWorkspaceView
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
         return _tabPages.Remove(tabId);
+    }
+
+    private static ChatPromptEditor CreatePromptEditor(
+        PromptComposerViewModel promptComposerViewModel,
+        Action sendPrompt,
+        Action steerPrompt,
+        Action delegateThread,
+        Action abortThread,
+        Action closeTab)
+    {
+        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
+        ArgumentNullException.ThrowIfNull(sendPrompt);
+        ArgumentNullException.ThrowIfNull(steerPrompt);
+        ArgumentNullException.ThrowIfNull(delegateThread);
+        ArgumentNullException.ThrowIfNull(abortThread);
+        ArgumentNullException.ThrowIfNull(closeTab);
+
+        var converter = new MarkdownMarkupConverter();
+        var editor = new ChatPromptEditor(_ => sendPrompt())
+            .PromptMarkup("[primary]>[/] ")
+            .ContinuationPromptMarkup("[muted]·[/] ")
+            .Placeholder(promptComposerViewModel.Bind.Placeholder)
+            .EnterMode(PromptEditorEnterMode.EnterInsertsNewLine)
+            .EnableWordHints(true)
+            .Highlighter(HighlightMarkdown)
+            .MinHeight(3)
+            .Style(PromptEditorStyle.Default with
+            {
+                Padding = new Thickness(0, 0, 1, 0),
+                PlaceholderForeground = UiPalette.PromptPlaceholderColor,
+            });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Steer",
+            LabelMarkup = "Steer",
+            DescriptionMarkup = "Send an immediate steering instruction to the selected thread.",
+            Gesture = new KeyGesture(TerminalKey.F5),
+            Importance = CommandImportance.Primary,
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => steerPrompt(),
+            CanExecute = _visual => promptComposerViewModel.CanSteer,
+        });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Delegate",
+            LabelMarkup = "Delegate",
+            DescriptionMarkup = "Create a delegated internal thread from the current project thread.",
+            Gesture = new KeyGesture(TerminalKey.F7),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => delegateThread(),
+            CanExecute = _visual => promptComposerViewModel.CanDelegate,
+        });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Abort",
+            LabelMarkup = "Abort",
+            DescriptionMarkup = "Abort the selected thread run.",
+            Gesture = new KeyGesture(TerminalKey.F8),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => abortThread(),
+            CanExecute = _visual => promptComposerViewModel.CanAbort,
+        });
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.CloseTab",
+            LabelMarkup = "Close Tab",
+            DescriptionMarkup = "Close the current thread tab.",
+            Gesture = new KeyGesture(TerminalKey.F9),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => closeTab(),
+            CanExecute = _visual => promptComposerViewModel.CanCloseTab,
+        });
+
+        return editor;
+
+        void HighlightMarkdown(in PromptEditorHighlightRequest request, List<StyledRun> runs)
+        {
+            converter.Theme = request.Theme;
+            converter.Highlight(SnapshotToString(request.Snapshot), runs);
+        }
+
+        static string SnapshotToString(ITextSnapshot snapshot)
+        {
+            if (snapshot.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return string.Create(snapshot.Length, snapshot, static (span, s) => s.CopyTo(0, span));
+        }
     }
 }

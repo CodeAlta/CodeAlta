@@ -9,13 +9,6 @@ using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Extensions.Markdown;
-using XenoAtom.Terminal.UI.Figlet;
-using XenoAtom.Terminal.UI.Geometry;
-using XenoAtom.Terminal.UI.Input;
-using XenoAtom.Terminal.UI.Layout;
-using XenoAtom.Terminal.UI.Styling;
-using XenoAtom.Terminal.UI.Text;
 using XenoAtom.Terminal.UI.Threading;
 
 internal sealed class CodeAltaApp : IAsyncDisposable
@@ -533,8 +526,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _threadWorkspaceViewModel,
             _promptComposerViewModel,
             () => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual),
-            CreatePromptEditor,
             () => _ = SendSelectedThreadPromptAsync(steer: false),
+            () => _ = SendSelectedThreadPromptAsync(steer: true),
+            () => _ = DelegateSelectedThreadAsync(),
+            () => _ = AbortSelectedThreadAsync(),
+            () => _ = GetSelectedThread() is not null ? CloseSelectedThreadAsync() : CloseDraftTabAsync(),
             OnThreadTabControlSelectionChanged,
             OnChatBackendSelectionChanged,
             OnChatModelSelectionChanged,
@@ -760,94 +756,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private async Task PersistViewStateAsync()
         => await _threadStateCoordinator.PersistViewStateAsync().ConfigureAwait(false);
-
-    private static Group CreateSectionGroup(string title, Visual content)
-    {
-        return new Group(new Markup($"[bold]{title}[/]"), content)
-            .Padding(1)
-            .Style(XenoAtom.Terminal.UI.Styling.GroupStyle.Rounded);
-    }
-
-    private ChatPromptEditor CreatePromptEditor()
-    {
-        var converter = new MarkdownMarkupConverter();
-        var editor = new ChatPromptEditor(text => _ = SendSelectedThreadPromptAsync(steer: false))
-            .PromptMarkup("[primary]>[/] ")
-            .ContinuationPromptMarkup("[muted]·[/] ")
-            .Placeholder(_promptComposerViewModel.Bind.Placeholder)
-            .EnterMode(PromptEditorEnterMode.EnterInsertsNewLine)
-            .EnableWordHints(true)
-            .Highlighter(HighlightMarkdown)
-            .MinHeight(3)
-            .Style(PromptEditorStyle.Default with
-            {
-                Padding = new Thickness(0, 0, 1, 0),
-                PlaceholderForeground = UiPalette.PromptPlaceholderColor,
-            });
-
-        editor.AddCommand(new Command
-        {
-            Id = "CodeAlta.Thread.Steer",
-            LabelMarkup = "Steer",
-            DescriptionMarkup = "Send an immediate steering instruction to the selected thread.",
-            Gesture = new KeyGesture(TerminalKey.F5),
-            Importance = CommandImportance.Primary,
-            Presentation = CommandPresentation.CommandBar,
-            Execute = _visual => { _ = SendSelectedThreadPromptAsync(steer: true); },
-            CanExecute = _visual => _promptComposerViewModel.CanSteer,
-        });
-
-        editor.AddCommand(new Command
-        {
-            Id = "CodeAlta.Thread.Delegate",
-            LabelMarkup = "Delegate",
-            DescriptionMarkup = "Create a delegated internal thread from the current project thread.",
-            Gesture = new KeyGesture(TerminalKey.F7),
-            Presentation = CommandPresentation.CommandBar,
-            Execute = _visual => { _ = DelegateSelectedThreadAsync(); },
-            CanExecute = _visual => _promptComposerViewModel.CanDelegate,
-        });
-
-        editor.AddCommand(new Command
-        {
-            Id = "CodeAlta.Thread.Abort",
-            LabelMarkup = "Abort",
-            DescriptionMarkup = "Abort the selected thread run.",
-            Gesture = new KeyGesture(TerminalKey.F8),
-            Presentation = CommandPresentation.CommandBar,
-            Execute = _visual => { _ = AbortSelectedThreadAsync(); },
-            CanExecute = _visual => _promptComposerViewModel.CanAbort,
-        });
-
-        editor.AddCommand(new Command
-        {
-            Id = "CodeAlta.Thread.CloseTab",
-            LabelMarkup = "Close Tab",
-            DescriptionMarkup = "Close the current thread tab.",
-            Gesture = new KeyGesture(TerminalKey.F9),
-            Presentation = CommandPresentation.CommandBar,
-            Execute = _visual => { _ = GetSelectedThread() is not null ? CloseSelectedThreadAsync() : CloseDraftTabAsync(); },
-            CanExecute = _visual => _promptComposerViewModel.CanCloseTab,
-        });
-
-        return editor;
-
-        void HighlightMarkdown(in PromptEditorHighlightRequest request, List<StyledRun> runs)
-        {
-            converter.Theme = request.Theme;
-            converter.Highlight(SnapshotToString(request.Snapshot), runs);
-        }
-
-        static string SnapshotToString(ITextSnapshot snapshot)
-        {
-            if (snapshot.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            return string.Create(snapshot.Length, snapshot, static (span, s) => s.CopyTo(0, span));
-        }
-    }
     private async Task LoadCatalogStateAsync(CancellationToken cancellationToken)
         => await _threadStateCoordinator.LoadCatalogStateAsync(cancellationToken).ConfigureAwait(false);
 
