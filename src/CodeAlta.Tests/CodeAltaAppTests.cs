@@ -226,9 +226,6 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void ToolCallDetailMarkdown_DoesNotRenderStatusDetail()
     {
-        var method = typeof(CodeAltaApp).GetMethod("BuildToolCallDetailMarkdown", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
         var entry = new ToolCallEntryState(
             "call-1",
             new Button(new TextBlock("tool")),
@@ -243,7 +240,7 @@ public sealed class CodeAltaAppTests
         };
         entry.OutputBuffer.AppendLine("Repeated in output");
 
-        var markdown = (string?)method.Invoke(null, [entry]);
+        var markdown = ToolCallSummaryFormatter.BuildDetailMarkdown(entry);
 
         Assert.IsNotNull(markdown);
         Assert.IsFalse(markdown.Contains("Status Detail", StringComparison.Ordinal));
@@ -922,9 +919,6 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void BuildToolCallSummaryMarkup_OmitsRawJsonArgumentPreview()
     {
-        var method = typeof(CodeAltaApp).GetMethod("BuildToolCallSummaryMarkup", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.IsNotNull(method);
-
         var entry = new ToolCallEntryState(
             "call-1",
             new Button(new TextBlock("tool")),
@@ -942,7 +936,7 @@ public sealed class CodeAltaAppTests
                 """,
         };
 
-        var markup = (string?)method.Invoke(null, [entry]);
+        var markup = ToolCallSummaryFormatter.BuildSummaryMarkup(entry);
 
         Assert.IsNotNull(markup);
         Assert.IsFalse(markup.Contains("{", StringComparison.Ordinal));

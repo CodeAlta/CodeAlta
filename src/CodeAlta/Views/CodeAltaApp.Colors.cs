@@ -4,6 +4,11 @@ using XenoAtom.Terminal.UI.Styling;
 
 internal sealed partial class CodeAltaApp
 {
+    internal static string GetToolStatusMarkup(ToolCallDisplayStatus status)
+        => UiPalette.GetToolStatusMarkup(status);
+
+    internal static string MutedMarkup => UiPalette.MutedMarkup;
+
     internal static GradientStop[] BuildWelcomeAltaGradientStops()
     {
         var edgeColor = Color.Mix(UiPalette.WelcomeAccent0, UiPalette.WelcomeAccentBright0, 0.34f, ColorMixSpace.Oklab)

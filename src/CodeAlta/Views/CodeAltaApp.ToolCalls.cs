@@ -278,7 +278,7 @@ internal sealed partial class CodeAltaApp
     {
         PostToUi(() =>
         {
-            entry.SummaryText.Text = BuildToolCallSummaryMarkup(entry);
+            entry.SummaryText.Text = ToolCallSummaryFormatter.BuildSummaryMarkup(entry);
             entry.Button.Tone = ControlTone.Default;
             entry.Button.SetStyle(ButtonStyle.Key, UiPalette.GetToolChipButtonStyle(entry.Status));
         });
@@ -293,7 +293,7 @@ internal sealed partial class CodeAltaApp
 
         PostToUi(() =>
         {
-            group.SummaryText.Text = BuildToolCallGroupSummaryMarkup(group);
+            group.SummaryText.Text = ToolCallSummaryFormatter.BuildGroupSummaryMarkup(group);
             ApplyChatCardTimestamp(group.TimestampText, group.LastUpdatedAt);
         });
     }
@@ -410,8 +410,8 @@ internal sealed partial class CodeAltaApp
 
         PostToUi(() =>
         {
-            entry.DetailMetadata.Markdown = BuildToolCallDetailMarkdown(entry);
-            entry.DetailStatsText.Text = BuildToolCallStatsMarkup(entry);
+            entry.DetailMetadata.Markdown = ToolCallSummaryFormatter.BuildDetailMarkdown(entry);
+            entry.DetailStatsText.Text = ToolCallSummaryFormatter.BuildStatsMarkup(entry);
             entry.DetailLog.Clear();
             foreach (var line in SplitToolOutputLines(entry.OutputBuffer.ToString()))
             {
@@ -511,159 +511,6 @@ internal sealed partial class CodeAltaApp
 
     private static bool IsCompletedStatus(ToolCallDisplayStatus status)
         => status is ToolCallDisplayStatus.Completed or ToolCallDisplayStatus.Failed or ToolCallDisplayStatus.Canceled;
-
-    private static string BuildToolCallSummaryMarkup(ToolCallEntryState entry)
-    {
-        var primaryLabel = BuildPrimaryToolLabel(entry);
-        var secondaryLabel = BuildToolSecondaryLabel(entry);
-        var detailLine = BuildToolCardDetailLine(entry);
-        var builder = new StringBuilder();
-        builder.Append(GetToolStatusIconMarkup(entry.Status))
-            .Append(' ')
-            .Append("[bold][")
-            .Append(UiPalette.GetToolStatusMarkup(entry.Status))
-            .Append("]")
-            .Append(AnsiMarkup.Escape(primaryLabel))
-            .Append("[/][/]");
-
-        if (!string.IsNullOrWhiteSpace(secondaryLabel))
-        {
-            builder.Append(" [dim]")
-                .Append(AnsiMarkup.Escape(secondaryLabel))
-                .Append("[/]");
-        }
-
-        builder.AppendLine()
-            .Append("[dim]")
-            .Append(AnsiMarkup.Escape(detailLine))
-            .Append("[/]")
-            .Append("[/]");
-
-        return builder.ToString();
-    }
-
-    private static string BuildToolCallGroupSummaryMarkup(ToolCallGroupState group)
-    {
-        var total = group.ToolCalls.Count;
-        var running = group.ToolCalls.Values.Count(static entry => entry.Status == ToolCallDisplayStatus.Running);
-        var completed = group.ToolCalls.Values.Count(static entry => entry.Status == ToolCallDisplayStatus.Completed);
-        var failed = group.ToolCalls.Values.Count(static entry => entry.Status == ToolCallDisplayStatus.Failed);
-        var canceled = group.ToolCalls.Values.Count(static entry => entry.Status == ToolCallDisplayStatus.Canceled);
-        var pending = group.ToolCalls.Values.Count(static entry => entry.Status == ToolCallDisplayStatus.Pending);
-
-        var parts = new List<string>
-        {
-            $"{total.ToString(CultureInfo.InvariantCulture)} call(s)",
-        };
-
-        if (running > 0)
-        {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Running)}]{running.ToString(CultureInfo.InvariantCulture)} running[/]");
-        }
-
-        if (pending > 0)
-        {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Pending)}]{pending.ToString(CultureInfo.InvariantCulture)} pending[/]");
-        }
-
-        if (completed > 0)
-        {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Completed)}]{completed.ToString(CultureInfo.InvariantCulture)} done[/]");
-        }
-
-        if (failed > 0)
-        {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Failed)}]{failed.ToString(CultureInfo.InvariantCulture)} failed[/]");
-        }
-
-        if (canceled > 0)
-        {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Canceled)}]{canceled.ToString(CultureInfo.InvariantCulture)} canceled[/]");
-        }
-
-        return $"[{UiPalette.MutedMarkup}]" + string.Join(" · ", parts) + "[/]";
-    }
-
-    private static string BuildPrimaryToolLabel(ToolCallEntryState entry)
-    {
-        if (entry.ActivityKind == AgentActivityKind.CommandExecution &&
-            !string.IsNullOrWhiteSpace(entry.CommandText))
-        {
-            return ExtractCommandDisplayName(entry.CommandText!);
-        }
-
-        return ResolveToolDisplayName(entry.ActivityKind, entry.DisplayName);
-    }
-
-    private static string? BuildToolSecondaryLabel(ToolCallEntryState entry)
-    {
-        var contextLabel = BuildCompactToolContext(entry);
-        if (string.IsNullOrWhiteSpace(contextLabel))
-        {
-            return null;
-        }
-
-        return string.Equals(contextLabel, BuildPrimaryToolLabel(entry), StringComparison.OrdinalIgnoreCase)
-            ? null
-            : contextLabel;
-    }
-
-    private static string BuildToolCardDetailLine(ToolCallEntryState entry)
-    {
-        var contextLabel = BuildCompactToolContext(entry);
-        var prefix = !string.IsNullOrWhiteSpace(entry.OutputPreview) &&
-                     !string.Equals(entry.OutputPreview, contextLabel, StringComparison.OrdinalIgnoreCase)
-            ? entry.OutputPreview!
-            : !string.IsNullOrWhiteSpace(entry.StatusMessage) && !IsRedundantStatusDetail(entry.StatusMessage, entry.OutputBuffer.ToString())
-                ? BuildToolPreview(entry.StatusMessage) ?? SplitPascalCase(entry.Status.ToString())
-                : SplitPascalCase(entry.Status.ToString());
-
-        return string.Equals(prefix, SplitPascalCase(entry.Status.ToString()), StringComparison.OrdinalIgnoreCase) && entry.OutputLineCount > 0
-            ? $"{entry.OutputLineCount.ToString(CultureInfo.InvariantCulture)}L · {FormatToolCallKilobytes(entry.OutputByteCount)}"
-            : $"{prefix} · {entry.OutputLineCount.ToString(CultureInfo.InvariantCulture)}L · {FormatToolCallKilobytes(entry.OutputByteCount)}";
-    }
-
-    private static string BuildToolCallDetailMarkdown(ToolCallEntryState entry)
-    {
-        var builder = new StringBuilder();
-        builder.Append("- Tool: ").AppendLine(BuildPrimaryToolLabel(entry))
-            .Append("- Kind: ").AppendLine(GetActivityKindLabel(entry.ActivityKind))
-            .Append("- Status: ").AppendLine(SplitPascalCase(entry.Status.ToString()))
-            .Append("- First Seen: `").Append(FormatChatCardTimestamp(entry.FirstSeenAt)).AppendLine("`")
-            .Append("- Last Updated: `").Append(FormatChatCardTimestamp(entry.LastUpdatedAt)).AppendLine("`");
-
-        if (!string.IsNullOrWhiteSpace(entry.ParentToolCallId))
-        {
-            builder.Append("- Parent: `").Append(entry.ParentToolCallId).AppendLine("`");
-        }
-
-        if (!string.IsNullOrWhiteSpace(entry.CommandText))
-        {
-            builder.AppendLine()
-                .AppendLine("**Command**")
-                .AppendLine()
-                .AppendLine(FormatChatCodeFence(entry.CommandText, "text"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(entry.ArgumentText))
-        {
-            builder.AppendLine()
-                .AppendLine("**Arguments**")
-                .AppendLine()
-                .AppendLine(FormatChatCodeFence(entry.ArgumentText, IsJsonPayload(entry.ArgumentText) ? "json" : "text"));
-        }
-
-        return builder.ToString();
-    }
-
-    private static string BuildToolCallStatsMarkup(ToolCallEntryState entry)
-    {
-        var duration = (entry.CompletedAt ?? entry.LastUpdatedAt) - entry.FirstSeenAt;
-        return $"[dim]{entry.OutputLineCount.ToString(CultureInfo.InvariantCulture)} lines · {FormatToolCallKilobytes(entry.OutputByteCount)} · {FormatToolCallDuration(duration)}[/]";
-    }
-
-    private static string GetToolStatusIconMarkup(ToolCallDisplayStatus status)
-        => $"[{UiPalette.GetToolStatusMarkup(status)}]●[/]";
 
     private static string ResolveToolDisplayName(AgentActivityEvent activity)
     {
@@ -1161,143 +1008,6 @@ internal sealed partial class CodeAltaApp
                trimmed.StartsWith("/", StringComparison.Ordinal);
     }
 
-    private static string? BuildCompactToolContext(ToolCallEntryState entry)
-    {
-        if (entry.Details is { } details &&
-            TryBuildCompactContextFromDetails(details, out var detailPreview))
-        {
-            return detailPreview;
-        }
-
-        if (!IsJsonPayload(entry.ArgumentText) &&
-            TryBuildCompactContextPreview(entry.ArgumentText, out var argumentPreview))
-        {
-            return argumentPreview;
-        }
-
-        if (entry.ActivityKind == AgentActivityKind.CommandExecution &&
-            TryExtractCommandArgument(entry.CommandText, out var commandArgument) &&
-            TryBuildCompactContextPreview(commandArgument, out var commandPreview))
-        {
-            return commandPreview;
-        }
-
-        return null;
-    }
-
-    private static bool TryBuildCompactContextPreview(string? source, out string? preview)
-    {
-        preview = null;
-        if (string.IsNullOrWhiteSpace(source))
-        {
-            return false;
-        }
-
-        foreach (var line in SplitToolOutputLines(source))
-        {
-            var trimmed = line.Trim();
-            if (string.IsNullOrWhiteSpace(trimmed))
-            {
-                continue;
-            }
-
-            if (trimmed.StartsWith("cwd:", StringComparison.OrdinalIgnoreCase))
-            {
-                trimmed = trimmed["cwd:".Length..].Trim();
-            }
-            else if (trimmed.StartsWith("server:", StringComparison.OrdinalIgnoreCase))
-            {
-                trimmed = trimmed["server:".Length..].Trim();
-            }
-
-            if (TryExtractPathLeaf(trimmed, out var pathLeaf))
-            {
-                preview = BuildToolPreview(pathLeaf);
-                return !string.IsNullOrWhiteSpace(preview);
-            }
-
-            preview = BuildToolPreview(trimmed);
-            return !string.IsNullOrWhiteSpace(preview);
-        }
-
-        return false;
-    }
-
-    private static bool TryBuildCompactContextFromDetails(JsonElement details, out string? preview)
-    {
-        preview = null;
-        if (details.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        if (!details.TryGetProperty("arguments", out var arguments) || arguments.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        foreach (var propertyName in new[] { "path", "pattern", "query", "intent", "description", "database", "command" })
-        {
-            if (TryGetStringProperty(arguments, propertyName, out var value) &&
-                TryBuildCompactContextPreview(value, out preview))
-            {
-                return true;
-            }
-        }
-
-        if (details.TryGetProperty("input", out var input) &&
-            input.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var propertyName in new[] { "path", "pattern", "query", "intent", "description", "database", "command" })
-            {
-                if (TryGetStringProperty(input, propertyName, out var value) &&
-                    TryBuildCompactContextPreview(value, out preview))
-                {
-                    return true;
-                }
-            }
-        }
-
-        if (arguments.TryGetProperty("view_range", out var viewRange) &&
-            viewRange.ValueKind == JsonValueKind.Array &&
-            viewRange.GetArrayLength() >= 2)
-        {
-            var start = viewRange[0].ToString();
-            var end = viewRange[1].ToString();
-            preview = $"{start}-{end}";
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryExtractCommandArgument(string? commandText, out string? argument)
-    {
-        argument = null;
-        if (string.IsNullOrWhiteSpace(commandText))
-        {
-            return false;
-        }
-
-        var command = NormalizeToolOutput(commandText)
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault()?
-            .Trim();
-        if (string.IsNullOrWhiteSpace(command))
-        {
-            return false;
-        }
-
-        var firstSpace = command.IndexOf(' ');
-        if (firstSpace < 0 || firstSpace >= command.Length - 1)
-        {
-            return false;
-        }
-
-        argument = command[(firstSpace + 1)..].Trim();
-        return !string.IsNullOrWhiteSpace(argument);
-    }
-
     private static string PreferToolDisplayName(string? existing, string candidate, AgentActivityEvent activity)
     {
         if (string.IsNullOrWhiteSpace(candidate))
@@ -1347,17 +1057,6 @@ internal sealed partial class CodeAltaApp
         };
     }
 
-    private static bool IsJsonPayload(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var trimmed = value.TrimStart();
-        return trimmed.StartsWith('{') || trimmed.StartsWith('[');
-    }
-
     private static string PrettyPrintJson(JsonElement element)
     {
         using var stream = new MemoryStream();
@@ -1367,41 +1066,6 @@ internal sealed partial class CodeAltaApp
         }
 
         return Encoding.UTF8.GetString(stream.ToArray());
-    }
-
-    private static bool TryExtractPathLeaf(string text, out string? leaf)
-    {
-        leaf = null;
-        var trimmed = text.Trim().Trim('"', '\'', '`');
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return false;
-        }
-
-        var candidate = trimmed;
-        if (trimmed.StartsWith("+++ b/", StringComparison.Ordinal))
-        {
-            candidate = trimmed["+++ b/".Length..];
-        }
-        else if (trimmed.StartsWith("diff --git a/", StringComparison.Ordinal) &&
-                 TryExtractDiffPath(trimmed, out var diffPath))
-        {
-            candidate = diffPath!;
-        }
-
-        if (!(candidate.Contains('\\', StringComparison.Ordinal) || candidate.Contains('/', StringComparison.Ordinal)))
-        {
-            return false;
-        }
-
-        leaf = Path.GetFileName(candidate);
-        if (string.IsNullOrWhiteSpace(leaf))
-        {
-            var directory = candidate.TrimEnd('\\', '/');
-            leaf = Path.GetFileName(directory);
-        }
-
-        return !string.IsNullOrWhiteSpace(leaf);
     }
 
     private static bool LooksLikeReadOutput(string text)
@@ -1589,21 +1253,4 @@ internal sealed partial class CodeAltaApp
         return NormalizeToolOutput(text).Count(static ch => ch == '\n') + 1;
     }
 
-    private static string FormatToolCallKilobytes(int byteCount)
-        => $"{(byteCount / 1024d).ToString("0.0", CultureInfo.InvariantCulture)} KB";
-
-    private static string FormatToolCallDuration(TimeSpan duration)
-    {
-        if (duration.TotalHours >= 1)
-        {
-            return duration.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture);
-        }
-
-        if (duration.TotalMinutes >= 1)
-        {
-            return duration.ToString(@"m\:ss", CultureInfo.InvariantCulture);
-        }
-
-        return $"{duration.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)}s";
-    }
 }
