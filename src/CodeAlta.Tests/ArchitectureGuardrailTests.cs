@@ -140,6 +140,18 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void CodeAltaApp_DelegatesThreadHistoryWorkflow()
+    {
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
+
+        Assert.IsTrue(appSource.Contains("_threadHistoryCoordinator.EnsureLoadedAsync", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static ThreadHistoryLoadPlan CreateInitialThreadHistoryLoadPlan(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static int FindInitialThreadHistoryStartIndex(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("internal static int CountRenderableHistoryMessages(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private async Task LoadEarlierThreadHistoryAsync(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void CodeAltaApp_IsNoLongerPartial()
     {
         var codeAltaRoot = GetCodeAltaSourceRoot();

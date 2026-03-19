@@ -405,7 +405,7 @@ public sealed class CodeAltaAppTests
             new AgentContentCompletedEvent(AgentBackendIds.Copilot, "session-1", timestamp, null, AgentContentKind.Assistant, "assistant-2", null, "Second reply"),
         ];
 
-        var plan = CodeAltaApp.CreateInitialThreadHistoryLoadPlan(history);
+        var plan = ThreadHistoryCoordinator.CreateInitialLoadPlan(history);
 
         Assert.AreEqual(3, plan.EventsToRender.Count);
         Assert.AreSame(history[3], plan.EventsToRender[0]);
@@ -709,7 +709,7 @@ public sealed class CodeAltaAppTests
             StartedAt = null,
         };
 
-        Assert.IsTrue(CodeAltaApp.CanLoadThreadHistory(recoverableThread));
+        Assert.IsTrue(ThreadHistoryCoordinator.CanLoadThreadHistory(recoverableThread));
     }
 
     [TestMethod]
