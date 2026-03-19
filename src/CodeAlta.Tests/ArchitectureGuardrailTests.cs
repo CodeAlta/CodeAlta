@@ -166,6 +166,23 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void CodeAltaApp_DelegatesThreadCommandWorkflow()
+    {
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
+
+        Assert.IsTrue(appSource.Contains("_threadCommandCoordinator.SendSelectedThreadPromptAsync", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_threadCommandCoordinator.DelegateSelectedThreadAsync", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("_threadCommandCoordinator.BuildPreferredExecutionOptions", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private async Task<AgentPermissionDecision> HandleThreadPermissionRequestAsync(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private async Task<AgentUserInputResponse> HandleThreadUserInputRequestAsync(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private WorkThreadExecutionOptions BuildExecutionOptions(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private WorkThreadExecutionOptions BuildPreferredExecutionOptions(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private static string CreateTransientThreadKey(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private string ResolveWorkingDirectory(", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("private IReadOnlyList<string> ResolveProjectRoots(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void CodeAltaApp_IsNoLongerPartial()
     {
         var codeAltaRoot = GetCodeAltaSourceRoot();

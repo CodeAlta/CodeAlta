@@ -129,5 +129,5 @@ This document is the implementation checklist companion to the architecture prop
 
 - [x] Extract thread history load planning and history reconstruction helpers out of `CodeAltaApp`.
 - [x] Extract runtime-event classification and thread-summary update helpers out of `CodeAltaApp`.
-- [ ] Extract thread command/session orchestration (`send`, `steer`, `delegate`, `abort`, execution options, permission/user-input callbacks) out of `CodeAltaApp`.
+- [x] Extract thread command/session orchestration (`send`, `steer`, `delegate`, `abort`, execution options, permission/user-input callbacks) out of `CodeAltaApp`.
 - [ ] Keep `CodeAltaApp` as a wiring/lifecycle shell that delegates to named collaborators for thread workflows.
