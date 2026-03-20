@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Shell;
 using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
@@ -27,6 +28,11 @@ internal sealed class ThreadWorkspaceView
         Func<Visual> buildSessionUsageIndicatorVisual,
         Action sendPrompt,
         Action steerPrompt,
+        Action clearQueuedPrompts,
+        Action<string> convertQueuedPromptToSteer,
+        Action<string> deleteQueuedPrompt,
+        Action<string, int> updateQueuedPromptCount,
+        Action<string, string> updateQueuedPromptText,
         Action delegateThread,
         Action abortThread,
         Action closeTab,
@@ -42,6 +48,11 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(buildSessionUsageIndicatorVisual);
         ArgumentNullException.ThrowIfNull(sendPrompt);
         ArgumentNullException.ThrowIfNull(steerPrompt);
+        ArgumentNullException.ThrowIfNull(clearQueuedPrompts);
+        ArgumentNullException.ThrowIfNull(convertQueuedPromptToSteer);
+        ArgumentNullException.ThrowIfNull(deleteQueuedPrompt);
+        ArgumentNullException.ThrowIfNull(updateQueuedPromptCount);
+        ArgumentNullException.ThrowIfNull(updateQueuedPromptText);
         ArgumentNullException.ThrowIfNull(delegateThread);
         ArgumentNullException.ThrowIfNull(abortThread);
         ArgumentNullException.ThrowIfNull(closeTab);
@@ -64,6 +75,7 @@ internal sealed class ThreadWorkspaceView
             promptComposerViewModel,
             sendPrompt,
             steerPrompt,
+            clearQueuedPrompts,
             delegateThread,
             abortThread,
             closeTab);
@@ -125,6 +137,15 @@ internal sealed class ThreadWorkspaceView
             HorizontalAlignment = Align.Stretch,
         };
 
+        var queuedPromptList = new ComputedVisual(
+            () => QueuedPromptListView.Build(
+                workspaceViewModel,
+                convertQueuedPromptToSteer,
+                deleteQueuedPrompt,
+                updateQueuedPromptCount,
+                updateQueuedPromptText,
+                CreateStyledPromptEditor));
+
         var selectionControls = new HStack(
         [
             SendPromptButton,
@@ -154,7 +175,7 @@ internal sealed class ThreadWorkspaceView
             .RightText(selectionRight);
 
         ThreadBottomPanel = new DockLayout(
-            top: statusLine,
+            top: new VStack([queuedPromptList, statusLine]) { Spacing = 0 },
             content: ThreadInputView,
             bottom: selectionLine)
         {
@@ -235,6 +256,7 @@ internal sealed class ThreadWorkspaceView
         PromptComposerViewModel promptComposerViewModel,
         Action sendPrompt,
         Action steerPrompt,
+        Action clearQueuedPrompts,
         Action delegateThread,
         Action abortThread,
         Action closeTab)
@@ -242,24 +264,13 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(sendPrompt);
         ArgumentNullException.ThrowIfNull(steerPrompt);
+        ArgumentNullException.ThrowIfNull(clearQueuedPrompts);
         ArgumentNullException.ThrowIfNull(delegateThread);
         ArgumentNullException.ThrowIfNull(abortThread);
         ArgumentNullException.ThrowIfNull(closeTab);
 
-        var converter = new MarkdownMarkupConverter();
-        var editor = new ChatPromptEditor(_ => sendPrompt())
-            .PromptMarkup("[primary]>[/] ")
-            .ContinuationPromptMarkup("[muted]·[/] ")
-            .Placeholder(promptComposerViewModel.Bind.Placeholder)
-            .EnterMode(PromptEditorEnterMode.EnterInsertsNewLine)
-            .EnableWordHints(true)
-            .Highlighter(HighlightMarkdown)
-            .MinHeight(3)
-            .Style(PromptEditorStyle.Default with
-            {
-                Padding = new Thickness(0, 0, 1, 0),
-                PlaceholderForeground = UiPalette.PromptPlaceholderColor,
-            });
+        var editor = CreateStyledPromptEditor(_ => sendPrompt(), placeholder: null)
+            .Placeholder(promptComposerViewModel.Bind.Placeholder);
 
         editor.AddCommand(new Command
         {
@@ -297,6 +308,17 @@ internal sealed class ThreadWorkspaceView
 
         editor.AddCommand(new Command
         {
+            Id = "CodeAlta.Thread.ClearQueue",
+            LabelMarkup = "Clear Queue",
+            DescriptionMarkup = "Clear all queued prompts for the selected thread.",
+            Gesture = new KeyGesture(TerminalKey.F10),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => clearQueuedPrompts(),
+            CanExecute = _visual => promptComposerViewModel.CanClearQueue,
+        });
+
+        editor.AddCommand(new Command
+        {
             Id = "CodeAlta.Thread.CloseTab",
             LabelMarkup = "Close Tab",
             DescriptionMarkup = "Close the current thread tab.",
@@ -307,6 +329,26 @@ internal sealed class ThreadWorkspaceView
         });
 
         return editor;
+    }
+
+    internal static ChatPromptEditor CreateStyledPromptEditor(Action<string> onAccepted, string? placeholder)
+    {
+        ArgumentNullException.ThrowIfNull(onAccepted);
+
+        var converter = new MarkdownMarkupConverter();
+        return new ChatPromptEditor(onAccepted)
+            .PromptMarkup("[primary]>[/] ")
+            .ContinuationPromptMarkup("[muted]·[/] ")
+            .Placeholder(placeholder)
+            .EnterMode(PromptEditorEnterMode.EnterInsertsNewLine)
+            .EnableWordHints(true)
+            .Highlighter(HighlightMarkdown)
+            .MinHeight(3)
+            .Style(PromptEditorStyle.Default with
+            {
+                Padding = new Thickness(0, 0, 1, 0),
+                PlaceholderForeground = UiPalette.PromptPlaceholderColor,
+            });
 
         void HighlightMarkdown(in PromptEditorHighlightRequest request, List<StyledRun> runs)
         {

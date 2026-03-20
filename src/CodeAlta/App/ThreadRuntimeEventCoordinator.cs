@@ -22,6 +22,7 @@ internal sealed class ThreadRuntimeEventCoordinator
     private readonly Action<string, bool, StatusTone> _setShellStatus;
     private readonly Action<OpenThreadState, string, bool, StatusTone> _setThreadStatus;
     private readonly Action<OpenThreadState> _clearThreadStatus;
+    private readonly Func<OpenThreadState, CancellationToken, Task> _drainQueuedPromptAsync;
 
     public ThreadRuntimeEventCoordinator(
         Func<string, WorkThreadDescriptor?> findThread,
@@ -32,7 +33,8 @@ internal sealed class ThreadRuntimeEventCoordinator
         Action refreshShellChrome,
         Action<string, bool, StatusTone> setShellStatus,
         Action<OpenThreadState, string, bool, StatusTone> setThreadStatus,
-        Action<OpenThreadState> clearThreadStatus)
+        Action<OpenThreadState> clearThreadStatus,
+        Func<OpenThreadState, CancellationToken, Task> drainQueuedPromptAsync)
     {
         ArgumentNullException.ThrowIfNull(findThread);
         ArgumentNullException.ThrowIfNull(findOpenThread);
@@ -43,6 +45,7 @@ internal sealed class ThreadRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(setShellStatus);
         ArgumentNullException.ThrowIfNull(setThreadStatus);
         ArgumentNullException.ThrowIfNull(clearThreadStatus);
+        ArgumentNullException.ThrowIfNull(drainQueuedPromptAsync);
 
         _findThread = findThread;
         _findOpenThread = findOpenThread;
@@ -53,6 +56,7 @@ internal sealed class ThreadRuntimeEventCoordinator
         _setShellStatus = setShellStatus;
         _setThreadStatus = setThreadStatus;
         _clearThreadStatus = clearThreadStatus;
+        _drainQueuedPromptAsync = drainQueuedPromptAsync;
     }
 
     public void ApplyRuntimeEvent(WorkThreadRuntimeEvent runtimeEvent)
@@ -254,6 +258,11 @@ internal sealed class ThreadRuntimeEventCoordinator
                 if (update.Kind == AgentSessionUpdateKind.Idle)
                 {
                     _clearThreadStatus(tab);
+                    if (tab.QueuedPrompts.Count > 0)
+                    {
+                        _ = _drainQueuedPromptAsync(tab, CancellationToken.None);
+                    }
+
                     break;
                 }
 

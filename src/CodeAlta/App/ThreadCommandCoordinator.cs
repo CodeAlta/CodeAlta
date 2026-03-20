@@ -23,6 +23,7 @@ internal sealed class ThreadCommandCoordinator
     private readonly ChatSelectorUiContext _selectorUi;
     private readonly ChatPreferenceContext _preferences;
     private readonly ThreadCommandContext _commandContext;
+    private readonly ThreadPromptQueueCoordinator _queueCoordinator;
 
     public ThreadCommandCoordinator(
         WorkThreadRuntimeService runtimeService,
@@ -31,7 +32,8 @@ internal sealed class ThreadCommandCoordinator
         ThreadSelectionContext threadSelection,
         ChatSelectorUiContext selectorUi,
         ChatPreferenceContext preferences,
-        ThreadCommandContext commandContext)
+        ThreadCommandContext commandContext,
+        ThreadPromptQueueCoordinator queueCoordinator)
     {
         ArgumentNullException.ThrowIfNull(runtimeService);
         ArgumentNullException.ThrowIfNull(catalogOptions);
@@ -40,6 +42,7 @@ internal sealed class ThreadCommandCoordinator
         ArgumentNullException.ThrowIfNull(selectorUi);
         ArgumentNullException.ThrowIfNull(preferences);
         ArgumentNullException.ThrowIfNull(commandContext);
+        ArgumentNullException.ThrowIfNull(queueCoordinator);
 
         _runtimeService = runtimeService;
         _catalogOptions = catalogOptions;
@@ -48,6 +51,7 @@ internal sealed class ThreadCommandCoordinator
         _selectorUi = selectorUi;
         _preferences = preferences;
         _commandContext = commandContext;
+        _queueCoordinator = queueCoordinator;
     }
 
     public async Task SendSelectedThreadPromptAsync(bool steer)
@@ -83,48 +87,28 @@ internal sealed class ThreadCommandCoordinator
         var prompt = UiDispatch.Invoke(_selectorUi.GetUiDispatcher(), () => _selectorUi.GetThreadInput()?.Text?.Trim());
         if (string.IsNullOrWhiteSpace(prompt))
         {
+            if (steer && thread is not null)
+            {
+                var queuedTab = _threadSelection.EnsureThreadTab(thread);
+                await _queueCoordinator.ConvertNextQueuedPromptToSteerAsync(queuedTab, CancellationToken.None).ConfigureAwait(false);
+            }
+
             return;
         }
 
         var tab = _threadSelection.EnsureThreadTab(thread);
         await _threadSelection.EnsureThreadHistoryLoadedAsync(thread, CancellationToken.None).ConfigureAwait(false);
         tab.Timeline.ReplaceTruncatedHistoryLoadButton();
+
+        if (!steer && tab.StatusBusy)
+        {
+            _queueCoordinator.EnqueuePrompt(tab, prompt);
+            _commandContext.ClearThreadInput();
+            return;
+        }
+
         _commandContext.ClearThreadInput();
-        try
-        {
-            _commandContext.SetThreadStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
-            var executionOptions = BuildExecutionOptions(thread, tab);
-            if (steer)
-            {
-                _ = await _runtimeService.SteerAsync(
-                        thread,
-                        executionOptions,
-                        new AgentSteerOptions { Input = AgentInput.Text(prompt) })
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                _ = await _runtimeService.SendAsync(
-                        thread,
-                        executionOptions,
-                        new AgentSendOptions { Input = AgentInput.Text(prompt) })
-                    .ConfigureAwait(false);
-            }
-
-            thread.MarkStarted(DateTimeOffset.UtcNow);
-            tab.HistoryLoaded = true;
-            _commandContext.RefreshHeaderAndThreadWorkspace();
-        }
-        catch (Exception ex)
-        {
-            if (LogManager.IsInitialized && CodeAltaApp.UiLogger.IsEnabled(LogLevel.Error))
-            {
-                CodeAltaApp.UiLogger.Error(ex, $"Failed to send prompt for thread {thread.ThreadId}");
-            }
-
-            tab.Timeline.RenderFailure($"Failed to send prompt: {ex.Message}");
-            _commandContext.SetThreadStatus(tab, $"Failed to send prompt: {ex.Message}", false, StatusTone.Error);
-        }
+        await DispatchPromptAsync(thread, tab, prompt, steer, CancellationToken.None).ConfigureAwait(false);
     }
 
     public async Task DelegateSelectedThreadAsync()
@@ -234,6 +218,55 @@ internal sealed class ThreadCommandCoordinator
             var tab = _threadSelection.EnsureThreadTab(thread);
             _commandContext.SetThreadStatus(tab, $"Failed to abort '{thread.Title}': {ex.Message}", false, StatusTone.Error);
         }
+    }
+
+    public Task ClearSelectedThreadQueueAsync()
+    {
+        _queueCoordinator.ClearSelectedThreadQueue();
+        return Task.CompletedTask;
+    }
+
+    public async Task ConvertSelectedThreadQueuedPromptToSteerAsync(string queuedPromptId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
+        await _queueCoordinator.ConvertSelectedThreadQueuedPromptToSteerAsync(queuedPromptId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void DeleteSelectedThreadQueuedPrompt(string queuedPromptId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
+        _queueCoordinator.DeleteSelectedThreadQueuedPrompt(queuedPromptId);
+    }
+
+    public void UpdateSelectedThreadQueuedPromptCount(string queuedPromptId, int remainingCount)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
+        _queueCoordinator.UpdateSelectedThreadQueuedPromptCount(queuedPromptId, remainingCount);
+    }
+
+    public void UpdateSelectedThreadQueuedPromptText(string queuedPromptId, string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        _queueCoordinator.UpdateSelectedThreadQueuedPromptText(queuedPromptId, text);
+    }
+
+    public Task DrainQueuedPromptAsync(OpenThreadState tab, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        return _queueCoordinator.DrainNextQueuedPromptAsync(tab, cancellationToken);
+    }
+
+    public Task DispatchQueuedPromptAsync(
+        OpenThreadState tab,
+        string prompt,
+        bool steer,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+        return DispatchPromptAsync(tab.Thread, tab, prompt, steer, cancellationToken);
     }
 
     public WorkThreadExecutionOptions BuildPreferredExecutionOptions(
@@ -384,6 +417,56 @@ internal sealed class ThreadCommandCoordinator
 
     private static string CreateTransientThreadKey(AgentBackendId backendId, string workingDirectory)
         => $"{backendId.Value}:{workingDirectory}";
+
+    private async Task DispatchPromptAsync(
+        WorkThreadDescriptor thread,
+        OpenThreadState tab,
+        string prompt,
+        bool steer,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(thread);
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+        try
+        {
+            _commandContext.SetThreadStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
+            var executionOptions = BuildExecutionOptions(thread, tab);
+            if (steer)
+            {
+                _ = await _runtimeService.SteerAsync(
+                        thread,
+                        executionOptions,
+                        new AgentSteerOptions { Input = AgentInput.Text(prompt) },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                _ = await _runtimeService.SendAsync(
+                        thread,
+                        executionOptions,
+                        new AgentSendOptions { Input = AgentInput.Text(prompt) },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            thread.MarkStarted(DateTimeOffset.UtcNow);
+            tab.HistoryLoaded = true;
+            _commandContext.RefreshHeaderAndThreadWorkspace();
+        }
+        catch (Exception ex)
+        {
+            if (LogManager.IsInitialized && CodeAltaApp.UiLogger.IsEnabled(LogLevel.Error))
+            {
+                CodeAltaApp.UiLogger.Error(ex, $"Failed to send prompt for thread {thread.ThreadId}");
+            }
+
+            tab.Timeline.RenderFailure($"Failed to send prompt: {ex.Message}");
+            _commandContext.SetThreadStatus(tab, $"Failed to send prompt: {ex.Message}", false, StatusTone.Error);
+        }
+    }
 
     private bool IsChatBackendReady(AgentBackendId backendId)
     {

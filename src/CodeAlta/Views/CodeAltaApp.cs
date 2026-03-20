@@ -41,6 +41,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private readonly ShellWorkspaceCoordinator _workspaceCoordinator;
     private readonly ThreadHistoryCoordinator _threadHistoryCoordinator;
     private readonly ThreadRuntimeEventCoordinator _threadRuntimeEventCoordinator;
+    private readonly ThreadPromptQueueCoordinator _threadPromptQueueCoordinator;
     private readonly ThreadCommandCoordinator _threadCommandCoordinator;
     private readonly ThreadCreationCoordinator _threadCreationCoordinator;
     private readonly CodeAltaShellViewModel _shellViewModel = new();
@@ -244,6 +245,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             EnsureSelectionDefaults,
             RefreshSidebarProjection,
             SyncSidebarSelectionToCurrentState,
+            () => _threadPromptQueueCoordinator!.RefreshSelectedThreadQueueUi(),
             () => RefreshChatSelectorsForDraftScope(),
             RefreshChatSelectorsForThread,
             UpdatePromptAvailabilityUi,
@@ -257,6 +259,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _threadSelectionContext,
             _shellWorkspaceContext,
             _catalogOptions.GlobalRoot);
+        _threadPromptQueueCoordinator = new ThreadPromptQueueCoordinator(
+            _threadWorkspaceViewModel,
+            _threadSelectionContext,
+            UpdatePromptAvailabilityUi,
+            DispatchToUi,
+            VerifyBindableAccess,
+            (tab, prompt, cancellationToken) => _threadCommandCoordinator!.DispatchQueuedPromptAsync(tab, prompt, steer: false, cancellationToken),
+            (tab, prompt, cancellationToken) => _threadCommandCoordinator!.DispatchQueuedPromptAsync(tab, prompt, steer: true, cancellationToken));
         _chatBackendInitializationCoordinator = new ChatBackendInitializationCoordinator(
             _agentHub,
             _chatBackendStates,
@@ -283,7 +293,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             RefreshShellChrome,
             SetStatus,
             (tab, message, showSpinner, tone) => SetThreadStatus(tab, message, showSpinner, tone),
-            ClearThreadStatus);
+            ClearThreadStatus,
+            (tab, cancellationToken) => _threadCommandCoordinator!.DrainQueuedPromptAsync(tab, cancellationToken));
         _threadCreationCoordinator = new ThreadCreationCoordinator(
             _runtimeService,
             _catalogOptions,
@@ -315,7 +326,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 RefreshCatalogAndThreadWorkspace,
                 SetStatus,
                 (tab, message, showSpinner, tone) => SetThreadStatus(tab, message, showSpinner, tone),
-                _threadRuntimeEventCoordinator.TryRenderInteraction));
+                _threadRuntimeEventCoordinator.TryRenderInteraction),
+            _threadPromptQueueCoordinator);
         _threadHistoryCoordinator = new ThreadHistoryCoordinator(
             _runtimeService,
             EnsureThreadTab,
@@ -364,10 +376,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         => _globalScopeSelected ? null : GetSelectedProject()?.ProjectPath;
 
     private string? GetThreadProjectRoot(WorkThreadDescriptor thread)
-    {
-        ArgumentNullException.ThrowIfNull(thread);
-        return GetProjectById(thread.ProjectRef)?.ProjectPath;
-    }
+        => GetProjectById(thread.ProjectRef)?.ProjectPath;
 
     private void ApplyDraftBackendPreference(ChatBackendState backendState)
         => _backendPreferences.ApplyDraftBackendPreference(backendState, GetDraftProjectRoot());
@@ -396,17 +405,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     }
 
     private string? GetExpandedSidebarProjectId()
-    {
-        return GetSelectedThread()?.ProjectRef ?? _selectedProjectId;
-    }
+        => GetSelectedThread()?.ProjectRef ?? _selectedProjectId;
 
     private SidebarSelectionTarget ResolveSidebarTargetForCurrentState()
-    {
-        return SidebarSelectionResolver.ResolveCurrentTarget(
+        => SidebarSelectionResolver.ResolveCurrentTarget(
             _selectedThreadId,
             _selectedProjectId,
             _globalScopeSelected);
-    }
 
     private void RefreshSidebarProjection()
     {
@@ -419,14 +424,10 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     }
 
     private void SyncSidebarSelectionToCurrentState()
-    {
-        _sidebarCoordinator.SyncSelectionToCurrentState(ResolveSidebarTargetForCurrentState());
-    }
+        => _sidebarCoordinator.SyncSelectionToCurrentState(ResolveSidebarTargetForCurrentState());
 
     private void ApplyPendingSidebarSelection()
-    {
-        _sidebarCoordinator.ApplyPendingSelection();
-    }
+        => _sidebarCoordinator.ApplyPendingSelection();
 
     private void SyncSidebarSelection()
     {
@@ -437,49 +438,31 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     }
 
     private void RefreshChatSelectorsForDraftScope(AgentBackendId? preferredBackendId = null)
-    {
-        _chatSelectorCoordinator.RefreshForDraftScope(preferredBackendId);
-    }
+        => _chatSelectorCoordinator.RefreshForDraftScope(preferredBackendId);
 
     private void RefreshChatSelectorsForThread(OpenThreadState tab)
-    {
-        _chatSelectorCoordinator.RefreshForThread(tab);
-    }
+        => _chatSelectorCoordinator.RefreshForThread(tab);
 
     private void OnChatBackendSelectionChanged(int newIndex)
-    {
-        _chatSelectorCoordinator.OnBackendSelectionChanged(newIndex);
-    }
+        => _chatSelectorCoordinator.OnBackendSelectionChanged(newIndex);
 
     private void OnChatModelSelectionChanged(int newIndex)
-    {
-        _chatSelectorCoordinator.OnModelSelectionChanged(newIndex);
-    }
+        => _chatSelectorCoordinator.OnModelSelectionChanged(newIndex);
 
     private void OnChatReasoningSelectionChanged(int newIndex)
-    {
-        _chatSelectorCoordinator.OnReasoningSelectionChanged(newIndex);
-    }
+        => _chatSelectorCoordinator.OnReasoningSelectionChanged(newIndex);
 
     private void OnChatAutoScrollChanged()
-    {
-        _chatSelectorCoordinator.OnAutoScrollChanged();
-    }
+        => _chatSelectorCoordinator.OnAutoScrollChanged();
 
     private AgentBackendId GetPreferredBackendId()
-    {
-        return _chatSelectorCoordinator.GetPreferredBackendId();
-    }
+        => _chatSelectorCoordinator.GetPreferredBackendId();
 
     private bool IsChatBackendReady(AgentBackendId backendId)
-    {
-        return _chatSelectorCoordinator.IsChatBackendReady(backendId);
-    }
+        => _chatSelectorCoordinator.IsChatBackendReady(backendId);
 
     private bool TryGetPromptUnavailableStatus(out string message, out StatusTone tone)
-    {
-        return _chatSelectorCoordinator.TryGetPromptUnavailableStatus(out message, out tone);
-    }
+        => _chatSelectorCoordinator.TryGetPromptUnavailableStatus(out message, out tone);
 
     private bool TrySetPromptUnavailableStatus()
     {
@@ -493,24 +476,16 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     }
 
     private void UpdatePromptAvailabilityUi()
-    {
-        _chatSelectorCoordinator.UpdatePromptAvailabilityUi();
-    }
+        => _chatSelectorCoordinator.UpdatePromptAvailabilityUi();
 
     private void SyncThreadTabControl()
-    {
-        _threadTabStripCoordinator.SyncControl();
-    }
+        => _threadTabStripCoordinator.SyncControl();
 
     private void OnThreadTabControlSelectionChanged(int selectedIndex)
-    {
-        _threadTabStripCoordinator.OnSelectionChanged(selectedIndex);
-    }
+        => _threadTabStripCoordinator.OnSelectionChanged(selectedIndex);
 
     private void ResetPendingThreadTabSelection()
-    {
-        _threadTabStripCoordinator.ResetPendingSelection();
-    }
+        => _threadTabStripCoordinator.ResetPendingSelection();
 
     private CodeAltaShellView EnsureShellView()
     {
@@ -519,10 +494,15 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _threadWorkspaceViewModel,
             _promptComposerViewModel,
             () => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual),
-            () => _ = SendSelectedThreadPromptAsync(steer: false),
-            () => _ = SendSelectedThreadPromptAsync(steer: true),
-            () => _ = DelegateSelectedThreadAsync(),
-            () => _ = AbortSelectedThreadAsync(),
+            () => _ = _threadCommandCoordinator.SendSelectedThreadPromptAsync(steer: false),
+            () => _ = _threadCommandCoordinator.SendSelectedThreadPromptAsync(steer: true),
+            () => _ = _threadCommandCoordinator.ClearSelectedThreadQueueAsync(),
+            queuedPromptId => _ = _threadCommandCoordinator.ConvertSelectedThreadQueuedPromptToSteerAsync(queuedPromptId),
+            queuedPromptId => _threadCommandCoordinator.DeleteSelectedThreadQueuedPrompt(queuedPromptId),
+            (queuedPromptId, remainingCount) => _threadCommandCoordinator.UpdateSelectedThreadQueuedPromptCount(queuedPromptId, remainingCount),
+            (queuedPromptId, text) => _threadCommandCoordinator.UpdateSelectedThreadQueuedPromptText(queuedPromptId, text),
+            () => _ = _threadCommandCoordinator.DelegateSelectedThreadAsync(),
+            () => _ = _threadCommandCoordinator.AbortSelectedThreadAsync(),
             () => _ = GetSelectedThread() is not null ? CloseSelectedThreadAsync() : CloseDraftTabAsync(),
             OnThreadTabControlSelectionChanged,
             OnChatBackendSelectionChanged,
@@ -636,17 +616,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 _terminalLoopCoordinator.HasStarted));
     }
 
-    internal static bool CanAccessBindableState(
-        bool dispatcherHasAccess,
-        bool terminalLoopStarted)
-    {
-        if (!terminalLoopStarted)
-        {
-            return true;
-        }
-
-        return dispatcherHasAccess;
-    }
+    internal static bool CanAccessBindableState(bool dispatcherHasAccess, bool terminalLoopStarted)
+        => !terminalLoopStarted || dispatcherHasAccess;
 
     private void VerifyBindableAccess()
     {
@@ -659,17 +630,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         throw new InvalidOperationException("Bindable view-model state must be accessed on the UI thread.");
     }
 
-    internal static bool ShouldRunInlineOnCurrentThread(
-        bool dispatcherHasAccess,
-        bool terminalLoopStarted)
-    {
-        if (!terminalLoopStarted)
-        {
-            return true;
-        }
-
-        return dispatcherHasAccess;
-    }
+    internal static bool ShouldRunInlineOnCurrentThread(bool dispatcherHasAccess, bool terminalLoopStarted)
+        => !terminalLoopStarted || dispatcherHasAccess;
 
     private IUiDispatcher GetUiDispatcher()
         => _uiDispatcher ??= new TerminalUiDispatcher(Dispatcher.Current);
@@ -692,9 +654,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     }
 
     private void ClearThreadTitleDraft()
-    {
-        DispatchToUi(() => _sidebarViewModel.DraftThreadTitle = string.Empty);
-    }
+        => DispatchToUi(() => _sidebarViewModel.DraftThreadTitle = string.Empty);
 
     private async Task ActivateDraftTabAsync()
     {
@@ -757,15 +717,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private Task EnsureThreadHistoryLoadedAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken = default)
         => _threadHistoryCoordinator.EnsureLoadedAsync(thread, cancellationToken);
-
-    private Task SendSelectedThreadPromptAsync(bool steer)
-        => _threadCommandCoordinator.SendSelectedThreadPromptAsync(steer);
-
-    private Task DelegateSelectedThreadAsync()
-        => _threadCommandCoordinator.DelegateSelectedThreadAsync();
-
-    private Task AbortSelectedThreadAsync()
-        => _threadCommandCoordinator.AbortSelectedThreadAsync();
 
     internal void HandleRuntimeEvent(WorkThreadRuntimeEvent runtimeEvent)
         => _threadRuntimeEventCoordinator.ApplyRuntimeEvent(runtimeEvent);

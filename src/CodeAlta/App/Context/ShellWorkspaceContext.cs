@@ -17,6 +17,7 @@ internal sealed class ShellWorkspaceContext
     private readonly Action _ensureSelectionDefaults;
     private readonly Action _refreshSidebarProjection;
     private readonly Action _syncSidebarSelectionToCurrentState;
+    private readonly Action _refreshQueuedPromptList;
     private readonly Action _refreshChatSelectorsForDraftScope;
     private readonly Action<OpenThreadState> _refreshChatSelectorsForThread;
     private readonly Action _updatePromptAvailabilityUi;
@@ -33,6 +34,7 @@ internal sealed class ShellWorkspaceContext
         Action ensureSelectionDefaults,
         Action refreshSidebarProjection,
         Action syncSidebarSelectionToCurrentState,
+        Action refreshQueuedPromptList,
         Action refreshChatSelectorsForDraftScope,
         Action<OpenThreadState> refreshChatSelectorsForThread,
         Action updatePromptAvailabilityUi,
@@ -48,6 +50,7 @@ internal sealed class ShellWorkspaceContext
         ArgumentNullException.ThrowIfNull(ensureSelectionDefaults);
         ArgumentNullException.ThrowIfNull(refreshSidebarProjection);
         ArgumentNullException.ThrowIfNull(syncSidebarSelectionToCurrentState);
+        ArgumentNullException.ThrowIfNull(refreshQueuedPromptList);
         ArgumentNullException.ThrowIfNull(refreshChatSelectorsForDraftScope);
         ArgumentNullException.ThrowIfNull(refreshChatSelectorsForThread);
         ArgumentNullException.ThrowIfNull(updatePromptAvailabilityUi);
@@ -63,6 +66,7 @@ internal sealed class ShellWorkspaceContext
         _ensureSelectionDefaults = ensureSelectionDefaults;
         _refreshSidebarProjection = refreshSidebarProjection;
         _syncSidebarSelectionToCurrentState = syncSidebarSelectionToCurrentState;
+        _refreshQueuedPromptList = refreshQueuedPromptList;
         _refreshChatSelectorsForDraftScope = refreshChatSelectorsForDraftScope;
         _refreshChatSelectorsForThread = refreshChatSelectorsForThread;
         _updatePromptAvailabilityUi = updatePromptAvailabilityUi;
@@ -94,6 +98,9 @@ internal sealed class ShellWorkspaceContext
 
     public void SyncSidebarSelectionToCurrentState()
         => _syncSidebarSelectionToCurrentState();
+
+    public void RefreshQueuedPromptList()
+        => _refreshQueuedPromptList();
 
     public void RefreshChatSelectorsForDraftScope()
         => _refreshChatSelectorsForDraftScope();

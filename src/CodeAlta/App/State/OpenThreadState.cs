@@ -80,6 +80,10 @@ internal sealed class OpenThreadState
 
     public Dictionary<string, AgentUserInputRequest> UserInputRequests => Session.UserInputRequests;
 
+    public object QueuedPromptsSyncRoot => Session.QueuedPromptsSyncRoot;
+
+    public List<QueuedThreadPrompt> QueuedPrompts => Session.QueuedPrompts;
+
     public AgentSessionUsage? Usage
     {
         get => Session.Usage;

@@ -245,6 +245,7 @@ internal sealed class ShellWorkspaceCoordinator
         var selectedThread = _threadSelection.GetSelectedThread();
         if (selectedThread is null)
         {
+            _workspaceContext.RefreshQueuedPromptList();
             _workspaceContext.RefreshChatSelectorsForDraftScope();
             _workspaceContext.UpdatePromptAvailabilityUi();
             threadBodySplitter.First = WelcomePaneFactory.Build(_threadSelection.GetSelectedProject(), _threadSelection.GlobalScopeSelected);
@@ -253,6 +254,7 @@ internal sealed class ShellWorkspaceCoordinator
         }
 
         var tab = _threadSelection.EnsureThreadTab(selectedThread);
+        _workspaceContext.RefreshQueuedPromptList();
         _workspaceContext.RefreshChatSelectorsForThread(tab);
         _workspaceContext.UpdatePromptAvailabilityUi();
         threadBodySplitter.First = tab.Timeline.Flow;

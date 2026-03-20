@@ -11,6 +11,7 @@ namespace CodeAlta.Presentation.Prompting
         bool CanDelegate,
         bool CanAbort,
         bool CanCloseTab,
+        bool CanClearQueue,
         string? UnavailableStatusMessage,
         StatusTone UnavailableStatusTone)
     {
@@ -28,7 +29,8 @@ namespace CodeAlta.Presentation.Prompting
             ChatBackendAvailability availability,
             bool anyBackendReady,
             bool draftTabOpen,
-            string? selectedThreadId)
+            string? selectedThreadId,
+            bool selectedThreadHasQueuedPrompts)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(backendDisplayName);
 
@@ -52,6 +54,7 @@ namespace CodeAlta.Presentation.Prompting
                 CanDelegate: hasThread && !isUnavailable,
                 CanAbort: hasThread,
                 CanCloseTab: hasThread || (draftTabOpen && string.IsNullOrWhiteSpace(selectedThreadId)),
+                CanClearQueue: hasThread && selectedThreadHasQueuedPrompts,
                 UnavailableStatusMessage: unavailableStatusMessage,
                 UnavailableStatusTone: unavailableStatusTone);
         }

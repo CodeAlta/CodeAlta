@@ -31,4 +31,7 @@ public sealed partial class PromptComposerViewModel
 
     [Bindable]
     public partial bool CanCloseTab { get; set; }
+
+    [Bindable]
+    public partial bool CanClearQueue { get; set; }
 }
