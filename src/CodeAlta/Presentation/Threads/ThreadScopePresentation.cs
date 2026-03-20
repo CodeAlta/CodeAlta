@@ -1,5 +1,7 @@
 using CodeAlta.Catalog;
 
+namespace CodeAlta.Presentation.Threads;
+
 internal static class ThreadScopePresentation
 {
     public static string BuildScopeSummary(

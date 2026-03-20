@@ -1,5 +1,7 @@
 using CodeAlta.Agent;
 
+namespace CodeAlta.Models;
+
 internal sealed class ThreadSessionState
 {
     public AgentBackendId BackendId { get; set; } = AgentBackendIds.Codex;

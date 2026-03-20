@@ -1,3 +1,5 @@
+namespace CodeAlta.App;
+
 internal interface IUiDispatcher
 {
     bool CheckAccess();

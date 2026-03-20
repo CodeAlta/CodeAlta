@@ -1,5 +1,9 @@
+using CodeAlta.App;
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Sidebar;
 using CodeAlta.ViewModels;
+
+namespace CodeAlta.Views;
 
 internal sealed class SidebarCoordinator
 {

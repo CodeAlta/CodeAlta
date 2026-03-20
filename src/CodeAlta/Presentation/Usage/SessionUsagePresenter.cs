@@ -1,12 +1,15 @@
-using System.Globalization;
 using CodeAlta.Agent;
+using CodeAlta.Presentation.Formatting;
 using CodeAlta.ViewModels;
+using CodeAlta.Views;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Styling;
+
+namespace CodeAlta.Presentation.Usage;
 
 internal sealed class SessionUsagePresenter
 {

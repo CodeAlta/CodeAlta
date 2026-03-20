@@ -1,6 +1,10 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Presentation.Shell;
+
+namespace CodeAlta.App;
 
 internal sealed class ThreadCreationCoordinator
 {

@@ -1,215 +1,217 @@
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
-using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 
-internal sealed record PendingChatMessage(
-    DocumentFlowItem UserItem,
-    DocumentFlowItem AssistantItem,
-    MarkdownControl StreamingMarkdown,
-    Markup TimestampText);
-
-internal enum ChatBackendAvailability
+namespace CodeAlta.Models
 {
-    Unknown,
-    Connecting,
-    Ready,
-    Unsupported,
-    Failed,
-}
+    internal sealed record PendingChatMessage(
+        DocumentFlowItem UserItem,
+        DocumentFlowItem AssistantItem,
+        MarkdownControl StreamingMarkdown,
+        Markup TimestampText);
 
-internal enum ChatTimelineTone
-{
-    User,
-    Assistant,
-    Reasoning,
-    Activity,
-    Notice,
-    Interaction,
-}
+    internal enum ChatBackendAvailability
+    {
+        Unknown,
+        Connecting,
+        Ready,
+        Unsupported,
+        Failed,
+    }
 
-internal sealed record ChatBackendOption(AgentBackendId BackendId, string Label)
-{
-    public override string ToString() => Label;
-}
+    internal enum ChatTimelineTone
+    {
+        User,
+        Assistant,
+        Reasoning,
+        Activity,
+        Notice,
+        Interaction,
+    }
 
-internal sealed record ChatModelOption(string? ModelId, string Label)
-{
-    public override string ToString() => Label;
-}
+    internal sealed record ChatBackendOption(AgentBackendId BackendId, string Label)
+    {
+        public override string ToString() => Label;
+    }
 
-internal sealed record ChatReasoningOption(AgentReasoningEffort? Effort, string Label)
-{
-    public override string ToString() => Label;
-}
+    internal sealed record ChatModelOption(string? ModelId, string Label)
+    {
+        public override string ToString() => Label;
+    }
 
-internal sealed record ChatMarkdownEntry(DocumentFlowItem Item, MarkdownControl Markdown, Markup TimestampText, Markup HeaderText);
+    internal sealed record ChatReasoningOption(AgentReasoningEffort? Effort, string Label)
+    {
+        public override string ToString() => Label;
+    }
 
-internal sealed class ChatBackendState(AgentBackendId backendId, string displayName)
-{
-    public AgentBackendId BackendId { get; } = backendId;
+    internal sealed record ChatMarkdownEntry(DocumentFlowItem Item, MarkdownControl Markdown, Markup TimestampText, Markup HeaderText);
 
-    public string DisplayName { get; } = displayName;
+    internal sealed class ChatBackendState(AgentBackendId backendId, string displayName)
+    {
+        public AgentBackendId BackendId { get; } = backendId;
 
-    public ChatBackendAvailability Availability { get; set; }
+        public string DisplayName { get; } = displayName;
 
-    public string StatusMessage { get; set; } = "Not initialized.";
+        public ChatBackendAvailability Availability { get; set; }
 
-    public List<AgentModelInfo> Models { get; } = [];
+        public string StatusMessage { get; set; } = "Not initialized.";
 
-    public string? SelectedModelId { get; set; }
+        public List<AgentModelInfo> Models { get; } = [];
 
-    public AgentReasoningEffort? SelectedReasoningEffort { get; set; }
+        public string? SelectedModelId { get; set; }
 
-    public string? DraftScopeKey { get; set; }
-}
+        public AgentReasoningEffort? SelectedReasoningEffort { get; set; }
 
-internal sealed class ChatContentState(
-    DocumentFlowItem item,
-    MarkdownControl markdown,
-    Markup timestampText,
-    Markup headerText,
-    StringBuilder buffer,
-    AgentContentKind kind)
-{
-    public DocumentFlowItem Item { get; } = item;
+        public string? DraftScopeKey { get; set; }
+    }
 
-    public MarkdownControl Markdown { get; } = markdown;
+    internal sealed class ChatContentState(
+        DocumentFlowItem item,
+        MarkdownControl markdown,
+        Markup timestampText,
+        Markup headerText,
+        StringBuilder buffer,
+        AgentContentKind kind)
+    {
+        public DocumentFlowItem Item { get; } = item;
 
-    public Markup TimestampText { get; } = timestampText;
+        public MarkdownControl Markdown { get; } = markdown;
 
-    public Markup HeaderText { get; } = headerText;
+        public Markup TimestampText { get; } = timestampText;
 
-    public StringBuilder Buffer { get; } = buffer;
+        public Markup HeaderText { get; } = headerText;
 
-    public AgentContentKind Kind { get; } = kind;
-}
+        public StringBuilder Buffer { get; } = buffer;
 
-internal sealed class PendingAssistantState(DocumentFlowItem item, MarkdownControl markdown, Markup timestampText, Markup headerText)
-{
-    public DocumentFlowItem Item { get; } = item;
+        public AgentContentKind Kind { get; } = kind;
+    }
 
-    public MarkdownControl Markdown { get; } = markdown;
+    internal sealed class PendingAssistantState(DocumentFlowItem item, MarkdownControl markdown, Markup timestampText, Markup headerText)
+    {
+        public DocumentFlowItem Item { get; } = item;
 
-    public Markup TimestampText { get; } = timestampText;
+        public MarkdownControl Markdown { get; } = markdown;
 
-    public Markup HeaderText { get; } = headerText;
+        public Markup TimestampText { get; } = timestampText;
 
-    public StringBuilder Buffer { get; } = new();
+        public Markup HeaderText { get; } = headerText;
 
-    public string? ContentId { get; set; }
-}
+        public StringBuilder Buffer { get; } = new();
 
-internal sealed class ChatStatusState(DocumentFlowItem item, MarkdownControl markdown, Markup timestampText)
-{
-    public DocumentFlowItem Item { get; } = item;
+        public string? ContentId { get; set; }
+    }
 
-    public MarkdownControl Markdown { get; } = markdown;
+    internal sealed class ChatStatusState(DocumentFlowItem item, MarkdownControl markdown, Markup timestampText)
+    {
+        public DocumentFlowItem Item { get; } = item;
 
-    public Markup TimestampText { get; } = timestampText;
+        public MarkdownControl Markdown { get; } = markdown;
 
-    public string BaseMarkdown { get; set; } = string.Empty;
+        public Markup TimestampText { get; } = timestampText;
 
-    public string? StatusMarkdown { get; set; }
+        public string BaseMarkdown { get; set; } = string.Empty;
 
-    public string MarkdownValue =>
-        string.IsNullOrWhiteSpace(StatusMarkdown)
-            ? BaseMarkdown
-            : $"{BaseMarkdown}\n\n{StatusMarkdown}";
-}
+        public string? StatusMarkdown { get; set; }
 
-internal sealed class TruncatedHistoryState(DocumentFlowItem item, Rule rule, int omittedMessageCount)
-{
-    public DocumentFlowItem Item { get; } = item;
+        public string MarkdownValue =>
+            string.IsNullOrWhiteSpace(StatusMarkdown)
+                ? BaseMarkdown
+                : $"{BaseMarkdown}\n\n{StatusMarkdown}";
+    }
 
-    public Rule Rule { get; } = rule;
+    internal sealed class TruncatedHistoryState(DocumentFlowItem item, Rule rule, int omittedMessageCount)
+    {
+        public DocumentFlowItem Item { get; } = item;
 
-    public int OmittedMessageCount { get; } = omittedMessageCount;
+        public Rule Rule { get; } = rule;
 
-    public bool CanLoad { get; set; } = true;
-}
+        public int OmittedMessageCount { get; } = omittedMessageCount;
 
-internal sealed record ThreadHistoryLoadPlan(IReadOnlyList<AgentEvent> EventsToRender, int OmittedMessageCount);
+        public bool CanLoad { get; set; } = true;
+    }
 
-internal enum ToolCallDisplayStatus
-{
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Canceled,
-}
+    internal sealed record ThreadHistoryLoadPlan(IReadOnlyList<AgentEvent> EventsToRender, int OmittedMessageCount);
 
-internal sealed class ToolCallEntryState(string toolCallId, Button button, Markup summaryText)
-{
-    public string ToolCallId { get; } = toolCallId;
+    internal enum ToolCallDisplayStatus
+    {
+        Pending,
+        Running,
+        Completed,
+        Failed,
+        Canceled,
+    }
 
-    public Button Button { get; } = button;
+    internal sealed class ToolCallEntryState(string toolCallId, Button button, Markup summaryText)
+    {
+        public string ToolCallId { get; } = toolCallId;
 
-    public Markup SummaryText { get; } = summaryText;
+        public Button Button { get; } = button;
 
-    public ToolCallGroupState? Group { get; set; }
+        public Markup SummaryText { get; } = summaryText;
 
-    public AgentActivityKind ActivityKind { get; set; } = AgentActivityKind.ToolCall;
+        public ToolCallGroupState? Group { get; set; }
 
-    public ToolCallDisplayStatus Status { get; set; } = ToolCallDisplayStatus.Pending;
+        public AgentActivityKind ActivityKind { get; set; } = AgentActivityKind.ToolCall;
 
-    public string DisplayName { get; set; } = "Tool";
+        public ToolCallDisplayStatus Status { get; set; } = ToolCallDisplayStatus.Pending;
 
-    public string? ArgumentPreview { get; set; }
+        public string DisplayName { get; set; } = "Tool";
 
-    public string? OutputPreview { get; set; }
+        public string? ArgumentPreview { get; set; }
 
-    public string? ParentToolCallId { get; set; }
+        public string? OutputPreview { get; set; }
 
-    public string? CommandText { get; set; }
+        public string? ParentToolCallId { get; set; }
 
-    public string? ArgumentText { get; set; }
+        public string? CommandText { get; set; }
 
-    public string? StatusMessage { get; set; }
+        public string? ArgumentText { get; set; }
 
-    public JsonElement? Details { get; set; }
+        public string? StatusMessage { get; set; }
 
-    public StringBuilder OutputBuffer { get; } = new();
+        public JsonElement? Details { get; set; }
 
-    public int OutputLineCount { get; set; }
+        public StringBuilder OutputBuffer { get; } = new();
 
-    public int OutputByteCount { get; set; }
+        public int OutputLineCount { get; set; }
 
-    public DateTimeOffset FirstSeenAt { get; set; }
+        public int OutputByteCount { get; set; }
 
-    public DateTimeOffset LastUpdatedAt { get; set; }
+        public DateTimeOffset FirstSeenAt { get; set; }
 
-    public DateTimeOffset? CompletedAt { get; set; }
+        public DateTimeOffset LastUpdatedAt { get; set; }
 
-    public Dialog? DetailDialog { get; set; }
+        public DateTimeOffset? CompletedAt { get; set; }
 
-    public MarkdownControl? DetailMetadata { get; set; }
+        public Dialog? DetailDialog { get; set; }
 
-    public LogControl? DetailLog { get; set; }
+        public MarkdownControl? DetailMetadata { get; set; }
 
-    public Markup? DetailStatsText { get; set; }
-}
+        public LogControl? DetailLog { get; set; }
 
-internal sealed class ToolCallGroupState(
-    DocumentFlowItem item,
-    WrapHStack itemsHost,
-    Markup headerText,
-    Markup summaryText,
-    Markup timestampText)
-{
-    public DocumentFlowItem Item { get; } = item;
+        public Markup? DetailStatsText { get; set; }
+    }
 
-    public WrapHStack ItemsHost { get; } = itemsHost;
+    internal sealed class ToolCallGroupState(
+        DocumentFlowItem item,
+        WrapHStack itemsHost,
+        Markup headerText,
+        Markup summaryText,
+        Markup timestampText)
+    {
+        public DocumentFlowItem Item { get; } = item;
 
-    public Markup HeaderText { get; } = headerText;
+        public WrapHStack ItemsHost { get; } = itemsHost;
 
-    public Markup SummaryText { get; } = summaryText;
+        public Markup HeaderText { get; } = headerText;
 
-    public Markup TimestampText { get; } = timestampText;
+        public Markup SummaryText { get; } = summaryText;
 
-    public Dictionary<string, ToolCallEntryState> ToolCalls { get; } = new(StringComparer.Ordinal);
+        public Markup TimestampText { get; } = timestampText;
 
-    public DateTimeOffset LastUpdatedAt { get; set; }
+        public Dictionary<string, ToolCallEntryState> ToolCalls { get; } = new(StringComparer.Ordinal);
+
+        public DateTimeOffset LastUpdatedAt { get; set; }
+    }
 }

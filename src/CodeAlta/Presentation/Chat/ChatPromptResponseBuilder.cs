@@ -1,5 +1,7 @@
 using CodeAlta.Agent;
 
+namespace CodeAlta.Presentation.Chat;
+
 internal static class ChatPromptResponseBuilder
 {
     public static AgentUserInputResponse CreateResponse(AgentUserInputRequest request, bool autoApprove)

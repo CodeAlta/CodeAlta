@@ -1,6 +1,8 @@
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
 
+namespace CodeAlta.App;
+
 internal sealed class RecoverableThreadSource : IRecoverableThreadSource
 {
     private readonly WorkThreadRuntimeService _runtimeService;

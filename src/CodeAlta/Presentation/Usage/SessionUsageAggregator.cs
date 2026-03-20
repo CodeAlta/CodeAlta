@@ -1,4 +1,7 @@
 using CodeAlta.Agent;
+using CodeAlta.Presentation.Formatting;
+
+namespace CodeAlta.Presentation.Usage;
 
 internal static class SessionUsageAggregator
 {

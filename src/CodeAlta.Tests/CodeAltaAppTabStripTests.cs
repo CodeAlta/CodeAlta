@@ -1,4 +1,8 @@
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
+using CodeAlta.Presentation.Tabs;
+using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Tests;

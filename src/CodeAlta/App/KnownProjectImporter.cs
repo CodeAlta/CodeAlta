@@ -3,6 +3,8 @@ using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
 using XenoAtom.Logging;
 
+namespace CodeAlta.App;
+
 internal sealed class KnownProjectImporter : IKnownProjectImporter
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.App");

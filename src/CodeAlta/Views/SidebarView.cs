@@ -1,8 +1,11 @@
+using CodeAlta.Presentation.Sidebar;
+using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Layout;
+
+namespace CodeAlta.Views;
 
 internal sealed class SidebarView
 {
@@ -26,25 +29,25 @@ internal sealed class SidebarView
             .VerticalScrollEnabled(true);
 
         var footer = new VStack(
-            [
-                new TextBlock("Thread Title (optional)"),
-                new TextBox().Text(viewModel.Bind.DraftThreadTitle),
-                new Button(new TextBlock("Refresh Catalog")).Click(refreshCatalog),
-            ])
+        [
+            new TextBlock("Thread Title (optional)"),
+            new TextBox().Text(viewModel.Bind.DraftThreadTitle),
+            new Button(new TextBlock("Refresh Catalog")).Click(refreshCatalog),
+        ])
         {
             Spacing = 1,
         };
 
         var contentGrid = new Grid
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-        }
-        .Rows(
-            new RowDefinition { Height = GridLength.Star(1) },
-            new RowDefinition { Height = GridLength.Auto })
-        .Columns(
-            new ColumnDefinition { Width = GridLength.Star(1) });
+            {
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Stretch,
+            }
+            .Rows(
+                new RowDefinition { Height = GridLength.Star(1) },
+                new RowDefinition { Height = GridLength.Auto })
+            .Columns(
+                new ColumnDefinition { Width = GridLength.Star(1) });
         contentGrid.Cell(treeHost, 0, 0);
         contentGrid.Cell(footer, 1, 0);
 

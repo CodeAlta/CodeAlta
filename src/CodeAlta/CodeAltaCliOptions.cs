@@ -1,3 +1,5 @@
+namespace CodeAlta;
+
 internal sealed class CodeAltaCliOptions
 {
     private CodeAltaCliOptions(bool testMode, TimeSpan? testDuration)

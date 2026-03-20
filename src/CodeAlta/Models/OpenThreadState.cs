@@ -1,6 +1,9 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Timeline;
 using CodeAlta.ViewModels;
+
+namespace CodeAlta.Models;
 
 internal sealed class OpenThreadState
 {

@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
+using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
-using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
@@ -8,9 +10,10 @@ using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
-using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Text;
+
+namespace CodeAlta.Views;
 
 internal sealed class ThreadWorkspaceView
 {
@@ -108,40 +111,40 @@ internal sealed class ThreadWorkspaceView
         };
 
         var statusLine = new HStack(
-            [
-                statusPrefix,
-                new TextBlock
+        [
+            statusPrefix,
+            new TextBlock
                 {
                     Wrap = true,
                     IsSelectable = false,
                 }.Text(() => shellViewModel.StatusText)
-                    .Style(() => StatusVisualFormatter.BuildStatusTextStyle(shellViewModel.StatusText, shellViewModel.StatusBusy, shellViewModel.StatusTone)),
-            ])
+                .Style(() => StatusVisualFormatter.BuildStatusTextStyle(shellViewModel.StatusText, shellViewModel.StatusBusy, shellViewModel.StatusTone)),
+        ])
         {
             Spacing = 1,
             HorizontalAlignment = Align.Stretch,
         };
 
         var selectionControls = new HStack(
-            [
-                SendPromptButton,
-                ChatBackendSelect,
-                ChatModelSelect,
-                ChatReasoningSelect,
-                ChatAutoScrollCheckBox,
-            ])
+        [
+            SendPromptButton,
+            ChatBackendSelect,
+            ChatModelSelect,
+            ChatReasoningSelect,
+            ChatAutoScrollCheckBox,
+        ])
         {
             Spacing = 2,
         };
 
         var selectionRight = new HStack(
-            [
-                new Markup(() => workspaceViewModel.BackendStatusMarkup)
-                {
-                    Wrap = false,
-                },
-                usageIndicator,
-            ])
+        [
+            new Markup(() => workspaceViewModel.BackendStatusMarkup)
+            {
+                Wrap = false,
+            },
+            usageIndicator,
+        ])
         {
             Spacing = 2,
         };
@@ -167,15 +170,15 @@ internal sealed class ThreadWorkspaceView
         };
 
         var threadPaneLayout = new Grid
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-        }
-        .Rows(
-            new RowDefinition { Height = GridLength.Auto },
-            new RowDefinition { Height = GridLength.Star(1) })
-        .Columns(
-            new ColumnDefinition { Width = GridLength.Star(1) });
+            {
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Stretch,
+            }
+            .Rows(
+                new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = GridLength.Star(1) })
+            .Columns(
+                new ColumnDefinition { Width = GridLength.Star(1) });
         threadPaneLayout.Cell(ThreadTabControl.Stretch(), 0, 0);
         threadPaneLayout.Cell(ThreadBodySplitter, 1, 0);
 

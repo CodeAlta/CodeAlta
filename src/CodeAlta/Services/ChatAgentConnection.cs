@@ -4,6 +4,8 @@ using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Persistence;
 using XenoAtom.Logging;
 
+namespace CodeAlta.Services;
+
 internal sealed class ChatAgentConnection : IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.ChatAgentConnection");

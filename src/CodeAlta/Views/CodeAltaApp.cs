@@ -1,14 +1,21 @@
 using CodeAlta.Agent;
+using CodeAlta.App;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Presentation.Chat;
+using CodeAlta.Presentation.Sidebar;
+using CodeAlta.Presentation.Tabs;
+using CodeAlta.Presentation.Usage;
+using CodeAlta.Presentation.Workspace;
 using CodeAlta.ViewModels;
-using XenoAtom.Ansi;
 using XenoAtom.Logging;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Threading;
+
+namespace CodeAlta.Views;
 
 internal sealed class CodeAltaApp : IAsyncDisposable
 {

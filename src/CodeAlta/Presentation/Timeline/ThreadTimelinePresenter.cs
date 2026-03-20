@@ -1,8 +1,14 @@
 using System.Text;
 using CodeAlta.Agent;
+using CodeAlta.App;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Formatting;
+using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
+
+namespace CodeAlta.Presentation.Timeline;
 
 internal sealed class ThreadTimelinePresenter
 {

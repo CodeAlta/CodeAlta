@@ -1,5 +1,8 @@
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+
+namespace CodeAlta.App;
 
 internal interface ICodeAltaShell
 {

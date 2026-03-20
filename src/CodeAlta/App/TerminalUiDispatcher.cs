@@ -1,5 +1,7 @@
 using XenoAtom.Terminal.UI.Threading;
 
+namespace CodeAlta.App;
+
 internal sealed class TerminalUiDispatcher : IUiDispatcher
 {
     private readonly Dispatcher _dispatcher;

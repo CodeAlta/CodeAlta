@@ -1,5 +1,7 @@
 using XenoAtom.Terminal.UI.Controls;
 
+namespace CodeAlta.Views;
+
 internal static class FlowScrollExtensions
 {
     internal static void ScrollToTailIfEnabled(this DocumentFlow flow, bool autoScroll)

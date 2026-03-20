@@ -1,5 +1,9 @@
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Views;
+
+namespace CodeAlta.App;
 
 internal sealed class CodeAltaShellBridge : ICodeAltaShell
 {

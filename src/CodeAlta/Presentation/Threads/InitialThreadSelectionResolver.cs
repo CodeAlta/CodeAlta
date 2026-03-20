@@ -1,4 +1,7 @@
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+
+namespace CodeAlta.Presentation.Threads;
 
 internal static class InitialThreadSelectionResolver
 {

@@ -1,8 +1,13 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
 using CodeAlta.ViewModels;
+using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+
+namespace CodeAlta.App;
 
 internal sealed class ShellWorkspaceCoordinator
 {

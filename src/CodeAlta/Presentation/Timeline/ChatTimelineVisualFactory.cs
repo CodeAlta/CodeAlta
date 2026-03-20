@@ -1,12 +1,16 @@
 using System.Globalization;
 using CodeAlta.Agent;
+using CodeAlta.App;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Styling;
-using XenoAtom.Terminal.UI.Text;
+
+namespace CodeAlta.Presentation.Timeline;
 
 internal static class ChatTimelineVisualFactory
 {

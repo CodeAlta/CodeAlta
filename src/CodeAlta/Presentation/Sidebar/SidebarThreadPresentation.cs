@@ -1,5 +1,8 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Styling;
+
+namespace CodeAlta.Presentation.Sidebar;
 
 internal static class SidebarThreadPresentation
 {

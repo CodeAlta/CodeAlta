@@ -1,4 +1,6 @@
 using CodeAlta.Agent;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
 
 namespace CodeAlta.Tests;
 

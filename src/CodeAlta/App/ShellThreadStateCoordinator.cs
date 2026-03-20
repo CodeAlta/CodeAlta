@@ -1,7 +1,13 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
+using CodeAlta.Presentation.Timeline;
+using CodeAlta.Views;
 using XenoAtom.Logging;
 using XenoAtom.Terminal.UI.Geometry;
+
+namespace CodeAlta.App;
 
 internal sealed class ShellThreadStateCoordinator
 {

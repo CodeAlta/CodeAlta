@@ -1,5 +1,7 @@
 using CodeAlta.Catalog;
 
+namespace CodeAlta.Models;
+
 internal sealed class ShellSelectionState
 {
     public WorkThreadViewState ViewState { get; set; } = new();

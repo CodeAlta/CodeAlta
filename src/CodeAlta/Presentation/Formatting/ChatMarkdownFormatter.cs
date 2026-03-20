@@ -1,8 +1,9 @@
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using XenoAtom.Terminal.UI;
+
+namespace CodeAlta.Presentation.Formatting;
 
 internal static class ChatMarkdownFormatter
 {

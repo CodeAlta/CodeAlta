@@ -1,5 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 
 namespace CodeAlta.Tests;
 

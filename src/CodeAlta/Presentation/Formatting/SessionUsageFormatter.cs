@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 using CodeAlta.Agent;
 
+namespace CodeAlta.Presentation.Formatting;
+
 internal static class SessionUsageFormatter
 {
     public static string BuildIndicatorMarkup(AgentSessionUsage? usage)

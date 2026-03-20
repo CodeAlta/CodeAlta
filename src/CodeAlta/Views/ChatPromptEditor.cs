@@ -1,5 +1,7 @@
 using XenoAtom.Terminal.UI.Controls;
 
+namespace CodeAlta.Views;
+
 internal sealed class ChatPromptEditor : PromptEditor
 {
     private readonly Action<string> _onAccepted;

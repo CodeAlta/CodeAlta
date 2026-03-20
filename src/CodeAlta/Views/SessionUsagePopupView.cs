@@ -1,6 +1,8 @@
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 
+namespace CodeAlta.Views;
+
 internal sealed class SessionUsagePopupView
 {
     private readonly Func<Visual> _buildContent;

@@ -1,7 +1,13 @@
 using CodeAlta.Agent;
+using CodeAlta.App;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Chat;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI.Controls;
+
+namespace CodeAlta.Presentation.Workspace;
 
 internal sealed class ChatSelectorCoordinator
 {
@@ -125,7 +131,7 @@ internal sealed class ChatSelectorCoordinator
             modelSelect.IsEnabled = backendState.Availability == ChatBackendAvailability.Ready;
 
             var selectedModel = backendState.Models.FirstOrDefault(model => string.Equals(model.Id, backendState.SelectedModelId, StringComparison.Ordinal))
-                ?? ChatBackendPresentation.GetSelectedModel(backendState);
+                                ?? ChatBackendPresentation.GetSelectedModel(backendState);
             var reasoningOptions = ChatBackendPresentation.BuildReasoningOptions(selectedModel);
             ChatBackendPresentation.ReplaceSelectItems(reasoningSelect, reasoningOptions);
             reasoningSelect.SelectedIndex = Math.Clamp(
@@ -179,8 +185,8 @@ internal sealed class ChatSelectorCoordinator
             modelSelect.IsEnabled = backendState.Availability == ChatBackendAvailability.Ready;
 
             var selectedModel = backendState.Models.FirstOrDefault(model =>
-                string.Equals(model.Id, tab.ModelId, StringComparison.Ordinal))
-                ?? ChatBackendPresentation.GetSelectedModel(backendState);
+                                    string.Equals(model.Id, tab.ModelId, StringComparison.Ordinal))
+                                ?? ChatBackendPresentation.GetSelectedModel(backendState);
             var reasoningOptions = ChatBackendPresentation.BuildReasoningOptions(selectedModel);
             ChatBackendPresentation.ReplaceSelectItems(reasoningSelect, reasoningOptions);
             reasoningSelect.SelectedIndex = Math.Clamp(

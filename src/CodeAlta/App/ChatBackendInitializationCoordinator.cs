@@ -1,6 +1,10 @@
 using System.ComponentModel;
 using CodeAlta.Agent;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Presentation.Chat;
+
+namespace CodeAlta.App;
 
 internal sealed class ChatBackendInitializationCoordinator
 {

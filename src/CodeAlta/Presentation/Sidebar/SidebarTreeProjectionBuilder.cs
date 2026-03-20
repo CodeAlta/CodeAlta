@@ -1,5 +1,9 @@
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Styling;
+using CodeAlta.Presentation.Threads;
 using XenoAtom.Terminal.UI;
+
+namespace CodeAlta.Presentation.Sidebar;
 
 internal static class SidebarTreeProjectionBuilder
 {

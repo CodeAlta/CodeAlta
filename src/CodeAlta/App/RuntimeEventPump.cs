@@ -1,5 +1,7 @@
 using CodeAlta.Orchestration.Runtime;
 
+namespace CodeAlta.App;
+
 internal sealed class RuntimeEventPump : IAsyncDisposable
 {
     private readonly WorkThreadRuntimeService _runtimeService;

@@ -1,6 +1,9 @@
-using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Views;
 using XenoAtom.Logging;
+
+namespace CodeAlta.App;
 
 internal sealed class CodeAltaShellController : IAsyncDisposable
 {
@@ -148,8 +151,8 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
             if (!_disposeCts.IsCancellationRequested)
             {
                 await UiDispatcher.InvokeAsync(
-                    () =>
-                    {
+                        () =>
+                        {
                             _shell.RefreshCatalogAndThreadWorkspace();
                             _shell.SetReadyStatusForCurrentSelection();
                             _shell.SetInitialized(true);

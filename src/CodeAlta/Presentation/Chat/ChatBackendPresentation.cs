@@ -1,7 +1,10 @@
 using CodeAlta.Agent;
+using CodeAlta.Models;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+
+namespace CodeAlta.Presentation.Chat;
 
 internal static class ChatBackendPresentation
 {

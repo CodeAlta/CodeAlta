@@ -1,12 +1,11 @@
-using System.IO;
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Figlet;
-using XenoAtom.Terminal.UI.Geometry;
-using XenoAtom.Terminal.UI.Layout;
 using XenoAtom.Terminal.UI.Styling;
+
+namespace CodeAlta.Presentation.Shell;
 
 internal static class WelcomePaneFactory
 {
@@ -17,43 +16,43 @@ internal static class WelcomePaneFactory
         var guidanceLines = ShellTextFormatter.BuildWelcomeGuidanceLines(selectedProject, globalScopeSelected);
         return new Center(
             new VStack(
-                [
-                    BuildWelcomeLogo(),
-                    new TextBlock(ShellTextFormatter.BuildWelcomeSubtitle(selectedProject, globalScopeSelected))
+            [
+                BuildWelcomeLogo(),
+                new TextBlock(ShellTextFormatter.BuildWelcomeSubtitle(selectedProject, globalScopeSelected))
                     {
                         Wrap = true,
                         IsSelectable = false,
                         TextAlignment = TextAlignment.Center,
                         HorizontalAlignment = Align.Stretch,
                     }
-                        .Style(TextBlockStyle.Default with
-                        {
-                            Foreground = UiPalette.WelcomeSubtitleColor,
-                            TextStyle = TextStyle.Bold,
-                        }),
-                    new TextBlock(guidanceLines[0])
+                    .Style(TextBlockStyle.Default with
+                    {
+                        Foreground = UiPalette.WelcomeSubtitleColor,
+                        TextStyle = TextStyle.Bold,
+                    }),
+                new TextBlock(guidanceLines[0])
                     {
                         Wrap = true,
                         IsSelectable = false,
                         TextAlignment = TextAlignment.Center,
                         HorizontalAlignment = Align.Stretch,
                     }
-                        .Style(TextBlockStyle.Default with
-                        {
-                            Foreground = UiPalette.WelcomeGuidanceColor,
-                        }),
-                    new TextBlock($"{NerdFont.MdArrowRightThinCircleOutline} {guidanceLines[1]}\n{NerdFont.MdTabPlus} {guidanceLines[2]}")
+                    .Style(TextBlockStyle.Default with
+                    {
+                        Foreground = UiPalette.WelcomeGuidanceColor,
+                    }),
+                new TextBlock($"{NerdFont.MdArrowRightThinCircleOutline} {guidanceLines[1]}\n{NerdFont.MdTabPlus} {guidanceLines[2]}")
                     {
                         Wrap = true,
                         IsSelectable = false,
                         TextAlignment = TextAlignment.Center,
                         HorizontalAlignment = Align.Stretch,
                     }
-                        .Style(TextBlockStyle.Default with
-                        {
-                            Foreground = UiPalette.WelcomeGuidanceColor,
-                        }),
-                ])
+                    .Style(TextBlockStyle.Default with
+                    {
+                        Foreground = UiPalette.WelcomeGuidanceColor,
+                    }),
+            ])
             {
                 Spacing = 1,
                 HorizontalAlignment = Align.Center,
@@ -92,19 +91,19 @@ internal static class WelcomePaneFactory
         var font = GetWelcomeFigletFont();
         return new Center(
             new HStack(
-                [
-                    new TextFiglet("Code")
-                        .Font(font)
-                        .LetterSpacing(1)
-                        .TrimTrailingSpaces(true)
-                        .TextAlignment(TextAlignment.Left),
-                    new TextFiglet("Alta")
-                        .Font(font)
-                        .LetterSpacing(1)
-                        .TrimTrailingSpaces(true)
-                        .TextAlignment(TextAlignment.Left)
-                        .Style(BuildWelcomeAltaFigletStyle),
-                ])
+            [
+                new TextFiglet("Code")
+                    .Font(font)
+                    .LetterSpacing(1)
+                    .TrimTrailingSpaces(true)
+                    .TextAlignment(TextAlignment.Left),
+                new TextFiglet("Alta")
+                    .Font(font)
+                    .LetterSpacing(1)
+                    .TrimTrailingSpaces(true)
+                    .TextAlignment(TextAlignment.Left)
+                    .Style(BuildWelcomeAltaFigletStyle),
+            ])
             {
                 Spacing = 2,
                 HorizontalAlignment = Align.Center,

@@ -1,3 +1,7 @@
+using CodeAlta.Models;
+
+namespace CodeAlta.Presentation.Shell;
+
 internal static class SelectionStatusResolver
 {
     public static StatusSnapshot Resolve(

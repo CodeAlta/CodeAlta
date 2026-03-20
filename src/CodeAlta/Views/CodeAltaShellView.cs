@@ -1,8 +1,8 @@
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Layout;
+
+namespace CodeAlta.Views;
 
 internal sealed class CodeAltaShellView
 {
@@ -18,15 +18,15 @@ internal sealed class CodeAltaShellView
         ArgumentNullException.ThrowIfNull(threadCommandBar);
 
         var mainLayout = new Grid
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-        }
-        .Rows(
-            new RowDefinition { Height = GridLength.Star(1) },
-            new RowDefinition { Height = GridLength.Auto })
-        .Columns(
-            new ColumnDefinition { Width = GridLength.Star(1) });
+            {
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Stretch,
+            }
+            .Rows(
+                new RowDefinition { Height = GridLength.Star(1) },
+                new RowDefinition { Height = GridLength.Auto })
+            .Columns(
+                new ColumnDefinition { Width = GridLength.Star(1) });
 
         mainLayout.Cell(
             new HSplitter(sidebar, threadWorkspace)
@@ -40,15 +40,15 @@ internal sealed class CodeAltaShellView
         mainLayout.Cell(threadCommandBar, 1, 0);
 
         var root = new Grid
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-        }
-        .Rows(
-            new RowDefinition { Height = GridLength.Auto },
-            new RowDefinition { Height = GridLength.Star(1) })
-        .Columns(
-            new ColumnDefinition { Width = GridLength.Star(1) });
+            {
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Stretch,
+            }
+            .Rows(
+                new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = GridLength.Star(1) })
+            .Columns(
+                new ColumnDefinition { Width = GridLength.Star(1) });
 
         root.Cell(
             new TextBlock

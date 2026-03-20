@@ -1,4 +1,7 @@
 using CodeAlta.Agent;
+using CodeAlta.App;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Timeline;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 

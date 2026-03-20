@@ -1,6 +1,12 @@
+using CodeAlta.App;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
+using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+
+namespace CodeAlta.Presentation.Tabs;
 
 internal sealed class ThreadTabStripCoordinator
 {
@@ -236,10 +242,10 @@ internal sealed class ThreadTabStripCoordinator
             {
                 var current = tab.Thread;
                 return new HStack(
-                    [
-                        ThreadTabVisualFactory.CreateIndicator(tab.ViewModel.StatusBusy, tab.ViewModel.StatusTone),
-                        ThreadTabVisualFactory.CreateTitle(ThreadTabVisualFactory.CompactTitle(tab.ViewModel.Title)),
-                    ])
+                [
+                    ThreadTabVisualFactory.CreateIndicator(tab.ViewModel.StatusBusy, tab.ViewModel.StatusTone),
+                    ThreadTabVisualFactory.CreateTitle(ThreadTabVisualFactory.CompactTitle(tab.ViewModel.Title)),
+                ])
                 {
                     Spacing = 1,
                 }.Tooltip(current.Title);
@@ -276,10 +282,10 @@ internal sealed class ThreadTabStripCoordinator
 
         var header = _createComputedVisual(
             () => new HStack(
-                [
-                    ThreadTabVisualFactory.CreateIndicator(isBusy: false, StatusTone.Info),
-                    ThreadTabVisualFactory.CreateTitle(ShellTextFormatter.BuildDraftTabTitle(_getSelectedProject(), _getGlobalScopeSelected())),
-                ])
+            [
+                ThreadTabVisualFactory.CreateIndicator(isBusy: false, StatusTone.Info),
+                ThreadTabVisualFactory.CreateTitle(ShellTextFormatter.BuildDraftTabTitle(_getSelectedProject(), _getGlobalScopeSelected())),
+            ])
             {
                 Spacing = 1,
             });

@@ -1,6 +1,8 @@
 using XenoAtom.Logging;
 using XenoAtom.Logging.Writers;
 
+namespace CodeAlta;
+
 internal static class CodeAltaLogging
 {
     internal const string LogFileName = "codealta.log";

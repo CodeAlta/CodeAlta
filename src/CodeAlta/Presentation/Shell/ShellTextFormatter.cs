@@ -1,4 +1,7 @@
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Tabs;
+
+namespace CodeAlta.Presentation.Shell;
 
 internal static class ShellTextFormatter
 {

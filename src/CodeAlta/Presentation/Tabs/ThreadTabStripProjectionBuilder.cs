@@ -1,3 +1,5 @@
+namespace CodeAlta.Presentation.Tabs;
+
 internal static class ThreadTabStripProjectionBuilder
 {
     public static ThreadTabStripProjection Build(

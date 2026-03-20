@@ -1,8 +1,9 @@
-using XenoAtom.Ansi;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Styling;
+
+namespace CodeAlta.Presentation.Shell;
 
 internal static class StatusVisualFormatter
 {

@@ -1,6 +1,10 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Chat;
 using XenoAtom.Logging;
+
+namespace CodeAlta.App;
 
 internal sealed class ChatBackendPreferenceCoordinator
 {

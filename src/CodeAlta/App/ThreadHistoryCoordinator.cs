@@ -1,8 +1,14 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Presentation.Formatting;
+using CodeAlta.Presentation.Timeline;
+using CodeAlta.Views;
 using XenoAtom.Logging;
 using XenoAtom.Terminal.UI.Controls;
+
+namespace CodeAlta.App;
 
 internal sealed class ThreadHistoryCoordinator
 {

@@ -1,5 +1,7 @@
 using CodeAlta.Catalog;
 
+namespace CodeAlta.App;
+
 internal sealed class ProjectCatalogLoader : IProjectCatalogLoader
 {
     private readonly ProjectCatalog _projectCatalog;

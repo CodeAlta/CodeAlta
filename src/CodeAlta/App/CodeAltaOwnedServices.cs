@@ -7,6 +7,8 @@ using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Persistence;
 using XenoAtom.Logging;
 
+namespace CodeAlta.App;
+
 internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 {
     private readonly bool _ownsLogging;

@@ -1,3 +1,7 @@
+using CodeAlta.Models;
+
+namespace CodeAlta.ViewModels;
+
 internal sealed class ThreadTabViewModel
 {
     public string ThreadId { get; set; } = string.Empty;

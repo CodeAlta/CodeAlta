@@ -1,9 +1,12 @@
 using System.Globalization;
-using System.IO;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Models;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Ansi;
+
+namespace CodeAlta.Presentation.Formatting;
 
 internal static class ToolCallSummaryFormatter
 {

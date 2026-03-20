@@ -1,7 +1,9 @@
-using System.IO;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Presentation.Formatting;
+
+namespace CodeAlta.Presentation.Timeline;
 
 internal static class ToolCallEventInterpreter
 {
@@ -51,7 +53,7 @@ internal static class ToolCallEventInterpreter
         if (!string.IsNullOrWhiteSpace(activity.Name))
         {
             return activity.Kind == AgentActivityKind.Subagent && activity.Details is { } subagentDetails &&
-                ToolCallSummaryFormatter.TryGetStringProperty(subagentDetails, "agentName", out var agentName)
+                   ToolCallSummaryFormatter.TryGetStringProperty(subagentDetails, "agentName", out var agentName)
                 ? agentName!
                 : activity.Name!;
         }

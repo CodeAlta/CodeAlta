@@ -1,3 +1,4 @@
+using CodeAlta.Models;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.ViewModels;

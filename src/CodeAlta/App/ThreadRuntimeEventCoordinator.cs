@@ -1,7 +1,14 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Presentation.Formatting;
+using CodeAlta.Presentation.Shell;
+using CodeAlta.Presentation.Usage;
+using CodeAlta.Views;
 using XenoAtom.Logging;
+
+namespace CodeAlta.App;
 
 internal sealed class ThreadRuntimeEventCoordinator
 {
@@ -310,9 +317,9 @@ internal sealed class ThreadRuntimeEventCoordinator
             AgentSessionUpdateEvent
             {
                 Kind: AgentSessionUpdateKind.Started
-                    or AgentSessionUpdateKind.Resumed
-                    or AgentSessionUpdateKind.PlanUpdated
-                    or AgentSessionUpdateKind.CompactionStarted
+                or AgentSessionUpdateKind.Resumed
+                or AgentSessionUpdateKind.PlanUpdated
+                or AgentSessionUpdateKind.CompactionStarted
             } => true,
             _ => false,
         };

@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Orchestration;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Persistence;
+using CodeAlta.Services;
 
 namespace CodeAlta.Tests;
 

@@ -1,7 +1,10 @@
-internal sealed record ThreadTabStripProjection(
-    IReadOnlyList<ThreadTabStripItemProjection> Tabs,
-    string? SelectedTabId);
+namespace CodeAlta.Presentation.Tabs
+{
+    internal sealed record ThreadTabStripProjection(
+        IReadOnlyList<ThreadTabStripItemProjection> Tabs,
+        string? SelectedTabId);
 
-internal sealed record ThreadTabStripItemProjection(
-    string TabId,
-    bool IsDraft);
+    internal sealed record ThreadTabStripItemProjection(
+        string TabId,
+        bool IsDraft);
+}

@@ -1,3 +1,5 @@
+using CodeAlta;
+using CodeAlta.Views;
 using XenoAtom.Logging;
 
 if (!CodeAltaCliOptions.TryParse(args, out var options, out var error))

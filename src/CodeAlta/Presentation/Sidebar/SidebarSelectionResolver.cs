@@ -1,3 +1,5 @@
+namespace CodeAlta.Presentation.Sidebar;
+
 internal static class SidebarSelectionResolver
 {
     public static SidebarSelectionTarget ResolveCurrentTarget(

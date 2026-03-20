@@ -1,6 +1,7 @@
-using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Threading;
+
+namespace CodeAlta.App;
 
 internal sealed class TerminalLoopCoordinator
 {

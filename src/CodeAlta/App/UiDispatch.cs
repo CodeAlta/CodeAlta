@@ -1,5 +1,7 @@
 using XenoAtom.Terminal.UI.Threading;
 
+namespace CodeAlta.App;
+
 internal static class UiDispatch
 {
     public static void Post(IUiDispatcher dispatcher, Action action, bool allowInline = false)

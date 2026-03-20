@@ -1,5 +1,7 @@
 using CodeAlta.Agent;
+using CodeAlta.App;
 using CodeAlta.Catalog;
+using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Tests;

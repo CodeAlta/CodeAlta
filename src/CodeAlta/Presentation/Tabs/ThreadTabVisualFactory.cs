@@ -1,7 +1,11 @@
+using CodeAlta.Models;
+using CodeAlta.Presentation.Shell;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Styling;
+
+namespace CodeAlta.Presentation.Tabs;
 
 internal static class ThreadTabVisualFactory
 {

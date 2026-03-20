@@ -1,6 +1,8 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Presentation.Sidebar;
 using CodeAlta.ViewModels;
+using CodeAlta.Views;
 
 namespace CodeAlta.Tests;
 
