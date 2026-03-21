@@ -4,8 +4,10 @@ using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Views;
@@ -234,6 +236,15 @@ internal static class QueuedPromptListView
             Width = 90,
             Height = 18,
         };
+        dialog.AddCommand(new Command
+        {
+            Id = "QueuedPromptEditorDialog.Cancel",
+            LabelMarkup = "Cancel",
+            DescriptionMarkup = "Close the queued prompt editor.",
+            Gesture = new KeyGesture(TerminalKey.Escape),
+            Importance = CommandImportance.Primary,
+            Execute = _ => dialog?.Close(),
+        });
         dialog.Show();
 
         void SaveQueuedPrompt(string text)
