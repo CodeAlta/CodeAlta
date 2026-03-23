@@ -1632,6 +1632,46 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void ReplaceSelectItems_DoesNotMutateSelectWhenItemsAreUnchanged()
+    {
+        var select = new Select<ChatModelOption>();
+        ChatBackendPresentation.ReplaceSelectItems(
+            select,
+            [new ChatModelOption("gpt-5.4", "GPT-5.4"), new ChatModelOption(null, "(default)")]);
+
+        var versionBefore = select.Items.Version;
+
+        ChatBackendPresentation.ReplaceSelectItems(
+            select,
+            [new ChatModelOption("gpt-5.4", "GPT-5.4"), new ChatModelOption(null, "(default)")]);
+
+        Assert.AreEqual(versionBefore, select.Items.Version);
+        Assert.AreEqual(2, select.Items.Count);
+        CollectionAssert.AreEqual(
+            new[] { new ChatModelOption("gpt-5.4", "GPT-5.4"), new ChatModelOption(null, "(default)") },
+            select.Items.ToArray());
+    }
+
+    [TestMethod]
+    public void ReplaceSelectItems_ReplacesSelectItemsWhenContentChanges()
+    {
+        var select = new Select<ChatReasoningOption>();
+        ChatBackendPresentation.ReplaceSelectItems(
+            select,
+            [new ChatReasoningOption(AgentReasoningEffort.Low, "Low")]);
+
+        var versionBefore = select.Items.Version;
+
+        ChatBackendPresentation.ReplaceSelectItems(
+            select,
+            [new ChatReasoningOption(AgentReasoningEffort.High, "High")]);
+
+        Assert.AreNotEqual(versionBefore, select.Items.Version);
+        Assert.AreEqual(1, select.Items.Count);
+        Assert.AreEqual(new ChatReasoningOption(AgentReasoningEffort.High, "High"), select.Items[0]);
+    }
+
+    [TestMethod]
     public void SessionUsageFormatting_UsesInvariantCulture()
     {
         var previousCulture = CultureInfo.CurrentCulture;

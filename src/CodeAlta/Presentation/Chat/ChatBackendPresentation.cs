@@ -187,6 +187,11 @@ internal static class ChatBackendPresentation
         ArgumentNullException.ThrowIfNull(select);
         ArgumentNullException.ThrowIfNull(items);
 
+        if (HasSameItems(select.Items, items))
+        {
+            return;
+        }
+
         select.Items.Clear();
         foreach (var item in items)
         {
@@ -222,5 +227,27 @@ internal static class ChatBackendPresentation
         }
 
         return builder.ToString();
+    }
+
+    private static bool HasSameItems<T>(IReadOnlyList<T> currentItems, IReadOnlyList<T> newItems)
+    {
+        ArgumentNullException.ThrowIfNull(currentItems);
+        ArgumentNullException.ThrowIfNull(newItems);
+
+        if (currentItems.Count != newItems.Count)
+        {
+            return false;
+        }
+
+        var comparer = EqualityComparer<T>.Default;
+        for (var index = 0; index < currentItems.Count; index++)
+        {
+            if (!comparer.Equals(currentItems[index], newItems[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
