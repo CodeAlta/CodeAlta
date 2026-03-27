@@ -250,6 +250,30 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
+    public void ToAgentSessionMetadata_MapsTypedCopilotDetails()
+    {
+        var metadata = CopilotAgentMapper.ToAgentSessionMetadata(
+            new SessionMetadata
+            {
+                SessionId = "session-1",
+                StartTime = DateTime.SpecifyKind(DateTime.Parse("2026-03-20T10:00:00"), DateTimeKind.Utc),
+                ModifiedTime = DateTime.SpecifyKind(DateTime.Parse("2026-03-20T10:05:00"), DateTimeKind.Utc),
+                Summary = "Review parser",
+                IsRemote = true,
+                Context = new SessionContext
+                {
+                    Cwd = @"C:\code\CodeAlta",
+                    GitRoot = @"C:\code\CodeAlta",
+                    Repository = "xoofx/codealta",
+                    Branch = "main",
+                }
+            });
+
+        var details = Assert.IsInstanceOfType<CopilotSessionMetadataDetails>(metadata.Details);
+        Assert.IsTrue(details.IsRemote);
+    }
+
+    [TestMethod]
     public void ToSendMessageOptions_MapsAttachmentsAndPromptFallbacks()
     {
         var options = new AgentSendOptions

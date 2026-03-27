@@ -43,4 +43,11 @@ public sealed class ResponsiveDialogSizeTests
     [TestMethod]
     public void ThreadWorkspaceView_UsesF6ForExpandedPromptShortcut()
         => Assert.AreEqual("F6", ThreadWorkspaceView.ExpandPromptShortcutKey.ToString());
+
+    [TestMethod]
+    public void ThreadWorkspaceView_UsesCtrlTForThreadInfoShortcut()
+    {
+        Assert.AreEqual(TerminalChar.CtrlT, ThreadWorkspaceView.ThreadInfoShortcutGesture.Char);
+        Assert.AreEqual(TerminalModifiers.Ctrl, ThreadWorkspaceView.ThreadInfoShortcutGesture.Modifiers);
+    }
 }

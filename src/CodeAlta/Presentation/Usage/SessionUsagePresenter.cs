@@ -19,7 +19,7 @@ internal sealed class SessionUsagePresenter
     private readonly SessionUsageViewModel _viewModel;
     private readonly Action<string> _copyMarkdown;
     private readonly Func<Func<Visual>, Visual> _createComputedVisual;
-    private SessionUsagePopupView? _popupView;
+    private AnchoredPopupView? _popupView;
 
     public SessionUsagePresenter(
         SessionUsageViewModel viewModel,
@@ -73,7 +73,7 @@ internal sealed class SessionUsagePresenter
 
     private void ShowPopup(Visual anchor)
     {
-        _popupView ??= new SessionUsagePopupView(() => _createComputedVisual(BuildPopupContent));
+        _popupView ??= new AnchoredPopupView(() => _createComputedVisual(BuildPopupContent));
         _popupView.Show(anchor);
     }
 

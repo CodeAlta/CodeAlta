@@ -3,11 +3,11 @@ using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.Presentation.Controls;
 
-internal sealed class SessionUsagePopupView
+internal sealed class AnchoredPopupView
 {
     private readonly Func<Visual> _buildContent;
 
-    public SessionUsagePopupView(Func<Visual> buildContent)
+    public AnchoredPopupView(Func<Visual> buildContent)
     {
         ArgumentNullException.ThrowIfNull(buildContent);
         _buildContent = buildContent;

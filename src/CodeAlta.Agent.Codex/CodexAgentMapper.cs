@@ -66,7 +66,13 @@ internal static class CodexAgentMapper
             UpdatedAt: DateTimeOffset.FromUnixTimeSeconds(thread.UpdatedAt),
             Summary: thread.Preview,
             Context: context,
-            WorkspacePath: thread.Path);
+            WorkspacePath: thread.Path,
+            Details: new CodexSessionMetadataDetails(
+                ModelProvider: string.IsNullOrWhiteSpace(thread.ModelProvider) ? null : thread.ModelProvider,
+                Source: thread.Source.ToString(),
+                Status: thread.Status.ToString(),
+                IsEphemeral: thread.Ephemeral,
+                ThreadName: thread.Name));
     }
 
     public static bool MatchesFilter(CodexThread thread, AgentSessionListFilter? filter)

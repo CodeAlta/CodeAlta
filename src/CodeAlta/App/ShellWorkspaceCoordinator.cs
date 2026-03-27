@@ -14,6 +14,7 @@ namespace CodeAlta.App;
 internal sealed class ShellWorkspaceCoordinator
 {
     private readonly CodeAltaShellViewModel _shellViewModel;
+    private readonly ThreadWorkspaceViewModel _threadWorkspaceViewModel;
     private readonly SessionUsageViewModel _sessionUsageViewModel;
     private readonly Dictionary<string, ChatBackendState> _chatBackendStates;
     private readonly ThreadSelectionContext _threadSelection;
@@ -25,6 +26,7 @@ internal sealed class ShellWorkspaceCoordinator
 
     public ShellWorkspaceCoordinator(
         CodeAltaShellViewModel shellViewModel,
+        ThreadWorkspaceViewModel threadWorkspaceViewModel,
         SessionUsageViewModel sessionUsageViewModel,
         Dictionary<string, ChatBackendState> chatBackendStates,
         ThreadSelectionContext threadSelection,
@@ -33,6 +35,7 @@ internal sealed class ShellWorkspaceCoordinator
         string globalRoot)
     {
         ArgumentNullException.ThrowIfNull(shellViewModel);
+        ArgumentNullException.ThrowIfNull(threadWorkspaceViewModel);
         ArgumentNullException.ThrowIfNull(sessionUsageViewModel);
         ArgumentNullException.ThrowIfNull(chatBackendStates);
         ArgumentNullException.ThrowIfNull(threadSelection);
@@ -41,6 +44,7 @@ internal sealed class ShellWorkspaceCoordinator
         ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
 
         _shellViewModel = shellViewModel;
+        _threadWorkspaceViewModel = threadWorkspaceViewModel;
         _sessionUsageViewModel = sessionUsageViewModel;
         _chatBackendStates = chatBackendStates;
         _threadSelection = threadSelection;
@@ -231,6 +235,7 @@ internal sealed class ShellWorkspaceCoordinator
     private void RefreshThreadWorkspaceCore()
     {
         SyncSelectedSessionUsageViewModel();
+        _threadWorkspaceViewModel.CanShowThreadInfo = _threadSelection.GetSelectedThread() is not null;
         _viewRefreshState.Value++;
         _usageRefreshState.Value++;
         RefreshThreadPaneContent();

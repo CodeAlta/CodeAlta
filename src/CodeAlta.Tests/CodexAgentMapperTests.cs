@@ -61,6 +61,35 @@ public sealed class CodexAgentMapperTests
     }
 
     [TestMethod]
+    public void ToAgentSessionMetadata_MapsTypedCodexDetails()
+    {
+        var thread = new CodeAlta.CodexSdk.Thread
+        {
+            Id = "thread-1",
+            CreatedAt = DateTimeOffset.Parse("2026-03-20T10:00:00+00:00").ToUnixTimeSeconds(),
+            UpdatedAt = DateTimeOffset.Parse("2026-03-20T10:05:00+00:00").ToUnixTimeSeconds(),
+            Cwd = @"C:\code\CodeAlta",
+            Preview = "Investigate startup",
+            Path = @"C:\Users\alexa\.codex\threads\thread-1.jsonl",
+            ModelProvider = "openai",
+            Source = new SessionSource.AppServer(),
+            Status = new ThreadStatus.IdleThreadStatus(),
+            Ephemeral = false,
+            Name = "Startup investigation",
+        };
+
+        var metadata = CodexAgentMapper.ToAgentSessionMetadata(thread);
+
+        Assert.AreEqual(@"C:\Users\alexa\.codex\threads\thread-1.jsonl", metadata.WorkspacePath);
+        var details = Assert.IsInstanceOfType<CodexSessionMetadataDetails>(metadata.Details);
+        Assert.AreEqual("openai", details.ModelProvider);
+        StringAssert.Contains(details.Source!, nameof(SessionSource.AppServer));
+        StringAssert.Contains(details.Status!, nameof(ThreadStatus.IdleThreadStatus));
+        Assert.IsFalse(details.IsEphemeral);
+        Assert.AreEqual("Startup investigation", details.ThreadName);
+    }
+
+    [TestMethod]
     public void TryExtractRepository_ParsesHttpsAndSsh()
     {
         var httpsRepository = CodexAgentMapper.TryExtractRepository("https://github.com/octo-org/octo-repo.git");

@@ -9,6 +9,7 @@ using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.Presentation.Tabs;
+using CodeAlta.Presentation.Threads;
 using CodeAlta.Presentation.Usage;
 using CodeAlta.Presentation.Workspace;
 using CodeAlta.ViewModels;
@@ -65,6 +66,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private CodeAltaShellView? _shellView;
     private ThreadWorkspaceView? _threadWorkspaceView;
     private SessionUsagePresenter? _sessionUsagePresenter;
+    private ThreadInfoPresenter? _threadInfoPresenter;
     private IUiDispatcher? _uiDispatcher;
     private Task<ShellThreadStateCoordinator.InitialCatalogState>? _initialCatalogStateTask;
     private bool _initialCatalogStateResolved;
@@ -250,6 +252,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             VerifyBindableAccess);
         _workspaceCoordinator = new ShellWorkspaceCoordinator(
             _shellViewModel,
+            _threadWorkspaceViewModel,
             _sessionUsageViewModel,
             _chatBackendStates,
             _threadSelectionContext,
@@ -548,6 +551,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _threadWorkspaceViewModel,
             _promptComposerViewModel,
             () => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual),
+            anchor => EnsureThreadInfoPresenter().TogglePopup(anchor),
             () => _ = _threadCommandCoordinator.SendSelectedThreadPromptAsync(steer: false),
             () => _ = _threadCommandCoordinator.SendSelectedThreadPromptAsync(steer: true),
             () => _ = _threadCommandCoordinator.ClearSelectedThreadQueueAsync(),
@@ -599,11 +603,17 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private void RefreshShellChrome()
         => _workspaceCoordinator.RefreshShellChrome();
     internal void RefreshCatalogAndThreadWorkspace()
-        => _workspaceCoordinator.RefreshCatalogAndThreadWorkspace();
+    {
+        _threadInfoPresenter?.InvalidateSelection();
+        _workspaceCoordinator.RefreshCatalogAndThreadWorkspace();
+    }
     private void RefreshHeaderAndThreadWorkspace()
         => _workspaceCoordinator.RefreshHeaderAndThreadWorkspace();
     private void RefreshSelectionAndThreadWorkspace()
-        => _workspaceCoordinator.RefreshSelectionAndThreadWorkspace();
+    {
+        _threadInfoPresenter?.InvalidateSelection();
+        _workspaceCoordinator.RefreshSelectionAndThreadWorkspace();
+    }
     internal void SelectGlobalScope()
         => _threadStateCoordinator.SelectGlobalScope();
     internal void SelectProjectScope(string projectId)
@@ -636,13 +646,17 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         => _workspaceCoordinator.SetReadyStatusForCurrentSelection();
 
     private SessionUsagePresenter EnsureSessionUsagePresenter()
-    {
-        _sessionUsagePresenter ??= new SessionUsagePresenter(
+        => _sessionUsagePresenter ??= PopupPresenterFactory.CreateSessionUsagePresenter(
             _sessionUsageViewModel,
-            markdown => (ThreadPaneLayout?.App)?.Terminal.Clipboard.TrySetText(markdown),
+            () => ThreadPaneLayout?.App,
             build => CreateUsageComputedVisual(build));
-        return _sessionUsagePresenter;
-    }
+
+    private ThreadInfoPresenter EnsureThreadInfoPresenter()
+        => _threadInfoPresenter ??= PopupPresenterFactory.CreateThreadInfoPresenter(
+            () => ThreadPaneLayout?.App,
+            new ThreadInfoService(_agentHub, _threadSelectionContext, _chatBackendStates),
+            DispatchToUi,
+            build => CreateComputedVisual(build));
 
     private T ReadBindableState<T>(Func<T> read)
     {

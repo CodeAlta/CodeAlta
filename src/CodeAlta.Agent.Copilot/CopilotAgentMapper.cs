@@ -57,7 +57,8 @@ internal static class CopilotAgentMapper
             UpdatedAt: new DateTimeOffset(metadata.ModifiedTime),
             Summary: metadata.Summary,
             Context: context,
-            WorkspacePath: null);
+            WorkspacePath: null,
+            Details: new CopilotSessionMetadataDetails(metadata.IsRemote));
     }
 
     public static SessionConfig ToSessionConfig(

@@ -23,12 +23,14 @@ internal sealed class ThreadWorkspaceView
     private Dialog? _expandedPromptDialog;
 
     internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
+    internal static readonly KeyGesture ThreadInfoShortcutGesture = new(TerminalChar.CtrlT, TerminalModifiers.Ctrl);
 
     public ThreadWorkspaceView(
         CodeAltaShellViewModel shellViewModel,
         ThreadWorkspaceViewModel workspaceViewModel,
         PromptComposerViewModel promptComposerViewModel,
         Func<Visual> buildSessionUsageIndicatorVisual,
+        Action<Visual> toggleThreadInfoPopup,
         Action sendPrompt,
         Action steerPrompt,
         Action clearQueuedPrompts,
@@ -52,6 +54,7 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(buildSessionUsageIndicatorVisual);
+        ArgumentNullException.ThrowIfNull(toggleThreadInfoPopup);
         ArgumentNullException.ThrowIfNull(sendPrompt);
         ArgumentNullException.ThrowIfNull(steerPrompt);
         ArgumentNullException.ThrowIfNull(clearQueuedPrompts);
@@ -79,9 +82,18 @@ internal sealed class ThreadWorkspaceView
             .Style(TabControlStyle.NoBorder)
             .SelectedIndex(workspaceViewModel.Bind.SelectedTabIndex);
 
+        Visual? threadInfoButton = null;
         ThreadInput = CreatePromptEditor(
             promptComposerViewModel,
             sendPrompt,
+            () =>
+            {
+                if (threadInfoButton is not null)
+                {
+                    toggleThreadInfoPopup(threadInfoButton);
+                }
+            },
+            () => workspaceViewModel.CanShowThreadInfo,
             () => OpenExpandedPromptDialog(promptComposerViewModel, promptText),
             steerPrompt,
             clearQueuedPrompts,
@@ -103,6 +115,11 @@ internal sealed class ThreadWorkspaceView
                 "Open the current prompt in a large editor window (F6).",
                 () => OpenExpandedPromptDialog(promptComposerViewModel, promptText),
                 button => button.IsEnabled(promptComposerViewModel.Bind.IsEnabled));
+        threadInfoButton = CreateIconButton(
+                $"{NerdFont.MdInformationOutline}",
+                "Show information about the selected thread (Ctrl+T).",
+                () => toggleThreadInfoPopup(threadInfoButton!),
+                button => button.IsEnabled(workspaceViewModel.Bind.CanShowThreadInfo));
         ChatBackendSelect = new Select<ChatBackendOption>()
             .SelectionChanged((_, e) => onChatBackendSelectionChanged(e.NewIndex))
             .MinWidth(14)
@@ -179,6 +196,7 @@ internal sealed class ThreadWorkspaceView
         [
             SendPromptButton,
             ExpandPromptButton,
+            threadInfoButton,
             ChatBackendSelect,
             ChatModelSelect,
             ChatReasoningSelect,
@@ -295,6 +313,8 @@ internal sealed class ThreadWorkspaceView
     private static ChatPromptEditor CreatePromptEditor(
         PromptComposerViewModel promptComposerViewModel,
         Action sendPrompt,
+        Action openThreadInfoPopup,
+        Func<bool> canShowThreadInfo,
         Action openExpandedPromptEditor,
         Action steerPrompt,
         Action clearQueuedPrompts,
@@ -306,6 +326,8 @@ internal sealed class ThreadWorkspaceView
     {
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(sendPrompt);
+        ArgumentNullException.ThrowIfNull(openThreadInfoPopup);
+        ArgumentNullException.ThrowIfNull(canShowThreadInfo);
         ArgumentNullException.ThrowIfNull(openExpandedPromptEditor);
         ArgumentNullException.ThrowIfNull(steerPrompt);
         ArgumentNullException.ThrowIfNull(clearQueuedPrompts);
@@ -316,6 +338,17 @@ internal sealed class ThreadWorkspaceView
         var editor = CreateStyledPromptEditor(_ => sendPrompt(), placeholder: null)
             .Placeholder(promptComposerViewModel.Bind.Placeholder)
             .Text(promptText);
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.Info",
+            LabelMarkup = "Thread Info",
+            DescriptionMarkup = "Show information about the selected thread.",
+            Gesture = ThreadInfoShortcutGesture,
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => openThreadInfoPopup(),
+            CanExecute = _visual => canShowThreadInfo(),
+        });
 
         editor.AddCommand(new Command
         {

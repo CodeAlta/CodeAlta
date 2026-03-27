@@ -38,6 +38,9 @@ public sealed partial class ThreadWorkspaceViewModel
     public partial bool HasQueuedPrompts { get; set; }
 
     [Bindable]
+    public partial bool CanShowThreadInfo { get; set; }
+
+    [Bindable]
     public partial IReadOnlyList<PromptStripItem> PromptStripItems { get; set; }
 
     internal void SetPromptStripItems(IReadOnlyList<PromptStripItem> promptStripItems, bool hasQueuedPrompts)

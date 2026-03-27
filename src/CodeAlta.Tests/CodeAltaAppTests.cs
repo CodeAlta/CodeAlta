@@ -478,7 +478,7 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
-    public void SessionUsagePopupView_ShowAndClose_ToggleOpenStateAndContent()
+    public void AnchoredPopupView_ShowAndClose_ToggleOpenStateAndContent()
     {
         using var session = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(80, 20)), new TerminalOptions { ImplicitStartInput = true }, force: true);
         var anchor = new TextBlock("anchor");
@@ -491,7 +491,7 @@ public sealed class CodeAltaAppTests
                 EnableMouse = true,
                 MouseMode = TerminalMouseMode.Move,
             });
-        var popupView = new SessionUsagePopupView(() => new TextBlock("usage"));
+        var popupView = new AnchoredPopupView(() => new TextBlock("usage"));
 
         InvokeTerminalApp(app, "BeginRun");
         try
