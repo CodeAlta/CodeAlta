@@ -10,7 +10,7 @@ public sealed partial class ThreadWorkspaceViewModel
         BackendStatusMarkup = string.Empty;
         AutoScroll = true;
         SelectedTabIndex = -1;
-        QueuedPrompts = [];
+        PromptStripItems = [];
     }
 
     [Bindable]
@@ -38,13 +38,13 @@ public sealed partial class ThreadWorkspaceViewModel
     public partial bool HasQueuedPrompts { get; set; }
 
     [Bindable]
-    public partial IReadOnlyList<QueuedPromptListItem> QueuedPrompts { get; set; }
+    public partial IReadOnlyList<PromptStripItem> PromptStripItems { get; set; }
 
-    internal void SetQueuedPrompts(IReadOnlyList<QueuedPromptListItem> queuedPrompts)
+    internal void SetPromptStripItems(IReadOnlyList<PromptStripItem> promptStripItems, bool hasQueuedPrompts)
     {
-        ArgumentNullException.ThrowIfNull(queuedPrompts);
+        ArgumentNullException.ThrowIfNull(promptStripItems);
 
-        QueuedPrompts = queuedPrompts;
-        HasQueuedPrompts = queuedPrompts.Count > 0;
+        PromptStripItems = promptStripItems;
+        HasQueuedPrompts = hasQueuedPrompts;
     }
 }

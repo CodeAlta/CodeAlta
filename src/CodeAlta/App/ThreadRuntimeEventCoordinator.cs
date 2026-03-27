@@ -22,6 +22,8 @@ internal sealed class ThreadRuntimeEventCoordinator
     private readonly Action<string, bool, StatusTone> _setShellStatus;
     private readonly Action<OpenThreadState, string, bool, StatusTone> _setThreadStatus;
     private readonly Action<OpenThreadState> _clearThreadStatus;
+    private readonly Func<OpenThreadState, string, bool> _consumePendingSteerForLiveUserContent;
+    private readonly Action<OpenThreadState> _clearPendingSteers;
     private readonly Func<OpenThreadState, CancellationToken, Task> _drainQueuedPromptAsync;
 
     public ThreadRuntimeEventCoordinator(
@@ -34,6 +36,8 @@ internal sealed class ThreadRuntimeEventCoordinator
         Action<string, bool, StatusTone> setShellStatus,
         Action<OpenThreadState, string, bool, StatusTone> setThreadStatus,
         Action<OpenThreadState> clearThreadStatus,
+        Func<OpenThreadState, string, bool> consumePendingSteerForLiveUserContent,
+        Action<OpenThreadState> clearPendingSteers,
         Func<OpenThreadState, CancellationToken, Task> drainQueuedPromptAsync)
     {
         ArgumentNullException.ThrowIfNull(findThread);
@@ -45,6 +49,8 @@ internal sealed class ThreadRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(setShellStatus);
         ArgumentNullException.ThrowIfNull(setThreadStatus);
         ArgumentNullException.ThrowIfNull(clearThreadStatus);
+        ArgumentNullException.ThrowIfNull(consumePendingSteerForLiveUserContent);
+        ArgumentNullException.ThrowIfNull(clearPendingSteers);
         ArgumentNullException.ThrowIfNull(drainQueuedPromptAsync);
 
         _findThread = findThread;
@@ -56,6 +62,8 @@ internal sealed class ThreadRuntimeEventCoordinator
         _setShellStatus = setShellStatus;
         _setThreadStatus = setThreadStatus;
         _clearThreadStatus = clearThreadStatus;
+        _consumePendingSteerForLiveUserContent = consumePendingSteerForLiveUserContent;
+        _clearPendingSteers = clearPendingSteers;
         _drainQueuedPromptAsync = drainQueuedPromptAsync;
     }
 
@@ -130,6 +138,7 @@ internal sealed class ThreadRuntimeEventCoordinator
         switch (@event)
         {
             case AgentContentDeltaEvent delta:
+                ConsumePendingSteerIfMaterialized(tab, delta.Kind, delta.ContentId);
                 if (tab.Timeline.ToolCalls.TryHandleContent(delta))
                 {
                     break;
@@ -144,6 +153,7 @@ internal sealed class ThreadRuntimeEventCoordinator
                 break;
 
             case AgentContentCompletedEvent completed:
+                ConsumePendingSteerIfMaterialized(tab, completed.Kind, completed.ContentId);
                 if (tab.Timeline.ToolCalls.TryHandleContent(completed))
                 {
                     break;
@@ -282,6 +292,7 @@ internal sealed class ThreadRuntimeEventCoordinator
                 if (update.Kind == AgentSessionUpdateKind.Idle)
                 {
                     tab.PendingManualCompaction = false;
+                    _clearPendingSteers(tab);
                     _clearThreadStatus(tab);
                     if (tab.QueuedPrompts.Count > 0)
                     {
@@ -289,6 +300,11 @@ internal sealed class ThreadRuntimeEventCoordinator
                     }
 
                     break;
+                }
+
+                if (update.Kind == AgentSessionUpdateKind.Shutdown)
+                {
+                    _clearPendingSteers(tab);
                 }
 
                 if (!ChatMarkdownFormatter.ShouldDisplaySessionUpdate(update))
@@ -311,11 +327,25 @@ internal sealed class ThreadRuntimeEventCoordinator
 
             case AgentErrorEvent error:
                 tab.PendingManualCompaction = false;
+                _clearPendingSteers(tab);
                 tab.Timeline.RenderError(error.Message, error.Timestamp);
                 thread.LatestSummary = SummarizeContent(error.Message);
                 _setThreadStatus(tab, error.Message, false, StatusTone.Error);
                 break;
         }
+    }
+
+    private void ConsumePendingSteerIfMaterialized(OpenThreadState tab, AgentContentKind kind, string contentId)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentId);
+
+        if (tab.HistoryLoading || kind != AgentContentKind.User)
+        {
+            return;
+        }
+
+        _ = _consumePendingSteerForLiveUserContent(tab, contentId);
     }
 
     public void TryRenderInteraction(OpenThreadState tab, Action action, string context)

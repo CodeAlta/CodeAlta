@@ -121,6 +121,91 @@ public sealed class ThreadRuntimeEventCoordinatorTests
         Assert.IsNull(tab.StatusMessage);
     }
 
+    [TestMethod]
+    public void HandleAgentEvent_RemovesPendingSteerOnFirstLiveUserContentOnly()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.PendingSteers.Add(new PendingSteerPrompt("First steer"));
+        tab.PendingSteers.Add(new PendingSteerPrompt("Second steer"));
+
+        var coordinator = CreateCoordinator(thread, tab);
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentContentDeltaEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentContentKind.User,
+                "user-1",
+                null,
+                "First steer"));
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentContentCompletedEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentContentKind.User,
+                "user-1",
+                null,
+                "First steer"));
+
+        Assert.AreEqual(1, tab.PendingSteers.Count);
+        Assert.AreEqual("Second steer", tab.PendingSteers[0].Text);
+    }
+
+    [TestMethod]
+    public void HandleAgentEvent_DoesNotConsumePendingSteerDuringHistoryReplay()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.HistoryLoading = true;
+        tab.PendingSteers.Add(new PendingSteerPrompt("Pending steer"));
+
+        var coordinator = CreateCoordinator(thread, tab);
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentContentCompletedEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentContentKind.User,
+                "user-1",
+                null,
+                "Pending steer"));
+
+        Assert.AreEqual(1, tab.PendingSteers.Count);
+    }
+
+    [TestMethod]
+    public void HandleAgentEvent_ClearsPendingSteersWhenSessionBecomesIdle()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.PendingSteers.Add(new PendingSteerPrompt("Pending steer"));
+
+        var coordinator = CreateCoordinator(thread, tab);
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentSessionUpdateKind.Idle,
+                "Idle"));
+
+        Assert.AreEqual(0, tab.PendingSteers.Count);
+    }
+
     private static ThreadRuntimeEventCoordinator CreateCoordinator(WorkThreadDescriptor thread, OpenThreadState tab)
     {
         return new ThreadRuntimeEventCoordinator(
@@ -144,6 +229,33 @@ public sealed class ThreadRuntimeEventCoordinatorTests
                 state.StatusBusy = false;
                 state.StatusTone = StatusTone.Info;
                 state.HasCustomStatus = false;
+            },
+            consumePendingSteerForLiveUserContent: static (state, contentId) =>
+            {
+                if (state.HistoryLoading ||
+                    string.Equals(state.LastObservedPendingSteerUserContentId, contentId, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                state.LastObservedPendingSteerUserContentId = contentId;
+                if (state.PendingSteers.Count == 0)
+                {
+                    return false;
+                }
+
+                state.PendingSteers.RemoveAt(0);
+                if (state.PendingSteers.Count == 0)
+                {
+                    state.LastObservedPendingSteerUserContentId = null;
+                }
+
+                return true;
+            },
+            clearPendingSteers: static state =>
+            {
+                state.PendingSteers.Clear();
+                state.LastObservedPendingSteerUserContentId = null;
             },
             drainQueuedPromptAsync: static (_, _) => Task.CompletedTask);
     }

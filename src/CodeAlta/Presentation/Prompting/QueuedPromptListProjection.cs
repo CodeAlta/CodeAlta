@@ -2,14 +2,22 @@ using CodeAlta.App.State;
 
 namespace CodeAlta.Presentation.Prompting;
 
-public readonly record struct QueuedPromptListItem(
+public enum PromptStripItemKind
+{
+    PendingSteer,
+    QueuedPrompt,
+}
+
+public readonly record struct PromptStripItem(
+    PromptStripItemKind Kind,
     string Id,
     string Text,
     string PreviewText,
-    int RemainingCount);
+    int? RemainingCount);
 
 internal readonly record struct QueuedPromptListProjection(
-    IReadOnlyList<QueuedPromptListItem> Items)
+    IReadOnlyList<PromptStripItem> Items,
+    bool HasQueuedPrompts)
 {
     public bool HasItems => Items.Count > 0;
 }
@@ -20,25 +28,34 @@ internal static class QueuedPromptListProjectionBuilder
     {
         if (tab is null)
         {
-            return new QueuedPromptListProjection([]);
+            return new QueuedPromptListProjection([], HasQueuedPrompts: false);
         }
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
-            if (tab.QueuedPrompts.Count == 0)
+            if (tab.PendingSteers.Count == 0 && tab.QueuedPrompts.Count == 0)
             {
-                return new QueuedPromptListProjection([]);
+                return new QueuedPromptListProjection([], HasQueuedPrompts: false);
             }
 
-            var items = tab.QueuedPrompts
+            var items = tab.PendingSteers
                 .Select(
-                    static prompt => new QueuedPromptListItem(
+                    static prompt => new PromptStripItem(
+                        PromptStripItemKind.PendingSteer,
                         prompt.Id,
                         prompt.Text,
                         BuildPreviewText(prompt.Text),
-                        prompt.RemainingCount))
+                        RemainingCount: null))
+                .Concat(
+                    tab.QueuedPrompts.Select(
+                        static prompt => new PromptStripItem(
+                            PromptStripItemKind.QueuedPrompt,
+                            prompt.Id,
+                            prompt.Text,
+                            BuildPreviewText(prompt.Text),
+                            prompt.RemainingCount)))
                 .ToArray();
-            return new QueuedPromptListProjection(items);
+            return new QueuedPromptListProjection(items, HasQueuedPrompts: tab.QueuedPrompts.Count > 0);
         }
     }
 

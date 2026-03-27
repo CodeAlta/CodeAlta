@@ -533,12 +533,14 @@ internal sealed class ThreadCommandCoordinator
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
+        string? pendingSteerId = null;
         try
         {
             _commandContext.SetThreadStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
             var executionOptions = BuildExecutionOptions(thread, tab);
             if (steer)
             {
+                pendingSteerId = _queueCoordinator.AddPendingSteer(tab, prompt);
                 _ = await _runtimeService.SteerAsync(
                         thread,
                         executionOptions,
@@ -562,6 +564,11 @@ internal sealed class ThreadCommandCoordinator
         }
         catch (Exception ex)
         {
+            if (steer && !string.IsNullOrWhiteSpace(pendingSteerId))
+            {
+                _queueCoordinator.RemovePendingSteer(tab, pendingSteerId);
+            }
+
             if (LogManager.IsInitialized && CodeAltaApp.UiLogger.IsEnabled(LogLevel.Error))
             {
                 CodeAltaApp.UiLogger.Error(ex, $"Failed to send prompt for thread {thread.ThreadId}");

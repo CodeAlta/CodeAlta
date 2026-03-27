@@ -167,7 +167,7 @@ internal sealed class ThreadWorkspaceView
         var queuedPromptList = new ComputedVisual(
             () =>
                 QueuedPromptListView.Build(
-                    workspaceViewModel.QueuedPrompts,
+                    workspaceViewModel.PromptStripItems,
                     markdown => (ThreadPaneLayout?.App)?.Terminal.Clipboard.TrySetText(markdown),
                     convertQueuedPromptToSteer,
                     deleteQueuedPrompt,

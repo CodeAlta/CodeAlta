@@ -86,9 +86,19 @@ internal sealed class OpenThreadState
 
     public Dictionary<string, AgentUserInputRequest> UserInputRequests => Session.UserInputRequests;
 
-    public object QueuedPromptsSyncRoot => Session.QueuedPromptsSyncRoot;
+    public object PromptStripSyncRoot => Session.PromptStripSyncRoot;
+
+    public object QueuedPromptsSyncRoot => Session.PromptStripSyncRoot;
 
     public List<QueuedThreadPrompt> QueuedPrompts => Session.QueuedPrompts;
+
+    public List<PendingSteerPrompt> PendingSteers => Session.PendingSteers;
+
+    public string? LastObservedPendingSteerUserContentId
+    {
+        get => Session.LastObservedPendingSteerUserContentId;
+        set => Session.LastObservedPendingSteerUserContentId = value;
+    }
 
     public AgentSessionUsage? Usage
     {

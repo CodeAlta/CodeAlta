@@ -28,9 +28,13 @@ internal sealed class ThreadSessionState
 
     public Dictionary<string, AgentUserInputRequest> UserInputRequests { get; } = new(StringComparer.Ordinal);
 
-    public object QueuedPromptsSyncRoot { get; } = new();
+    public object PromptStripSyncRoot { get; } = new();
 
     public List<QueuedThreadPrompt> QueuedPrompts { get; } = [];
+
+    public List<PendingSteerPrompt> PendingSteers { get; } = [];
+
+    public string? LastObservedPendingSteerUserContentId { get; set; }
 
     public AgentSessionUsage? Usage { get; set; }
 }

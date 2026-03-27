@@ -28,7 +28,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private const int MaxRecentThreadsPerProject = 3;
     internal const string DraftTabId = "__draft__";
     private const bool DefaultAutoApproveEnabled = true;
-
     private readonly ChatBackendPreferenceCoordinator _backendPreferences;
     private readonly WorkThreadRuntimeService _runtimeService;
     private readonly CatalogOptions _catalogOptions;
@@ -63,7 +62,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private readonly ThreadSelectionContext _threadSelectionContext;
     private readonly ThreadTabContext _threadTabContext;
     private readonly WorkspaceRefreshContext _workspaceRefreshContext;
-
     private CodeAltaShellView? _shellView;
     private ThreadWorkspaceView? _threadWorkspaceView;
     private SessionUsagePresenter? _sessionUsagePresenter;
@@ -71,7 +69,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private Task<ShellThreadStateCoordinator.InitialCatalogState>? _initialCatalogStateTask;
     private bool _initialCatalogStateResolved;
     private bool _disableTerminalLoopCallback;
-
     private WorkThreadViewState _viewState
     {
         get => _threadStateCoordinator.ViewState;
@@ -107,17 +104,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         get => _threadStateCoordinator.PendingStartupThreadRestoreId;
         set => _threadStateCoordinator.PendingStartupThreadRestoreId = value;
     }
-
     private Visual? ThreadPaneLayout => _threadWorkspaceView?.ThreadPaneLayout;
-
     private VSplitter? ThreadBodySplitter => _threadWorkspaceView?.ThreadBodySplitter;
-
     private ChatPromptEditor? ThreadInput => _threadWorkspaceView?.ThreadInput;
-
     private CommandBar? ThreadCommandBar => _threadWorkspaceView?.ThreadCommandBar;
-
     private Select<ChatBackendOption>? ChatBackendSelect => _threadWorkspaceView?.ChatBackendSelect;
-
     private Select<ChatModelOption>? ChatModelSelect => _threadWorkspaceView?.ChatModelSelect;
     private Select<ChatReasoningOption>? ChatReasoningSelect => _threadWorkspaceView?.ChatReasoningSelect;
     private TabControl? ThreadTabControl => _threadWorkspaceView?.ThreadTabControl;
@@ -147,11 +138,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         var ownedServices = await CodeAltaOwnedServices.CreateAsync(cancellationToken).ConfigureAwait(false);
         return Create(ownedServices);
     }
-
     internal static CodeAltaApp Create(CodeAltaOwnedServices ownedServices)
     {
         ArgumentNullException.ThrowIfNull(ownedServices);
-
         return new CodeAltaApp(
             ownedServices.ProjectCatalog,
             ownedServices.ThreadCatalog,
@@ -176,7 +165,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(runtimeService);
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(agentHub);
-
         _backendPreferences = new ChatBackendPreferenceCoordinator(new CodeAltaConfigStore(catalogOptions), UiLogger);
         _runtimeService = runtimeService;
         _catalogOptions = catalogOptions;
@@ -305,6 +293,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             SetStatus,
             (tab, message, showSpinner, tone) => SetThreadStatus(tab, message, showSpinner, tone),
             ClearThreadStatus,
+            (tab, contentId) => _threadPromptQueueCoordinator.ConsumePendingSteerForLiveUserContent(tab, contentId),
+            tab => _threadPromptQueueCoordinator.ClearPendingSteers(tab),
             (tab, cancellationToken) => _threadCommandCoordinator!.DrainQueuedPromptAsync(tab, cancellationToken));
         _threadCreationCoordinator = new ThreadCreationCoordinator(
             _runtimeService,

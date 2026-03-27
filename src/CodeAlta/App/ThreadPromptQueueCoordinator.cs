@@ -46,7 +46,7 @@ internal sealed class ThreadPromptQueueCoordinator
     {
         ArgumentNullException.ThrowIfNull(tab);
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             return tab.QueuedPrompts.Count > 0;
         }
@@ -57,7 +57,7 @@ internal sealed class ThreadPromptQueueCoordinator
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             tab.QueuedPrompts.Add(new QueuedThreadPrompt(prompt));
         }
@@ -82,7 +82,7 @@ internal sealed class ThreadPromptQueueCoordinator
             return;
         }
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             var index = FindQueuedPromptIndex(tab, queuedPromptId);
             if (index >= 0)
@@ -103,7 +103,7 @@ internal sealed class ThreadPromptQueueCoordinator
             return;
         }
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             var queuedPrompt = FindQueuedPrompt(tab, queuedPromptId);
             queuedPrompt?.UpdateRemainingCount(remainingCount);
@@ -122,7 +122,7 @@ internal sealed class ThreadPromptQueueCoordinator
             return;
         }
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             var queuedPrompt = FindQueuedPrompt(tab, queuedPromptId);
             queuedPrompt?.UpdateText(text);
@@ -195,6 +195,99 @@ internal sealed class ThreadPromptQueueCoordinator
     public void RefreshSelectedThreadQueueUi()
         => _dispatchToUi(RefreshSelectedThreadQueueUiCore);
 
+    public string AddPendingSteer(OpenThreadState tab, string prompt)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+        PendingSteerPrompt pendingSteer;
+        lock (tab.PromptStripSyncRoot)
+        {
+            pendingSteer = new PendingSteerPrompt(prompt);
+            tab.PendingSteers.Add(pendingSteer);
+            tab.LastObservedPendingSteerUserContentId = null;
+        }
+
+        RefreshSelectedThreadQueueUi();
+        return pendingSteer.Id;
+    }
+
+    public void RemovePendingSteer(OpenThreadState tab, string pendingSteerId)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pendingSteerId);
+
+        lock (tab.PromptStripSyncRoot)
+        {
+            var pendingSteer = FindPendingSteer(tab, pendingSteerId);
+            if (pendingSteer is null)
+            {
+                return;
+            }
+
+            _ = tab.PendingSteers.Remove(pendingSteer);
+            ResetPendingSteerTrackingIfEmpty(tab);
+        }
+
+        RefreshSelectedThreadQueueUi();
+    }
+
+    public bool ConsumePendingSteerForLiveUserContent(OpenThreadState tab, string contentId)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentId);
+
+        var removed = false;
+        lock (tab.PromptStripSyncRoot)
+        {
+            if (string.Equals(tab.LastObservedPendingSteerUserContentId, contentId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            tab.LastObservedPendingSteerUserContentId = contentId;
+            if (tab.PendingSteers.Count == 0)
+            {
+                return false;
+            }
+
+            tab.PendingSteers.RemoveAt(0);
+            ResetPendingSteerTrackingIfEmpty(tab);
+            removed = true;
+        }
+
+        if (removed)
+        {
+            RefreshSelectedThreadQueueUi();
+        }
+
+        return removed;
+    }
+
+    public void ClearPendingSteers(OpenThreadState tab)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+
+        var cleared = false;
+        lock (tab.PromptStripSyncRoot)
+        {
+            if (tab.PendingSteers.Count == 0)
+            {
+                tab.LastObservedPendingSteerUserContentId = null;
+                return;
+            }
+
+            tab.PendingSteers.Clear();
+            tab.LastObservedPendingSteerUserContentId = null;
+            cleared = true;
+        }
+
+        if (cleared)
+        {
+            RefreshSelectedThreadQueueUi();
+        }
+    }
+
     private void RefreshSelectedThreadQueueUiCore()
     {
         _verifyBindableAccess();
@@ -202,13 +295,13 @@ internal sealed class ThreadPromptQueueCoordinator
         var selectedThread = _threadSelection.GetSelectedThread();
         var tab = selectedThread is null ? null : _threadSelection.FindOpenThread(selectedThread.ThreadId);
         var projection = QueuedPromptListProjectionBuilder.Build(tab);
-        _workspaceViewModel.SetQueuedPrompts(projection.Items);
+        _workspaceViewModel.SetPromptStripItems(projection.Items, projection.HasQueuedPrompts);
         _updatePromptAvailabilityUi();
     }
 
     private void ClearQueue(OpenThreadState tab)
     {
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             tab.QueuedPrompts.Clear();
         }
@@ -231,7 +324,7 @@ internal sealed class ThreadPromptQueueCoordinator
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
 
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             var queuedPrompt = FindQueuedPrompt(tab, queuedPromptId);
             if (queuedPrompt is null)
@@ -284,9 +377,9 @@ internal sealed class ThreadPromptQueueCoordinator
         return tab.QueuedPrompts.FirstOrDefault(prompt => string.Equals(prompt.Id, queuedPromptId, StringComparison.Ordinal));
     }
 
-    private static bool TrySnapshotQueuedPrompt(OpenThreadState tab, string queuedPromptId, out QueuedPromptListItem queuedPrompt)
+    private static bool TrySnapshotQueuedPrompt(OpenThreadState tab, string queuedPromptId, out QueuedPromptSnapshot queuedPrompt)
     {
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             var existing = FindQueuedPrompt(tab, queuedPromptId);
             if (existing is null)
@@ -295,14 +388,14 @@ internal sealed class ThreadPromptQueueCoordinator
                 return false;
             }
 
-            queuedPrompt = new QueuedPromptListItem(existing.Id, existing.Text, BuildPreviewText(existing.Text), existing.RemainingCount);
+            queuedPrompt = new QueuedPromptSnapshot(existing.Id, existing.Text, existing.RemainingCount);
             return true;
         }
     }
 
-    private static bool TrySnapshotNextQueuedPrompt(OpenThreadState tab, out QueuedPromptListItem queuedPrompt)
+    private static bool TrySnapshotNextQueuedPrompt(OpenThreadState tab, out QueuedPromptSnapshot queuedPrompt)
     {
-        lock (tab.QueuedPromptsSyncRoot)
+        lock (tab.PromptStripSyncRoot)
         {
             if (tab.QueuedPrompts.Count == 0)
             {
@@ -311,11 +404,24 @@ internal sealed class ThreadPromptQueueCoordinator
             }
 
             var existing = tab.QueuedPrompts[0];
-            queuedPrompt = new QueuedPromptListItem(existing.Id, existing.Text, BuildPreviewText(existing.Text), existing.RemainingCount);
+            queuedPrompt = new QueuedPromptSnapshot(existing.Id, existing.Text, existing.RemainingCount);
             return true;
         }
     }
 
-    private static string BuildPreviewText(string text)
-        => QueuedPromptListProjectionBuilder.BuildPreviewText(text);
+    private static PendingSteerPrompt? FindPendingSteer(OpenThreadState tab, string pendingSteerId)
+        => tab.PendingSteers.FirstOrDefault(prompt => string.Equals(prompt.Id, pendingSteerId, StringComparison.Ordinal));
+
+    private static void ResetPendingSteerTrackingIfEmpty(OpenThreadState tab)
+    {
+        if (tab.PendingSteers.Count == 0)
+        {
+            tab.LastObservedPendingSteerUserContentId = null;
+        }
+    }
+
+    private readonly record struct QueuedPromptSnapshot(
+        string Id,
+        string Text,
+        int RemainingCount);
 }

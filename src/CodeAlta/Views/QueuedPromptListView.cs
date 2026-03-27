@@ -15,7 +15,7 @@ namespace CodeAlta.Views;
 internal static partial class QueuedPromptListView
 {
     public static Visual Build(
-        IReadOnlyList<QueuedPromptListItem> queuedPrompts,
+        IReadOnlyList<PromptStripItem> promptStripItems,
         Action<string> copyQueuedPromptMarkdown,
         Action<string> convertQueuedPromptToSteer,
         Action<string> deleteQueuedPrompt,
@@ -23,7 +23,7 @@ internal static partial class QueuedPromptListView
         Action<string, string> updateQueuedPromptText,
         Func<Action<string>, string?, ChatPromptEditor> createPromptEditor)
     {
-        ArgumentNullException.ThrowIfNull(queuedPrompts);
+        ArgumentNullException.ThrowIfNull(promptStripItems);
         ArgumentNullException.ThrowIfNull(copyQueuedPromptMarkdown);
         ArgumentNullException.ThrowIfNull(convertQueuedPromptToSteer);
         ArgumentNullException.ThrowIfNull(deleteQueuedPrompt);
@@ -31,25 +31,30 @@ internal static partial class QueuedPromptListView
         ArgumentNullException.ThrowIfNull(updateQueuedPromptText);
         ArgumentNullException.ThrowIfNull(createPromptEditor);
 
-        if (queuedPrompts.Count == 0)
+        if (promptStripItems.Count == 0)
         {
             return new Placeholder { IsVisible = false };
         }
 
-        var rows = new List<Visual>(queuedPrompts.Count * 2);
-        for (var index = 0; index < queuedPrompts.Count; index++)
+        var rows = new List<Visual>(promptStripItems.Count * 2);
+        for (var index = 0; index < promptStripItems.Count; index++)
         {
-            rows.Add(
-                BuildRow(
-                    queuedPrompts[index],
+            var item = promptStripItems[index];
+            rows.Add(item.Kind switch
+            {
+                PromptStripItemKind.PendingSteer => BuildPendingSteerRow(item),
+                PromptStripItemKind.QueuedPrompt => BuildQueuedPromptRow(
+                    item,
                     copyQueuedPromptMarkdown,
                     convertQueuedPromptToSteer,
                     deleteQueuedPrompt,
                     updateQueuedPromptCount,
                     updateQueuedPromptText,
-                    createPromptEditor));
+                    createPromptEditor),
+                _ => new Placeholder { IsVisible = false },
+            });
 
-            if (index < queuedPrompts.Count - 1)
+            if (index < promptStripItems.Count - 1)
             {
                 rows.Add(CreateSeparator());
             }
@@ -62,8 +67,47 @@ internal static partial class QueuedPromptListView
         };
     }
 
-    private static Visual BuildRow(
-        QueuedPromptListItem queuedPrompt,
+    private static Visual BuildPendingSteerRow(PromptStripItem pendingSteer)
+    {
+        var icon = new TextBlock($"{NerdFont.MdArrowRightThinCircleOutline}")
+        {
+            Wrap = false,
+            IsSelectable = false,
+            Margin = new Thickness(0, 0, 1, 0),
+        };
+
+        var promptText = new TextBlock(pendingSteer.PreviewText)
+        {
+            HorizontalAlignment = Align.Stretch,
+            IsSelectable = false,
+            Wrap = false,
+            Trimming = TextTrimming.EndEllipsis,
+            Margin = new Thickness(0, 0, 1, 0),
+        };
+
+        var status = new TextBlock("Steer pending")
+        {
+            Wrap = false,
+            IsSelectable = false,
+        };
+
+        var row = new Grid
+            {
+                HorizontalAlignment = Align.Stretch,
+            }
+            .Rows(new RowDefinition { Height = GridLength.Auto })
+            .Columns(
+                new ColumnDefinition { Width = GridLength.Auto },
+                new ColumnDefinition { Width = GridLength.Star(1) },
+                new ColumnDefinition { Width = GridLength.Auto });
+        row.Cell(icon, 0, 0);
+        row.Cell(promptText, 0, 1);
+        row.Cell(status, 0, 2);
+        return BuildStripRow(row, UiPalette.PendingSteerBackgroundColor);
+    }
+
+    private static Visual BuildQueuedPromptRow(
+        PromptStripItem queuedPrompt,
         Action<string> copyQueuedPromptMarkdown,
         Action<string> convertQueuedPromptToSteer,
         Action<string> deleteQueuedPrompt,
@@ -133,20 +177,15 @@ internal static partial class QueuedPromptListView
         row.Cell(counter, 0, 4);
         row.Cell(steerButton, 0, 5);
         row.Cell(deleteButton, 0, 6);
-        return new ZStack(
-            new Placeholder()
-                .HorizontalAlignment(Align.Stretch)
-                .VerticalAlignment(Align.Stretch)
-                .Style(PlaceholderStyle.Default with { Background = UiPalette.QueuedPromptBackgroundColor }),
-            row.Padding(new Thickness(1, 0, 1, 0)));
+        return BuildStripRow(row, UiPalette.QueuedPromptBackgroundColor);
     }
 
     private static Visual CreateCounter(
-        QueuedPromptListItem queuedPrompt,
+        PromptStripItem queuedPrompt,
         Action<string, int> updateQueuedPromptCount)
     {
         var countState = new QueuedPromptCountState(
-            queuedPrompt.RemainingCount,
+            queuedPrompt.RemainingCount.GetValueOrDefault(1),
             value => updateQueuedPromptCount(queuedPrompt.Id, value));
         var countBox = new NumberBox<int>()
             .Value(countState.Bind.Value)
@@ -162,7 +201,7 @@ internal static partial class QueuedPromptListView
                 "-",
                 "Decrease repeat count",
                 () => countState.Value = Math.Max(1, countState.Value - 1),
-                isEnabled: queuedPrompt.RemainingCount > 1),
+                isEnabled: countState.Value > 1),
             countBox,
             CreateIconButton(
                 $"{NerdFont.MdPlus}",
@@ -188,7 +227,7 @@ internal static partial class QueuedPromptListView
     private static Visual CreateSeparator() => new Rule();
 
     private static void ShowEditorDialog(
-        QueuedPromptListItem queuedPrompt,
+        PromptStripItem queuedPrompt,
         Action<string, string> updateQueuedPromptText,
         Func<Action<string>, string?, ChatPromptEditor> createPromptEditor)
     {
@@ -239,6 +278,21 @@ internal static partial class QueuedPromptListView
             updateQueuedPromptText(queuedPrompt.Id, trimmed);
             dialog?.Close();
         }
+    }
+
+    private static Visual BuildStripRow(Visual content, Color background)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        return new ZStack(
+            new Placeholder()
+                .HorizontalAlignment(Align.Stretch)
+                .VerticalAlignment(Align.Stretch)
+                .Style(PlaceholderStyle.Default with { Background = background }),
+            new Padder(content)
+            {
+                Padding = new Thickness(1, 0, 1, 0),
+            });
     }
 }
 

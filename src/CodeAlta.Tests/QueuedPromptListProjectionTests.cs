@@ -29,10 +29,30 @@ public sealed class QueuedPromptListProjectionTests
         var projection = QueuedPromptListProjectionBuilder.Build(tab);
 
         Assert.IsTrue(projection.HasItems);
+        Assert.IsTrue(projection.HasQueuedPrompts);
         Assert.AreEqual(1, projection.Items.Count);
+        Assert.AreEqual(PromptStripItemKind.QueuedPrompt, projection.Items[0].Kind);
         Assert.AreEqual("First line Second line", projection.Items[0].PreviewText);
         Assert.AreEqual("First line\r\n\r\nSecond line", projection.Items[0].Text);
         Assert.AreEqual(3, projection.Items[0].RemainingCount);
+    }
+
+    [TestMethod]
+    public void Build_RendersPendingSteersBeforeQueuedPrompts()
+    {
+        var tab = CreateOpenThreadState();
+        tab.PendingSteers.Add(new PendingSteerPrompt("  steer this next  "));
+        tab.QueuedPrompts.Add(new QueuedThreadPrompt("queued prompt", remainingCount: 2));
+
+        var projection = QueuedPromptListProjectionBuilder.Build(tab);
+
+        Assert.AreEqual(2, projection.Items.Count);
+        Assert.AreEqual(PromptStripItemKind.PendingSteer, projection.Items[0].Kind);
+        Assert.AreEqual("steer this next", projection.Items[0].Text);
+        Assert.IsNull(projection.Items[0].RemainingCount);
+        Assert.AreEqual(PromptStripItemKind.QueuedPrompt, projection.Items[1].Kind);
+        Assert.AreEqual(2, projection.Items[1].RemainingCount);
+        Assert.IsTrue(projection.HasQueuedPrompts);
     }
 
     private static OpenThreadState CreateOpenThreadState()
