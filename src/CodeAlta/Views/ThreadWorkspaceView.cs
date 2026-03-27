@@ -93,9 +93,11 @@ internal sealed class ThreadWorkspaceView
             .IsEnabled(promptComposerViewModel.Bind.IsEnabled);
         ThreadInputView = ThreadInput.Scrollable();
 
-        SendPromptButton = new Button(new TextBlock($"{NerdFont.MdSend} Send"))
-            .Click(sendPrompt)
-            .IsEnabled(promptComposerViewModel.Bind.CanSend);
+        SendPromptButton = CreateIconButton(
+                $"{NerdFont.MdSend}",
+                "Send the current prompt.",
+                sendPrompt,
+                button => button.IsEnabled(promptComposerViewModel.Bind.CanSend));
         ExpandPromptButton = CreateIconButton(
                 $"{NerdFont.MdSquareEditOutline}",
                 "Open the current prompt in a large editor window (F6).",
@@ -253,7 +255,7 @@ internal sealed class ThreadWorkspaceView
 
     public Visual ThreadInputView { get; }
 
-    public Button SendPromptButton { get; }
+    public Visual SendPromptButton { get; }
 
     public Visual ExpandPromptButton { get; }
 
