@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.App;
+using CodeAlta.App.State;
 using CodeAlta.App.Context;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Roles;
@@ -105,6 +106,8 @@ public sealed class ThreadCommandCoordinatorTests
                 clearThreadInputCallCount++;
                 threadInput.Text = string.Empty;
             },
+            () => string.IsNullOrWhiteSpace(threadInput.Text),
+            prompt => threadInput.Text = prompt,
             static () => { },
             static () => { },
             static (_, _, _) => { },
@@ -231,6 +234,8 @@ public sealed class ThreadCommandCoordinatorTests
             static () => { },
             static () => { },
             () => threadInput.Text = string.Empty,
+            () => string.IsNullOrWhiteSpace(threadInput.Text),
+            prompt => threadInput.Text = prompt,
             static () => { },
             static () => { },
             static (_, _, _) => { },
@@ -257,6 +262,76 @@ public sealed class ThreadCommandCoordinatorTests
         Assert.AreEqual("Investigate the regression in startup flow. It only happens on Windows.", backend.LastSentText);
     }
 
+    [TestMethod]
+    public async Task DispatchQueuedPromptAsync_SteerFallsBackToSendWhenNoActiveRunExists()
+    {
+        using var temp = TempDirectory.Create();
+        var backend = new RecordingBackend();
+        var harness = await CreateSelectedThreadHarnessAsync(temp.Path, backend).ConfigureAwait(false);
+        await using var _ = harness.Hub;
+
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Fallback prompt", steer: true).ConfigureAwait(false);
+
+        Assert.AreEqual(1, backend.SendCount);
+        Assert.AreEqual(0, backend.SteerCount);
+        Assert.AreEqual("Fallback prompt", backend.LastSentText);
+        Assert.AreEqual("fake-run-1", harness.Tab.ActiveRunId?.Value);
+    }
+
+    [TestMethod]
+    public async Task DispatchQueuedPromptAsync_RestoresPromptTextWhenSendFails()
+    {
+        using var temp = TempDirectory.Create();
+        var backend = new RecordingBackend
+        {
+            SendException = new InvalidOperationException("send failed"),
+        };
+        var harness = await CreateSelectedThreadHarnessAsync(temp.Path, backend).ConfigureAwait(false);
+        await using var _ = harness.Hub;
+        harness.ThreadInput.Text = string.Empty;
+
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Retry prompt", steer: false).ConfigureAwait(false);
+
+        Assert.AreEqual("Retry prompt", harness.ThreadInput.Text);
+    }
+
+    [TestMethod]
+    public async Task DispatchQueuedPromptAsync_DoesNotOverwriteReplacementDraftWhenSendFails()
+    {
+        using var temp = TempDirectory.Create();
+        var backend = new RecordingBackend
+        {
+            SendException = new InvalidOperationException("send failed"),
+        };
+        var harness = await CreateSelectedThreadHarnessAsync(temp.Path, backend).ConfigureAwait(false);
+        await using var _ = harness.Hub;
+        harness.ThreadInput.Text = "replacement draft";
+
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Original prompt", steer: false).ConfigureAwait(false);
+
+        Assert.AreEqual("replacement draft", harness.ThreadInput.Text);
+    }
+
+    [TestMethod]
+    public async Task DispatchQueuedPromptAsync_RestoresPromptTextAndClearsPendingSteerWhenSteerFails()
+    {
+        using var temp = TempDirectory.Create();
+        var backend = new RecordingBackend
+        {
+            SteerException = new InvalidOperationException("steer failed"),
+        };
+        var harness = await CreateSelectedThreadHarnessAsync(temp.Path, backend).ConfigureAwait(false);
+        await using var _ = harness.Hub;
+        harness.Tab.ActiveRunId = new AgentRunId("active-run-1");
+        harness.ThreadInput.Text = string.Empty;
+
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Retry steer", steer: true).ConfigureAwait(false);
+
+        Assert.AreEqual(0, harness.Tab.PendingSteers.Count);
+        Assert.AreEqual("Retry steer", harness.ThreadInput.Text);
+        Assert.AreEqual(1, backend.SteerCount);
+    }
+
     private static WorkThreadExecutionOptions CreateExecutionOptions(AgentBackendId backendId, string workingDirectory)
     {
         return new WorkThreadExecutionOptions
@@ -274,6 +349,111 @@ public sealed class ThreadCommandCoordinatorTests
         var db = new CodeAltaDb(new CodeAltaDbOptions { DatabasePath = dbPath });
         await db.InitializeAsync().ConfigureAwait(false);
         return db;
+    }
+
+    private static async Task<ThreadCommandHarness> CreateSelectedThreadHarnessAsync(string rootPath, RecordingBackend backend)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(backend);
+
+        var db = await CreateDbAsync(rootPath).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        var backendFactory = new AgentBackendFactory();
+        backendFactory.Register(backend.BackendId.Value, () => backend);
+
+        var hub = new AgentHub(backendFactory, repository);
+        var catalogOptions = new CatalogOptions { GlobalRoot = rootPath };
+        var runtimeService = new WorkThreadRuntimeService(
+            hub,
+            new ProjectCatalog(catalogOptions),
+            new WorkThreadCatalog(catalogOptions),
+            new RoleProfileStore(),
+            new AgentInstructionTemplateProvider(),
+            catalogOptions);
+        var dispatcher = new InlineUiDispatcher();
+        var threadState = new ShellThreadStateCoordinator(
+            new ProjectCatalog(catalogOptions),
+            new WorkThreadCatalog(catalogOptions),
+            () => dispatcher,
+            static () => null,
+            static _ => true,
+            static _ => { },
+            static (_, _, _, _, _) => { },
+            static (_, _) => Task.CompletedTask,
+            static () => { },
+            static () => { },
+            static () => { },
+            static _ => { },
+            static (_, _, _) => { });
+        threadState.ViewState = new WorkThreadViewState();
+        threadState.GlobalScopeSelected = true;
+
+        var threadSelection = new ThreadSelectionContext(
+            threadState,
+            static (_, _) => Task.CompletedTask,
+            threadId => string.Equals(threadState.SelectedThreadId, threadId, StringComparison.OrdinalIgnoreCase));
+        var threadInput = new ChatPromptEditor(_ => { });
+        var selectorUi = new ChatSelectorUiContext(
+            static () => null,
+            static () => null,
+            static () => null,
+            () => threadInput,
+            () => dispatcher,
+            static () => { });
+        var backendState = new ChatBackendState(backend.BackendId, "Fake Chat")
+        {
+            Availability = ChatBackendAvailability.Ready,
+        };
+        var chatBackendStates = new Dictionary<string, ChatBackendState>(StringComparer.OrdinalIgnoreCase)
+        {
+            [backend.BackendId.Value] = backendState,
+        };
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var queueCoordinator = new ThreadPromptQueueCoordinator(
+            workspaceViewModel,
+            threadSelection,
+            static () => { },
+            action => action(),
+            static () => { },
+            static (_, _, _) => Task.CompletedTask,
+            static (_, _, _) => Task.CompletedTask);
+        var commandContext = new ThreadCommandContext(
+            static () => false,
+            static _ => Task.FromResult<WorkThreadDescriptor?>(null),
+            static _ => Task.FromResult<WorkThreadDescriptor?>(null),
+            static () => Task.CompletedTask,
+            static () => true,
+            static () => { },
+            static () => { },
+            () => threadInput.Text = string.Empty,
+            () => string.IsNullOrWhiteSpace(threadInput.Text),
+            prompt => threadInput.Text = prompt,
+            static () => { },
+            static () => { },
+            static (_, _, _) => { },
+            static (_, _, _, _) => { },
+            static (_, _, _) => { });
+        var coordinator = new ThreadCommandCoordinator(
+            runtimeService,
+            catalogOptions,
+            chatBackendStates,
+            threadSelection,
+            selectorUi,
+            new ChatPreferenceContext(
+                static _ => { },
+                static _ => { },
+                static (_, _, _) => { },
+                static (_, _, _, _, _) => { }),
+            commandContext,
+            queueCoordinator,
+            new PromptComposerViewModel());
+
+        var thread = await runtimeService.CreateGlobalThreadAsync(CreateExecutionOptions(backend.BackendId, rootPath), title: "Global Thread").ConfigureAwait(false);
+        await threadState.RegisterCreatedThreadAsync(thread).ConfigureAwait(false);
+        var tab = threadSelection.EnsureThreadTab(thread);
+        tab.BackendId = backend.BackendId;
+
+        return new ThreadCommandHarness(hub, coordinator, tab, threadInput);
     }
 
     private sealed class InlineUiDispatcher : IUiDispatcher
@@ -307,6 +487,16 @@ public sealed class ThreadCommandCoordinatorTests
         public string DisplayName => "Fake Chat";
 
         public string? LastSentText { get; private set; }
+
+        public string? LastSteeredText { get; private set; }
+
+        public int SendCount { get; private set; }
+
+        public int SteerCount { get; private set; }
+
+        public Exception? SendException { get; set; }
+
+        public Exception? SteerException { get; set; }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
@@ -363,12 +553,27 @@ public sealed class ThreadCommandCoordinatorTests
 
             public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
             {
+                _backend.SendCount++;
                 _backend.LastSentText = (options.Input.Items.Single() as AgentInputItem.Text)?.Value;
+                if (_backend.SendException is not null)
+                {
+                    throw _backend.SendException;
+                }
+
                 return Task.FromResult(new AgentRunId("fake-run-1"));
             }
 
             public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
-                => throw new NotSupportedException();
+            {
+                _backend.SteerCount++;
+                _backend.LastSteeredText = (options.Input.Items.Single() as AgentInputItem.Text)?.Value;
+                if (_backend.SteerException is not null)
+                {
+                    throw _backend.SteerException;
+                }
+
+                return Task.FromResult(new AgentRunId("fake-run-2"));
+            }
 
             public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -439,4 +644,10 @@ public sealed class ThreadCommandCoordinatorTests
             }
         }
     }
+
+    private sealed record ThreadCommandHarness(
+        AgentHub Hub,
+        ThreadCommandCoordinator Coordinator,
+        OpenThreadState Tab,
+        ChatPromptEditor ThreadInput);
 }

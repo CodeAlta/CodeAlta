@@ -130,6 +130,8 @@ internal sealed class ThreadRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentNullException.ThrowIfNull(@event);
 
+        ObserveActiveRun(tab, @event);
+
         if (!tab.HistoryLoading && !tab.PendingManualCompaction && ShouldPromoteAgentEventToThinking(@event))
         {
             _setThreadStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
@@ -346,6 +348,22 @@ internal sealed class ThreadRuntimeEventCoordinator
         }
 
         _ = _consumePendingSteerForLiveUserContent(tab, contentId);
+    }
+
+    private static void ObserveActiveRun(OpenThreadState tab, AgentEvent @event)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentNullException.ThrowIfNull(@event);
+
+        if (@event.RunId is { } runId)
+        {
+            tab.ActiveRunId = runId;
+        }
+
+        if (@event is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown })
+        {
+            tab.ActiveRunId = null;
+        }
     }
 
     public void TryRenderInteraction(OpenThreadState tab, Action action, string context)

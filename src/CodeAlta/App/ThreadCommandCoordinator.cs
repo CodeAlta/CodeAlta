@@ -538,19 +538,25 @@ internal sealed class ThreadCommandCoordinator
         {
             _commandContext.SetThreadStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
             var executionOptions = BuildExecutionOptions(thread, tab);
-            if (steer)
+            var dispatchAsSteer = steer && tab.ActiveRunId is not null;
+            AgentRunId runId;
+            if (dispatchAsSteer)
             {
                 pendingSteerId = _queueCoordinator.AddPendingSteer(tab, prompt);
-                _ = await _runtimeService.SteerAsync(
+                runId = await _runtimeService.SteerAsync(
                         thread,
                         executionOptions,
-                        new AgentSteerOptions { Input = AgentInput.Text(prompt) },
+                        new AgentSteerOptions
+                        {
+                            Input = AgentInput.Text(prompt),
+                            ExpectedRunId = tab.ActiveRunId,
+                        },
                         cancellationToken)
                     .ConfigureAwait(false);
             }
             else
             {
-                _ = await _runtimeService.SendAsync(
+                runId = await _runtimeService.SendAsync(
                         thread,
                         executionOptions,
                         new AgentSendOptions { Input = AgentInput.Text(prompt) },
@@ -558,6 +564,7 @@ internal sealed class ThreadCommandCoordinator
                     .ConfigureAwait(false);
             }
 
+            tab.ActiveRunId = runId;
             thread.MarkStarted(DateTimeOffset.UtcNow);
             tab.HistoryLoaded = true;
             _commandContext.RefreshHeaderAndThreadWorkspace();
@@ -574,9 +581,41 @@ internal sealed class ThreadCommandCoordinator
                 CodeAltaApp.UiLogger.Error(ex, $"Failed to send prompt for thread {thread.ThreadId}");
             }
 
-            tab.Timeline.RenderFailure($"Failed to send prompt: {ex.Message}");
+            var restoredToDraft = false;
+            if (_commandContext.IsThreadInputEmpty())
+            {
+                _commandContext.RestoreThreadInput(prompt);
+                restoredToDraft = true;
+            }
+
+            tab.Timeline.RenderFailure(BuildPromptDispatchFailureMarkdown(ex.Message, prompt, restoredToDraft));
             _commandContext.SetThreadStatus(tab, $"Failed to send prompt: {ex.Message}", false, StatusTone.Error);
         }
+    }
+
+    private static string BuildPromptDispatchFailureMarkdown(string errorMessage, string prompt, bool restoredToDraft)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(errorMessage);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+        var normalizedPrompt = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
+        var builder = new System.Text.StringBuilder();
+        builder.Append("Failed to send prompt: ").Append(errorMessage);
+        builder.AppendLine();
+        builder.AppendLine();
+        builder.AppendLine(restoredToDraft
+            ? "Prompt restored to the editor for retry."
+            : "Prompt preserved below because the current editor draft is no longer empty.");
+        builder.AppendLine();
+        builder.AppendLine("Prompt:");
+
+        foreach (var line in normalizedPrompt.Split('\n'))
+        {
+            builder.Append("> ");
+            builder.AppendLine(line);
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private bool IsChatBackendReady(AgentBackendId backendId)

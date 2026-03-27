@@ -314,7 +314,7 @@ internal sealed class ThreadPromptQueueCoordinator
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
-        return tab.StatusBusy
+        return tab.ActiveRunId is not null
             ? _dispatchSteeringPromptAsync(tab, prompt, cancellationToken)
             : _dispatchQueuedPromptAsync(tab, prompt, cancellationToken);
     }

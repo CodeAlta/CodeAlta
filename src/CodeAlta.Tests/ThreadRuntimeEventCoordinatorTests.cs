@@ -206,6 +206,42 @@ public sealed class ThreadRuntimeEventCoordinatorTests
         Assert.AreEqual(0, tab.PendingSteers.Count);
     }
 
+    [TestMethod]
+    public void HandleAgentEvent_TracksActiveRunIdAndClearsItWhenSessionBecomesIdle()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        var coordinator = CreateCoordinator(thread, tab);
+
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentContentDeltaEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                new AgentRunId("run-1"),
+                AgentContentKind.Assistant,
+                "assistant-1",
+                null,
+                "Working..."));
+
+        Assert.AreEqual("run-1", tab.ActiveRunId?.Value);
+
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                new AgentRunId("run-1"),
+                AgentSessionUpdateKind.Idle,
+                "Idle"));
+
+        Assert.IsNull(tab.ActiveRunId);
+    }
+
     private static ThreadRuntimeEventCoordinator CreateCoordinator(WorkThreadDescriptor thread, OpenThreadState tab)
     {
         return new ThreadRuntimeEventCoordinator(

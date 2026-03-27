@@ -36,5 +36,7 @@ internal sealed class ThreadSessionState
 
     public string? LastObservedPendingSteerUserContentId { get; set; }
 
+    public AgentRunId? ActiveRunId { get; set; }
+
     public AgentSessionUsage? Usage { get; set; }
 }

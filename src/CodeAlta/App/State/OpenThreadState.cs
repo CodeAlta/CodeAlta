@@ -100,6 +100,12 @@ internal sealed class OpenThreadState
         set => Session.LastObservedPendingSteerUserContentId = value;
     }
 
+    public AgentRunId? ActiveRunId
+    {
+        get => Session.ActiveRunId;
+        set => Session.ActiveRunId = value;
+    }
+
     public AgentSessionUsage? Usage
     {
         get => Session.Usage;

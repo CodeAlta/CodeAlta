@@ -113,9 +113,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private Select<ChatReasoningOption>? ChatReasoningSelect => _threadWorkspaceView?.ChatReasoningSelect;
     private TabControl? ThreadTabControl => _threadWorkspaceView?.ThreadTabControl;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="CodeAltaApp"/> class.
-    /// </summary>
+    /// <summary>Initializes <see cref="CodeAltaApp"/>.</summary>
     public CodeAltaApp(
         ProjectCatalog projectCatalog,
         WorkThreadCatalog threadCatalog,
@@ -323,7 +321,15 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 () => DefaultAutoApproveEnabled,
                 _promptDraftUiCoordinator.ClearDraftPromptText,
                 SetReadyStatusForCurrentSelection,
-                ClearThreadInput,
+                () => UiDispatch.Invoke(
+                    GetUiDispatcher(),
+                    () =>
+                    {
+                        _promptDraftUiCoordinator.ClearPromptText();
+                        return 0;
+                    }),
+                () => ReadBindableState(() => string.IsNullOrWhiteSpace(_promptDraftUiCoordinator.PromptText)),
+                prompt => DispatchToUi(() => _promptDraftUiCoordinator.PromptText = prompt),
                 RefreshHeaderAndThreadWorkspace,
                 RefreshCatalogAndThreadWorkspace,
                 SetStatus,
@@ -585,7 +591,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     }
 
     internal static Visual CreateThreadTabPageContentPlaceholder()
-        // The active thread flow is hosted by the splitter, so tabs need a detached placeholder.
         => new Placeholder
         {
             IsVisible = false,
@@ -693,17 +698,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private ComputedVisual CreateUsageComputedVisual(Func<Visual> build)
         => _workspaceCoordinator.CreateUsageComputedVisual(build);
-
-    private void ClearThreadInput()
-    {
-        UiDispatch.Invoke(
-            GetUiDispatcher(),
-            () =>
-            {
-                _promptDraftUiCoordinator.ClearPromptText();
-                return 0;
-            });
-    }
 
     private void ClearThreadTitleDraft()
         => DispatchToUi(() => _sidebarViewModel.DraftThreadTitle = string.Empty);
