@@ -20,6 +20,9 @@ internal sealed class ThreadWorkspaceView
 {
     private Markup? _statusIconVisual;
     private readonly Dictionary<string, TabPage> _tabPages = new(StringComparer.OrdinalIgnoreCase);
+    private Dialog? _expandedPromptDialog;
+
+    internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
 
     public ThreadWorkspaceView(
         CodeAltaShellViewModel shellViewModel,
@@ -79,6 +82,7 @@ internal sealed class ThreadWorkspaceView
         ThreadInput = CreatePromptEditor(
             promptComposerViewModel,
             sendPrompt,
+            () => OpenExpandedPromptDialog(promptComposerViewModel, promptText),
             steerPrompt,
             clearQueuedPrompts,
             delegateThread,
@@ -92,6 +96,9 @@ internal sealed class ThreadWorkspaceView
         SendPromptButton = new Button(new TextBlock($"{NerdFont.MdSend} Send"))
             .Click(sendPrompt)
             .IsEnabled(promptComposerViewModel.Bind.CanSend);
+        ExpandPromptButton = new Button("Full Prompt")
+            .Click(() => OpenExpandedPromptDialog(promptComposerViewModel, promptText))
+            .IsEnabled(promptComposerViewModel.Bind.IsEnabled);
         ChatBackendSelect = new Select<ChatBackendOption>()
             .SelectionChanged((_, e) => onChatBackendSelectionChanged(e.NewIndex))
             .MinWidth(14)
@@ -164,6 +171,7 @@ internal sealed class ThreadWorkspaceView
         var selectionControls = new HStack(
         [
             SendPromptButton,
+            ExpandPromptButton,
             ChatBackendSelect,
             ChatModelSelect,
             ChatReasoningSelect,
@@ -242,6 +250,8 @@ internal sealed class ThreadWorkspaceView
 
     public Button SendPromptButton { get; }
 
+    public Button ExpandPromptButton { get; }
+
     public CommandBar ThreadCommandBar { get; }
 
     public Select<ChatBackendOption> ChatBackendSelect { get; }
@@ -278,6 +288,7 @@ internal sealed class ThreadWorkspaceView
     private static ChatPromptEditor CreatePromptEditor(
         PromptComposerViewModel promptComposerViewModel,
         Action sendPrompt,
+        Action openExpandedPromptEditor,
         Action steerPrompt,
         Action clearQueuedPrompts,
         Action delegateThread,
@@ -288,6 +299,7 @@ internal sealed class ThreadWorkspaceView
     {
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(sendPrompt);
+        ArgumentNullException.ThrowIfNull(openExpandedPromptEditor);
         ArgumentNullException.ThrowIfNull(steerPrompt);
         ArgumentNullException.ThrowIfNull(clearQueuedPrompts);
         ArgumentNullException.ThrowIfNull(delegateThread);
@@ -297,6 +309,17 @@ internal sealed class ThreadWorkspaceView
         var editor = CreateStyledPromptEditor(_ => sendPrompt(), placeholder: null)
             .Placeholder(promptComposerViewModel.Bind.Placeholder)
             .Text(promptText);
+
+        editor.AddCommand(new Command
+        {
+            Id = "CodeAlta.Thread.ExpandPrompt",
+            LabelMarkup = "Full Prompt",
+            DescriptionMarkup = "Open the current prompt in a large editor window. Escape closes the window and keeps the draft.",
+            Gesture = new KeyGesture(ExpandPromptShortcutKey),
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _visual => openExpandedPromptEditor(),
+            CanExecute = _visual => promptComposerViewModel.IsEnabled,
+        });
 
         editor.AddCommand(new Command
         {
@@ -366,6 +389,64 @@ internal sealed class ThreadWorkspaceView
         });
 
         return editor;
+    }
+
+    private void OpenExpandedPromptDialog(
+        PromptComposerViewModel promptComposerViewModel,
+        Binding<string?> promptText)
+    {
+        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
+
+        if (_expandedPromptDialog is { App: not null })
+        {
+            return;
+        }
+
+        var editor = CreateStyledPromptEditor(_ => { }, placeholder: null)
+            .Placeholder(promptComposerViewModel.Bind.Placeholder)
+            .Text(promptText)
+            .MinHeight(12)
+            .IsEnabled(promptComposerViewModel.Bind.IsEnabled);
+        editor.AddCommand(CreateExpandedPromptDialogCloseCommand());
+
+        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        {
+            HorizontalAlignment = Align.End,
+            VerticalAlignment = Align.Start,
+            Tone = ControlTone.Error,
+        };
+        closeButton.Click(CloseExpandedPromptDialog);
+
+        var dialog = new Dialog()
+            .Title("Edit Prompt")
+            .TopRightText(closeButton)
+            .BottomRightText(new Markup("[dim]Esc Close · draft preserved[/]"))
+            .IsModal(true)
+            .Padding(1)
+            .Content(editor.Scrollable());
+        ResponsiveDialogSize.Apply(dialog, ThreadPaneLayout.GetAbsoluteBounds(), minWidth: 60, minHeight: 18);
+        dialog.AddCommand(CreateExpandedPromptDialogCloseCommand());
+
+        _expandedPromptDialog = dialog;
+        dialog.Show();
+
+        Command CreateExpandedPromptDialogCloseCommand()
+            => new()
+            {
+                Id = "CodeAlta.Thread.ExpandPrompt.Close",
+                LabelMarkup = "Close",
+                DescriptionMarkup = "Close the large prompt editor and keep the current draft.",
+                Gesture = new KeyGesture(TerminalKey.Escape),
+                Importance = CommandImportance.Primary,
+                Execute = _ => CloseExpandedPromptDialog(),
+            };
+    }
+
+    private void CloseExpandedPromptDialog()
+    {
+        var dialog = _expandedPromptDialog;
+        _expandedPromptDialog = null;
+        dialog?.Close();
     }
 
     private static Button CreateIconButton(string icon, Action onClick)

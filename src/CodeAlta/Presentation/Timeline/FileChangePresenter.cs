@@ -341,13 +341,12 @@ internal sealed class FileChangePresenter
                 .BottomRightText(new Markup("[dim]Ctrl+F Search[/]"))
                 .IsModal(true)
                 .Padding(1)
-                .Width(Math.Max(60, (int)Math.Round(bounds.Width * 0.85, MidpointRounding.AwayFromZero)))
-                .Height(Math.Max(18, (int)Math.Round(bounds.Height * 0.85, MidpointRounding.AwayFromZero)))
                 .Content(new Grid()
                     .Rows(new RowDefinition { Height = GridLength.Auto }, new RowDefinition { Height = GridLength.Star(1) })
                     .Columns(new ColumnDefinition { Width = GridLength.Star(1) })
                     .Cell(detailsGroup, 0, 0)
                     .Cell(outputGroup, 1, 0));
+            ResponsiveDialogSize.Apply(dialog, bounds, minWidth: 60, minHeight: 18, widthFactor: 0.85, heightFactor: 0.85);
             dialog.AddCommand(new Command { Id = "FileChangeDialog.Close", LabelMarkup = "Close", DescriptionMarkup = "Close file change details.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => CloseDialog(entry) });
             dialog.KeyDown((_, e) => { if (e.Key == TerminalKey.Escape) { CloseDialog(entry); e.Handled = true; } });
             entry.DetailDialog = dialog;

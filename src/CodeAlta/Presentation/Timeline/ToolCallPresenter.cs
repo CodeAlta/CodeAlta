@@ -302,9 +302,8 @@ internal sealed class ToolCallPresenter
                 .BottomRightText(new Markup("[dim]Ctrl+F Search[/]"))
                 .IsModal(true)
                 .Padding(1)
-                .Width(Math.Max(56, (int)Math.Round(bounds.Width * 0.8, MidpointRounding.AwayFromZero)))
-                .Height(Math.Max(16, (int)Math.Round(bounds.Height * 0.8, MidpointRounding.AwayFromZero)))
                 .Content(new Grid().Rows(new RowDefinition { Height = GridLength.Auto }, new RowDefinition { Height = GridLength.Star(1) }).Columns(new ColumnDefinition { Width = GridLength.Star(1) }).Cell(detailsGroup, 0, 0).Cell(outputGroup, 1, 0));
+            ResponsiveDialogSize.Apply(dialog, bounds, minWidth: 56, minHeight: 16);
             dialog.AddCommand(new Command { Id = "ToolCallDialog.Close", LabelMarkup = "Close", DescriptionMarkup = "Close tool call details.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => CloseDialog(entry) });
             dialog.KeyDown((_, e) => { if (e.Key == TerminalKey.Escape) { CloseDialog(entry); e.Handled = true; } });
             entry.DetailDialog = dialog;

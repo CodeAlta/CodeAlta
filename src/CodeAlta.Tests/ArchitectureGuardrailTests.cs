@@ -301,6 +301,16 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void ThreadWorkspaceView_ExpandedPromptDialog_UsesEscapeCommandWithoutDirectKeyHandler()
+    {
+        var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+
+        Assert.IsTrue(workspaceSource.Contains("editor.AddCommand(CreateExpandedPromptDialogCloseCommand());", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("dialog.AddCommand(CreateExpandedPromptDialogCloseCommand());", StringComparison.Ordinal));
+        Assert.IsFalse(workspaceSource.Contains("dialog.KeyDown(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void CodeAltaSource_UsesBindingsInsteadOfRegisterDynamicUpdate()
     {
         var codeAltaRoot = GetCodeAltaSourceRoot();

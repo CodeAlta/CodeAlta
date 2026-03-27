@@ -109,6 +109,7 @@ Current terminal shell capabilities:
   - Automatically probes and initializes both Copilot and Codex backends (when available), with inline warnings when a local CLI/runtime is not installed.
   - Codex backend sessions default to `danger-full-access` (no sandbox) in CodeAlta so prompts can inspect sibling projects outside the current working directory without first switching the session root.
   - Backend, model, and reasoning-effort selectors are shown under the prompt.
+  - Press `F6` or use the `Full Prompt` button to edit the current draft in a large 80%-screen prompt window; `Esc` closes it and keeps the edited draft.
   - Per-backend model and reasoning defaults are stored in `~/.codealta/config.toml`, with project-local overrides read from `<project>/.codealta/config.toml`.
   - Thread-specific model and reasoning selections are preserved for reopened tabs through `~/.codealta/machine/ui-state.yaml`, so an existing thread keeps its model by default even after global or project defaults change.
   - The reasoning selector only shows concrete effort values. When a selected model supports `high`, CodeAlta prefers `high` by default.
