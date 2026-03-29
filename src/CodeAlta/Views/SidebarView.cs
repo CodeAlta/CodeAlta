@@ -1,30 +1,36 @@
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
+using System.Text;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Views;
 
 internal sealed class SidebarView
 {
+    private static readonly ButtonStyle ToolbarButtonStyle = ButtonStyle.Default with
+    {
+        Padding = Thickness.Zero,
+    };
+
     private readonly Dictionary<SidebarSelectionTarget, TreeNode> _nodesByTarget = new();
 
     public SidebarView(
         SidebarViewModel viewModel,
-        Action refreshCatalog)
-        : this(viewModel, refreshCatalog, static _ => { })
-    {
-    }
-
-    public SidebarView(
-        SidebarViewModel viewModel,
         Action refreshCatalog,
+        Action cycleSortMode,
+        Action openNavigatorSettings,
         Action<SidebarSelectionTarget?> onSelectedTargetChanged)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(refreshCatalog);
+        ArgumentNullException.ThrowIfNull(cycleSortMode);
+        ArgumentNullException.ThrowIfNull(openNavigatorSettings);
         ArgumentNullException.ThrowIfNull(onSelectedTargetChanged);
 
         Tree = new TreeView
@@ -37,14 +43,28 @@ internal sealed class SidebarView
             .HorizontalScrollEnabled(false)
             .VerticalScrollEnabled(true);
 
-        var footer = new VStack(
+        var footer = new HStack(
         [
-            new TextBlock("Thread Title (optional)"),
-            new TextBox().Text(viewModel.Bind.DraftThreadTitle),
-            new Button(new TextBlock("Refresh Catalog")).Click(refreshCatalog),
+            CreateToolbarButton(
+                () => NerdFont.MdRefresh,
+                "Refresh projects and threads",
+                refreshCatalog),
+            CreateToolbarButton(
+                () => viewModel.SortMode == NavigatorProjectSortMode.Name
+                    ? NerdFont.MdSortAlphabeticalAscending
+                    : NerdFont.MdSortCalendarDescending,
+                () => viewModel.SortMode == NavigatorProjectSortMode.Name
+                    ? "Sort projects by name"
+                    : "Sort projects by last activity",
+                cycleSortMode),
+            CreateToolbarButton(
+                () => NerdFont.MdCogOutline,
+                "Navigator settings",
+                openNavigatorSettings),
         ])
         {
-            Spacing = 1,
+            Spacing = 2,
+            HorizontalAlignment = Align.Stretch,
         };
 
         var contentGrid = new Grid
@@ -104,13 +124,18 @@ internal sealed class SidebarView
     {
         ArgumentNullException.ThrowIfNull(projection);
 
-        var node = new TreeNode(CreateSidebarHeader(projection.Title))
+        var node = new TreeNode(CreateSidebarHeader(projection.Row))
         {
             Icon = projection.Icon,
             IconStyle = UiPalette.GetSidebarIconStyle(projection.Accent),
             Data = projection.SelectionTarget,
             IsExpanded = projection.IsExpanded,
         };
+
+        if (projection.Kind is SidebarNodeKind.Global or SidebarNodeKind.Project or SidebarNodeKind.Thread)
+        {
+            node.AddRightVisual(CreateTimestampVisual(projection.Row), TreeNodeRightVisualVisibility.Always);
+        }
 
         if (projection.SelectionTarget is { } target)
         {
@@ -125,12 +150,55 @@ internal sealed class SidebarView
         return node;
     }
 
-    private static Visual CreateSidebarHeader(string title)
+    private static Visual CreateSidebarHeader(SidebarNodeViewModel row)
     {
-        var markup = new Markup($"[bold]{AnsiMarkup.Escape(title)}[/]")
+        ArgumentNullException.ThrowIfNull(row);
+
+        return new Markup(() => $"[bold]{AnsiMarkup.Escape(row.Title)}[/]")
         {
             Wrap = false,
         };
-        return markup;
+    }
+
+    private static Visual CreateTimestampVisual(SidebarNodeViewModel row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return new Markup(() =>
+                $"[{UiPalette.MutedMarkup}]{AnsiMarkup.Escape(row.RelativeActivityText)}[/]")
+            .Wrap(false)
+            .TextAlignment(TextAlignment.Right)
+            .MinWidth(12)
+            .Tooltip(new TextBlock(() => row.ExactActivityText));
+    }
+
+    private static Visual CreateToolbarButton(
+        Func<Rune> iconFactory,
+        string tooltip,
+        Action onClick)
+    {
+        ArgumentNullException.ThrowIfNull(iconFactory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tooltip);
+        ArgumentNullException.ThrowIfNull(onClick);
+
+        return new Button(new TextBlock(() => iconFactory().ToString()))
+            .Style(ToolbarButtonStyle)
+            .Click(onClick)
+            .Tooltip(new TextBlock(tooltip));
+    }
+
+    private static Visual CreateToolbarButton(
+        Func<Rune> iconFactory,
+        Func<string> tooltipFactory,
+        Action onClick)
+    {
+        ArgumentNullException.ThrowIfNull(iconFactory);
+        ArgumentNullException.ThrowIfNull(tooltipFactory);
+        ArgumentNullException.ThrowIfNull(onClick);
+
+        return new Button(new TextBlock(() => iconFactory().ToString()))
+            .Style(ToolbarButtonStyle)
+            .Click(onClick)
+            .Tooltip(new TextBlock(tooltipFactory));
     }
 }

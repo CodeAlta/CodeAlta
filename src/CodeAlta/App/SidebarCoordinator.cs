@@ -1,8 +1,7 @@
-using CodeAlta.Views;
-using CodeAlta.App;
 using CodeAlta.Catalog;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.ViewModels;
+using CodeAlta.Views;
 
 namespace CodeAlta.App;
 
@@ -10,31 +9,36 @@ internal sealed class SidebarCoordinator
 {
     private readonly SidebarViewModel _viewModel;
     private readonly CatalogOptions _catalogOptions;
-    private readonly int _maxRecentThreadsPerProject;
     private readonly CodeAltaShellController _shellController;
     private readonly SidebarView _view;
+    private readonly Dictionary<string, SidebarNodeViewModel> _rowsById = new(StringComparer.OrdinalIgnoreCase);
     private bool _selectionSyncEnabled = true;
     private SidebarTreeProjection? _projection;
     private SidebarSelectionTarget? _pendingSelectionTarget;
     private SidebarSelectionTarget? _lastSelectedTarget;
+    private DateTimeOffset? _nextRecencyRefreshAtUtc;
 
     public SidebarCoordinator(
         SidebarViewModel viewModel,
         CatalogOptions catalogOptions,
         CodeAltaShellController shellController,
-        int maxRecentThreadsPerProject)
+        Action cycleSortMode,
+        Action openNavigatorSettings)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(shellController);
+        ArgumentNullException.ThrowIfNull(cycleSortMode);
+        ArgumentNullException.ThrowIfNull(openNavigatorSettings);
 
         _viewModel = viewModel;
         _catalogOptions = catalogOptions;
-        _maxRecentThreadsPerProject = maxRecentThreadsPerProject;
         _shellController = shellController;
         _view = new SidebarView(
             viewModel,
             () => _ = shellController.ReloadCatalogAsync(CancellationToken.None),
+            cycleSortMode,
+            openNavigatorSettings,
             OnSelectedTargetChanged);
     }
 
@@ -45,20 +49,27 @@ internal sealed class SidebarCoordinator
         IReadOnlyList<WorkThreadDescriptor> threads,
         string? expandedProjectId,
         SidebarSelectionTarget currentTarget,
+        NavigatorSettings settings,
         Action verifyBindableAccess)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(threads);
+        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(verifyBindableAccess);
 
         verifyBindableAccess();
 
+        var nowUtc = DateTimeOffset.UtcNow;
+        _viewModel.SortMode = settings.SortMode;
         var projection = SidebarTreeProjectionBuilder.Build(
             projects,
             threads,
             _catalogOptions.GlobalRoot,
             expandedProjectId,
-            _maxRecentThreadsPerProject);
+            settings,
+            GetOrCreateRow,
+            nowUtc);
+        UpdateNextRecencyRefresh(nowUtc);
 
         if (_projection == projection)
         {
@@ -82,7 +93,27 @@ internal sealed class SidebarCoordinator
             _selectionSyncEnabled = true;
         }
 
+        PruneStaleRows(projection);
         ApplyPendingSelection();
+    }
+
+    public void RefreshRecency(DateTimeOffset nowUtc, Action verifyBindableAccess)
+    {
+        ArgumentNullException.ThrowIfNull(verifyBindableAccess);
+        verifyBindableAccess();
+
+        if (_nextRecencyRefreshAtUtc is { } nextRefreshAtUtc &&
+            nowUtc < nextRefreshAtUtc)
+        {
+            return;
+        }
+
+        foreach (var row in _rowsById.Values)
+        {
+            row.UpdateActivity(row.ActivityAtUtc, nowUtc);
+        }
+
+        UpdateNextRecencyRefresh(nowUtc);
     }
 
     public void SyncSelectionToCurrentState(SidebarSelectionTarget currentTarget)
@@ -111,6 +142,68 @@ internal sealed class SidebarCoordinator
 
         _lastSelectedTarget = target;
         _pendingSelectionTarget = null;
+    }
+
+    private SidebarNodeViewModel GetOrCreateRow(
+        string nodeId,
+        SidebarNodeKind kind,
+        SidebarSelectionTarget? selectionTarget)
+    {
+        if (_rowsById.TryGetValue(nodeId, out var existing))
+        {
+            return existing;
+        }
+
+        var created = new SidebarNodeViewModel(nodeId, kind, selectionTarget);
+        _rowsById.Add(nodeId, created);
+        return created;
+    }
+
+    private void UpdateNextRecencyRefresh(DateTimeOffset nowUtc)
+    {
+        DateTimeOffset? nextRefreshAtUtc = null;
+        foreach (var row in _rowsById.Values)
+        {
+            if (row.NextRelativeRefreshAtUtc is not { } candidate || candidate <= nowUtc)
+            {
+                continue;
+            }
+
+            if (nextRefreshAtUtc is null || candidate < nextRefreshAtUtc.Value)
+            {
+                nextRefreshAtUtc = candidate;
+            }
+        }
+
+        _nextRecencyRefreshAtUtc = nextRefreshAtUtc;
+    }
+
+    private void PruneStaleRows(SidebarTreeProjection projection)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+
+        var activeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in projection.Roots)
+        {
+            CollectNodeIds(root, activeIds);
+        }
+
+        foreach (var nodeId in _rowsById.Keys.ToArray())
+        {
+            if (!activeIds.Contains(nodeId))
+            {
+                _rowsById.Remove(nodeId);
+            }
+        }
+    }
+
+    private static void CollectNodeIds(SidebarTreeNodeProjection node, HashSet<string> ids)
+    {
+        ids.Add(node.NodeId);
+        foreach (var child in node.Children)
+        {
+            CollectNodeIds(child, ids);
+        }
     }
 
     private void OnSelectedTargetChanged(SidebarSelectionTarget? target)

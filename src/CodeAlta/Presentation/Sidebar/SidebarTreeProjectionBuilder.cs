@@ -12,82 +12,126 @@ internal static class SidebarTreeProjectionBuilder
         IReadOnlyList<WorkThreadDescriptor> threads,
         string globalRoot,
         string? expandedProjectId,
-        int maxRecentThreadsPerProject)
+        NavigatorSettings settings,
+        Func<string, SidebarNodeKind, SidebarSelectionTarget?, SidebarNodeViewModel> getOrCreateRow,
+        DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(threads);
         ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(getOrCreateRow);
 
         return new SidebarTreeProjection(
         [
-            CreateGlobalNode(threads, maxRecentThreadsPerProject),
-            CreateProjectsNode(projects, threads, expandedProjectId, maxRecentThreadsPerProject),
+            CreateGlobalNode(threads, settings, getOrCreateRow, nowUtc),
+            CreateProjectsNode(projects, threads, expandedProjectId, settings, getOrCreateRow, nowUtc),
         ]);
     }
 
     private static SidebarTreeNodeProjection CreateGlobalNode(
         IReadOnlyList<WorkThreadDescriptor> threads,
-        int maxRecentThreadsPerProject)
+        NavigatorSettings settings,
+        Func<string, SidebarNodeKind, SidebarSelectionTarget?, SidebarNodeViewModel> getOrCreateRow,
+        DateTimeOffset nowUtc)
     {
-        var children = threads
+        var visibleThreads = threads
+            .Where(static item => item.Status != WorkThreadStatus.Archived)
             .Where(static item => item.Kind == WorkThreadKind.GlobalThread)
             .OrderByDescending(static item => item.LastActiveAt)
-            .Take(maxRecentThreadsPerProject)
-            .Select(CreateThreadNode)
+            .ToArray();
+        var row = getOrCreateRow("global", SidebarNodeKind.Global, SidebarSelectionTarget.Global());
+        row.UpdateTitle("Global");
+        row.UpdateActivity(visibleThreads.FirstOrDefault()?.LastActiveAt, nowUtc);
+
+        var children = visibleThreads
+            .Take(settings.RecentThreadsPerProject)
+            .Select(thread => CreateThreadNode(thread, getOrCreateRow, nowUtc))
             .ToArray();
 
         return new SidebarTreeNodeProjection(
-            Title: "Global",
-            Icon: NerdFont.MdHomeOutline,
-            Accent: SidebarAccent.Global,
-            SelectionTarget: SidebarSelectionTarget.Global(),
-            IsExpanded: true,
-            Children: children);
+            row.NodeId,
+            SidebarNodeKind.Global,
+            row,
+            NerdFont.MdHomeOutline,
+            SidebarAccent.Global,
+            SidebarSelectionTarget.Global(),
+            true,
+            children);
     }
 
     private static SidebarTreeNodeProjection CreateProjectsNode(
         IReadOnlyList<ProjectDescriptor> projects,
         IReadOnlyList<WorkThreadDescriptor> threads,
         string? expandedProjectId,
-        int maxRecentThreadsPerProject)
+        NavigatorSettings settings,
+        Func<string, SidebarNodeKind, SidebarSelectionTarget?, SidebarNodeViewModel> getOrCreateRow,
+        DateTimeOffset nowUtc)
     {
-        var children = projects
-            .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .Select(project => CreateProjectNode(project, threads, expandedProjectId, maxRecentThreadsPerProject))
+        var row = getOrCreateRow("projects", SidebarNodeKind.ProjectsRoot, null);
+        row.UpdateTitle("Projects");
+        row.UpdateActivity(activityAtUtc: null, nowUtc);
+
+        var visibleProjects = projects
+            .Where(static project => !project.Archived)
+            .ToArray();
+        var orderedProjects = settings.SortMode == NavigatorProjectSortMode.Date
+            ? OrderProjectsByDate(visibleProjects, threads)
+            : OrderProjectsByName(visibleProjects);
+
+        var children = orderedProjects
+            .Select(project => CreateProjectNode(project, threads, expandedProjectId, settings, getOrCreateRow, nowUtc))
             .ToArray();
 
         return new SidebarTreeNodeProjection(
-            Title: "Projects",
-            Icon: NerdFont.MdFolderMultipleOutline,
-            Accent: SidebarAccent.Projects,
-            SelectionTarget: null,
-            IsExpanded: true,
-            Children: children);
+            row.NodeId,
+            SidebarNodeKind.ProjectsRoot,
+            row,
+            NerdFont.MdFolderMultipleOutline,
+            SidebarAccent.Projects,
+            null,
+            true,
+            children);
     }
 
     private static SidebarTreeNodeProjection CreateProjectNode(
         ProjectDescriptor project,
         IReadOnlyList<WorkThreadDescriptor> threads,
         string? expandedProjectId,
-        int maxRecentThreadsPerProject)
+        NavigatorSettings settings,
+        Func<string, SidebarNodeKind, SidebarSelectionTarget?, SidebarNodeViewModel> getOrCreateRow,
+        DateTimeOffset nowUtc)
     {
         var projectThreads = ThreadScopePresentation.FilterThreadsForProject(threads, project.Id, includeInternal: true)
-            .Take(maxRecentThreadsPerProject)
-            .Select(CreateThreadNode)
+            .Where(static thread => thread.Status != WorkThreadStatus.Archived)
+            .ToArray();
+        var row = getOrCreateRow($"project:{project.Id}", SidebarNodeKind.Project, SidebarSelectionTarget.Project(project.Id));
+        row.UpdateTitle(project.DisplayName);
+        row.UpdateActivity(projectThreads.FirstOrDefault()?.LastActiveAt, nowUtc);
+
+        var children = projectThreads
+            .Take(settings.RecentThreadsPerProject)
+            .Select(thread => CreateThreadNode(thread, getOrCreateRow, nowUtc))
             .ToArray();
 
         return new SidebarTreeNodeProjection(
-            Title: project.DisplayName,
-            Icon: NerdFont.MdFolderOutline,
-            Accent: SidebarAccent.Projects,
-            SelectionTarget: SidebarSelectionTarget.Project(project.Id),
-            IsExpanded: string.Equals(project.Id, expandedProjectId, StringComparison.OrdinalIgnoreCase),
-            Children: projectThreads);
+            row.NodeId,
+            SidebarNodeKind.Project,
+            row,
+            NerdFont.MdFolderOutline,
+            SidebarAccent.Projects,
+            SidebarSelectionTarget.Project(project.Id),
+            string.Equals(project.Id, expandedProjectId, StringComparison.OrdinalIgnoreCase),
+            children);
     }
 
-    private static SidebarTreeNodeProjection CreateThreadNode(WorkThreadDescriptor thread)
+    private static SidebarTreeNodeProjection CreateThreadNode(
+        WorkThreadDescriptor thread,
+        Func<string, SidebarNodeKind, SidebarSelectionTarget?, SidebarNodeViewModel> getOrCreateRow,
+        DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(thread);
+        ArgumentNullException.ThrowIfNull(getOrCreateRow);
 
         var icon = thread.Kind switch
         {
@@ -96,13 +140,51 @@ internal static class SidebarTreeProjectionBuilder
             WorkThreadKind.InternalThread => NerdFont.MdAccountCogOutline,
             _ => NerdFont.MdChatProcessingOutline,
         };
+        var row = getOrCreateRow($"thread:{thread.ThreadId}", SidebarNodeKind.Thread, SidebarSelectionTarget.Thread(thread.ThreadId));
+        row.UpdateTitle(SidebarThreadPresentation.CompactThreadTitle(thread.Title));
+        row.UpdateActivity(thread.LastActiveAt, nowUtc);
 
         return new SidebarTreeNodeProjection(
-            Title: SidebarThreadPresentation.CompactThreadTitle(thread.Title),
-            Icon: icon,
-            Accent: SidebarThreadPresentation.ResolveThreadAccent(thread.BackendId, thread.Kind),
-            SelectionTarget: SidebarSelectionTarget.Thread(thread.ThreadId),
-            IsExpanded: false,
-            Children: []);
+            row.NodeId,
+            SidebarNodeKind.Thread,
+            row,
+            icon,
+            SidebarThreadPresentation.ResolveThreadAccent(thread.BackendId, thread.Kind),
+            SidebarSelectionTarget.Thread(thread.ThreadId),
+            false,
+            []);
+    }
+
+    private static IEnumerable<ProjectDescriptor> OrderProjectsByName(IEnumerable<ProjectDescriptor> projects)
+    {
+        return projects
+            .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static project => project.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static project => project.Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<ProjectDescriptor> OrderProjectsByDate(
+        IEnumerable<ProjectDescriptor> projects,
+        IReadOnlyList<WorkThreadDescriptor> threads,
+        bool includeInternal = true)
+    {
+        ArgumentNullException.ThrowIfNull(projects);
+        ArgumentNullException.ThrowIfNull(threads);
+
+        return projects
+            .Select(project => new
+            {
+                Project = project,
+                LastActiveAt = ThreadScopePresentation.FilterThreadsForProject(threads, project.Id, includeInternal)
+                    .Where(static thread => thread.Status != WorkThreadStatus.Archived)
+                    .Select(static thread => (DateTimeOffset?)thread.LastActiveAt)
+                    .Max(),
+            })
+            .OrderByDescending(static item => item.LastActiveAt.HasValue)
+            .ThenByDescending(static item => item.LastActiveAt)
+            .ThenBy(static item => item.Project.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static item => item.Project.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static item => item.Project.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(static item => item.Project);
     }
 }

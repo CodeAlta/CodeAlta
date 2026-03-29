@@ -43,6 +43,24 @@ public interface IAgentBackend : IAsyncDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes an existing backend session when supported.
+    /// </summary>
+    /// <param name="sessionId">The backend session identifier.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// <see langword="true"/> when the backend deleted the session; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sessionId"/> is empty.</exception>
+    Task<bool> DeleteSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(false);
+    }
+
+    /// <summary>
     /// Creates a new session.
     /// </summary>
     /// <param name="options">Session creation options.</param>

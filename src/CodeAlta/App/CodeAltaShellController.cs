@@ -16,7 +16,7 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
     private readonly IKnownProjectImporter _knownProjectImporter;
     private readonly IProjectCatalogStore _projectCatalog;
     private readonly IRecoverableThreadSource _recoverableThreadSource;
-    private readonly IWorkThreadArchiver _threadArchiver;
+    private readonly IWorkThreadDeleter _threadDeleter;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly ConcurrentQueue<WorkThreadRuntimeEvent> _pendingRuntimeEvents = new();
     private IUiDispatcher? _uiDispatcher;
@@ -29,19 +29,19 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
         IKnownProjectImporter knownProjectImporter,
         IProjectCatalogStore projectCatalog,
         IRecoverableThreadSource recoverableThreadSource,
-        IWorkThreadArchiver threadArchiver)
+        IWorkThreadDeleter threadDeleter)
     {
         ArgumentNullException.ThrowIfNull(shell);
         ArgumentNullException.ThrowIfNull(knownProjectImporter);
         ArgumentNullException.ThrowIfNull(projectCatalog);
         ArgumentNullException.ThrowIfNull(recoverableThreadSource);
-        ArgumentNullException.ThrowIfNull(threadArchiver);
+        ArgumentNullException.ThrowIfNull(threadDeleter);
 
         _shell = shell;
         _knownProjectImporter = knownProjectImporter;
         _projectCatalog = projectCatalog;
         _recoverableThreadSource = recoverableThreadSource;
-        _threadArchiver = threadArchiver;
+        _threadDeleter = threadDeleter;
     }
 
     public void AttachUiDispatcher(IUiDispatcher uiDispatcher)
@@ -196,7 +196,7 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
         await ReloadCatalogAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<bool> ArchiveThreadAsync(string threadId, CancellationToken cancellationToken)
+    public async Task<bool> DeleteThreadAsync(string threadId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
 
@@ -204,12 +204,12 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
         var thread = threads.FirstOrDefault(candidate => string.Equals(candidate.ThreadId, threadId, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"Thread '{threadId}' was not found.");
 
-        var archivedByBackend = await _threadArchiver.ArchiveThreadAsync(thread, cancellationToken).ConfigureAwait(false);
+        var deletedByBackend = await _threadDeleter.DeleteThreadAsync(thread, cancellationToken).ConfigureAwait(false);
         await ReloadCatalogAsync(cancellationToken).ConfigureAwait(false);
-        return archivedByBackend;
+        return deletedByBackend;
     }
 
-    public async Task<ArchiveProjectResult> ArchiveProjectAsync(string projectId, CancellationToken cancellationToken)
+    public async Task<DeleteProjectResult> DeleteProjectAsync(string projectId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
 
@@ -219,13 +219,13 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
 
         foreach (var thread in threads)
         {
-            await _threadArchiver.ArchiveThreadAsync(thread, cancellationToken).ConfigureAwait(false);
+            await _threadDeleter.DeleteThreadAsync(thread, cancellationToken).ConfigureAwait(false);
         }
 
         project.Archived = true;
         await _projectCatalog.SaveAsync(project, cancellationToken).ConfigureAwait(false);
         await ReloadCatalogAsync(cancellationToken).ConfigureAwait(false);
-        return new ArchiveProjectResult(project.Id, threads.Select(static thread => thread.ThreadId).ToArray());
+        return new DeleteProjectResult(project.Id, threads.Select(static thread => thread.ThreadId).ToArray());
     }
 
     public async ValueTask DisposeAsync()

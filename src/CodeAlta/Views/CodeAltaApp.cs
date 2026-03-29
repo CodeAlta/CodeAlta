@@ -26,7 +26,6 @@ namespace CodeAlta.Views;
 internal sealed class CodeAltaApp : IAsyncDisposable
 {
     internal static readonly Logger UiLogger = LogManager.GetLogger("CodeAlta.UI");
-    private const int MaxRecentThreadsPerProject = 3;
     internal const string DraftTabId = "__draft__";
     private const bool DefaultAutoApproveEnabled = true;
     private readonly ChatBackendPreferenceCoordinator _backendPreferences;
@@ -115,7 +114,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private Select<ChatReasoningOption>? ChatReasoningSelect => _threadWorkspaceView?.ChatReasoningSelect;
     private TabControl? ThreadTabControl => _threadWorkspaceView?.ThreadTabControl;
 
-    /// <summary>Initializes <see cref="CodeAltaApp"/>.</summary>
     public CodeAltaApp(
         ProjectCatalog projectCatalog,
         WorkThreadCatalog threadCatalog,
@@ -177,7 +175,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _knownProjectImporter,
             new ProjectCatalogStore(projectCatalog),
             new RecoverableThreadSource(_runtimeService),
-            new WorkThreadArchiver(_runtimeService));
+            new WorkThreadDeleter(_runtimeService));
         _runtimeEventPump = new RuntimeEventPump(_runtimeService, _shellController);
         _terminalLoopCoordinator = new TerminalLoopCoordinator(
             _shellController,
@@ -221,7 +219,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _sidebarViewModel,
             _catalogOptions,
             _shellController,
-            MaxRecentThreadsPerProject);
+            () => _ = ToggleNavigatorSortModeAsync(),
+            OpenNavigatorSettings);
         _chatSelectorCoordinator = new ChatSelectorCoordinator(
             _threadWorkspaceViewModel,
             _promptComposerViewModel,
@@ -304,11 +303,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             GetPreferredBackendId,
             GetSelectedProject,
             () => _globalScopeSelected,
-            () => ReadBindableState(() => _sidebarViewModel.DraftThreadTitle?.Trim()),
+            static () => null,
             (backendId, workingDirectory, projectRoots) => _threadCommandCoordinator!.BuildPreferredExecutionOptions(backendId, workingDirectory, projectRoots),
             RememberThreadPreference,
             RegisterCreatedThreadAsync,
-            ClearThreadTitleDraft,
+            static () => { },
             SetStatus);
         _threadCommandCoordinator = new ThreadCommandCoordinator(
             _runtimeService,
@@ -355,9 +354,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             thread => _threadStateCoordinator.PersistThreadLocalStateAsync(thread));
     }
 
-    /// <summary>
-    /// Runs the terminal UI.
-    /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         PrepareForRun();
@@ -371,7 +367,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
-    /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         await _runtimeEventPump.DisposeAsync().ConfigureAwait(false);
@@ -431,6 +426,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _threadStateCoordinator.Threads,
             GetExpandedSidebarProjectId(),
             ResolveSidebarTargetForCurrentState(),
+            _threadStateCoordinator.NavigatorSettings,
             VerifyBindableAccess);
     }
 
@@ -457,6 +453,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         }
 
         _shellAnimationRuntime.Advance();
+        _sidebarCoordinator.RefreshRecency(DateTimeOffset.UtcNow, VerifyBindableAccess);
         EnsureInitialCatalogStateStarted(cancellationToken);
         if (!TryResolveInitialCatalogState(cancellationToken))
         {
@@ -597,11 +594,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         return _shellView;
     }
 
-    internal static Visual CreateThreadTabPageContentPlaceholder()
-        => new Placeholder
-        {
-            IsVisible = false,
-        };
+    internal static Visual CreateThreadTabPageContentPlaceholder() => new Placeholder { IsVisible = false };
 
     private void RefreshShellChrome()
         => _workspaceCoordinator.RefreshShellChrome();
@@ -617,16 +610,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         _threadInfoPresenter?.InvalidateSelection();
         _workspaceCoordinator.RefreshSelectionAndThreadWorkspace();
     }
-    internal void SelectGlobalScope()
-        => _threadStateCoordinator.SelectGlobalScope();
-    internal void SelectProjectScope(string projectId)
-        => _threadStateCoordinator.SelectProjectScope(projectId);
-    private void EnsureSelectionDefaults()
-        => _threadStateCoordinator.EnsureSelectionDefaults();
-    private string BuildHeaderText()
-        => _workspaceCoordinator.BuildHeaderText();
-    internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info)
-        => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
+    internal void SelectGlobalScope() => _threadStateCoordinator.SelectGlobalScope();
+    internal void SelectProjectScope(string projectId) => _threadStateCoordinator.SelectProjectScope(projectId);
+    private void EnsureSelectionDefaults() => _threadStateCoordinator.EnsureSelectionDefaults();
+    private string BuildHeaderText() => _workspaceCoordinator.BuildHeaderText();
+    internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info) => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
 
     private void SetThreadStatus(
         OpenThreadState tab,
@@ -682,14 +670,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private void DispatchToUi(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
-
         var dispatcher = GetUiDispatcher();
         UiDispatch.Post(
             dispatcher,
             action,
-            allowInline: ShouldRunInlineOnCurrentThread(
-                dispatcher.CheckAccess(),
-                _terminalLoopCoordinator.HasStarted));
+            allowInline: ShouldRunInlineOnCurrentThread(dispatcher.CheckAccess(), _terminalLoopCoordinator.HasStarted));
     }
 
     internal static bool CanAccessBindableState(bool dispatcherHasAccess, bool terminalLoopStarted)
@@ -717,9 +702,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private ComputedVisual CreateUsageComputedVisual(Func<Visual> build)
         => _workspaceCoordinator.CreateUsageComputedVisual(build);
-
-    private void ClearThreadTitleDraft()
-        => DispatchToUi(() => _sidebarViewModel.DraftThreadTitle = string.Empty);
 
     private async Task ActivateDraftTabAsync()
     {
@@ -801,4 +783,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private WorkThreadDescriptor? FindThread(string? threadId)
         => _threadStateCoordinator.FindThread(threadId);
 
+    private async Task ToggleNavigatorSortModeAsync()
+    {
+        var settings = _threadStateCoordinator.GetNavigatorSettingsSnapshot();
+        settings.SortMode = settings.SortMode == NavigatorProjectSortMode.Name ? NavigatorProjectSortMode.Date : NavigatorProjectSortMode.Name;
+        await _threadStateCoordinator.SaveNavigatorSettingsAsync(settings).ConfigureAwait(false);
+        RefreshCatalogAndThreadWorkspace();
+    }
+
+    private void OpenNavigatorSettings() => SetStatus("Navigator settings dialog will be added in the next step.", tone: StatusTone.Info);
 }

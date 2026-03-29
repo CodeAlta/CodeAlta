@@ -120,6 +120,8 @@ internal sealed class ShellThreadStateCoordinator
         set => _selection.PendingStartupThreadRestoreId = value;
     }
 
+    public NavigatorSettings NavigatorSettings => ViewState.Navigator;
+
     public async Task<InitialCatalogState> LoadInitialCatalogStateAsync(CancellationToken cancellationToken)
     {
         var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
@@ -211,6 +213,29 @@ internal sealed class ShellThreadStateCoordinator
         {
             Archived = thread.Status == WorkThreadStatus.Archived,
             MessageCount = thread.MessageCount,
+        };
+        ViewState.UpdatedAt = DateTimeOffset.UtcNow;
+        await PersistViewStateAsync().ConfigureAwait(false);
+    }
+
+    public NavigatorSettings GetNavigatorSettingsSnapshot()
+    {
+        return new NavigatorSettings
+        {
+            SortMode = ViewState.Navigator.SortMode,
+            RecentThreadsPerProject = ViewState.Navigator.RecentThreadsPerProject,
+        };
+    }
+
+    public async Task SaveNavigatorSettingsAsync(NavigatorSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        settings.Validate();
+
+        ViewState.Navigator = new NavigatorSettings
+        {
+            SortMode = settings.SortMode,
+            RecentThreadsPerProject = settings.RecentThreadsPerProject,
         };
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         await PersistViewStateAsync().ConfigureAwait(false);

@@ -271,26 +271,21 @@ public sealed class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
-    /// Attempts to archive a backend-owned thread.
+    /// Deletes a backend-owned session when supported.
     /// </summary>
     /// <param name="backendId">The backend identifier.</param>
-    /// <param name="threadId">The backend thread identifier.</param>
+    /// <param name="sessionId">The backend session identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns><see langword="true"/> when the backend archived the thread; otherwise <see langword="false"/>.</returns>
-    public async Task<bool> TryArchiveThreadAsync(
+    /// <returns><see langword="true"/> when the backend deleted the session; otherwise <see langword="false"/>.</returns>
+    public async Task<bool> DeleteSessionAsync(
         AgentBackendId backendId,
-        string threadId,
+        string sessionId,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
         var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
-        if (backend is not IThreadArchivingBackend archivingBackend)
-        {
-            return false;
-        }
-
-        return await archivingBackend.TryArchiveThreadAsync(threadId, cancellationToken).ConfigureAwait(false);
+        return await backend.DeleteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

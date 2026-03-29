@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Sidebar;
 using XenoAtom.Terminal.UI;
 
@@ -7,11 +8,11 @@ public sealed partial class SidebarViewModel
 {
     public SidebarViewModel()
     {
-        DraftThreadTitle = string.Empty;
+        SortMode = NavigatorProjectSortMode.Name;
     }
 
     [Bindable]
-    public partial string? DraftThreadTitle { get; set; }
+    public partial NavigatorProjectSortMode SortMode { get; set; }
 
     internal SidebarTreeProjection? Projection { get; set; }
 }

@@ -5,34 +5,34 @@ Read that document first for the full product and technical guidance, UX intent,
 
 - [x] Add persisted navigator settings model and storage
 - [x] Add navigator sort mode enum and default values
-- [ ] Define sidebar structural state vs bindable row state boundaries
-- [x] Add project archived flag to `ProjectDescriptor` and catalog serialization
+- [x] Define sidebar structural state vs bindable row state boundaries
+- [x] Add project hidden flag to `ProjectDescriptor` and catalog serialization
 - [ ] Add thread-side cached metadata needed for navigator/dialog management
   - [x] Persist or derive a stable message count
   - [ ] Ensure last activity timestamps reflect message updates
-- [x] Add application-level archive operations
-  - [x] Archive single thread
-  - [x] Archive project and all of its threads
-  - [x] Handle backend-supported and local-only archive flows
-- [ ] Extend sidebar projection models to carry recency text, exact timestamps, node kind, and row actions
-- [ ] Add bindable row view models for sidebar nodes where live values change
-- [ ] Add relative time formatter utility and exact timestamp tooltip content helper
-- [ ] Add recency refresh strategy that updates only when displayed buckets change
-- [ ] Replace the sidebar footer with an icon toolbar
-  - [ ] Refresh catalog icon button
-  - [ ] Sort mode icon button
-  - [ ] Navigator settings icon button
-- [ ] Remove the existing sidebar thread title editor and refresh text button
-- [ ] Add always-visible dimmed relative timestamps to project rows
-- [ ] Add always-visible dimmed relative timestamps to thread rows
-- [ ] Add hover-only archive button to thread rows
+- [x] Add application-level delete operations
+  - [x] Delete single thread
+  - [x] Delete project and all of its threads
+  - [x] Handle backend-supported and local-only delete flows
+- [x] Extend sidebar projection models to carry recency text, exact timestamps, node kind, and row actions
+- [x] Add bindable row view models for sidebar nodes where live values change
+- [x] Add relative time formatter utility and exact timestamp tooltip content helper
+- [x] Add recency refresh strategy that updates only when displayed buckets change
+- [x] Replace the sidebar footer with an icon toolbar
+  - [x] Refresh catalog icon button
+  - [x] Sort mode icon button
+  - [x] Navigator settings icon button
+- [x] Remove the existing sidebar thread title editor and refresh text button
+- [x] Add always-visible dimmed relative timestamps to project rows
+- [x] Add always-visible dimmed relative timestamps to thread rows
+- [ ] Add hover-only delete button to thread rows
 - [ ] Add hover-only project row actions
-  - [ ] Archive project
+  - [ ] Delete project
   - [ ] Show all threads
   - [ ] Show project details
-- [ ] Filter archived projects and archived threads out of the default navigator projection
-- [ ] Update selection behavior after thread archival
-- [ ] Update selection behavior after project archival
+- [x] Filter hidden projects and deleted threads out of the default navigator projection
+- [ ] Update selection behavior after thread deletion
+- [ ] Update selection behavior after project deletion
 - [ ] Add reusable CodeAlta confirmation dialog
 - [ ] Add navigator settings dialog
   - [ ] Edit sort mode
@@ -49,7 +49,7 @@ Read that document first for the full product and technical guidance, UX intent,
     - [ ] Select none
     - [ ] Select all
     - [ ] Invert selection
-  - [ ] Add batch archive flow with confirmation
+  - [ ] Add batch delete flow with confirmation
   - [ ] Close dialog on ESC
   - [ ] Close dialog via top-right close button
 - [ ] Add project details dialog
@@ -70,9 +70,9 @@ Read that document first for the full product and technical guidance, UX intent,
   - [ ] Save on Enter
   - [ ] Cancel on ESC
   - [ ] Preserve selection after save
-- [ ] Add tests for sidebar projection recency and sort behavior
-- [ ] Add tests for sidebar reactivity without unnecessary rebuilds
-- [ ] Add tests for archive flows
+- [x] Add tests for sidebar projection recency and sort behavior
+- [x] Add tests for sidebar reactivity without unnecessary rebuilds
+- [ ] Add tests for delete flows
 - [ ] Add tests for dialog row view models and selection commands
 - [ ] Add tests for inline rename validation and commit/cancel behavior
 - [ ] Add tests for navigator settings persistence

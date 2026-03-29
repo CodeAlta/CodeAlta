@@ -20,7 +20,7 @@ public sealed class CodeAltaShellControllerTests
         var projectCatalog = new FakeProjectCatalogStore(log, [project]);
         var threads = new FakeRecoverableThreadSource(log, [CreateThread("thread-1")]);
         var dispatcher = new FakeUiDispatcher();
-        var controller = new CodeAltaShellController(shell, importer, projectCatalog, threads, new FakeWorkThreadArchiver(log));
+        var controller = new CodeAltaShellController(shell, importer, projectCatalog, threads, new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
 
         await controller.ReloadCatalogAsync(CancellationToken.None);
@@ -51,7 +51,7 @@ public sealed class CodeAltaShellControllerTests
             importer,
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
 
         await controller.ReloadCatalogAsync(CancellationToken.None);
@@ -76,7 +76,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, [new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" }]),
             new FakeRecoverableThreadSource(log, [CreateThread("thread-1")]),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(new FakeUiDispatcher());
 
         await controller.InitializeAsync(CancellationToken.None);
@@ -108,7 +108,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
         var runtimeEvent = CreateHostEvent("thread-1");
 
@@ -135,7 +135,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
 
         controller.QueueRuntimeEvent(CreateHostEvent("thread-1"), CancellationToken.None);
@@ -160,7 +160,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
 
         controller.QueueRuntimeEvent(CreateToolDeltaEvent("thread-1", "tool-1", "alpha"), CancellationToken.None);
         controller.QueueRuntimeEvent(CreateToolDeltaEvent("thread-1", "tool-1", "beta"), CancellationToken.None);
@@ -185,7 +185,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
 
         await controller.SelectGlobalScopeAsync(CancellationToken.None);
@@ -205,7 +205,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
 
         await controller.SelectProjectScopeAsync("project-1", CancellationToken.None);
@@ -225,7 +225,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, []),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(dispatcher);
 
         await controller.OpenThreadAsync("thread-1", CancellationToken.None);
@@ -251,7 +251,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, threads),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
 
         var projectThreads = await controller.LoadProjectThreadsAsync("project-1", CancellationToken.None);
 
@@ -270,7 +270,7 @@ public sealed class CodeAltaShellControllerTests
             new FakeImporter(log),
             catalog,
             new FakeRecoverableThreadSource(log, [CreateThread("thread-1")]),
-            new FakeWorkThreadArchiver(log));
+            new FakeWorkThreadDeleter(log));
         controller.AttachUiDispatcher(new FakeUiDispatcher());
 
         project.DisplayName = "CodeAlta UI";
@@ -282,48 +282,48 @@ public sealed class CodeAltaShellControllerTests
     }
 
     [TestMethod]
-    public async Task ArchiveThreadAsync_ArchivesThreadAndReloadsCatalog()
+    public async Task DeleteThreadAsync_DeletesThreadAndReloadsCatalog()
     {
         var log = new List<string>();
         var shell = new FakeShell(log);
         var thread = CreateThread("thread-1");
-        var archiver = new FakeWorkThreadArchiver(log) { ArchiveResult = true };
+        var deleter = new FakeWorkThreadDeleter(log) { DeleteResult = true };
         var controller = new CodeAltaShellController(
             shell,
             new FakeImporter(log),
             new FakeProjectCatalogStore(log, []),
             new FakeRecoverableThreadSource(log, [thread]),
-            archiver);
+            deleter);
         controller.AttachUiDispatcher(new FakeUiDispatcher());
 
-        var archivedByBackend = await controller.ArchiveThreadAsync(thread.ThreadId, CancellationToken.None);
+        var deletedByBackend = await controller.DeleteThreadAsync(thread.ThreadId, CancellationToken.None);
 
-        Assert.IsTrue(archivedByBackend);
-        Assert.AreEqual(thread.ThreadId, archiver.ArchivedThreadIds.Single());
+        Assert.IsTrue(deletedByBackend);
+        Assert.AreEqual(thread.ThreadId, deleter.DeletedThreadIds.Single());
         CollectionAssert.Contains(log, "Shell.ApplyRecoveredCatalogState:0:1");
     }
 
     [TestMethod]
-    public async Task ArchiveProjectAsync_ArchivesThreadsMarksProjectArchivedAndReloadsCatalog()
+    public async Task DeleteProjectAsync_DeletesThreadsMarksProjectArchivedAndReloadsCatalog()
     {
         var log = new List<string>();
         var shell = new FakeShell(log);
         var project = new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" };
         var catalog = new FakeProjectCatalogStore(log, [project]);
-        var archiver = new FakeWorkThreadArchiver(log);
+        var deleter = new FakeWorkThreadDeleter(log);
         var controller = new CodeAltaShellController(
             shell,
             new FakeImporter(log),
             catalog,
             new FakeRecoverableThreadSource(log, [CreateThread("thread-1"), CreateThread("thread-2")]),
-            archiver);
+            deleter);
         controller.AttachUiDispatcher(new FakeUiDispatcher());
 
-        var result = await controller.ArchiveProjectAsync(project.Id, CancellationToken.None);
+        var result = await controller.DeleteProjectAsync(project.Id, CancellationToken.None);
 
         Assert.IsTrue(catalog.Projects.Single().Archived);
-        CollectionAssert.AreEquivalent(new[] { "thread-1", "thread-2" }, archiver.ArchivedThreadIds.ToArray());
-        CollectionAssert.AreEquivalent(new[] { "thread-1", "thread-2" }, result.ArchivedThreadIds.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "thread-1", "thread-2" }, deleter.DeletedThreadIds.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "thread-1", "thread-2" }, result.DeletedThreadIds.ToArray());
         CollectionAssert.Contains(log, "ProjectCatalog.Save:project-1");
     }
 
@@ -458,18 +458,18 @@ public sealed class CodeAltaShellControllerTests
         }
     }
 
-    private sealed class FakeWorkThreadArchiver(List<string> log) : IWorkThreadArchiver
+    private sealed class FakeWorkThreadDeleter(List<string> log) : IWorkThreadDeleter
     {
-        public List<string> ArchivedThreadIds { get; } = [];
+        public List<string> DeletedThreadIds { get; } = [];
 
-        public bool ArchiveResult { get; set; }
+        public bool DeleteResult { get; set; }
 
-        public Task<bool> ArchiveThreadAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken)
+        public Task<bool> DeleteThreadAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken)
         {
-            log.Add($"ThreadArchiver.Archive:{thread.ThreadId}");
-            ArchivedThreadIds.Add(thread.ThreadId);
+            log.Add($"ThreadDeleter.Delete:{thread.ThreadId}");
+            DeletedThreadIds.Add(thread.ThreadId);
             thread.Status = WorkThreadStatus.Archived;
-            return Task.FromResult(ArchiveResult);
+            return Task.FromResult(DeleteResult);
         }
     }
 

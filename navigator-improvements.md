@@ -10,14 +10,14 @@ It is written so an implementer can complete the work without needing additional
   project-level actions on projects, thread-level actions on threads, global navigator actions in the footer toolbar.
 - Make recency visible everywhere.
 - Keep the sidebar fully reactive while avoiding unnecessary rebuilds when nothing changed.
-- Support safe archival flows for both individual threads and whole projects.
+- Support safe delete flows for both individual threads and whole projects.
 - Provide a scalable way to inspect and manage more than the small “recent threads” subset shown in the navigator.
 - Preserve keyboard-first workflows.
 
 ## Non-Goals For This Iteration
 
 - No sidebar search yet. The design should leave room for it, but it is not part of this implementation.
-- No archived-items browser yet. Archived projects and threads are hidden by default.
+- No deleted-items browser yet. Deleted threads and hidden projects are out of the default navigator view.
 - No generic confirmation dialog contribution to `XenoAtom.Terminal.UI` yet. The first version lives in CodeAlta.
 
 ## Current Relevant Code Areas
@@ -36,7 +36,7 @@ It is written so an implementer can complete the work without needing additional
   - `src/CodeAlta.Catalog/WorkThreadDescriptor.cs`
   - `src/CodeAlta.Catalog/ProjectCatalog.cs`
   - `src/CodeAlta.Catalog/WorkThreadCatalog.cs`
-- Existing backend archive support:
+- Existing backend delete support:
   - `src/CodeAlta.CodexSdk/CodexClient.cs`
   - `src/CodeAlta.Agent.Codex/CodexAgentMapper.cs`
 
@@ -69,7 +69,7 @@ The sidebar must be fully reactive:
 - relative dates update while time passes
 - sort mode changes are reflected immediately
 - settings changes are reflected immediately
-- archiving, renaming, project edits, and thread activity updates are reflected immediately
+- deleting, renaming, project edits, and thread activity updates are reflected immediately
 
 But the sidebar must not be rebuilt or re-rendered continuously when nothing is actually changing.
 
@@ -87,7 +87,7 @@ Recommended design direction:
 - treat structural changes and presentation changes separately
 - structural changes:
   - project added/removed
-  - thread added/removed/archived
+  - thread added/removed/deleted
   - sort mode changed
   - recent-thread count changed
   - project rename if ordering key changes
@@ -154,7 +154,7 @@ Each project and thread row must support:
 Use `TreeNode.AddRightVisual(...)` with:
 
 - relative timestamp: `Always`
-- archive button: `Hover`
+- delete button: `Hover`
 - project-only extra buttons: `Hover`
 
 Hover-only buttons must never push the timestamp offscreen. The timestamp is always present and remains visually pinned at the far right.
@@ -194,8 +194,8 @@ Thread recency:
 
 Project recency:
 
-- defined as the most recent `LastActiveAt` among the project’s non-archived threads
-- if a project has no non-archived threads, show `never`
+- defined as the most recent `LastActiveAt` among the project’s non-deleted visible threads
+- if a project has no non-deleted visible threads, show `never`
 
 ### Refresh Behavior
 
@@ -289,13 +289,14 @@ Save behavior:
 
 Project rows get three hover-only buttons, shown to the left of the always-visible timestamp.
 
-### 1. Archive Project
+### 1. Delete Project
 
 Behavior:
 
-- archives all threads belonging to the project
-- marks the project itself as archived
+- deletes all threads belonging to the project
+- marks the project itself as archived internally
 - removes the project from the default navigator view
+- does not delete the project directory on disk
 
 Confirmation required.
 
@@ -303,12 +304,13 @@ Confirmation dialog text should clearly state impact:
 
 - project display name
 - number of threads affected
-- that archived projects are hidden from the default navigator
+- that the project is removed from the default navigator view
+- that the project directory on disk is not deleted
 
-When project archive completes:
+When project delete completes:
 
 - if the selected scope is that project, move selection to global or the next visible project
-- if any archived threads are open in tabs, close those tabs cleanly
+- if any deleted threads are open in tabs, close those tabs cleanly
 - refresh recovered catalog state and sidebar projection
 
 ### 2. Show All Threads
@@ -325,11 +327,11 @@ Opens a project details dialog with an editable form.
 
 Thread rows get one hover-only button:
 
-- Archive thread
+- Delete thread
 
 Behavior:
 
-- archives that thread
+- deletes that thread
 - removes it from the default navigator view
 - if currently open in a tab, close the tab
 - if currently selected, move selection to:
@@ -344,35 +346,36 @@ Confirmation dialog text should include:
 - thread title
 - project display name if available
 
-## Thread Archiving Requirements
+## Thread Delete Requirements
 
 ### Backend Exposure
 
-Codex already exposes thread archive/unarchive requests in `CodexClient`.
-The implementation must verify that the app-level runtime/shell layer exposes a clear archive operation for UI callers.
+Codex already exposes thread archive requests in `CodexClient`, and Copilot exposes session deletion in its client API.
+The implementation must expose a single app-level delete operation for UI callers and map it per backend.
 
 Required outcome:
 
-- the UI should call a single application-level archive service or controller method
+- the UI should call a single application-level delete service or controller method
 - that service handles backend-specific and catalog-specific work
 
-### Archive Semantics By Thread Type
+### Delete Semantics By Thread Type
 
 Project/global threads backed by a backend session:
 
-- use backend archive if supported
+- use backend delete if supported
+- Codex maps delete to archive internally
 - update local thread descriptor status to `Archived`
 - persist any local state changes
 
 Internal threads:
 
-- no backend archive needed
+- no backend delete needed
 - set local status to `Archived`
 - persist through `WorkThreadCatalog`
 
-If a backend does not support archive:
+If a backend does not support delete:
 
-- fallback to local archival only
+- fallback to local hidden-thread state only
 - do not block the UI feature
 - log the degraded path
 
@@ -382,14 +385,14 @@ Add shell/controller methods so UI code never talks directly to backend SDKs.
 
 Examples:
 
-- `ArchiveThreadAsync(string threadId, CancellationToken)`
-- `ArchiveProjectAsync(string projectId, CancellationToken)`
+- `DeleteThreadAsync(string threadId, CancellationToken)`
+- `DeleteProjectAsync(string projectId, CancellationToken)`
 - `LoadProjectThreadsAsync(string projectId, CancellationToken)`
 - `SaveProjectAsync(ProjectDescriptor project, CancellationToken)`
 
 ## Project Archiving Requirements
 
-Projects currently do not have an archived flag.
+Projects currently do not have a hidden/deleted-in-navigator flag.
 
 Add one.
 
@@ -398,27 +401,27 @@ Recommended model change:
 - `ProjectDescriptor.Archived : bool`
 - serialized in project markdown frontmatter as `archived: true|false`
 
-Project catalog loading should continue to load archived projects.
-Filtering archived projects out of the navigator should happen in the navigator projection layer or shell state layer, not by deleting them from the catalog load.
+Project catalog loading should continue to load hidden projects.
+Filtering hidden projects out of the navigator should happen in the navigator projection layer or shell state layer, not by deleting them from the catalog load.
 
 Why:
 
-- future “show archived” support stays simple
-- archived projects remain editable and recoverable
+- future “show deleted/hidden” support stays simple
+- hidden projects remain editable and recoverable
 
-Project archive flow:
+Project delete flow:
 
 1. resolve all threads for the project
-2. archive each thread
+2. delete each thread
 3. set `ProjectDescriptor.Archived = true`
 4. persist the project descriptor
 5. refresh shell state
 
 Failure handling:
 
-- do not silently leave the project half-archived
-- if some thread archives fail, show an error status and keep the project visible
-- only mark the project archived after all thread archives succeed
+- do not silently leave the project half-deleted
+- if some thread deletes fail, show an error status and keep the project visible
+- only mark the project hidden after all thread deletes succeed
 
 ## Project “Show All Threads” Dialog
 
@@ -505,21 +508,21 @@ Required actions:
 - `Select None`
 - `Select All`
 - `Invert Selection`
-- `Archive Selected`
+- `Delete Selected`
 - `Toggle Filter`
 
 Recommended additional behaviors:
 
 - show selected count in the toolbar
-- disable `Archive Selected` when selection is empty
+- disable `Delete Selected` when selection is empty
 - support double-activate or Enter on the row action to open the selected thread
 
-### Archive Selected Flow
+### Delete Selected Flow
 
 - opens a confirmation dialog
 - shows count of selected threads
 - on success:
-  - closes archived thread tabs if open
+  - closes deleted thread tabs if open
   - refreshes grid contents
   - refreshes sidebar projection
 
@@ -556,7 +559,7 @@ Editable in this iteration:
 - `DefaultBranch`
 - `Description`
 - `Tags`
-- `Archived` only through the archive flow, not a plain checkbox
+- `Archived` only through the delete flow, not a plain checkbox
 
 Strong recommendation:
 
@@ -742,9 +745,9 @@ Add small app-local components where needed:
 
 The confirmation dialog should be reusable for:
 
-- archive thread
-- archive selected threads
-- archive project
+- delete thread
+- delete selected threads
+- delete project
 - dirty form discard confirmation if added later
 
 ## Keyboard and Mouse Behavior Summary
@@ -806,9 +809,9 @@ Add or update tests for:
 - sort mode name/date behavior
 - sidebar reactivity updates relative time labels without forcing structural rebuild when only label text changes
 - sidebar does not rebuild when unchanged data is reapplied
-- archived threads/projects are hidden from the default navigator
-- archive thread flow updates selection and closes open tabs
-- archive project flow archives all project threads and hides the project
+- deleted threads and hidden projects are excluded from the default navigator
+- delete thread flow updates selection and closes open tabs
+- delete project flow deletes all project threads and hides the project
 - project threads dialog row view model sorting/filtering/selection behavior
 - inline rename validation and save/cancel behavior
 - details dialog save validation
@@ -822,16 +825,16 @@ Also add focused tests for:
 ## Suggested Implementation Order
 
 1. Add data/model support
-   - project archived flag
+   - project hidden flag
    - optional thread message count metadata
-   - archive controller/service API
+   - delete controller/service API
    - navigator settings persistence
 2. Extend sidebar projection model
 3. Introduce bindable row state for reactive timestamp and inline-edit behavior
 4. Replace footer with icon toolbar
 5. Add always-visible relative timestamps
-6. Add thread archive action
-7. Add project archive action
+6. Add thread delete action
+7. Add project delete action
 8. Add project threads dialog
 9. Add project details dialog
 10. Add F2 inline rename
@@ -843,5 +846,5 @@ Also add focused tests for:
 - The thread list dialog is the “management mode”; the navigator remains the “fast navigation mode”.
 - Timestamps should be quiet but always present.
 - Hover-only action buttons should not create layout jump for the timestamp.
-- Archive actions should always be confirmed.
+- Delete actions should always be confirmed.
 - After any destructive action, selection should remain valid and obvious.

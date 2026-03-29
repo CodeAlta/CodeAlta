@@ -76,12 +76,13 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
-    public void RuntimeLayer_UsesBindableReadHelperForViewModelReads()
+    public void SidebarDraftTitleEditor_IsRemoved()
     {
-        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaApp.cs"));
+        var codeAltaRoot = GetCodeAltaSourceRoot();
+        var sourceFiles = Directory.EnumerateFiles(codeAltaRoot, "*.cs", SearchOption.AllDirectories).ToArray();
 
-        Assert.IsTrue(appSource.Contains("ReadBindableState(() => _sidebarViewModel.DraftThreadTitle?.Trim())", StringComparison.Ordinal));
-        Assert.IsFalse(appSource.Contains("var title = _sidebarViewModel.DraftThreadTitle?.Trim()", StringComparison.Ordinal));
+        AssertSourceDoesNotContain(sourceFiles, "DraftThreadTitle");
+        AssertSourceDoesNotContain(sourceFiles, "Thread Title (optional)");
     }
 
     [TestMethod]

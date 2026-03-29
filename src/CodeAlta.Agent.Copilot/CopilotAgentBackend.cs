@@ -108,6 +108,22 @@ public sealed class CopilotAgentBackend : ICopilotAgentBackend
     }
 
     /// <inheritdoc />
+    public async Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        var client = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        await client.DeleteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+
+        if (_sessions.TryRemove(sessionId, out var session))
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc />
     public async Task<IAgentSession> CreateSessionAsync(
         AgentSessionCreateOptions options,
         CancellationToken cancellationToken = default)

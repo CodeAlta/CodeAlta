@@ -108,21 +108,21 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Archives a thread through the backend when supported and persists local archival metadata.
+    /// Deletes a thread through the backend when supported and persists local hidden-thread metadata.
     /// </summary>
-    /// <param name="thread">The thread to archive.</param>
+    /// <param name="thread">The thread to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns><see langword="true"/> when the backend archived the thread; otherwise <see langword="false"/>.</returns>
-    public async Task<bool> ArchiveThreadAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken = default)
+    /// <returns><see langword="true"/> when the backend deleted the thread; otherwise <see langword="false"/>.</returns>
+    public async Task<bool> DeleteThreadAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(thread);
 
-        var backendArchived = false;
+        var deletedByBackend = false;
         if (!string.IsNullOrWhiteSpace(thread.BackendSessionId))
         {
             try
             {
-                backendArchived = await _agentHub.TryArchiveThreadAsync(
+                deletedByBackend = await _agentHub.DeleteSessionAsync(
                         new AgentBackendId(thread.BackendId),
                         thread.BackendSessionId,
                         cancellationToken)
@@ -145,7 +145,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         }
 
         await UpdateThreadLocalStateAsync(thread, cancellationToken).ConfigureAwait(false);
-        return backendArchived;
+        return deletedByBackend;
     }
 
     /// <summary>
