@@ -68,11 +68,11 @@ internal sealed class ProjectThreadsDialog
         using (_document.BeginUpdate())
         {
             _document
-                .AddColumn(new DataGridColumnInfo<ProjectThreadsDialogRowViewModel>("select", string.Empty, true, rowAccessor))
+                .AddColumn(new DataGridColumnInfo<bool>("select", string.Empty, false, ProjectThreadsDialogRowViewModel.Accessor.IsSelected))
                 .AddColumn(ProjectThreadsDialogRowViewModel.Accessor.Title)
-                .AddColumn(new DataGridColumnInfo<ProjectThreadsDialogRowViewModel>("updated", "Last Updated", true, rowAccessor))
+                .AddColumn(new DataGridColumnInfo<DateTimeOffset?>("updated", "Last Updated", true, ProjectThreadsDialogRowViewModel.Accessor.LastUpdatedAt))
                 .AddColumn(ProjectThreadsDialogRowViewModel.Accessor.MessageCount)
-                .AddColumn(new DataGridColumnInfo<ProjectThreadsDialogRowViewModel>("open", "Action", true, rowAccessor));
+                .AddColumn(new DataGridColumnInfo<ProjectThreadsDialogRowViewModel>("open", "Action", false, rowAccessor));
 
             foreach (var row in _state.Rows)
             {
@@ -95,12 +95,12 @@ internal sealed class ProjectThreadsDialog
             return new CheckBox(new TextBlock(""), row.Bind.IsSelected);
         }
 
-        static Visual BuildLastUpdatedCell(DataTemplateValue<ProjectThreadsDialogRowViewModel> value, in DataTemplateContext _)
+        static Visual BuildLastUpdatedCell(DataTemplateValue<DateTimeOffset?> value, in DataTemplateContext _)
         {
             var row = value.GetValue();
-            return new Markup(() => row.LastUpdatedRelative)
-                .Wrap(false)
-                .Tooltip(new TextBlock(() => row.LastUpdatedExact));
+            return new Markup(() => row.ToString())
+                .Wrap(false);
+/*                .Tooltip(new TextBlock(() => row.LastUpdatedExact))*/;
         }
 
         static Visual BuildMessageCountCell(DataTemplateValue<int?> value, in DataTemplateContext _)
@@ -114,14 +114,13 @@ internal sealed class ProjectThreadsDialog
                 .Click(() => _ = OpenThreadAsync(row.ThreadId));
         }
 
-        grid.Columns.Add(new DataGridColumn<ProjectThreadsDialogRowViewModel>
+        grid.Columns.Add(new DataGridColumn<bool>
         {
             Key = "select",
             Header = new TextBlock(""),
-            TypedValueAccessor = rowAccessor,
+            TypedValueAccessor = ProjectThreadsDialogRowViewModel.Accessor.IsSelected,
             Width = GridLength.Auto,
-            ReadOnly = true,
-            CellTemplate = new DataTemplate<ProjectThreadsDialogRowViewModel>(BuildSelectionCell, null),
+            //CellTemplate = new DataTemplate<ProjectThreadsDialogRowViewModel>(BuildSelectionCell, null),
         });
         grid.Columns.Add(new DataGridColumn<string>
         {
@@ -131,24 +130,14 @@ internal sealed class ProjectThreadsDialog
             Width = GridLength.Star(2),
             Sortable = true,
         });
-        grid.Columns.Add(new DataGridColumn<ProjectThreadsDialogRowViewModel>
+        grid.Columns.Add(new DataGridColumn<DateTimeOffset?>
         {
             Key = "updated",
             Header = new TextBlock("Last Updated"),
-            TypedValueAccessor = rowAccessor,
+            TypedValueAccessor = ProjectThreadsDialogRowViewModel.Accessor.LastUpdatedAt,
             Width = GridLength.Auto,
             Sortable = true,
-            SortComparer = Comparer<ProjectThreadsDialogRowViewModel>.Create(static (left, right) =>
-            {
-                var comparison = Nullable.Compare(right?.LastUpdatedAt, left?.LastUpdatedAt);
-                if (comparison != 0)
-                {
-                    return comparison;
-                }
-
-                return string.Compare(left?.Title, right?.Title, StringComparison.OrdinalIgnoreCase);
-            }),
-            CellTemplate = new DataTemplate<ProjectThreadsDialogRowViewModel>(BuildLastUpdatedCell, null),
+            CellTemplate = new DataTemplate<DateTimeOffset?>(BuildLastUpdatedCell, null),
         });
         grid.Columns.Add(new DataGridColumn<int?>
         {
@@ -212,16 +201,13 @@ internal sealed class ProjectThreadsDialog
             Spacing = 2,
         };
 
-        var content = new VStack(
-            toolbar,
-            new Border(new ScrollViewer(grid).MinHeight(12).MaxHeight(18))
-                .Style(BorderStyle.Single)
-                .Padding(new Thickness(1, 0, 1, 0)))
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-            Spacing = 1,
-        };
+        var content = new Grid();
+        content.ColumnDefinitions.Add(new ColumnDefinition() { Width = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Star(1) });
+
+        content.Cells.Add(new GridCell() { Column = 0, Row = 0, Content = toolbar });
+        content.Cells.Add(new GridCell() { Column = 0, Row = 1, Content = new ScrollViewer(grid.Stretch()).Stretch() });
 
         _dialog = new Dialog()
             .Title($"Threads · {project.DisplayName}")
@@ -230,7 +216,7 @@ internal sealed class ProjectThreadsDialog
             .IsModal(true)
             .Padding(1)
             .Content(content);
-        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 80, minHeight: 16, widthFactor: 0.85, heightFactor: 0.7);
+        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 80, minHeight: 16);
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ProjectThreads.Close",
