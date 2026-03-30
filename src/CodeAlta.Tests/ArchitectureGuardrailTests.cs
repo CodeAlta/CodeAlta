@@ -340,11 +340,15 @@ public sealed class ArchitectureGuardrailTests
         Assert.IsTrue(dialogSource.Contains("Header = new TextBlock(\"🚀 Open\")", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("return new TextBlock(() => row.LastUpdatedRelative)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains(".Tooltip(new TextBlock(() => row.LastUpdatedExact));", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains(".FilterRowVisible(_viewModel.Bind.FilterRowVisible)", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("new CheckBox(\"Filter row\").IsChecked(_viewModel.Bind.FilterRowVisible)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellActivationMode = DataGridCellActivationMode.DirectActivate", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellTemplate = new DataTemplate<ProjectThreadsDialogRowViewModel>(BuildOpenButtonDisplay, null)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellEditorTemplate = new DataTemplate<ProjectThreadsDialogRowViewModel>(null, BuildOpenButtonEditor)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("IsHitTestVisible = false", StringComparison.Ordinal));
         Assert.IsFalse(dialogSource.Contains("ReadOnly = true", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("Show Filter", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("Hide Filter", StringComparison.Ordinal));
     }
 
     [TestMethod]

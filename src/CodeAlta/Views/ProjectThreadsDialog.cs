@@ -205,8 +205,7 @@ internal sealed class ProjectThreadsDialog
             new Button("Delete Selected")
                 .Tone(ControlTone.Error)
                 .Click(() => _ = ConfirmDeleteSelectedAsync()),
-            new Button(() => _viewModel.FilterRowVisible ? "Hide Filter" : "Show Filter")
-                .Click(() => _viewModel.FilterRowVisible = !_viewModel.FilterRowVisible),
+            new CheckBox("Filter row").IsChecked(_viewModel.Bind.FilterRowVisible),
             new TextBlock(() => $"{_state.SelectedCount} selected"))
         {
             HorizontalAlignment = Align.Stretch,
