@@ -113,11 +113,7 @@ internal sealed class ThreadWorkspaceView
             .IsEnabled(promptComposerViewModel.Bind.IsEnabled);
         ThreadInputView = ThreadInput.Scrollable();
 
-        SendPromptButton = CreateIconButton(
-                $"{NerdFont.MdSend}",
-                "Send the current prompt.",
-                sendPrompt,
-                button => button.IsEnabled(promptComposerViewModel.Bind.CanSend));
+        SendPromptButton = CreatePromptActionButton(promptComposerViewModel, sendPrompt, abortThread);
         ExpandPromptButton = CreateIconButton(
                 $"{NerdFont.MdSquareEditOutline}",
                 "Open the current prompt in a large editor window (F6).",
@@ -202,9 +198,6 @@ internal sealed class ThreadWorkspaceView
 
         var selectionControls = new HStack(
         [
-            SendPromptButton,
-            ExpandPromptButton,
-            threadInfoButton,
             ChatBackendSelect,
             ChatModelSelect,
             ChatReasoningSelect,
@@ -223,6 +216,9 @@ internal sealed class ThreadWorkspaceView
                 Wrap = false,
             },
             usageIndicator,
+            threadInfoButton,
+            ExpandPromptButton,
+            SendPromptButton,
         ])
         {
             Spacing = 2,
@@ -522,6 +518,36 @@ internal sealed class ThreadWorkspaceView
             .Click(onClick);
         configureButton?.Invoke(button);
         return button.Tooltip(new TextBlock(tooltipText));
+    }
+
+    private static Visual CreatePromptActionButton(
+        PromptComposerViewModel promptComposerViewModel,
+        Action sendPrompt,
+        Action abortThread)
+    {
+        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
+        ArgumentNullException.ThrowIfNull(sendPrompt);
+        ArgumentNullException.ThrowIfNull(abortThread);
+
+        return new ComputedVisual(() =>
+        {
+            var isAbort = promptComposerViewModel.CanAbort;
+            var icon = isAbort ? $"{NerdFont.MdSquare}" : $"{NerdFont.MdSend}";
+            var tooltipText = isAbort ? "Abort the selected thread run." : "Send the current prompt.";
+            var action = isAbort ? abortThread : sendPrompt;
+            var tone = isAbort ? ControlTone.Error : ControlTone.Success;
+            var isEnabled = isAbort ? promptComposerViewModel.CanAbort : promptComposerViewModel.CanSend;
+
+            return CreateIconButton(
+                icon,
+                tooltipText,
+                action,
+                button =>
+                {
+                    button.Tone = tone;
+                    button.IsEnabled = isEnabled;
+                });
+        });
     }
 
     internal static ChatPromptEditor CreateStyledPromptEditor(Action<string> onAccepted, string? placeholder)

@@ -407,6 +407,9 @@ internal sealed class ChatSelectorCoordinator
             selectedThread is not null &&
             _threadSelection.FindOpenThread(selectedThread.ThreadId) is { } selectedThreadTab &&
             selectedThread.StartedAt is not null &&
-            !selectedThreadTab.StatusBusy);
+            !selectedThreadTab.StatusBusy,
+            selectedThread is not null &&
+            _threadSelection.FindOpenThread(selectedThread.ThreadId) is { } selectedAbortTab &&
+            selectedAbortTab.StatusBusy);
     }
 }

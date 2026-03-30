@@ -330,6 +330,19 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void ThreadWorkspaceView_BottomBar_RightAlignsPromptActions_AndSendBecomesAbort()
+    {
+        var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+        var normalizedSource = workspaceSource.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.IsTrue(workspaceSource.Contains("SendPromptButton = CreatePromptActionButton(promptComposerViewModel, sendPrompt, abortThread);", StringComparison.Ordinal));
+        Assert.IsTrue(normalizedSource.Contains("usageIndicator,\n            threadInfoButton,\n            ExpandPromptButton,\n            SendPromptButton,", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("var icon = isAbort ? $\"{NerdFont.MdSquare}\" : $\"{NerdFont.MdSend}\";", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("var tone = isAbort ? ControlTone.Error : ControlTone.Success;", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("var tooltipText = isAbort ? \"Abort the selected thread run.\" : \"Send the current prompt.\";", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void ProjectThreadsDialog_ActionColumn_UsesDirectActivateButtonEditor()
     {
         var dialogSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ProjectThreadsDialog.cs"));

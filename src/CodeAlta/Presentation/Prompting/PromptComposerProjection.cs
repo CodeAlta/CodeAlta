@@ -34,7 +34,8 @@ namespace CodeAlta.Presentation.Prompting
             string? selectedThreadId,
             bool selectedThreadHasQueuedPrompts,
             bool selectedThreadCanAlwaysEnqueue,
-            bool selectedThreadCanCompact)
+            bool selectedThreadCanCompact,
+            bool selectedThreadCanAbort)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(backendDisplayName);
 
@@ -56,7 +57,7 @@ namespace CodeAlta.Presentation.Prompting
                 CanSend: !isUnavailable,
                 CanSteer: hasThread && !isUnavailable,
                 CanDelegate: hasThread && !isUnavailable,
-                CanAbort: hasThread,
+                CanAbort: hasThread && selectedThreadCanAbort,
                 CanCompact: hasThread && selectedThreadCanCompact && !isUnavailable,
                 CanCloseTab: hasThread || (draftTabOpen && string.IsNullOrWhiteSpace(selectedThreadId)),
                 CanClearQueue: hasThread && selectedThreadHasQueuedPrompts,

@@ -24,7 +24,8 @@ public sealed class PromptComposerProjectionTests
             selectedThreadId: thread.ThreadId,
             selectedThreadHasQueuedPrompts: false,
             selectedThreadCanAlwaysEnqueue: true,
-            selectedThreadCanCompact: false);
+            selectedThreadCanCompact: false,
+            selectedThreadCanAbort: true);
 
         Assert.AreEqual("Waiting for Codex to reconnect...", projection.Placeholder);
         Assert.IsFalse(projection.IsEnabled);
@@ -62,7 +63,8 @@ public sealed class PromptComposerProjectionTests
             selectedThreadId: null,
             selectedThreadHasQueuedPrompts: false,
             selectedThreadCanAlwaysEnqueue: false,
-            selectedThreadCanCompact: false);
+            selectedThreadCanCompact: false,
+            selectedThreadCanAbort: false);
 
         Assert.AreEqual("Start a thread for CodeAlta...", projection.Placeholder);
         Assert.IsTrue(projection.IsEnabled);
@@ -91,7 +93,8 @@ public sealed class PromptComposerProjectionTests
             selectedThreadId: null,
             selectedThreadHasQueuedPrompts: false,
             selectedThreadCanAlwaysEnqueue: false,
-            selectedThreadCanCompact: false);
+            selectedThreadCanCompact: false,
+            selectedThreadCanAbort: false);
 
         Assert.AreEqual("Install or connect Codex/Copilot to start a thread...", projection.Placeholder);
         Assert.IsTrue(projection.HasUnavailableStatus);
@@ -115,10 +118,12 @@ public sealed class PromptComposerProjectionTests
             selectedThreadId: thread.ThreadId,
             selectedThreadHasQueuedPrompts: true,
             selectedThreadCanAlwaysEnqueue: true,
-            selectedThreadCanCompact: true);
+            selectedThreadCanCompact: true,
+            selectedThreadCanAbort: false);
 
         Assert.IsTrue(projection.CanSend);
         Assert.IsTrue(projection.CanSteer);
+        Assert.IsFalse(projection.CanAbort);
         Assert.IsTrue(projection.CanCompact);
         Assert.IsTrue(projection.CanClearQueue);
         Assert.IsTrue(projection.CanAlwaysEnqueue);
@@ -140,9 +145,46 @@ public sealed class PromptComposerProjectionTests
             selectedThreadId: thread.ThreadId,
             selectedThreadHasQueuedPrompts: false,
             selectedThreadCanAlwaysEnqueue: true,
-            selectedThreadCanCompact: false);
+            selectedThreadCanCompact: false,
+            selectedThreadCanAbort: false);
 
         Assert.IsFalse(projection.CanCompact);
+    }
+
+    [TestMethod]
+    public void Build_EnablesAbortOnlyWhenSelectedThreadIsRunning()
+    {
+        var thread = CreateThread("Review startup");
+
+        var idleProjection = PromptComposerProjectionBuilder.Build(
+            thread,
+            selectedProject: null,
+            globalScopeSelected: false,
+            backendDisplayName: "Codex",
+            availability: ChatBackendAvailability.Ready,
+            anyBackendReady: true,
+            draftTabOpen: false,
+            selectedThreadId: thread.ThreadId,
+            selectedThreadHasQueuedPrompts: false,
+            selectedThreadCanAlwaysEnqueue: true,
+            selectedThreadCanCompact: true,
+            selectedThreadCanAbort: false);
+        var runningProjection = PromptComposerProjectionBuilder.Build(
+            thread,
+            selectedProject: null,
+            globalScopeSelected: false,
+            backendDisplayName: "Codex",
+            availability: ChatBackendAvailability.Ready,
+            anyBackendReady: true,
+            draftTabOpen: false,
+            selectedThreadId: thread.ThreadId,
+            selectedThreadHasQueuedPrompts: false,
+            selectedThreadCanAlwaysEnqueue: true,
+            selectedThreadCanCompact: false,
+            selectedThreadCanAbort: true);
+
+        Assert.IsFalse(idleProjection.CanAbort);
+        Assert.IsTrue(runningProjection.CanAbort);
     }
 
     private static WorkThreadDescriptor CreateThread(string title)
