@@ -18,6 +18,7 @@ internal readonly record struct ThreadRuntimeReductionResult(
     bool InvalidateSelectedSessionUsage,
     bool ClearThreadStatus,
     bool DrainQueuedPrompt,
+    bool RefreshPromptStrip,
     ThreadRuntimeStatusUpdate? ThreadStatus);
 
 internal sealed class ThreadRuntimeStateReducer
@@ -149,6 +150,7 @@ internal sealed class ThreadRuntimeStateReducer
             InvalidateSelectedSessionUsage: false,
             ClearThreadStatus: clearThreadStatus,
             DrainQueuedPrompt: false,
+            RefreshPromptStrip: false,
             ThreadStatus: threadStatus);
     }
 
@@ -165,7 +167,7 @@ internal sealed class ThreadRuntimeStateReducer
         UpdateThreadFromAgentEvent(thread, @event);
         if (tab is null)
         {
-            return new ThreadRuntimeReductionResult(refreshShellChrome, false, false, false, null);
+            return new ThreadRuntimeReductionResult(refreshShellChrome, false, false, false, false, null);
         }
 
         ObserveActiveRun(tab, @event);
@@ -174,6 +176,7 @@ internal sealed class ThreadRuntimeStateReducer
         var clearThreadStatus = false;
         var invalidateSelectedUsage = false;
         var drainQueuedPrompt = false;
+        var refreshPromptStrip = false;
 
         if (!tab.HistoryLoading && !tab.PendingManualCompaction && ShouldPromoteAgentEventToThinking(@event))
         {
@@ -183,11 +186,11 @@ internal sealed class ThreadRuntimeStateReducer
         switch (@event)
         {
             case AgentContentDeltaEvent delta:
-                ConsumePendingSteerIfMaterialized(tab, delta.Kind, delta.ContentId);
+                refreshPromptStrip = ConsumePendingSteerIfMaterialized(tab, delta.Kind, delta.ContentId) || refreshPromptStrip;
                 break;
 
             case AgentContentCompletedEvent completed:
-                ConsumePendingSteerIfMaterialized(tab, completed.Kind, completed.ContentId);
+                refreshPromptStrip = ConsumePendingSteerIfMaterialized(tab, completed.Kind, completed.ContentId) || refreshPromptStrip;
                 if (completed.Kind == AgentContentKind.Assistant && !string.IsNullOrWhiteSpace(completed.Content))
                 {
                     thread.LatestSummary = SummarizeContent(completed.Content);
@@ -229,13 +232,13 @@ internal sealed class ThreadRuntimeStateReducer
                 if (update.Kind == AgentSessionUpdateKind.Idle)
                 {
                     tab.PendingManualCompaction = false;
-                    ClearPendingSteers(tab);
+                    refreshPromptStrip = ClearPendingSteers(tab) || refreshPromptStrip;
                     clearThreadStatus = true;
                     drainQueuedPrompt = tab.QueuedPrompts.Count > 0;
                 }
                 else if (update.Kind == AgentSessionUpdateKind.Shutdown)
                 {
-                    ClearPendingSteers(tab);
+                    refreshPromptStrip = ClearPendingSteers(tab) || refreshPromptStrip;
                 }
 
                 if (!string.IsNullOrWhiteSpace(update.Message) &&
@@ -248,7 +251,7 @@ internal sealed class ThreadRuntimeStateReducer
 
             case AgentErrorEvent error:
                 tab.PendingManualCompaction = false;
-                ClearPendingSteers(tab);
+                refreshPromptStrip = ClearPendingSteers(tab) || refreshPromptStrip;
                 thread.LatestSummary = SummarizeContent(error.Message);
                 threadStatus = new ThreadRuntimeStatusUpdate(error.Message, false, StatusTone.Error);
                 break;
@@ -259,28 +262,29 @@ internal sealed class ThreadRuntimeStateReducer
             InvalidateSelectedSessionUsage: invalidateSelectedUsage,
             ClearThreadStatus: clearThreadStatus,
             DrainQueuedPrompt: drainQueuedPrompt,
+            RefreshPromptStrip: refreshPromptStrip,
             ThreadStatus: threadStatus);
     }
 
-    private static void ConsumePendingSteerIfMaterialized(OpenThreadState tab, AgentContentKind kind, string contentId)
+    private static bool ConsumePendingSteerIfMaterialized(OpenThreadState tab, AgentContentKind kind, string contentId)
     {
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentId);
 
         if (tab.HistoryLoading || kind != AgentContentKind.User)
         {
-            return;
+            return false;
         }
 
         if (string.Equals(tab.LastObservedPendingSteerUserContentId, contentId, StringComparison.Ordinal))
         {
-            return;
+            return false;
         }
 
         tab.LastObservedPendingSteerUserContentId = contentId;
         if (tab.PendingSteers.Count == 0)
         {
-            return;
+            return false;
         }
 
         tab.PendingSteers.RemoveAt(0);
@@ -288,13 +292,22 @@ internal sealed class ThreadRuntimeStateReducer
         {
             tab.LastObservedPendingSteerUserContentId = null;
         }
+
+        return true;
     }
 
-    private static void ClearPendingSteers(OpenThreadState tab)
+    private static bool ClearPendingSteers(OpenThreadState tab)
     {
         ArgumentNullException.ThrowIfNull(tab);
+        if (tab.PendingSteers.Count == 0)
+        {
+            tab.LastObservedPendingSteerUserContentId = null;
+            return false;
+        }
+
         tab.PendingSteers.Clear();
         tab.LastObservedPendingSteerUserContentId = null;
+        return true;
     }
 
     private static void ObserveActiveRun(OpenThreadState tab, AgentEvent @event)

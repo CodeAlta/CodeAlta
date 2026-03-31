@@ -19,6 +19,7 @@ internal sealed class ThreadRuntimeEventCoordinator
     private readonly Action<string, bool, StatusTone> _setShellStatus;
     private readonly Action<OpenThreadState, string, bool, StatusTone> _setThreadStatus;
     private readonly Action<OpenThreadState> _clearThreadStatus;
+    private readonly Action _refreshQueuedPromptList;
     private readonly Func<OpenThreadState, CancellationToken, Task> _drainQueuedPromptAsync;
     private readonly ThreadRuntimeStateReducer _stateReducer;
     private readonly ThreadRuntimeTimelineRenderer _timelineRenderer;
@@ -33,6 +34,7 @@ internal sealed class ThreadRuntimeEventCoordinator
         Action<string, bool, StatusTone> setShellStatus,
         Action<OpenThreadState, string, bool, StatusTone> setThreadStatus,
         Action<OpenThreadState> clearThreadStatus,
+        Action refreshQueuedPromptList,
         Func<OpenThreadState, CancellationToken, Task> drainQueuedPromptAsync)
     {
         ArgumentNullException.ThrowIfNull(findThread);
@@ -44,6 +46,7 @@ internal sealed class ThreadRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(setShellStatus);
         ArgumentNullException.ThrowIfNull(setThreadStatus);
         ArgumentNullException.ThrowIfNull(clearThreadStatus);
+        ArgumentNullException.ThrowIfNull(refreshQueuedPromptList);
         ArgumentNullException.ThrowIfNull(drainQueuedPromptAsync);
 
         _findThread = findThread;
@@ -54,6 +57,7 @@ internal sealed class ThreadRuntimeEventCoordinator
         _setShellStatus = setShellStatus;
         _setThreadStatus = setThreadStatus;
         _clearThreadStatus = clearThreadStatus;
+        _refreshQueuedPromptList = refreshQueuedPromptList;
         _drainQueuedPromptAsync = drainQueuedPromptAsync;
         _stateReducer = new ThreadRuntimeStateReducer();
         _timelineRenderer = new ThreadRuntimeTimelineRenderer(getAutoApproveEnabled);
@@ -154,6 +158,11 @@ internal sealed class ThreadRuntimeEventCoordinator
             {
                 _ = _drainQueuedPromptAsync(tab, CancellationToken.None);
             }
+        }
+
+        if (reduction.RefreshPromptStrip)
+        {
+            _refreshQueuedPromptList();
         }
 
         if (reduction.InvalidateSelectedSessionUsage)

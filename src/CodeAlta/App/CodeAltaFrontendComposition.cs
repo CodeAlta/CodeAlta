@@ -186,6 +186,7 @@ internal sealed class CodeAltaFrontendComposition
             callbacks.SetStatus,
             callbacks.SetThreadStatus,
             callbacks.ClearThreadStatus,
+            () => threadPromptQueueCoordinator!.RefreshSelectedThreadQueueUi(),
             (tab, cancellationToken) => threadCommandCoordinator!.DrainQueuedPromptAsync(tab, cancellationToken));
         var threadCreationCoordinator = new ThreadCreationCoordinator(
             runtimeService,

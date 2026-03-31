@@ -160,6 +160,35 @@ public sealed class ThreadRuntimeEventCoordinatorTests
     }
 
     [TestMethod]
+    public void HandleAgentEvent_RefreshesQueuedPromptListWhenPendingSteerIsConsumed()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.PendingSteers.Add(new PendingSteerPrompt("First steer"));
+        var refreshQueuedPromptListCount = 0;
+
+        var coordinator = CreateCoordinator(
+            thread,
+            tab,
+            refreshQueuedPromptList: () => refreshQueuedPromptListCount++);
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentContentCompletedEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentContentKind.User,
+                "user-1",
+                null,
+                "First steer"));
+
+        Assert.AreEqual(0, tab.PendingSteers.Count);
+        Assert.AreEqual(1, refreshQueuedPromptListCount);
+    }
+
+    [TestMethod]
     public void HandleAgentEvent_DoesNotConsumePendingSteerDuringHistoryReplay()
     {
         var thread = CreateThread();
@@ -207,6 +236,33 @@ public sealed class ThreadRuntimeEventCoordinatorTests
     }
 
     [TestMethod]
+    public void HandleAgentEvent_RefreshesQueuedPromptListWhenPendingSteersAreCleared()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.PendingSteers.Add(new PendingSteerPrompt("Pending steer"));
+        var refreshQueuedPromptListCount = 0;
+
+        var coordinator = CreateCoordinator(
+            thread,
+            tab,
+            refreshQueuedPromptList: () => refreshQueuedPromptListCount++);
+        coordinator.HandleAgentEvent(
+            thread,
+            tab,
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                null,
+                AgentSessionUpdateKind.Idle,
+                "Idle"));
+
+        Assert.AreEqual(0, tab.PendingSteers.Count);
+        Assert.AreEqual(1, refreshQueuedPromptListCount);
+    }
+
+    [TestMethod]
     public void HandleAgentEvent_TracksActiveRunIdAndClearsItWhenSessionBecomesIdle()
     {
         var thread = CreateThread();
@@ -242,7 +298,10 @@ public sealed class ThreadRuntimeEventCoordinatorTests
         Assert.IsNull(tab.ActiveRunId);
     }
 
-    private static ThreadRuntimeEventCoordinator CreateCoordinator(WorkThreadDescriptor thread, OpenThreadState tab)
+    private static ThreadRuntimeEventCoordinator CreateCoordinator(
+        WorkThreadDescriptor thread,
+        OpenThreadState tab,
+        Action? refreshQueuedPromptList = null)
     {
         return new ThreadRuntimeEventCoordinator(
             findThread: id => id == thread.ThreadId ? thread : null,
@@ -266,6 +325,7 @@ public sealed class ThreadRuntimeEventCoordinatorTests
                 state.StatusTone = StatusTone.Info;
                 state.HasCustomStatus = false;
             },
+            refreshQueuedPromptList: refreshQueuedPromptList ?? (() => { }),
             drainQueuedPromptAsync: static (_, _) => Task.CompletedTask);
     }
 
