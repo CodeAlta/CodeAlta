@@ -46,6 +46,11 @@ internal static class ShellHelpContentBuilder
             bindings.Add("?");
         }
 
+        if (command.Id == "CodeAlta.Shell.CommandPalette")
+        {
+            bindings.Add("/");
+        }
+
         return new ShellHelpEntry(command.Label, command.Description, bindings);
     }
 

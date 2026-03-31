@@ -25,6 +25,14 @@ internal static class ShellCommandCatalog
             Gesture: new KeyGesture(TerminalKey.F1),
             Aliases: ["help"]),
         new(
+            "CodeAlta.Shell.CommandPalette",
+            "Command Palette",
+            "Search and run available shell commands.",
+            ShellCommandHelpCategory.General,
+            ShellCommandScope.AnyShell,
+            ShellCommandAvailability.Always,
+            Gesture: new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl)),
+        new(
             "CodeAlta.Thread.SessionUsage",
             "Context Usage",
             "Show context and usage details for the selected backend session.",

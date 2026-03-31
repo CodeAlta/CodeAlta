@@ -5,6 +5,7 @@ using CodeAlta.Models;
 using CodeAlta.ViewModels;
 using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 
 namespace CodeAlta.Frontend.Commands;
@@ -23,6 +24,7 @@ internal sealed class ShellCommandSurfaceCoordinator
     private readonly Action _openThreadInfo;
     private readonly Action _openExpandedPromptEditor;
     private readonly ShellInputCoordinator _shellInputCoordinator;
+    private CommandPalette? _commandPalette;
     private ShellHelpDialog? _helpDialog;
 
     public ShellCommandSurfaceCoordinator(
@@ -69,8 +71,8 @@ internal sealed class ShellCommandSurfaceCoordinator
             new ShellInputRouter(),
             getPromptText,
             closeCurrentTabAsync,
-            () => ShowHelpAsync(),
-            ShowHelpAsync,
+            () => ShowShellHelpAsync(),
+            ShowShellHelpAsync,
             ShowSelectedThreadQueueStatusAsync,
             threadCommandCoordinator,
             setStatus);
@@ -111,6 +113,12 @@ internal sealed class ShellCommandSurfaceCoordinator
     public Task CloseCurrentTabAsync(CancellationToken cancellationToken = default)
         => _shellInputCoordinator.CloseCurrentTabAsync(cancellationToken);
 
+    public Task ShowHelpAsync(string? filterText = null, CancellationToken cancellationToken = default)
+        => ExecuteHelpAsync(filterText, cancellationToken);
+
+    public void ShowCommandPalette()
+        => (_commandPalette ??= new CommandPalette()).Show();
+
     private ThreadWorkspaceCommandBinding CreateCommandBinding(string commandId, Action execute)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(commandId);
@@ -141,7 +149,13 @@ internal sealed class ShellCommandSurfaceCoordinator
         };
     }
 
-    private Task ShowHelpAsync(string? filterText = null)
+    private Task ExecuteHelpAsync(string? filterText, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return ShowShellHelpAsync(filterText);
+    }
+
+    private Task ShowShellHelpAsync(string? filterText = null)
     {
         _helpDialog ??= new ShellHelpDialog(_getHelpBounds, _getHelpFocusTarget);
         return _helpDialog.ShowAsync(filterText);

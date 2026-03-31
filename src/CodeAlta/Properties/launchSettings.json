@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CodeAlta": {
+      "commandName": "Project",
+      "workingDirectory": "C:\\code\\CodeAlta"
+    }
+  }
+}

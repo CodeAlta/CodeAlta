@@ -34,7 +34,7 @@ internal sealed class ShellHelpDialog
         var contentItems = new List<Visual>
         {
             new Markup("[bold]Shell Commands[/]").Wrap(true),
-            new Markup("[dim]Use /help, ?, or the shortcuts below to discover available shell actions.[/]").Wrap(true),
+            new Markup("[dim]Use ?, /, or the shortcuts below to discover available shell actions.[/]").Wrap(true),
         };
 
         if (sections.Count == 0)

@@ -473,6 +473,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             () => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual),
             () => EnsureSessionUsagePresenter().TogglePopupFromIndicator(),
             anchor => EnsureThreadInfoPresenter().TogglePopup(anchor),
+            () => _ = _shellCommandSurfaceCoordinator.ShowHelpAsync(),
+            () => _shellCommandSurfaceCoordinator.ShowCommandPalette(),
             acceptedPrompt => _ = _shellCommandSurfaceCoordinator.HandleAcceptedPromptAsync(acceptedPrompt),
             () => _ = _shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync(steer: false),
             () => _ = _shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync(steer: true),
@@ -510,6 +512,17 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 Gesture = new KeyGesture(TerminalKey.F4),
                 Presentation = CommandPresentation.CommandBar,
                 Execute = _ => ToggleTerminalLoopCallback(),
+            });
+            _shellView.Root.AddCommand(new Command
+            {
+                Id = "CodeAlta.Shell.CommandPalette",
+                LabelMarkup = "Command Palette",
+                Name = "palette",
+                SearchText = "commands palette command search",
+                DescriptionMarkup = "Search and run available shell commands.",
+                Gesture = new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl),
+                Presentation = CommandPresentation.CommandBar,
+                Execute = _ => _shellCommandSurfaceCoordinator.ShowCommandPalette(),
             });
         }
 

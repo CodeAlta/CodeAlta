@@ -37,6 +37,8 @@ internal sealed class ThreadWorkspaceView
         Func<Visual> buildSessionUsageIndicatorVisual,
         Action openSessionUsagePopup,
         Action<Visual> toggleThreadInfoPopup,
+        Action openHelp,
+        Action openCommandPalette,
         Action<string> acceptPrompt,
         Action sendPrompt,
         Action steerPrompt,
@@ -64,6 +66,8 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(buildSessionUsageIndicatorVisual);
         ArgumentNullException.ThrowIfNull(openSessionUsagePopup);
         ArgumentNullException.ThrowIfNull(toggleThreadInfoPopup);
+        ArgumentNullException.ThrowIfNull(openHelp);
+        ArgumentNullException.ThrowIfNull(openCommandPalette);
         ArgumentNullException.ThrowIfNull(acceptPrompt);
         ArgumentNullException.ThrowIfNull(sendPrompt);
         ArgumentNullException.ThrowIfNull(steerPrompt);
@@ -98,6 +102,8 @@ internal sealed class ThreadWorkspaceView
         Visual? threadInfoButton = null;
         ThreadInput = CreatePromptEditor(
             promptComposerViewModel,
+            openHelp,
+            openCommandPalette,
             acceptPrompt,
             commandBindings,
             promptText)
@@ -188,7 +194,7 @@ internal sealed class ThreadWorkspaceView
                     deleteQueuedPrompt,
                     updateQueuedPromptCount,
                     updateQueuedPromptText,
-                    CreateStyledPromptEditor));
+                    (onAccepted, placeholder) => CreateStyledPromptEditor(onAccepted, openHelp, openCommandPalette, placeholder)));
 
         var selectionControls = new HStack(
         [
@@ -328,14 +334,18 @@ internal sealed class ThreadWorkspaceView
 
     private static ChatPromptEditor CreatePromptEditor(
         PromptComposerViewModel promptComposerViewModel,
+        Action openHelp,
+        Action openCommandPalette,
         Action<string> acceptPrompt,
         IReadOnlyList<ThreadWorkspaceCommandBinding> commandBindings,
         Binding<string?> promptText)
     {
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
+        ArgumentNullException.ThrowIfNull(openHelp);
+        ArgumentNullException.ThrowIfNull(openCommandPalette);
         ArgumentNullException.ThrowIfNull(acceptPrompt);
         ArgumentNullException.ThrowIfNull(commandBindings);
-        var editor = CreateStyledPromptEditor(acceptPrompt, placeholder: null)
+        var editor = CreateStyledPromptEditor(acceptPrompt, openHelp, openCommandPalette, placeholder: null)
             .Placeholder(promptComposerViewModel.Bind.Placeholder)
             .Text(promptText);
 
@@ -356,12 +366,18 @@ internal sealed class ThreadWorkspaceView
         {
             Id = metadata.Id,
             LabelMarkup = metadata.Label,
+            Name = metadata.Aliases.FirstOrDefault(),
             DescriptionMarkup = metadata.Description,
+            SearchText = metadata.Aliases.Count == 0
+                ? metadata.Label
+                : $"{metadata.Label} {string.Join(' ', metadata.Aliases)}",
             Execute = _ => binding.Execute(),
             CanExecute = _ => binding.CanExecute(),
             Gesture = metadata.Gesture,
             Sequence = metadata.Sequence,
-            Presentation = metadata.ShowInCommandBar ? CommandPresentation.CommandBar : default,
+            Presentation = metadata.ShowInCommandBar
+                ? CommandPresentation.CommandBar | CommandPresentation.CommandPalette
+                : CommandPresentation.CommandPalette,
         };
     }
 
@@ -376,7 +392,7 @@ internal sealed class ThreadWorkspaceView
             return;
         }
 
-        var editor = CreateStyledPromptEditor(_ => { }, placeholder: null)
+        var editor = CreateStyledPromptEditor(_ => { }, onOpenHelp: null, onOpenCommandPalette: null, placeholder: null)
             .Placeholder(promptComposerViewModel.Bind.Placeholder)
             .Text(promptText)
             .MinHeight(12)
@@ -468,7 +484,11 @@ internal sealed class ThreadWorkspaceView
         });
     }
 
-    internal static ChatPromptEditor CreateStyledPromptEditor(Action<string> onAccepted, string? placeholder)
+    internal static ChatPromptEditor CreateStyledPromptEditor(
+        Action<string> onAccepted,
+        Action? onOpenHelp,
+        Action? onOpenCommandPalette,
+        string? placeholder)
     {
         ArgumentNullException.ThrowIfNull(onAccepted);
 
@@ -477,7 +497,7 @@ internal sealed class ThreadWorkspaceView
         Theme? cachedTheme = null;
         string? cachedText = null;
         List<StyledRun>? cachedRuns = null;
-        return new ChatPromptEditor(onAccepted)
+        return new ChatPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette)
             .PromptMarkup("[primary]>[/] ")
             .ContinuationPromptMarkup("[muted]·[/] ")
             .Placeholder(placeholder)

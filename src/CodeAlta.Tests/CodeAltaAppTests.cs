@@ -2257,11 +2257,47 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void CreateStyledPromptEditor_PreservesMarkdownHighlighting()
     {
-        var editor = ThreadWorkspaceView.CreateStyledPromptEditor(_ => { }, placeholder: "Prompt");
+        var editor = ThreadWorkspaceView.CreateStyledPromptEditor(_ => { }, onOpenHelp: null, onOpenCommandPalette: null, placeholder: "Prompt");
 
         Assert.IsFalse(editor.Highlighter.IsEmpty);
         Assert.IsTrue(editor.EnableWordHints);
         Assert.AreEqual(PromptEditorEscapeBehavior.CancelCompletionOnly, editor.EscapeBehavior);
+    }
+
+    [TestMethod]
+    public void ChatPromptEditor_TransientShortcuts_OpenHelpAndPaletteWithoutTyping()
+    {
+        var helpCount = 0;
+        var paletteCount = 0;
+        var editor = new ChatPromptEditor(
+            _ => { },
+            () => helpCount++,
+            () => paletteCount++);
+
+        Assert.IsTrue(editor.TryHandleTransientShortcutInput("?"));
+        Assert.AreEqual(1, helpCount);
+        Assert.AreEqual(0, paletteCount);
+        Assert.IsTrue(string.IsNullOrEmpty(editor.Text));
+
+        Assert.IsTrue(editor.TryHandleTransientShortcutInput("/"));
+        Assert.AreEqual(1, helpCount);
+        Assert.AreEqual(1, paletteCount);
+        Assert.IsTrue(string.IsNullOrEmpty(editor.Text));
+    }
+
+    [TestMethod]
+    public void ChatPromptEditor_TransientShortcuts_DoNotInterceptAfterTextExists()
+    {
+        var editor = new ChatPromptEditor(
+            _ => { },
+            () => Assert.Fail("Help should not open."),
+            () => Assert.Fail("Palette should not open."))
+        {
+            Text = "inspect "
+        };
+
+        Assert.IsFalse(editor.TryHandleTransientShortcutInput("?"));
+        Assert.IsFalse(editor.TryHandleTransientShortcutInput("/"));
     }
 
     private static void TickTerminalApp(TerminalApp app)

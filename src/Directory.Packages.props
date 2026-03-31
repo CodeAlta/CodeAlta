@@ -24,7 +24,7 @@
     <PackageVersion Include="XenoAtom.CommandLine.Terminal" Version="2.0.2" />
     <PackageVersion Include="XenoAtom.Logging" Version="1.1.2" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.1.2" />
-    <PackageVersion Include="XenoAtom.Terminal.UI" Version="1.15.0" />
-    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Markdown" Version="1.15.0" />
+    <PackageVersion Include="XenoAtom.Terminal.UI" Version="1.16.0" />
+    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Markdown" Version="1.16.0" />
   </ItemGroup>
 </Project>
