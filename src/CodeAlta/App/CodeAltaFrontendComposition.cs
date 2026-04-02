@@ -165,8 +165,7 @@ internal sealed class CodeAltaFrontendComposition
             chatBackendStates,
             threadSelectionContext,
             shellWorkspaceContext,
-            welcomePhase01,
-            catalogOptions.GlobalRoot);
+            welcomePhase01);
         threadPromptQueueCoordinator = new ThreadPromptQueueCoordinator(
             threadWorkspaceViewModel,
             threadSelectionContext,

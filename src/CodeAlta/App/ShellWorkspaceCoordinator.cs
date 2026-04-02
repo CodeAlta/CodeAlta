@@ -19,7 +19,6 @@ internal sealed class ShellWorkspaceCoordinator
     private readonly Dictionary<string, ChatBackendState> _chatBackendStates;
     private readonly ThreadSelectionContext _threadSelection;
     private readonly ShellWorkspaceContext _workspaceContext;
-    private readonly string _globalRoot;
     private readonly State<float> _welcomeAnimationPhase01;
     private readonly State<int> _viewRefreshState = new(0);
     private readonly State<int> _usageRefreshState = new(0);
@@ -31,8 +30,7 @@ internal sealed class ShellWorkspaceCoordinator
         Dictionary<string, ChatBackendState> chatBackendStates,
         ThreadSelectionContext threadSelection,
         ShellWorkspaceContext workspaceContext,
-        State<float> welcomeAnimationPhase01,
-        string globalRoot)
+        State<float> welcomeAnimationPhase01)
     {
         ArgumentNullException.ThrowIfNull(shellViewModel);
         ArgumentNullException.ThrowIfNull(threadWorkspaceViewModel);
@@ -41,7 +39,6 @@ internal sealed class ShellWorkspaceCoordinator
         ArgumentNullException.ThrowIfNull(threadSelection);
         ArgumentNullException.ThrowIfNull(workspaceContext);
         ArgumentNullException.ThrowIfNull(welcomeAnimationPhase01);
-        ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
 
         _shellViewModel = shellViewModel;
         _threadWorkspaceViewModel = threadWorkspaceViewModel;
@@ -50,7 +47,6 @@ internal sealed class ShellWorkspaceCoordinator
         _threadSelection = threadSelection;
         _workspaceContext = workspaceContext;
         _welcomeAnimationPhase01 = welcomeAnimationPhase01;
-        _globalRoot = globalRoot;
     }
 
     public ComputedVisual CreateComputedVisual(Func<Visual> build)
@@ -205,22 +201,10 @@ internal sealed class ShellWorkspaceCoordinator
     public void SetShellInitialized(bool isInitialized)
         => _workspaceContext.DispatchToUi(() => _shellViewModel.IsInitialized = isInitialized);
 
-    public string BuildHeaderText()
-    {
-        var selection = _threadSelection.Selection;
-        return ShellTextFormatter.BuildHeaderText(
-            selection.Target is WorkspaceTarget.Thread ? _threadSelection.GetSelectedThread() : null,
-            _threadSelection.GetSelectedProject(),
-            _globalRoot,
-            _workspaceContext.GetPreferredBackendId().Value,
-            selection.Target is WorkspaceTarget.Draft { IsGlobal: true });
-    }
-
     private void RefreshHeaderAndThreadWorkspaceCore()
     {
         _workspaceContext.VerifyBindableAccess();
         _workspaceContext.EnsureSelectionDefaults();
-        _shellViewModel.HeaderText = BuildHeaderText();
         RefreshThreadWorkspaceCore();
     }
 
@@ -228,7 +212,6 @@ internal sealed class ShellWorkspaceCoordinator
     {
         _workspaceContext.VerifyBindableAccess();
         _workspaceContext.EnsureSelectionDefaults();
-        _shellViewModel.HeaderText = BuildHeaderText();
         _workspaceContext.RefreshSidebarProjection();
     }
 
@@ -242,7 +225,6 @@ internal sealed class ShellWorkspaceCoordinator
     {
         _workspaceContext.VerifyBindableAccess();
         _workspaceContext.EnsureSelectionDefaults();
-        _shellViewModel.HeaderText = BuildHeaderText();
         _workspaceContext.RefreshSidebarProjection();
         RefreshThreadWorkspaceCore();
     }

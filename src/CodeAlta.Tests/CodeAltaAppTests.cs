@@ -277,37 +277,6 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
-    public void BuildHeaderText_UsesDraftScopeWhenNoThreadIsSelected()
-    {
-        var project = new ProjectDescriptor
-        {
-            Id = "project-1",
-            Slug = "codealta",
-            DisplayName = "CodeAlta",
-            ProjectPath = @"C:\code\CodeAlta",
-            DefaultBranch = "main",
-            MarkdownBody = "# CodeAlta",
-        };
-
-        var globalHeader = ShellTextFormatter.BuildHeaderText(
-            thread: null,
-            selectedProject: null,
-            globalRoot: @"C:\Users\alexa\.codealta",
-            preferredBackendId: AgentBackendIds.Codex.Value,
-            globalScopeSelected: true);
-
-        var projectHeader = ShellTextFormatter.BuildHeaderText(
-            thread: null,
-            selectedProject: project,
-            globalRoot: @"C:\Users\alexa\.codealta",
-            preferredBackendId: AgentBackendIds.Copilot.Value,
-            globalScopeSelected: false);
-
-        Assert.AreEqual("CodeAlta | codex | global draft", globalHeader);
-        Assert.AreEqual("CodeAlta | copilot | codealta draft", projectHeader);
-    }
-
-    [TestMethod]
     public void BuildDraftPromptMessage_ReflectsSelectedScope()
     {
         Assert.AreEqual("Send the first prompt to start a global thread.", ShellTextFormatter.BuildDraftPromptMessage(globalScopeSelected: true));

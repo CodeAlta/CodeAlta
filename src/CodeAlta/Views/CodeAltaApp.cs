@@ -357,7 +357,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     internal void PrepareForRun()
     {
-        _shellViewModel.HeaderText = BuildHeaderText();
         SetStatus("Connecting to available backends...", showSpinner: true);
     }
 
@@ -411,7 +410,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         try
         {
             _threadStateCoordinator.ApplyInitialCatalogState(task.GetAwaiter().GetResult());
-            _shellViewModel.HeaderText = BuildHeaderText();
             RefreshCatalogAndThreadWorkspace();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -507,7 +505,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         {
             var commandPaletteMetadata = ShellCommandCatalog.Get("CodeAlta.Shell.CommandPalette");
             _shellView = new CodeAltaShellView(
-                _shellViewModel,
                 _sidebarCoordinator.View.Root,
                 _threadWorkspaceView.Root,
                 ThreadCommandBar!);
@@ -555,7 +552,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     internal void SelectGlobalScope() => _threadStateCoordinator.SelectGlobalScope();
     internal void SelectProjectScope(string projectId) => _threadStateCoordinator.SelectProjectScope(projectId);
     private void EnsureSelectionDefaults() => _threadStateCoordinator.EnsureSelectionDefaults();
-    private string BuildHeaderText() => _workspaceCoordinator.BuildHeaderText();
     internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info) => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
 
     private void SetThreadStatus(

@@ -5,39 +5,6 @@ namespace CodeAlta.Presentation.Shell;
 
 internal static class ShellTextFormatter
 {
-    public static string BuildHeaderText(
-        WorkThreadDescriptor? thread,
-        ProjectDescriptor? selectedProject,
-        string globalRoot,
-        string preferredBackendId,
-        bool globalScopeSelected)
-    {
-        _ = globalRoot;
-
-        if (thread is null)
-        {
-            if (globalScopeSelected)
-            {
-                return $"CodeAlta | {preferredBackendId} | global draft";
-            }
-
-            if (selectedProject is not null)
-            {
-                return $"CodeAlta | {preferredBackendId} | {selectedProject.Slug} draft";
-            }
-
-            return "CodeAlta | no thread selected";
-        }
-
-        return thread.Kind switch
-        {
-            WorkThreadKind.GlobalThread => $"CodeAlta | {thread.BackendId} | {ThreadTabVisualFactory.CompactTitle(thread.Title)} | global",
-            WorkThreadKind.ProjectThread => $"CodeAlta | {thread.BackendId} | {selectedProject?.Slug ?? "?"} | {ThreadTabVisualFactory.CompactTitle(thread.Title)}",
-            WorkThreadKind.InternalThread => $"CodeAlta | {thread.BackendId} | internal | {ThreadTabVisualFactory.CompactTitle(thread.Title)}",
-            _ => $"CodeAlta | thread={thread.Title}",
-        };
-    }
-
     public static string BuildDraftPromptMessage(bool globalScopeSelected)
     {
         return globalScopeSelected

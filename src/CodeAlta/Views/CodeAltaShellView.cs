@@ -1,4 +1,3 @@
-using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 
@@ -7,12 +6,10 @@ namespace CodeAlta.Views;
 internal sealed class CodeAltaShellView
 {
     public CodeAltaShellView(
-        CodeAltaShellViewModel viewModel,
         Visual sidebar,
         Visual threadWorkspace,
         Visual threadCommandBar)
     {
-        ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(sidebar);
         ArgumentNullException.ThrowIfNull(threadWorkspace);
         ArgumentNullException.ThrowIfNull(threadCommandBar);
@@ -39,27 +36,7 @@ internal sealed class CodeAltaShellView
             0);
         mainLayout.Cell(threadCommandBar, 1, 0);
 
-        var root = new Grid
-            {
-                HorizontalAlignment = Align.Stretch,
-                VerticalAlignment = Align.Stretch,
-            }
-            .Rows(
-                new RowDefinition { Height = GridLength.Auto },
-                new RowDefinition { Height = GridLength.Star(1) })
-            .Columns(
-                new ColumnDefinition { Width = GridLength.Star(1) });
-
-        root.Cell(
-            new TextBlock
-            {
-                Wrap = false,
-            }.Text(() => viewModel.HeaderText),
-            0,
-            0);
-        root.Cell(mainLayout, 1, 0);
-
-        Root = root;
+        Root = mainLayout;
     }
 
     public Visual Root { get; }

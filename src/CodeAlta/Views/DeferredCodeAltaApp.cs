@@ -8,7 +8,6 @@ namespace CodeAlta.Views;
 
 internal sealed class DeferredCodeAltaApp : IAsyncDisposable
 {
-    private readonly CodeAltaShellViewModel _shellViewModel = new();
     private readonly Padder _rootHost;
     private readonly Padder _sidebarHost;
     private readonly Padder _workspaceHost;
@@ -24,10 +23,8 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         _sidebarHost = CreateStretchHost(BuildMessage("Loading sidebar..."));
         _workspaceHost = CreateStretchHost(BuildWorkspacePlaceholder("Starting CodeAlta..."));
         _commandBarHost = CreateStretchHost(new Placeholder { IsVisible = false });
-        _shellViewModel.HeaderText = "CodeAlta | Starting...";
         _rootHost = CreateStretchHost(
             new CodeAltaShellView(
-                _shellViewModel,
                 _sidebarHost,
                 _workspaceHost,
                 _commandBarHost).Root);
@@ -88,7 +85,6 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         catch (Exception ex)
         {
             _startupFailure = ex;
-            _shellViewModel.HeaderText = "CodeAlta | Startup Failed";
             _sidebarHost.Content = BuildMessage("Startup failed.");
             _workspaceHost.Content = BuildWorkspacePlaceholder($"CodeAlta startup failed: {ex.Message}");
             _commandBarHost.Content = new Placeholder { IsVisible = false };

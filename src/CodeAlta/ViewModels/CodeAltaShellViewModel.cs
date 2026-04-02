@@ -7,15 +7,11 @@ internal sealed partial class CodeAltaShellViewModel
 {
     public CodeAltaShellViewModel()
     {
-        HeaderText = "CodeAlta";
         StatusText = "Prompt ready";
         StatusIconMarkup = string.Empty;
         StatusTone = StatusTone.Ready;
         IsInitialized = false;
     }
-
-    [Bindable]
-    public partial string HeaderText { get; set; }
 
     [Bindable]
     public partial string StatusText { get; set; }
