@@ -129,7 +129,8 @@ internal sealed class SidebarView
         {
             HorizontalAlignment = Align.Stretch,
             VerticalAlignment = Align.Stretch,
-        };
+        }
+        .Style(GroupStyle.Rounded);
 
         Root = group;
     }
