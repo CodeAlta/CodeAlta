@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace CodeAlta;
 
 internal sealed class CodeAltaCliOptions
@@ -14,8 +16,8 @@ internal sealed class CodeAltaCliOptions
 
     public static bool TryParse(
         IReadOnlyList<string> args,
-        out CodeAltaCliOptions? options,
-        out string? error)
+        [NotNullWhen(true)] out CodeAltaCliOptions? options,
+        [NotNullWhen(false)] out string? error)
     {
         ArgumentNullException.ThrowIfNull(args);
 
