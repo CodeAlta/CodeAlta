@@ -12,6 +12,7 @@ internal sealed class ShellInputCoordinator
     private readonly Func<Task> _showHelpAsync;
     private readonly Func<string?, Task> _showHelpAsyncWithFilter;
     private readonly Func<Task> _showCommandPaletteAsync;
+    private readonly Func<string?, Task> _showOpenFolderAsync;
     private readonly Func<Task> _showSessionUsageAsync;
     private readonly Func<Task> _showThreadInfoAsync;
     private readonly Func<Task> _showExpandedPromptAsync;
@@ -27,6 +28,7 @@ internal sealed class ShellInputCoordinator
         Func<Task> showHelpAsync,
         Func<string?, Task> showHelpAsyncWithFilter,
         Func<Task> showCommandPaletteAsync,
+        Func<string?, Task> showOpenFolderAsync,
         Func<Task> showSessionUsageAsync,
         Func<Task> showThreadInfoAsync,
         Func<Task> showExpandedPromptAsync,
@@ -41,6 +43,7 @@ internal sealed class ShellInputCoordinator
         ArgumentNullException.ThrowIfNull(showHelpAsync);
         ArgumentNullException.ThrowIfNull(showHelpAsyncWithFilter);
         ArgumentNullException.ThrowIfNull(showCommandPaletteAsync);
+        ArgumentNullException.ThrowIfNull(showOpenFolderAsync);
         ArgumentNullException.ThrowIfNull(showSessionUsageAsync);
         ArgumentNullException.ThrowIfNull(showThreadInfoAsync);
         ArgumentNullException.ThrowIfNull(showExpandedPromptAsync);
@@ -55,6 +58,7 @@ internal sealed class ShellInputCoordinator
         _showHelpAsync = showHelpAsync;
         _showHelpAsyncWithFilter = showHelpAsyncWithFilter;
         _showCommandPaletteAsync = showCommandPaletteAsync;
+        _showOpenFolderAsync = showOpenFolderAsync;
         _showSessionUsageAsync = showSessionUsageAsync;
         _showThreadInfoAsync = showThreadInfoAsync;
         _showExpandedPromptAsync = showExpandedPromptAsync;
@@ -141,6 +145,10 @@ internal sealed class ShellInputCoordinator
 
             case OpenCommandPaletteIntent:
                 await _showCommandPaletteAsync();
+                return;
+
+            case OpenFolderIntent openFolder:
+                await _showOpenFolderAsync(openFolder.InitialPath);
                 return;
 
             case OpenSessionUsageIntent:

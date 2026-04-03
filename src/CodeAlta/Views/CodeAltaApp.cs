@@ -242,10 +242,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _promptComposerViewModel,
             _threadWorkspaceViewModel,
             _threadCommandCoordinator,
+            OpenFolderAsync,
             () => ReadBindableState(() => _promptDraftUiCoordinator.PromptText),
             CloseCurrentShellTabAsync,
             SetStatus,
-            () => ThreadPaneLayout?.GetAbsoluteBounds(),
+            () => DialogBoundsResolver.ResolveAppBounds(ThreadInput),
             () => ThreadInput,
             GetSelectedThread,
             EnsureThreadTab,
@@ -504,6 +505,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         if (_shellView is null)
         {
             var commandPaletteMetadata = ShellCommandCatalog.Get("CodeAlta.Shell.CommandPalette");
+            var openFolderMetadata = ShellCommandCatalog.Get("CodeAlta.Project.OpenFolder");
             _shellView = new CodeAltaShellView(
                 _sidebarCoordinator.View.Root,
                 _threadWorkspaceView.Root,
@@ -527,6 +529,20 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 Gesture = commandPaletteMetadata.Gesture,
                 Presentation = CommandPresentation.CommandBar,
                 Execute = _ => _shellCommandSurfaceCoordinator.ShowCommandPalette(),
+            });
+            _shellView.Root.AddCommand(new Command
+            {
+                Id = openFolderMetadata.Id,
+                LabelMarkup = openFolderMetadata.SlashCommandText,
+                Name = openFolderMetadata.CommandName,
+                SearchText = openFolderMetadata.CommandSearchText,
+                DescriptionMarkup = openFolderMetadata.DescriptionMarkup,
+                Gesture = openFolderMetadata.Gesture,
+                Presentation = CommandPresentation.CommandPalette,
+                Execute = visual =>
+                {
+                    _ = _shellCommandSurfaceCoordinator.ShowOpenFolderDialogAsync();
+                },
             });
         }
 
@@ -684,6 +700,18 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private Task CloseCurrentShellTabAsync()
         => GetSelectedThread() is not null ? CloseSelectedThreadAsync() : CloseDraftTabAsync();
+
+    private async Task OpenFolderAsync(string folderPath)
+    {
+        try
+        {
+            await _shellController.OpenFolderAsync(folderPath, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Failed to open folder: {ex.Message}", false, StatusTone.Error);
+        }
+    }
 
     private bool GetAutoApproveEnabled()
         => DefaultAutoApproveEnabled;

@@ -168,6 +168,31 @@ internal sealed class CodeAltaShellController : IAsyncDisposable
         return UiDispatcher.InvokeAsync(() => _shell.OpenThread(threadId));
     }
 
+    public async Task<ProjectDescriptor> OpenFolderAsync(string folderPath, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await UiDispatcher.InvokeAsync(
+                () => _shell.SetStatus($"Opening folder '{folderPath}'...", showSpinner: true))
+            .ConfigureAwait(false);
+
+        var project = await _projectCatalog.UpsertFromPathAsync(folderPath, cancellationToken).ConfigureAwait(false);
+        var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var threads = await _recoverableThreadSource.ListRecoverableThreadsAsync(cancellationToken).ConfigureAwait(false);
+
+        await UiDispatcher.InvokeAsync(
+                () =>
+                {
+                    _shell.ApplyRecoveredCatalogState(projects, threads);
+                    _shell.SelectProjectScope(project.Id);
+                    _shell.SetReadyStatusForCurrentSelection();
+                })
+            .ConfigureAwait(false);
+
+        return project;
+    }
+
     public async Task<IReadOnlyList<WorkThreadDescriptor>> LoadProjectThreadsAsync(
         string projectId,
         CancellationToken cancellationToken)

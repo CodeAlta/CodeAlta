@@ -11,6 +11,7 @@ public sealed class ShellCommandHelpTests
     {
         var helpCommand = ShellCommandCatalog.Get("CodeAlta.Shell.Help");
         var paletteCommand = ShellCommandCatalog.Get("CodeAlta.Shell.CommandPalette");
+        var openFolderCommand = ShellCommandCatalog.Get("CodeAlta.Project.OpenFolder");
         var fullPromptCommand = ShellCommandCatalog.Get("CodeAlta.Thread.ExpandPrompt");
 
         var sections = ShellHelpContentBuilder.BuildSections();
@@ -20,6 +21,9 @@ public sealed class ShellCommandHelpTests
         var paletteEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, paletteCommand.Label, StringComparison.Ordinal));
+        var openFolderEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, openFolderCommand.Label, StringComparison.Ordinal));
         var fullPromptEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, fullPromptCommand.Label, StringComparison.Ordinal));
@@ -27,6 +31,8 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(entry.Bindings.ToArray(), "/help");
         CollectionAssert.Contains(entry.Bindings.ToArray(), "?");
         CollectionAssert.Contains(paletteEntry.Bindings.ToArray(), "/");
+        CollectionAssert.Contains(openFolderEntry.Bindings.ToArray(), "/open_folder");
+        CollectionAssert.Contains(openFolderEntry.Bindings.ToArray(), "/open");
         CollectionAssert.Contains(fullPromptEntry.Bindings.ToArray(), "/full_prompt");
     }
 
@@ -45,6 +51,7 @@ public sealed class ShellCommandHelpTests
     {
         var fullPromptCommand = ShellCommandCatalog.Get("CodeAlta.Thread.ExpandPrompt");
         var closeTabCommand = ShellCommandCatalog.Get("CodeAlta.Thread.CloseTab");
+        var openFolderCommand = ShellCommandCatalog.Get("CodeAlta.Project.OpenFolder");
 
         Assert.AreEqual("full_prompt", fullPromptCommand.CommandName);
         Assert.AreEqual("/full_prompt", fullPromptCommand.SlashCommandText);
@@ -56,5 +63,8 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(closeTabCommand.Aliases.ToArray(), "close");
         StringAssert.Contains(closeTabCommand.CommandSearchText, "/close_tab");
         StringAssert.Contains(closeTabCommand.CommandSearchText, "/close");
+        Assert.AreEqual("open_folder", openFolderCommand.CommandName);
+        CollectionAssert.Contains(openFolderCommand.Aliases.ToArray(), "open");
+        StringAssert.Contains(openFolderCommand.CommandSearchText, "/open");
     }
 }

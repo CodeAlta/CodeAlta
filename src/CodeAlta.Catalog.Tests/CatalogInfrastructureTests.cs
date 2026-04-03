@@ -45,6 +45,26 @@ public sealed class CatalogInfrastructureTests
     }
 
     [TestMethod]
+    public async Task ProjectCatalog_UpsertFromPathAsync_ReactivatesArchivedProject()
+    {
+        using var root = TempDirectory.Create();
+        var projectRoot = Path.Combine(root.Path, "Tomlyn");
+        Directory.CreateDirectory(projectRoot);
+
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root.Path });
+        var first = await catalog.UpsertFromPathAsync(projectRoot).ConfigureAwait(false);
+        first.Archived = true;
+        await catalog.SaveAsync(first).ConfigureAwait(false);
+
+        var reopened = await catalog.UpsertFromPathAsync(projectRoot).ConfigureAwait(false);
+
+        Assert.AreEqual(first.Id, reopened.Id);
+        Assert.IsFalse(reopened.Archived);
+        var reloaded = await catalog.LoadAsync().ConfigureAwait(false);
+        Assert.IsFalse(reloaded.Single().Archived);
+    }
+
+    [TestMethod]
     public async Task ProjectCatalog_ImportWorkingDirectoriesAsync_ImportsDistinctProjectsAndSkipsGlobalRoot()
     {
         using var root = TempDirectory.Create();

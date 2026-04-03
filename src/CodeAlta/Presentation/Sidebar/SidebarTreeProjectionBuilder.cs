@@ -99,7 +99,7 @@ internal static class SidebarTreeProjectionBuilder
             SidebarAccent.Projects,
             null,
             true,
-            [],
+            CreateProjectsRootActions(),
             children);
     }
 
@@ -185,6 +185,9 @@ internal static class SidebarTreeProjectionBuilder
             new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectDetails, NerdFont.MdInformationOutline, "Show project details"),
             new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteProject, NerdFont.MdTrashCanOutline, "Delete project"),
         ];
+
+    private static IReadOnlyList<SidebarRowActionDescriptor> CreateProjectsRootActions()
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenFolder, NerdFont.MdPlus, "Open folder", SidebarRowActionVisibility.Always)];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateGlobalActions()
         => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectThreads, NerdFont.MdFormatListBulleted, "Show all global threads")];

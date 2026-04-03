@@ -33,6 +33,16 @@ internal static class ShellCommandCatalog
             ShellCommandAvailability.Always,
             Gesture: new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl)),
         new(
+            "CodeAlta.Project.OpenFolder",
+            "Open Folder",
+            "Open a folder picker dialog and add that directory to the project list.",
+            ShellCommandHelpCategory.General,
+            ShellCommandScope.AnyShell,
+            ShellCommandAvailability.Always,
+            Gesture: new KeyGesture(TerminalChar.CtrlO, TerminalModifiers.Ctrl),
+            Aliases: ["open"],
+            ShowInCommandBar: false),
+        new(
             "CodeAlta.Thread.SessionUsage",
             "Context Usage",
             "Show context and usage details for the selected backend session.",

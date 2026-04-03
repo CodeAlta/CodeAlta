@@ -18,6 +18,8 @@ internal sealed record OpenThreadInfoIntent : ShellInputIntent;
 
 internal sealed record OpenExpandedPromptIntent : ShellInputIntent;
 
+internal sealed record OpenFolderIntent(string? InitialPath) : ShellInputIntent;
+
 internal sealed record AbortThreadIntent : ShellInputIntent;
 
 internal sealed record CompactThreadIntent : ShellInputIntent;

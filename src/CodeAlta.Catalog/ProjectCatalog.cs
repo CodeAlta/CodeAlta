@@ -157,6 +157,12 @@ public sealed partial class ProjectCatalog
             string.Equals(NormalizePath(project.ProjectPath), normalizedPath, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
+            if (existing.Archived)
+            {
+                existing.Archived = false;
+                await SaveAsync(existing, cancellationToken).ConfigureAwait(false);
+            }
+
             return existing;
         }
 

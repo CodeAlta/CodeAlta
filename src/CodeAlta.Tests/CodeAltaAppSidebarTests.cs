@@ -127,6 +127,22 @@ public sealed class CodeAltaAppSidebarTests
     }
 
     [TestMethod]
+    public void Build_ProjectsRootIncludesAlwaysVisibleOpenFolderAction()
+    {
+        var projection = BuildProjection(
+            projects: [],
+            threads: [],
+            expandedProjectIds: [],
+            nowUtc: DateTimeOffset.Parse("2026-03-29T12:02:00+00:00"));
+
+        var projectsRoot = projection.Roots[1];
+        Assert.AreEqual("Projects", projectsRoot.Row.Title);
+        Assert.AreEqual(1, projectsRoot.Actions.Count);
+        Assert.AreEqual(SidebarRowActionKind.OpenFolder, projectsRoot.Actions[0].Kind);
+        Assert.AreEqual(SidebarRowActionVisibility.Always, projectsRoot.Actions[0].Visibility);
+    }
+
+    [TestMethod]
     public void Build_SortsProjectsByDateWhenConfigured()
     {
         var timestamp = DateTimeOffset.Parse("2026-03-29T10:00:00+00:00");
@@ -256,13 +272,16 @@ public sealed class CodeAltaAppSidebarTests
             [thread],
             [project.Id],
             nowUtc: DateTimeOffset.Parse("2026-03-29T10:05:00+00:00"));
-        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { });
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static () => { }, static _ => { });
 
         view.ApplyProjection(projection);
 
         Assert.AreEqual(2, view.Tree.Roots.Count);
+        var projectsRoot = view.Tree.Roots[1];
         var projectNode = view.Tree.Roots[1].Children[0];
         var threadNode = projectNode.Children[0];
+        Assert.AreEqual(1, projectsRoot.RightVisuals.Count);
+        Assert.AreEqual(TreeNodeRightVisualVisibility.Always, projectsRoot.RightVisuals[0].Visibility);
         Assert.AreEqual(SidebarSelectionTarget.Project(project.Id), projectNode.Data);
         Assert.IsTrue(projectNode.IsExpanded);
         Assert.IsTrue(projection.ContainsTarget(SidebarSelectionTarget.Project(project.Id)));
@@ -285,7 +304,7 @@ public sealed class CodeAltaAppSidebarTests
             threads: [globalThread],
             expandedProjectIds: [],
             nowUtc: DateTimeOffset.Parse("2026-03-29T10:05:00+00:00"));
-        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { });
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static () => { }, static _ => { });
 
         view.ApplyProjection(projection);
 
@@ -352,7 +371,7 @@ public sealed class CodeAltaAppSidebarTests
             [project.Id],
             nowUtc: DateTimeOffset.Parse("2026-03-29T10:05:00+00:00"));
         var renameCount = 0;
-        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, () => renameCount++, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { });
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, () => renameCount++, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static () => { }, static _ => { });
 
         view.ApplyProjection(projection);
         view.Tree.Measure(new LayoutConstraints(0, 80, 0, 20));
@@ -376,7 +395,7 @@ public sealed class CodeAltaAppSidebarTests
             [project.Id],
             nowUtc: DateTimeOffset.Parse("2026-03-29T10:05:00+00:00"));
         var observedTargets = new List<SidebarSelectionTarget?>();
-        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, target => observedTargets.Add(target));
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static _ => { }, static () => { }, target => observedTargets.Add(target));
 
         view.ApplyProjection(projection);
 

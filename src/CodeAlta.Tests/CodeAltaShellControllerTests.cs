@@ -4,6 +4,7 @@ using CodeAlta.App;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using System.IO;
 
 namespace CodeAlta.Tests;
 
@@ -235,6 +236,39 @@ public sealed class CodeAltaShellControllerTests
     }
 
     [TestMethod]
+    public async Task OpenFolderAsync_UpsertsProjectReloadsCatalogAndSelectsProject()
+    {
+        var log = new List<string>();
+        var shell = new FakeShell(log);
+        var catalog = new FakeProjectCatalogStore(log, []);
+        var dispatcher = new FakeUiDispatcher();
+        var controller = new CodeAltaShellController(
+            shell,
+            new FakeImporter(log),
+            catalog,
+            new FakeRecoverableThreadSource(log, [CreateThread("thread-1")]),
+            new FakeWorkThreadDeleter(log));
+        controller.AttachUiDispatcher(dispatcher);
+
+        var project = await controller.OpenFolderAsync(@"C:\repo", CancellationToken.None);
+
+        Assert.AreEqual(@"C:\repo", project.ProjectPath);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "Shell.Status:Opening folder 'C:\\repo'...:True:Info",
+                "ProjectCatalog.UpsertFromPath:C:\\repo",
+                "ProjectCatalog.Load",
+                "ThreadSource.List",
+                "Shell.ApplyRecoveredCatalogState:1:1",
+                $"Shell.SelectProjectScope:{project.Id}",
+                "Shell.SetReadyStatus",
+            },
+            log);
+        Assert.AreEqual(2, dispatcher.InvokeCallCount);
+    }
+
+    [TestMethod]
     public async Task LoadProjectThreadsAsync_ReturnsProjectThreadsOrderedByRecency()
     {
         var log = new List<string>();
@@ -438,6 +472,30 @@ public sealed class CodeAltaShellControllerTests
         {
             log.Add($"ProjectCatalog.GetById:{projectId}");
             return Task.FromResult(Projects.FirstOrDefault(project => string.Equals(project.Id, projectId, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        public Task<ProjectDescriptor> UpsertFromPathAsync(string projectPath, CancellationToken cancellationToken)
+        {
+            log.Add($"ProjectCatalog.UpsertFromPath:{projectPath}");
+            var existing = Projects.FirstOrDefault(project =>
+                string.Equals(project.ProjectPath, projectPath, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                existing.Archived = false;
+                return Task.FromResult(existing);
+            }
+
+            var created = new ProjectDescriptor
+            {
+                Id = $"project-{Projects.Count + 1}",
+                Slug = $"project-{Projects.Count + 1}",
+                Name = Path.GetFileName(projectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                DisplayName = Path.GetFileName(projectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                ProjectPath = projectPath,
+                DefaultBranch = "main",
+            };
+            Projects.Add(created);
+            return Task.FromResult(created);
         }
 
         public Task SaveAsync(ProjectDescriptor project, CancellationToken cancellationToken)

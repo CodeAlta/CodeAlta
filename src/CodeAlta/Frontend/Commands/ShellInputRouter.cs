@@ -42,6 +42,7 @@ internal sealed class ShellInputRouter
         {
             { Id: "CodeAlta.Shell.Help" } => new OpenHelpIntent(arguments),
             { Id: "CodeAlta.Shell.CommandPalette" } => new OpenCommandPaletteIntent(),
+            { Id: "CodeAlta.Project.OpenFolder" } => new OpenFolderIntent(arguments),
             { Id: "CodeAlta.Thread.SessionUsage" } => new OpenSessionUsageIntent(),
             { Id: "CodeAlta.Thread.Info" } => new OpenThreadInfoIntent(),
             { Id: "CodeAlta.Thread.ExpandPrompt" } => new OpenExpandedPromptIntent(),

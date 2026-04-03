@@ -30,7 +30,8 @@ internal sealed class SidebarCoordinator
         Action<string> requestDeleteThread,
         Action<string> requestDeleteProject,
         Action<string> openProjectThreads,
-        Action<string> openProjectDetails)
+        Action<string> openProjectDetails,
+        Action openFolder)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(catalogOptions);
@@ -42,6 +43,7 @@ internal sealed class SidebarCoordinator
         ArgumentNullException.ThrowIfNull(requestDeleteProject);
         ArgumentNullException.ThrowIfNull(openProjectThreads);
         ArgumentNullException.ThrowIfNull(openProjectDetails);
+        ArgumentNullException.ThrowIfNull(openFolder);
 
         _viewModel = viewModel;
         _catalogOptions = catalogOptions;
@@ -59,6 +61,7 @@ internal sealed class SidebarCoordinator
             requestDeleteProject,
             openProjectThreads,
             openProjectDetails,
+            openFolder,
             OnSelectedTargetChanged);
     }
 

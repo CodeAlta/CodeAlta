@@ -38,6 +38,7 @@ public sealed class ShellInputRouterTests
     {
         Assert.IsInstanceOfType<OpenHelpIntent>(_router.Route("/help", steerRequested: false));
         Assert.IsInstanceOfType<OpenCommandPaletteIntent>(_router.Route("/command_palette", steerRequested: false));
+        Assert.IsInstanceOfType<OpenFolderIntent>(_router.Route("/open", steerRequested: false));
         Assert.IsInstanceOfType<OpenSessionUsageIntent>(_router.Route("/context_usage", steerRequested: false));
         Assert.IsInstanceOfType<OpenThreadInfoIntent>(_router.Route("/thread_info", steerRequested: false));
         Assert.IsInstanceOfType<OpenExpandedPromptIntent>(_router.Route("/full_prompt", steerRequested: false));
@@ -69,5 +70,14 @@ public sealed class ShellInputRouterTests
 
         Assert.IsInstanceOfType<DelegateThreadIntent>(intent);
         Assert.AreEqual("review the test failures", ((DelegateThreadIntent)intent).PromptText);
+    }
+
+    [TestMethod]
+    public void Route_OpenCommand_PreservesOptionalInitialPath()
+    {
+        var intent = _router.Route(@"/open C:\code\CodeAlta", steerRequested: false);
+
+        Assert.IsInstanceOfType<OpenFolderIntent>(intent);
+        Assert.AreEqual(@"C:\code\CodeAlta", ((OpenFolderIntent)intent).InitialPath);
     }
 }

@@ -168,6 +168,19 @@ internal sealed class NavigatorActionCoordinator
             .Show();
     }
 
+    public void OpenFolder()
+    {
+        new DirectoryPathDialog(
+            "Open Folder",
+            "Type a folder path to add it to the navigator as a project scope.",
+            "Open",
+            OpenFolderAsync,
+            _getDialogBounds,
+            _getFocusTarget,
+            placeholder: "C:\\code\\SomeFolder")
+            .Show();
+    }
+
     public async Task RenameProjectDisplayNameAsync(string projectId, string displayName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -242,6 +255,18 @@ internal sealed class NavigatorActionCoordinator
         {
             _setStatus($"Failed to save project: {ex.Message}", false, StatusTone.Error);
             throw;
+        }
+    }
+
+    private async Task OpenFolderAsync(string folderPath)
+    {
+        try
+        {
+            await _shellController.OpenFolderAsync(folderPath, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _setStatus($"Failed to open folder: {ex.Message}", false, StatusTone.Error);
         }
     }
 

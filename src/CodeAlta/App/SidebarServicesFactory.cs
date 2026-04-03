@@ -49,7 +49,8 @@ internal static class SidebarServicesFactory
             navigatorActions.ConfirmDeleteThread,
             navigatorActions.ConfirmDeleteProject,
             navigatorActions.OpenProjectThreads,
-            navigatorActions.OpenProjectDetails);
+            navigatorActions.OpenProjectDetails,
+            navigatorActions.OpenFolder);
         return (navigatorActions, sidebar);
     }
 

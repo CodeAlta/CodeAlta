@@ -27,6 +27,7 @@ internal sealed class SidebarView
     private readonly Action<string> _deleteProject;
     private readonly Action<string> _openProjectThreads;
     private readonly Action<string> _openProjectDetails;
+    private readonly Action _openFolder;
     private readonly Action<SidebarNodeViewModel> _submitInlineRename;
     private readonly Action<SidebarNodeViewModel> _cancelInlineRename;
 
@@ -42,6 +43,7 @@ internal sealed class SidebarView
         Action<string> deleteProject,
         Action<string> openProjectThreads,
         Action<string> openProjectDetails,
+        Action openFolder,
         Action<SidebarSelectionTarget?> onSelectedTargetChanged)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
@@ -55,12 +57,14 @@ internal sealed class SidebarView
         ArgumentNullException.ThrowIfNull(deleteProject);
         ArgumentNullException.ThrowIfNull(openProjectThreads);
         ArgumentNullException.ThrowIfNull(openProjectDetails);
+        ArgumentNullException.ThrowIfNull(openFolder);
         ArgumentNullException.ThrowIfNull(onSelectedTargetChanged);
 
         _deleteThread = deleteThread;
         _deleteProject = deleteProject;
         _openProjectThreads = openProjectThreads;
         _openProjectDetails = openProjectDetails;
+        _openFolder = openFolder;
         _submitInlineRename = submitInlineRename;
         _cancelInlineRename = cancelInlineRename;
 
@@ -202,13 +206,13 @@ internal sealed class SidebarView
         foreach (var action in projection.Actions)
         {
             node.AddRightVisual(
-                CreateHoverOnlyRowActionButton(
+                CreateRowActionVisual(
                     projection.Row,
                     action.Icon,
                     action.Tooltip,
                     ResolveRowActionTone(action.Kind),
                     ResolveRowAction(projection.SelectionTarget, action.Kind)),
-                TreeNodeRightVisualVisibility.Hover);
+                ResolveRowActionVisibility(action.Visibility));
         }
 
         if (projection.SelectionTarget is { } target)
@@ -236,7 +240,7 @@ internal sealed class SidebarView
             .Tooltip(new TextBlock(() => row.ExactActivityText));
     }
 
-    private static Visual CreateHoverOnlyRowActionButton(
+    private static Visual CreateRowActionVisual(
         SidebarNodeViewModel row,
         Rune icon,
         string tooltip,
@@ -311,9 +315,16 @@ internal sealed class SidebarView
                 => () => _openProjectThreads(projectId),
             SidebarRowActionKind.OpenProjectDetails when target?.ProjectId is { } projectId
                 => () => _openProjectDetails(projectId),
+            SidebarRowActionKind.OpenFolder
+                => _openFolder,
             _ => static () => { },
         };
     }
+
+    private static TreeNodeRightVisualVisibility ResolveRowActionVisibility(SidebarRowActionVisibility visibility)
+        => visibility == SidebarRowActionVisibility.Always
+            ? TreeNodeRightVisualVisibility.Always
+            : TreeNodeRightVisualVisibility.Hover;
 
     private static ControlTone ResolveRowActionTone(SidebarRowActionKind actionKind)
         => actionKind is SidebarRowActionKind.DeleteThread or SidebarRowActionKind.DeleteProject

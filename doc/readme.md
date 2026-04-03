@@ -112,7 +112,8 @@ Current terminal shell capabilities:
   - Codex backend sessions default to `danger-full-access` (no sandbox) in CodeAlta so prompts can inspect sibling projects outside the current working directory without first switching the session root.
   - Backend, model, and reasoning-effort selectors are shown under the prompt.
   - Press `F6` or use the `Full Prompt` button to edit the current draft in a large 80%-screen prompt window; `Esc` closes it and keeps the edited draft.
-  - Press `F1`, type `/help`, or enter `?` in the prompt to open shell command discovery. Textual shell commands now include `/abort`, `/compact`, `/close`, `/queue`, and `/delegate ...`.
+  - Press `F1`, type `/help`, or enter `?` in the prompt to open shell command discovery. Textual shell commands now include `/open`, `/abort`, `/compact`, `/close`, `/queue`, and `/delegate ...`.
+  - Press `Ctrl+O`, run `/open`, or use the always-visible `+` action on the `Projects` sidebar row to open a folder dialog. The dialog uses a one-line prompt editor with directory completion and adds the selected folder to the project catalog.
   - Press `Ctrl+G Ctrl+U` or use the footer usage indicator to open the context/usage popup, and press `Ctrl+G Ctrl+T` or use the thread info icon in the footer to open the selected thread report.
   - Closing either popup restores focus to the thread prompt editor so the workflow stays keyboard-first.
   - Per-backend model and reasoning defaults are stored in `~/.codealta/config.toml`, with project-local overrides read from `<project>/.codealta/config.toml`.
