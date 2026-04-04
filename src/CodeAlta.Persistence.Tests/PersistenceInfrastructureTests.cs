@@ -21,6 +21,7 @@ public sealed class PersistenceInfrastructureTests
         CollectionAssert.Contains(tableNames, "artifacts");
         CollectionAssert.Contains(tableNames, "documents");
         CollectionAssert.Contains(tableNames, "documents_fts");
+        CollectionAssert.Contains(tableNames, "project_file_usage");
     }
 
     [TestMethod]
@@ -249,6 +250,48 @@ public sealed class PersistenceInfrastructureTests
         var sessions = await repository.ListSessionsAsync(agent.AgentId).ConfigureAwait(false);
         Assert.AreEqual(1, sessions.Count);
         Assert.AreEqual("session-1", sessions[0].SessionId);
+    }
+
+    [TestMethod]
+    public async Task ProjectFileUsageRepository_RecordAndListRecent_RoundTrips()
+    {
+        using var temp = TempDirectory.Create();
+        var dbPath = Path.Combine(temp.Path, "state", "db", "codealta.db");
+        var db = await CreateInitializedDbAsync(dbPath).ConfigureAwait(false);
+        var repository = new ProjectFileUsageRepository(db);
+
+        var firstAccess = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var secondAccess = DateTimeOffset.UtcNow;
+
+        await repository.RecordAccessAsync(
+            projectRoot: temp.Path,
+            relativePath: "src/CodeAlta/App",
+            kind: "directory",
+            accessedAt: firstAccess,
+            accessKind: "popup_accepted").ConfigureAwait(false);
+        var updated = await repository.RecordAccessAsync(
+            projectRoot: temp.Path,
+            relativePath: "src/CodeAlta/App",
+            kind: "directory",
+            accessedAt: secondAccess,
+            accessKind: "prompt_inserted").ConfigureAwait(false);
+        await repository.RecordAccessAsync(
+            projectRoot: temp.Path,
+            relativePath: "readme.md",
+            kind: "file",
+            accessedAt: firstAccess,
+            accessKind: "editor_opened").ConfigureAwait(false);
+
+        Assert.AreEqual(2L, updated.AccessCount);
+        Assert.AreEqual("prompt_inserted", updated.LastAccessKind);
+
+        var recent = await repository.ListRecentAsync(temp.Path, limit: 5).ConfigureAwait(false);
+        Assert.AreEqual(2, recent.Count);
+        Assert.AreEqual("src/CodeAlta/App", recent[0].RelativePath);
+        Assert.AreEqual(2L, recent[0].AccessCount);
+
+        var all = await repository.ListByProjectAsync(temp.Path).ConfigureAwait(false);
+        Assert.AreEqual(2, all.Count);
     }
 
     private static async Task<CodeAltaDb> CreateInitializedDbAsync(string path)

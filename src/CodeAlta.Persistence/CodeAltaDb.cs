@@ -198,6 +198,23 @@ public sealed class CodeAltaDb
             PRAGMA foreign_keys = ON;
             """
         ),
+        new DbMigration(
+            "0003_project_file_usage",
+            """
+            CREATE TABLE IF NOT EXISTS project_file_usage (
+                project_root TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                last_accessed_at TEXT NOT NULL,
+                access_count INTEGER NOT NULL DEFAULT 1,
+                last_access_kind TEXT NULL,
+                PRIMARY KEY (project_root, relative_path, kind)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_file_usage_recent
+                ON project_file_usage(project_root, last_accessed_at DESC, access_count DESC);
+            """
+        ),
     ];
 
     private readonly CodeAltaDbOptions _options;

@@ -177,6 +177,73 @@ public sealed class SearchInfrastructureTests
         }
     }
 
+    [TestMethod]
+    public async Task ProjectFileSnapshotCache_PreservesSnapshotWhileDirty()
+    {
+        var cache = new ProjectFileSnapshotCache();
+        var item = new ProjectFileSearchItem
+        {
+            Kind = ProjectFileSearchItemKind.File,
+            ProjectRoot = @"C:\repo",
+            RelativePath = "src/App.cs",
+            FullPath = @"C:\repo\src\App.cs",
+            Basename = "App.cs",
+            ParentPath = "src",
+            Extension = ".cs",
+            SearchFields = new ProjectFileSearchFields("app.cs", "src/app.cs", ["src", "app.cs"], ".cs"),
+        };
+
+        await cache.SetAsync(
+            new ProjectFileSnapshot
+            {
+                ProjectRoot = @"C:\repo",
+                IsGitAware = true,
+                SnapshotGeneration = 3,
+                BuiltAt = DateTimeOffset.UtcNow,
+                Items = [item],
+            }).ConfigureAwait(false);
+        await cache.MarkDirtyAsync(@"C:\repo", ProjectFileInvalidationReason.FileSystemWrite).ConfigureAwait(false);
+
+        var entry = await cache.GetAsync(@"C:\repo").ConfigureAwait(false);
+        Assert.IsNotNull(entry);
+        Assert.IsTrue(entry.IsDirty);
+        Assert.IsNotNull(entry.Snapshot);
+        Assert.AreEqual(3L, entry.Snapshot.SnapshotGeneration);
+        Assert.AreEqual(ProjectFileInvalidationReason.FileSystemWrite, entry.LastInvalidationReason);
+    }
+
+    [TestMethod]
+    public async Task PersistentProjectFileUsageStore_RecordsAndLoadsTypedUsage()
+    {
+        using var temp = TempDirectory.Create();
+        var dbPath = Path.Combine(temp.Path, "state", "db", "codealta.db");
+        var db = new CodeAltaDb(
+            new CodeAltaDbOptions
+            {
+                DatabasePath = dbPath,
+            });
+        await db.InitializeAsync().ConfigureAwait(false);
+
+        var repository = new ProjectFileUsageRepository(db);
+        var store = new PersistentProjectFileUsageStore(repository);
+        await store.RecordAsync(
+            new ProjectFileUsageEvent(
+                temp.Path,
+                "src/CodeAlta/App.cs",
+                ProjectFileSearchItemKind.File,
+                DateTimeOffset.UtcNow,
+                ProjectFileUsageAccessKind.PopupAccepted)).ConfigureAwait(false);
+
+        var recent = await store.GetRecentAsync(temp.Path, limit: 5).ConfigureAwait(false);
+        Assert.AreEqual(1, recent.Count);
+        Assert.AreEqual(ProjectFileSearchItemKind.File, recent[0].Kind);
+        Assert.AreEqual(ProjectFileUsageAccessKind.PopupAccepted, recent[0].LastAccessKind);
+
+        var byPath = await store.GetUsageByRelativePathAsync(temp.Path).ConfigureAwait(false);
+        Assert.IsTrue(byPath.TryGetValue("src/CodeAlta/App.cs", out var entry));
+        Assert.AreEqual(1L, entry.AccessCount);
+    }
+
     private static async Task<(Indexer Indexer, SearchService Service)> CreateSearchPipelineAsync(string rootPath)
     {
         var dbPath = Path.Combine(rootPath, "state", "db", "codealta.db");
