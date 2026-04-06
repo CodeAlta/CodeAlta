@@ -69,7 +69,7 @@ public sealed class PromptComposerProjectionTests
             selectedThreadCanAbort: false);
 
         Assert.AreEqual(
-            $"Start a thread. / commands, ? help, @ project files, Enter newline, {GetSendShortcutLabel()} send, F5 steer.",
+            $"Start a thread. [/] commands, [?] help, [@] project files, [ENTER] for new line, [{GetSendShortcutLabel().ToUpperInvariant()}] to send, [F5] to steer.",
             projection.Placeholder);
         Assert.IsTrue(projection.IsEnabled);
         Assert.IsTrue(projection.CanSend);
@@ -128,7 +128,7 @@ public sealed class PromptComposerProjectionTests
             selectedThreadCanAbort: false);
 
         Assert.AreEqual(
-            $"Continue the selected thread. / commands, ? help, @ project files, Enter newline, {GetSendShortcutLabel()} send, F5 steer.",
+            $"Continue the selected thread. [/] commands, [?] help, [@] project files, [ENTER] for new line, [{GetSendShortcutLabel().ToUpperInvariant()}] to send, [F5] to steer.",
             projection.Placeholder);
         Assert.IsTrue(projection.CanSend);
         Assert.IsTrue(projection.CanSteer);
@@ -218,7 +218,7 @@ public sealed class PromptComposerProjectionTests
             selectedThreadCanAbort: false);
 
         Assert.AreEqual(
-            $"Start a thread. / commands, ? help, Enter newline, {GetSendShortcutLabel()} send, F5 steer.",
+            $"Start a thread. [/] commands, [?] help, [ENTER] for new line, [{GetSendShortcutLabel().ToUpperInvariant()}] to send, [F5] to steer.",
             projection.Placeholder);
         Assert.IsTrue(projection.CanCloseTab);
     }

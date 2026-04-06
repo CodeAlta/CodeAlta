@@ -141,17 +141,17 @@ namespace CodeAlta.Presentation.Prompting
         {
             var segments = new List<string>(6)
             {
-                "/ commands",
-                "? help",
+                "[/] commands",
+                "[?] help",
             };
             if (hasProjectContext)
             {
-                segments.Add("@ project files");
+                segments.Add("[@] project files");
             }
 
-            segments.Add("Enter newline");
-            segments.Add($"{GetPromptSendShortcutLabel()} send");
-            segments.Add("F5 steer");
+            segments.Add("[ENTER] for new line");
+            segments.Add($"[{GetPromptSendShortcutLabel().ToUpperInvariant()}] to send");
+            segments.Add("[F5] to steer");
             return string.Join(", ", segments) + ".";
         }
 
