@@ -211,12 +211,13 @@ internal sealed class ThreadWorkspaceView
             .MinWidth(12)
             .MaxWidth(22)
             .IsEnabled(workspaceViewModel.Bind.CanSelectReasoning);
-        ChatAutoScrollSwitch = new Switch(new TextBlock("AutoScroll") { Wrap = false, IsSelectable = false })
-            .IsOn(workspaceViewModel.Bind.AutoScroll)
-            .IsEnabled(workspaceViewModel.Bind.CanToggleAutoScroll)
-            .Toggled(onAutoScrollChanged);
-        AlwaysEnqueueSwitch = new Switch(new TextBlock("AlwaysQueue") { Wrap = false, IsSelectable = false })
-            .IsOn(promptComposerViewModel.Bind.AlwaysEnqueue)
+        ChatAutoScrollCheckBox = new CheckBox("AutoScroll")
+            .IsChecked(workspaceViewModel.Bind.AutoScroll)
+            .IsEnabled(workspaceViewModel.Bind.CanToggleAutoScroll);
+        ChatAutoScrollCheckBox.KeyDown((_, e) => OnAutoScrollCheckBoxToggled(e, onAutoScrollChanged));
+        ChatAutoScrollCheckBox.PointerPressed((_, e) => OnAutoScrollCheckBoxToggled(e, onAutoScrollChanged));
+        AlwaysEnqueueCheckBox = new CheckBox("AlwaysQueue")
+            .IsChecked(promptComposerViewModel.Bind.AlwaysEnqueue)
             .IsEnabled(promptComposerViewModel.Bind.CanAlwaysEnqueue);
         var compactThreadButton = CreateIconButton(
                 $"{NerdFont.MdSelectCompare}",
@@ -274,8 +275,8 @@ internal sealed class ThreadWorkspaceView
             ChatModelSelect,
             ChatReasoningSelect,
             compactThreadButton,
-            ChatAutoScrollSwitch,
-            AlwaysEnqueueSwitch,
+            ChatAutoScrollCheckBox,
+            AlwaysEnqueueCheckBox,
         ])
         {
             Spacing = 2,
@@ -357,9 +358,9 @@ internal sealed class ThreadWorkspaceView
 
     private Select<ChatReasoningOption> ChatReasoningSelect { get; }
 
-    public Switch ChatAutoScrollSwitch { get; }
+    public CheckBox ChatAutoScrollCheckBox { get; }
 
-    public Switch AlwaysEnqueueSwitch { get; }
+    public CheckBox AlwaysEnqueueCheckBox { get; }
 
     public TabControl ThreadTabControl { get; }
 
@@ -457,6 +458,28 @@ internal sealed class ThreadWorkspaceView
         }
 
         return presentation;
+    }
+
+    private static void OnAutoScrollCheckBoxToggled(KeyEventArgs e, Action onAutoScrollChanged)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        ArgumentNullException.ThrowIfNull(onAutoScrollChanged);
+
+        if (e.Handled && e.Key is TerminalKey.Space or TerminalKey.Enter)
+        {
+            onAutoScrollChanged();
+        }
+    }
+
+    private static void OnAutoScrollCheckBoxToggled(PointerEventArgs e, Action onAutoScrollChanged)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        ArgumentNullException.ThrowIfNull(onAutoScrollChanged);
+
+        if (e.Handled && e.Button == TerminalMouseButton.Left)
+        {
+            onAutoScrollChanged();
+        }
     }
 
     private void OpenExpandedPromptDialog(

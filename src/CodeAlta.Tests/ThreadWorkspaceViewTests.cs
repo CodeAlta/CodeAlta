@@ -140,6 +140,56 @@ public sealed class ThreadWorkspaceViewTests
         Assert.IsFalse(steerCommand.SearchText.Contains("/steer", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public void ToggleControls_UseCheckBoxesBoundToViewModels()
+    {
+        var shellViewModel = new CodeAltaShellViewModel();
+        var workspaceViewModel = new ThreadWorkspaceViewModel
+        {
+            AutoScroll = false,
+            CanToggleAutoScroll = true,
+        };
+        var promptComposerViewModel = new PromptComposerViewModel
+        {
+            AlwaysEnqueue = true,
+            CanAlwaysEnqueue = true,
+        };
+        var view = new ThreadWorkspaceView(
+            shellViewModel,
+            workspaceViewModel,
+            promptComposerViewModel,
+            [],
+            static () => new TextBlock(string.Empty),
+            static () => { },
+            static _ => { },
+            static () => { },
+            static () => { },
+            static _ => { },
+            static () => { },
+            static () => { },
+            static () => { },
+            static _ => { },
+            static _ => { },
+            static (_, _) => { },
+            static (_, _) => { },
+            static () => { },
+            static () => { },
+            static () => { },
+            static () => { },
+            static _ => { },
+            static _ => { },
+            static _ => { },
+            static _ => { },
+            new State<string?>(string.Empty),
+            new State<float>(0),
+            static () => { });
+
+        Assert.IsFalse(view.ChatAutoScrollCheckBox.IsChecked);
+        Assert.IsTrue(view.ChatAutoScrollCheckBox.IsEnabled);
+        Assert.IsTrue(view.AlwaysEnqueueCheckBox.IsChecked);
+        Assert.IsTrue(view.AlwaysEnqueueCheckBox.IsEnabled);
+    }
+
     private static T GetPrivateField<T>(object instance, string fieldName)
         where T : class
     {
