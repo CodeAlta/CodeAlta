@@ -533,23 +533,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private void RefreshShellChrome()
         => _workspaceCoordinator.RefreshShellChrome();
-    internal void RefreshCatalogAndThreadWorkspace()
-    {
-        _threadInfoPresenter?.InvalidateSelection();
-        _workspaceCoordinator.RefreshCatalogAndThreadWorkspace();
-    }
+    internal void RefreshCatalogAndThreadWorkspace() { _threadInfoPresenter?.InvalidateSelection(); _workspaceCoordinator.RefreshCatalogAndThreadWorkspace(); }
     private void RefreshHeaderAndThreadWorkspace()
         => _workspaceCoordinator.RefreshHeaderAndThreadWorkspace();
-    private void RefreshSelectionAndThreadWorkspace()
-    {
-        _threadInfoPresenter?.InvalidateSelection();
-        _workspaceCoordinator.RefreshSelectionAndThreadWorkspace();
-    }
+    private void RefreshSelectionAndThreadWorkspace() { _threadInfoPresenter?.InvalidateSelection(); _workspaceCoordinator.RefreshSelectionAndThreadWorkspace(); }
     internal void SelectGlobalScope() => _threadStateCoordinator.SelectGlobalScope();
     internal void SelectProjectScope(string projectId) => _threadStateCoordinator.SelectProjectScope(projectId);
     private void EnsureSelectionDefaults() => _threadStateCoordinator.EnsureSelectionDefaults();
     internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info) => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
-
     private void SetThreadStatus(
         OpenThreadState tab,
         string message,
@@ -587,43 +578,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             DispatchToUi,
             build => CreateComputedVisual(build));
 
-    private T ReadBindableState<T>(Func<T> read)
-    {
-        ArgumentNullException.ThrowIfNull(read);
-
-        return UiDispatch.Invoke(
-            GetUiDispatcher(),
-            () =>
-            {
-                VerifyBindableAccess();
-                return read();
-            });
-    }
+    private T ReadBindableState<T>(Func<T> read) { ArgumentNullException.ThrowIfNull(read); return UiDispatch.Invoke(GetUiDispatcher(), () => { VerifyBindableAccess(); return read(); }); }
 
     internal void SetShellInitialized(bool isInitialized)
         => _workspaceCoordinator.SetShellInitialized(isInitialized);
 
-    private void DispatchToUi(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        var dispatcher = GetUiDispatcher();
-        UiDispatch.Post(
-            dispatcher,
-            action,
-            allowInline: ShouldRunInlineOnCurrentThread(dispatcher.CheckAccess(), _terminalLoopCoordinator.HasStarted));
-    }
-
-    private void DispatchToUiDeferred(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-        var dispatcher = GetUiDispatcher();
-        UiDispatch.Post(
-            dispatcher,
-            action,
-            allowInline: ShouldRunDeferredUiActionInlineOnCurrentThread(
-                dispatcher.CheckAccess(),
-                _terminalLoopCoordinator.HasStarted));
-    }
+    private void DispatchToUi(Action action) { ArgumentNullException.ThrowIfNull(action); var dispatcher = GetUiDispatcher(); UiDispatch.Post(dispatcher, action, allowInline: ShouldRunInlineOnCurrentThread(dispatcher.CheckAccess(), _terminalLoopCoordinator.HasStarted)); }
+    private void DispatchToUiDeferred(Action action) { ArgumentNullException.ThrowIfNull(action); var dispatcher = GetUiDispatcher(); UiDispatch.Post(dispatcher, action, allowInline: ShouldRunDeferredUiActionInlineOnCurrentThread(dispatcher.CheckAccess(), _terminalLoopCoordinator.HasStarted)); }
 
     internal static bool CanAccessBindableState(bool dispatcherHasAccess, bool terminalLoopStarted)
         => !terminalLoopStarted || dispatcherHasAccess;
@@ -685,7 +646,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         => _shellController.OpenFolderAsync(folderPath, includeHidden, CancellationToken.None);
 
     private bool GetAutoApproveEnabled() => DefaultAutoApproveEnabled;
-
     private async Task PersistViewStateAsync()
         => await _threadStateCoordinator.PersistViewStateAsync();
     internal async Task InitializeChatBackendsAsync(CancellationToken cancellationToken)
@@ -707,10 +667,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         => _threadStateCoordinator.OpenThread(threadId);
 
     internal void FocusPromptEditor() => ThreadPaneLayout?.App?.Focus(ThreadInput);
-
     internal void OpenAcpManagement() { if (_acpManagementCoordinator is null) { SetStatus("ACP management is unavailable in this app instance.", tone: StatusTone.Warning); return; } _acpManagementCoordinator.Open(); }
     internal void FocusSidebar() { SyncSidebarSelectionToCurrentState(); ApplyPendingSidebarSelection(); _sidebarCoordinator.View.Tree.App?.Focus(_sidebarCoordinator.View.Tree); }
-
     private async Task CloseSelectedThreadAsync()
         => await _threadStateCoordinator.CloseSelectedThreadAsync();
 
