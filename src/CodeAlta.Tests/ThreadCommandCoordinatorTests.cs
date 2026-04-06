@@ -335,6 +335,21 @@ public sealed class ThreadCommandCoordinatorTests
         Assert.AreEqual(1, backend.SteerCount);
     }
 
+    [TestMethod]
+    public async Task DeleteSelectedThreadPendingSteer_RemovesPendingSteer()
+    {
+        using var temp = TempDirectory.Create();
+        var backend = new RecordingBackend();
+        var harness = await CreateSelectedThreadHarnessAsync(temp.Path, backend).ConfigureAwait(false);
+        await using var _ = harness.Hub;
+        var pendingSteer = new PendingSteerPrompt("Retry steer");
+        harness.Tab.PendingSteers.Add(pendingSteer);
+
+        harness.Coordinator.DeleteSelectedThreadPendingSteer(pendingSteer.Id);
+
+        Assert.AreEqual(0, harness.Tab.PendingSteers.Count);
+    }
+
     private static WorkThreadExecutionOptions CreateExecutionOptions(AgentBackendId backendId, string workingDirectory)
     {
         return new WorkThreadExecutionOptions

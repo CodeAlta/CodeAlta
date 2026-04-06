@@ -298,6 +298,12 @@ internal sealed class ThreadCommandCoordinator
         _queueCoordinator.DeleteSelectedThreadQueuedPrompt(queuedPromptId);
     }
 
+    public void DeleteSelectedThreadPendingSteer(string pendingSteerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pendingSteerId);
+        _queueCoordinator.DeleteSelectedThreadPendingSteer(pendingSteerId);
+    }
+
     public void UpdateSelectedThreadQueuedPromptCount(string queuedPromptId, int remainingCount)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);

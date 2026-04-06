@@ -18,6 +18,7 @@ internal static partial class QueuedPromptListView
         IReadOnlyList<PromptStripItem> promptStripItems,
         Action<string> copyQueuedPromptMarkdown,
         Action<string> convertQueuedPromptToSteer,
+        Action<string> deletePendingSteer,
         Action<string> deleteQueuedPrompt,
         Action<string, int> updateQueuedPromptCount,
         Action<string, string> updateQueuedPromptText,
@@ -26,6 +27,7 @@ internal static partial class QueuedPromptListView
         ArgumentNullException.ThrowIfNull(promptStripItems);
         ArgumentNullException.ThrowIfNull(copyQueuedPromptMarkdown);
         ArgumentNullException.ThrowIfNull(convertQueuedPromptToSteer);
+        ArgumentNullException.ThrowIfNull(deletePendingSteer);
         ArgumentNullException.ThrowIfNull(deleteQueuedPrompt);
         ArgumentNullException.ThrowIfNull(updateQueuedPromptCount);
         ArgumentNullException.ThrowIfNull(updateQueuedPromptText);
@@ -42,7 +44,7 @@ internal static partial class QueuedPromptListView
             var item = promptStripItems[index];
             rows.Add(item.Kind switch
             {
-                PromptStripItemKind.PendingSteer => BuildPendingSteerRow(item),
+                PromptStripItemKind.PendingSteer => BuildPendingSteerRow(item, copyQueuedPromptMarkdown, deletePendingSteer),
                 PromptStripItemKind.QueuedPrompt => BuildQueuedPromptRow(
                     item,
                     copyQueuedPromptMarkdown,
@@ -67,7 +69,10 @@ internal static partial class QueuedPromptListView
         };
     }
 
-    private static Visual BuildPendingSteerRow(PromptStripItem pendingSteer)
+    private static Visual BuildPendingSteerRow(
+        PromptStripItem pendingSteer,
+        Action<string> copyQueuedPromptMarkdown,
+        Action<string> deletePendingSteer)
     {
         var icon = new TextBlock($"{NerdFont.MdArrowRightThinCircleOutline}")
         {
@@ -91,6 +96,17 @@ internal static partial class QueuedPromptListView
             IsSelectable = false,
         };
 
+        var copyButton = CreateIconButton(
+            $"{NerdFont.MdContentCopy}",
+            "Copy pending steering prompt markdown to the clipboard",
+            () => copyQueuedPromptMarkdown(pendingSteer.Text));
+        copyButton.Margin = new Thickness(0, 0, 1, 0);
+
+        var deleteButton = CreateIconButton(
+            $"{NerdFont.MdTrashCanOutline}",
+            "Delete pending steering prompt",
+            () => deletePendingSteer(pendingSteer.Id));
+
         var row = new Grid
             {
                 HorizontalAlignment = Align.Stretch,
@@ -99,10 +115,14 @@ internal static partial class QueuedPromptListView
             .Columns(
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) },
+                new ColumnDefinition { Width = GridLength.Auto },
+                new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Auto });
         row.Cell(icon, 0, 0);
         row.Cell(promptText, 0, 1);
-        row.Cell(status, 0, 2);
+        row.Cell(copyButton, 0, 2);
+        row.Cell(deleteButton, 0, 3);
+        row.Cell(status, 0, 4);
         return BuildStripRow(row, UiPalette.PendingSteerBackgroundColor);
     }
 

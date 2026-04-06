@@ -46,6 +46,7 @@ internal sealed class ThreadWorkspaceView
         Action steerPrompt,
         Action clearQueuedPrompts,
         Action<string> convertQueuedPromptToSteer,
+        Action<string> deletePendingSteer,
         Action<string> deleteQueuedPrompt,
         Action<string, int> updateQueuedPromptCount,
         Action<string, string> updateQueuedPromptText,
@@ -77,6 +78,7 @@ internal sealed class ThreadWorkspaceView
             steerPrompt,
             clearQueuedPrompts,
             convertQueuedPromptToSteer,
+            deletePendingSteer,
             deleteQueuedPrompt,
             updateQueuedPromptCount,
             updateQueuedPromptText,
@@ -111,6 +113,7 @@ internal sealed class ThreadWorkspaceView
         Action steerPrompt,
         Action clearQueuedPrompts,
         Action<string> convertQueuedPromptToSteer,
+        Action<string> deletePendingSteer,
         Action<string> deleteQueuedPrompt,
         Action<string, int> updateQueuedPromptCount,
         Action<string, string> updateQueuedPromptText,
@@ -142,6 +145,7 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(steerPrompt);
         ArgumentNullException.ThrowIfNull(clearQueuedPrompts);
         ArgumentNullException.ThrowIfNull(convertQueuedPromptToSteer);
+        ArgumentNullException.ThrowIfNull(deletePendingSteer);
         ArgumentNullException.ThrowIfNull(deleteQueuedPrompt);
         ArgumentNullException.ThrowIfNull(updateQueuedPromptCount);
         ArgumentNullException.ThrowIfNull(updateQueuedPromptText);
@@ -264,6 +268,7 @@ internal sealed class ThreadWorkspaceView
                     workspaceViewModel.PromptStripItems,
                     markdown => (ThreadPaneLayout?.App)?.Terminal.Clipboard.TrySetText(markdown),
                     convertQueuedPromptToSteer,
+                    deletePendingSteer,
                     deleteQueuedPrompt,
                     updateQueuedPromptCount,
                     updateQueuedPromptText,

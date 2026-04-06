@@ -94,6 +94,18 @@ internal sealed class ThreadPromptQueueCoordinator
         RefreshSelectedThreadQueueUi();
     }
 
+    public void DeleteSelectedThreadPendingSteer(string pendingSteerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pendingSteerId);
+
+        if (!TryGetSelectedTabWithQueue(out var tab) || tab is null)
+        {
+            return;
+        }
+
+        RemovePendingSteer(tab, pendingSteerId);
+    }
+
     public void UpdateSelectedThreadQueuedPromptCount(string queuedPromptId, int remainingCount)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
