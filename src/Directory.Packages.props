@@ -25,8 +25,8 @@
     <PackageVersion Include="XenoAtom.Logging" Version="1.1.2" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.1.2" />
     <PackageVersion Include="XenoAtom.Glob" Version="1.0.0" />
-    <PackageVersion Include="XenoAtom.Terminal.UI" Version="2.3.1" />
-    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Markdown" Version="2.3.1" />
-    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Screenshot" Version="2.3.1" />
+    <PackageVersion Include="XenoAtom.Terminal.UI" Version="2.4.0" />
+    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Markdown" Version="2.4.0" />
+    <PackageVersion Include="XenoAtom.Terminal.UI.Extensions.Screenshot" Version="2.4.0" />
   </ItemGroup>
 </Project>
