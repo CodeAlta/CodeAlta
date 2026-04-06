@@ -1,4 +1,7 @@
 using CodeAlta.Agent.LocalRuntime;
+using Google.GenAI;
+using Google.GenAI.Types;
+using Microsoft.Extensions.AI;
 
 namespace CodeAlta.Agent.GoogleGenAI;
 
@@ -48,7 +51,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend
                                 SupportsThoughtSignatures = true,
                             },
                         },
-                        TurnExecutor = new UnsupportedGoogleTurnExecutor(),
+                        TurnExecutor = CreateTurnExecutor(provider),
                     }),
                 ],
             });
@@ -96,17 +99,82 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private sealed class UnsupportedGoogleTurnExecutor : ILocalAgentTurnExecutor
+    private static ILocalAgentTurnExecutor CreateTurnExecutor(GoogleGenAIProviderOptions provider)
     {
-        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Google GenAI execution is not implemented yet.");
+        return new LocalAgentChatClientTurnExecutor(
+            (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
+            (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken));
+    }
 
-        public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-            LocalAgentTurnRequest request,
-            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Google GenAI execution is not implemented yet.");
+    private static ValueTask<IChatClient> CreateChatClientAsync(
+        GoogleGenAIProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (provider.ChatClientFactory is not null)
+        {
+            return ValueTask.FromResult(provider.ChatClientFactory());
+        }
+
+        var client = CreateSdkClient(provider);
+        return ValueTask.FromResult<IChatClient>(new OwnedChatClient(client.AsIChatClient(), client));
+    }
+
+    private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
+        GoogleGenAIProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor,
+        CancellationToken cancellationToken)
+    {
+        if (provider.ModelListAsync is not null)
+        {
+            return await provider.ModelListAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        using var client = CreateSdkClient(provider);
+        var pager = await client.Models.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var results = new List<AgentModelInfo>();
+        await foreach (var model in pager.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(ToAgentModelInfo(providerDescriptor, model));
+        }
+
+        return results;
+    }
+
+    private static Client CreateSdkClient(GoogleGenAIProviderOptions provider)
+    {
+        var httpOptions = provider.BaseUri is null
+            ? null
+            : new HttpOptions
+            {
+                BaseUrl = provider.BaseUri.ToString(),
+            };
+        return new Client(
+            vertexAI: provider.UseVertexAI,
+            apiKey: provider.ApiKey,
+            project: provider.Project,
+            location: provider.Location,
+            httpOptions: httpOptions);
+    }
+
+    private static AgentModelInfo ToAgentModelInfo(
+        LocalAgentProviderDescriptor provider,
+        Model model)
+    {
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["inputTokenLimit"] = model.InputTokenLimit,
+            ["outputTokenLimit"] = model.OutputTokenLimit,
+            ["thinking"] = model.Thinking,
+            ["supportedActions"] = model.SupportedActions?.ToArray(),
+        };
+
+        return new AgentModelInfo(
+            model.Name ?? string.Empty,
+            DisplayName: model.DisplayName,
+            Description: model.Description,
+            Provider: provider.ProviderKey,
+            Capabilities: capabilities);
     }
 }

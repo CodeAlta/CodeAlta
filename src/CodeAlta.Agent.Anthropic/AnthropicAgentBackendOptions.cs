@@ -1,4 +1,5 @@
 using CodeAlta.Agent.LocalRuntime;
+using Microsoft.Extensions.AI;
 
 namespace CodeAlta.Agent.Anthropic;
 
@@ -52,4 +53,8 @@ public sealed class AnthropicProviderOptions
     /// Gets or sets the compatibility profile for the provider.
     /// </summary>
     public LocalAgentProviderProfile? Profile { get; set; }
+
+    internal Func<IChatClient>? ChatClientFactory { get; set; }
+
+    internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
 }

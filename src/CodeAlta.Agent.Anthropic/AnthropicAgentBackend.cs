@@ -1,4 +1,8 @@
+using Anthropic;
+using Anthropic.Core;
+using Anthropic.Models.Models;
 using CodeAlta.Agent.LocalRuntime;
+using Microsoft.Extensions.AI;
 
 namespace CodeAlta.Agent.Anthropic;
 
@@ -47,7 +51,7 @@ public sealed class AnthropicAgentBackend : IAgentBackend
                                 SupportsThoughtSignatures = true,
                             },
                         },
-                        TurnExecutor = new UnsupportedAnthropicTurnExecutor(),
+                        TurnExecutor = CreateTurnExecutor(provider),
                     }),
                 ],
             });
@@ -95,17 +99,87 @@ public sealed class AnthropicAgentBackend : IAgentBackend
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private sealed class UnsupportedAnthropicTurnExecutor : ILocalAgentTurnExecutor
+    private static ILocalAgentTurnExecutor CreateTurnExecutor(AnthropicProviderOptions provider)
     {
-        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Anthropic execution is not implemented yet.");
+        return new LocalAgentChatClientTurnExecutor(
+            (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
+            (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken));
+    }
 
-        public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-            LocalAgentTurnRequest request,
-            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException("Anthropic execution is not implemented yet.");
+    private static ValueTask<IChatClient> CreateChatClientAsync(
+        AnthropicProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (provider.ChatClientFactory is not null)
+        {
+            return ValueTask.FromResult(provider.ChatClientFactory());
+        }
+
+        var client = CreateSdkClient(provider, providerDescriptor);
+        return ValueTask.FromResult<IChatClient>(new OwnedChatClient(client.AsIChatClient(), client));
+    }
+
+    private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
+        AnthropicProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor,
+        CancellationToken cancellationToken)
+    {
+        if (provider.ModelListAsync is not null)
+        {
+            return await provider.ModelListAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        using var client = CreateSdkClient(provider, providerDescriptor);
+        var results = new List<AgentModelInfo>();
+        var page = await client.Models.List(cancellationToken: cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            results.AddRange(page.Items.Select(model => ToAgentModelInfo(providerDescriptor, model)));
+            if (!page.HasNext())
+            {
+                break;
+            }
+
+            page = await page.Next(cancellationToken).ConfigureAwait(false);
+        }
+
+        return results;
+    }
+
+    private static AnthropicClient CreateSdkClient(
+        AnthropicProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor)
+    {
+        var options = new ClientOptions
+        {
+            ApiKey = provider.ApiKey,
+        };
+        if (provider.BaseUri is not null)
+        {
+            options.BaseUrl = provider.BaseUri.ToString();
+        }
+
+        return new AnthropicClient(options);
+    }
+
+    private static AgentModelInfo ToAgentModelInfo(
+        LocalAgentProviderDescriptor provider,
+        ModelInfo model)
+    {
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["createdAt"] = model.CreatedAt,
+            ["maxInputTokens"] = model.MaxInputTokens,
+            ["maxTokens"] = model.MaxTokens,
+        };
+
+        return new AgentModelInfo(
+            model.ID,
+            DisplayName: model.DisplayName,
+            Description: null,
+            Provider: provider.ProviderKey,
+            Capabilities: capabilities);
     }
 }
