@@ -47,8 +47,7 @@ internal static class ShellCommandCatalog
             ShellCommandHelpCategory.General,
             ShellCommandScope.AnyShell,
             ShellCommandAvailability.Always,
-            Gesture: new KeyGesture(TerminalChar.CtrlQ, TerminalModifiers.Ctrl),
-            ShowInCommandBar: false),
+            Gesture: new KeyGesture(TerminalChar.CtrlQ, TerminalModifiers.Ctrl)),
         new(
             "CodeAlta.Project.OpenFolder",
             "Open Project",

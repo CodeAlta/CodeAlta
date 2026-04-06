@@ -21,7 +21,7 @@ public sealed class CodeAltaGlobalCommandConfiguratorTests
         var exitCommand = app.GlobalCommands.Single(command => string.Equals(command.Id, "CodeAlta.Shell.Exit", StringComparison.Ordinal));
         Assert.AreEqual("/exit", exitCommand.LabelMarkup);
         Assert.AreEqual("exit", exitCommand.Name);
-        Assert.AreEqual(CommandPresentation.CommandPalette, exitCommand.Presentation);
+        Assert.AreEqual(CommandPresentation.CommandBar | CommandPresentation.CommandPalette, exitCommand.Presentation);
         Assert.AreEqual(new KeyGesture(TerminalChar.CtrlQ, TerminalModifiers.Ctrl), exitCommand.Gesture);
         StringAssert.Contains(exitCommand.SearchText, "/exit");
     }
