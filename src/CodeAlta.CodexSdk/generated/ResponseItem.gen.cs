@@ -44,13 +44,13 @@ public abstract partial record ResponseItem
         [JsonPropertyName("encrypted_content")]
         public string? EncryptedContent { get; set; }
         [JsonPropertyName("summary")]
-        public List<JsonElement> Summary { get; set; } = [];
+        public List<ReasoningItemReasoningSummary> Summary { get; set; } = [];
     }
 
     public sealed partial record LocalShellCallResponseItem : ResponseItem
     {
         [JsonPropertyName("action")]
-        public JsonElement Action { get; set; }
+        public LocalShellAction Action { get; set; } = default!;
         /// <summary>Set when using the Responses API.</summary>
         [JsonPropertyName("call_id")]
         public string? CallId { get; set; }

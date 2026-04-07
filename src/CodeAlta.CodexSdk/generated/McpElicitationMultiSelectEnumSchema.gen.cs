@@ -6,4 +6,22 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
-public abstract partial record McpElicitationMultiSelectEnumSchema;
+internal sealed class McpElicitationMultiSelectEnumSchemaJsonConverter : JsonConverter<McpElicitationMultiSelectEnumSchema>
+{
+    public override McpElicitationMultiSelectEnumSchema Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var document = JsonDocument.ParseValue(ref reader);
+        return new McpElicitationMultiSelectEnumSchema { Value = document.RootElement.Clone() };
+    }
+
+    public override void Write(Utf8JsonWriter writer, McpElicitationMultiSelectEnumSchema value, JsonSerializerOptions options)
+    {
+        value.Value.WriteTo(writer);
+    }
+}
+
+[JsonConverter(typeof(McpElicitationMultiSelectEnumSchemaJsonConverter))]
+public partial record struct McpElicitationMultiSelectEnumSchema
+{
+    public JsonElement Value { get; set; }
+}

@@ -15,9 +15,7 @@ public abstract partial record McpServerElicitationRequestParams
     public string ServerName { get; set; } = string.Empty;
     [JsonPropertyName("threadId")]
     public string ThreadId { get; set; } = string.Empty;
-    /// <summary>Active Codex turn when this elicitation was observed, if app-server could correlate one.
-    ///
-    /// This is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.</summary>
+    /// <summary>Active Codex turn when this elicitation was observed, if app-server could correlate one.  This is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.</summary>
     [JsonPropertyName("turnId")]
     public string? TurnId { get; set; }
 

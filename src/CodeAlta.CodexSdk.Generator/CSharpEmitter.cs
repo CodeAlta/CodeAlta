@@ -1015,7 +1015,7 @@ public class CSharpEmitter
         {
             var innerSchema = propSchema.AnyOf.First(a =>
                 !(a.Type == JsonObjectType.Null));
-            var innerType = MapType(SchemaWalker.Resolve(innerSchema),
+            var innerType = MapType(innerSchema,
                 contextNs);
             return innerType + "?";
         }
@@ -1034,13 +1034,12 @@ public class CSharpEmitter
         // allOf with single ref -> just the ref type
         if (propSchema.AllOf.Count == 1 && propSchema.Type == JsonObjectType.None)
         {
-            var resolved = SchemaWalker.Resolve(propSchema.AllOf.First());
-            return MapType(resolved, contextNs);
+            return MapType(propSchema.AllOf.First(), contextNs);
         }
 
         // Direct $ref
         if (propSchema.HasReference)
-            return MapType(SchemaWalker.Resolve(propSchema), contextNs);
+            return MapType(propSchema, contextNs);
 
         var csType = MapType(propSchema, contextNs);
 
@@ -1053,6 +1052,11 @@ public class CSharpEmitter
 
     private string MapType(JsonSchema schema, string contextNs)
     {
+        if (schema.HasReference)
+        {
+            return MapType(schema.Reference!, contextNs);
+        }
+
         // Check if this is a known definition we have a name for
         var refPath = GetDefinitionPointer(schema);
         if (refPath != null && _pointerToTypeDef.TryGetValue(refPath, out var targetDef))
@@ -1076,7 +1080,7 @@ public class CSharpEmitter
         {
             if (schema.Item != null)
             {
-                var itemType = MapType(SchemaWalker.Resolve(schema.Item), contextNs);
+                var itemType = MapType(schema.Item, contextNs);
                 var listType = $"List<{itemType}>";
                 TrackCollectionType(listType, contextNs);
                 return listType;
@@ -1090,8 +1094,9 @@ public class CSharpEmitter
             schema.AdditionalPropertiesSchema != null &&
             schema.Properties.Count == 0)
         {
-            var valType = MapType(SchemaWalker.Resolve(
-                schema.AdditionalPropertiesSchema), contextNs);
+            var valType = MapType(
+                schema.AdditionalPropertiesSchema,
+                contextNs);
             var dictType = $"Dictionary<string, {valType}>";
             TrackCollectionType(dictType, contextNs);
             return dictType;

@@ -727,7 +727,6 @@ public sealed class CodexAgentMapperTests
     public void ToAgentEvent_MapsRawResponseLocalShellCall()
     {
         var timestamp = DateTimeOffset.Parse("2026-02-25T10:00:00+00:00");
-        using var actionDocument = JsonDocument.Parse("""{"command":"Get-ChildItem -Path C:\\code\\Tomlyn"}""");
         var notification = new CodexNotification.RawResponseItemCompleted(
             new RawResponseItemCompletedNotification
             {
@@ -737,7 +736,11 @@ public sealed class CodexAgentMapperTests
                 {
                     CallId = "call-1",
                     Status = LocalShellStatus.Completed,
-                    Action = actionDocument.RootElement.Clone()
+                    Action = new LocalShellAction
+                    {
+                        Type = "command",
+                        Command = ["Get-ChildItem", "-Path", @"C:\code\Tomlyn"]
+                    }
                 }
             });
 

@@ -138,7 +138,7 @@ public static class SchemaWalker
         }
 
         var definitions = EnsureDefinitionsObject(schemaRoot);
-        foreach (var fragment in EnumerateSupplementalFragments(schemaDir))
+        foreach (var fragment in EnumerateSupplementalFragments(schemaDir, schemaFilePath))
         {
             MergeSupplementalSchema(
                 definitions,
@@ -159,17 +159,80 @@ public static class SchemaWalker
         return definitions;
     }
 
-    private static IEnumerable<(string Path, bool TrimLegacyServerRequests)> EnumerateSupplementalFragments(string schemaDir)
+    private static IEnumerable<(string Path, bool TrimLegacyServerRequests)> EnumerateSupplementalFragments(
+        string schemaDir,
+        string schemaFilePath)
     {
-        yield return (Path.Combine(schemaDir, "v1", "InitializeResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "ServerRequest.json"), true);
-        yield return (Path.Combine(schemaDir, "CommandExecutionRequestApprovalResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "FileChangeRequestApprovalResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "PermissionsRequestApprovalResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "ToolRequestUserInputResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "DynamicToolCallResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "ChatgptAuthTokensRefreshResponse.json"), false);
-        yield return (Path.Combine(schemaDir, "McpServerElicitationRequestResponse.json"), false);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schemaDir);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schemaFilePath);
+
+        if (IsCodexBundleSchemaFileName(Path.GetFileName(schemaFilePath)))
+        {
+            foreach (var fragmentPath in Directory
+                         .EnumerateFiles(schemaDir, "*.json", SearchOption.AllDirectories)
+                         .OrderBy(static x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                if (ShouldSkipDiscoveredFragment(fragmentPath, schemaFilePath))
+                {
+                    continue;
+                }
+
+                yield return (fragmentPath, ShouldTrimLegacyServerRequests(fragmentPath));
+            }
+
+            yield break;
+        }
+
+        foreach (var fragmentPath in EnumerateLegacySupplementalFragments(schemaDir))
+        {
+            yield return (fragmentPath, ShouldTrimLegacyServerRequests(fragmentPath));
+        }
+    }
+
+    private static IEnumerable<string> EnumerateLegacySupplementalFragments(string schemaDir)
+    {
+        yield return Path.Combine(schemaDir, "v1", "InitializeResponse.json");
+        yield return Path.Combine(schemaDir, "ServerRequest.json");
+        yield return Path.Combine(schemaDir, "CommandExecutionRequestApprovalResponse.json");
+        yield return Path.Combine(schemaDir, "FileChangeRequestApprovalResponse.json");
+        yield return Path.Combine(schemaDir, "PermissionsRequestApprovalResponse.json");
+        yield return Path.Combine(schemaDir, "ToolRequestUserInputResponse.json");
+        yield return Path.Combine(schemaDir, "DynamicToolCallResponse.json");
+        yield return Path.Combine(schemaDir, "ChatgptAuthTokensRefreshResponse.json");
+        yield return Path.Combine(schemaDir, "McpServerElicitationRequestResponse.json");
+    }
+
+    private static bool IsCodexBundleSchemaFileName(string? fileName)
+    {
+        return string.Equals(fileName, "codex_app_server_protocol.schemas.json", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(fileName, "codex_app_server_protocol.v2.schemas.json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldSkipDiscoveredFragment(string fragmentPath, string schemaFilePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fragmentPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schemaFilePath);
+
+        var fileName = Path.GetFileName(fragmentPath);
+        if (IsCodexBundleSchemaFileName(fileName))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            Path.GetFullPath(fragmentPath),
+            Path.GetFullPath(schemaFilePath),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldTrimLegacyServerRequests(string fragmentPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fragmentPath);
+
+        return string.Equals(
+            Path.GetFileName(fragmentPath),
+            "ServerRequest.json",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static void MergeSupplementalSchema(

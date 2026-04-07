@@ -21,7 +21,7 @@ public sealed partial record PluginSummary
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
     [JsonPropertyName("source")]
-    public JsonElement Source { get; set; }
+    public PluginSource Source { get; set; } = default!;
     [JsonPropertyName("interface")]
     public PluginInterface? Interface { get; set; }
 }

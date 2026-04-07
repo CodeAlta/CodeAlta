@@ -2308,7 +2308,7 @@ internal static class CodexAgentMapper
             if (TryResolveLocalShellCommandText(item.Action, out var command))
                 writer.WriteString("command", command);
             writer.WritePropertyName("action");
-            item.Action.WriteTo(writer);
+            JsonSerializer.Serialize(writer, item.Action);
         });
     }
 
@@ -2385,42 +2385,28 @@ internal static class CodexAgentMapper
         });
     }
 
-    private static string DescribeLocalShellAction(JsonElement action)
+    private static string DescribeLocalShellAction(LocalShellAction action)
     {
         if (TryResolveLocalShellCommandText(action, out var command))
         {
             return command!;
         }
 
-        if (action.ValueKind == JsonValueKind.Object)
+        if (!string.IsNullOrWhiteSpace(action.Type))
         {
-            if (TryGetStringProperty(action, "text") is { } text)
-                return text;
-            if (TryGetStringProperty(action, "type") is { } type)
-                return type;
+            return action.Type;
         }
 
-        return action.GetRawText();
+        return JsonSerializer.Serialize(action);
     }
 
-    private static bool TryResolveLocalShellCommandText(JsonElement action, out string? command)
+    private static bool TryResolveLocalShellCommandText(LocalShellAction action, out string? command)
     {
         command = null;
 
-        if (action.ValueKind != JsonValueKind.Object)
+        if (action.Command.Count > 0)
         {
-            return false;
-        }
-
-        if (TryDeserializeCommandAction(action, out var commandAction))
-        {
-            command = GetCommandActionText(commandAction);
-            return !string.IsNullOrWhiteSpace(command);
-        }
-
-        if (TryGetStringProperty(action, "command") is { } commandText)
-        {
-            command = commandText;
+            command = string.Join(" ", action.Command);
             return true;
         }
 
@@ -2524,7 +2510,9 @@ internal static class CodexAgentMapper
         {
             return string.Join(
                 Environment.NewLine,
-                reasoning.Summary.Select(static item => item.ValueKind == JsonValueKind.String ? item.GetString()! : item.ToString()));
+                reasoning.Summary
+                    .Select(static item => item.Text)
+                    .Where(static value => !string.IsNullOrWhiteSpace(value)));
         }
 
         return !string.IsNullOrWhiteSpace(reasoning.EncryptedContent)

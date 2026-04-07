@@ -11,5 +11,5 @@ public sealed partial record PermissionsRequestApprovalResponse
     [JsonPropertyName("permissions")]
     public GrantedPermissionProfile Permissions { get; set; } = default!;
     [JsonPropertyName("scope")]
-    public PermissionGrantScope Scope { get; set; } = PermissionGrantScope.Turn;
+    public PermissionGrantScope Scope { get; set; } = default!;
 }

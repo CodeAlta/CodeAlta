@@ -331,6 +331,123 @@ public sealed class CodexSdkGeneratorTests
     }
 
     [TestMethod]
+    public async Task SchemaWalker_FlatV2Bundle_DiscoversAdditionalExtractedFragments()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"CodeAlta.Tests.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "codex_app_server_protocol.v2.schemas.json");
+        var v2Dir = Path.Combine(root, "v2");
+        Directory.CreateDirectory(v2Dir);
+
+        await File.WriteAllTextAsync(
+                schemaPath,
+                """
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "CodexAppServerProtocolV2",
+                  "type": "object",
+                  "definitions": {
+                    "Existing": { "type": "string" }
+                  }
+                }
+                """)
+            .ConfigureAwait(false);
+
+        await File.WriteAllTextAsync(
+                Path.Combine(root, "ClientNotification.json"),
+                """
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "ClientNotification",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": ["method"],
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": ["initialized"]
+                        }
+                      }
+                    }
+                  ]
+                }
+                """)
+            .ConfigureAwait(false);
+
+        await File.WriteAllTextAsync(
+                Path.Combine(root, "FuzzyFileSearchResponse.json"),
+                """
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "FuzzyFileSearchResponse",
+                  "type": "object",
+                  "required": ["files"],
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": { "$ref": "#/definitions/FuzzyFileSearchResult" }
+                    }
+                  },
+                  "definitions": {
+                    "FuzzyFileSearchResult": {
+                      "type": "object",
+                      "required": ["path"],
+                      "properties": {
+                        "path": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+                """)
+            .ConfigureAwait(false);
+
+        await File.WriteAllTextAsync(
+                Path.Combine(v2Dir, "SkillsRemoteReadParams.json"),
+                """
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "SkillsRemoteReadParams",
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" }
+                  }
+                }
+                """)
+            .ConfigureAwait(false);
+
+        try
+        {
+            var defs = await SchemaWalker.LoadDefinitionsAsync(
+                    schemaPath,
+                    "CodeAlta.CodexSdk")
+                .ConfigureAwait(false);
+
+            Assert.IsTrue(defs.Any(x => x.CsNamespace == "CodeAlta.CodexSdk" && x.Name == "Existing"));
+            Assert.IsTrue(defs.Any(x => x.CsNamespace == "CodeAlta.CodexSdk" && x.Name == "ClientNotification"));
+            Assert.IsTrue(defs.Any(x => x.CsNamespace == "CodeAlta.CodexSdk" && x.Name == "FuzzyFileSearchResponse"));
+            Assert.IsTrue(defs.Any(x => x.CsNamespace == "CodeAlta.CodexSdk" && x.Name == "FuzzyFileSearchResult"));
+            Assert.IsTrue(defs.Any(x => x.CsNamespace == "CodeAlta.CodexSdk" && x.Name == "SkillsRemoteReadParams"));
+            Assert.IsFalse(defs.Any(x => x.CsNamespace == "CodeAlta.CodexSdk.V2"));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [TestMethod]
     public void EmitSerializerContext_DictionaryWithNullablePrimitive_UsesPrimitiveTypeAndSanitizedPropertyName()
     {
         var schema = new JsonSchema();
@@ -513,6 +630,84 @@ public sealed class CodexSdkGeneratorTests
             StringAssert.Contains(code, "JsonConverter(typeof(PrimitiveJsonConverter))");
             StringAssert.Contains(code, "public partial record struct Primitive");
             StringAssert.Contains(code, "public JsonElement Value { get; set; }");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task EmitType_ReferencedUnionProperty_UsesNamedReferencedType()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"CodeAlta.Tests.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "schema.json");
+
+        await File.WriteAllTextAsync(
+                schemaPath,
+                """
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "Test",
+                  "type": "object",
+                  "definitions": {
+                    "AgentMessageContent": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": ["text", "type"],
+                          "properties": {
+                            "text": { "type": "string" },
+                            "type": {
+                              "type": "string",
+                              "enum": ["text"]
+                            }
+                          },
+                          "title": "TextAgentMessageContent"
+                        }
+                      ]
+                    },
+                    "TurnItem": {
+                      "type": "object",
+                      "required": ["content"],
+                      "properties": {
+                        "content": {
+                          "type": "array",
+                          "items": { "$ref": "#/definitions/AgentMessageContent" }
+                        }
+                      }
+                    }
+                  }
+                }
+                """)
+            .ConfigureAwait(false);
+
+        try
+        {
+            var defs = await SchemaWalker.LoadDefinitionsAsync(
+                    schemaPath,
+                    "CodeAlta.CodexSdk")
+                .ConfigureAwait(false);
+            var def = defs.Single(static x => x.Name == "TurnItem");
+            var emitter = new CSharpEmitter(defs, "CodeAlta.CodexSdk");
+
+            var code = emitter.EmitType(def);
+
+            Assert.IsNotNull(code);
+            StringAssert.Contains(code, "public List<AgentMessageContent> Content { get; set; } = [];");
+            Assert.IsFalse(code.Contains("List<JsonElement>", StringComparison.Ordinal));
         }
         finally
         {
