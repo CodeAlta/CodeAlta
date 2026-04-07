@@ -19,6 +19,7 @@ namespace CodeAlta.CodexSdk;
 /// </remarks>
 internal sealed class JsonRpcTransport : IAsyncDisposable
 {
+    private const int MaxLoggedPayloadLength = 2048;
     private readonly Stream _inputStream;
     private readonly Stream _outputStream;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -101,10 +102,16 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
 
             var resultElement = await tcs.Task.ConfigureAwait(false);
 
-            //Console.WriteLine(resultElement.ToString()); // Ensure the JsonElement is fully parsed before we leave the async method, to avoid deferred parsing issues.
-
-            return resultElement.Deserialize<TResult>(_jsonOptions)
-                ?? throw new JsonRpcException(-1, $"Failed to deserialize response for '{method}'.");
+            try
+            {
+                return resultElement.Deserialize<TResult>(_jsonOptions)
+                    ?? throw new JsonRpcException(-1, $"Failed to deserialize response for '{method}'.");
+            }
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)
+            {
+                LogError(ex, $"Failed to deserialize Codex response for '{method}'. Payload: {TrimPayload(resultElement.GetRawText())}");
+                throw;
+            }
         }
         finally
         {
@@ -139,8 +146,16 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
             await WriteEnvelopeAsync(method, id, writeParams: null, cancellationToken).ConfigureAwait(false);
 
             var resultElement = await tcs.Task.ConfigureAwait(false);
-            return resultElement.Deserialize<TResult>(_jsonOptions)
-                ?? throw new JsonRpcException(-1, $"Failed to deserialize response for '{method}'.");
+            try
+            {
+                return resultElement.Deserialize<TResult>(_jsonOptions)
+                    ?? throw new JsonRpcException(-1, $"Failed to deserialize response for '{method}'.");
+            }
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)
+            {
+                LogError(ex, $"Failed to deserialize Codex response for '{method}'. Payload: {TrimPayload(resultElement.GetRawText())}");
+                throw;
+            }
         }
         finally
         {
@@ -382,7 +397,14 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
 
                 while (TryReadLine(ref buffer, out var line))
                 {
-                    ProcessLine(line);
+                    try
+                    {
+                        ProcessLine(line);
+                    }
+                    catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        LogError(ex, $"Failed to process incoming Codex JSON-RPC message. Payload: {TrimPayload(GetPayloadText(line))}");
+                    }
                 }
 
                 pipe.AdvanceTo(buffer.Start, buffer.End);
@@ -433,9 +455,9 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
         {
             element = JsonElement.ParseValue(ref reader);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            // Skip malformed lines.
+            LogError(ex, $"Failed to parse incoming Codex JSON-RPC message. Payload: {TrimPayload(GetPayloadText(lineBytes))}");
             return;
         }
 
@@ -451,7 +473,14 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
         if (hasId && (hasResult || hasError))
         {
             // Response to a pending request.
-            var id = idProp.GetInt64();
+            if (idProp.ValueKind != JsonValueKind.Number || !idProp.TryGetInt64(out var id))
+            {
+                LogError(
+                    new JsonException("Response 'id' must be an integer."),
+                    $"Ignoring Codex response with unsupported id shape. Payload: {TrimPayload(element.GetRawText())}");
+                return;
+            }
+
             if (_pendingRequests.TryRemove(id, out var tcs))
             {
                 if (hasError)
@@ -469,8 +498,15 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
         else if (hasId && hasMethod)
         {
             // Server-initiated request (e.g., approval requests).
-            var id = idProp.Deserialize<RequestId>(_jsonOptions)
-                ?? throw new JsonException("Server request 'id' must be a string or number.");
+            var id = idProp.Deserialize<RequestId>(_jsonOptions);
+            if (id is null)
+            {
+                LogError(
+                    new JsonException("Server request 'id' must be a string or number."),
+                    $"Ignoring Codex server request with invalid id. Payload: {TrimPayload(element.GetRawText())}");
+                return;
+            }
+
             var method = methodProp.GetString() ?? "";
             var paramsElement = element.TryGetProperty("params", out var p) ? p.Clone() : default;
             _incomingMessages.Writer.TryWrite(new ServerMessage(method, paramsElement, id));
@@ -482,6 +518,34 @@ internal sealed class JsonRpcTransport : IAsyncDisposable
             var paramsElement = element.TryGetProperty("params", out var p) ? p.Clone() : default;
             _incomingMessages.Writer.TryWrite(new ServerMessage(method, paramsElement, RequestId: null));
         }
+    }
+
+    private void LogError(Exception exception, string message)
+    {
+        if (_logger is not null && _logger.IsEnabled(LogLevel.Error))
+        {
+            _logger.Error(exception, message);
+        }
+    }
+
+    private static string GetPayloadText(ReadOnlySequence<byte> payload)
+    {
+        return payload.IsSingleSegment
+            ? Encoding.UTF8.GetString(payload.FirstSpan)
+            : Encoding.UTF8.GetString(payload.ToArray());
+    }
+
+    private static string TrimPayload(string payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        var normalized = payload.ReplaceLineEndings(" ").Trim();
+        if (normalized.Length <= MaxLoggedPayloadLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..MaxLoggedPayloadLength] + "...";
     }
 
 }

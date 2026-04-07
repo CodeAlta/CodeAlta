@@ -209,4 +209,20 @@ public sealed class CodexMessageParserTests
         Assert.AreEqual("req-9", ((RequestId.StringValue)typed.RequestId).Value);
         Assert.AreEqual("thr_123", typed.Params.GetProperty("threadId").GetString());
     }
+
+    [TestMethod]
+    public void ParseNotification_InvalidPayload_FallsBackToUnknown()
+    {
+        var options = CodexClient.CreateJsonSerializerOptions();
+
+        var notification = CodexMessageParser.ParseNotification(
+            "thread/closed",
+            ParseJsonElement("""{ "threadId": 123 }"""),
+            options);
+
+        Assert.IsInstanceOfType(notification, typeof(CodexNotification.Unknown));
+        var typed = (CodexNotification.Unknown)notification!;
+        Assert.AreEqual("thread/closed", typed.Method);
+        Assert.AreEqual(123, typed.Params.GetProperty("threadId").GetInt32());
+    }
 }

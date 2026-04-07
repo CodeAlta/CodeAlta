@@ -1,4 +1,5 @@
 using XenoAtom.Logging.Writers;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Tests;
 
@@ -27,5 +28,15 @@ public sealed class CodeAltaLoggingTests
         Assert.AreEqual(CodeAltaLogging.RetainedLogFileCountLimit, options.RetainedFileCountLimit);
         Assert.IsTrue(options.AutoFlush);
         Assert.AreEqual(FileLogWriterFailureMode.Ignore, options.FailureMode);
+    }
+
+    [TestMethod]
+    public void CreateConfig_OnlyLogsErrorsByDefault()
+    {
+        var homeRoot = Path.Combine(Path.GetTempPath(), ".codealta-test-home");
+
+        var config = CodeAltaLogging.CreateConfig(homeRoot);
+
+        Assert.AreEqual(LogLevel.Error, config.RootLogger.MinimumLevel);
     }
 }

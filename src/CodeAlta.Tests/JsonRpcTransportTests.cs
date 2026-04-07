@@ -194,4 +194,24 @@ public class JsonRpcTransportTests
         Assert.IsTrue(written.Contains("\"code\":-32601"), $"Expected code in: {written}");
         Assert.IsTrue(written.Contains("\"message\":\"Unsupported request\""), $"Expected message in: {written}");
     }
+
+    [TestMethod]
+    public async Task ReadLoop_SkipsMalformedJson_AndContinuesToNextMessage()
+    {
+        var pipe = new Pipe();
+        var clientInput = new MemoryStream();
+
+        await using var transport = new JsonRpcTransport(pipe.Reader.AsStream(), clientInput, CreateOptions());
+
+        var payload = "not-json\n" +
+                      """{"method":"thread/closed","params":{"threadId":"thr_123"}}""" + "\n";
+        await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes(payload));
+        await pipe.Writer.CompleteAsync();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var message = await transport.Messages.ReadAsync(cts.Token);
+
+        Assert.AreEqual("thread/closed", message.Method);
+        Assert.IsNull(message.RequestId);
+    }
 }

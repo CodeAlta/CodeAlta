@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using XenoAtom.Logging;
 
 namespace CodeAlta.CodexSdk;
 
@@ -12,21 +13,23 @@ internal static class CodexMessageParser
         string method,
         JsonElement parameters,
         RequestId? requestId,
-        JsonSerializerOptions jsonOptions)
+        JsonSerializerOptions jsonOptions,
+        Logger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(method);
 
         if (requestId is not null)
-            return ParseServerRequest(method, parameters, requestId, jsonOptions);
+            return ParseServerRequest(method, parameters, requestId, jsonOptions, logger);
 
-        return ParseNotification(method, parameters, jsonOptions);
+        return ParseNotification(method, parameters, jsonOptions, logger);
     }
 
     internal static object ParseServerRequest(
         string method,
         JsonElement parameters,
         RequestId requestId,
-        JsonSerializerOptions jsonOptions)
+        JsonSerializerOptions jsonOptions,
+        Logger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(method);
         ArgumentNullException.ThrowIfNull(requestId);
@@ -42,10 +45,12 @@ internal static class CodexMessageParser
         }
         catch (JsonException)
         {
+            LogParseFailure(logger, method, parameters, "Failed to deserialize Codex server request.");
             return new CodexUnknownServerRequest(requestId, method, parameters);
         }
         catch (NotSupportedException)
         {
+            LogParseFailure(logger, method, parameters, "Failed to deserialize Codex server request.");
             return new CodexUnknownServerRequest(requestId, method, parameters);
         }
     }
@@ -53,13 +58,16 @@ internal static class CodexMessageParser
     internal static CodexNotification? ParseNotification(
         string method,
         JsonElement parameters,
-        JsonSerializerOptions jsonOptions)
+        JsonSerializerOptions jsonOptions,
+        Logger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(method);
         ArgumentNullException.ThrowIfNull(jsonOptions);
 
-        return method switch
+        try
         {
+            return method switch
+            {
             // Thread lifecycle
             "thread/started" => new CodexNotification.ThreadStarted(
                 parameters.Deserialize<ThreadStartedNotification>(jsonOptions)!),
@@ -192,7 +200,13 @@ internal static class CodexMessageParser
 
             // Catch-all
             _ => new CodexNotification.Unknown(method, parameters)
-        };
+            };
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            LogParseFailure(logger, method, parameters, "Failed to deserialize Codex notification.", ex);
+            return new CodexNotification.Unknown(method, parameters);
+        }
     }
 
     private static ServerRequestResolvedNotification ParseServerRequestResolvedNotification(JsonElement parameters)
@@ -238,5 +252,31 @@ internal static class CodexMessageParser
 
         using var document = JsonDocument.Parse(stream.ToArray());
         return document.RootElement.Clone();
+    }
+
+    private static void LogParseFailure(
+        Logger? logger,
+        string method,
+        JsonElement parameters,
+        string message,
+        Exception? exception = null)
+    {
+        if (logger is null || !logger.IsEnabled(LogLevel.Error))
+        {
+            return;
+        }
+
+        var payload = parameters.ValueKind == JsonValueKind.Undefined
+            ? "<undefined>"
+            : parameters.GetRawText();
+        var trimmedPayload = payload.Length <= 2048 ? payload : payload[..2048] + "...";
+        if (exception is null)
+        {
+            logger.Error($"{message} Method: {method}. Payload: {trimmedPayload}");
+        }
+        else
+        {
+            logger.Error(exception, $"{message} Method: {method}. Payload: {trimmedPayload}");
+        }
     }
 }

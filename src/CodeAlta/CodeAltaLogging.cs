@@ -19,9 +19,17 @@ internal static class CodeAltaLogging
             return false;
         }
 
-        var fileWriterOptions = CreateFileWriterOptions(homeRoot);
-        Directory.CreateDirectory(Path.GetDirectoryName(fileWriterOptions.FilePath)!);
+        var config = CreateConfig(homeRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(CreateFileWriterOptions(homeRoot).FilePath)!);
+        LogManager.InitializeForAsync(config);
+        return true;
+    }
 
+    internal static LogManagerConfig CreateConfig(string homeRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeRoot);
+
+        var fileWriterOptions = CreateFileWriterOptions(homeRoot);
         var config = new LogManagerConfig
         {
             AsyncErrorHandler = static exception =>
@@ -36,17 +44,9 @@ internal static class CodeAltaLogging
             }
         };
 
-        config.RootLogger.MinimumLevel = LogLevel.Info;
+        config.RootLogger.MinimumLevel = LogLevel.Error;
         config.RootLogger.Writers.Add(new FileLogWriter(fileWriterOptions));
-
-        config.GetLoggerConfig("CodeAlta.Chat").MinimumLevel = LogLevel.Debug;
-        config.GetLoggerConfig("CodeAlta.ChatAgentConnection").MinimumLevel = LogLevel.Debug;
-        config.GetLoggerConfig("CodeAlta.Agent.Copilot.Session").MinimumLevel = LogLevel.Debug;
-        config.GetLoggerConfig("CodeAlta.Agent.Copilot.Callbacks").MinimumLevel = LogLevel.Debug;
-        config.GetLoggerConfig("CodeAlta.Program").MinimumLevel = LogLevel.Debug;
-
-        LogManager.InitializeForAsync(config);
-        return true;
+        return config;
     }
 
     internal static FileLogWriterOptions CreateFileWriterOptions(string homeRoot)

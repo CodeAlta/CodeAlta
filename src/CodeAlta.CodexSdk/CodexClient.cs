@@ -41,6 +41,7 @@ public sealed partial class CodexClient : IAsyncDisposable
     private readonly CodexProcess _process;
     private readonly JsonRpcTransport _transport;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly Logger? _logger;
     private bool _disposed;
 
     /// <summary>
@@ -48,11 +49,12 @@ public sealed partial class CodexClient : IAsyncDisposable
     /// </summary>
     public const string LoggerName = "codex.app-server";
 
-    private CodexClient(CodexProcess process, JsonRpcTransport transport, JsonSerializerOptions jsonOptions)
+    private CodexClient(CodexProcess process, JsonRpcTransport transport, JsonSerializerOptions jsonOptions, Logger? logger)
     {
         _process = process;
         _transport = transport;
         _jsonOptions = jsonOptions;
+        _logger = logger;
     }
 
     /// <summary>
@@ -89,7 +91,7 @@ public sealed partial class CodexClient : IAsyncDisposable
         var jsonOptions = CreateJsonSerializerOptions();
         var transport = new JsonRpcTransport(process.StandardOutput, process.StandardInput, jsonOptions, logger);
 
-        var client = new CodexClient(process, transport, jsonOptions);
+        var client = new CodexClient(process, transport, jsonOptions, logger);
         try
         {
             await client.InitializeAsync(clientInfo, experimentalApi, optOutNotificationMethods, cancellationToken)
@@ -139,7 +141,7 @@ public sealed partial class CodexClient : IAsyncDisposable
         var jsonOptions = CreateJsonSerializerOptions();
         var transport = new JsonRpcTransport(serverOutput, clientInput, jsonOptions, logger);
 
-        var client = new CodexClient(process: null!, transport, jsonOptions);
+        var client = new CodexClient(process: null!, transport, jsonOptions, logger);
         try
         {
             await client.InitializeAsync(clientInfo, experimentalApi, optOutNotificationMethods, cancellationToken)
@@ -1339,7 +1341,8 @@ public sealed partial class CodexClient : IAsyncDisposable
             message.Method,
             message.Params,
             message.RequestId,
-            _jsonOptions);
+            _jsonOptions,
+            _logger);
     }
 
     /// <summary>
