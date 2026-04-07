@@ -38,6 +38,71 @@ public sealed class LocalAgentToolsTests
     }
 
     [TestMethod]
+    public async Task GrepFilesTool_UsesXenoAtomGlobPatternMatching()
+    {
+        using var temp = TestTempDirectory.Create();
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "file7.txt"), ["match"]).ConfigureAwait(false);
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "filex.txt"), ["match"]).ConfigureAwait(false);
+
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "grep_files");
+        using var args = JsonDocument.Parse("""{"pattern":"match","glob":"file[0-9].txt"}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "file7.txt:1: match");
+        Assert.IsFalse(output.Contains("filex.txt:1: match", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task GrepFilesTool_HonorsGitIgnoreWhenSearchingInsideRepository()
+    {
+        using var temp = TestTempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(temp.Path, ".git"));
+        await File.WriteAllTextAsync(
+                Path.Combine(temp.Path, ".git", "config"),
+                """
+                [core]
+                    repositoryformatversion = 0
+                    filemode = false
+                    bare = false
+                """)
+            .ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, ".gitignore"), "ignored.txt" + Environment.NewLine).ConfigureAwait(false);
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "tracked.txt"), ["match"]).ConfigureAwait(false);
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "ignored.txt"), ["match"]).ConfigureAwait(false);
+
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "grep_files");
+        using var args = JsonDocument.Parse("""{"pattern":"match","glob":"*.txt"}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "tracked.txt:1: match");
+        Assert.IsFalse(output.Contains("ignored.txt:1: match", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task WebGetTool_FetchesAndSimplifiesHtml()
     {
         using var htmlContent = new StringContent("<html><body><h1>Hello</h1><p>world</p></body></html>");

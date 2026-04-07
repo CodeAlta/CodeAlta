@@ -5,6 +5,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using XenoAtom.Glob;
+using XenoAtom.Glob.Git;
+using XenoAtom.Glob.IO;
 
 namespace CodeAlta.Agent.LocalRuntime.Tools;
 
@@ -13,6 +16,8 @@ namespace CodeAlta.Agent.LocalRuntime.Tools;
 /// </summary>
 public static class LocalAgentBuiltInToolFactory
 {
+    private static readonly FileTreeWalker FileTreeWalker = new();
+
     private static readonly JsonElement ReadFileSchema = ParseSchema(
         """
         {
@@ -207,7 +212,7 @@ public static class LocalAgentBuiltInToolFactory
         ];
     }
 
-    private static async Task<AgentToolResult> ReadFileAsync(
+    private static Task<AgentToolResult> ReadFileAsync(
         LocalAgentBuiltInToolOptions options,
         AgentToolInvocation invocation,
         CancellationToken cancellationToken)
@@ -216,17 +221,17 @@ public static class LocalAgentBuiltInToolFactory
         var resolvedPath = ResolvePath(options.WorkingDirectory, path);
         if (!File.Exists(resolvedPath))
         {
-            return Failure($"File '{resolvedPath}' was not found.");
+            return Task.FromResult(Failure($"File '{resolvedPath}' was not found."));
         }
 
         if (IsImagePath(resolvedPath))
         {
-            return new AgentToolResult(
+            return Task.FromResult(new AgentToolResult(
                 true,
                 [
                     new AgentToolResultItem.Text($"Image: {resolvedPath}"),
                     new AgentToolResultItem.ImageUrl(new Uri(resolvedPath).AbsoluteUri),
-                ]);
+                ]));
         }
 
         var offset = Math.Max(1, GetOptionalInt(invocation.Arguments, "offset") ?? 1);
@@ -234,11 +239,11 @@ public static class LocalAgentBuiltInToolFactory
         var limit = Math.Clamp(requestedLimit, 1, options.MaxReadFileLineLimit);
 
         var lines = new List<string>(limit);
-        using var reader = new StreamReader(resolvedPath);
-        string? line;
-        for (var lineNumber = 1; (line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null; lineNumber++)
+        var lineNumber = 0;
+        foreach (var line in File.ReadLines(resolvedPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            lineNumber++;
             if (lineNumber < offset)
             {
                 continue;
@@ -251,9 +256,9 @@ public static class LocalAgentBuiltInToolFactory
             }
         }
 
-        return new AgentToolResult(
+        return Task.FromResult(new AgentToolResult(
             true,
-            [new AgentToolResultItem.Text(string.Join(Environment.NewLine, lines))]);
+            [new AgentToolResultItem.Text(string.Join(Environment.NewLine, lines))]));
     }
 
     private static Task<AgentToolResult> ListDirectoryAsync(
@@ -295,21 +300,44 @@ public static class LocalAgentBuiltInToolFactory
         }
 
         var glob = GetOptionalString(invocation.Arguments, "glob");
+        GlobPattern? globPattern = null;
+        var useRelativePathGlob = false;
+        if (!string.IsNullOrWhiteSpace(glob))
+        {
+            var parseResult = GlobPattern.TryParse(glob);
+            if (!parseResult.Success)
+            {
+                return Failure($"Invalid glob pattern '{glob}'.");
+            }
+
+            globPattern = parseResult.Pattern;
+            useRelativePathGlob = glob.Contains('/') || glob.Contains('\\');
+        }
+
         var caseSensitive = GetOptionalBool(invocation.Arguments, "caseSensitive") ?? false;
         var maxMatches = Math.Clamp(GetOptionalInt(invocation.Arguments, "maxMatches") ?? options.MaxGrepMatches, 1, options.MaxGrepMatches);
         var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-
-        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories);
         var matches = new List<string>(maxMatches);
-        foreach (var file in files)
+        var walkOptions = new FileTreeWalkOptions
+        {
+            CancellationToken = cancellationToken,
+            RepositoryContext = RepositoryDiscovery.TryDiscover(root, out var repositoryContext) ? repositoryContext : null,
+        };
+
+        foreach (var entry in FileTreeWalker.Enumerate(root, walkOptions))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (glob is not null && !MatchesGlob(Path.GetFileName(file), glob))
+            if (entry.IsDirectory)
             {
                 continue;
             }
 
-            if (IsImagePath(file))
+            if (globPattern is not null && !GlobMatches(globPattern, entry, useRelativePathGlob))
+            {
+                continue;
+            }
+
+            if (IsImagePath(entry.FullPath))
             {
                 continue;
             }
@@ -317,7 +345,7 @@ public static class LocalAgentBuiltInToolFactory
             string[] lines;
             try
             {
-                lines = await File.ReadAllLinesAsync(file, cancellationToken).ConfigureAwait(false);
+                lines = await File.ReadAllLinesAsync(entry.FullPath, cancellationToken).ConfigureAwait(false);
             }
             catch (IOException)
             {
@@ -335,7 +363,7 @@ public static class LocalAgentBuiltInToolFactory
                     continue;
                 }
 
-                matches.Add($"{Path.GetRelativePath(root, file)}:{index + 1}: {lines[index]}");
+                matches.Add($"{entry.RelativePath}:{index + 1}: {lines[index]}");
                 if (matches.Count >= maxMatches)
                 {
                     goto Done;
@@ -655,11 +683,10 @@ Done:
         return Regex.Replace(decoded, "\\s+", " ").Trim();
     }
 
-    private static bool MatchesGlob(string fileName, string glob)
-    {
-        var pattern = "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-        return Regex.IsMatch(fileName, pattern, RegexOptions.IgnoreCase);
-    }
+    private static bool GlobMatches(GlobPattern globPattern, FileTreeEntry entry, bool useRelativePath)
+        => useRelativePath
+            ? globPattern.IsMatch(entry.RelativePath)
+            : globPattern.IsMatch(entry.Name);
 
     private static ShellProcessSpec CreateShellProcessSpec(string command, string workdir, bool login)
     {

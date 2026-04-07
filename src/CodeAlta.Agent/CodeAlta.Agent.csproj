@@ -17,5 +17,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="XenoAtom.Glob" />
   </ItemGroup>
 </Project>
