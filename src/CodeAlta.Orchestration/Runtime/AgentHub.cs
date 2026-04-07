@@ -354,6 +354,13 @@ public sealed class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Lists registered backend identifiers known to the orchestration runtime.
+    /// </summary>
+    /// <returns>The registered backend identifiers.</returns>
+    public IReadOnlyList<AgentBackendId> ListRegisteredBackends()
+        => _backendFactory.ListRegisteredBackends();
+
+    /// <summary>
     /// Sends input through an active agent session.
     /// </summary>
     /// <param name="agentId">Agent id.</param>

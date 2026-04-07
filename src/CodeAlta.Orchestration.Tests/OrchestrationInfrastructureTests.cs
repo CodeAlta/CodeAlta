@@ -799,6 +799,62 @@ public sealed class OrchestrationInfrastructureTests
     }
 
     [TestMethod]
+    public async Task WorkThreadRuntimeService_ListRecoverableThreadsAsync_IncludesOpenAIResponsesSessions()
+    {
+        using var temp = TempDirectory.Create();
+        var catalogOptions = new CatalogOptions { GlobalRoot = temp.Path };
+        var projectCatalog = new ProjectCatalog(catalogOptions);
+        var threadCatalog = new WorkThreadCatalog(catalogOptions);
+        var roleStore = new RoleProfileStore();
+        var instructionProvider = new AgentInstructionTemplateProvider();
+
+        var project = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Slug = "repo-main",
+            DisplayName = "Main Repo",
+            ProjectPath = Path.Combine(temp.Path, "repo-main"),
+            DefaultBranch = "main",
+        };
+        Directory.CreateDirectory(project.ProjectPath);
+        await projectCatalog.SaveAsync(project).ConfigureAwait(false);
+
+        var backendFactory = new AgentBackendFactory();
+        backendFactory.Register(
+            AgentBackendIds.OpenAIResponses.Value,
+            () => new FakeBackend(
+                backendId: AgentBackendIds.OpenAIResponses,
+                sessions:
+                [
+                    new AgentSessionMetadata(
+                        "session-1",
+                        DateTimeOffset.UtcNow.AddMinutes(-5),
+                        DateTimeOffset.UtcNow,
+                        "Review the repo",
+                        Context: new AgentSessionContext(project.ProjectPath, project.ProjectPath, "repo-main", "main"),
+                        WorkspacePath: project.ProjectPath)
+                ]));
+
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        await using var hub = new AgentHub(backendFactory, repository);
+        await using var runtime = new WorkThreadRuntimeService(
+            hub,
+            projectCatalog,
+            threadCatalog,
+            roleStore,
+            instructionProvider,
+            catalogOptions);
+
+        var recoverable = await runtime.ListRecoverableThreadsAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, recoverable.Count);
+        Assert.AreEqual(AgentBackendIds.OpenAIResponses.Value, recoverable[0].BackendId);
+        Assert.AreEqual(WorkThreadKind.ProjectThread, recoverable[0].Kind);
+        Assert.AreEqual(project.Id, recoverable[0].ProjectRef);
+    }
+
+    [TestMethod]
     public async Task WorkThreadRuntimeService_ListRecoverableThreadsAsync_ContinuesWhenBackendIsUnavailable()
     {
         using var temp = TempDirectory.Create();

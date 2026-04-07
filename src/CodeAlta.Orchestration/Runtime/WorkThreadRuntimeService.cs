@@ -70,7 +70,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         var results = new List<WorkThreadDescriptor>(internalThreads.Count);
         results.AddRange(internalThreads);
 
-        foreach (var backendId in new[] { AgentBackendIds.Codex, AgentBackendIds.Copilot })
+        foreach (var backendId in _agentHub.ListRegisteredBackends())
         {
             IReadOnlyList<AgentSessionMetadata> sessions;
             try
