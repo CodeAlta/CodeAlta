@@ -247,6 +247,43 @@ public sealed class LocalAgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_StreamsProgressWhileCommandRuns()
+    {
+        using var temp = TestTempDirectory.Create();
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "shell_command");
+        var command = OperatingSystem.IsWindows()
+            ? "$stdout = [Console]::Out; $stderr = [Console]::Error; $stdout.WriteLine('step 1'); Start-Sleep -Milliseconds 50; $stderr.WriteLine('step 2');"
+            : "printf 'step 1\\n'; sleep 0.05; printf 'step 2\\n' >&2";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}}}""");
+        var progress = new List<AgentToolProgressUpdate>();
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone(),
+                    (update, _) =>
+                    {
+                        progress.Add(update);
+                        return ValueTask.CompletedTask;
+                    }),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        Assert.IsTrue(progress.Count >= 2);
+        Assert.IsTrue(progress.Any(static update => update.Details?.GetProperty("stream").GetString() == "stdout" && update.Delta.Contains("step 1", StringComparison.Ordinal)));
+        Assert.IsTrue(progress.Any(static update => update.Details?.GetProperty("stream").GetString() == "stderr" && update.Delta.Contains("step 2", StringComparison.Ordinal)));
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "step 1");
+        StringAssert.Contains(output, "step 2");
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_RespectsDeniedPermissionDecision()
     {
         using var temp = TestTempDirectory.Create();

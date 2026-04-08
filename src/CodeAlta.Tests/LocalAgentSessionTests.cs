@@ -114,10 +114,15 @@ public sealed class LocalAgentSessionTests
                 [
                     new AgentToolDefinition(
                         new AgentToolSpec("inspect_file", "Inspect a file", schema.RootElement.Clone()),
-                        (invocation, _) =>
+                        async (invocation, cancellationToken) =>
                         {
                             toolInvocations.Add(invocation);
-                            return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text($"inspected {invocation.Arguments.GetProperty("path").GetString()}")]));
+                            if (invocation.Progress is not null)
+                            {
+                                await invocation.Progress(new AgentToolProgressUpdate("opening sample.txt" + Environment.NewLine), cancellationToken).ConfigureAwait(false);
+                            }
+
+                            return new AgentToolResult(true, [new AgentToolResultItem.Text($"inspected {invocation.Arguments.GetProperty("path").GetString()}")]);
                         }),
                 ],
             });
@@ -143,6 +148,12 @@ public sealed class LocalAgentSessionTests
             evt.Kind == AgentContentKind.Assistant &&
             evt.ContentId == "assistant-1" &&
             evt.Content == "Need to inspect a file."));
+        Assert.IsTrue(history.OfType<AgentContentDeltaEvent>().Any(evt =>
+            evt.RunId == runId &&
+            evt.Kind == AgentContentKind.ToolOutput &&
+            evt.ContentId == "call-1:output" &&
+            evt.ParentActivityId == "call-1" &&
+            evt.Delta.Contains("opening sample.txt", StringComparison.Ordinal)));
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static evt => evt.Kind == AgentContentKind.ToolOutput && evt.Content.Contains("inspected sample.txt", StringComparison.Ordinal)));
         Assert.AreEqual(2, history.OfType<AgentActivityEvent>().Count(static evt => evt.ActivityId == "call-1" && (evt.Phase == AgentActivityPhase.Requested || evt.Phase == AgentActivityPhase.Started)));
         Assert.IsTrue(history.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.Idle));

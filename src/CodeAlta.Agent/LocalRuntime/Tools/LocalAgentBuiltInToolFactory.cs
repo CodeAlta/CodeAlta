@@ -510,8 +510,20 @@ public static class LocalAgentBuiltInToolFactory
             return Failure($"shell_command failed to start: {ex.Message}");
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdoutBuilder = new StringBuilder();
+        var stderrBuilder = new StringBuilder();
+        var stdoutTask = PumpProcessStreamAsync(
+            process.StandardOutput,
+            "stdout",
+            stdoutBuilder,
+            invocation.Progress,
+            cancellationToken);
+        var stderrTask = PumpProcessStreamAsync(
+            process.StandardError,
+            "stderr",
+            stderrBuilder,
+            invocation.Progress,
+            cancellationToken);
 
         try
         {
@@ -811,6 +823,52 @@ public static class LocalAgentBuiltInToolFactory
         builder.AppendLine("stderr:");
         builder.Append(string.IsNullOrEmpty(stderr) ? "(empty)" : stderr);
         return builder.ToString().TrimEnd();
+    }
+
+    private static async Task<string> PumpProcessStreamAsync(
+        StreamReader reader,
+        string streamName,
+        StringBuilder builder,
+        AgentToolProgressHandler? progress,
+        CancellationToken cancellationToken)
+    {
+        string? line;
+        var firstLine = true;
+        while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
+        {
+            if (!firstLine)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(line);
+            firstLine = false;
+
+            if (progress is not null)
+            {
+                await progress(
+                        new AgentToolProgressUpdate(
+                            line + Environment.NewLine,
+                            CreateShellStreamDetails(streamName)),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static JsonElement CreateShellStreamDetails(string streamName)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("stream", streamName);
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
     private static void TryKill(Process process)

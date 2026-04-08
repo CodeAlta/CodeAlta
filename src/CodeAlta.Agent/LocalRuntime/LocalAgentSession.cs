@@ -212,13 +212,42 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         CreateToolCallDetails(toolCall));
                     await AppendEventsAsync([started], linkedCts.Token).ConfigureAwait(false);
 
+                    using var progressGate = new SemaphoreSlim(1, 1);
+                    var toolOutputContentId = $"{toolCall.CallId}:output";
                     var result = await toolDefinition.Handler(
                             new AgentToolInvocation(
                                 BackendId,
                                 SessionId,
                                 toolCall.CallId,
                                 toolDefinition.Spec.Name,
-                                toolCall.Arguments),
+                                toolCall.Arguments,
+                                async (update, cancellationToken) =>
+                                {
+                                    if (string.IsNullOrEmpty(update.Delta))
+                                    {
+                                        return;
+                                    }
+
+                                    await progressGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                                    try
+                                    {
+                                        var deltaEvent = new AgentContentDeltaEvent(
+                                            BackendId,
+                                            SessionId,
+                                            DateTimeOffset.UtcNow,
+                                            runId,
+                                            AgentContentKind.ToolOutput,
+                                            toolOutputContentId,
+                                            toolCall.CallId,
+                                            update.Delta,
+                                            update.Details);
+                                        await AppendEventsAsync([deltaEvent], cancellationToken).ConfigureAwait(false);
+                                    }
+                                    finally
+                                    {
+                                        progressGate.Release();
+                                    }
+                                }),
                             linkedCts.Token)
                         .ConfigureAwait(false);
                     var toolMessage = new LocalAgentConversationMessage(
@@ -251,7 +280,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         DateTimeOffset.UtcNow,
                         runId,
                         AgentContentKind.ToolOutput,
-                        $"{toolCall.CallId}:output",
+                        toolOutputContentId,
                         toolCall.CallId,
                         RenderToolResult(result),
                         CreateToolResultDetails(toolCall, result));

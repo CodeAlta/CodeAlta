@@ -348,6 +348,7 @@ Optional later additions:
 - must be cross-platform
 - should use the session's configured shell
 - should work on Windows, Linux, and macOS
+- should stream stdout/stderr progress into tool-output deltas while the command is still running
 
 `webget` for direct retrieval, not only search
 - should fetch and return webpage content in a model-friendly text form

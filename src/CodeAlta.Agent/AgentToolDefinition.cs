@@ -26,12 +26,32 @@ public sealed record AgentToolSpec(string Name, string Description, JsonElement 
 /// <param name="ToolCallId">The tool call identifier.</param>
 /// <param name="ToolName">The tool name.</param>
 /// <param name="Arguments">The tool arguments.</param>
+/// <param name="Progress">Optional progress callback for streaming tool output.</param>
 public sealed record AgentToolInvocation(
     AgentBackendId BackendId,
     string SessionId,
     string ToolCallId,
     string ToolName,
-    JsonElement Arguments);
+    JsonElement Arguments,
+    AgentToolProgressHandler? Progress = null);
+
+/// <summary>
+/// Represents a streaming tool-progress update.
+/// </summary>
+/// <param name="Delta">The incremental text delta.</param>
+/// <param name="Details">Optional structured metadata for the progress update.</param>
+public sealed record AgentToolProgressUpdate(
+    string Delta,
+    JsonElement? Details = null);
+
+/// <summary>
+/// Progress callback invoked by tools that can stream incremental output.
+/// </summary>
+/// <param name="update">The progress update.</param>
+/// <param name="cancellationToken">A token to cancel progress delivery.</param>
+public delegate ValueTask AgentToolProgressHandler(
+    AgentToolProgressUpdate update,
+    CancellationToken cancellationToken);
 
 /// <summary>
 /// Tool handler delegate.
