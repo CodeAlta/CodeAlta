@@ -22,65 +22,80 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onUpdate);
 
-        var client = OpenAIProviderSdkFactory.CreateResponsesClient(provider, request.ModelId);
-        var (inputItems, options) = CreateRequestPayload(request);
-        OpenAIResponse? completedResponse = null;
-
-        await foreach (var update in client.CreateResponseStreamingAsync(inputItems, options, cancellationToken).ConfigureAwait(false))
+        try
         {
-            switch (update)
+            var client = OpenAIProviderSdkFactory.CreateResponsesClient(provider, request.ModelId);
+            var (inputItems, options) = CreateRequestPayload(request);
+            OpenAIResponse? completedResponse = null;
+
+            await foreach (var update in client.CreateResponseStreamingAsync(inputItems, options, cancellationToken).ConfigureAwait(false))
             {
-                case StreamingResponseOutputTextDeltaUpdate outputTextDelta when !string.IsNullOrEmpty(outputTextDelta.Delta):
-                    await onUpdate(
-                        new LocalAgentTurnDelta
-                        {
-                            Kind = AgentContentKind.Assistant,
-                            ContentId = outputTextDelta.ItemId,
-                            Text = outputTextDelta.Delta,
-                        },
-                        cancellationToken).ConfigureAwait(false);
-                    break;
-                case StreamingResponseReasoningSummaryTextDeltaUpdate reasoningSummaryDelta when !string.IsNullOrEmpty(reasoningSummaryDelta.Delta):
-                    await onUpdate(
-                        new LocalAgentTurnDelta
-                        {
-                            Kind = AgentContentKind.Reasoning,
-                            ContentId = reasoningSummaryDelta.ItemId,
-                            Text = reasoningSummaryDelta.Delta,
-                        },
-                        cancellationToken).ConfigureAwait(false);
-                    break;
-                case StreamingResponseReasoningTextDeltaUpdate reasoningTextDelta when !string.IsNullOrEmpty(reasoningTextDelta.Delta):
-                    await onUpdate(
-                        new LocalAgentTurnDelta
-                        {
-                            Kind = AgentContentKind.Reasoning,
-                            ContentId = reasoningTextDelta.ItemId,
-                            Text = reasoningTextDelta.Delta,
-                        },
-                        cancellationToken).ConfigureAwait(false);
-                    break;
-                case StreamingResponseCompletedUpdate completed:
-                    completedResponse = completed.Response;
-                    break;
+                switch (update)
+                {
+                    case StreamingResponseOutputTextDeltaUpdate outputTextDelta when !string.IsNullOrEmpty(outputTextDelta.Delta):
+                        await onUpdate(
+                            new LocalAgentTurnDelta
+                            {
+                                Kind = AgentContentKind.Assistant,
+                                ContentId = outputTextDelta.ItemId,
+                                Text = outputTextDelta.Delta,
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                        break;
+                    case StreamingResponseReasoningSummaryTextDeltaUpdate reasoningSummaryDelta when !string.IsNullOrEmpty(reasoningSummaryDelta.Delta):
+                        await onUpdate(
+                            new LocalAgentTurnDelta
+                            {
+                                Kind = AgentContentKind.Reasoning,
+                                ContentId = reasoningSummaryDelta.ItemId,
+                                Text = reasoningSummaryDelta.Delta,
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                        break;
+                    case StreamingResponseReasoningTextDeltaUpdate reasoningTextDelta when !string.IsNullOrEmpty(reasoningTextDelta.Delta):
+                        await onUpdate(
+                            new LocalAgentTurnDelta
+                            {
+                                Kind = AgentContentKind.Reasoning,
+                                ContentId = reasoningTextDelta.ItemId,
+                                Text = reasoningTextDelta.Delta,
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                        break;
+                    case StreamingResponseCompletedUpdate completed:
+                        completedResponse = completed.Response;
+                        break;
+                }
             }
-        }
 
-        if (completedResponse is null)
-        {
-            throw new InvalidOperationException("The OpenAI Responses stream completed without a final response payload.");
-        }
+            if (completedResponse is null)
+            {
+                throw new InvalidOperationException("The OpenAI Responses stream completed without a final response payload.");
+            }
 
-        var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(completedResponse);
-        return new LocalAgentTurnResponse
+            var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(completedResponse);
+            return new LocalAgentTurnResponse
+            {
+                AssistantMessage = assistantMessage,
+                AssistantPartContentIds = assistantPartContentIds,
+                Usage = CreateUsage(request, completedResponse),
+                ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
+                ProviderState = CreateProviderState(completedResponse),
+                Summary = ExtractSummary(assistantMessage),
+            };
+        }
+        catch (OperationCanceledException)
         {
-            AssistantMessage = assistantMessage,
-            AssistantPartContentIds = assistantPartContentIds,
-            Usage = CreateUsage(request, completedResponse),
-            ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
-            ProviderState = CreateProviderState(completedResponse),
-            Summary = ExtractSummary(assistantMessage),
-        };
+            throw;
+        }
+        catch (LocalAgentTurnExecutionException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw CreateTurnExecutionException(ex);
+        }
     }
 
     private static (IReadOnlyList<ResponseItem> InputItems, ResponseCreationOptions Options) CreateRequestPayload(LocalAgentTurnRequest request)
@@ -430,4 +445,17 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                 _ => string.Empty,
             }).Where(static value => !string.IsNullOrWhiteSpace(value)));
     }
+
+    private static LocalAgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+        => new(
+            new LocalAgentTurnFailure(
+                ex.Message,
+                IsContextOverflowMessage(ex.Message)),
+            ex);
+
+    private static bool IsContextOverflowMessage(string? message)
+        => !string.IsNullOrWhiteSpace(message) &&
+           (message.Contains("context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("maximum context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase));
 }

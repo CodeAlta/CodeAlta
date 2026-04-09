@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Catalog;
@@ -65,6 +66,7 @@ internal static class RawApiBackendRegistrar
                     ProjectId = definition.ProjectId,
                     IsDefault = definition.DefaultResponses,
                     Profile = CreateOpenAIResponsesProfile(definition.Profile),
+                    Compaction = CreateCompactionSettings(definition.Compaction),
                     ModelsDevProviderId = ResolveModelsDevProviderId(definition.ModelsDevProviderId, "openai"),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
@@ -83,6 +85,7 @@ internal static class RawApiBackendRegistrar
                     ProjectId = definition.ProjectId,
                     IsDefault = definition.DefaultChat,
                     Profile = CreateOpenAIChatProfile(definition.Profile),
+                    Compaction = CreateCompactionSettings(definition.Compaction),
                     ModelsDevProviderId = ResolveModelsDevProviderId(definition.ModelsDevProviderId, "openai"),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
@@ -131,6 +134,7 @@ internal static class RawApiBackendRegistrar
                 BaseUri = ParseUri(definition.BaseUri),
                 IsDefault = definition.IsDefault,
                 Profile = CreateAnthropicProfile(definition.Profile),
+                Compaction = CreateCompactionSettings(definition.Compaction),
                 ModelsDevProviderId = ResolveModelsDevProviderId(definition.ModelsDevProviderId, "anthropic"),
                 ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                 ModelCatalog = modelCatalog,
@@ -183,6 +187,7 @@ internal static class RawApiBackendRegistrar
                 BaseUri = ParseUri(definition.BaseUri),
                 IsDefault = definition.IsDefault,
                 Profile = CreateGoogleGenAIProfile(definition.Profile),
+                Compaction = CreateCompactionSettings(definition.Compaction),
                 ModelsDevProviderId = ResolveModelsDevProviderId(definition.ModelsDevProviderId, "google"),
                 ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                 ModelCatalog = modelCatalog,
@@ -346,5 +351,18 @@ internal static class RawApiBackendRegistrar
                 SupportsStructuredOutput = entry.Value.SupportsStructuredOutput,
             },
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static LocalAgentCompactionSettings CreateCompactionSettings(CodeAltaRawApiCompactionDocument? compaction)
+    {
+        var normalized = compaction ?? new CodeAltaRawApiCompactionDocument();
+        return new LocalAgentCompactionSettings(
+            Enabled: normalized.Enabled ?? LocalAgentCompactionSettings.Default.Enabled,
+            TriggerThreshold: normalized.TriggerThreshold ?? LocalAgentCompactionSettings.Default.TriggerThreshold,
+            TargetThreshold: normalized.TargetThreshold ?? LocalAgentCompactionSettings.Default.TargetThreshold,
+            ReservedOutputTokens: normalized.ReservedOutputTokens ?? LocalAgentCompactionSettings.Default.ReservedOutputTokens,
+            ReservedOverheadTokens: normalized.ReservedOverheadTokens ?? LocalAgentCompactionSettings.Default.ReservedOverheadTokens,
+            KeepLastUserMessage: normalized.KeepLastUserMessage ?? LocalAgentCompactionSettings.Default.KeepLastUserMessage,
+            AllowSplitTurn: normalized.AllowSplitTurn ?? LocalAgentCompactionSettings.Default.AllowSplitTurn);
     }
 }

@@ -43,37 +43,52 @@ internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onUpdate);
 
-        var chatClient = await _chatClientFactory(request.Provider, cancellationToken).ConfigureAwait(false);
         try
         {
-            var messages = request.Conversation.Select(MapMessage).ToArray();
-            var updates = new List<ChatResponseUpdate>();
-            await foreach (var update in chatClient
-                               .GetStreamingResponseAsync(messages, CreateOptions(request), cancellationToken)
-                               .ConfigureAwait(false))
+            var chatClient = await _chatClientFactory(request.Provider, cancellationToken).ConfigureAwait(false);
+            try
             {
-                updates.Add(update);
-                foreach (var delta in ExtractStreamingDeltas(update))
+                var messages = request.Conversation.Select(MapMessage).ToArray();
+                var updates = new List<ChatResponseUpdate>();
+                await foreach (var update in chatClient
+                                   .GetStreamingResponseAsync(messages, CreateOptions(request), cancellationToken)
+                                   .ConfigureAwait(false))
                 {
-                    await onUpdate(delta, cancellationToken).ConfigureAwait(false);
+                    updates.Add(update);
+                    foreach (var delta in ExtractStreamingDeltas(update))
+                    {
+                        await onUpdate(delta, cancellationToken).ConfigureAwait(false);
+                    }
                 }
-            }
 
-            var response = updates.ToChatResponse();
-            var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(response);
-            return new LocalAgentTurnResponse
+                var response = updates.ToChatResponse();
+                var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(response);
+                return new LocalAgentTurnResponse
+                {
+                    AssistantMessage = assistantMessage,
+                    AssistantPartContentIds = assistantPartContentIds,
+                    Usage = CreateUsage(request, response),
+                    ProviderSessionId = response.ConversationId,
+                    ProviderState = CreateProviderState(response),
+                    Summary = ExtractSummary(assistantMessage),
+                };
+            }
+            finally
             {
-                AssistantMessage = assistantMessage,
-                AssistantPartContentIds = assistantPartContentIds,
-                Usage = CreateUsage(request, response),
-                ProviderSessionId = response.ConversationId,
-                ProviderState = CreateProviderState(response),
-                Summary = ExtractSummary(assistantMessage),
-            };
+                chatClient.Dispose();
+            }
         }
-        finally
+        catch (OperationCanceledException)
         {
-            chatClient.Dispose();
+            throw;
+        }
+        catch (LocalAgentTurnExecutionException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw CreateTurnExecutionException(ex);
         }
     }
 
@@ -495,4 +510,18 @@ internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
                 return;
         }
     }
+
+    private static LocalAgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+        => new(
+            new LocalAgentTurnFailure(
+                ex.Message,
+                IsContextOverflowMessage(ex.Message)),
+            ex);
+
+    private static bool IsContextOverflowMessage(string? message)
+        => !string.IsNullOrWhiteSpace(message) &&
+           (message.Contains("context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("maximum context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("prompt is too long", StringComparison.OrdinalIgnoreCase));
 }

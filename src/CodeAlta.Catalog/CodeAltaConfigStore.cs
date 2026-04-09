@@ -8,6 +8,17 @@ namespace CodeAlta.Catalog;
 /// </summary>
 public sealed class CodeAltaConfigStore
 {
+    private static readonly CodeAltaRawApiCompactionDocument DefaultCompaction = new()
+    {
+        Enabled = true,
+        TriggerThreshold = 0.80,
+        TargetThreshold = 0.50,
+        ReservedOutputTokens = 4096,
+        ReservedOverheadTokens = 2048,
+        KeepLastUserMessage = true,
+        AllowSplitTurn = true,
+    };
+
     private readonly CatalogOptions _options;
 
     /// <summary>
@@ -429,10 +440,13 @@ public sealed class CodeAltaConfigStore
                 StringComparer.OrdinalIgnoreCase);
 
         document.RawApi ??= new CodeAltaRawApiSettingsDocument();
+        document.RawApi.Compaction = NormalizeAndCompleteCompactionSettings(
+            document.RawApi.Compaction,
+            DefaultCompaction);
         document.RawApi.OpenAI ??= new CodeAltaOpenAISettingsDocument();
         document.RawApi.OpenAI.Providers = document.RawApi.OpenAI.Providers
             .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
-            .Select(static entry =>
+            .Select(entry =>
             {
                 var definition = entry.Value ?? new CodeAltaOpenAIProviderDocument();
                 definition.ProviderKey = NormalizeRawProviderKey(entry.Key) ?? string.Empty;
@@ -445,6 +459,7 @@ public sealed class CodeAltaConfigStore
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
+                definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, document.RawApi.Compaction);
                 return definition;
             })
             .Where(static definition => !string.IsNullOrWhiteSpace(definition.ProviderKey))
@@ -456,7 +471,7 @@ public sealed class CodeAltaConfigStore
         document.RawApi.Anthropic ??= new CodeAltaAnthropicSettingsDocument();
         document.RawApi.Anthropic.Providers = document.RawApi.Anthropic.Providers
             .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
-            .Select(static entry =>
+            .Select(entry =>
             {
                 var definition = entry.Value ?? new CodeAltaAnthropicProviderDocument();
                 definition.ProviderKey = NormalizeRawProviderKey(entry.Key) ?? string.Empty;
@@ -467,6 +482,7 @@ public sealed class CodeAltaConfigStore
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
+                definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, document.RawApi.Compaction);
                 return definition;
             })
             .Where(static definition => !string.IsNullOrWhiteSpace(definition.ProviderKey))
@@ -478,7 +494,7 @@ public sealed class CodeAltaConfigStore
         document.RawApi.GoogleGenAI ??= new CodeAltaGoogleGenAISettingsDocument();
         document.RawApi.GoogleGenAI.Providers = document.RawApi.GoogleGenAI.Providers
             .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
-            .Select(static entry =>
+            .Select(entry =>
             {
                 var definition = entry.Value ?? new CodeAltaGoogleGenAIProviderDocument();
                 definition.ProviderKey = NormalizeRawProviderKey(entry.Key) ?? string.Empty;
@@ -491,6 +507,7 @@ public sealed class CodeAltaConfigStore
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
+                definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, document.RawApi.Compaction);
                 return definition;
             })
             .Where(static definition => !string.IsNullOrWhiteSpace(definition.ProviderKey))
@@ -629,6 +646,7 @@ public sealed class CodeAltaConfigStore
             DefaultResponses = definition.DefaultResponses,
             DefaultChat = definition.DefaultChat,
             Profile = CloneProfile(definition.Profile),
+            Compaction = CloneCompaction(definition.Compaction),
             ModelOverrides = CloneModelOverrides(definition.ModelOverrides),
         };
     }
@@ -648,6 +666,7 @@ public sealed class CodeAltaConfigStore
             ModelsDevProviderId = definition.ModelsDevProviderId,
             IsDefault = definition.IsDefault,
             Profile = CloneProfile(definition.Profile),
+            Compaction = CloneCompaction(definition.Compaction),
             ModelOverrides = CloneModelOverrides(definition.ModelOverrides),
         };
     }
@@ -670,6 +689,7 @@ public sealed class CodeAltaConfigStore
             ModelsDevProviderId = definition.ModelsDevProviderId,
             IsDefault = definition.IsDefault,
             Profile = CloneProfile(definition.Profile),
+            Compaction = CloneCompaction(definition.Compaction),
             ModelOverrides = CloneModelOverrides(definition.ModelOverrides),
         };
     }
@@ -691,6 +711,22 @@ public sealed class CodeAltaConfigStore
             MaxTokensFieldName = profile.MaxTokensFieldName,
             ReasoningFieldNames = profile.ReasoningFieldNames is null ? null : [.. profile.ReasoningFieldNames],
         };
+    }
+
+    private static CodeAltaRawApiCompactionDocument CloneCompaction(CodeAltaRawApiCompactionDocument? compaction)
+    {
+        return compaction is null
+            ? new CodeAltaRawApiCompactionDocument()
+            : new CodeAltaRawApiCompactionDocument
+            {
+                Enabled = compaction.Enabled,
+                TriggerThreshold = compaction.TriggerThreshold,
+                TargetThreshold = compaction.TargetThreshold,
+                ReservedOutputTokens = compaction.ReservedOutputTokens,
+                ReservedOverheadTokens = compaction.ReservedOverheadTokens,
+                KeepLastUserMessage = compaction.KeepLastUserMessage,
+                AllowSplitTurn = compaction.AllowSplitTurn,
+            };
     }
 
     private static Dictionary<string, CodeAltaRawApiModelOverrideDocument>? CloneModelOverrides(
@@ -717,5 +753,65 @@ public sealed class CodeAltaConfigStore
                 SupportsStructuredOutput = entry.Value.SupportsStructuredOutput,
             },
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static CodeAltaRawApiCompactionDocument NormalizeAndCompleteCompactionSettings(
+        CodeAltaRawApiCompactionDocument? compaction,
+        CodeAltaRawApiCompactionDocument? inherited)
+    {
+        var merged = CloneCompaction(inherited);
+        var normalized = compaction is null ? null : CloneCompaction(compaction);
+
+        if (normalized is not null)
+        {
+            merged.Enabled = normalized.Enabled ?? merged.Enabled;
+            merged.TriggerThreshold = normalized.TriggerThreshold ?? merged.TriggerThreshold;
+            merged.TargetThreshold = normalized.TargetThreshold ?? merged.TargetThreshold;
+            merged.ReservedOutputTokens = normalized.ReservedOutputTokens ?? merged.ReservedOutputTokens;
+            merged.ReservedOverheadTokens = normalized.ReservedOverheadTokens ?? merged.ReservedOverheadTokens;
+            merged.KeepLastUserMessage = normalized.KeepLastUserMessage ?? merged.KeepLastUserMessage;
+            merged.AllowSplitTurn = normalized.AllowSplitTurn ?? merged.AllowSplitTurn;
+        }
+
+        merged.Enabled ??= true;
+        merged.TriggerThreshold ??= 0.80;
+        merged.TargetThreshold ??= 0.50;
+        merged.ReservedOutputTokens ??= 4096;
+        merged.ReservedOverheadTokens ??= 2048;
+        merged.KeepLastUserMessage ??= true;
+        merged.AllowSplitTurn ??= true;
+
+        ValidateCompaction(merged);
+        return merged;
+    }
+
+    private static void ValidateCompaction(CodeAltaRawApiCompactionDocument compaction)
+    {
+        ArgumentNullException.ThrowIfNull(compaction);
+
+        if (compaction.TriggerThreshold is not > 0 or > 1)
+        {
+            throw new InvalidOperationException("raw_api compaction trigger_threshold must be > 0 and <= 1.");
+        }
+
+        if (compaction.TargetThreshold is not > 0)
+        {
+            throw new InvalidOperationException("raw_api compaction target_threshold must be > 0.");
+        }
+
+        if (compaction.TargetThreshold >= compaction.TriggerThreshold)
+        {
+            throw new InvalidOperationException("raw_api compaction target_threshold must be less than trigger_threshold.");
+        }
+
+        if (compaction.ReservedOutputTokens < 0)
+        {
+            throw new InvalidOperationException("raw_api compaction reserved_output_tokens must be >= 0.");
+        }
+
+        if (compaction.ReservedOverheadTokens < 0)
+        {
+            throw new InvalidOperationException("raw_api compaction reserved_overhead_tokens must be >= 0.");
+        }
     }
 }

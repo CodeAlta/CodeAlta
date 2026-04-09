@@ -25,125 +25,140 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onUpdate);
 
-        var client = OpenAIProviderSdkFactory.CreateChatClient(provider, request.ModelId);
-        var messages = CreateMessages(request);
-        var options = CreateOptions(request);
-        var streamedToolCalls = new Dictionary<int, StreamingToolCallState>();
-        var streamedAssistantContent = new StringBuilder();
-        var streamedReasoning = new StringBuilder();
-        var assistantContentId = $"assistant:{Guid.CreateVersion7()}";
-        var reasoningContentId = $"reasoning:{Guid.CreateVersion7()}";
-        ChatTokenUsage? usage = null;
-        string? completionId = null;
-        string? modelId = null;
-
-        await foreach (var update in client.CompleteChatStreamingAsync(messages, options, cancellationToken).ConfigureAwait(false))
+        try
         {
-            completionId ??= update.CompletionId;
-            modelId ??= update.Model;
-            usage = update.Usage ?? usage;
+            var client = OpenAIProviderSdkFactory.CreateChatClient(provider, request.ModelId);
+            var messages = CreateMessages(request);
+            var options = CreateOptions(request);
+            var streamedToolCalls = new Dictionary<int, StreamingToolCallState>();
+            var streamedAssistantContent = new StringBuilder();
+            var streamedReasoning = new StringBuilder();
+            var assistantContentId = $"assistant:{Guid.CreateVersion7()}";
+            var reasoningContentId = $"reasoning:{Guid.CreateVersion7()}";
+            ChatTokenUsage? usage = null;
+            string? completionId = null;
+            string? modelId = null;
 
-            foreach (var contentPart in update.ContentUpdate)
+            await foreach (var update in client.CompleteChatStreamingAsync(messages, options, cancellationToken).ConfigureAwait(false))
             {
-                if (contentPart.Kind == ChatMessageContentPartKind.Text && !string.IsNullOrEmpty(contentPart.Text))
+                completionId ??= update.CompletionId;
+                modelId ??= update.Model;
+                usage = update.Usage ?? usage;
+
+                foreach (var contentPart in update.ContentUpdate)
                 {
-                    streamedAssistantContent.Append(contentPart.Text);
+                    if (contentPart.Kind == ChatMessageContentPartKind.Text && !string.IsNullOrEmpty(contentPart.Text))
+                    {
+                        streamedAssistantContent.Append(contentPart.Text);
+                        await onUpdate(
+                            new LocalAgentTurnDelta
+                            {
+                                Kind = AgentContentKind.Assistant,
+                                ContentId = assistantContentId,
+                                Text = contentPart.Text,
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(update.RefusalUpdate))
+                {
+                    streamedAssistantContent.Append(update.RefusalUpdate);
                     await onUpdate(
                         new LocalAgentTurnDelta
                         {
                             Kind = AgentContentKind.Assistant,
                             ContentId = assistantContentId,
-                            Text = contentPart.Text,
+                            Text = update.RefusalUpdate,
                         },
                         cancellationToken).ConfigureAwait(false);
                 }
-            }
 
-            if (!string.IsNullOrEmpty(update.RefusalUpdate))
-            {
-                streamedAssistantContent.Append(update.RefusalUpdate);
-                await onUpdate(
-                    new LocalAgentTurnDelta
+                if (TryGetReasoningDelta(update, out var reasoningDelta))
+                {
+                    streamedReasoning.Append(reasoningDelta);
+                    await onUpdate(
+                        new LocalAgentTurnDelta
+                        {
+                            Kind = AgentContentKind.Reasoning,
+                            ContentId = reasoningContentId,
+                            Text = reasoningDelta,
+                        },
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                foreach (var toolUpdate in update.ToolCallUpdates)
+                {
+                    if (!streamedToolCalls.TryGetValue(toolUpdate.Index, out var toolState))
                     {
-                        Kind = AgentContentKind.Assistant,
-                        ContentId = assistantContentId,
-                        Text = update.RefusalUpdate,
-                    },
-                    cancellationToken).ConfigureAwait(false);
-            }
+                        toolState = new StreamingToolCallState();
+                        streamedToolCalls.Add(toolUpdate.Index, toolState);
+                    }
 
-            if (TryGetReasoningDelta(update, out var reasoningDelta))
-            {
-                streamedReasoning.Append(reasoningDelta);
-                await onUpdate(
-                    new LocalAgentTurnDelta
+                    if (!string.IsNullOrWhiteSpace(toolUpdate.ToolCallId))
                     {
-                        Kind = AgentContentKind.Reasoning,
-                        ContentId = reasoningContentId,
-                        Text = reasoningDelta,
-                    },
-                    cancellationToken).ConfigureAwait(false);
+                        toolState.CallId = toolUpdate.ToolCallId;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(toolUpdate.FunctionName))
+                    {
+                        toolState.Name = toolUpdate.FunctionName;
+                    }
+
+                    var argumentDelta = toolUpdate.FunctionArgumentsUpdate?.ToString();
+                    if (!string.IsNullOrEmpty(argumentDelta))
+                    {
+                        toolState.Arguments.Append(argumentDelta);
+                    }
+                }
             }
 
-            foreach (var toolUpdate in update.ToolCallUpdates)
+            var parts = new List<LocalAgentMessagePart>();
+            var assistantPartContentIds = new List<string?>();
+            if (streamedAssistantContent.Length > 0)
             {
-                if (!streamedToolCalls.TryGetValue(toolUpdate.Index, out var toolState))
-                {
-                    toolState = new StreamingToolCallState();
-                    streamedToolCalls.Add(toolUpdate.Index, toolState);
-                }
-
-                if (!string.IsNullOrWhiteSpace(toolUpdate.ToolCallId))
-                {
-                    toolState.CallId = toolUpdate.ToolCallId;
-                }
-
-                if (!string.IsNullOrWhiteSpace(toolUpdate.FunctionName))
-                {
-                    toolState.Name = toolUpdate.FunctionName;
-                }
-
-                var argumentDelta = toolUpdate.FunctionArgumentsUpdate?.ToString();
-                if (!string.IsNullOrEmpty(argumentDelta))
-                {
-                    toolState.Arguments.Append(argumentDelta);
-                }
+                parts.Add(new LocalAgentMessagePart.Text(streamedAssistantContent.ToString()));
+                assistantPartContentIds.Add(assistantContentId);
             }
-        }
 
-        var parts = new List<LocalAgentMessagePart>();
-        var assistantPartContentIds = new List<string?>();
-        if (streamedAssistantContent.Length > 0)
-        {
-            parts.Add(new LocalAgentMessagePart.Text(streamedAssistantContent.ToString()));
-            assistantPartContentIds.Add(assistantContentId);
-        }
+            if (streamedReasoning.Length > 0)
+            {
+                parts.Add(new LocalAgentMessagePart.Reasoning(streamedReasoning.ToString(), ProtectedData: null));
+                assistantPartContentIds.Add(reasoningContentId);
+            }
 
-        if (streamedReasoning.Length > 0)
-        {
-            parts.Add(new LocalAgentMessagePart.Reasoning(streamedReasoning.ToString(), ProtectedData: null));
-            assistantPartContentIds.Add(reasoningContentId);
-        }
+            foreach (var toolState in streamedToolCalls.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
+            {
+                parts.Add(new LocalAgentMessagePart.ToolCall(
+                    toolState.CallId ?? $"tool:{Guid.CreateVersion7()}",
+                    toolState.Name ?? string.Empty,
+                    DeserializeToolArguments(toolState.Arguments.ToString())));
+                assistantPartContentIds.Add(null);
+            }
 
-        foreach (var toolState in streamedToolCalls.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
-        {
-            parts.Add(new LocalAgentMessagePart.ToolCall(
-                toolState.CallId ?? $"tool:{Guid.CreateVersion7()}",
-                toolState.Name ?? string.Empty,
-                DeserializeToolArguments(toolState.Arguments.ToString())));
-            assistantPartContentIds.Add(null);
+            var assistantMessage = new LocalAgentConversationMessage(LocalAgentConversationRole.Assistant, parts);
+            return new LocalAgentTurnResponse
+            {
+                AssistantMessage = assistantMessage,
+                AssistantPartContentIds = assistantPartContentIds,
+                Usage = CreateUsage(request, modelId, usage),
+                ProviderSessionId = string.IsNullOrWhiteSpace(completionId) ? null : completionId,
+                ProviderState = CreateProviderState(completionId),
+                Summary = ExtractSummary(assistantMessage),
+            };
         }
-
-        var assistantMessage = new LocalAgentConversationMessage(LocalAgentConversationRole.Assistant, parts);
-        return new LocalAgentTurnResponse
+        catch (OperationCanceledException)
         {
-            AssistantMessage = assistantMessage,
-            AssistantPartContentIds = assistantPartContentIds,
-            Usage = CreateUsage(request, modelId, usage),
-            ProviderSessionId = string.IsNullOrWhiteSpace(completionId) ? null : completionId,
-            ProviderState = CreateProviderState(completionId),
-            Summary = ExtractSummary(assistantMessage),
-        };
+            throw;
+        }
+        catch (LocalAgentTurnExecutionException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw CreateTurnExecutionException(ex);
+        }
     }
 
     private static IReadOnlyList<ChatMessage> CreateMessages(LocalAgentTurnRequest request)
@@ -437,4 +452,17 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
         public string? Name { get; set; }
     }
+
+    private static LocalAgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+        => new(
+            new LocalAgentTurnFailure(
+                ex.Message,
+                IsContextOverflowMessage(ex.Message)),
+            ex);
+
+    private static bool IsContextOverflowMessage(string? message)
+        => !string.IsNullOrWhiteSpace(message) &&
+           (message.Contains("context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("maximum context length", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase));
 }

@@ -30,6 +30,21 @@ public interface ILocalAgentTurnExecutor
         CancellationToken cancellationToken = default);
 }
 
+internal sealed record LocalAgentTurnFailure(
+    string Message,
+    bool IsContextOverflow);
+
+internal sealed class LocalAgentTurnExecutionException : Exception
+{
+    public LocalAgentTurnExecutionException(LocalAgentTurnFailure failure, Exception? innerException = null)
+        : base(failure?.Message, innerException)
+    {
+        Failure = failure ?? throw new ArgumentNullException(nameof(failure));
+    }
+
+    public LocalAgentTurnFailure Failure { get; }
+}
+
 /// <summary>
 /// Represents a single provider turn request.
 /// </summary>

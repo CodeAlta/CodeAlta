@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.LocalRuntime.Tools;
 
@@ -16,6 +17,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     private const string AssistantMessageEventType = "local.assistantMessage";
     private const string ToolMessageEventType = "local.toolMessage";
     private const string CompactionSnapshotEventType = "local.compactionSnapshot";
+    private const string CompactionCheckpointEventType = "local.compactionCheckpoint";
 
     private readonly string _protocolFamily;
     private readonly string _providerKey;
@@ -27,7 +29,6 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
     private readonly List<AgentEvent> _history;
     private readonly List<LocalAgentConversationMessage> _conversation;
-    private readonly string _compactionSummaryContentId = $"compaction:{Guid.CreateVersion7()}";
     private AgentModelInfo? _resolvedModelInfo;
     private bool _resolvedModelInfoLoaded;
     private LocalAgentSessionSummary _summary;
@@ -73,7 +74,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         _summary = summary;
         _state = state;
         _history = [.. history];
-        _conversation = ReplayConversation(history);
+        _conversation = ReplayConversation(history, state);
         _eventChannel = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
         {
             SingleReader = false,
@@ -154,24 +155,37 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
 
             while (true)
             {
-                var response = await _turnExecutor.ExecuteTurnAsync(
-                        new LocalAgentTurnRequest
-                        {
-                            Provider = Provider,
-                            BackendId = BackendId,
-                            SessionId = SessionId,
-                            RunId = runId,
-                            ModelId = _summary.ModelId ?? _options.Model,
-                            ModelInfo = modelInfo,
-                            WorkingDirectory = _summary.WorkingDirectory,
-                            SystemMessage = instructionBundle.SystemMessage,
-                            DeveloperInstructions = instructionBundle.DeveloperInstructions,
-                            ReasoningEffort = _options.ReasoningEffort,
-                            Conversation = _conversation.ToArray(),
-                            Tools = allTools,
-                            State = _state,
-                        },
-                        (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
+                await MaybeCompactForThresholdAsync(
+                        runId,
+                        instructionBundle.SystemMessage,
+                        instructionBundle.DeveloperInstructions,
+                        modelInfo,
+                        LocalAgentCompactionTrigger.Threshold,
+                        linkedCts.Token)
+                    .ConfigureAwait(false);
+
+                var turnRequest = new LocalAgentTurnRequest
+                {
+                    Provider = Provider,
+                    BackendId = BackendId,
+                    SessionId = SessionId,
+                    RunId = runId,
+                    ModelId = _summary.ModelId ?? _options.Model,
+                    ModelInfo = modelInfo,
+                    WorkingDirectory = _summary.WorkingDirectory,
+                    SystemMessage = instructionBundle.SystemMessage,
+                    DeveloperInstructions = instructionBundle.DeveloperInstructions,
+                    ReasoningEffort = _options.ReasoningEffort,
+                    Conversation = _conversation.ToArray(),
+                    Tools = allTools,
+                    State = _state,
+                };
+                var response = await ExecuteTurnWithOverflowRecoveryAsync(
+                        turnRequest,
+                        runId,
+                        instructionBundle.SystemMessage,
+                        instructionBundle.DeveloperInstructions,
+                        modelInfo,
                         linkedCts.Token)
                     .ConfigureAwait(false);
 
@@ -180,6 +194,15 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 var toolCalls = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.ToolCall>().ToArray();
                 if (toolCalls.Length == 0)
                 {
+                    await MaybeCompactForThresholdAsync(
+                            runId,
+                            instructionBundle.SystemMessage,
+                            instructionBundle.DeveloperInstructions,
+                            modelInfo,
+                            LocalAgentCompactionTrigger.Threshold,
+                            linkedCts.Token)
+                        .ConfigureAwait(false);
+
                     var idleEvent = new AgentSessionUpdateEvent(
                         BackendId,
                         SessionId,
@@ -210,7 +233,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         null,
                         toolCall.Name,
                         null,
-                        CreateToolCallDetails(toolCall));
+                        CreateToolCallDetails(toolCall, _summary.WorkingDirectory));
                     await AppendEventsAsync([started], linkedCts.Token).ConfigureAwait(false);
 
                     using var progressGate = new SemaphoreSlim(1, 1);
@@ -242,7 +265,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                                             toolCall.CallId,
                                             update.Delta,
                                             update.Details);
-                                        await AppendEventsAsync([deltaEvent], cancellationToken).ConfigureAwait(false);
+                                        await AppendEventsAsync([deltaEvent], LocalAgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
                                     }
                                     finally
                                     {
@@ -267,7 +290,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         null,
                         toolCall.Name,
                         result.Error,
-                        CreateToolResultDetails(toolCall, result));
+                        CreateToolResultDetails(toolCall, result, _summary.WorkingDirectory));
                     var rawToolEvent = new AgentRawEvent(
                         BackendId,
                         SessionId,
@@ -284,7 +307,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         toolOutputContentId,
                         toolCall.CallId,
                         RenderToolResult(result),
-                        CreateToolResultDetails(toolCall, result));
+                        CreateToolResultDetails(toolCall, result, _summary.WorkingDirectory));
                     await AppendEventsAsync([rawToolEvent, completed, toolOutputText], linkedCts.Token).ConfigureAwait(false);
                 }
             }
@@ -327,61 +350,28 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var effectiveConversation = _conversation
-                .Where(static message => message.Role is not LocalAgentConversationRole.System)
-                .ToArray();
-            if (effectiveConversation.Length == 0)
+            var instructionBundle = LocalAgentInstructionComposer.Compose(_options);
+            var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
+            var outcome = await CompactCoreAsync(
+                    trigger: LocalAgentCompactionTrigger.Manual,
+                    runId: null,
+                    systemMessage: instructionBundle.SystemMessage,
+                    developerInstructions: instructionBundle.DeveloperInstructions,
+                    modelInfo: modelInfo,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (outcome is null)
             {
                 return new AgentCompactionOutcome(true, "Nothing to compact.");
             }
 
-            var now = DateTimeOffset.UtcNow;
-            var started = new AgentSessionUpdateEvent(
-                BackendId,
-                SessionId,
-                now,
-                null,
-                AgentSessionUpdateKind.CompactionStarted,
-                "Manual local compaction started.");
-
-            var snapshot = CreateCompactionSnapshot(_history.Count + 2, effectiveConversation);
-            var rawSnapshot = new AgentRawEvent(
-                BackendId,
-                SessionId,
-                now,
-                CompactionSnapshotEventType,
-                JsonSerializer.SerializeToElement(snapshot, AgentJsonSerializerContext.Default.LocalAgentCompactionSnapshot));
-
-            _conversation.Clear();
-            _conversation.Add(snapshot.SummaryMessage);
-
-            _state = _state with
-            {
-                CompactionEventOffset = _history.Count + 1,
-                CompactionSummaryContentId = _compactionSummaryContentId,
-                UpdatedAt = now,
-            };
-            _summary = _summary with
-            {
-                UpdatedAt = now,
-            };
-
-            var completed = new AgentSessionUpdateEvent(
-                BackendId,
-                SessionId,
-                now,
-                null,
-                AgentSessionUpdateKind.CompactionCompleted,
-                $"Manual local compaction summarized {snapshot.SummarizedMessageCount} messages.",
-                Usage: _summary.Usage);
-            await AppendEventsAsync([started, rawSnapshot, completed], cancellationToken).ConfigureAwait(false);
-            await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
-
             return new AgentCompactionOutcome(
                 Success: true,
-                Message: completed.Message,
-                MessagesRemoved: Math.Max(0, snapshot.SummarizedMessageCount - 1));
+                Message: outcome.Message,
+                MessagesRemoved: outcome.MessagesRemoved,
+                TokensRemoved: outcome.TokensRemoved,
+                PreCompactionTokens: outcome.PreCompactionTokens,
+                PostCompactionTokens: outcome.PostCompactionTokens);
         }
         finally
         {
@@ -538,7 +528,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         null,
                         toolCall.Name,
                         null,
-                        CreateToolCallDetails(toolCall)));
+                        CreateToolCallDetails(toolCall, _summary.WorkingDirectory)));
                     break;
             }
         }
@@ -574,10 +564,18 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             delta.ContentId,
             null,
             delta.Text);
-        await AppendEventsAsync([@event], cancellationToken).ConfigureAwait(false);
+        await AppendEventsAsync([@event], LocalAgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task AppendEventsAsync(IReadOnlyList<AgentEvent> events, CancellationToken cancellationToken)
+    private async Task AppendEventsAsync(
+        IReadOnlyList<AgentEvent> events,
+        CancellationToken cancellationToken)
+        => await AppendEventsAsync(events, LocalAgentEventPersistenceMode.DurableCanonical, cancellationToken).ConfigureAwait(false);
+
+    private async Task AppendEventsAsync(
+        IReadOnlyList<AgentEvent> events,
+        LocalAgentEventPersistenceMode persistenceMode,
+        CancellationToken cancellationToken)
     {
         if (events.Count == 0)
         {
@@ -585,7 +583,10 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         }
 
         _history.AddRange(events);
-        await _store.AppendEventsAsync(_protocolFamily, _providerKey, SessionId, events, cancellationToken).ConfigureAwait(false);
+        if (persistenceMode is LocalAgentEventPersistenceMode.DurableCanonical)
+        {
+            await _store.AppendEventsAsync(_protocolFamily, _providerKey, SessionId, events, cancellationToken).ConfigureAwait(false);
+        }
 
         foreach (var @event in events)
         {
@@ -603,6 +604,362 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 }
             }
         }
+    }
+
+    private async Task<LocalAgentTurnResponse> ExecuteTurnWithOverflowRecoveryAsync(
+        LocalAgentTurnRequest request,
+        AgentRunId runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _turnExecutor.ExecuteTurnAsync(
+                    request,
+                    (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (LocalAgentTurnExecutionException ex) when (ex.Failure.IsContextOverflow)
+        {
+            var compacted = await CompactCoreAsync(
+                    LocalAgentCompactionTrigger.Overflow,
+                    runId,
+                    systemMessage,
+                    developerInstructions,
+                    modelInfo,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (compacted is null)
+            {
+                throw;
+            }
+
+            try
+            {
+                return await _turnExecutor.ExecuteTurnAsync(
+                        request with
+                        {
+                            Conversation = _conversation.ToArray(),
+                            State = _state,
+                        },
+                        (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (LocalAgentTurnExecutionException retryEx) when (retryEx.Failure.IsContextOverflow)
+            {
+                throw;
+            }
+        }
+    }
+
+    private async Task MaybeCompactForThresholdAsync(
+        AgentRunId? runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        LocalAgentCompactionTrigger trigger,
+        CancellationToken cancellationToken)
+    {
+        var settings = Provider.Compaction ?? LocalAgentCompactionSettings.Default;
+        if (!settings.Enabled)
+        {
+            return;
+        }
+
+        var budget = LocalAgentTokenBudgetResolver.Resolve(modelInfo, settings);
+        if (budget.UsablePromptBudget is null)
+        {
+            return;
+        }
+
+        if (budget.UsablePromptBudget <= 0)
+        {
+            throw new InvalidOperationException("The resolved prompt budget is not usable after reserved output and overhead tokens.");
+        }
+
+        if (budget.OutputTokenLimit is not null && settings.ReservedOutputTokens > budget.OutputTokenLimit.Value)
+        {
+            throw new InvalidOperationException("The reserved output token budget exceeds the model's output token limit.");
+        }
+
+        var estimate = LocalAgentTokenEstimator.EstimatePromptTokens(
+            systemMessage,
+            developerInstructions,
+            _conversation,
+            _state.Usage);
+        var thresholdTokens = Math.Max((long)Math.Floor(budget.UsablePromptBudget.Value * settings.TriggerThreshold), 1);
+        if (estimate.Tokens < thresholdTokens)
+        {
+            return;
+        }
+
+        _ = await CompactCoreAsync(
+                trigger,
+                runId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<AgentCompactionOutcome?> CompactCoreAsync(
+        LocalAgentCompactionTrigger trigger,
+        AgentRunId? runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        CancellationToken cancellationToken)
+    {
+        var settings = Provider.Compaction ?? LocalAgentCompactionSettings.Default;
+        if (trigger is not LocalAgentCompactionTrigger.Manual && !settings.Enabled)
+        {
+            return null;
+        }
+
+        var budget = LocalAgentTokenBudgetResolver.Resolve(modelInfo, settings);
+        if (budget.UsablePromptBudget is <= 0)
+        {
+            throw new InvalidOperationException("The resolved prompt budget is not usable after reserved output and overhead tokens.");
+        }
+
+        if (budget.OutputTokenLimit is not null && settings.ReservedOutputTokens > budget.OutputTokenLimit.Value)
+        {
+            throw new InvalidOperationException("The reserved output token budget exceeds the model's output token limit.");
+        }
+
+        var preparation = LocalAgentCompactionPlanner.Prepare(
+            trigger,
+            systemMessage,
+            developerInstructions,
+            _conversation,
+            _state.Usage,
+            budget,
+            settings,
+            FindLatestUserContentId());
+        if (preparation is null)
+        {
+            return null;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var started = new AgentSessionUpdateEvent(
+            BackendId,
+            SessionId,
+            now,
+            runId,
+            AgentSessionUpdateKind.CompactionStarted,
+            $"{trigger} local compaction started.");
+
+        var firstKeptEventOffset = TryResolveFirstKeptEventOffset(preparation.MessagesToKeep);
+        var checkpointContentId = $"compaction:{Guid.CreateVersion7()}";
+        var postCompactionConversation = new List<LocalAgentConversationMessage>(preparation.MessagesToKeep.Count + 1);
+        var latestUserRequest = GetLatestUserRequest(_conversation);
+        var tentativeSummary = LocalAgentCompactionSummarizer.Summarize(
+            preparation,
+            _history,
+            latestUserRequest,
+            tokensAfter: null);
+        var checkpoint = new LocalAgentCompactionCheckpoint
+        {
+            Version = 1,
+            ContentId = checkpointContentId,
+            Trigger = trigger.ToString().ToLowerInvariant(),
+            Summary = tentativeSummary.Summary,
+            FirstKeptEventOffset = firstKeptEventOffset,
+            AnchorContentId = preparation.AnchorContentId,
+            TokensBefore = tentativeSummary.TokensBefore,
+            SummarizedMessageCount = tentativeSummary.MessagesSummarized,
+            ReadFiles = tentativeSummary.ReadFiles,
+            ModifiedFiles = tentativeSummary.ModifiedFiles,
+            KeptMessages = preparation.MessagesToKeep,
+        };
+        var checkpointMessage = checkpoint.CreateMessage();
+        postCompactionConversation.Add(checkpointMessage);
+        postCompactionConversation.AddRange(preparation.MessagesToKeep);
+        var tokensAfter = LocalAgentTokenEstimator.EstimatePromptTokens(
+            systemMessage,
+            developerInstructions,
+            postCompactionConversation,
+            usage: null).Tokens;
+        var result = LocalAgentCompactionSummarizer.Summarize(
+            preparation,
+            _history,
+            latestUserRequest,
+            tokensAfter);
+        checkpoint = checkpoint with
+        {
+            Summary = result.Summary,
+            TokensAfter = result.TokensAfter,
+            ReadFiles = result.ReadFiles,
+            ModifiedFiles = result.ModifiedFiles,
+        };
+        checkpointMessage = checkpoint.CreateMessage();
+
+        _conversation.Clear();
+        _conversation.Add(checkpointMessage);
+        _conversation.AddRange(preparation.MessagesToKeep);
+
+        var usage = CreateCompactionUsage(result, budget, _conversation.Count, _state.Usage);
+        _state = _state with
+        {
+            CompactionEventOffset = CountDurableEvents() + 2,
+            CompactionSummaryContentId = checkpoint.ContentId,
+            CompactionCheckpointEventId = checkpoint.ContentId,
+            LastCompactedAt = now,
+            LastCompactionTrigger = checkpoint.Trigger,
+            LastCompactionTokensBefore = result.TokensBefore,
+            LastCompactionTokensAfter = result.TokensAfter,
+            Usage = usage,
+            UpdatedAt = now,
+        };
+        _summary = _summary with
+        {
+            Usage = usage,
+            UpdatedAt = now,
+        };
+
+        var rawCheckpoint = new AgentRawEvent(
+            BackendId,
+            SessionId,
+            now,
+            CompactionCheckpointEventType,
+            JsonSerializer.SerializeToElement(checkpoint, AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint),
+            runId);
+        var completed = new AgentSessionUpdateEvent(
+            BackendId,
+            SessionId,
+            now,
+            runId,
+            AgentSessionUpdateKind.CompactionCompleted,
+            $"{trigger} local compaction summarized {result.MessagesSummarized} messages.",
+            Usage: usage);
+        await AppendEventsAsync([started, rawCheckpoint, completed], cancellationToken).ConfigureAwait(false);
+        await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
+        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+
+        long? tokensRemoved = result.TokensAfter is null ? null : Math.Max(0, result.TokensBefore - result.TokensAfter.Value);
+        return new AgentCompactionOutcome(
+            Success: true,
+            Message: completed.Message,
+            MessagesRemoved: result.MessagesSummarized,
+            TokensRemoved: tokensRemoved,
+            PreCompactionTokens: result.TokensBefore,
+            PostCompactionTokens: result.TokensAfter);
+    }
+
+    private static AgentSessionUsage? CreateCompactionUsage(
+        LocalAgentCompactionResult result,
+        LocalAgentTokenBudget budget,
+        int messageCount,
+        AgentSessionUsage? previousUsage)
+    {
+        return new AgentSessionUsage(
+            Window: new AgentWindowUsageSnapshot(
+                CurrentTokens: result.TokensAfter,
+                TokenLimit: budget.ContextWindow,
+                MessageCount: messageCount,
+                Label: "Post-compaction window"),
+            LastOperation: previousUsage?.LastOperation,
+            RateLimits: previousUsage?.RateLimits,
+            Scope: AgentUsageScope.Compaction,
+            Source: AgentUsageSource.RecoveredHistory,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            Details: previousUsage?.Details);
+    }
+
+    private long CountDurableEvents()
+        => _history.Count(static @event => @event is not AgentContentDeltaEvent);
+
+    private string? FindLatestUserContentId()
+        => _history
+            .OfType<AgentContentCompletedEvent>()
+            .LastOrDefault(static @event => @event.Kind is AgentContentKind.User)
+            ?.ContentId;
+
+    private static string? GetLatestUserRequest(IReadOnlyList<LocalAgentConversationMessage> conversation)
+        => conversation
+            .Reverse()
+            .Where(static message => message.Role is LocalAgentConversationRole.User)
+            .SelectMany(static message => message.Parts.OfType<LocalAgentMessagePart.Text>())
+            .Select(static part => part.Value)
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+
+    private long? TryResolveFirstKeptEventOffset(IReadOnlyList<LocalAgentConversationMessage> keptMessages)
+    {
+        if (keptMessages.Count == 0)
+        {
+            return null;
+        }
+
+        var conversationStartIndex = _conversation.Count > 0 &&
+                                     LocalAgentCompactionCheckpoint.TryExtractSummary(_conversation[0]) is not null
+            ? 1
+            : 0;
+        var firstKeptConversationIndex = -1;
+        for (var index = conversationStartIndex; index < _conversation.Count; index++)
+        {
+            if (ReferenceEquals(_conversation[index], keptMessages[0]))
+            {
+                firstKeptConversationIndex = index - conversationStartIndex;
+                break;
+            }
+        }
+
+        if (firstKeptConversationIndex < 0)
+        {
+            return null;
+        }
+
+        var replayableOffsets = GetReplayableRawEventOffsets();
+        return firstKeptConversationIndex < replayableOffsets.Count
+            ? replayableOffsets[firstKeptConversationIndex].Offset
+            : null;
+    }
+
+    private IReadOnlyList<(long Offset, string BackendEventType)> GetReplayableRawEventOffsets()
+    {
+        var results = new List<(long Offset, string BackendEventType)>();
+        long offset = 0;
+        foreach (var @event in _history)
+        {
+            if (@event is AgentContentDeltaEvent)
+            {
+                continue;
+            }
+
+            offset++;
+            if (@event is not AgentRawEvent rawEvent)
+            {
+                continue;
+            }
+
+            if (rawEvent.BackendEventType == UserMessageEventType)
+            {
+                var input = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentInput);
+                if (input is not null)
+                {
+                    results.Add((offset, rawEvent.BackendEventType));
+                }
+
+                continue;
+            }
+
+            if (rawEvent.BackendEventType is AssistantMessageEventType or ToolMessageEventType)
+            {
+                var message = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentConversationMessage);
+                if (message is not null)
+                {
+                    results.Add((offset, rawEvent.BackendEventType));
+                }
+            }
+        }
+
+        return results;
     }
 
     private static IReadOnlyList<LocalAgentMessagePart> MapInputItems(IReadOnlyList<AgentInputItem> items)
@@ -728,8 +1085,9 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static JsonElement CreateToolCallDetails(LocalAgentMessagePart.ToolCall toolCall)
+    private static JsonElement CreateToolCallDetails(LocalAgentMessagePart.ToolCall toolCall, string? workingDirectory)
     {
+        var fileActivity = GetToolFileActivity(toolCall, workingDirectory);
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -738,14 +1096,17 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             writer.WriteString("toolName", toolCall.Name);
             writer.WritePropertyName("arguments");
             toolCall.Arguments.WriteTo(writer);
+            WritePaths(writer, "readFiles", fileActivity.ReadFiles);
+            WritePaths(writer, "modifiedFiles", fileActivity.ModifiedFiles);
             writer.WriteEndObject();
         }
 
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static JsonElement CreateToolResultDetails(LocalAgentMessagePart.ToolCall toolCall, AgentToolResult result)
+    private static JsonElement CreateToolResultDetails(LocalAgentMessagePart.ToolCall toolCall, AgentToolResult result, string? workingDirectory)
     {
+        var fileActivity = GetToolFileActivity(toolCall, workingDirectory);
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -754,6 +1115,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             writer.WriteString("toolName", toolCall.Name);
             writer.WritePropertyName("arguments");
             toolCall.Arguments.WriteTo(writer);
+            WritePaths(writer, "readFiles", fileActivity.ReadFiles);
+            WritePaths(writer, "modifiedFiles", fileActivity.ModifiedFiles);
             writer.WritePropertyName("result");
             JsonSerializer.Serialize(writer, result, AgentJsonSerializerContext.Default.AgentToolResult);
             writer.WriteEndObject();
@@ -762,26 +1125,128 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static List<LocalAgentConversationMessage> ReplayConversation(IReadOnlyList<AgentEvent> history)
+    private static void WritePaths(Utf8JsonWriter writer, string propertyName, IReadOnlyList<string> paths)
     {
-        var conversation = new List<LocalAgentConversationMessage>();
-        foreach (var @event in history.OfType<AgentRawEvent>())
+        writer.WritePropertyName(propertyName);
+        writer.WriteStartArray();
+        foreach (var path in paths)
         {
-            if (@event.BackendEventType == CompactionSnapshotEventType)
-            {
-                var snapshot = @event.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionSnapshot);
-                conversation.Clear();
-                if (snapshot is not null)
+            writer.WriteStringValue(path);
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static ToolFileActivity GetToolFileActivity(LocalAgentMessagePart.ToolCall toolCall, string? workingDirectory)
+    {
+        static string? GetPath(JsonElement arguments, string propertyName)
+            => arguments.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+
+        string Resolve(string path)
+            => Path.GetFullPath(Path.IsPathRooted(path)
+                ? path
+                : Path.Combine(workingDirectory ?? Environment.CurrentDirectory, path));
+
+        var readFiles = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var modifiedFiles = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        switch (toolCall.Name)
+        {
+            case "read_file":
+            case "view_image":
+                if (GetPath(toolCall.Arguments, "path") is { Length: > 0 } readPath)
                 {
-                    conversation.Add(snapshot.SummaryMessage);
+                    readFiles.Add(Resolve(readPath));
                 }
 
+                break;
+            case "apply_patch":
+                if (toolCall.Arguments.TryGetProperty("input", out var patchInput) &&
+                    patchInput.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(patchInput.GetString()))
+                {
+                    foreach (var path in LocalAgentApplyPatch.GetTouchedPaths(patchInput.GetString()!, workingDirectory ?? Environment.CurrentDirectory))
+                    {
+                        modifiedFiles.Add(path);
+                    }
+                }
+
+                break;
+        }
+
+        return new ToolFileActivity([.. readFiles], [.. modifiedFiles]);
+    }
+
+    private static List<LocalAgentConversationMessage> ReplayConversation(
+        IReadOnlyList<AgentEvent> history,
+        LocalAgentSessionState state)
+    {
+        var conversation = new List<LocalAgentConversationMessage>();
+        LocalAgentCompactionCheckpoint? latestCheckpoint = null;
+        long durableOffset = 0;
+        foreach (var @event in history)
+        {
+            if (@event is AgentContentDeltaEvent)
+            {
                 continue;
             }
 
-            if (@event.BackendEventType == UserMessageEventType)
+            durableOffset++;
+            if (@event is not AgentRawEvent rawEvent)
             {
-                var input = @event.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentInput);
+                continue;
+            }
+
+            if (rawEvent.BackendEventType == CompactionCheckpointEventType)
+            {
+                var checkpoint = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint);
+                if (checkpoint is not null &&
+                    (string.IsNullOrWhiteSpace(state.CompactionCheckpointEventId) ||
+                     string.Equals(checkpoint.ContentId, state.CompactionCheckpointEventId, StringComparison.Ordinal)))
+                {
+                    latestCheckpoint = checkpoint;
+                }
+            }
+        }
+
+        if (latestCheckpoint is not null)
+        {
+            conversation.Add(latestCheckpoint.CreateMessage());
+            conversation.AddRange(latestCheckpoint.KeptMessages);
+        }
+
+        durableOffset = 0;
+        var includeAfterCheckpoint = latestCheckpoint is null;
+        foreach (var @event in history)
+        {
+            if (@event is AgentContentDeltaEvent)
+            {
+                continue;
+            }
+
+            durableOffset++;
+            if (@event is not AgentRawEvent rawEvent)
+            {
+                continue;
+            }
+
+            if (latestCheckpoint is not null && rawEvent.BackendEventType == CompactionCheckpointEventType)
+            {
+                var checkpoint = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint);
+                includeAfterCheckpoint = checkpoint is not null &&
+                                         string.Equals(checkpoint.ContentId, latestCheckpoint.ContentId, StringComparison.Ordinal);
+                continue;
+            }
+
+            if (!includeAfterCheckpoint)
+            {
+                continue;
+            }
+
+            if (rawEvent.BackendEventType == UserMessageEventType)
+            {
+                var input = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentInput);
                 if (input is not null)
                 {
                     conversation.Add(new LocalAgentConversationMessage(
@@ -792,12 +1257,24 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 continue;
             }
 
-            if (@event.BackendEventType is AssistantMessageEventType or ToolMessageEventType)
+            if (rawEvent.BackendEventType is AssistantMessageEventType or ToolMessageEventType)
             {
-                var message = @event.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentConversationMessage);
+                var message = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentConversationMessage);
                 if (message is not null)
                 {
                     conversation.Add(message);
+                }
+
+                continue;
+            }
+
+            if (latestCheckpoint is null && rawEvent.BackendEventType == CompactionSnapshotEventType)
+            {
+                var snapshot = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionSnapshot);
+                conversation.Clear();
+                if (snapshot is not null)
+                {
+                    conversation.Add(snapshot.SummaryMessage);
                 }
             }
         }
@@ -896,6 +1373,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             ? condensed
             : condensed[..237] + "...";
     }
+
+    private sealed record ToolFileActivity(IReadOnlyList<string> ReadFiles, IReadOnlyList<string> ModifiedFiles);
 
     private sealed class LocalUnsubscriber(Action dispose) : IDisposable
     {

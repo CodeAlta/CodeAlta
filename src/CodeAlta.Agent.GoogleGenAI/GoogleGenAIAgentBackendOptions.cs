@@ -1,4 +1,5 @@
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using Microsoft.Extensions.AI;
 
@@ -69,6 +70,11 @@ public sealed class GoogleGenAIProviderOptions
     /// Gets or sets the compatibility profile for the provider.
     /// </summary>
     public LocalAgentProviderProfile? Profile { get; set; }
+
+    /// <summary>
+    /// Gets or sets normalized compaction settings for the provider.
+    /// </summary>
+    public LocalAgentCompactionSettings? Compaction { get; set; }
 
     /// <summary>
     /// Gets or sets the models.dev provider identifier used to enrich model metadata.

@@ -12,6 +12,10 @@ public sealed class CodeAltaConfigStoreRawApiTests
         File.WriteAllText(
             Path.Combine(temp.Path, "config.toml"),
             """
+            [raw_api.compaction]
+            trigger_threshold = 0.81
+            reserved_overhead_tokens = 1024
+
             [raw_api.openai.providers.OpenRouter]
             display_name = " OpenRouter "
             api_key_env = " OPENROUTER_API_KEY "
@@ -25,6 +29,9 @@ public sealed class CodeAltaConfigStoreRawApiTests
             supports_store = false
             max_tokens_field_name = " max_tokens "
             reasoning_field_names = [" reasoning_content ", "", "reasoning"]
+
+            [raw_api.openai.providers.OpenRouter.compaction]
+            reserved_output_tokens = 2048
 
             [raw_api.openai.providers.OpenRouter.model_overrides." gpt-5 "]
             display_name = " GPT-5 "
@@ -53,6 +60,15 @@ public sealed class CodeAltaConfigStoreRawApiTests
         CollectionAssert.AreEqual(
             new[] { "reasoning_content", "reasoning" },
             profile.ReasoningFieldNames);
+        var compaction = providers[0].Compaction;
+        Assert.IsNotNull(compaction);
+        Assert.IsTrue(compaction!.Enabled);
+        Assert.AreEqual(0.81d, compaction.TriggerThreshold!.Value, 0.0001d);
+        Assert.AreEqual(0.50d, compaction.TargetThreshold!.Value, 0.0001d);
+        Assert.AreEqual(2048, compaction.ReservedOutputTokens);
+        Assert.AreEqual(1024, compaction.ReservedOverheadTokens);
+        Assert.IsTrue(compaction.KeepLastUserMessage);
+        Assert.IsTrue(compaction.AllowSplitTurn);
         var modelOverrides = providers[0].ModelOverrides;
         Assert.IsNotNull(modelOverrides);
         Assert.IsTrue(modelOverrides!.TryGetValue("gpt-5", out var modelOverride));
@@ -61,6 +77,25 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("flagship", modelOverride.Description);
         Assert.AreEqual(400000L, modelOverride.ContextWindow);
         Assert.AreEqual(128000L, modelOverride.OutputTokenLimit);
+    }
+
+    [TestMethod]
+    public void LoadGlobalOpenAIProviderDefinitions_InvalidCompactionThreshold_Throws()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [raw_api.compaction]
+            trigger_threshold = 0.5
+            target_threshold = 0.5
+
+            [raw_api.openai.providers.openai]
+            api_key_env = "OPENAI_API_KEY"
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalOpenAIProviderDefinitions(includeDisabled: true));
     }
 
     [TestMethod]

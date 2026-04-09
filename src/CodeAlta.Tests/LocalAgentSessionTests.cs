@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 
 namespace CodeAlta.Tests;
 
@@ -158,6 +159,10 @@ public sealed class LocalAgentSessionTests
         Assert.AreEqual(2, history.OfType<AgentActivityEvent>().Count(static evt => evt.ActivityId == "call-1" && (evt.Phase == AgentActivityPhase.Requested || evt.Phase == AgentActivityPhase.Started)));
         Assert.IsTrue(history.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.Idle));
 
+        var persistedHistory = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsFalse(persistedHistory.OfType<AgentContentDeltaEvent>().Any());
+        Assert.IsTrue(persistedHistory.OfType<AgentContentCompletedEvent>().Any(static evt => evt.Kind == AgentContentKind.Assistant));
+
         var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
         Assert.IsNotNull(persistedState);
         Assert.AreEqual("resp_124", persistedState.ProviderSessionId);
@@ -277,7 +282,7 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
-    public async Task LocalAgentSession_CompactAsync_PersistsSnapshotAndReplaysFromSummary()
+    public async Task LocalAgentSession_CompactAsync_PersistsCheckpointAndReplaysFromCheckpointPlusSuffix()
     {
         using var temp = TestTempDirectory.Create();
         var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
@@ -301,32 +306,39 @@ public sealed class LocalAgentSessionTests
                                  {
                                      AssistantMessage = new LocalAgentConversationMessage(
                                          LocalAgentConversationRole.Assistant,
-                                         [new LocalAgentMessagePart.Text("First answer.")]),
+                                         [new LocalAgentMessagePart.Text("First answer " + new string('a', 120))]),
                                  }),
                              (_, _, _) => Task.FromResult(
                                  new LocalAgentTurnResponse
                                  {
                                      AssistantMessage = new LocalAgentConversationMessage(
                                          LocalAgentConversationRole.Assistant,
-                                         [new LocalAgentMessagePart.Text("Second answer.")]),
+                                         [new LocalAgentMessagePart.Text("Second answer " + new string('b', 120))]),
                                  })),
                          CreateOptions(provider, temp.Path)))
         {
-            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") }).ConfigureAwait(false);
-            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt") }).ConfigureAwait(false);
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 140)) }).ConfigureAwait(false);
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 140)) }).ConfigureAwait(false);
 
             var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
             Assert.IsNotNull(outcome);
             Assert.IsTrue(outcome.Success);
-            Assert.AreEqual(3, outcome.MessagesRemoved);
         }
 
         var persistedHistory = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
-        Assert.IsTrue(persistedHistory.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.compactionSnapshot"));
+        var checkpointEvent = persistedHistory
+            .OfType<AgentRawEvent>()
+            .Single(static evt => evt.BackendEventType == "local.compactionCheckpoint");
+        var checkpoint = checkpointEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint);
+        Assert.IsNotNull(checkpoint);
+        Assert.IsTrue(checkpoint!.KeptMessages.Count >= 1);
+        Assert.IsTrue(checkpoint.SummarizedMessageCount >= 1);
 
         var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
         Assert.IsNotNull(persistedState);
         Assert.IsNotNull(persistedState.CompactionEventOffset);
+        Assert.AreEqual("manual", persistedState.LastCompactionTrigger);
+        Assert.AreEqual(checkpoint.ContentId, persistedState.CompactionCheckpointEventId);
 
         await using var resumedSession = new LocalAgentSession(
             AgentBackendIds.OpenAIResponses,
@@ -338,12 +350,12 @@ public sealed class LocalAgentSessionTests
             new ScriptedTurnExecutor(
                 (request, _, _) =>
                 {
-                    Assert.AreEqual(2, request.Conversation.Count);
-                    Assert.AreEqual(LocalAgentConversationRole.System, request.Conversation[0].Role);
+                    Assert.IsTrue(request.Conversation.Count >= 3);
+                    Assert.AreEqual(LocalAgentConversationRole.User, request.Conversation[0].Role);
                     StringAssert.Contains(
                         Assert.IsInstanceOfType<LocalAgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value,
-                        "First prompt");
-                    Assert.AreEqual(LocalAgentConversationRole.User, request.Conversation[1].Role);
+                        "## Objective");
+                    Assert.AreEqual(LocalAgentConversationRole.User, request.Conversation[^1].Role);
                     return Task.FromResult(
                         new LocalAgentTurnResponse
                         {
@@ -361,6 +373,156 @@ public sealed class LocalAgentSessionTests
                 }).ConfigureAwait(false);
     }
 
+    [TestMethod]
+    public void LocalAgentCompactionPlanner_ThresholdPreparation_ProtectsLatestUserMessage()
+    {
+        var instructionBundle = LocalAgentInstructionComposer.Compose(
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = "openai",
+                Model = "gpt-5.4",
+                WorkingDirectory = Environment.CurrentDirectory,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+        var firstUserMessage = new LocalAgentConversationMessage(
+            LocalAgentConversationRole.User,
+            [new LocalAgentMessagePart.Text("First prompt " + new string('x', 420))]);
+        var firstAssistantMessage = new LocalAgentConversationMessage(
+            LocalAgentConversationRole.Assistant,
+            [new LocalAgentMessagePart.Text(new string('A', 420))]);
+        var secondUserMessage = new LocalAgentConversationMessage(
+            LocalAgentConversationRole.User,
+            [new LocalAgentMessagePart.Text("Second prompt " + new string('y', 40))]);
+        var conversation = new[] { firstUserMessage, firstAssistantMessage, secondUserMessage };
+        var estimatedPromptTokens = LocalAgentTokenEstimator.EstimatePromptTokens(
+            instructionBundle.SystemMessage,
+            instructionBundle.DeveloperInstructions,
+            conversation,
+            usage: null).Tokens;
+        var fixedTokens = LocalAgentTokenEstimator.EstimatePromptTokens(
+            instructionBundle.SystemMessage,
+            instructionBundle.DeveloperInstructions,
+            [],
+            usage: null).Tokens;
+        var anchorTokens = LocalAgentTokenEstimator.EstimateMessage(secondUserMessage);
+        var usablePromptBudget = (fixedTokens + 64 + anchorTokens + 20) * 2L;
+        var triggerThreshold = Math.Max(0.20d, Math.Min(0.95d, (estimatedPromptTokens - 1d) / usablePromptBudget));
+
+        var preparation = LocalAgentCompactionPlanner.Prepare(
+            LocalAgentCompactionTrigger.Threshold,
+            instructionBundle.SystemMessage,
+            instructionBundle.DeveloperInstructions,
+            conversation,
+            usage: null,
+            new LocalAgentTokenBudget(
+                ContextWindow: usablePromptBudget + 20 + 10,
+                InputTokenLimit: usablePromptBudget,
+                OutputTokenLimit: 128,
+                UsablePromptBudget: usablePromptBudget,
+                ReservedOutputTokens: 20,
+                ReservedOverheadTokens: 10),
+            new LocalAgentCompactionSettings(
+                Enabled: true,
+                TriggerThreshold: triggerThreshold,
+                TargetThreshold: 0.50,
+                ReservedOutputTokens: 20,
+                ReservedOverheadTokens: 10,
+                KeepLastUserMessage: true,
+                AllowSplitTurn: true),
+            anchorContentId: "user:2");
+
+        Assert.IsNotNull(preparation);
+        Assert.AreEqual("user:2", preparation!.AnchorContentId);
+        Assert.IsTrue(preparation.MessagesToSummarize.Count >= 1);
+        Assert.IsTrue(preparation.MessagesToKeep.Count >= 1);
+        Assert.AreEqual(secondUserMessage, preparation.MessagesToKeep[0]);
+    }
+
+    [TestMethod]
+    public async Task LocalAgentSession_SendAsync_OverflowCompactsAndRetriesOnce()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(new LocalAgentCompactionSettings(
+            Enabled: true,
+            TriggerThreshold: 0.95,
+            TargetThreshold: 0.50,
+            ReservedOutputTokens: 10,
+            ReservedOverheadTokens: 10,
+            KeepLastUserMessage: true,
+            AllowSplitTurn: true));
+        var summary = CreateSummary("session-overflow");
+        var state = CreateState("session-overflow");
+        await store.UpsertProviderAsync(provider).ConfigureAwait(false);
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var attempt = 0;
+        var executor = new ScriptedTurnExecutor(
+            (_, _, _) => Task.FromResult(
+                new LocalAgentTurnResponse
+                {
+                    AssistantMessage = new LocalAgentConversationMessage(
+                        LocalAgentConversationRole.Assistant,
+                        [new LocalAgentMessagePart.Text("Initial answer " + new string('a', 80))]),
+                }),
+            (request, _, _) =>
+            {
+                attempt++;
+                if (attempt == 1)
+                {
+                    throw new LocalAgentTurnExecutionException(new LocalAgentTurnFailure("maximum context length exceeded", IsContextOverflow: true));
+                }
+
+                Assert.AreEqual(LocalAgentConversationRole.User, request.Conversation[0].Role);
+                StringAssert.Contains(
+                    Assert.IsInstanceOfType<LocalAgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value,
+                    "codealta-compaction-checkpoint");
+                return Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Recovered after overflow.")]),
+                        Usage = CreateUsageSnapshot(40, 20),
+                    });
+            },
+            (request, _, _) =>
+            {
+                attempt++;
+                Assert.AreEqual(LocalAgentConversationRole.User, request.Conversation[0].Role);
+                StringAssert.Contains(
+                    Assert.IsInstanceOfType<LocalAgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value,
+                    "codealta-compaction-checkpoint");
+                return Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Recovered after overflow.")]),
+                        Usage = CreateUsageSnapshot(40, 20),
+                    });
+            });
+
+        await using var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            executor,
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Prompt one " + new string('x', 100)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Prompt two " + new string('y', 90)) }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, attempt);
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsNotNull(persistedState);
+        Assert.AreEqual("overflow", persistedState.LastCompactionTrigger);
+    }
+
     private static AgentSessionCreateOptions CreateOptions(LocalAgentProviderDescriptor provider, string workingDirectory)
     {
         return new AgentSessionCreateOptions
@@ -372,7 +534,7 @@ public sealed class LocalAgentSessionTests
         };
     }
 
-    private static LocalAgentProviderDescriptor CreateProvider()
+    private static LocalAgentProviderDescriptor CreateProvider(LocalAgentCompactionSettings? compaction = null)
     {
         return new LocalAgentProviderDescriptor
         {
@@ -391,6 +553,7 @@ public sealed class LocalAgentSessionTests
                 MaxTokensFieldName = "max_output_tokens",
                 ReasoningFieldNames = ["reasoning"],
             },
+            Compaction = compaction ?? LocalAgentCompactionSettings.Default,
         };
     }
 
@@ -433,17 +596,28 @@ public sealed class LocalAgentSessionTests
 
     private sealed class ScriptedTurnExecutor : ILocalAgentTurnExecutor
     {
+        private readonly IReadOnlyList<AgentModelInfo> _models;
         private readonly Queue<Func<LocalAgentTurnRequest, Func<LocalAgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<LocalAgentTurnResponse>>> _steps;
 
         public ScriptedTurnExecutor(params Func<LocalAgentTurnRequest, Func<LocalAgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<LocalAgentTurnResponse>>[] steps)
+            : this(
+                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                steps)
         {
+        }
+
+        public ScriptedTurnExecutor(
+            IReadOnlyList<AgentModelInfo> models,
+            params Func<LocalAgentTurnRequest, Func<LocalAgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<LocalAgentTurnResponse>>[] steps)
+        {
+            _models = models;
             _steps = new Queue<Func<LocalAgentTurnRequest, Func<LocalAgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<LocalAgentTurnResponse>>>(steps);
         }
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
             LocalAgentProviderDescriptor provider,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([new AgentModelInfo("gpt-5.4", "GPT-5.4")]);
+            => Task.FromResult(_models);
 
         public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
             LocalAgentTurnRequest request,

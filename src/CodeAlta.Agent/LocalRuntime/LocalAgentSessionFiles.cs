@@ -119,6 +119,31 @@ public sealed record LocalAgentSessionState
     public string? CompactionSummaryContentId { get; init; }
 
     /// <summary>
+    /// Gets or initializes the latest compaction checkpoint event identifier when present.
+    /// </summary>
+    public string? CompactionCheckpointEventId { get; init; }
+
+    /// <summary>
+    /// Gets or initializes when compaction last completed.
+    /// </summary>
+    public DateTimeOffset? LastCompactedAt { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the latest compaction trigger when known.
+    /// </summary>
+    public string? LastCompactionTrigger { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the prompt token count before the latest compaction.
+    /// </summary>
+    public long? LastCompactionTokensBefore { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the prompt token count after the latest compaction.
+    /// </summary>
+    public long? LastCompactionTokensAfter { get; init; }
+
+    /// <summary>
     /// Gets or initializes the update timestamp.
     /// </summary>
     public required DateTimeOffset UpdatedAt { get; init; }

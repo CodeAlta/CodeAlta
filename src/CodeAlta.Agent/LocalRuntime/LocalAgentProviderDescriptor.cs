@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 
 namespace CodeAlta.Agent.LocalRuntime;
 
@@ -46,6 +47,11 @@ public sealed record LocalAgentProviderDescriptor
     /// Gets or initializes the provider capability profile.
     /// </summary>
     public LocalAgentProviderProfile? Profile { get; init; }
+
+    /// <summary>
+    /// Gets or initializes normalized compaction settings for the provider.
+    /// </summary>
+    public LocalAgentCompactionSettings? Compaction { get; init; }
 
     /// <summary>
     /// Gets or initializes non-secret provider metadata.

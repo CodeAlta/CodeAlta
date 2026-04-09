@@ -2,6 +2,7 @@ using Anthropic;
 using Anthropic.Core;
 using Anthropic.Models.Models;
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using Microsoft.Extensions.AI;
 
@@ -51,6 +52,7 @@ public sealed class AnthropicAgentBackend : IAgentBackend
                                 StreamsUsage = true,
                                 SupportsThoughtSignatures = true,
                             },
+                            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
                         },
                         TurnExecutor = CreateTurnExecutor(provider),
                     }),

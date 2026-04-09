@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 
 namespace CodeAlta.Tests;
 
@@ -46,6 +47,7 @@ public sealed class LocalAgentRuntimeContractsTests
                 MaxTokensFieldName = "max_completion_tokens",
                 ReasoningFieldNames = ["reasoning"],
             },
+            Compaction = LocalAgentCompactionSettings.Default,
         };
 
         using var document = JsonDocument.Parse(descriptor.ToJson());
@@ -55,6 +57,7 @@ public sealed class LocalAgentRuntimeContractsTests
         Assert.AreEqual("openai-responses", root.GetProperty("backendId").GetString());
         Assert.AreEqual("OpenAIResponses", root.GetProperty("transportKind").GetString());
         Assert.AreEqual("max_completion_tokens", root.GetProperty("profile").GetProperty("maxTokensFieldName").GetString());
+        Assert.AreEqual(0.8d, root.GetProperty("compaction").GetProperty("triggerThreshold").GetDouble(), 0.0001d);
     }
 
     [TestMethod]
@@ -69,6 +72,11 @@ public sealed class LocalAgentRuntimeContractsTests
             ProviderSessionId = "resp_123",
             CompactionEventOffset = 17,
             InstructionHash = "sha256:abc",
+            CompactionCheckpointEventId = "compaction:1",
+            LastCompactedAt = DateTimeOffset.Parse("2026-04-06T14:29:00+00:00"),
+            LastCompactionTrigger = "threshold",
+            LastCompactionTokensBefore = 2048,
+            LastCompactionTokensAfter = 1024,
             ProviderState = providerState.RootElement.Clone(),
             UpdatedAt = DateTimeOffset.Parse("2026-04-06T14:30:00+00:00"),
         };
@@ -78,7 +86,11 @@ public sealed class LocalAgentRuntimeContractsTests
 
         Assert.AreEqual("resp_123", root.GetProperty("providerSessionId").GetString());
         Assert.AreEqual(17, root.GetProperty("compactionEventOffset").GetInt64());
+        Assert.AreEqual("compaction:1", root.GetProperty("compactionCheckpointEventId").GetString());
         Assert.AreEqual("sha256:abc", root.GetProperty("instructionHash").GetString());
+        Assert.AreEqual("threshold", root.GetProperty("lastCompactionTrigger").GetString());
+        Assert.AreEqual(2048, root.GetProperty("lastCompactionTokensBefore").GetInt64());
+        Assert.AreEqual(1024, root.GetProperty("lastCompactionTokensAfter").GetInt64());
         Assert.AreEqual(17, root.GetProperty("providerState").GetProperty("cursor").GetInt32());
     }
 }

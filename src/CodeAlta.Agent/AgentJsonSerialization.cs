@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 
 namespace CodeAlta.Agent;
 
@@ -221,9 +222,11 @@ internal sealed class AgentObjectDictionaryJsonConverter : JsonConverter<IReadOn
 [JsonSerializable(typeof(CopilotSessionMetadataDetails))]
 [JsonSerializable(typeof(RawApiSessionMetadataDetails))]
 [JsonSerializable(typeof(LocalAgentTransportKind))]
+[JsonSerializable(typeof(LocalAgentCompactionSettings))]
 [JsonSerializable(typeof(LocalAgentProviderProfile))]
 [JsonSerializable(typeof(LocalAgentProviderDescriptor))]
 [JsonSerializable(typeof(LocalAgentCompactionSnapshot))]
+[JsonSerializable(typeof(LocalAgentCompactionCheckpoint))]
 [JsonSerializable(typeof(LocalAgentConversationMessage))]
 [JsonSerializable(typeof(LocalAgentConversationRole))]
 [JsonSerializable(typeof(LocalAgentMessagePart))]
@@ -313,9 +316,11 @@ internal partial class AgentJsonSerializerContext : JsonSerializerContext;
 [JsonSerializable(typeof(CopilotSessionMetadataDetails))]
 [JsonSerializable(typeof(RawApiSessionMetadataDetails))]
 [JsonSerializable(typeof(LocalAgentTransportKind))]
+[JsonSerializable(typeof(LocalAgentCompactionSettings))]
 [JsonSerializable(typeof(LocalAgentProviderProfile))]
 [JsonSerializable(typeof(LocalAgentProviderDescriptor))]
 [JsonSerializable(typeof(LocalAgentCompactionSnapshot))]
+[JsonSerializable(typeof(LocalAgentCompactionCheckpoint))]
 [JsonSerializable(typeof(LocalAgentConversationMessage))]
 [JsonSerializable(typeof(LocalAgentConversationRole))]
 [JsonSerializable(typeof(LocalAgentMessagePart))]

@@ -1,4 +1,5 @@
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 
 namespace CodeAlta.Agent.OpenAI;
 
@@ -55,6 +56,7 @@ internal static class OpenAIBackendFactory
                             BaseUri = provider.BaseUri,
                             IsDefault = provider.IsDefault,
                             Profile = provider.Profile ?? CreateDefaultProfile(transportKind),
+                            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
                         },
                         TurnExecutor = executorFactory(provider),
                     }),

@@ -8,6 +8,12 @@ namespace CodeAlta.Catalog;
 public sealed class CodeAltaRawApiSettingsDocument
 {
     /// <summary>
+    /// Gets or sets global raw-API compaction settings.
+    /// </summary>
+    [JsonPropertyName("compaction")]
+    public CodeAltaRawApiCompactionDocument? Compaction { get; set; }
+
+    /// <summary>
     /// Gets or sets OpenAI-compatible provider settings.
     /// </summary>
     [JsonPropertyName("openai")]
@@ -108,6 +114,54 @@ public sealed class CodeAltaRawApiProviderProfileDocument
     /// </summary>
     [JsonPropertyName("reasoning_field_names")]
     public List<string>? ReasoningFieldNames { get; set; }
+}
+
+/// <summary>
+/// Represents configurable raw-API compaction settings.
+/// </summary>
+public sealed class CodeAltaRawApiCompactionDocument
+{
+    /// <summary>
+    /// Gets or sets whether automatic compaction is enabled.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the usage threshold that triggers compaction.
+    /// </summary>
+    [JsonPropertyName("trigger_threshold")]
+    public double? TriggerThreshold { get; set; }
+
+    /// <summary>
+    /// Gets or sets the target usage threshold after compaction.
+    /// </summary>
+    [JsonPropertyName("target_threshold")]
+    public double? TargetThreshold { get; set; }
+
+    /// <summary>
+    /// Gets or sets the reserved output tokens.
+    /// </summary>
+    [JsonPropertyName("reserved_output_tokens")]
+    public int? ReservedOutputTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets the reserved overhead tokens.
+    /// </summary>
+    [JsonPropertyName("reserved_overhead_tokens")]
+    public int? ReservedOverheadTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the latest user message should be kept verbatim.
+    /// </summary>
+    [JsonPropertyName("keep_last_user_message")]
+    public bool? KeepLastUserMessage { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether split-turn compaction is allowed.
+    /// </summary>
+    [JsonPropertyName("allow_split_turn")]
+    public bool? AllowSplitTurn { get; set; }
 }
 
 /// <summary>
@@ -266,6 +320,12 @@ public sealed class CodeAltaOpenAIProviderDocument
     public CodeAltaRawApiProviderProfileDocument? Profile { get; set; }
 
     /// <summary>
+    /// Gets or sets the optional compaction override.
+    /// </summary>
+    [JsonPropertyName("compaction")]
+    public CodeAltaRawApiCompactionDocument? Compaction { get; set; }
+
+    /// <summary>
     /// Gets or sets optional per-model metadata overrides.
     /// </summary>
     [JsonPropertyName("model_overrides")]
@@ -330,6 +390,12 @@ public sealed class CodeAltaAnthropicProviderDocument
     /// </summary>
     [JsonPropertyName("profile")]
     public CodeAltaRawApiProviderProfileDocument? Profile { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional compaction override.
+    /// </summary>
+    [JsonPropertyName("compaction")]
+    public CodeAltaRawApiCompactionDocument? Compaction { get; set; }
 
     /// <summary>
     /// Gets or sets optional per-model metadata overrides.
@@ -414,6 +480,12 @@ public sealed class CodeAltaGoogleGenAIProviderDocument
     /// </summary>
     [JsonPropertyName("profile")]
     public CodeAltaRawApiProviderProfileDocument? Profile { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional compaction override.
+    /// </summary>
+    [JsonPropertyName("compaction")]
+    public CodeAltaRawApiCompactionDocument? Compaction { get; set; }
 
     /// <summary>
     /// Gets or sets optional per-model metadata overrides.

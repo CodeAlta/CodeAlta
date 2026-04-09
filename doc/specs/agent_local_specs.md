@@ -155,6 +155,7 @@ This is preferred over separate global `providers/` and `sessions/` trees.
 `events.jsonl`
 - the only canonical session log
 - stored as normalized `AgentEvent` items
+- contains replay-significant finalized events, not duplicate streaming-only deltas
 - used for both UI playback and replay/resume
 
 `state.json`
@@ -179,7 +180,9 @@ The canonical durable transcript is a single `events.jsonl`. To make that viable
 Replay rule:
 
 - delta/progress events are diagnostic
-- final canonical events are replay-significant
+- finalized canonical events are replay-significant
+- duplicate deltas that are superseded by a later finalized content event should not be written to `events.jsonl`
+- if a backend streams deltas but does not provide a finalized content event, the runtime should synthesize one finalized canonical event instead of relying on durable deltas for replay
 - resume rebuilds context from the last compaction point plus replay-significant events
 
 The authoritative session transcript remains event-based even when provider SDKs expose richer in-memory item graphs. Provider-specific replay hints may still be cached in `state.json`, but the conversation must remain resumable from the normalized event log plus compaction state.
@@ -233,11 +236,12 @@ Each run should follow this shape:
 1. Load `session.json`, `events.jsonl`, and `state.json`.
 2. Reconstruct context from the last compaction point and replay-significant events.
 3. Compose the next provider request locally.
-4. Stream provider output into normalized `AgentEvent`s.
-5. Execute local tools when tool calls arrive.
-6. Append tool results as events and feed them into the next provider call.
-7. Persist final outputs and updated `state.json`.
-8. Compact old context when needed.
+4. Stream provider output into normalized `AgentEvent`s for live subscribers.
+5. Canonicalize streamed output into finalized replay-significant events for `events.jsonl`.
+6. Execute local tools when tool calls arrive.
+7. Append tool results as canonical events and feed them into the next provider call.
+8. Persist finalized outputs and updated `state.json`.
+9. Compact old context when needed.
 
 This is the same broad model described by OpenAI for the Codex harness.
 
@@ -250,6 +254,8 @@ The runtime should support:
 - a compaction event in `events.jsonl`
 - a compaction cursor in `state.json`
 - replay from compaction summary plus later events
+
+Compaction must operate over canonical replay-significant content only. Streaming deltas that merely duplicate finalized assistant, reasoning, or tool-output content must not be part of the compaction input.
 
 ## 15. Provider capability profile
 
@@ -387,7 +393,7 @@ Within that root, sessions are stored provider-first under:
 1. Rename the spec to `agent_local_specs.md`.
 2. Keep the common infrastructure in `CodeAlta.Agent`.
 3. Use provider-first storage under `~/.codealta/local/agents/<protocol-family>/<provider-key>/`.
-4. Use one canonical `events.jsonl` per session.
+4. Use one canonical `events.jsonl` per session, containing finalized replay-significant events rather than duplicate deltas.
 5. Use `state.json`, not `provider-state.json`.
 6. Do not use `previous_response_id` as the session continuation model.
 7. Build the runtime as a local harness in the same spirit as Codex.
@@ -408,3 +414,4 @@ CodeAlta should own:
 - one replay/resume model
 
 The provider adapters should stay thin and focus on wire-format differences and compatibility profiles.
+

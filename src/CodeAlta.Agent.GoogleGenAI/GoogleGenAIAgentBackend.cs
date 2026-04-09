@@ -1,4 +1,5 @@
 using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using Google.GenAI;
 using Google.GenAI.Types;
@@ -51,6 +52,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend
                                 StreamsUsage = true,
                                 SupportsThoughtSignatures = true,
                             },
+                            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
                         },
                         TurnExecutor = CreateTurnExecutor(provider),
                     }),
