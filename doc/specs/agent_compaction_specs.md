@@ -162,11 +162,12 @@ Implications:
 5. Build a compaction plan.
 6. Serialize a **budgeted** summarization input.
 7. If the summarization input is too large, recursively chunk and summarize it.
-8. Generate a checkpoint using a normal provider chat/generation call.
-9. Rebuild active context from checkpoint + retained suffix.
-10. Validate exact post-compaction fit.
-11. Persist the checkpoint and compaction metadata.
-12. Retry the original turn at most once when recovering from overflow.
+8. If the latest protected anchor is itself too large, reduce it into a compact anchor synopsis first.
+9. Generate a checkpoint using a normal provider chat/generation call.
+10. Rebuild active context from checkpoint + retained suffix.
+11. Validate exact post-compaction fit.
+12. Persist the checkpoint and compaction metadata.
+13. Retry the original turn at most once when recovering from overflow.
 
 ## 9. Capacity model
 
@@ -269,6 +270,15 @@ The summarizer call must use an explicit provider-specific output limit:
 - Google GenAI: `maxOutputTokens`
 
 The compaction system must never rely on an unconstrained summarizer response.
+
+The effective cap must also respect any smaller provider/model output limit. CodeAlta must not enforce a local minimum that exceeds the resolved provider maximum.
+
+This applies to every compaction-related generation pass, including:
+
+- main checkpoint generation
+- chunk partial summaries
+- oversized-anchor reduction
+- final merge/update passes
 
 ## 11. Message relevance policy
 
@@ -421,6 +431,13 @@ If a single turn is too large:
 
 Split-turn compaction must preserve tool-call/tool-result adjacency.
 
+The preferred bounded fallback order is:
+
+1. try the preferred recent-suffix target first
+2. replan against the wider resolved usable prompt budget when the preferred target is too tight
+3. fall back to anchor-only retention when necessary
+4. only then reduce an oversized latest-user anchor
+
 ### 13.3 Aggressive fallback order
 
 If a normal plan still does not fit:
@@ -455,6 +472,12 @@ If the latest user message by itself cannot fit in the usable prompt budget:
   - exact literals/errors the user supplied
 - the canonical event log must still retain the original message unchanged
 
+Preferred v2 behavior:
+
+1. try wider bounded replanning first so the raw anchor stays verbatim whenever physically possible
+2. if it still cannot fit, reduce only that protected latest-user anchor into a compact synopsis
+3. feed the synopsis into final checkpoint generation instead of replaying the full raw anchor
+
 ### 14.2 Oversized attachments or file selections
 
 If a user input includes a file, selection, pasted log, or attachment that is itself too large:
@@ -469,7 +492,8 @@ If the summarization request input is too large for one model call:
 
 1. split the material into chunks by semantic boundaries when possible
 2. summarize each chunk into a short structured partial summary
-3. merge the partial summaries into the final checkpoint
+3. carry a rolling prior summary forward across chunks
+4. run a final bounded merge pass that reintroduces retained prefix/suffix context when needed
 
 This is required for:
 
@@ -477,6 +501,15 @@ This is required for:
 - very large single turns
 - very large initial prompts
 - summarization of a previous checkpoint plus too much new history
+
+The preferred merge pattern is:
+
+1. summarize old history chunks first
+2. accumulate a compact rolling summary
+3. perform one final bounded merge call that combines the rolling summary with:
+   - any retained split-turn prefix
+   - the retained newest suffix
+   - any oversized-anchor synopsis
 
 ## 15. Summarization input preparation
 
@@ -575,6 +608,8 @@ The checkpoint should track at least:
 
 Read files that were only exploratory and are no longer relevant should be droppable.
 
+When both are present, modified files should be presented before read-only exploratory context, and the runtime should prefer newer unique paths over older duplicates.
+
 ### 17.2 Iterative update
 
 If a previous checkpoint exists:
@@ -614,6 +649,10 @@ Requirements:
 - use deterministic or low-variance settings where supported
 - bound output tokens
 - pass serialized/tagged input rather than replay history as chat
+
+Implementation note:
+
+- the configured compaction output cap should be propagated into the actual provider turn request, not just described in the prompt text
 
 ### 19.2 Model choice
 
@@ -691,6 +730,9 @@ The payload should include at least:
   - omitted reasoning count
   - chunk count when recursive summarization was used
   - compression ratio
+  - whether the latest anchor was reduced
+
+`chunk count` should describe the recursive checkpoint-summarization work used to build the final checkpoint. It should not be inflated by separate oversized-anchor reduction calls.
 
 ## 22. Validation
 
@@ -703,6 +745,11 @@ If it still does not fit:
 - tighten the plan
 - optionally regenerate a smaller checkpoint
 - or fail clearly
+
+If the rebuilt prompt fits but its realized compression ratio still exceeds the configured target ceiling because the retained suffix remains expensive, the runtime should:
+
+- accept the result only when no stricter safe fallback remains
+- record that the realized ratio exceeded the target ceiling in diagnostics/compaction messaging
 
 ### 22.2 Checkpoint quality validation
 
@@ -784,7 +831,7 @@ At minimum:
 19. per-provider overrides take precedence
 20. no transient delta events participate
 21. very large initial prompt or attachment is reducible
-22. summary output token limit is applied
+22. summary output token limit is applied to actual provider requests
 23. automatic compaction does not silently downgrade to heuristic-only summary generation
 
 ## 25. Concrete v2 decisions
