@@ -37,8 +37,12 @@ internal static class LocalAgentCompactionSerializer
         ArgumentNullException.ThrowIfNull(modifiedFiles);
         ArgumentNullException.ThrowIfNull(settings);
 
+        var summarizedUnits = LocalAgentCompactionCanonicalizer.Normalize(preparation.MessagesToSummarize);
+        var retainedPrefixUnits = LocalAgentCompactionCanonicalizer.Normalize(preparation.TurnPrefixMessages);
+        var retainedSuffixUnits = LocalAgentCompactionCanonicalizer.Normalize(preparation.MessagesToKeep);
+
         var state = new SerializationState(settings, oversizedAnchorReduced);
-        AllocateExpensiveParts(preparation, state);
+        AllocateExpensiveParts(summarizedUnits, retainedPrefixUnits, retainedSuffixUnits, state);
 
         var builder = new StringBuilder();
         builder.AppendLine("""<codealta-compaction-request version="2">""");
@@ -60,16 +64,16 @@ internal static class LocalAgentCompactionSerializer
             AppendTag(builder, "previous-summary", preparation.PreviousSummary);
         }
 
-        AppendTag(builder, "conversation", SerializeMessages(preparation.MessagesToSummarize, state));
+        AppendTag(builder, "conversation", SerializeUnits(summarizedUnits, state));
 
-        if (preparation.TurnPrefixMessages.Count > 0)
+        if (retainedPrefixUnits.Count > 0)
         {
-            AppendTag(builder, "retained-prefix", SerializeMessages(preparation.TurnPrefixMessages, state));
+            AppendTag(builder, "retained-prefix", SerializeUnits(retainedPrefixUnits, state));
         }
 
-        if (preparation.MessagesToKeep.Count > 0)
+        if (retainedSuffixUnits.Count > 0)
         {
-            AppendTag(builder, "retained-suffix", SerializeMessages(preparation.MessagesToKeep, state));
+            AppendTag(builder, "retained-suffix", SerializeUnits(retainedSuffixUnits, state));
         }
 
         AppendTag(builder, "relevant-files", RenderFileActivity(readFiles, modifiedFiles));
@@ -87,55 +91,65 @@ internal static class LocalAgentCompactionSerializer
     }
 
     private static void AllocateExpensiveParts(
-        LocalAgentCompactionPreparation preparation,
+        IReadOnlyList<LocalAgentCompactionUnit> summarizedUnits,
+        IReadOnlyList<LocalAgentCompactionUnit> retainedPrefixUnits,
+        IReadOnlyList<LocalAgentCompactionUnit> retainedSuffixUnits,
         SerializationState state)
     {
-        var rankedMessages = new List<RankedMessage>(preparation.MessagesToSummarize.Count + preparation.TurnPrefixMessages.Count + preparation.MessagesToKeep.Count);
+        var rankedUnits = new List<RankedUnit>(summarizedUnits.Count + retainedPrefixUnits.Count + retainedSuffixUnits.Count);
         var recency = 0;
-        AddRankedMessages(rankedMessages, preparation.MessagesToSummarize, SectionRank.Summarized, ref recency);
-        AddRankedMessages(rankedMessages, preparation.TurnPrefixMessages, SectionRank.RetainedPrefix, ref recency);
-        AddRankedMessages(rankedMessages, preparation.MessagesToKeep, SectionRank.RetainedSuffix, ref recency);
+        AddRankedUnits(rankedUnits, summarizedUnits, SectionRank.Summarized, ref recency);
+        AddRankedUnits(rankedUnits, retainedPrefixUnits, SectionRank.RetainedPrefix, ref recency);
+        AddRankedUnits(rankedUnits, retainedSuffixUnits, SectionRank.RetainedSuffix, ref recency);
 
-        foreach (var rankedMessage in OrderRankedMessages(rankedMessages, state.Settings))
+        foreach (var rankedUnit in OrderRankedUnits(rankedUnits, state.Settings))
         {
-            for (var partIndex = 0; partIndex < rankedMessage.Message.Parts.Count; partIndex++)
+            if (rankedUnit.Unit is LocalAgentCompactionToolInteractionUnit { IsCollapsed: true })
             {
-                switch (rankedMessage.Message.Parts[partIndex])
+                continue;
+            }
+
+            foreach (var message in rankedUnit.Unit.SourceMessages)
+            {
+                for (var partIndex = 0; partIndex < message.Parts.Count; partIndex++)
                 {
-                    case LocalAgentMessagePart.ToolResult toolResult:
-                        AllocateToolResult(rankedMessage.Message, partIndex, toolResult, state);
-                        break;
-                    case LocalAgentMessagePart.Reasoning reasoning:
-                        AllocateReasoning(rankedMessage.Message, partIndex, reasoning, state);
-                        break;
-                    case LocalAgentMessagePart.Data:
-                        state.OmittedAttachmentCount++;
-                        break;
+                    switch (message.Parts[partIndex])
+                    {
+                        case LocalAgentMessagePart.ToolResult toolResult:
+                            AllocateToolResult(message, partIndex, toolResult, state);
+                            break;
+                        case LocalAgentMessagePart.Reasoning reasoning:
+                            AllocateReasoning(message, partIndex, reasoning, state);
+                            break;
+                        case LocalAgentMessagePart.Data:
+                            state.OmittedAttachmentCount++;
+                            break;
+                    }
                 }
             }
         }
     }
 
-    private static void AddRankedMessages(
-        ICollection<RankedMessage> target,
-        IReadOnlyList<LocalAgentConversationMessage> messages,
+    private static void AddRankedUnits(
+        ICollection<RankedUnit> target,
+        IReadOnlyList<LocalAgentCompactionUnit> units,
         SectionRank sectionRank,
         ref int recency)
     {
-        foreach (var message in messages)
+        foreach (var unit in units)
         {
-            target.Add(new RankedMessage(message, ComputePriority(message, sectionRank), recency++));
+            target.Add(new RankedUnit(unit, ComputePriority(unit, sectionRank), recency++));
         }
     }
 
-    private static IOrderedEnumerable<RankedMessage> OrderRankedMessages(
-        IEnumerable<RankedMessage> rankedMessages,
+    private static IOrderedEnumerable<RankedUnit> OrderRankedUnits(
+        IEnumerable<RankedUnit> rankedUnits,
         LocalAgentCompactionSettings settings)
     {
-        ArgumentNullException.ThrowIfNull(rankedMessages);
+        ArgumentNullException.ThrowIfNull(rankedUnits);
         ArgumentNullException.ThrowIfNull(settings);
 
-        var ordered = rankedMessages.OrderByDescending(static item => item.Priority);
+        var ordered = rankedUnits.OrderByDescending(static item => item.Priority);
         if (settings.PreferRecentToolOutputs)
         {
             ordered = ordered.ThenByDescending(static item => item.ContainsToolResult ? item.Recency : int.MinValue);
@@ -149,7 +163,7 @@ internal static class LocalAgentCompactionSerializer
         return ordered;
     }
 
-    private static int ComputePriority(LocalAgentConversationMessage message, SectionRank sectionRank)
+    private static int ComputePriority(LocalAgentCompactionUnit unit, SectionRank sectionRank)
     {
         var sectionWeight = sectionRank switch
         {
@@ -158,7 +172,7 @@ internal static class LocalAgentCompactionSerializer
             _ => 100,
         };
 
-        var roleWeight = message.Role switch
+        var roleWeight = unit.Role switch
         {
             LocalAgentConversationRole.User => 40,
             LocalAgentConversationRole.Assistant => 30,
@@ -166,7 +180,9 @@ internal static class LocalAgentCompactionSerializer
             _ => 10,
         };
 
-        var failureWeight = message.Parts.OfType<LocalAgentMessagePart.ToolResult>().Any(static part => !part.Result.Success || !string.IsNullOrWhiteSpace(part.Result.Error))
+        var failureWeight = unit.SourceMessages
+            .SelectMany(static message => message.Parts.OfType<LocalAgentMessagePart.ToolResult>())
+            .Any(static part => !part.Result.Success || !string.IsNullOrWhiteSpace(part.Result.Error))
             ? 25
             : 0;
         return sectionWeight + roleWeight + failureWeight;
@@ -247,24 +263,59 @@ internal static class LocalAgentCompactionSerializer
         }
     }
 
-    private static string SerializeMessages(IReadOnlyList<LocalAgentConversationMessage> messages, SerializationState state)
+    private static string SerializeUnits(IReadOnlyList<LocalAgentCompactionUnit> units, SerializationState state)
     {
-        if (messages.Count == 0)
+        if (units.Count == 0)
         {
             return "(none)";
         }
 
         var builder = new StringBuilder();
-        for (var messageIndex = 0; messageIndex < messages.Count; messageIndex++)
+        for (var unitIndex = 0; unitIndex < units.Count; unitIndex++)
         {
-            var message = messages[messageIndex];
-            foreach (var line in SerializeMessage(message, state))
+            foreach (var line in SerializeUnit(units[unitIndex], state))
             {
                 builder.AppendLine(line);
             }
         }
 
         return builder.ToString().Trim();
+    }
+
+    private static IEnumerable<string> SerializeUnit(LocalAgentCompactionUnit unit, SerializationState state)
+    {
+        switch (unit)
+        {
+            case LocalAgentCompactionMessageUnit messageUnit:
+                foreach (var line in SerializeMessage(messageUnit.Message, state))
+                {
+                    yield return line;
+                }
+
+                break;
+            case LocalAgentCompactionToolInteractionUnit { IsCollapsed: true } collapsedUnit:
+                foreach (var line in SerializeCollapsedToolInteraction(collapsedUnit))
+                {
+                    yield return line;
+                }
+
+                break;
+            case LocalAgentCompactionToolInteractionUnit toolInteractionUnit:
+                foreach (var line in SerializeMessage(toolInteractionUnit.AssistantMessage, state))
+                {
+                    yield return line;
+                }
+
+                foreach (var toolMessage in toolInteractionUnit.ToolMessages)
+                {
+                    foreach (var line in SerializeMessage(toolMessage, state))
+                    {
+                        yield return line;
+                    }
+                }
+
+                break;
+        }
     }
 
     private static IEnumerable<string> SerializeMessage(LocalAgentConversationMessage message, SerializationState state)
@@ -318,6 +369,15 @@ internal static class LocalAgentCompactionSerializer
         {
             state.DroppedMessageCount++;
         }
+    }
+
+    private static IEnumerable<string> SerializeCollapsedToolInteraction(LocalAgentCompactionToolInteractionUnit unit)
+    {
+        var toolCall = unit.ToolCalls.Single();
+        var toolResult = unit.ToolResults.Single();
+        var descriptor = BuildToolDescriptor(toolResult);
+        yield return $"[Assistant tool calls] {toolCall.Name} {SummarizeArguments(toolCall.Arguments)} repeated {unit.RepeatCount} times";
+        yield return $"[Tool result summary] repeated successful {toolCall.Name} activity ({unit.RepeatCount}x); latest {descriptor}; bulk output omitted";
     }
 
     private static string GetRoleLabel(LocalAgentConversationRole role)
@@ -618,9 +678,9 @@ internal static class LocalAgentCompactionSerializer
                 ReducedOversizedAnchor);
     }
 
-    private readonly record struct RankedMessage(LocalAgentConversationMessage Message, int Priority, int Recency)
+    private readonly record struct RankedUnit(LocalAgentCompactionUnit Unit, int Priority, int Recency)
     {
-        public bool ContainsToolResult => Message.Parts.Any(static part => part is LocalAgentMessagePart.ToolResult);
+        public bool ContainsToolResult => Unit.SourceMessages.Any(static message => message.Parts.Any(static part => part is LocalAgentMessagePart.ToolResult));
     }
 
     private enum SectionRank

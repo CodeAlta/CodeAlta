@@ -744,6 +744,76 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
+    public void LocalAgentCompactionCanonicalizer_Normalize_CollapsesRepeatedReadFileOperations()
+    {
+        var messages = new List<LocalAgentConversationMessage>();
+        foreach (var index in Enumerable.Range(1, 3))
+        {
+            messages.Add(
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.Assistant,
+                    [new LocalAgentMessagePart.ToolCall($"call-{index}", "read_file", JsonSerializer.SerializeToElement(new { path = "src/CodeAlta.Agent/LocalRuntime/Compaction/LocalAgentCompactionSerializer.cs" }))]));
+            messages.Add(
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.Tool,
+                    [
+                        new LocalAgentMessagePart.ToolResult(
+                            $"call-{index}",
+                            new AgentToolResult(true, [new AgentToolResultItem.Text($"file contents chunk {index} " + new string('x', 120))])),
+                    ]));
+        }
+
+        var units = LocalAgentCompactionCanonicalizer.Normalize(messages);
+        Assert.AreEqual(1, units.Count);
+        var collapsed = Assert.IsInstanceOfType<LocalAgentCompactionToolInteractionUnit>(units[0]);
+        Assert.IsTrue(collapsed.IsCollapsed);
+        Assert.AreEqual(3, collapsed.RepeatCount);
+        Assert.AreEqual(1, collapsed.ToolCalls.Count);
+        Assert.AreEqual(1, collapsed.ToolResults.Count);
+    }
+
+    [TestMethod]
+    public void LocalAgentCompactionSerializer_BuildSummaryRequestBody_CollapsesRepeatedLowValueToolActivity()
+    {
+        var messagesToSummarize = new List<LocalAgentConversationMessage>();
+        foreach (var index in Enumerable.Range(1, 3))
+        {
+            messagesToSummarize.Add(
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.Assistant,
+                    [new LocalAgentMessagePart.ToolCall($"call-{index}", "grep", JsonSerializer.SerializeToElement(new { path = "src/CodeAlta.Agent", pattern = "compaction" }))]));
+            messagesToSummarize.Add(
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.Tool,
+                    [
+                        new LocalAgentMessagePart.ToolResult(
+                            $"call-{index}",
+                            new AgentToolResult(true, [new AgentToolResultItem.Text($"match {index}: src/CodeAlta.Agent/File{index}.cs")])),
+                    ]));
+        }
+
+        var result = LocalAgentCompactionSerializer.BuildSummaryRequestBody(
+            new LocalAgentCompactionPreparation(
+                Trigger: LocalAgentCompactionTrigger.Threshold,
+                MessagesToSummarize: messagesToSummarize,
+                TurnPrefixMessages: [],
+                MessagesToKeep: [],
+                AnchorContentId: null,
+                IsSplitTurn: false,
+                TokensBefore: new LocalAgentTokenEstimate(2000, "test", IsEstimated: true),
+                PreviousSummary: null),
+            latestUserRequest: "Continue",
+            readFiles: [],
+            modifiedFiles: [],
+            settings: LocalAgentCompactionSettings.Default);
+
+        StringAssert.Contains(result.UserMessage, "repeated 3 times");
+        StringAssert.Contains(result.UserMessage, "repeated successful grep activity");
+        Assert.IsFalse(result.UserMessage.Contains("match 1:", StringComparison.Ordinal));
+        Assert.IsFalse(result.UserMessage.Contains("match 2:", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void LocalAgentCompactionSerializer_BuildSummaryRequestBody_KeepsAllPlaintextMessagesWhenInputFits()
     {
         var summarizedMessages = new[]
