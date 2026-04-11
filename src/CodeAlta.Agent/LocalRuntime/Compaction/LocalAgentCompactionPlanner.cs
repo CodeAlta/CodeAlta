@@ -52,28 +52,43 @@ internal static class LocalAgentCompactionPlanner
         IReadOnlyList<int> turnPrefixIndexes = [];
         IReadOnlyList<int> suffixIndexes;
         bool isSplitTurn;
+        int? oversizedAnchorGroupIndex = null;
 
         if (keepAnchorOnly)
         {
-            (turnPrefixIndexes, suffixIndexes, isSplitTurn) = BuildAnchorOnlyPlan(groups, anchorGroupIndex, availableForRetained);
+            (turnPrefixIndexes, suffixIndexes, isSplitTurn, oversizedAnchorGroupIndex) = BuildAnchorOnlyPlan(
+                groups,
+                anchorGroupIndex,
+                availableForRetained,
+                settings.AllowOversizedAnchorReduction);
         }
         else
         {
-            (turnPrefixIndexes, suffixIndexes, isSplitTurn) = BuildPlan(
+            (turnPrefixIndexes, suffixIndexes, isSplitTurn, oversizedAnchorGroupIndex) = BuildPlan(
                 groups,
                 anchorGroupIndex,
                 settings.AllowSplitTurn,
-                availableForRetained);
+                availableForRetained,
+                settings.AllowOversizedAnchorReduction);
         }
 
         var retainedIndexes = turnPrefixIndexes.Concat(suffixIndexes).ToHashSet();
+        if (oversizedAnchorGroupIndex is { } excludedAnchorIndex)
+        {
+            retainedIndexes.Add(excludedAnchorIndex);
+        }
+
         var messagesToSummarize = FlattenGroups(
             groups,
             Enumerable.Range(0, groups.Count).Where(index => !retainedIndexes.Contains(index)));
-        if (messagesToSummarize.Count == 0)
+        if (messagesToSummarize.Count == 0 && oversizedAnchorGroupIndex is null)
         {
             return null;
         }
+
+        var oversizedAnchorMessage = oversizedAnchorGroupIndex is { } oversizedIndex
+            ? groups[oversizedIndex].Messages.LastOrDefault(static message => message.Role is LocalAgentConversationRole.User)
+            : null;
 
         return new LocalAgentCompactionPreparation(
             Trigger: trigger,
@@ -83,7 +98,8 @@ internal static class LocalAgentCompactionPlanner
             AnchorContentId: anchorContentId,
             IsSplitTurn: isSplitTurn,
             TokensBefore: tokensBefore,
-            PreviousSummary: previousSummary);
+            PreviousSummary: previousSummary,
+            OversizedAnchorMessage: oversizedAnchorMessage);
     }
 
     private static long ResolveRetainedPromptBudget(
@@ -106,27 +122,28 @@ internal static class LocalAgentCompactionPlanner
         return Math.Max(Math.Min(resolvedPromptBudget, preferredRetainedBudget), 1L);
     }
 
-    private static (IReadOnlyList<int> TurnPrefixIndexes, IReadOnlyList<int> SuffixIndexes, bool IsSplitTurn) BuildPlan(
+    private static (IReadOnlyList<int> TurnPrefixIndexes, IReadOnlyList<int> SuffixIndexes, bool IsSplitTurn, int? OversizedAnchorGroupIndex) BuildPlan(
         IReadOnlyList<MessageGroup> groups,
         int? anchorGroupIndex,
         bool allowSplitTurn,
-        long availableForRetained)
+        long availableForRetained,
+        bool allowOversizedAnchorReduction)
     {
         if (groups.Count == 0)
         {
-            return ([], [], false);
+            return ([], [], false, null);
         }
 
         if (anchorGroupIndex is null)
         {
-            return ([], BuildContiguousSuffix(groups, availableForRetained), false);
+            return ([], BuildContiguousSuffix(groups, availableForRetained), false, null);
         }
 
         var anchoredSuffixIndexes = BuildSuffixFromStart(groups, anchorGroupIndex.Value);
         var anchoredSuffixTokens = SumTokens(groups, anchoredSuffixIndexes);
         if (anchoredSuffixTokens <= availableForRetained)
         {
-            return ([], BuildContiguousSuffix(groups, availableForRetained, maximumStartIndex: anchorGroupIndex.Value), false);
+            return ([], BuildContiguousSuffix(groups, availableForRetained, maximumStartIndex: anchorGroupIndex.Value), false, null);
         }
 
         if (!allowSplitTurn)
@@ -137,31 +154,43 @@ internal static class LocalAgentCompactionPlanner
         var anchorTokens = groups[anchorGroupIndex.Value].Tokens;
         if (anchorTokens > availableForRetained)
         {
+            if (allowOversizedAnchorReduction)
+            {
+                var reducedSuffixIndexes = BuildContiguousSuffix(groups, availableForRetained, minimumStartIndexExclusive: anchorGroupIndex.Value);
+                return ([], reducedSuffixIndexes, true, anchorGroupIndex.Value);
+            }
+
             throw new InvalidOperationException("The latest user message is too large to keep within the resolved prompt budget.");
         }
 
         var remainingBudget = availableForRetained - anchorTokens;
         var suffixIndexes = BuildContiguousSuffix(groups, remainingBudget, minimumStartIndexExclusive: anchorGroupIndex.Value);
         var isSplitTurn = suffixIndexes.Count > 0 || anchorGroupIndex.Value < groups.Count - 1;
-        return ([anchorGroupIndex.Value], suffixIndexes, isSplitTurn);
+        return ([anchorGroupIndex.Value], suffixIndexes, isSplitTurn, null);
     }
 
-    private static (IReadOnlyList<int> TurnPrefixIndexes, IReadOnlyList<int> SuffixIndexes, bool IsSplitTurn) BuildAnchorOnlyPlan(
+    private static (IReadOnlyList<int> TurnPrefixIndexes, IReadOnlyList<int> SuffixIndexes, bool IsSplitTurn, int? OversizedAnchorGroupIndex) BuildAnchorOnlyPlan(
         IReadOnlyList<MessageGroup> groups,
         int? anchorGroupIndex,
-        long availableForRetained)
+        long availableForRetained,
+        bool allowOversizedAnchorReduction)
     {
         if (anchorGroupIndex is null)
         {
-            return ([], [], false);
+            return ([], [], false, null);
         }
 
         if (groups[anchorGroupIndex.Value].Tokens > availableForRetained)
         {
+            if (allowOversizedAnchorReduction)
+            {
+                return ([], [], anchorGroupIndex.Value < groups.Count - 1, anchorGroupIndex.Value);
+            }
+
             throw new InvalidOperationException("The latest user message is too large to keep within the resolved prompt budget.");
         }
 
-        return ([anchorGroupIndex.Value], [], anchorGroupIndex.Value < groups.Count - 1);
+        return ([anchorGroupIndex.Value], [], anchorGroupIndex.Value < groups.Count - 1, null);
     }
 
     private static IReadOnlyList<int> BuildContiguousSuffix(

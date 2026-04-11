@@ -24,6 +24,7 @@ internal sealed class LocalAgentTurnExecutorCompactionSummaryExecutor(ILocalAgen
                     SystemMessage = request.SystemMessage,
                     DeveloperInstructions = null,
                     ReasoningEffort = null,
+                    MaxOutputTokens = request.MaxOutputTokens,
                     Conversation =
                     [
                         new LocalAgentConversationMessage(

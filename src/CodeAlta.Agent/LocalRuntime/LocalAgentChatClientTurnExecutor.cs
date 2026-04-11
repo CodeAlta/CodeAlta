@@ -98,6 +98,7 @@ internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
         {
             ModelId = request.ModelId,
             Instructions = ComposeInstructions(request),
+            MaxOutputTokens = request.MaxOutputTokens,
             Tools = LocalAgentToolBridge.CreateDeclarations(request.Tools).ToList(),
             ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
             AllowMultipleToolCalls = true,

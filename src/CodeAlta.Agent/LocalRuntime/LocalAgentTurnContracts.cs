@@ -101,6 +101,11 @@ public sealed record LocalAgentTurnRequest
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the maximum number of output tokens the provider should generate when supported.
+    /// </summary>
+    public int? MaxOutputTokens { get; init; }
+
+    /// <summary>
     /// Gets or initializes the replayable conversation.
     /// </summary>
     public required IReadOnlyList<LocalAgentConversationMessage> Conversation { get; init; }

@@ -109,6 +109,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             StoredOutputEnabled = request.Provider.Profile?.SupportsStore == false ? null : false,
             PreviousResponseId = null,
             StreamingEnabled = true,
+            MaxOutputTokenCount = request.MaxOutputTokens,
         };
 
         foreach (var inputItem in CreateConversationItems(request.Conversation))

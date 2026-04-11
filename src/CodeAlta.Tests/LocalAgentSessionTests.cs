@@ -667,6 +667,45 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
+    public void LocalAgentCompactionPlanner_Preparation_ReducesOversizedLatestUserAnchorWhenConfigured()
+    {
+        var conversation = new[]
+        {
+            new LocalAgentConversationMessage(LocalAgentConversationRole.User, [new LocalAgentMessagePart.Text("Earlier prompt")]),
+            new LocalAgentConversationMessage(LocalAgentConversationRole.Assistant, [new LocalAgentMessagePart.Text("Earlier answer")]),
+            new LocalAgentConversationMessage(LocalAgentConversationRole.User, [new LocalAgentMessagePart.Text("Huge prompt " + new string('x', 2200))]),
+        };
+
+        var preparation = LocalAgentCompactionPlanner.Prepare(
+            LocalAgentCompactionTrigger.Threshold,
+            systemMessage: null,
+            developerInstructions: null,
+            conversation,
+            usage: null,
+            new LocalAgentTokenBudget(
+                ContextWindow: 800,
+                InputTokenLimit: 400,
+                OutputTokenLimit: 128,
+                UsablePromptBudget: 280,
+                ReservedOutputTokens: 64,
+                ReservedOverheadTokens: 64),
+            LocalAgentCompactionSettings.Default with
+            {
+                AllowOversizedAnchorReduction = true,
+                RecentSuffixTargetTokens = 160,
+            },
+            anchorContentId: "user:latest",
+            checkpointTokenEstimate: 64,
+            promptBudgetOverride: 200);
+
+        Assert.IsNotNull(preparation);
+        Assert.AreEqual(conversation[^1], preparation!.OversizedAnchorMessage);
+        CollectionAssert.DoesNotContain(preparation.MessagesToKeep.ToArray(), conversation[^1]);
+        CollectionAssert.DoesNotContain(preparation.MessagesToSummarize.ToArray(), conversation[^1]);
+        Assert.AreEqual("user:latest", preparation.AnchorContentId);
+    }
+
+    [TestMethod]
     public async Task LocalAgentSession_CompactAsync_UsesSummarizerExecutorAndPreviousSummaryOnUpdate()
     {
         using var temp = TestTempDirectory.Create();
@@ -758,6 +797,341 @@ public sealed class LocalAgentSessionTests
         Assert.IsFalse(summaryPayloads[0].Contains("<previous-summary>", StringComparison.Ordinal));
         StringAssert.Contains(summaryPayloads[1], "<previous-summary>");
         StringAssert.Contains(summaryPayloads[1], "## Objective");
+    }
+
+    [TestMethod]
+    public async Task LocalAgentSession_CompactAsync_PassesConfiguredSummaryOutputTokenLimitToSummarizer()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(LocalAgentCompactionSettings.Default with
+        {
+            SummaryOutputTokens = 320,
+        });
+        var summary = CreateSummary("session-summary-output-limit");
+        var state = CreateState("session-summary-output-limit");
+        await store.UpsertProviderAsync(provider).ConfigureAwait(false);
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var observedMaxOutputTokens = new List<int?>();
+        await using var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                (request, _, _) =>
+                {
+                    observedMaxOutputTokens.Add(request.MaxOutputTokens);
+                    return Task.FromResult(
+                        new LocalAgentTurnResponse
+                        {
+                            AssistantMessage = new LocalAgentConversationMessage(
+                                LocalAgentConversationRole.Assistant,
+                                [new LocalAgentMessagePart.Text(
+                                    """
+                                    ## Objective
+                                    Keep working.
+                                    ## Active User Request
+                                    Follow up.
+                                    ## Constraints
+                                    - Preserve behavior.
+                                    ## Progress
+                                    ### Done
+                                    - Captured state.
+                                    ### In Progress
+                                    - Compaction.
+                                    ### Blocked
+                                    - None recorded.
+                                    ## Decisions
+                                    - Limit summary output.
+                                    ## Next Steps
+                                    - Continue.
+                                    ## Critical Context
+                                    - Keep the summary tight.
+                                    ## Relevant Files
+                                    - None tracked.
+                                    """)]),
+                        });
+                },
+                (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("First answer " + new string('a', 160))]),
+                    }),
+                (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Second answer " + new string('b', 160))]),
+                    })),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 180)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 180)) }).ConfigureAwait(false);
+
+        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+        Assert.IsNotNull(outcome);
+        Assert.IsTrue(outcome.Success);
+        CollectionAssert.AreEqual(new int?[] { 320 }, observedMaxOutputTokens);
+    }
+
+    [TestMethod]
+    public async Task LocalAgentSession_CompactAsync_ChunksOversizedSummaryInput()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(LocalAgentCompactionSettings.Default with
+        {
+            SummaryInputTokens = 360,
+            RecentSuffixTargetTokens = 180,
+            MaxChunkPasses = 4,
+        });
+        var summary = CreateSummary("session-chunked-compaction");
+        var state = CreateState("session-chunked-compaction");
+        await store.UpsertProviderAsync(provider).ConfigureAwait(false);
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var summaryPayloads = new List<string>();
+        await using var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                (request, _, _) =>
+                {
+                    var payload = Assert.IsInstanceOfType<LocalAgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value;
+                    summaryPayloads.Add(payload);
+                    return Task.FromResult(
+                        new LocalAgentTurnResponse
+                        {
+                            AssistantMessage = new LocalAgentConversationMessage(
+                                LocalAgentConversationRole.Assistant,
+                                [new LocalAgentMessagePart.Text(
+                                    """
+                                    ## Objective
+                                    Continue the task.
+                                    ## Active User Request
+                                    Keep working.
+                                    ## Constraints
+                                    - Preserve behavior.
+                                    ## Progress
+                                    ### Done
+                                    - Captured progress.
+                                    ### In Progress
+                                    - Continue.
+                                    ### Blocked
+                                    - None recorded.
+                                    ## Decisions
+                                    - Use chunked compaction.
+                                    ## Next Steps
+                                    - Continue from the suffix.
+                                    ## Critical Context
+                                    - Important details retained.
+                                    ## Relevant Files
+                                    - None tracked.
+                                    """)]),
+                        });
+                },
+                (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("First answer " + new string('a', 320))]),
+                    }),
+                (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Second answer " + new string('b', 320))]),
+                    }),
+                (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Third answer " + new string('c', 320))]),
+                    })),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 240)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 240)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Third prompt " + new string('z', 240)) }).ConfigureAwait(false);
+
+        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+        Assert.IsNotNull(outcome);
+        Assert.IsTrue(outcome.Success);
+        Assert.IsTrue(summaryPayloads.Count >= 2);
+        Assert.IsTrue(summaryPayloads.Skip(1).Any(static payload => payload.Contains("<previous-summary>", StringComparison.Ordinal)));
+
+        var history = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var checkpointEvent = history
+            .OfType<AgentRawEvent>()
+            .Single(static evt => evt.BackendEventType == "local.compactionCheckpoint");
+        var checkpoint = checkpointEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint);
+        Assert.IsNotNull(checkpoint);
+        Assert.IsTrue(checkpoint!.ChunkCount > 1);
+    }
+
+    [TestMethod]
+    public async Task LocalAgentSession_SendAsync_ReducesOversizedLatestUserAnchorBeforeTurnExecution()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(LocalAgentCompactionSettings.Default with
+        {
+            TriggerThreshold = 0.60,
+            ReservedOutputTokens = 128,
+            ReservedOverheadTokens = 96,
+            RecentSuffixTargetTokens = 160,
+            SummaryInputTokens = 320,
+            SummaryOutputTokens = 320,
+            MaxChunkPasses = 4,
+            AllowOversizedAnchorReduction = true,
+        });
+        var summary = CreateSummary("session-oversized-anchor");
+        var state = CreateState("session-oversized-anchor");
+        await store.UpsertProviderAsync(provider).ConfigureAwait(false);
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var summaryPayloads = new List<string>();
+        var actualTurnPayloads = new List<string>();
+        await using var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [
+                    new AgentModelInfo(
+                        "gpt-5.4",
+                        "GPT-5.4",
+                        Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["contextWindow"] = 700L,
+                            ["inputTokenLimit"] = 540L,
+                            ["outputTokenLimit"] = 320L,
+                        }),
+                ],
+                (request, _, _) =>
+                {
+                    var payload = Assert.IsInstanceOfType<LocalAgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value;
+                    summaryPayloads.Add(payload);
+                    var summaryText = request.SystemMessage?.Contains("oversized-anchor reducer", StringComparison.Ordinal) == true
+                        ? """
+                          ## Task
+                          - Update the compaction system for large sessions.
+                          ## Explicit Requirements
+                          - Preserve recent knowledge.
+                          - Keep configurable compaction targets.
+                          - Cover very large prompts and oversized attachments.
+                          ## Files and Identifiers
+                          - doc/specs/agent_compaction_specs.md
+                          - tmp/agent_compaction_plan_v2.md
+                          ## Exact Literals and Errors
+                          - "target_context_ratio_ideal = 0.03"
+                          """
+                        : """
+                          ## Objective
+                          Update compaction behavior for large sessions.
+                          ## Active User Request
+                          Implement the remaining compaction plan while preserving the latest task via an anchor synopsis.
+                          ## Constraints
+                          - Keep configurable limits.
+                          - Prefer recent context.
+                          ## Progress
+                          ### Done
+                          - Reduced the oversized latest user message into a compact anchor.
+                          ### In Progress
+                          - Continue implementing the compaction improvements.
+                          ### Blocked
+                          - None recorded.
+                          ## Decisions
+                          - Use a compact synopsis instead of replaying the full oversized prompt.
+                          ## Next Steps
+                          - Continue the requested implementation work.
+                          ## Critical Context
+                          - The large latest user input was intentionally reduced before replay.
+                          ## Relevant Files
+                          - doc/specs/agent_compaction_specs.md
+                          - tmp/agent_compaction_plan_v2.md
+                          """;
+                    return Task.FromResult(
+                        new LocalAgentTurnResponse
+                        {
+                            AssistantMessage = new LocalAgentConversationMessage(
+                                LocalAgentConversationRole.Assistant,
+                                [new LocalAgentMessagePart.Text(summaryText)]),
+                        });
+                },
+                (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Initial answer.")]),
+                        Usage = CreateUsageSnapshot(120, 40),
+                    }),
+                (request, _, _) =>
+                {
+                    actualTurnPayloads.Add(Assert.IsInstanceOfType<LocalAgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value);
+                    return Task.FromResult(
+                        new LocalAgentTurnResponse
+                        {
+                            AssistantMessage = new LocalAgentConversationMessage(
+                                LocalAgentConversationRole.Assistant,
+                                [new LocalAgentMessagePart.Text("Handled the oversized request.")]),
+                            Usage = CreateUsageSnapshot(140, 50),
+                        });
+                }),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Normal prompt") }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = AgentInput.Text(
+                "Please finish the compaction v2 implementation. " +
+                "Requirements: " +
+                string.Join(
+                    Environment.NewLine,
+                    Enumerable.Range(1, 160).Select(index => $"{index}. Keep detail #{index} and mention doc/specs/agent_compaction_specs.md"))),
+        }).ConfigureAwait(false);
+
+        Assert.IsTrue(summaryPayloads.Count >= 2);
+        Assert.IsTrue(summaryPayloads.Any(static payload => payload.Contains("<codealta-oversized-anchor-request", StringComparison.Ordinal)));
+        Assert.IsTrue(summaryPayloads.Any(static payload => payload.Contains("<oversized-anchor-synopsis>", StringComparison.Ordinal)));
+        Assert.AreEqual(1, actualTurnPayloads.Count);
+        StringAssert.Contains(actualTurnPayloads[0], "codealta-compaction-checkpoint");
+        Assert.IsFalse(actualTurnPayloads[0].Contains("Keep detail #160", StringComparison.Ordinal));
+
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsNotNull(persistedState);
+        Assert.AreEqual("threshold", persistedState.LastCompactionTrigger);
+
+        var history = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var checkpointEvent = history
+            .OfType<AgentRawEvent>()
+            .Last(static evt => evt.BackendEventType == "local.compactionCheckpoint");
+        var checkpoint = checkpointEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint);
+        Assert.IsNotNull(checkpoint);
+        Assert.IsTrue(checkpoint!.OversizedAnchorReduced);
     }
 
     [TestMethod]
@@ -1178,7 +1552,8 @@ public sealed class LocalAgentSessionTests
             CancellationToken cancellationToken = default)
         {
             if (_summaryHandler is not null &&
-                request.SystemMessage?.Contains("CodeAlta compaction summarizer", StringComparison.Ordinal) == true)
+                (request.SystemMessage?.Contains("CodeAlta compaction summarizer", StringComparison.Ordinal) == true ||
+                 request.SystemMessage?.Contains("CodeAlta oversized-anchor reducer", StringComparison.Ordinal) == true))
             {
                 return _summaryHandler(request, onUpdate, cancellationToken);
             }

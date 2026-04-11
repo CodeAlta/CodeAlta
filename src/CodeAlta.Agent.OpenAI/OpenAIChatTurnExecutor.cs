@@ -207,6 +207,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             ToolChoice = request.Tools.Count > 0 ? ChatToolChoice.CreateAutoChoice() : null,
             AllowParallelToolCalls = request.Tools.Count > 0,
             StoredOutputEnabled = request.Provider.Profile?.SupportsStore == false ? null : false,
+            MaxOutputTokenCount = request.MaxOutputTokens,
         };
 
         if ((request.Provider.Profile?.SupportsReasoningEffort ?? true) &&

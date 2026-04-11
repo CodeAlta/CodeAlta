@@ -28,7 +28,8 @@ internal sealed record LocalAgentCompactionPreparation(
     string? AnchorContentId,
     bool IsSplitTurn,
     LocalAgentTokenEstimate TokensBefore,
-    string? PreviousSummary);
+    string? PreviousSummary,
+    LocalAgentConversationMessage? OversizedAnchorMessage = null);
 
 internal sealed record LocalAgentCompactionResult(
     string Summary,

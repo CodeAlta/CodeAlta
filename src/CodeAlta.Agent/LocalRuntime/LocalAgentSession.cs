@@ -765,6 +765,9 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         {
             long? promptBudgetOverride = attempt == 0 ? null : budget.UsablePromptBudget ?? currentPromptTokens;
             var keepAnchorOnly = attempt == 2;
+            var plannerSettings = attempt < 2
+                ? settings with { AllowOversizedAnchorReduction = false }
+                : settings;
             try
             {
                 preparation = LocalAgentCompactionPlanner.Prepare(
@@ -774,7 +777,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                     _conversation,
                     _state.Usage,
                     budget,
-                    settings,
+                    plannerSettings,
                     FindLatestUserContentId(),
                     checkpointTokenEstimate,
                     promptBudgetOverride,
@@ -906,13 +909,20 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             CompactionCheckpointEventType,
             JsonSerializer.SerializeToElement(checkpoint, AgentJsonSerializerContext.Default.LocalAgentCompactionCheckpoint),
             runId);
+        var completionMessage = $"{trigger} local compaction summarized {result.MessagesSummarized} messages.";
+        if (result.CompressionRatio is { } realizedCompressionRatio &&
+            realizedCompressionRatio > settings.TargetContextRatioMax)
+        {
+            completionMessage += $" Post-compaction ratio {realizedCompressionRatio:P1} exceeded target {settings.TargetContextRatioMax:P1} because retained context remained expensive.";
+        }
+
         var completed = new AgentSessionUpdateEvent(
             BackendId,
             SessionId,
             now,
             runId,
             AgentSessionUpdateKind.CompactionCompleted,
-            $"{trigger} local compaction summarized {result.MessagesSummarized} messages.",
+            completionMessage,
             Usage: usage);
         await AppendEventsAsync([started, rawCheckpoint, completed], cancellationToken).ConfigureAwait(false);
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
@@ -1268,6 +1278,17 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 if (GetPath(toolCall.Arguments, "path") is { Length: > 0 } readPath)
                 {
                     readFiles.Add(Resolve(readPath));
+                }
+
+                break;
+            case "grep":
+                if (GetPath(toolCall.Arguments, "path") is { Length: > 0 } grepPath)
+                {
+                    var resolvedGrepPath = Resolve(grepPath);
+                    if (File.Exists(resolvedGrepPath))
+                    {
+                        readFiles.Add(resolvedGrepPath);
+                    }
                 }
 
                 break;
