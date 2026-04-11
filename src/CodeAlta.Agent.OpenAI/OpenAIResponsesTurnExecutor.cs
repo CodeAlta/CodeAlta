@@ -27,11 +27,19 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             var client = OpenAIProviderSdkFactory.CreateResponsesClient(provider, request.ModelId);
             var options = CreateRequestPayload(request);
             ResponseResult? completedResponse = null;
+            ResponseResult? latestResponse = null;
+            var streamedOutputItems = new SortedDictionary<int, ResponseItem>();
 
             await foreach (var update in client.CreateResponseStreamingAsync(options, cancellationToken).ConfigureAwait(false))
             {
                 switch (update)
                 {
+                    case StreamingResponseCreatedUpdate created:
+                        latestResponse = created.Response;
+                        break;
+                    case StreamingResponseInProgressUpdate inProgress:
+                        latestResponse = inProgress.Response;
+                        break;
                     case StreamingResponseOutputTextDeltaUpdate outputTextDelta when !string.IsNullOrEmpty(outputTextDelta.Delta):
                         await onUpdate(
                             new LocalAgentTurnDelta
@@ -39,6 +47,16 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                                 Kind = AgentContentKind.Assistant,
                                 ContentId = outputTextDelta.ItemId,
                                 Text = outputTextDelta.Delta,
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                        break;
+                    case StreamingResponseRefusalDeltaUpdate refusalDelta when !string.IsNullOrEmpty(refusalDelta.Delta):
+                        await onUpdate(
+                            new LocalAgentTurnDelta
+                            {
+                                Kind = AgentContentKind.Assistant,
+                                ContentId = refusalDelta.ItemId,
+                                Text = refusalDelta.Delta,
                             },
                             cancellationToken).ConfigureAwait(false);
                         break;
@@ -62,15 +80,40 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                             },
                             cancellationToken).ConfigureAwait(false);
                         break;
+                    case StreamingResponseOutputItemDoneUpdate outputItemDone when outputItemDone.Item is not null:
+                        streamedOutputItems[outputItemDone.OutputIndex] = outputItemDone.Item;
+                        break;
+                    case StreamingResponseIncompleteUpdate incomplete:
+                        latestResponse = incomplete.Response;
+                        completedResponse = incomplete.Response;
+                        break;
+                    case StreamingResponseFailedUpdate failed:
+                        throw CreateTurnExecutionException(CreateResponseFailureException(failed.Response, "failed"));
+                    case StreamingResponseErrorUpdate error:
+                        throw CreateTurnExecutionException(CreateStreamErrorException(error));
                     case StreamingResponseCompletedUpdate completed:
+                        latestResponse = completed.Response;
                         completedResponse = completed.Response;
                         break;
                 }
             }
 
+            completedResponse ??= TryCreateResponseWithoutTerminalPayload(request, latestResponse, streamedOutputItems);
+
             if (completedResponse is null)
             {
-                throw new InvalidOperationException("The OpenAI Responses stream completed without a final response payload.");
+                throw new InvalidOperationException("The OpenAI Responses stream completed without a terminal response payload or reconstructable output.");
+            }
+
+            if (completedResponse.Status is ResponseStatus.Failed)
+            {
+                throw CreateTurnExecutionException(CreateResponseFailureException(completedResponse, "failed"));
+            }
+
+            if (completedResponse.Status is ResponseStatus.Incomplete &&
+                completedResponse.OutputItems.Count == 0)
+            {
+                throw CreateTurnExecutionException(CreateResponseFailureException(completedResponse, "incomplete"));
             }
 
             var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(completedResponse);
@@ -96,6 +139,40 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         {
             throw CreateTurnExecutionException(ex);
         }
+    }
+
+    private static ResponseResult? TryCreateResponseWithoutTerminalPayload(
+        LocalAgentTurnRequest request,
+        ResponseResult? latestResponse,
+        IReadOnlyDictionary<int, ResponseItem> streamedOutputItems)
+    {
+        if (latestResponse?.OutputItems.Count > 0)
+        {
+            return latestResponse;
+        }
+
+        if (streamedOutputItems.Count == 0)
+        {
+            return null;
+        }
+
+        var response = new ResponseResult
+        {
+            Id = latestResponse?.Id,
+            Model = latestResponse?.Model ?? request.ModelId,
+            CreatedAt = latestResponse?.CreatedAt ?? DateTimeOffset.UtcNow,
+            Status = latestResponse?.Status ?? ResponseStatus.Completed,
+            Error = latestResponse?.Error,
+            Usage = latestResponse?.Usage,
+            IncompleteStatusDetails = latestResponse?.IncompleteStatusDetails,
+        };
+
+        foreach (var item in streamedOutputItems.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
+        {
+            response.OutputItems.Add(item);
+        }
+
+        return response;
     }
 
     private static CreateResponseOptions CreateRequestPayload(LocalAgentTurnRequest request)
@@ -454,6 +531,53 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             }).Where(static value => !string.IsNullOrWhiteSpace(value)));
     }
 
+    private static Exception CreateResponseFailureException(ResponseResult response, string fallbackStatus)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        var message = response.Error?.Message;
+        if (string.IsNullOrWhiteSpace(message) &&
+            response.IncompleteStatusDetails?.Reason is { } incompleteReason)
+        {
+            message = $"The OpenAI Responses request ended {fallbackStatus} ({incompleteReason}).";
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            message = $"The OpenAI Responses request ended {fallbackStatus}.";
+        }
+
+        if (response.Error is { Code: { } errorCode } &&
+            !string.IsNullOrWhiteSpace(errorCode.ToString()) &&
+            !message.Contains(errorCode.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            message = $"{errorCode}: {message}";
+        }
+
+        return new InvalidOperationException(message);
+    }
+
+    private static Exception CreateStreamErrorException(StreamingResponseErrorUpdate error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+
+        var message = string.IsNullOrWhiteSpace(error.Message)
+            ? "The OpenAI Responses stream reported an unknown error."
+            : error.Message;
+        if (!string.IsNullOrWhiteSpace(error.Code) &&
+            !message.Contains(error.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            message = $"{error.Code}: {message}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(error.Param))
+        {
+            message = $"{message} (param: {error.Param})";
+        }
+
+        return new InvalidOperationException(message);
+    }
+
     private static LocalAgentTurnExecutionException CreateTurnExecutionException(Exception ex)
         => new(
             new LocalAgentTurnFailure(
@@ -465,5 +589,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         => !string.IsNullOrWhiteSpace(message) &&
            (message.Contains("context length", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("maximum context length", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase));
+            message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("prompt is too long", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("context window", StringComparison.OrdinalIgnoreCase));
 }

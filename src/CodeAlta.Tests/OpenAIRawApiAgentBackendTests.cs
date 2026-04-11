@@ -311,6 +311,63 @@ public sealed class OpenAIRawApiAgentBackendTests
             e.Content == "Thinking through the repository layout."));
     }
 
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ReconstructsResponseWhenStreamEndsWithoutCompletedPayload()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateCreatedResponseUpdate(
+                    responseId: "response-recovered",
+                    modelId: "gpt-test"),
+                CreateOutputItemDoneUpdate(
+                    outputIndex: 0,
+                    item: ResponseItem.CreateAssistantMessageItem("Recovered answer.", [])),
+            ],
+        ]);
+
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        Assert.AreEqual("Recovered answer.", text);
+        Assert.AreEqual("response-recovered", response.ProviderSessionId);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_MapsErrorUpdateToContextOverflowFailure()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateErrorResponseUpdate(
+                    code: "invalid_prompt",
+                    message: "maximum context length exceeded"),
+            ],
+        ]);
+
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+            () => executor.ExecuteTurnAsync(
+                CreateTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+
+        Assert.IsTrue(exception.Failure.IsContextOverflow);
+        StringAssert.Contains(exception.Message, "maximum context length exceeded");
+    }
+
     private static StreamingResponseUpdate CreateAssistantResponseUpdate(
         string responseId,
         string modelId,
@@ -341,6 +398,55 @@ public sealed class OpenAIRawApiAgentBackendTests
             }
             """);
     }
+
+    private static StreamingResponseUpdate CreateCreatedResponseUpdate(
+        string responseId,
+        string modelId)
+    {
+        var response = new ResponseResult
+        {
+            Id = responseId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Model = modelId,
+            Status = ResponseStatus.InProgress,
+        };
+        return DeserializeStreamingResponseUpdate(
+            $$"""
+            {
+              "type": "response.created",
+              "sequence_number": 0,
+              "response": {{SerializeModel(response)}}
+            }
+            """);
+    }
+
+    private static StreamingResponseUpdate CreateOutputItemDoneUpdate(
+        int outputIndex,
+        ResponseItem item)
+        => DeserializeStreamingResponseUpdate(
+            $$"""
+            {
+              "type": "response.output_item.done",
+              "sequence_number": 0,
+              "output_index": {{outputIndex}},
+              "item": {{SerializeModel(item)}}
+            }
+            """);
+
+    private static StreamingResponseUpdate CreateErrorResponseUpdate(
+        string? code,
+        string message,
+        string? param = null)
+        => DeserializeStreamingResponseUpdate(
+            $$"""
+            {
+              "type": "error",
+              "sequence_number": 0,
+              "code": {{SerializeJsonStringOrNull(code)}},
+              "message": {{SerializeJsonStringOrNull(message)}},
+              "param": {{SerializeJsonStringOrNull(param)}}
+            }
+            """);
 
     private static StreamingResponseUpdate CreateToolCallResponseUpdate(
         string responseId,
@@ -432,6 +538,47 @@ public sealed class OpenAIRawApiAgentBackendTests
     private static string SerializeModel<T>(T model)
         where T : notnull
         => ((IPersistableModel<T>)model).Write(new ModelReaderWriterOptions("J")).ToString();
+
+    private static string SerializeJsonStringOrNull(string? value)
+        => value is null ? "null" : JsonSerializer.Serialize(value);
+
+    private static LocalAgentTurnRequest CreateTurnRequest()
+        => new()
+        {
+            Provider = new LocalAgentProviderDescriptor
+            {
+                ProtocolFamily = "openai-responses",
+                ProviderKey = "openai",
+                DisplayName = "OpenAI Responses",
+                BackendId = new AgentBackendId("openai-responses"),
+                TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            },
+            BackendId = new AgentBackendId("openai-responses"),
+            SessionId = "session-1",
+            RunId = new AgentRunId("run-1"),
+            ModelId = "gpt-test",
+            ModelInfo = new AgentModelInfo(
+                "gpt-test",
+                DisplayName: "GPT Test",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["inputTokenLimit"] = 200000L,
+                }),
+            Conversation =
+            [
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.User,
+                    [new LocalAgentMessagePart.Text("Hello")]),
+            ],
+            Tools = [],
+            State = new LocalAgentSessionState
+            {
+                SessionId = "session-1",
+                ProtocolFamily = "openai-responses",
+                ProviderKey = "openai",
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+        };
 
     private sealed class RecordingOpenAIResponseClient(IReadOnlyList<IReadOnlyList<StreamingResponseUpdate>> responseBatches)
         : ResponsesClient(new ApiKeyCredential("test-key"), new OpenAIClientOptions())
