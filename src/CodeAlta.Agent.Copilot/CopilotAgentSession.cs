@@ -114,7 +114,7 @@ public sealed class CopilotAgentSession : ICopilotAgentSession, IAgentCompaction
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var result = await Session.Rpc.Compaction.CompactAsync(cancellationToken).ConfigureAwait(false);
+        var result = await Session.Rpc.History.CompactAsync(cancellationToken).ConfigureAwait(false);
         var tokensRemoved = checked((long)result.TokensRemoved);
         var messagesRemoved = checked((int)result.MessagesRemoved);
         var message = result.Success

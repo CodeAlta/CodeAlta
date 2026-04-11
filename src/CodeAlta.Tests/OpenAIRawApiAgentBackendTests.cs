@@ -320,17 +320,18 @@ public sealed class OpenAIRawApiAgentBackendTests
         int inputTokens = 0,
         int outputTokens = 0)
     {
-        var response = OpenAIResponsesModelFactory.OpenAIResponse(
-            id: responseId,
-            createdAt: DateTimeOffset.UtcNow,
-            model: modelId,
-            outputItems:
-            [
-                ResponseItem.CreateAssistantMessageItem(text, []),
-                OpenAIResponsesModelFactory.ReasoningResponseItem(
-                    encryptedContent: encryptedReasoning,
-                    summaryText: reasoningText),
-            ]);
+        var response = new ResponseResult
+        {
+            Id = responseId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Model = modelId,
+        };
+        response.OutputItems.Add(ResponseItem.CreateAssistantMessageItem(text, []));
+        response.OutputItems.Add(
+            new ReasoningResponseItem(reasoningText)
+            {
+                EncryptedContent = encryptedReasoning,
+            });
         return DeserializeStreamingResponseUpdate(
             $$"""
             {
@@ -349,19 +350,18 @@ public sealed class OpenAIRawApiAgentBackendTests
         string arguments,
         string summaryText)
     {
-        var response = OpenAIResponsesModelFactory.OpenAIResponse(
-            id: responseId,
-            createdAt: DateTimeOffset.UtcNow,
-            model: modelId,
-            outputItems:
-            [
-                OpenAIResponsesModelFactory.ReasoningResponseItem(summaryText: summaryText),
-                ResponseItem.CreateFunctionCallItem(callId, toolName, BinaryData.FromString(arguments)),
-            ]);
+        var response = new ResponseResult
+        {
+            Id = responseId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Model = modelId,
+        };
+        response.OutputItems.Add(new ReasoningResponseItem(summaryText));
+        response.OutputItems.Add(ResponseItem.CreateFunctionCallItem(callId, toolName, BinaryData.FromString(arguments)));
         return CreateCompletedUpdate(response);
     }
 
-    private static StreamingResponseUpdate CreateCompletedUpdate(OpenAIResponse response)
+    private static StreamingResponseUpdate CreateCompletedUpdate(ResponseResult response)
         => DeserializeStreamingResponseUpdate(
             $$"""
             {
@@ -371,7 +371,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             }
             """);
 
-    private static string SerializeResponseWithUsage(OpenAIResponse response, int inputTokens, int outputTokens)
+    private static string SerializeResponseWithUsage(ResponseResult response, int inputTokens, int outputTokens)
     {
         using var source = JsonDocument.Parse(SerializeModel(response));
         using var stream = new MemoryStream();
@@ -434,16 +434,16 @@ public sealed class OpenAIRawApiAgentBackendTests
         => ((IPersistableModel<T>)model).Write(new ModelReaderWriterOptions("J")).ToString();
 
     private sealed class RecordingOpenAIResponseClient(IReadOnlyList<IReadOnlyList<StreamingResponseUpdate>> responseBatches)
-        : OpenAIResponseClient("test-model", new ApiKeyCredential("test-key"), new OpenAIClientOptions())
+        : ResponsesClient(new ApiKeyCredential("test-key"), new OpenAIClientOptions())
     {
         public List<ResponseRequestRecord> Requests { get; } = [];
 
         public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
-            IEnumerable<ResponseItem> inputItems,
-            ResponseCreationOptions options = default!,
+            CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
-            Requests.Add(new ResponseRequestRecord(inputItems.ToArray(), CloneOptions(options)));
+            var clonedOptions = CloneOptions(options);
+            Requests.Add(new ResponseRequestRecord(clonedOptions.InputItems.ToArray(), clonedOptions));
             var requestIndex = Requests.Count - 1;
             var updates = requestIndex < responseBatches.Count
                 ? responseBatches[requestIndex]
@@ -451,15 +451,17 @@ public sealed class OpenAIRawApiAgentBackendTests
             return new TestAsyncCollectionResult<StreamingResponseUpdate>(updates);
         }
 
-        private static ResponseCreationOptions CloneOptions(ResponseCreationOptions? options)
+        private static CreateResponseOptions CloneOptions(CreateResponseOptions? options)
         {
-            var clone = new ResponseCreationOptions
+            var clone = new CreateResponseOptions
             {
+                Model = options?.Model,
                 Instructions = options?.Instructions,
                 ParallelToolCallsEnabled = options?.ParallelToolCallsEnabled,
                 StoredOutputEnabled = options?.StoredOutputEnabled,
                 PreviousResponseId = options?.PreviousResponseId,
                 ToolChoice = options?.ToolChoice,
+                StreamingEnabled = options?.StreamingEnabled,
                 ReasoningOptions = options?.ReasoningOptions is null
                     ? null
                     : new ResponseReasoningOptions
@@ -471,6 +473,11 @@ public sealed class OpenAIRawApiAgentBackendTests
 
             if (options is not null)
             {
+                foreach (var inputItem in options.InputItems)
+                {
+                    clone.InputItems.Add(inputItem);
+                }
+
                 foreach (var tool in options.Tools)
                 {
                     clone.Tools.Add(tool);
@@ -520,7 +527,7 @@ public sealed class OpenAIRawApiAgentBackendTests
 
     private sealed record ResponseRequestRecord(
         IReadOnlyList<ResponseItem> InputItems,
-        ResponseCreationOptions Options);
+        CreateResponseOptions Options);
 
     private sealed record ChatRequestRecord(
         IReadOnlyList<ChatMessage> Messages,

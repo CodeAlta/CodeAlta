@@ -99,7 +99,7 @@ public sealed class OpenAIProviderOptions
     /// </summary>
     public ModelsDevCatalogService? ModelCatalog { get; set; }
 
-    internal Func<string?, OpenAIResponseClient>? ResponsesClientFactory { get; set; }
+    internal Func<string?, ResponsesClient>? ResponsesClientFactory { get; set; }
 
     internal Func<string?, ChatClient>? ChatClientFactory { get; set; }
 

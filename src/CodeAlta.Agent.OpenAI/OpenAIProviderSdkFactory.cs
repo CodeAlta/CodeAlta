@@ -15,10 +15,10 @@ internal static class OpenAIProviderSdkFactory
     public static OpenAIClient CreateClient(OpenAIProviderOptions provider)
         => new(CreateCredential(provider), CreateClientOptions(provider));
 
-    public static OpenAIResponseClient CreateResponsesClient(OpenAIProviderOptions provider, string? model)
+    public static ResponsesClient CreateResponsesClient(OpenAIProviderOptions provider, string? model)
         => provider.ResponsesClientFactory is not null
             ? provider.ResponsesClientFactory(model)
-            : new OpenAIResponseClient(model ?? string.Empty, CreateCredential(provider), CreateClientOptions(provider));
+            : new ResponsesClient(CreateCredential(provider), CreateClientOptions(provider));
 
     public static ChatClient CreateChatClient(OpenAIProviderOptions provider, string? model)
         => provider.ChatClientFactory is not null

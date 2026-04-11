@@ -25,10 +25,10 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         try
         {
             var client = OpenAIProviderSdkFactory.CreateResponsesClient(provider, request.ModelId);
-            var (inputItems, options) = CreateRequestPayload(request);
-            OpenAIResponse? completedResponse = null;
+            var options = CreateRequestPayload(request);
+            ResponseResult? completedResponse = null;
 
-            await foreach (var update in client.CreateResponseStreamingAsync(inputItems, options, cancellationToken).ConfigureAwait(false))
+            await foreach (var update in client.CreateResponseStreamingAsync(options, cancellationToken).ConfigureAwait(false))
             {
                 switch (update)
                 {
@@ -98,16 +98,23 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         }
     }
 
-    private static (IReadOnlyList<ResponseItem> InputItems, ResponseCreationOptions Options) CreateRequestPayload(LocalAgentTurnRequest request)
+    private static CreateResponseOptions CreateRequestPayload(LocalAgentTurnRequest request)
     {
         var toolDefinitions = request.Tools.Select(CreateFunctionTool).Cast<ResponseTool>().ToArray();
-        var options = new ResponseCreationOptions
+        var options = new CreateResponseOptions
         {
+            Model = request.ModelId,
             Instructions = ComposeInstructions(request),
             ParallelToolCallsEnabled = toolDefinitions.Length > 0,
             StoredOutputEnabled = request.Provider.Profile?.SupportsStore == false ? null : false,
             PreviousResponseId = null,
+            StreamingEnabled = true,
         };
+
+        foreach (var inputItem in CreateConversationItems(request.Conversation))
+        {
+            options.InputItems.Add(inputItem);
+        }
 
         foreach (var tool in toolDefinitions)
         {
@@ -138,7 +145,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             };
         }
 
-        return (CreateConversationItems(request.Conversation), options);
+        return options;
     }
 
     private static string? ComposeInstructions(LocalAgentTurnRequest request)
@@ -325,7 +332,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             strictModeEnabled: true,
             functionDescription: tool.Spec.Description);
 
-    private static (LocalAgentConversationMessage Message, IReadOnlyList<string?> PartContentIds) MapAssistantMessage(OpenAIResponse response)
+    private static (LocalAgentConversationMessage Message, IReadOnlyList<string?> PartContentIds) MapAssistantMessage(ResponseResult response)
     {
         var parts = new List<LocalAgentMessagePart>();
         var partContentIds = new List<string?>();
@@ -378,7 +385,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         return (new LocalAgentConversationMessage(LocalAgentConversationRole.Assistant, parts), partContentIds);
     }
 
-    private static AgentSessionUsage? CreateUsage(LocalAgentTurnRequest request, OpenAIResponse response)
+    private static AgentSessionUsage? CreateUsage(LocalAgentTurnRequest request, ResponseResult response)
     {
         if (response.Usage is null)
         {
@@ -396,7 +403,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt);
     }
 
-    private static JsonElement? CreateProviderState(OpenAIResponse response)
+    private static JsonElement? CreateProviderState(ResponseResult response)
     {
         if (string.IsNullOrWhiteSpace(response.Id))
         {
