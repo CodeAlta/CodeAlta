@@ -973,6 +973,104 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
+    public void LocalAgentCompactionPlanner_LargeToolHeavyConversation_StaysWithinV2CompressionTargets()
+    {
+        var conversation = new List<LocalAgentConversationMessage>
+        {
+            new(LocalAgentConversationRole.User, [new LocalAgentMessagePart.Text("Initial request")]),
+        };
+
+        foreach (var index in Enumerable.Range(1, 24))
+        {
+            conversation.Add(
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.Assistant,
+                    [new LocalAgentMessagePart.ToolCall($"call-{index}", "read_file", JsonSerializer.SerializeToElement(new { path = $"src/File{index}.cs" }))]));
+            conversation.Add(
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.Tool,
+                    [
+                        new LocalAgentMessagePart.ToolResult(
+                            $"call-{index}",
+                            new AgentToolResult(
+                                true,
+                                [new AgentToolResultItem.Text($"file dump {index} " + new string((char)('a' + (index % 20)), 2400))])),
+                    ]));
+        }
+
+        conversation.Add(new LocalAgentConversationMessage(LocalAgentConversationRole.User, [new LocalAgentMessagePart.Text("Latest request")]));
+
+        var settings = LocalAgentCompactionSettings.Default with
+        {
+            RecentSuffixTargetTokens = 160,
+        };
+        var preparation = LocalAgentCompactionPlanner.Prepare(
+            LocalAgentCompactionTrigger.Threshold,
+            systemMessage: null,
+            developerInstructions: null,
+            conversation,
+            usage: null,
+            new LocalAgentTokenBudget(
+                ContextWindow: 400_000,
+                InputTokenLimit: 400_000,
+                OutputTokenLimit: 4_096,
+                UsablePromptBudget: 400_000,
+                ReservedOutputTokens: settings.ReservedOutputTokens,
+                ReservedOverheadTokens: settings.ReservedOverheadTokens),
+            settings,
+            anchorContentId: "user:latest",
+            checkpointTokenEstimate: 128);
+
+        Assert.IsNotNull(preparation);
+        var checkpoint = new LocalAgentCompactionCheckpoint
+        {
+            Version = 2,
+            ContentId = "compaction:test",
+            Trigger = "manual",
+            Summary =
+                """
+                ## Objective
+                Continue the task.
+                ## Active User Request
+                Latest request
+                ## Constraints
+                - Keep only continuation-critical details.
+                ## Progress
+                ### Done
+                - Earlier file inspection activity was summarized.
+                ### In Progress
+                - Continue from the latest request.
+                ### Blocked
+                - None recorded.
+                ## Decisions
+                - Omit repetitive file dumps.
+                ## Next Steps
+                - Continue implementation.
+                ## Critical Context
+                - The session was dominated by repetitive tool output.
+                ## Relevant Files
+                - None tracked.
+                """,
+            TokensBefore = preparation!.TokensBefore.Tokens,
+            SummarizedMessageCount = preparation.MessagesToSummarize.Count,
+        };
+
+        var compactedConversation = new List<LocalAgentConversationMessage> { checkpoint.CreateMessage() };
+        compactedConversation.AddRange(preparation.TurnPrefixMessages);
+        compactedConversation.AddRange(preparation.MessagesToKeep);
+
+        var tokensAfter = LocalAgentTokenEstimator.EstimatePromptTokens(
+            systemMessage: null,
+            developerInstructions: null,
+            compactedConversation,
+            usage: null).Tokens;
+        var ratio = (double)tokensAfter / preparation.TokensBefore.Tokens;
+
+        Assert.IsTrue(ratio <= 0.06d, $"Expected a representative large tool-heavy session to compact to 6% or less, but got {ratio:P2}.");
+        Assert.IsTrue(ratio <= settings.TargetContextRatioMax, $"Expected the post-compaction ratio {ratio:P2} to stay within the v2 max target {settings.TargetContextRatioMax:P2}.");
+    }
+
+    [TestMethod]
     public void LocalAgentCompactionPlanner_Preparation_ReducesOversizedLatestUserAnchorWhenConfigured()
     {
         var conversation = new[]
