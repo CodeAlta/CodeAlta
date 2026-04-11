@@ -773,6 +773,30 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
+    public void LocalAgentCompactionChunker_CreateChunks_KeepsToolInteractionAdjacent()
+    {
+        var introMessage = new LocalAgentConversationMessage(
+            LocalAgentConversationRole.User,
+            [new LocalAgentMessagePart.Text("Intro " + new string('x', 180))]);
+        var assistantToolCall = new LocalAgentConversationMessage(
+            LocalAgentConversationRole.Assistant,
+            [new LocalAgentMessagePart.ToolCall("call-1", "grep", JsonSerializer.SerializeToElement(new { path = "src/CodeAlta.Agent", pattern = "compaction" }))]);
+        var toolResult = new LocalAgentConversationMessage(
+            LocalAgentConversationRole.Tool,
+            [new LocalAgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("match line")]))]);
+
+        var maxTokens = LocalAgentTokenEstimator.EstimateMessage(introMessage) + LocalAgentTokenEstimator.EstimateMessage(assistantToolCall) + 4;
+        var chunks = LocalAgentCompactionChunker.CreateChunks(
+            [introMessage, assistantToolCall, toolResult],
+            (int)maxTokens,
+            static chunk => chunk.Sum(LocalAgentTokenEstimator.EstimateMessage));
+
+        Assert.AreEqual(2, chunks.Count);
+        CollectionAssert.AreEqual(new[] { introMessage }, chunks[0].ToArray());
+        CollectionAssert.AreEqual(new[] { assistantToolCall, toolResult }, chunks[1].ToArray());
+    }
+
+    [TestMethod]
     public void LocalAgentCompactionSerializer_BuildSummaryRequestBody_CollapsesRepeatedLowValueToolActivity()
     {
         var messagesToSummarize = new List<LocalAgentConversationMessage>();

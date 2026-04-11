@@ -16,30 +16,31 @@ internal static class LocalAgentCompactionChunker
         }
 
         var normalizedMessages = ExpandOversizedTextMessages(messages, maxInputTokens);
+        var normalizedUnits = LocalAgentCompactionCanonicalizer.Normalize(normalizedMessages);
         var chunks = new List<IReadOnlyList<LocalAgentConversationMessage>>();
-        var currentChunk = new List<LocalAgentConversationMessage>();
+        var currentChunk = new List<LocalAgentCompactionUnit>();
 
-        foreach (var message in normalizedMessages)
+        foreach (var unit in normalizedUnits)
         {
-            currentChunk.Add(message);
+            currentChunk.Add(unit);
             if (currentChunk.Count == 1)
             {
                 continue;
             }
 
-            if (estimateChunkTokens(currentChunk) <= maxInputTokens)
+            if (estimateChunkTokens(FlattenUnits(currentChunk)) <= maxInputTokens)
             {
                 continue;
             }
 
             currentChunk.RemoveAt(currentChunk.Count - 1);
-            chunks.Add(currentChunk.ToArray());
-            currentChunk = [message];
+            chunks.Add(FlattenUnits(currentChunk));
+            currentChunk = [unit];
         }
 
         if (currentChunk.Count > 0)
         {
-            chunks.Add(currentChunk.ToArray());
+            chunks.Add(FlattenUnits(currentChunk));
         }
 
         return chunks;
@@ -69,6 +70,9 @@ internal static class LocalAgentCompactionChunker
 
         return expanded;
     }
+
+    private static IReadOnlyList<LocalAgentConversationMessage> FlattenUnits(IReadOnlyList<LocalAgentCompactionUnit> units)
+        => units.SelectMany(static unit => unit.SourceMessages).ToArray();
 
     private static bool TrySplitMessage(
         LocalAgentConversationMessage message,
