@@ -132,8 +132,8 @@ public sealed class LocalAgentBackendTests
         var repairedSummary = await store.GetSessionAsync("openai-responses", "openai", sessionId).ConfigureAwait(false);
         Assert.IsNotNull(repairedSummary?.Usage);
         Assert.AreEqual(1050000L, repairedSummary.Usage.TokenLimit);
-        Assert.AreEqual(42290L, repairedSummary.Usage.CurrentTokens);
-        Assert.AreEqual(AgentUsageScope.CurrentWindow, repairedSummary.Usage.Scope);
+        Assert.IsNull(repairedSummary.Usage.CurrentTokens);
+        Assert.AreEqual(AgentUsageScope.LastOperation, repairedSummary.Usage.Scope);
     }
 
     private static LocalAgentBackend CreateBackend(string tempRoot, out RecordingTurnExecutor executor)

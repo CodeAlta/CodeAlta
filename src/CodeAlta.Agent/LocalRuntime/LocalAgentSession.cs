@@ -161,8 +161,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
             var allTools = BuildAvailableTools();
-            var toolMap = LocalAgentToolBridge.CreateDefinitionMap(allTools);
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
+            var toolMap = LocalAgentToolBridge.CreateDefinitionMap(allTools);
 
             while (true)
             {
@@ -172,6 +172,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         instructionBundle.SystemMessage,
                         instructionBundle.DeveloperInstructions,
                         modelInfo,
+                        allTools,
                         linkedCts.Token)
                     .ConfigureAwait(false);
 
@@ -180,36 +181,36 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         instructionBundle.SystemMessage,
                         instructionBundle.DeveloperInstructions,
                         modelInfo,
+                        allTools,
                         LocalAgentCompactionTrigger.Threshold,
                         linkedCts.Token)
                     .ConfigureAwait(false);
 
-                var turnRequest = new LocalAgentTurnRequest
-                {
-                    Provider = Provider,
-                    BackendId = BackendId,
-                    SessionId = SessionId,
-                    RunId = runId,
-                    ModelId = _summary.ModelId ?? _options.Model,
-                    ModelInfo = modelInfo,
-                    WorkingDirectory = _summary.WorkingDirectory,
-                    SystemMessage = instructionBundle.SystemMessage,
-                    DeveloperInstructions = instructionBundle.DeveloperInstructions,
-                    ReasoningEffort = _options.ReasoningEffort,
-                    Conversation = _conversation.ToArray(),
-                    Tools = allTools,
-                    State = _state,
-                };
+                var turnRequest = CreateTurnRequest(
+                    runId,
+                    instructionBundle.SystemMessage,
+                    instructionBundle.DeveloperInstructions,
+                    modelInfo,
+                    allTools);
                 var response = await ExecuteTurnWithOverflowRecoveryAsync(
                         turnRequest,
                         runId,
                         instructionBundle.SystemMessage,
                         instructionBundle.DeveloperInstructions,
                         modelInfo,
+                        allTools,
                         linkedCts.Token)
                     .ConfigureAwait(false);
 
-                await AppendAssistantMessageAsync(response, runId, linkedCts.Token).ConfigureAwait(false);
+                await AppendAssistantMessageAsync(
+                        response,
+                        runId,
+                        instructionBundle.SystemMessage,
+                        instructionBundle.DeveloperInstructions,
+                        modelInfo,
+                        allTools,
+                        linkedCts.Token)
+                    .ConfigureAwait(false);
 
                 var toolCalls = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.ToolCall>().ToArray();
                 if (toolCalls.Length == 0)
@@ -225,6 +226,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                             instructionBundle.SystemMessage,
                             instructionBundle.DeveloperInstructions,
                             modelInfo,
+                            allTools,
                             LocalAgentCompactionTrigger.Threshold,
                             linkedCts.Token)
                         .ConfigureAwait(false);
@@ -397,12 +399,14 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         {
             var instructionBundle = LocalAgentInstructionComposer.Compose(_options);
             var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
+            var tools = BuildAvailableTools();
             var outcome = await CompactCoreAsync(
                     trigger: LocalAgentCompactionTrigger.Manual,
                     runId: null,
                     systemMessage: instructionBundle.SystemMessage,
                     developerInstructions: instructionBundle.DeveloperInstructions,
                     modelInfo: modelInfo,
+                    tools: tools,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             if (outcome is null)
@@ -463,6 +467,109 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]
             : builtIns;
+    }
+
+    private LocalAgentTurnRequest CreateTurnRequest(
+        AgentRunId runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
+        IReadOnlyList<LocalAgentConversationMessage>? conversation = null)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+
+        return new LocalAgentTurnRequest
+        {
+            Provider = Provider,
+            BackendId = BackendId,
+            SessionId = SessionId,
+            RunId = runId,
+            ModelId = _summary.ModelId ?? _options.Model,
+            ModelInfo = modelInfo,
+            WorkingDirectory = _summary.WorkingDirectory,
+            SystemMessage = systemMessage,
+            DeveloperInstructions = developerInstructions,
+            ReasoningEffort = _options.ReasoningEffort,
+            Conversation = conversation?.ToArray() ?? _conversation.ToArray(),
+            Tools = tools,
+            State = _state,
+        };
+    }
+
+    private async Task<LocalAgentTokenEstimate> EstimatePromptTokensAsync(
+        AgentRunId? runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
+        IReadOnlyList<LocalAgentConversationMessage> conversation,
+        AgentSessionUsage? usage,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        ArgumentNullException.ThrowIfNull(conversation);
+
+        if (_turnExecutor is ILocalAgentInputTokenCounter counter)
+        {
+            var probeRunId = runId ?? new AgentRunId("usage-probe");
+            var probeRequest = CreateTurnRequest(
+                probeRunId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                tools,
+                conversation);
+            var exactCount = await counter.CountInputTokensAsync(probeRequest, cancellationToken).ConfigureAwait(false);
+            if (exactCount is not null)
+            {
+                return exactCount;
+            }
+        }
+
+        return LocalAgentTokenEstimator.EstimatePromptTokens(
+            systemMessage,
+            developerInstructions,
+            conversation,
+            usage);
+    }
+
+    private async Task<AgentSessionUsage?> CreateConversationUsageSnapshotAsync(
+        AgentRunId? runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
+        IReadOnlyList<LocalAgentConversationMessage> conversation,
+        AgentSessionUsage? usage,
+        CancellationToken cancellationToken)
+    {
+        if (usage is null)
+        {
+            return null;
+        }
+
+        var estimate = await EstimatePromptTokensAsync(
+                runId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                tools,
+                conversation,
+                usage,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var label = estimate.IsEstimated
+            ? "Estimated active context"
+            : "Active context window";
+        var usageWithWindow = LocalAgentUsageFactory.AttachWindowEstimate(
+            usage,
+            modelInfo,
+            estimate.Tokens,
+            conversation.Count,
+            DateTimeOffset.UtcNow,
+            label);
+        return LocalAgentUsageFactory.AttachMessageCount(usageWithWindow, conversation.Count);
     }
 
     private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, CancellationToken cancellationToken)
@@ -544,6 +651,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         string? systemMessage,
         string? developerInstructions,
         AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
         CancellationToken cancellationToken)
     {
         if (_state.Usage is null)
@@ -551,14 +659,19 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             return;
         }
 
-        var estimate = LocalAgentTokenEstimator.EstimatePromptTokens(
-            systemMessage,
-            developerInstructions,
-            _conversation,
-            _state.Usage);
+        var estimate = await EstimatePromptTokensAsync(
+                runId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                tools,
+                _conversation,
+                _state.Usage,
+                cancellationToken)
+            .ConfigureAwait(false);
         var label = estimate.IsEstimated
             ? "Estimated active context"
-            : _state.Usage?.Window?.Label ?? "Active context window";
+            : "Active context window";
         var refreshedUsage = LocalAgentUsageFactory.AttachWindowEstimate(
             _state.Usage,
             modelInfo,
@@ -598,10 +711,23 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     private async Task AppendAssistantMessageAsync(
         LocalAgentTurnResponse response,
         AgentRunId runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
         CancellationToken cancellationToken)
     {
         _conversation.Add(response.AssistantMessage);
-        var effectiveUsage = LocalAgentUsageFactory.AttachMessageCount(response.Usage, _conversation.Count);
+        var effectiveUsage = await CreateConversationUsageSnapshotAsync(
+                runId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                tools,
+                _conversation,
+                response.Usage,
+                cancellationToken)
+            .ConfigureAwait(false);
 
         _state = _state with
         {
@@ -761,6 +887,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         string? systemMessage,
         string? developerInstructions,
         AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
         CancellationToken cancellationToken)
     {
         try
@@ -782,6 +909,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                         systemMessage,
                         developerInstructions,
                         modelInfo,
+                        tools,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -821,6 +949,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         string? systemMessage,
         string? developerInstructions,
         AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
         LocalAgentCompactionTrigger trigger,
         CancellationToken cancellationToken)
     {
@@ -846,11 +975,16 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             throw new InvalidOperationException("The reserved output token budget exceeds the model's output token limit.");
         }
 
-        var estimate = LocalAgentTokenEstimator.EstimatePromptTokens(
-            systemMessage,
-            developerInstructions,
-            _conversation,
-            _state.Usage);
+        var estimate = await EstimatePromptTokensAsync(
+                runId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                tools,
+                _conversation,
+                _state.Usage,
+                cancellationToken)
+            .ConfigureAwait(false);
         var thresholdTokens = Math.Max((long)Math.Floor(budget.UsablePromptBudget.Value * settings.TriggerThreshold), 1);
         if (estimate.Tokens < thresholdTokens)
         {
@@ -863,6 +997,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 systemMessage,
                 developerInstructions,
                 modelInfo,
+                tools,
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -873,6 +1008,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         string? systemMessage,
         string? developerInstructions,
         AgentModelInfo? modelInfo,
+        IReadOnlyList<AgentToolDefinition> tools,
         CancellationToken cancellationToken)
     {
         var settings = Provider.Compaction ?? LocalAgentCompactionSettings.Default;
@@ -894,11 +1030,24 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
 
         var now = DateTimeOffset.UtcNow;
         var latestUserRequest = GetLatestUserRequest(_conversation);
-        var currentPromptTokens = LocalAgentTokenEstimator.EstimatePromptTokens(
-            systemMessage,
-            developerInstructions,
-            _conversation,
-            _state.Usage).Tokens;
+        var currentPromptEstimate = await EstimatePromptTokensAsync(
+                runId,
+                systemMessage,
+                developerInstructions,
+                modelInfo,
+                tools,
+                _conversation,
+                _state.Usage,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var currentPromptTokens = currentPromptEstimate.Tokens;
+        var planningUsage = LocalAgentUsageFactory.AttachWindowEstimate(
+            _state.Usage,
+            modelInfo,
+            currentPromptTokens,
+            _conversation.Count,
+            now,
+            currentPromptEstimate.IsEstimated ? "Estimated active context" : "Active context window");
         var checkpointContentId = $"compaction:{Guid.CreateVersion7()}";
         var summaryOutputTokens = GetCompactionSummaryOutputTokens(settings, budget);
         LocalAgentCompactionPreparation? preparation = null;
@@ -922,7 +1071,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                     systemMessage,
                     developerInstructions,
                     _conversation,
-                    _state.Usage,
+                    planningUsage,
                     budget,
                     plannerSettings,
                     FindLatestUserContentId(),
@@ -985,11 +1134,16 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             };
             candidateConversation.AddRange(retainedConversation);
 
-            var tokensAfter = LocalAgentTokenEstimator.EstimatePromptTokens(
-                systemMessage,
-                developerInstructions,
-                candidateConversation,
-                usage: null).Tokens;
+            var tokensAfter = (await EstimatePromptTokensAsync(
+                    runId,
+                    systemMessage,
+                    developerInstructions,
+                    modelInfo,
+                    tools,
+                    candidateConversation,
+                    usage: null,
+                    cancellationToken)
+                .ConfigureAwait(false)).Tokens;
             var compressionRatio = summaryResult.TokensBefore > 0
                 ? (double)tokensAfter / summaryResult.TokensBefore
                 : (double?)null;

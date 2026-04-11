@@ -247,6 +247,64 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
+    public async Task LocalAgentSession_SendAsync_UsesProviderInputTokenCountForCurrentWindow()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-provider-token-count");
+        var state = CreateState("session-provider-token-count");
+        await store.UpsertProviderAsync(provider).ConfigureAwait(false);
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        await using var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new CountAwareTurnExecutor(
+                [700, 700, 700],
+                static (_, _, _) => Task.FromResult(
+                    new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Done.")]),
+                        Usage = new AgentSessionUsage(
+                            LastOperation: new AgentOperationUsageSnapshot(
+                                InputTokens: 760,
+                                OutputTokens: 140),
+                            Scope: AgentUsageScope.LastOperation,
+                            Source: AgentUsageSource.LocalProviderUsage,
+                            UpdatedAt: DateTimeOffset.UtcNow),
+                    })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        _ = await session.SendAsync(
+                new AgentSendOptions
+                {
+                    Input = AgentInput.Text("Hello"),
+                })
+            .ConfigureAwait(false);
+
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        var usageEvent = history.OfType<AgentSessionUpdateEvent>().Last(static evt => evt.Kind == AgentSessionUpdateKind.UsageUpdated);
+        Assert.IsNotNull(usageEvent.Usage);
+        Assert.AreEqual(700L, usageEvent.Usage.CurrentTokens);
+        Assert.AreEqual("Active context window", usageEvent.Usage.Window?.Label);
+        Assert.AreEqual(2, usageEvent.Usage.MessageCount);
+    }
+
+    [TestMethod]
     public async Task LocalAgentSession_SteerAsync_QueuesPendingInputIntoSameRun()
     {
         using var temp = TestTempDirectory.Create();
@@ -2482,6 +2540,47 @@ public sealed class LocalAgentSessionTests
 
             return step(request, onUpdate, cancellationToken);
         }
+    }
+
+    private sealed class CountAwareTurnExecutor(
+        IReadOnlyList<long> counts,
+        Func<LocalAgentTurnRequest, Func<LocalAgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<LocalAgentTurnResponse>> step)
+        : ILocalAgentTurnExecutor, ILocalAgentInputTokenCounter
+    {
+        private readonly Queue<long> _counts = new(counts);
+
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
+            LocalAgentProviderDescriptor provider,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
+            [
+                new AgentModelInfo(
+                    "gpt-5.4",
+                    DisplayName: "GPT-5.4",
+                    Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["contextWindow"] = 100000L,
+                    }),
+            ]);
+
+        public Task<LocalAgentTokenEstimate?> CountInputTokensAsync(
+            LocalAgentTurnRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (_counts.Count == 0)
+            {
+                throw new InvalidOperationException("No token-count result remained.");
+            }
+
+            return Task.FromResult<LocalAgentTokenEstimate?>(
+                new LocalAgentTokenEstimate(_counts.Dequeue(), "provider-input-token-count", IsEstimated: false));
+        }
+
+        public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
+            LocalAgentTurnRequest request,
+            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+            => step(request, onUpdate, cancellationToken);
     }
 
     private sealed class AliasAwareTurnExecutor : ILocalAgentTurnExecutor

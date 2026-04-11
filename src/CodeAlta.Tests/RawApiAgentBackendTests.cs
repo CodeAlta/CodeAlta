@@ -100,7 +100,8 @@ public sealed class RawApiAgentBackendTests
                 OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
             }).ConfigureAwait(false);
         var resumedHistory = await resumed.GetHistoryAsync().ConfigureAwait(false);
-        Assert.AreEqual(history.Count, resumedHistory.Count);
+        Assert.IsTrue(resumedHistory.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Reasoning && e.Content == "thinking"));
+        Assert.IsTrue(resumedHistory.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "Anthropic answer."));
     }
 
     [TestMethod]

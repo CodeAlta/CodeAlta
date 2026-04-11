@@ -57,7 +57,7 @@ public sealed class LocalAgentRuntimeContractsTests
         Assert.AreEqual("openai-responses", root.GetProperty("backendId").GetString());
         Assert.AreEqual("OpenAIResponses", root.GetProperty("transportKind").GetString());
         Assert.AreEqual("max_completion_tokens", root.GetProperty("profile").GetProperty("maxTokensFieldName").GetString());
-        Assert.AreEqual(0.8d, root.GetProperty("compaction").GetProperty("triggerThreshold").GetDouble(), 0.0001d);
+        Assert.AreEqual(0.85d, root.GetProperty("compaction").GetProperty("triggerThreshold").GetDouble(), 0.0001d);
         Assert.AreEqual(20000, root.GetProperty("compaction").GetProperty("recentSuffixTargetTokens").GetInt32());
         Assert.AreEqual(1024, root.GetProperty("compaction").GetProperty("summaryOutputTokens").GetInt32());
     }

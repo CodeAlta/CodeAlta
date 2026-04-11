@@ -23,14 +23,13 @@ internal static class LocalAgentUsageFactory
         long? reasoningTokens,
         DateTimeOffset updatedAt)
     {
-        var currentTokens = totalTokens ?? Sum(inputTokens, outputTokens);
         var tokenLimit = GetContextWindowTokenLimit(modelInfo);
-        var window = currentTokens is not null || tokenLimit is not null
+        var window = tokenLimit is not null
             ? new AgentWindowUsageSnapshot(
-                CurrentTokens: currentTokens,
+                CurrentTokens: null,
                 TokenLimit: tokenLimit,
                 MessageCount: null,
-                Label: tokenLimit is not null ? "Active context window" : "Estimated active context")
+                Label: "Context window limit")
             : null;
 
         return new AgentSessionUsage(
@@ -44,34 +43,25 @@ internal static class LocalAgentUsageFactory
                 Label: string.IsNullOrWhiteSpace(modelId)
                     ? null
                     : $"{modelId}: {inputTokens ?? 0}/{outputTokens ?? 0} tokens"),
-            Scope: window is null ? AgentUsageScope.LastOperation : AgentUsageScope.CurrentWindow,
+            Scope: AgentUsageScope.LastOperation,
             Source: AgentUsageSource.LocalProviderUsage,
             UpdatedAt: updatedAt);
     }
 
     public static AgentSessionUsage? AttachMessageCount(AgentSessionUsage? usage, int? messageCount)
     {
-        if (usage is null || messageCount is not >= 0)
+        if (usage?.Window is null || messageCount is not >= 0)
         {
             return usage;
         }
 
-        var currentTokens = usage.Window?.CurrentTokens ?? Sum(usage.LastOperation?.InputTokens, usage.LastOperation?.OutputTokens);
-        var tokenLimit = usage.Window?.TokenLimit;
-        if (currentTokens is null && tokenLimit is null)
-        {
-            return usage;
-        }
-
-        var label = usage.Window?.Label ?? (tokenLimit is not null ? "Active context window" : "Estimated active context");
         return usage with
         {
             Window = new AgentWindowUsageSnapshot(
-                CurrentTokens: currentTokens,
-                TokenLimit: tokenLimit,
+                CurrentTokens: usage.Window.CurrentTokens,
+                TokenLimit: usage.Window.TokenLimit,
                 MessageCount: messageCount,
-                Label: label),
-            Scope = usage.Window is null ? AgentUsageScope.CurrentWindow : usage.Scope,
+                Label: usage.Window.Label),
         };
     }
 
@@ -88,8 +78,8 @@ internal static class LocalAgentUsageFactory
             return usage;
         }
 
-        var currentTokens = usage.Window?.CurrentTokens ?? Sum(usage.LastOperation?.InputTokens, usage.LastOperation?.OutputTokens);
-        var label = usage.Window?.Label ?? "Active context window";
+        var currentTokens = usage.Window?.CurrentTokens;
+        var label = usage.Window?.Label ?? "Context window limit";
         var window = new AgentWindowUsageSnapshot(
             CurrentTokens: currentTokens,
             TokenLimit: tokenLimit,
@@ -103,7 +93,7 @@ internal static class LocalAgentUsageFactory
         return usage with
         {
             Window = window,
-            Scope = usage.Scope is AgentUsageScope.Unknown or AgentUsageScope.LastOperation
+            Scope = usage.Scope is AgentUsageScope.Unknown && currentTokens is not null
                 ? AgentUsageScope.CurrentWindow
                 : usage.Scope,
         };
