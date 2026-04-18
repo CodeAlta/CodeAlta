@@ -4,6 +4,7 @@ using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.GoogleGenAI;
+using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.App;
@@ -168,6 +169,101 @@ public sealed class RawApiBackendRegistrarTests
             Assert.AreEqual(1, descriptors.Count);
             Assert.AreEqual(AgentBackendIds.OpenAIChat.Value, descriptors[0].BackendId.Value);
             Assert.AreEqual("MiniMax 2.7", descriptors[0].DisplayName);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(minimaxKeyName, null);
+        }
+    }
+
+    [TestMethod]
+    public async Task RegisterConfiguredBackends_MiniMaxProfileDisablesDeveloperRoleByDefault()
+    {
+        using var temp = TempDirectory.Create();
+        var minimaxKeyName = $"MINIMAX_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(minimaxKeyName, "minimax-test-key");
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(temp.Path, "config.toml"),
+                $$"""
+                [providers.compat]
+                display_name = "MiniMax 2.7"
+                provider = "openai"
+                api_key_env = "{{minimaxKeyName}}"
+                base_uri = "https://api.minimax.io/v1"
+                wire_api = "chat"
+                is_default = true
+                """);
+
+            var stateRoot = Path.Combine(temp.Path, "machine", "agents");
+            var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+            var factory = new AgentBackendFactory();
+
+            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+                factory,
+                store,
+                stateRoot);
+
+            await using var chatBackend = factory.Create(AgentBackendIds.OpenAIChat);
+            await chatBackend.StartAsync().ConfigureAwait(false);
+
+            var sessionStore = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(stateRoot));
+            var provider = await sessionStore.GetProviderAsync("openai-chat", "compat").ConfigureAwait(false);
+
+            Assert.IsNotNull(provider);
+            Assert.IsNotNull(provider.Profile);
+            Assert.IsFalse(provider.Profile.SupportsDeveloperRole);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(minimaxKeyName, null);
+        }
+    }
+
+    [TestMethod]
+    public async Task RegisterConfiguredBackends_ExplicitProfileOverridesProviderDefault()
+    {
+        using var temp = TempDirectory.Create();
+        var minimaxKeyName = $"MINIMAX_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(minimaxKeyName, "minimax-test-key");
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(temp.Path, "config.toml"),
+                $$"""
+                [providers.compat]
+                display_name = "MiniMax 2.7"
+                provider = "openai"
+                api_key_env = "{{minimaxKeyName}}"
+                base_uri = "https://api.minimax.io/v1"
+                wire_api = "chat"
+                is_default = true
+
+                [providers.compat.profile]
+                supports_developer_role = true
+                """);
+
+            var stateRoot = Path.Combine(temp.Path, "machine", "agents");
+            var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+            var factory = new AgentBackendFactory();
+
+            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+                factory,
+                store,
+                stateRoot);
+
+            await using var chatBackend = factory.Create(AgentBackendIds.OpenAIChat);
+            await chatBackend.StartAsync().ConfigureAwait(false);
+
+            var sessionStore = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(stateRoot));
+            var provider = await sessionStore.GetProviderAsync("openai-chat", "compat").ConfigureAwait(false);
+
+            Assert.IsNotNull(provider);
+            Assert.IsNotNull(provider.Profile);
+            Assert.IsTrue(provider.Profile.SupportsDeveloperRole);
         }
         finally
         {

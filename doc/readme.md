@@ -207,6 +207,8 @@ is_default = true
 
 Model discovery still comes from the upstream provider API when supported. `model_overrides` enriches or corrects discovered model metadata, while `single_model_id` can pin a provider to one fixed model for single-model endpoints. When an OpenAI-compatible endpoint does not implement `/models`, CodeAlta can also fall back to the local `models.dev` catalog if the provider key or `models_dev_provider_id` maps to a known catalog provider such as `minimax`.
 
+CodeAlta also applies known provider defaults through a small defaults catalog before config overrides are applied. For example, MiniMax Chat registrations automatically disable the `developer` message role and merge developer instructions into the system prompt instead, while an explicit `profile` section in `config.toml` can still override that default.
+
 The bundled snapshot lives in `src/CodeAlta.Agent/Data/models_dev_db.json`. To refresh it manually, run:
 
 ```sh

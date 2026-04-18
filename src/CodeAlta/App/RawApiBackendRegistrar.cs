@@ -72,7 +72,10 @@ internal static class RawApiBackendRegistrar
                     OrganizationId = definition.OrganizationId,
                     ProjectId = definition.ProjectId,
                     IsDefault = definition.DefaultResponses,
-                    Profile = CreateOpenAIResponsesProfile(definition.Profile),
+                    Profile = CreateOpenAIResponsesProfile(
+                        definition.ProviderKey,
+                        baseUri,
+                        definition.Profile),
                     Compaction = CreateCompactionSettings(definition.Compaction),
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
@@ -98,7 +101,10 @@ internal static class RawApiBackendRegistrar
                     OrganizationId = definition.OrganizationId,
                     ProjectId = definition.ProjectId,
                     IsDefault = definition.DefaultChat,
-                    Profile = CreateOpenAIChatProfile(definition.Profile),
+                    Profile = CreateOpenAIChatProfile(
+                        definition.ProviderKey,
+                        baseUri,
+                        definition.Profile),
                     Compaction = CreateCompactionSettings(definition.Compaction),
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
@@ -269,15 +275,32 @@ internal static class RawApiBackendRegistrar
         return NormalizeText(Environment.GetEnvironmentVariable(normalizedEnvironmentVariableName));
     }
 
-    private static LocalAgentProviderProfile? CreateOpenAIResponsesProfile(CodeAltaRawApiProviderProfileDocument? document)
+    private static LocalAgentProviderProfile CreateOpenAIResponsesProfile(
+        string providerKey,
+        Uri? baseUri,
+        CodeAltaRawApiProviderProfileDocument? document)
     {
-        if (document is null)
-        {
-            return null;
-        }
+        var profile = CreateOpenAIBaseProfile(LocalAgentTransportKind.OpenAIResponses, providerKey, baseUri, responses: true);
+        return document is null ? profile : ApplyProfileOverrides(profile, document);
+    }
 
-        return ApplyProfileOverrides(
-            new LocalAgentProviderProfile
+    private static LocalAgentProviderProfile CreateOpenAIChatProfile(
+        string providerKey,
+        Uri? baseUri,
+        CodeAltaRawApiProviderProfileDocument? document)
+    {
+        var profile = CreateOpenAIBaseProfile(LocalAgentTransportKind.OpenAIChatCompletions, providerKey, baseUri, responses: false);
+        return document is null ? profile : ApplyProfileOverrides(profile, document);
+    }
+
+    private static LocalAgentProviderProfile CreateOpenAIBaseProfile(
+        LocalAgentTransportKind transportKind,
+        string providerKey,
+        Uri? baseUri,
+        bool responses)
+    {
+        var profile = responses
+            ? new LocalAgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = true,
@@ -285,19 +308,8 @@ internal static class RawApiBackendRegistrar
                 StreamsUsage = true,
                 MaxTokensFieldName = "max_output_tokens",
                 ReasoningFieldNames = ["reasoning"],
-            },
-            document);
-    }
-
-    private static LocalAgentProviderProfile? CreateOpenAIChatProfile(CodeAltaRawApiProviderProfileDocument? document)
-    {
-        if (document is null)
-        {
-            return null;
-        }
-
-        return ApplyProfileOverrides(
-            new LocalAgentProviderProfile
+            }
+            : new LocalAgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = true,
@@ -305,8 +317,9 @@ internal static class RawApiBackendRegistrar
                 StreamsUsage = true,
                 MaxTokensFieldName = "max_completion_tokens",
                 ReasoningFieldNames = ["reasoning_content", "reasoning"],
-            },
-            document);
+            };
+
+        return RawApiProviderDefaultsCatalog.ApplyProfileDefaults(transportKind, providerKey, baseUri, profile);
     }
 
     private static LocalAgentProviderProfile? CreateAnthropicProfile(CodeAltaRawApiProviderProfileDocument? document)
