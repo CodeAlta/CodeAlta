@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
+    <CodeAltaAnthropicSdkProjectPath Condition="'$(CodeAltaAnthropicSdkProjectPath)' == ''">$(MSBuildThisFileDirectory)..\..\..\anthropic-sdk-csharp\src\Anthropic\Anthropic.csproj</CodeAltaAnthropicSdkProjectPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,7 +16,12 @@
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(UseLocalAnthropicSdk)' == 'true' and Exists('$(CodeAltaAnthropicSdkProjectPath)')">
+    <!-- Used when validating or debugging a local Anthropic SDK change. -->
+    <ProjectReference Include="$(CodeAltaAnthropicSdkProjectPath)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseLocalAnthropicSdk)' != 'true' or !Exists('$(CodeAltaAnthropicSdkProjectPath)')">
     <PackageReference Include="Anthropic" />
   </ItemGroup>
 </Project>
