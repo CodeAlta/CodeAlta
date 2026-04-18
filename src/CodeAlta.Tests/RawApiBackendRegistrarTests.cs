@@ -272,6 +272,39 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
+    public void RawApiProviderDefaultsCatalog_MiniMaxDefaults_PrependReasoningFieldAndMergeExtraBody()
+    {
+        var profile = RawApiProviderDefaultsCatalog.ApplyProfileDefaults(
+            LocalAgentTransportKind.OpenAIChatCompletions,
+            "minimax",
+            new Uri("https://api.minimax.io/v1"),
+            new LocalAgentProviderProfile
+            {
+                SupportsDeveloperRole = true,
+                ReasoningFieldNames = ["reasoning_content", "reasoning"],
+            });
+
+        Assert.IsFalse(profile.SupportsDeveloperRole);
+        CollectionAssert.AreEqual(
+            new[] { "reasoning_details[0].text", "reasoning_content", "reasoning" },
+            profile.ReasoningFieldNames.ToArray());
+
+        var extraBody = RawApiProviderDefaultsCatalog.ApplyOpenAIExtraBodyDefaults(
+            LocalAgentTransportKind.OpenAIChatCompletions,
+            "minimax",
+            new Uri("https://api.minimax.io/v1"),
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["reasoning_split"] = false,
+                ["custom_flag"] = true,
+            });
+
+        Assert.IsNotNull(extraBody);
+        Assert.AreEqual(false, extraBody!["reasoning_split"]);
+        Assert.AreEqual(true, extraBody["custom_flag"]);
+    }
+
+    [TestMethod]
     public async Task RegisterConfiguredBackends_OpenAICompatibleProviderWithoutModelsEndpoint_FallsBackToModelsDevCatalog()
     {
         using var temp = TempDirectory.Create();
@@ -354,6 +387,51 @@ public sealed class RawApiBackendRegistrarTests
 
             await using var chatBackend = factory.Create(AgentBackendIds.OpenAIChat);
             var models = await chatBackend.ListModelsAsync().ConfigureAwait(false);
+
+            Assert.AreEqual(1, models.Count);
+            Assert.AreEqual("MiniMax-M2.7", models[0].Id);
+            Assert.AreEqual("MiniMax-M2.7", models[0].DisplayName);
+            Assert.AreEqual(1000000L, models[0].Capabilities?["contextWindow"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(minimaxKeyName, null);
+        }
+    }
+
+    [TestMethod]
+    public async Task RegisterConfiguredBackends_AnthropicSingleModelId_ExposesOnlyConfiguredModel()
+    {
+        using var temp = TempDirectory.Create();
+        await using var modelCatalog = CreateModelCatalog();
+        var minimaxKeyName = $"MINIMAX_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(minimaxKeyName, "minimax-test-key");
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(temp.Path, "config.toml"),
+                $$"""
+                [providers.minimax]
+                display_name = "MiniMax 2.7"
+                provider = "anthropic"
+                api_key_env = "{{minimaxKeyName}}"
+                base_uri = "https://api.minimax.io/anthropic"
+                single_model_id = " MiniMax-M2.7 "
+                is_default = true
+                """);
+
+            var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+            var factory = new AgentBackendFactory();
+
+            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+                factory,
+                store,
+                Path.Combine(temp.Path, "machine", "agents"),
+                modelCatalog);
+
+            await using var anthropicBackend = factory.Create(AgentBackendIds.AnthropicMessages);
+            var models = await anthropicBackend.ListModelsAsync().ConfigureAwait(false);
 
             Assert.AreEqual(1, models.Count);
             Assert.AreEqual("MiniMax-M2.7", models[0].Id);

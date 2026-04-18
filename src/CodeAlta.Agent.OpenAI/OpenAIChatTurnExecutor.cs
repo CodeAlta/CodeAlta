@@ -74,7 +74,11 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                         cancellationToken).ConfigureAwait(false);
                 }
 
-                if (TryGetReasoningDelta(update, out var reasoningDelta))
+                if (TryGetReasoningDelta(
+                    update,
+                    request.Provider.Profile?.ReasoningFieldNames,
+                    streamedReasoning,
+                    out var reasoningDelta))
                 {
                     streamedReasoning.Append(reasoningDelta);
                     await onUpdate(
@@ -200,7 +204,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         return messages;
     }
 
-    private static ChatCompletionOptions CreateOptions(LocalAgentTurnRequest request)
+    private ChatCompletionOptions CreateOptions(LocalAgentTurnRequest request)
     {
         var options = new ChatCompletionOptions
         {
@@ -224,6 +228,8 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 _ => null,
             };
         }
+
+        OpenAIExtraBodyPatchHelper.Apply(ref options.Patch, provider.ExtraBody);
 
         foreach (var tool in request.Tools)
         {
@@ -410,9 +416,68 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             .Select(static part => part.Value)
             .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
 
-    private static bool TryGetReasoningDelta(StreamingChatCompletionUpdate update, [NotNullWhen(true)] out string? reasoningText)
-        => update.Patch.TryGetValue("$.choices[0].delta.reasoning_content"u8, out reasoningText) && !string.IsNullOrWhiteSpace(reasoningText)
-           || update.Patch.TryGetValue("$.choices[0].delta.reasoning"u8, out reasoningText) && !string.IsNullOrWhiteSpace(reasoningText);
+    private static bool TryGetReasoningDelta(
+        StreamingChatCompletionUpdate update,
+        IReadOnlyList<string>? reasoningFieldNames,
+        StringBuilder accumulatedReasoning,
+        [NotNullWhen(true)] out string? reasoningText)
+    {
+        ArgumentNullException.ThrowIfNull(accumulatedReasoning);
+
+        foreach (var reasoningFieldName in EnumerateReasoningFieldNames(reasoningFieldNames))
+        {
+            if (!TryGetReasoningValue(update, reasoningFieldName, out var reasoningValue))
+            {
+                continue;
+            }
+
+            reasoningText = ComputeReasoningDelta(accumulatedReasoning, reasoningValue);
+            if (!string.IsNullOrWhiteSpace(reasoningText))
+            {
+                return true;
+            }
+        }
+
+        reasoningText = null;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateReasoningFieldNames(IReadOnlyList<string>? reasoningFieldNames)
+        => reasoningFieldNames is { Count: > 0 }
+            ? reasoningFieldNames.Where(static value => !string.IsNullOrWhiteSpace(value))
+            : ["reasoning_content", "reasoning"];
+
+    private static bool TryGetReasoningValue(
+        StreamingChatCompletionUpdate update,
+        string reasoningFieldName,
+        [NotNullWhen(true)] out string? reasoningValue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasoningFieldName);
+
+        var normalizedFieldName = reasoningFieldName.Trim();
+        var jsonPath = normalizedFieldName.StartsWith("$", StringComparison.Ordinal)
+            ? normalizedFieldName
+            : $"$.choices[0].delta.{normalizedFieldName}";
+
+        return update.Patch.TryGetValue(Encoding.UTF8.GetBytes(jsonPath), out reasoningValue) &&
+            !string.IsNullOrWhiteSpace(reasoningValue);
+    }
+
+    private static string? ComputeReasoningDelta(StringBuilder accumulatedReasoning, string reasoningValue)
+    {
+        ArgumentNullException.ThrowIfNull(accumulatedReasoning);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasoningValue);
+
+        if (accumulatedReasoning.Length == 0)
+        {
+            return reasoningValue;
+        }
+
+        var currentReasoning = accumulatedReasoning.ToString();
+        return reasoningValue.StartsWith(currentReasoning, StringComparison.Ordinal)
+            ? reasoningValue[currentReasoning.Length..]
+            : reasoningValue;
+    }
 
     private static string MergeSystemAndDeveloperInstructions(string? systemMessage, string developerInstructions)
         => string.IsNullOrWhiteSpace(systemMessage)

@@ -140,6 +140,19 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend
                 provider.ModelOverrides);
         }
 
+        if (!string.IsNullOrWhiteSpace(provider.SingleModelId))
+        {
+            models =
+            [
+                CreateSingleModelInfo(provider.SingleModelId, providerDescriptor),
+            ];
+            return AgentModelMetadataEnricher.EnrichModels(
+                models,
+                provider.ModelCatalog,
+                provider.ModelsDevProviderId,
+                provider.ModelOverrides);
+        }
+
         using var client = CreateSdkClient(provider);
         var pager = await client.Models.ListAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var results = new List<AgentModelInfo>();
@@ -190,5 +203,19 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend
             Description: model.Description,
             Provider: provider.ProviderKey,
             Capabilities: capabilities);
+    }
+
+    private static AgentModelInfo CreateSingleModelInfo(
+        string modelId,
+        LocalAgentProviderDescriptor providerDescriptor)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentNullException.ThrowIfNull(providerDescriptor);
+
+        var trimmedModelId = modelId.Trim();
+        return new AgentModelInfo(
+            trimmedModelId,
+            DisplayName: trimmedModelId,
+            Provider: providerDescriptor.ProviderKey);
     }
 }

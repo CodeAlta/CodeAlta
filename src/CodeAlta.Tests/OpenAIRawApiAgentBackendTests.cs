@@ -1,6 +1,7 @@
 ﻿#pragma warning disable OPENAI001
 
 using System.ClientModel;
+#pragma warning disable SCME0001
 using System.ClientModel.Primitives;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -312,6 +313,120 @@ public sealed class OpenAIRawApiAgentBackendTests
     }
 
     [TestMethod]
+    public async Task OpenAIChatAgentBackend_AppliesExtraBodyAndParsesCumulativeReasoningDetails()
+    {
+        using var temp = TestTempDirectory.Create();
+        var chatClient = new RecordingOpenAIChatClient(
+        [
+            DeserializeStreamingChatCompletionUpdate(
+                """
+                {
+                  "id": "chatcmpl-minimax-1",
+                  "object": "chat.completion.chunk",
+                  "created": 1744060800,
+                  "model": "MiniMax-M2.7",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {
+                        "reasoning_details": [
+                          { "text": "Thinking" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """),
+            DeserializeStreamingChatCompletionUpdate(
+                """
+                {
+                  "id": "chatcmpl-minimax-1",
+                  "object": "chat.completion.chunk",
+                  "created": 1744060801,
+                  "model": "MiniMax-M2.7",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {
+                        "reasoning_details": [
+                          { "text": "Thinking through the repository layout." }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """),
+            DeserializeStreamingChatCompletionUpdate(
+                """
+                {
+                  "id": "chatcmpl-minimax-1",
+                  "object": "chat.completion.chunk",
+                  "created": 1744060802,
+                  "model": "MiniMax-M2.7",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {
+                        "content": "Done."
+                      }
+                    }
+                  ]
+                }
+                """),
+        ]);
+
+        await using var backend = new OpenAIChatAgentBackend(new OpenAIChatAgentBackendOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new OpenAIProviderOptions
+                {
+                    ProviderKey = "minimax",
+                    IsDefault = true,
+                    Profile = new LocalAgentProviderProfile
+                    {
+                        SupportsDeveloperRole = false,
+                        SupportsReasoningEffort = true,
+                        SupportsStore = false,
+                        StreamsUsage = true,
+                        ReasoningFieldNames = ["reasoning_details[0].text"],
+                    },
+                    ExtraBody = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["reasoning_split"] = true,
+                    },
+                    ChatClientFactory = _ => chatClient,
+                },
+            },
+        });
+
+        await using var session = await backend.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "MiniMax-M2.7",
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput([new AgentInputItem.Text("Think")]),
+        }).ConfigureAwait(false);
+
+        Assert.AreEqual(1, chatClient.Requests.Count);
+        Assert.IsTrue(chatClient.Requests[0].Options!.Patch.TryGetValue("$.reasoning_split"u8, out bool reasoningSplit));
+        Assert.IsTrue(reasoningSplit);
+
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e =>
+            e.Kind == AgentContentKind.Reasoning &&
+            e.Content == "Thinking through the repository layout."));
+        Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e =>
+            e.Kind == AgentContentKind.Assistant &&
+            e.Content == "Done."));
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_ReconstructsResponseWhenStreamEndsWithoutCompletedPayload()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
@@ -400,6 +515,57 @@ public sealed class OpenAIRawApiAgentBackendTests
         Assert.AreEqual(40L, response.Usage.CurrentTokens);
         Assert.AreEqual(200000L, response.Usage.TokenLimit);
         Assert.AreEqual(AgentUsageScope.CurrentWindow, response.Usage.Scope);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesAgentBackend_AppliesConfiguredExtraBody()
+    {
+        using var temp = TestTempDirectory.Create();
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-extra-body",
+                    modelId: "gpt-test",
+                    text: "Answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: null),
+            ],
+        ]);
+
+        await using var backend = new OpenAIResponsesAgentBackend(new OpenAIResponsesAgentBackendOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new OpenAIProviderOptions
+                {
+                    ProviderKey = "compat-provider",
+                    IsDefault = true,
+                    ExtraBody = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["custom_flag"] = true,
+                    },
+                    ResponsesClientFactory = _ => responsesClient,
+                },
+            },
+        });
+
+        await using var session = await backend.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "gpt-test",
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput([new AgentInputItem.Text("Hello")]),
+        }).ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.IsTrue(responsesClient.Requests[0].Options.Patch.TryGetValue("$.custom_flag"u8, out bool customFlag));
+        Assert.IsTrue(customFlag);
     }
 
     private static StreamingResponseUpdate CreateAssistantResponseUpdate(
@@ -663,6 +829,11 @@ public sealed class OpenAIRawApiAgentBackendTests
                 {
                     clone.Tools.Add(tool);
                 }
+
+                if (options.Patch.TryGetValue("$.custom_flag"u8, out bool customFlag))
+                {
+                    clone.Patch.Set("$.custom_flag"u8, customFlag);
+                }
             }
 
             return clone;
@@ -700,6 +871,11 @@ public sealed class OpenAIRawApiAgentBackendTests
             foreach (var tool in options.Tools)
             {
                 clone.Tools.Add(tool);
+            }
+
+            if (options.Patch.TryGetValue("$.reasoning_split"u8, out bool reasoningSplit))
+            {
+                clone.Patch.Set("$.reasoning_split"u8, reasoningSplit);
             }
 
             return clone;

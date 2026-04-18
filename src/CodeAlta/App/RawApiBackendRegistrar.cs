@@ -6,6 +6,7 @@ using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Catalog;
+using Tomlyn.Model;
 using XenoAtom.Logging;
 
 namespace CodeAlta.App;
@@ -58,6 +59,7 @@ internal static class RawApiBackendRegistrar
             }
 
             var baseUri = ParseUri(definition.BaseUri);
+            var configuredExtraBody = CreateExtraBody(definition.ExtraBody);
 
             if (definition.EnableResponses)
             {
@@ -83,6 +85,11 @@ internal static class RawApiBackendRegistrar
                         "openai",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
+                    ExtraBody = RawApiProviderDefaultsCatalog.ApplyOpenAIExtraBodyDefaults(
+                        LocalAgentTransportKind.OpenAIResponses,
+                        definition.ProviderKey,
+                        baseUri,
+                        configuredExtraBody),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                 });
@@ -112,6 +119,11 @@ internal static class RawApiBackendRegistrar
                         "openai",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
+                    ExtraBody = RawApiProviderDefaultsCatalog.ApplyOpenAIExtraBodyDefaults(
+                        LocalAgentTransportKind.OpenAIChatCompletions,
+                        definition.ProviderKey,
+                        baseUri,
+                        configuredExtraBody),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                 });
@@ -175,6 +187,7 @@ internal static class RawApiBackendRegistrar
                     definition.ProviderKey,
                     "anthropic",
                     modelCatalog),
+                SingleModelId = NormalizeText(definition.SingleModelId),
                 ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                 ModelCatalog = modelCatalog,
             });
@@ -241,6 +254,7 @@ internal static class RawApiBackendRegistrar
                     definition.ProviderKey,
                     "google",
                     modelCatalog),
+                SingleModelId = NormalizeText(definition.SingleModelId),
                 ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                 ModelCatalog = modelCatalog,
             });
@@ -446,6 +460,38 @@ internal static class RawApiBackendRegistrar
                 SupportsStructuredOutput = entry.Value.SupportsStructuredOutput,
             },
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, object?>? CreateExtraBody(TomlTable? extraBody)
+    {
+        if (extraBody is null || extraBody.Count == 0)
+        {
+            return null;
+        }
+
+        var normalized = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var entry in extraBody)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+            {
+                continue;
+            }
+
+            normalized[entry.Key.Trim()] = NormalizeTomlValue(entry.Value);
+        }
+
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static object? NormalizeTomlValue(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            TomlTable table => CreateExtraBody(table),
+            TomlArray array => array.Select(NormalizeTomlValue).ToArray(),
+            _ => value,
+        };
     }
 
     private static LocalAgentCompactionSettings CreateCompactionSettings(CodeAltaRawApiCompactionDocument? compaction)

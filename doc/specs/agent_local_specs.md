@@ -109,6 +109,7 @@ Each configured entry describes one endpoint registration. Key fields include:
 - `provider = "openai" | "anthropic" | "google_genai"`
 - `wire_api` for providers that expose multiple wire formats, such as OpenAI-compatible `chat` vs `responses`
 - shared endpoint/auth fields such as `display_name`, `api_key`, `api_key_env`, and `base_uri`
+- cross-provider extras such as `single_model_id` for single-model endpoints that cannot list models dynamically, and OpenAI-compatible `extra_body` for provider-specific request-body fields
 - provider-specific fields such as `organization_id`, `project_id`, `use_vertex_ai`, `project`, and `location`
 
 Legacy sections under `[raw_api.providers.*]`, `[raw_api.openai.providers.*]`, `[raw_api.anthropic.providers.*]`, and `[raw_api.google_genai.providers.*]` remain readable for backward compatibility, but new configuration should use the unified `providers.*` layout.

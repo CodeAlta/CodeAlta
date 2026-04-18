@@ -27,6 +27,10 @@ public sealed class CodeAltaConfigStoreRawApiTests
             single_model_id = " gpt-5 "
             is_default = true
 
+            [providers.OpenRouter.extra_body]
+            custom_boolean = true
+            custom_threshold = 0.75
+
             [providers.OpenRouter.profile]
             supports_developer_role = false
             supports_store = false
@@ -63,6 +67,10 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("https://openrouter.ai/api/v1", providers[0].BaseUri);
         Assert.AreEqual("openrouter", providers[0].ModelsDevProviderId);
         Assert.AreEqual("gpt-5", providers[0].SingleModelId);
+        var extraBody = providers[0].ExtraBody;
+        Assert.IsNotNull(extraBody);
+        Assert.AreEqual(true, extraBody!["custom_boolean"]);
+        Assert.AreEqual(0.75d, Convert.ToDouble(extraBody["custom_threshold"]));
         Assert.IsFalse(providers[0].EnableResponses);
         Assert.IsTrue(providers[0].EnableChat);
         Assert.IsTrue(providers[0].DefaultChat);
@@ -152,6 +160,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             display_name = " Anthropic "
             provider = " anthropic "
             api_key_env = " ANTHROPIC_API_KEY "
+            single_model_id = " MiniMax-M2.7 "
             is_default = true
 
             [providers.VertexWest]
@@ -160,6 +169,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             use_vertex_ai = true
             project = " sample-project "
             location = " europe-west4 "
+            single_model_id = " gemini-2.5-pro "
             """);
 
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
@@ -169,6 +179,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("anthropic", anthropicProviders[0].ProviderKey);
         Assert.AreEqual("Anthropic", anthropicProviders[0].DisplayName);
         Assert.AreEqual("ANTHROPIC_API_KEY", anthropicProviders[0].ApiKeyEnv);
+        Assert.AreEqual("MiniMax-M2.7", anthropicProviders[0].SingleModelId);
         Assert.IsTrue(anthropicProviders[0].IsDefault);
 
         var enabledGoogleProviders = store.LoadGlobalGoogleGenAIProviderDefinitions();
@@ -180,6 +191,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.IsTrue(allGoogleProviders[0].UseVertexAI);
         Assert.AreEqual("sample-project", allGoogleProviders[0].Project);
         Assert.AreEqual("europe-west4", allGoogleProviders[0].Location);
+        Assert.AreEqual("gemini-2.5-pro", allGoogleProviders[0].SingleModelId);
     }
 
     [TestMethod]

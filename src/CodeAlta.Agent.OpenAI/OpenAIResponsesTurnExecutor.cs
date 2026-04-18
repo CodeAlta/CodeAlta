@@ -1,4 +1,5 @@
 #pragma warning disable OPENAI001
+#pragma warning disable SCME0001
 
 using System.Text.Json;
 using CodeAlta.Agent.LocalRuntime;
@@ -177,7 +178,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         return response;
     }
 
-    private static CreateResponseOptions CreateRequestPayload(LocalAgentTurnRequest request)
+    private CreateResponseOptions CreateRequestPayload(LocalAgentTurnRequest request)
     {
         var toolDefinitions = request.Tools.Select(CreateFunctionTool).Cast<ResponseTool>().ToArray();
         var options = new CreateResponseOptions
@@ -224,6 +225,8 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                 },
             };
         }
+
+        OpenAIExtraBodyPatchHelper.Apply(ref options.Patch, provider.ExtraBody);
 
         return options;
     }

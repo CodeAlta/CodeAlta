@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using Tomlyn;
+using Tomlyn.Model;
 
 namespace CodeAlta.Catalog;
 
@@ -576,6 +577,7 @@ public sealed class CodeAltaConfigStore
                 definition.ProjectId = NormalizeText(definition.ProjectId);
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
                 definition.SingleModelId = NormalizeModel(definition.SingleModelId);
+                definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
                 definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, document.RawApi.Compaction);
@@ -599,6 +601,7 @@ public sealed class CodeAltaConfigStore
                 definition.ApiKeyEnv = NormalizeText(definition.ApiKeyEnv);
                 definition.BaseUri = NormalizeText(definition.BaseUri);
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
+                definition.SingleModelId = NormalizeModel(definition.SingleModelId);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
                 definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, document.RawApi.Compaction);
@@ -624,6 +627,7 @@ public sealed class CodeAltaConfigStore
                 definition.Location = NormalizeText(definition.Location);
                 definition.BaseUri = NormalizeText(definition.BaseUri);
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
+                definition.SingleModelId = NormalizeModel(definition.SingleModelId);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
                 definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, document.RawApi.Compaction);
@@ -751,6 +755,7 @@ public sealed class CodeAltaConfigStore
                 definition.Location = NormalizeText(definition.Location);
                 definition.ModelsDevProviderId = NormalizeRawProviderKey(definition.ModelsDevProviderId);
                 definition.SingleModelId = NormalizeModel(definition.SingleModelId);
+                definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
                 definition.Profile = NormalizeProfile(definition.Profile);
                 definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
                 definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, inherited);
@@ -825,6 +830,7 @@ public sealed class CodeAltaConfigStore
             ProjectId = definition.ProjectId,
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
+            ExtraBody = CloneExtraBody(definition.ExtraBody),
             EnableResponses = string.Equals(definition.WireApi, "responses", StringComparison.Ordinal),
             EnableChat = string.Equals(definition.WireApi, "chat", StringComparison.Ordinal),
             DefaultResponses = definition.IsDefault && string.Equals(definition.WireApi, "responses", StringComparison.Ordinal),
@@ -857,6 +863,7 @@ public sealed class CodeAltaConfigStore
             ApiKeyEnv = definition.ApiKeyEnv,
             BaseUri = definition.BaseUri,
             ModelsDevProviderId = definition.ModelsDevProviderId,
+            SingleModelId = definition.SingleModelId,
             IsDefault = definition.IsDefault,
             Profile = CloneProfile(definition.Profile),
             Compaction = CloneCompaction(definition.Compaction),
@@ -889,6 +896,7 @@ public sealed class CodeAltaConfigStore
             Location = definition.Location,
             BaseUri = definition.BaseUri,
             ModelsDevProviderId = definition.ModelsDevProviderId,
+            SingleModelId = definition.SingleModelId,
             IsDefault = definition.IsDefault,
             Profile = CloneProfile(definition.Profile),
             Compaction = CloneCompaction(definition.Compaction),
@@ -942,6 +950,7 @@ public sealed class CodeAltaConfigStore
             Location = definition.Location,
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
+            ExtraBody = CloneExtraBody(definition.ExtraBody),
             Profile = CloneProfile(definition.Profile),
             Compaction = CloneCompaction(definition.Compaction),
             ModelOverrides = CloneModelOverrides(definition.ModelOverrides),
@@ -964,6 +973,7 @@ public sealed class CodeAltaConfigStore
             ProjectId = definition.ProjectId,
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
+            ExtraBody = CloneExtraBody(definition.ExtraBody),
             EnableResponses = definition.EnableResponses,
             EnableChat = definition.EnableChat,
             DefaultResponses = definition.DefaultResponses,
@@ -987,6 +997,7 @@ public sealed class CodeAltaConfigStore
             ApiKeyEnv = definition.ApiKeyEnv,
             BaseUri = definition.BaseUri,
             ModelsDevProviderId = definition.ModelsDevProviderId,
+            SingleModelId = definition.SingleModelId,
             IsDefault = definition.IsDefault,
             Profile = CloneProfile(definition.Profile),
             Compaction = CloneCompaction(definition.Compaction),
@@ -1010,6 +1021,7 @@ public sealed class CodeAltaConfigStore
             Location = definition.Location,
             BaseUri = definition.BaseUri,
             ModelsDevProviderId = definition.ModelsDevProviderId,
+            SingleModelId = definition.SingleModelId,
             IsDefault = definition.IsDefault,
             Profile = CloneProfile(definition.Profile),
             Compaction = CloneCompaction(definition.Compaction),
@@ -1034,6 +1046,54 @@ public sealed class CodeAltaConfigStore
             MaxTokensFieldName = profile.MaxTokensFieldName,
             ReasoningFieldNames = profile.ReasoningFieldNames is null ? null : [.. profile.ReasoningFieldNames],
         };
+    }
+
+    private static TomlTable? NormalizeExtraBody(TomlTable? extraBody)
+        => CloneExtraBody(extraBody);
+
+    private static TomlTable? CloneExtraBody(TomlTable? extraBody)
+    {
+        if (extraBody is null || extraBody.Count == 0)
+        {
+            return null;
+        }
+
+        var clone = new TomlTable(extraBody.Kind == ObjectKind.InlineTable);
+        foreach (var entry in extraBody)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+            {
+                continue;
+            }
+
+            clone[entry.Key.Trim()] = CloneExtraBodyValue(entry.Value)!;
+        }
+
+        return clone.Count == 0 ? null : clone;
+    }
+
+    private static object? CloneExtraBodyValue(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            TomlTable table => CloneExtraBody(table),
+            TomlArray array => CloneExtraBodyArray(array),
+            _ => value,
+        };
+    }
+
+    private static TomlArray CloneExtraBodyArray(TomlArray array)
+    {
+        ArgumentNullException.ThrowIfNull(array);
+
+        var clone = new TomlArray(array.Count);
+        foreach (var item in array)
+        {
+            clone.Add(CloneExtraBodyValue(item));
+        }
+
+        return clone;
     }
 
     private static CodeAltaRawApiCompactionDocument CloneCompaction(CodeAltaRawApiCompactionDocument? compaction)

@@ -140,6 +140,19 @@ public sealed class AnthropicAgentBackend : IAgentBackend
                 provider.ModelOverrides);
         }
 
+        if (!string.IsNullOrWhiteSpace(provider.SingleModelId))
+        {
+            models =
+            [
+                CreateSingleModelInfo(provider.SingleModelId, providerDescriptor),
+            ];
+            return AgentModelMetadataEnricher.EnrichModels(
+                models,
+                provider.ModelCatalog,
+                provider.ModelsDevProviderId,
+                provider.ModelOverrides);
+        }
+
         using var client = CreateSdkClient(provider, providerDescriptor);
         var results = new List<AgentModelInfo>();
         var page = await client.Models.List(cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -195,5 +208,19 @@ public sealed class AnthropicAgentBackend : IAgentBackend
             Description: null,
             Provider: provider.ProviderKey,
             Capabilities: capabilities);
+    }
+
+    private static AgentModelInfo CreateSingleModelInfo(
+        string modelId,
+        LocalAgentProviderDescriptor providerDescriptor)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentNullException.ThrowIfNull(providerDescriptor);
+
+        var trimmedModelId = modelId.Trim();
+        return new AgentModelInfo(
+            trimmedModelId,
+            DisplayName: trimmedModelId,
+            Provider: providerDescriptor.ProviderKey);
     }
 }

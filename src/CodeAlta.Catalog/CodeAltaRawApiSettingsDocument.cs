@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Tomlyn.Model;
 
 namespace CodeAlta.Catalog;
 
@@ -428,6 +429,12 @@ public sealed class CodeAltaRawApiProviderDocument
     public string? SingleModelId { get; set; }
 
     /// <summary>
+    /// Gets or sets provider-specific OpenAI-compatible request-body fields that should be added to outgoing requests.
+    /// </summary>
+    [JsonPropertyName("extra_body")]
+    public TomlTable? ExtraBody { get; set; }
+
+    /// <summary>
     /// Gets or sets the optional compatibility-profile override.
     /// </summary>
     [JsonPropertyName("profile")]
@@ -510,6 +517,12 @@ public sealed class CodeAltaOpenAIProviderDocument
     /// </summary>
     [JsonPropertyName("single_model_id")]
     public string? SingleModelId { get; set; }
+
+    /// <summary>
+    /// Gets or sets provider-specific OpenAI-compatible request-body fields that should be added to outgoing requests.
+    /// </summary>
+    [JsonPropertyName("extra_body")]
+    public TomlTable? ExtraBody { get; set; }
 
     /// <summary>
     /// Gets or sets whether the Responses backend is enabled for this provider.
@@ -602,6 +615,12 @@ public sealed class CodeAltaAnthropicProviderDocument
     public string? ModelsDevProviderId { get; set; }
 
     /// <summary>
+    /// Gets or sets the optional fixed model identifier used when the provider does not support model discovery.
+    /// </summary>
+    [JsonPropertyName("single_model_id")]
+    public string? SingleModelId { get; set; }
+
+    /// <summary>
     /// Gets or sets whether this provider is the backend default.
     /// </summary>
     [JsonPropertyName("is_default")]
@@ -690,6 +709,12 @@ public sealed class CodeAltaGoogleGenAIProviderDocument
     /// </summary>
     [JsonPropertyName("models_dev_provider_id")]
     public string? ModelsDevProviderId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional fixed model identifier used when the provider does not support model discovery.
+    /// </summary>
+    [JsonPropertyName("single_model_id")]
+    public string? SingleModelId { get; set; }
 
     /// <summary>
     /// Gets or sets whether this provider is the backend default.

@@ -167,6 +167,36 @@ public sealed class ModelsDevCatalogTests
     }
 
     [TestMethod]
+    public async Task AnthropicAgentBackend_ListModelsAsync_UsesConfiguredSingleModelId()
+    {
+        await using var catalog = CreateCatalog();
+        using var temp = TestTempDirectory.Create();
+        await using var backend = new AnthropicAgentBackend(new AnthropicAgentBackendOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new AnthropicProviderOptions
+                {
+                    ProviderKey = "anthropic",
+                    IsDefault = true,
+                    ModelsDevProviderId = "anthropic",
+                    ModelCatalog = catalog,
+                    SingleModelId = " claude-sonnet-test ",
+                    ApiKey = "test-key",
+                    BaseUri = new Uri("https://127.0.0.1.invalid/anthropic"),
+                },
+            },
+        });
+
+        var model = (await backend.ListModelsAsync().ConfigureAwait(false)).Single();
+
+        Assert.AreEqual("claude-sonnet-test", model.Id);
+        Assert.AreEqual("Claude Sonnet Test", model.DisplayName);
+        Assert.AreEqual(200000L, model.Capabilities?["contextWindow"]);
+    }
+
+    [TestMethod]
     public async Task GoogleGenAIAgentBackend_ListModelsAsync_EnrichesWithModelsDevMetadata()
     {
         await using var catalog = CreateCatalog();
@@ -192,6 +222,36 @@ public sealed class ModelsDevCatalogTests
 
         var model = (await backend.ListModelsAsync().ConfigureAwait(false)).Single();
 
+        Assert.AreEqual("Gemini Test", model.DisplayName);
+        Assert.AreEqual(1000000L, model.Capabilities?["contextWindow"]);
+    }
+
+    [TestMethod]
+    public async Task GoogleGenAIAgentBackend_ListModelsAsync_UsesConfiguredSingleModelId()
+    {
+        await using var catalog = CreateCatalog();
+        using var temp = TestTempDirectory.Create();
+        await using var backend = new GoogleGenAIAgentBackend(new GoogleGenAIAgentBackendOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new GoogleGenAIProviderOptions
+                {
+                    ProviderKey = "google",
+                    IsDefault = true,
+                    ModelsDevProviderId = "google",
+                    ModelCatalog = catalog,
+                    SingleModelId = " gemini-test ",
+                    ApiKey = "test-key",
+                    BaseUri = new Uri("https://127.0.0.1.invalid/v1beta"),
+                },
+            },
+        });
+
+        var model = (await backend.ListModelsAsync().ConfigureAwait(false)).Single();
+
+        Assert.AreEqual("gemini-test", model.Id);
         Assert.AreEqual("Gemini Test", model.DisplayName);
         Assert.AreEqual(1000000L, model.Capabilities?["contextWindow"]);
     }
