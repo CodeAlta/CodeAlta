@@ -103,7 +103,6 @@ public sealed class CatalogInfrastructureTests
         using var root = TempDirectory.Create();
         var catalogRoot = Path.Combine(root.Path, ".alta");
         var projectsRoot = Path.Combine(catalogRoot, "projects");
-        Directory.CreateDirectory(Path.Combine(projectsRoot, "codealta"));
         Directory.CreateDirectory(Path.Combine(projectsRoot, "codealta-copy"));
 
         var projectPath = Path.Combine(root.Path, "CodeAlta");
@@ -124,7 +123,7 @@ public sealed class CatalogInfrastructureTests
             """;
 
         await File.WriteAllTextAsync(
-            Path.Combine(projectsRoot, "codealta", "readme.md"),
+            Path.Combine(projectsRoot, "codealta.md"),
             string.Format(
                 projectTemplate,
                 ProjectId.NewVersion7(),
@@ -170,14 +169,14 @@ public sealed class CatalogInfrastructureTests
     }
 
     [TestMethod]
-    public async Task ProjectCatalog_LoadAsync_LoadsProjectsFromReadmeCatalog()
+    public async Task ProjectCatalog_LoadAsync_LoadsProjectsFromFlatCatalogFile()
     {
         using var root = TempDirectory.Create();
-        var projectRoot = Path.Combine(root.Path, "projects", "repo-main");
-        Directory.CreateDirectory(projectRoot);
+        var projectsRoot = Path.Combine(root.Path, "projects");
+        Directory.CreateDirectory(projectsRoot);
 
         await File.WriteAllTextAsync(
-            Path.Combine(projectRoot, "readme.md"),
+            Path.Combine(projectsRoot, "repo-main.md"),
             """
             ---
             kind: "project"
@@ -201,6 +200,37 @@ public sealed class CatalogInfrastructureTests
         Assert.AreEqual(1, projects.Count);
         Assert.AreEqual("repo-main", projects[0].Slug);
         Assert.AreEqual("Repo.Main", projects[0].Name);
+    }
+
+    [TestMethod]
+    public async Task ProjectCatalog_LoadAsync_LoadsLegacyProjectReadmeDuringTransition()
+    {
+        using var root = TempDirectory.Create();
+        var projectRoot = Path.Combine(root.Path, "projects", "repo-main");
+        Directory.CreateDirectory(projectRoot);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(projectRoot, "readme.md"),
+            """
+            ---
+            kind: "project"
+            id: "01963b36-0d70-7a11-b3c2-1f2e3d4c5b6a"
+            slug: "repo-main"
+            name: "Repo.Main"
+            display_name: "Main Repo"
+            path: "C:\\code\\repo-main"
+            default_branch: "main"
+            ---
+
+            # Main Repo
+            """
+        ).ConfigureAwait(false);
+
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root.Path });
+        var projects = await catalog.LoadAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, projects.Count);
+        Assert.AreEqual("repo-main", projects[0].Slug);
     }
 
     [TestMethod]
@@ -261,7 +291,7 @@ public sealed class CatalogInfrastructureTests
     }
 
     [TestMethod]
-    public async Task ProjectCatalog_SaveAsync_WritesReadmeCatalogFiles()
+    public async Task ProjectCatalog_SaveAsync_WritesFlatCatalogFiles()
     {
         using var root = TempDirectory.Create();
         var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root.Path });
@@ -269,7 +299,7 @@ public sealed class CatalogInfrastructureTests
 
         await catalog.SaveAsync(project).ConfigureAwait(false);
 
-        Assert.IsTrue(File.Exists(Path.Combine(root.Path, "projects", "repo-main", "readme.md")));
+        Assert.IsTrue(File.Exists(Path.Combine(root.Path, "projects", "repo-main.md")));
 
         var loaded = await catalog.GetBySlugAsync("repo-main").ConfigureAwait(false);
         Assert.IsNotNull(loaded);

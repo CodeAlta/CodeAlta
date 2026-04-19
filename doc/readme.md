@@ -15,7 +15,7 @@ Current infrastructure-first progress includes project catalog and checkout prim
 
 Global repository layout (implemented reader support):
 
-- `projects/<projectSlug>/readme.md`
+- `projects/<projectSlug>.md`
 - `machines/<machineId>.yaml`
 - `checkouts/<projectName>/`
 

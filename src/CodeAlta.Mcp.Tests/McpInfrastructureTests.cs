@@ -382,13 +382,13 @@ public sealed class McpInfrastructureTests
 
         private static async Task SeedProjectFixtureAsync(string globalRepoRoot)
         {
-            var projectsRoot = Path.Combine(globalRepoRoot, "projects", "repo-main");
+            var projectsRoot = Path.Combine(globalRepoRoot, "projects");
             Directory.CreateDirectory(projectsRoot);
 
             var projectId = ProjectId.NewVersion7();
 
             await File.WriteAllTextAsync(
-                Path.Combine(projectsRoot, "readme.md"),
+                Path.Combine(projectsRoot, "repo-main.md"),
                 $$"""
                 ---
                 kind: "project"

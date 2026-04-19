@@ -197,7 +197,7 @@ These artifacts should be stored in a way that supports **portability** and **re
 
 To keep artifacts machine-readable, prefer **Markdown files with YAML frontmatter** (similar to Agent Skills’ `SKILL.md` and optionally project `AGENTS.md`).
 
-For the portable `~/.codealta/` catalog, workspace and project folders should use lowercase `readme.md` as their canonical metadata file so the folder remains directly readable in default git hosting views.
+For the portable per-user catalog, workspace and thread folders should use lowercase `readme.md` as their canonical metadata file, while project descriptors should use flat files named `<projectSlug>.md`.
 Example:
 
 ```md

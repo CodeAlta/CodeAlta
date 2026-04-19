@@ -143,7 +143,7 @@ Most durable entities get their own folder.
 
 Preferred convention:
 
-- project folders use `readme.md`
+- project descriptors use single markdown files named `<projectSlug>.md`
 - thread folders use `readme.md`
 - agent definitions use single files named `<agent-key>.agent.md`
 - skill folders keep `SKILL.md`
@@ -154,7 +154,7 @@ Projects are first-class catalog entities.
 
 Example:
 
-- `~/.codealta/projects/tomlyn/readme.md`
+- `~/.alta/projects/tomlyn.md`
 - `~/.codealta/projects/tomlyn/activity/2026-03.jsonl`
 - `~/.codealta/projects/tomlyn/artifacts/...`
 - `~/.codealta/projects/tomlyn/threads/<thread-id>/readme.md`
@@ -445,7 +445,7 @@ CodeAlta should load the catalog by walking the filesystem, not by querying a me
 
 Suggested discovery order:
 
-1. `projects/**/readme.md`
+1. `projects/*.md` (and legacy `projects/**/readme.md` during transition)
 2. backend session listings from Copilot and Codex
 3. `threads/internal/**/readme.md` only for host-owned internal linkage records if present
 4. `agents/**/*.agent.md`

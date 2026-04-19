@@ -49,7 +49,7 @@ public sealed partial class ProjectCatalog
         }
 
         var results = new List<ProjectDescriptor>();
-        foreach (var markdownPath in Directory.EnumerateFiles(projectsRoot, "readme.md", SearchOption.AllDirectories))
+        foreach (var markdownPath in EnumerateProjectMarkdownPaths(projectsRoot))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
@@ -63,7 +63,8 @@ public sealed partial class ProjectCatalog
         return results
             .GroupBy(static project => NormalizePath(project.ProjectPath), StringComparer.OrdinalIgnoreCase)
             .Select(static group => group
-                .OrderBy(static project => project.SourcePath, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(static project => IsFlatProjectMarkdownPath(project.SourcePath))
+                .ThenBy(static project => project.SourcePath, StringComparer.OrdinalIgnoreCase)
                 .First())
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -130,9 +131,8 @@ public sealed partial class ProjectCatalog
         ArgumentNullException.ThrowIfNull(project);
         project.Validate();
 
-        var directory = Path.Combine(_options.ProjectsRoot, project.Slug);
-        Directory.CreateDirectory(directory);
-        var markdownPath = Path.Combine(directory, "readme.md");
+        Directory.CreateDirectory(_options.ProjectsRoot);
+        var markdownPath = GetProjectMarkdownPath(project.Slug);
         var markdown = _serializer.SerializeProjectMarkdown(project);
         await File.WriteAllTextAsync(markdownPath, markdown, cancellationToken).ConfigureAwait(false);
         project.SourcePath = markdownPath;
@@ -303,6 +303,37 @@ public sealed partial class ProjectCatalog
 
         var prefix = globalRoot + Path.DirectorySeparatorChar;
         return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumerateProjectMarkdownPaths(string projectsRoot)
+    {
+        foreach (var markdownPath in Directory.EnumerateFiles(projectsRoot, "*.md", SearchOption.TopDirectoryOnly))
+        {
+            yield return markdownPath;
+        }
+
+        foreach (var legacyDirectory in Directory.EnumerateDirectories(projectsRoot, "*", SearchOption.TopDirectoryOnly))
+        {
+            var markdownPath = Path.Combine(legacyDirectory, "readme.md");
+            if (File.Exists(markdownPath))
+            {
+                yield return markdownPath;
+            }
+        }
+    }
+
+    private string GetProjectMarkdownPath(string projectSlug)
+        => Path.Combine(_options.ProjectsRoot, $"{projectSlug}.md");
+
+    private static bool IsFlatProjectMarkdownPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(Path.GetFileName(path), "readme.md", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Slugify(string value)

@@ -7,7 +7,7 @@ The workspace-first plan is obsolete.
 The current model is:
 
 - a global catalog rooted at `~/.codealta/`
-- project descriptors under `projects/<projectSlug>/readme.md`
+- project descriptors under `projects/<projectSlug>.md`
 - a project `slug` used as the normalized reference
 - a separate project `name` used for checkout directory naming
 - `global` plus `project` scopes only

@@ -60,7 +60,7 @@ Runtime interpretation:
 ### 1.3 Catalog-level storage
 
 Project metadata lives in the portable `~/.codealta/` catalog and references local checkout paths via machine overrides:
-- `~/.codealta/projects/<projectSlug>/readme.md`
+- `~/.alta/projects/<projectSlug>.md`
 - `~/.codealta/local/config.yaml` (per-machine path overrides)
 
 ## 2. Artifact file format (markdown + YAML frontmatter)
