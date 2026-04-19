@@ -116,7 +116,7 @@ public sealed class WorkThreadCatalog
 
     private string GetViewStatePath()
     {
-        return Path.Combine(_options.LocalRoot, "ui-state.yaml");
+        return _options.UiStatePath;
     }
 
     private static string GetInternalDirectoryName(string threadId)

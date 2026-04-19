@@ -6,15 +6,18 @@ using System.Text.Json.Serialization.Metadata;
 namespace CodeAlta.Agent.LocalRuntime;
 
 /// <summary>
-/// Persists local agent providers, sessions, state, and canonical event logs on the filesystem.
+/// Persists local raw-API session journals on the filesystem.
 /// </summary>
 public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
 {
+    private const string SessionSummaryEventType = "local.sessionSummary";
+    private const string SessionStateEventType = "local.sessionState";
+
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly LocalAgentRuntimePathLayout _layout;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _pathLocks = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, string> _sessionRoots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _sessionFiles = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileSystemLocalAgentSessionStore"/> class.
@@ -34,15 +37,12 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
     {
         ArgumentNullException.ThrowIfNull(provider);
 
-        var providerRoot = _layout.GetProviderRootPath(provider.ProtocolFamily, provider.ProviderKey);
         var providerPath = _layout.GetProviderDescriptorPath(provider.ProtocolFamily, provider.ProviderKey);
-        Directory.CreateDirectory(providerRoot);
-
         await WriteFileAtomicallyAsync(
-            providerPath,
-            provider.ToJson(),
-            cancellationToken).ConfigureAwait(false);
-
+                providerPath,
+                provider.ToJson(),
+                cancellationToken)
+            .ConfigureAwait(false);
         return provider;
     }
 
@@ -59,9 +59,10 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         }
 
         return await ReadJsonFileAsync(
-            providerPath,
-            AgentJsonSerializerContext.Default.LocalAgentProviderDescriptor,
-            cancellationToken).ConfigureAwait(false);
+                providerPath,
+                AgentJsonSerializerContext.Default.LocalAgentProviderDescriptor,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -71,19 +72,19 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
     {
         ArgumentNullException.ThrowIfNull(session);
 
-        var sessionRoot = await GetOrCreateSessionRootPathAsync(
-            session.ProtocolFamily,
-            session.ProviderKey,
+        var sessionFile = await GetOrCreateSessionFilePathAsync(
             session.SessionId,
             session.CreatedAt,
             cancellationToken).ConfigureAwait(false);
-        Directory.CreateDirectory(sessionRoot);
-        Directory.CreateDirectory(_layout.GetAttachmentsDirectoryPath(sessionRoot));
+        var snapshotEvent = new AgentRawEvent(
+            session.BackendId,
+            session.SessionId,
+            session.UpdatedAt,
+            SessionSummaryEventType,
+            JsonSerializer.SerializeToElement(session, AgentJsonSerializerContext.Default.LocalAgentSessionSummary),
+            null);
 
-        await WriteFileAtomicallyAsync(
-            _layout.GetSessionSummaryPath(sessionRoot),
-            session.ToJson(),
-            cancellationToken).ConfigureAwait(false);
+        await AppendLinesAsync(sessionFile, [snapshotEvent.ToJson()], cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -93,26 +94,15 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        var sessionRoot = await TryGetSessionRootPathAsync(
-            protocolFamily,
-            providerKey,
-            sessionId,
-            cancellationToken).ConfigureAwait(false);
-        if (sessionRoot is null)
+        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (projection is null || projection.Summary is null)
         {
             return null;
         }
 
-        var summaryPath = _layout.GetSessionSummaryPath(sessionRoot);
-        if (!File.Exists(summaryPath))
-        {
-            return null;
-        }
-
-        return await ReadJsonFileAsync(
-            summaryPath,
-            AgentJsonSerializerContext.Default.LocalAgentSessionSummary,
-            cancellationToken).ConfigureAwait(false);
+        return MatchesScope(projection.Summary, protocolFamily, providerKey)
+            ? projection.Summary
+            : null;
     }
 
     /// <inheritdoc />
@@ -121,38 +111,27 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string providerKey,
         CancellationToken cancellationToken = default)
     {
-        var sessionsRoot = _layout.GetProviderSessionsRootPath(protocolFamily, providerKey);
-        if (!Directory.Exists(sessionsRoot))
+        if (!Directory.Exists(_layout.SessionsRootPath))
         {
             return [];
         }
 
         var results = new List<LocalAgentSessionSummary>();
-        foreach (var sessionFile in Directory.EnumerateFiles(sessionsRoot, "session.json", SearchOption.AllDirectories))
+        foreach (var sessionFile in Directory.EnumerateFiles(_layout.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
-                var summary = await ReadJsonFileAsync(
-                    sessionFile,
-                    AgentJsonSerializerContext.Default.LocalAgentSessionSummary,
-                    cancellationToken).ConfigureAwait(false);
-                if (summary is null)
-                {
-                    continue;
-                }
-
-                if (!string.Equals(summary.ProtocolFamily, protocolFamily, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(summary.ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase))
+                var projection = await ProjectSessionFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+                var summary = projection.Summary;
+                if (summary is null || !MatchesScope(summary, protocolFamily, providerKey))
                 {
                     continue;
                 }
 
                 results.Add(summary);
-                _sessionRoots[GetSessionCacheKey(protocolFamily, providerKey, summary.SessionId)] =
-                    Path.GetDirectoryName(sessionFile)
-                    ?? throw new InvalidOperationException($"Session path '{sessionFile}' did not resolve to a directory.");
+                _sessionFiles[summary.SessionId] = sessionFile;
             }
             catch (IOException)
             {
@@ -186,36 +165,12 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
             return;
         }
 
-        var sessionRoot = await GetExistingSessionRootPathAsync(
-            protocolFamily,
-            providerKey,
-            sessionId,
-            cancellationToken).ConfigureAwait(false);
-        var eventsPath = _layout.GetSessionEventsPath(sessionRoot);
-        Directory.CreateDirectory(sessionRoot);
-
-        var pathLock = GetPathLock(eventsPath);
-        await pathLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await using var stream = new FileStream(
-                eventsPath,
-                FileMode.Append,
-                FileAccess.Write,
-                FileShare.Read,
-                bufferSize: 4096,
-                useAsync: true);
-            await using var writer = new StreamWriter(stream, Utf8WithoutBom);
-            foreach (var @event in events)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await writer.WriteLineAsync(@event.ToJson().AsMemory(), cancellationToken).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            pathLock.Release();
-        }
+        var sessionFile = await GetExistingSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        await AppendLinesAsync(
+                sessionFile,
+                events.Select(static @event => @event.ToJson()).ToArray(),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -225,25 +180,225 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        var sessionRoot = await TryGetSessionRootPathAsync(
-            protocolFamily,
-            providerKey,
-            sessionId,
-            cancellationToken).ConfigureAwait(false);
-        if (sessionRoot is null)
+        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (projection is null || projection.Summary is null || !MatchesScope(projection.Summary, protocolFamily, providerKey))
         {
             return [];
         }
 
-        var eventsPath = _layout.GetSessionEventsPath(sessionRoot);
-        if (!File.Exists(eventsPath))
+        return projection.History;
+    }
+
+    /// <inheritdoc />
+    public async Task UpsertStateAsync(
+        LocalAgentSessionState state,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        var sessionFile = await GetExistingSessionFilePathAsync(state.SessionId, cancellationToken).ConfigureAwait(false);
+        var backendId = await ResolveBackendIdAsync(state.SessionId, state.ProviderKey, cancellationToken).ConfigureAwait(false);
+        var snapshotEvent = new AgentRawEvent(
+            backendId,
+            state.SessionId,
+            state.UpdatedAt,
+            SessionStateEventType,
+            JsonSerializer.SerializeToElement(state, AgentJsonSerializerContext.Default.LocalAgentSessionState),
+            null);
+
+        await AppendLinesAsync(sessionFile, [snapshotEvent.ToJson()], cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<LocalAgentSessionState?> GetStateAsync(
+        string protocolFamily,
+        string providerKey,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (projection is null || projection.Summary is null || projection.State is null)
         {
-            return [];
+            return null;
         }
 
-        var results = new List<AgentEvent>();
+        return MatchesScope(projection.Summary, protocolFamily, providerKey)
+            ? projection.State
+            : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteSessionAsync(
+        string protocolFamily,
+        string providerKey,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var sessionFile = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (sessionFile is null || !File.Exists(sessionFile))
+        {
+            return false;
+        }
+
+        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (projection?.Summary is not null && !MatchesScope(projection.Summary, protocolFamily, providerKey))
+        {
+            return false;
+        }
+
+        var pathLock = GetPathLock(sessionFile);
+        await pathLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!File.Exists(sessionFile))
+            {
+                return false;
+            }
+
+            File.Delete(sessionFile);
+            _sessionFiles.TryRemove(sessionId, out _);
+            DeleteEmptySessionDirectories(Path.GetDirectoryName(sessionFile));
+            return true;
+        }
+        finally
+        {
+            pathLock.Release();
+        }
+    }
+
+    private async Task<string> GetOrCreateSessionFilePathAsync(
+        string sessionId,
+        DateTimeOffset createdAt,
+        CancellationToken cancellationToken)
+    {
+        var existing = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var sessionFile = _layout.GetSessionFilePath(sessionId, createdAt);
+        _sessionFiles[sessionId] = sessionFile;
+        return sessionFile;
+    }
+
+    private async Task<string> GetExistingSessionFilePathAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        var sessionFile = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (sessionFile is null)
+        {
+            throw new InvalidOperationException($"Local session '{sessionId}' does not exist.");
+        }
+
+        return sessionFile;
+    }
+
+    private async Task<string?> TryGetSessionFilePathAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        if (_sessionFiles.TryGetValue(sessionId, out var cachedPath) && File.Exists(cachedPath))
+        {
+            return cachedPath;
+        }
+
+        if (!Directory.Exists(_layout.SessionsRootPath))
+        {
+            return null;
+        }
+
+        foreach (var sessionFile in Directory.EnumerateFiles(_layout.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.Equals(
+                    Path.GetFileNameWithoutExtension(sessionFile),
+                    sessionId,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            _sessionFiles[sessionId] = sessionFile;
+            return sessionFile;
+        }
+
+        return null;
+    }
+
+    private async Task<AgentBackendId> ResolveBackendIdAsync(
+        string sessionId,
+        string providerKey,
+        CancellationToken cancellationToken)
+    {
+        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return projection?.Summary?.BackendId ?? new AgentBackendId(providerKey);
+    }
+
+    private async Task<SessionProjection?> TryProjectSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        var sessionFile = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (sessionFile is null || !File.Exists(sessionFile))
+        {
+            return null;
+        }
+
+        return await ProjectSessionFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SessionProjection> ProjectSessionFileAsync(
+        string sessionFile,
+        CancellationToken cancellationToken)
+    {
+        LocalAgentSessionSummary? summary = null;
+        LocalAgentSessionState? state = null;
+        var history = new List<AgentEvent>();
+
+        await foreach (var @event in ReadJournalEventsAsync(sessionFile, cancellationToken).ConfigureAwait(false))
+        {
+            if (@event is AgentRawEvent rawEvent)
+            {
+                if (rawEvent.BackendEventType == SessionSummaryEventType)
+                {
+                    var snapshot = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentSessionSummary);
+                    if (snapshot is not null)
+                    {
+                        summary = snapshot;
+                    }
+
+                    continue;
+                }
+
+                if (rawEvent.BackendEventType == SessionStateEventType)
+                {
+                    var snapshot = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentSessionState);
+                    if (snapshot is not null)
+                    {
+                        state = snapshot;
+                    }
+
+                    continue;
+                }
+            }
+
+            history.Add(@event);
+        }
+
+        return new SessionProjection(summary, state, history);
+    }
+
+    private async IAsyncEnumerable<AgentEvent> ReadJournalEventsAsync(
+        string path,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         await using var stream = new FileStream(
-            eventsPath,
+            path,
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite,
@@ -259,191 +414,52 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
                 continue;
             }
 
+            AgentEvent? @event;
             try
             {
-                var @event = JsonSerializer.Deserialize(line, AgentJsonSerializerContext.Default.AgentEvent)
-                    ?? throw new JsonException("Event log line deserialized to null.");
-                results.Add(@event);
+                @event = JsonSerializer.Deserialize(line, AgentJsonSerializerContext.Default.AgentEvent)
+                    ?? throw new JsonException("Journal line deserialized to null.");
             }
             catch (JsonException) when (reader.Peek() < 0)
             {
-                break;
+                yield break;
             }
-        }
 
-        return results;
+            yield return @event;
+        }
     }
 
-    /// <inheritdoc />
-    public async Task UpsertStateAsync(
-        LocalAgentSessionState state,
-        CancellationToken cancellationToken = default)
+    private async Task AppendLinesAsync(
+        string path,
+        IReadOnlyList<string> lines,
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        var directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
+        Directory.CreateDirectory(directory);
 
-        var sessionRoot = await GetExistingSessionRootPathAsync(
-            state.ProtocolFamily,
-            state.ProviderKey,
-            state.SessionId,
-            cancellationToken).ConfigureAwait(false);
-        Directory.CreateDirectory(sessionRoot);
-
-        await WriteFileAtomicallyAsync(
-            _layout.GetSessionStatePath(sessionRoot),
-            state.ToJson(),
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<LocalAgentSessionState?> GetStateAsync(
-        string protocolFamily,
-        string providerKey,
-        string sessionId,
-        CancellationToken cancellationToken = default)
-    {
-        var sessionRoot = await TryGetSessionRootPathAsync(
-            protocolFamily,
-            providerKey,
-            sessionId,
-            cancellationToken).ConfigureAwait(false);
-        if (sessionRoot is null)
-        {
-            return null;
-        }
-
-        var statePath = _layout.GetSessionStatePath(sessionRoot);
-        if (!File.Exists(statePath))
-        {
-            return null;
-        }
-
-        return await ReadJsonFileAsync(
-            statePath,
-            AgentJsonSerializerContext.Default.LocalAgentSessionState,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> DeleteSessionAsync(
-        string protocolFamily,
-        string providerKey,
-        string sessionId,
-        CancellationToken cancellationToken = default)
-    {
-        var sessionRoot = await TryGetSessionRootPathAsync(
-            protocolFamily,
-            providerKey,
-            sessionId,
-            cancellationToken).ConfigureAwait(false);
-        if (sessionRoot is null || !Directory.Exists(sessionRoot))
-        {
-            return false;
-        }
-
-        var pathLock = GetPathLock(sessionRoot);
+        var pathLock = GetPathLock(path);
         await pathLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!Directory.Exists(sessionRoot))
+            await using var stream = new FileStream(
+                path,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.Read,
+                bufferSize: 4096,
+                useAsync: true);
+            await using var writer = new StreamWriter(stream, Utf8WithoutBom);
+            foreach (var line in lines)
             {
-                return false;
+                cancellationToken.ThrowIfCancellationRequested();
+                await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
             }
-
-            Directory.Delete(sessionRoot, recursive: true);
-            _sessionRoots.TryRemove(GetSessionCacheKey(protocolFamily, providerKey, sessionId), out _);
-            return true;
         }
         finally
         {
             pathLock.Release();
         }
-    }
-
-    private async Task<string> GetOrCreateSessionRootPathAsync(
-        string protocolFamily,
-        string providerKey,
-        string sessionId,
-        DateTimeOffset createdAt,
-        CancellationToken cancellationToken)
-    {
-        var existing = await TryGetSessionRootPathAsync(protocolFamily, providerKey, sessionId, cancellationToken).ConfigureAwait(false);
-        if (existing is not null)
-        {
-            return existing;
-        }
-
-        var sessionRoot = _layout.GetSessionRootPath(protocolFamily, providerKey, sessionId, createdAt);
-        _sessionRoots[GetSessionCacheKey(protocolFamily, providerKey, sessionId)] = sessionRoot;
-        return sessionRoot;
-    }
-
-    private async Task<string> GetExistingSessionRootPathAsync(
-        string protocolFamily,
-        string providerKey,
-        string sessionId,
-        CancellationToken cancellationToken)
-    {
-        var sessionRoot = await TryGetSessionRootPathAsync(protocolFamily, providerKey, sessionId, cancellationToken).ConfigureAwait(false);
-        if (sessionRoot is null)
-        {
-            throw new InvalidOperationException(
-                $"Local session '{protocolFamily}/{providerKey}/{sessionId}' does not exist.");
-        }
-
-        return sessionRoot;
-    }
-
-    private async Task<string?> TryGetSessionRootPathAsync(
-        string protocolFamily,
-        string providerKey,
-        string sessionId,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(protocolFamily);
-        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-
-        var cacheKey = GetSessionCacheKey(protocolFamily, providerKey, sessionId);
-        if (_sessionRoots.TryGetValue(cacheKey, out var cachedRoot) && Directory.Exists(cachedRoot))
-        {
-            return cachedRoot;
-        }
-
-        var sessionsRoot = _layout.GetProviderSessionsRootPath(protocolFamily, providerKey);
-        if (!Directory.Exists(sessionsRoot))
-        {
-            return null;
-        }
-
-        foreach (var sessionFile in Directory.EnumerateFiles(sessionsRoot, "session.json", SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                var summary = await ReadJsonFileAsync(
-                    sessionFile,
-                    AgentJsonSerializerContext.Default.LocalAgentSessionSummary,
-                    cancellationToken).ConfigureAwait(false);
-                if (summary is null || !string.Equals(summary.SessionId, sessionId, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var sessionRoot = Path.GetDirectoryName(sessionFile)
-                    ?? throw new InvalidOperationException($"Session path '{sessionFile}' did not resolve to a directory.");
-                _sessionRoots[cacheKey] = sessionRoot;
-                return sessionRoot;
-            }
-            catch (IOException)
-            {
-            }
-            catch (JsonException)
-            {
-            }
-        }
-
-        return null;
     }
 
     private async Task WriteFileAtomicallyAsync(
@@ -512,6 +528,32 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         return await JsonSerializer.DeserializeAsync(stream, typeInfo, cancellationToken).ConfigureAwait(false);
     }
 
-    private static string GetSessionCacheKey(string protocolFamily, string providerKey, string sessionId)
-        => $"{protocolFamily}\n{providerKey}\n{sessionId}";
+    private static bool MatchesScope(LocalAgentSessionSummary summary, string protocolFamily, string providerKey)
+    {
+        return string.Equals(summary.ProtocolFamily, protocolFamily, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(summary.ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void DeleteEmptySessionDirectories(string? directory)
+    {
+        var sessionsRoot = Path.GetFullPath(_layout.SessionsRootPath);
+        while (!string.IsNullOrWhiteSpace(directory) &&
+               Directory.Exists(directory) &&
+               Path.GetFullPath(directory).StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase) &&
+               !Directory.EnumerateFileSystemEntries(directory).Any())
+        {
+            Directory.Delete(directory);
+            if (string.Equals(Path.GetFullPath(directory), sessionsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+    }
+
+    private sealed record SessionProjection(
+        LocalAgentSessionSummary? Summary,
+        LocalAgentSessionState? State,
+        IReadOnlyList<AgentEvent> History);
 }

@@ -10,6 +10,6 @@ public sealed class OrchestrationOptions
     /// </summary>
     public string ArtifactRoot { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".codealta",
+        ".alta",
         "orchestration");
 }

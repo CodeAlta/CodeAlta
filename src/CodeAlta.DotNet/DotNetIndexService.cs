@@ -198,7 +198,7 @@ public sealed class DotNetIndexService
 
         return Path.Combine(
             Path.GetFullPath(repoRoot),
-            ".codealta",
+            ".alta",
             "knowledge",
             "dotnet");
     }

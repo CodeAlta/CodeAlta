@@ -2043,7 +2043,7 @@ public sealed class CodeAltaAppTests
                 Kind = WorkThreadKind.GlobalThread,
                 BackendId = "codex",
                 BackendSessionId = "session-global",
-                WorkingDirectory = @"C:\Users\alexa\.codealta",
+                WorkingDirectory = @"C:\Users\alexa\.alta",
                 Title = "Global",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = timestamp,
@@ -2072,7 +2072,7 @@ public sealed class CodeAltaAppTests
                 BackendSessionId = "session-b",
                 ProjectRef = project1,
                 ParentThreadId = "thread-a",
-                WorkingDirectory = @"C:\Users\alexa\.codealta\threads\internal\child",
+                WorkingDirectory = @"C:\Users\alexa\.alta\threads\internal\child",
                 Title = "Internal child",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = timestamp,
@@ -2124,7 +2124,7 @@ public sealed class CodeAltaAppTests
                 Kind = WorkThreadKind.GlobalThread,
                 BackendId = "codex",
                 BackendSessionId = "session-global",
-                WorkingDirectory = @"C:\Users\alexa\.codealta",
+                WorkingDirectory = @"C:\Users\alexa\.alta",
                 Title = "Global",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -2132,7 +2132,7 @@ public sealed class CodeAltaAppTests
                 LastActiveAt = DateTimeOffset.UtcNow,
             },
             projects,
-            @"C:\Users\alexa\.codealta");
+            @"C:\Users\alexa\.alta");
 
         var projectSummary = ThreadScopePresentation.BuildScopeSummary(
             new WorkThreadDescriptor
@@ -2150,7 +2150,7 @@ public sealed class CodeAltaAppTests
                 LastActiveAt = DateTimeOffset.UtcNow,
             },
             projects,
-            @"C:\Users\alexa\.codealta");
+            @"C:\Users\alexa\.alta");
 
         var internalSummary = ThreadScopePresentation.BuildScopeSummary(
             new WorkThreadDescriptor
@@ -2160,7 +2160,7 @@ public sealed class CodeAltaAppTests
                 BackendId = "codex",
                 BackendSessionId = "session-internal",
                 ProjectRef = projectId,
-                WorkingDirectory = @"C:\Users\alexa\.codealta\threads\internal",
+                WorkingDirectory = @"C:\Users\alexa\.alta\threads\internal",
                 Title = "Internal",
                 Status = WorkThreadStatus.Active,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -2168,9 +2168,9 @@ public sealed class CodeAltaAppTests
                 LastActiveAt = DateTimeOffset.UtcNow,
             },
             projects,
-            @"C:\Users\alexa\.codealta");
+            @"C:\Users\alexa\.alta");
 
-        Assert.AreEqual(@"Global thread · C:\Users\alexa\.codealta", globalSummary);
+        Assert.AreEqual(@"Global thread · C:\Users\alexa\.alta", globalSummary);
         Assert.AreEqual(@"CodeAlta · C:\code\CodeAlta", projectSummary);
         Assert.AreEqual("Internal · CodeAlta", internalSummary);
     }

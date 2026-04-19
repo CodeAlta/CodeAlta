@@ -9,22 +9,20 @@ namespace CodeAlta.Tests;
 public sealed class LocalAgentRuntimeContractsTests
 {
     [TestMethod]
-    public void LocalAgentRuntimePathLayout_UsesProviderFirstDateShardedStructure()
+    public void LocalAgentRuntimePathLayout_UsesDateShardedSessionJournalStructure()
     {
-        var layout = new LocalAgentRuntimePathLayout(@"C:\codealta-test-root\machine\agents");
+        var layout = new LocalAgentRuntimePathLayout(@"C:\codealta-test-root\.alta");
         var createdAt = DateTimeOffset.Parse("2026-04-06T14:15:00+00:00");
 
         var providerRoot = layout.GetProviderRootPath("openai", "openrouter");
         var providerDescriptorPath = layout.GetProviderDescriptorPath("openai", "openrouter");
-        var sessionRoot = layout.GetSessionRootPath("openai", "openrouter", "session-123", createdAt);
+        var sessionFile = layout.GetSessionFilePath("session-123", createdAt);
 
-        Assert.AreEqual(@"C:\codealta-test-root\machine\agents\openai\openrouter", providerRoot);
+        Assert.AreEqual(@"C:\codealta-test-root\.alta\providers\openai\openrouter", providerRoot);
         Assert.AreEqual(Path.Combine(providerRoot, "provider.json"), providerDescriptorPath);
         Assert.AreEqual(
-            @"C:\codealta-test-root\machine\agents\openai\openrouter\sessions\2026\04\06\session-123",
-            sessionRoot);
-        Assert.AreEqual(Path.Combine(sessionRoot, "events.jsonl"), layout.GetSessionEventsPath(sessionRoot));
-        Assert.AreEqual(Path.Combine(sessionRoot, "state.json"), layout.GetSessionStatePath(sessionRoot));
+            @"C:\codealta-test-root\.alta\sessions\2026\04\06\session-123.jsonl",
+            sessionFile);
     }
 
     [TestMethod]

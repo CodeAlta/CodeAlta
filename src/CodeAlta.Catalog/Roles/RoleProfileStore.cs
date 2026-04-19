@@ -77,7 +77,7 @@ public sealed class RoleProfileStore
         {
             foreach (var projectRoot in projectRoots.Where(static x => !string.IsNullOrWhiteSpace(x)))
             {
-                roots.Add(Path.Combine(projectRoot, ".codealta", "agents"));
+                roots.Add(Path.Combine(projectRoot, ".alta", "agents"));
             }
         }
 

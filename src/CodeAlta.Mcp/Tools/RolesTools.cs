@@ -37,7 +37,7 @@ public sealed class RolesTools
         [Description("Scope kind: global|project.")] string kind = "global",
         [Description("Project slug for project scope.")] string? projectSlug = null,
         [Description("Optional machine id for applying machine profile overrides.")] string? machineId = null,
-        [Description("Whether to include user-level role roots under ~/.codealta/agents.")] bool includeUserRoots = false,
+        [Description("Whether to include user-level role roots under ~/.alta/agents.")] bool includeUserRoots = false,
         CancellationToken cancellationToken = default)
     {
         var roots = await ResolveRoleRootsAsync(kind, projectSlug, machineId, includeUserRoots, cancellationToken)
@@ -65,7 +65,7 @@ public sealed class RolesTools
         [Description("Scope kind: global|project.")] string kind = "global",
         [Description("Project slug for project scope.")] string? projectSlug = null,
         [Description("Optional machine id for applying machine profile overrides.")] string? machineId = null,
-        [Description("Whether to include user-level role roots under ~/.codealta/agents.")] bool includeUserRoots = false,
+        [Description("Whether to include user-level role roots under ~/.alta/agents.")] bool includeUserRoots = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(roleId))
@@ -129,7 +129,7 @@ public sealed class RolesTools
         {
             roots.Add(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".codealta",
+                ".alta",
                 "agents"));
         }
 

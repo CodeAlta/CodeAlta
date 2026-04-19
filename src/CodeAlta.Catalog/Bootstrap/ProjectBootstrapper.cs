@@ -76,7 +76,7 @@ public sealed class ProjectBootstrapper
 
                 if (success)
                 {
-                    Directory.CreateDirectory(Path.Combine(checkoutPath, ".codealta"));
+                    Directory.CreateDirectory(Path.Combine(checkoutPath, ".alta"));
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

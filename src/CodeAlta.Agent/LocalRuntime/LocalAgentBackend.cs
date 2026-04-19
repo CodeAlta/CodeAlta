@@ -38,9 +38,7 @@ public sealed class LocalAgentBackend : IAgentBackend
         var stateRootPath = string.IsNullOrWhiteSpace(options.StateRootPath)
             ? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".codealta",
-                "machine",
-                "agents")
+                ".alta")
             : options.StateRootPath;
         _store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(stateRootPath));
         _providersByKey = options.Providers.ToDictionary(
@@ -67,7 +65,6 @@ public sealed class LocalAgentBackend : IAgentBackend
             cancellationToken.ThrowIfCancellationRequested();
             await _store.UpsertProviderAsync(provider.Provider, cancellationToken).ConfigureAwait(false);
         }
-
         _started = true;
     }
 

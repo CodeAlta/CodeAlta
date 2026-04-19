@@ -44,7 +44,7 @@ public sealed class ThreadProviderSwitchCoordinatorTests
         };
 
         var store = new FileSystemLocalAgentSessionStore(
-            new LocalAgentRuntimePathLayout(Path.Combine(options.LocalRoot, "agents")));
+            new LocalAgentRuntimePathLayout(options.GlobalRoot));
         var createdAt = DateTimeOffset.Parse("2026-04-19T10:00:00+00:00");
         var sourceSummary = new LocalAgentSessionSummary
         {
@@ -170,7 +170,8 @@ public sealed class ThreadProviderSwitchCoordinatorTests
         Assert.IsNull(clonedState.Usage);
 
         var clonedHistory = await store.ReadEventsAsync("anthropic-messages", "anthropic", "session-1").ConfigureAwait(false);
-        Assert.AreEqual(1, clonedHistory.Count);
+        Assert.AreEqual(2, clonedHistory.Count);
+        Assert.IsInstanceOfType<AgentSessionUpdateEvent>(clonedHistory[^1]);
         Assert.IsNull(await store.GetSessionAsync("openai-chat", "openai", "session-1").ConfigureAwait(false));
     }
 

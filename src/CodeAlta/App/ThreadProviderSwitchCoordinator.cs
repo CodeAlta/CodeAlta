@@ -124,27 +124,43 @@ internal sealed class ThreadProviderSwitchCoordinator
                 sessionId,
                 cancellationToken)
             .ConfigureAwait(false);
-        var sourceHistory = await store.ReadEventsAsync(
-                sourceBackend.ProtocolFamily,
-                sourceBackend.ProviderKey,
-                sessionId,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        await store.DeleteSessionAsync(
-                targetBackend.ProtocolFamily,
-                targetBackend.ProviderKey,
-                sessionId,
-                cancellationToken)
-            .ConfigureAwait(false);
 
         var timestamp = DateTimeOffset.UtcNow;
+
+        var oldThreadId = thread.ThreadId;
+        var oldInternalDirectory = thread.Kind == WorkThreadKind.InternalThread &&
+                                   !string.IsNullOrWhiteSpace(thread.SourcePath)
+            ? Path.GetDirectoryName(thread.SourcePath)
+            : null;
+
+        try
+        {
+            await _detachThreadSessionAsync(oldThreadId).ConfigureAwait(false);
+        }
+        catch
+        {
+            throw;
+        }
+
+        thread.BackendId = targetBackend.BackendId.Value;
+        thread.ProviderKey = targetBackend.ProviderKey;
+        thread.ThreadId = Orchestration.Runtime.WorkThreadRuntimeService.CreateThreadId(targetBackend.BackendId, sessionId);
+        thread.UpdatedAt = timestamp;
+
+        tab.BackendId = targetBackend.BackendId;
+        tab.ModelId = null;
+        tab.ReasoningEffort = null;
+        tab.Usage = null;
+
+        _rekeyThreadIdentity(oldThreadId, thread);
+        await _applyThreadPreferenceAsync(tab).ConfigureAwait(false);
+
         var targetSummary = sourceSummary with
         {
             BackendId = targetBackend.BackendId,
             ProtocolFamily = targetBackend.ProtocolFamily,
             ProviderKey = targetBackend.ProviderKey,
-            ModelId = null,
+            ModelId = tab.ModelId,
             Usage = null,
             UpdatedAt = timestamp,
         };
@@ -171,45 +187,17 @@ internal sealed class ThreadProviderSwitchCoordinator
                 targetBackend.ProtocolFamily,
                 targetBackend.ProviderKey,
                 sessionId,
-                sourceHistory,
+                [
+                    new AgentSessionUpdateEvent(
+                        targetBackend.BackendId,
+                        sessionId,
+                        timestamp,
+                        null,
+                        AgentSessionUpdateKind.ModelChanged,
+                        $"Provider switched from {sourceBackend.ProviderKey} to {targetBackend.ProviderKey}."),
+                ],
                 cancellationToken)
             .ConfigureAwait(false);
-
-        var oldThreadId = thread.ThreadId;
-        var oldInternalDirectory = thread.Kind == WorkThreadKind.InternalThread &&
-                                   !string.IsNullOrWhiteSpace(thread.SourcePath)
-            ? Path.GetDirectoryName(thread.SourcePath)
-            : null;
-
-        try
-        {
-            await _detachThreadSessionAsync(oldThreadId).ConfigureAwait(false);
-        }
-        catch
-        {
-            await store.DeleteSessionAsync(
-                    targetBackend.ProtocolFamily,
-                    targetBackend.ProviderKey,
-                    sessionId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            throw;
-        }
-
-        thread.BackendId = targetBackend.BackendId.Value;
-        thread.ProviderKey = targetBackend.ProviderKey;
-        thread.ThreadId = Orchestration.Runtime.WorkThreadRuntimeService.CreateThreadId(targetBackend.BackendId, sessionId);
-        thread.UpdatedAt = timestamp;
-
-        tab.BackendId = targetBackend.BackendId;
-        tab.ModelId = null;
-        tab.ReasoningEffort = null;
-        tab.Usage = null;
-
-        _rekeyThreadIdentity(oldThreadId, thread);
-        await _applyThreadPreferenceAsync(tab).ConfigureAwait(false);
-        targetSummary = targetSummary with { ModelId = tab.ModelId };
-        await store.UpsertSessionAsync(targetSummary, cancellationToken).ConfigureAwait(false);
 
         if (thread.Kind == WorkThreadKind.InternalThread)
         {
@@ -224,19 +212,12 @@ internal sealed class ThreadProviderSwitchCoordinator
         }
 
         await _persistViewStateAsync().ConfigureAwait(false);
-        await store.DeleteSessionAsync(
-                sourceBackend.ProtocolFamily,
-                sourceBackend.ProviderKey,
-                sessionId,
-                cancellationToken)
-            .ConfigureAwait(false);
         return true;
     }
 
     private FileSystemLocalAgentSessionStore CreateSessionStore()
     {
-        var stateRootPath = Path.Combine(_catalogOptions.LocalRoot, "agents");
-        return new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(stateRootPath));
+        return new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(_catalogOptions.GlobalRoot));
     }
 
     private bool TryGetLocalRuntimeBackendInfo(AgentBackendId backendId, out LocalRuntimeBackendInfo backendInfo)

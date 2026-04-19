@@ -105,7 +105,7 @@ public sealed class ProjectResolver
             {
                 Project = project,
                 CheckoutPath = checkoutPath,
-                CodeAltaRoot = Path.Combine(checkoutPath, ".codealta"),
+                CodeAltaRoot = Path.Combine(checkoutPath, ".alta"),
             });
         }
 

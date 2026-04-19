@@ -7,7 +7,7 @@ An agentic AI coding CLI assistant developed in .NET.
 Current infrastructure-first progress includes project catalog and checkout primitives:
 
 - `CodeAlta.Catalog`: project descriptors, machine override profiles, catalog loading.
-- Scope resolution (`global`, `project`) into concrete checkout and `.codealta` roots.
+- Scope resolution (`global`, `project`) into concrete checkout and `.alta` roots.
 - Checkout planning (`clone` vs `update`) without network side effects.
 - `CodeAlta.Persistence`: SQLite migrations, task/artifact/agent repositories, and markdown artifact store.
 
@@ -102,13 +102,13 @@ Launch helpers:
 
 `CodeAlta` and the small CLI utilities under `src/` now use `XenoAtom.CommandLine` with `TerminalVisualCommandOutput`, so `--help` and parse errors render through the shared visual command help/error path.
 
-`--test` still starts the real terminal UI, but it schedules cancellation after the requested duration so a smoke test can verify startup and a short steady-state run without manual Ctrl+C. Smoke-test lifecycle markers and normal diagnostic activity are written to the rolling logs under `~/.codealta/logs/`.
+`--test` still starts the real terminal UI, but it schedules cancellation after the requested duration so a smoke test can verify startup and a short steady-state run without manual Ctrl+C. Smoke-test lifecycle markers and normal diagnostic activity are written to the rolling logs under `~/.alta/logs/`.
 
 Current terminal shell capabilities:
 
 - Chat (global agent) operations:
   - Chat screen powered by `PromptEditor` (input) and `DocumentFlow` + `MarkdownControl` (rendered conversation history).
-  - Automatically probes and initializes both Copilot and Codex backends. Codex is pinned to the SDK-generated release tag and is downloaded on demand into `~/.codealta/local/bin/codex/<tag>/` when missing.
+  - Automatically probes and initializes both Copilot and Codex backends. Codex is pinned to the SDK-generated release tag and is downloaded on demand into `~/.codealta/cache/bin/codex/<tag>/` when missing.
   - Codex backend sessions default to `danger-full-access` (no sandbox) in CodeAlta so prompts can inspect sibling projects outside the current working directory without first switching the session root.
   - Provider, model, and reasoning-effort selectors are shown under the prompt.
   - Press `F6` or use the `Full Prompt` button to edit the current draft in a large 80%-screen prompt window; `Esc` closes it and keeps the edited draft.
@@ -117,15 +117,15 @@ Current terminal shell capabilities:
   - Press `Ctrl+O`, run `/open`, or use the always-visible `+` action on the `Projects` sidebar row to open a project dialog with project-name and directory completion. Rooted paths such as `/`, `C:`, `D:`, and `~` open folders, visible projects match the sidebar display names by default, and an `Include hidden` toggle opts archived projects back into completion and opening while successful opens return focus to the prompt.
   - Press `Ctrl+G Ctrl+S` to focus the sidebar on the current selection, `Ctrl+G Ctrl+P` to focus the prompt, `Ctrl+G Ctrl+U` or use the footer usage indicator to open the context/usage popup, and press `Ctrl+G Ctrl+T` or use the thread info icon in the footer to open the selected thread report.
   - Closing either popup restores focus to the thread prompt editor so the workflow stays keyboard-first.
-  - Per-provider model and reasoning defaults are stored in `~/.codealta/config.toml`, with project-local overrides read from `<project>/.codealta/config.toml`.
-- OpenAI-compatible, Anthropic, and Google GenAI providers can also be configured in `~/.codealta/config.toml`; only providers with usable credentials or Vertex settings are registered at startup. Local raw-API providers enrich model metadata from the bundled `models_dev_db.json` snapshot, apply per-provider `models_dev_provider_id` mappings and optional `model_overrides`, and refresh the models.dev catalog in the background at runtime.
-  - Thread-specific model and reasoning selections are preserved for reopened tabs through `~/.codealta/local/ui-state.yaml`, so an existing thread keeps its model by default even after global or project defaults change.
+  - Per-provider model and reasoning defaults are stored in `~/.alta/config.toml`, with project-local overrides read from `<project>/.alta/config.toml`.
+- OpenAI-compatible, Anthropic, and Google GenAI providers can also be configured in `~/.alta/config.toml`; only providers with usable credentials or Vertex settings are registered at startup. Local raw-API providers enrich model metadata from the bundled `models_dev_db.json` snapshot, apply per-provider `models_dev_provider_id` mappings and optional `model_overrides`, and refresh the models.dev catalog in the background at runtime.
+  - Thread-specific model and reasoning selections are preserved for reopened tabs through `~/.alta/ui-state.yaml`, so an existing thread keeps its model by default even after global or project defaults change.
   - The reasoning selector only shows concrete effort values. When a selected model supports `high`, CodeAlta prefers `high` by default.
   - Sending a prompt now follows an enqueue-first workflow for busy threads: `Ctrl+J`/`Ctrl+Enter` adds the prompt to a waiting list above the status line, where queued prompts can be edited, repeated, steered immediately when the backend supports live steering, deleted, or cleared with `F10`. Steer requests that have been sent locally but not yet echoed back by the backend also appear at the top of that strip as transient pending rows, and unsupported backends such as the current local raw-API OpenAI/Anthropic/Google runtimes automatically re-queue the prompt for the next turn.
   - A temporary `AlwaysQueue` checkbox next to `AutoScroll` forces normal sends to enqueue for the selected thread even when it is idle, which is useful for exercising the waiting-list controls without dispatching work immediately.
   - Pressing `F5` with an empty draft now steers the first queued prompt immediately when the selected thread has queued work.
   - If a steer is requested while the thread has no active provider run, CodeAlta now falls back to a normal send instead of surfacing a provider steer error. If prompt dispatch still fails, the prompt is preserved in the UI instead of being dropped.
-  - Closing a thread tab no longer stops an active run or drops an edited thread draft. Running threads stay live in the sidebar, edited prompts surface with a draft indicator, and unsent per-thread prompts are persisted under `~/.codealta/local/saved_prompts/` so reopening the app restores them.
+  - Closing a thread tab no longer stops an active run or drops an edited thread draft. Running threads stay live in the sidebar, edited prompts surface with a draft indicator, and unsent per-thread prompts are persisted under `~/.alta/saved_prompts/` so reopening the app restores them.
   - Idle local-runtime threads can now switch providers directly from the provider selector. CodeAlta rebinds the local session onto the newly selected raw-API runtime and preserves the replayable thread history; Codex and Copilot threads remain locked to their original provider because their hidden runtime instructions and compaction state cannot be reconstructed safely.
   - A compact button now sits beside the provider/model/reasoning selectors. Press `F11` or click it to trigger a manual session compaction when the selected thread has already started and is currently idle; if the reopened thread's provider session had already shut down, CodeAlta now resumes it again before compacting. Manual compaction keeps a dedicated status line and emits visible started/completed notices in the timeline even when the backend does not emit its own compaction events.
   - The footer usage indicator stays compact as `ctx --`, `ctx N tok`, or `ctx NN%`, while the usage popup is split into Summary, Usage breakdown, Limits and quotas, and Backend-specific details with explicit source/scope metadata.
@@ -133,7 +133,7 @@ Current terminal shell capabilities:
   - CodeAlta now auto-approves provider permission requests and auto-resolves `ask_user` prompts by preferring continue/inspect-style choices (or a neutral fallback for freeform prompts).
   - Sequential Codex/Copilot tool activity is grouped into compact "Tool Calls" timeline cards so verbose command/tool logs stay out of the main document flow; each chip shows a live status icon, inferred tool/command label, compact context, and an expandable `LogControl` detail dialog with full output, wrapping toggle, and compact execution stats.
   - When a run finishes, CodeAlta emits a separate compact "Modified Files" recap card that aggregates all files changed during that run, shows per-file and total `+/-` line counts, and opens an inline diff viewer for each file when diff data is available from the backend.
-  - The terminal shell writes rolling diagnostic logs under `~/.codealta/logs/`, including chat prompt submission, selected provider/model/tool set, normalized agent events, and Copilot permission/user-input callback traffic.
+  - The terminal shell writes rolling diagnostic logs under `~/.alta/logs/`, including chat prompt submission, selected provider/model/tool set, normalized agent events, and Copilot permission/user-input callback traffic.
 - Project operations:
   - list discovered projects
   - resolve global/project scopes.
@@ -172,7 +172,7 @@ Additional local providers can target raw provider SDKs such as:
 - `Google GenAI`
 - `Vertex AI`
 
-These providers are configured from `~/.codealta/config.toml` under `providers.<provider-key>`. Each entry represents one provider registration and uses a single canonical `type` field such as `openai-chat`, `openai-responses`, `anthropic`, `google-genai`, or `vertex-ai`. OpenAI-compatible and Anthropic-compatible endpoints may set `api_url`; Vertex uses `project` and `location` instead. Each provider can optionally map to a models.dev provider id and override individual model limits so context usage stays consistent even when the upstream SDK does not expose context-window metadata.
+These providers are configured from `~/.alta/config.toml` under `providers.<provider-key>`. Each entry represents one provider registration and uses a single canonical `type` field such as `openai-chat`, `openai-responses`, `anthropic`, `google-genai`, or `vertex-ai`. OpenAI-compatible and Anthropic-compatible endpoints may set `api_url`; Vertex uses `project` and `location` instead. Each provider can optionally map to a models.dev provider id and override individual model limits so context usage stays consistent even when the upstream SDK does not expose context-window metadata.
 
 Default provider selection is configured separately:
 
@@ -252,7 +252,7 @@ The bundled snapshot lives in `src/CodeAlta.Agent/Data/models_dev_db.json`. To r
 dotnet run --project src/CodeAlta.Agent.ModelsDev.Updater/CodeAlta.Agent.ModelsDev.Updater.csproj -c Release
 ```
 
-Session state for these local runtimes is stored under `~/.codealta/local/agents/<protocol-family>/<provider-key>/sessions/...` with `session.json`, `events.jsonl`, and `state.json`.
+Session state for these local runtimes is stored under `~/.alta/sessions/yyyy/mm/dd/<session-id>.jsonl`. The journal contains replayable agent events plus internal session summary/state snapshots, so provider or model switches are captured as events in the same durable file instead of rewriting multiple provider-bound files.
 
 ## Live Backend Smoke Tests
 

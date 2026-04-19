@@ -165,7 +165,7 @@ public sealed class McpInfrastructureTests
 
         Assert.AreEqual(JsonValueKind.Array, payload.RootElement.ValueKind);
         Assert.IsTrue(payload.RootElement.EnumerateArray().Any(x =>
-            string.Equals(x.GetProperty("roleId").GetString(), "global", StringComparison.OrdinalIgnoreCase)));
+            string.Equals(x.GetProperty("roleId").GetString(), "coordinator", StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]
@@ -405,7 +405,7 @@ public sealed class McpInfrastructureTests
                 # Main Repo
                 """).ConfigureAwait(false);
 
-            var skillRoot = Path.Combine(globalRepoRoot, "checkouts", "Repo.Main", ".codealta", "skills", "sample-skill");
+            var skillRoot = Path.Combine(globalRepoRoot, "checkouts", "Repo.Main", ".alta", "skills", "sample-skill");
             Directory.CreateDirectory(skillRoot);
             await File.WriteAllTextAsync(
                 Path.Combine(skillRoot, "SKILL.md"),

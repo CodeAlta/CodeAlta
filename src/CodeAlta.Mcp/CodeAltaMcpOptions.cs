@@ -20,6 +20,6 @@ public sealed class CodeAltaMcpOptions
     /// </summary>
     public string ArtifactRoot { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".codealta",
+        ".alta",
         "artifacts");
 }

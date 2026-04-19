@@ -6,7 +6,7 @@ namespace CodeAlta.Catalog;
 public enum WorkThreadKind
 {
     /// <summary>
-    /// A user-facing global thread rooted at <c>~/.codealta/</c>.
+    /// A user-facing global thread rooted at <c>~/.alta/</c>.
     /// </summary>
     GlobalThread,
 

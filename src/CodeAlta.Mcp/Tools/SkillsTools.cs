@@ -37,7 +37,7 @@ public sealed class SkillsTools
         [Description("Scope kind: global|project.")] string kind = "global",
         [Description("Project slug for project scope.")] string? projectSlug = null,
         [Description("Optional machine id for applying machine profile overrides.")] string? machineId = null,
-        [Description("Whether to include user-level skill roots under ~/.codealta/skills.")] bool includeUserRoots = false,
+        [Description("Whether to include user-level skill roots under ~/.alta/skills.")] bool includeUserRoots = false,
         CancellationToken cancellationToken = default)
     {
         var roots = await ResolveSkillRootsAsync(kind, projectSlug, machineId, includeUserRoots, cancellationToken)
@@ -63,7 +63,7 @@ public sealed class SkillsTools
         [Description("Scope kind: global|project.")] string kind = "global",
         [Description("Project slug for project scope.")] string? projectSlug = null,
         [Description("Optional machine id for applying machine profile overrides.")] string? machineId = null,
-        [Description("Whether to include user-level skill roots under ~/.codealta/skills.")] bool includeUserRoots = false,
+        [Description("Whether to include user-level skill roots under ~/.alta/skills.")] bool includeUserRoots = false,
         CancellationToken cancellationToken = default)
     {
         var roots = await ResolveSkillRootsAsync(kind, projectSlug, machineId, includeUserRoots, cancellationToken)
@@ -112,7 +112,7 @@ public sealed class SkillsTools
         {
             roots.Add(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".codealta",
+                ".alta",
                 "skills"));
         }
 

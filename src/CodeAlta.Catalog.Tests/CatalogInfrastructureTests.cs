@@ -68,7 +68,7 @@ public sealed class CatalogInfrastructureTests
     public async Task ProjectCatalog_ImportWorkingDirectoriesAsync_ImportsDistinctProjectsAndSkipsGlobalRoot()
     {
         using var root = TempDirectory.Create();
-        var catalogRoot = Path.Combine(root.Path, ".codealta");
+        var catalogRoot = Path.Combine(root.Path, ".alta");
         var projectA = Path.Combine(root.Path, "Tomlyn");
         var projectB = Path.Combine(root.Path, "XenoAtom.Terminal");
         var internalThreadRoot = Path.Combine(catalogRoot, "threads", "internal", "child-1");
@@ -101,7 +101,7 @@ public sealed class CatalogInfrastructureTests
     public async Task ProjectCatalog_LoadAsync_DeduplicatesProjectsByNormalizedPath()
     {
         using var root = TempDirectory.Create();
-        var catalogRoot = Path.Combine(root.Path, ".codealta");
+        var catalogRoot = Path.Combine(root.Path, ".alta");
         var projectsRoot = Path.Combine(catalogRoot, "projects");
         Directory.CreateDirectory(Path.Combine(projectsRoot, "codealta"));
         Directory.CreateDirectory(Path.Combine(projectsRoot, "codealta-copy"));
@@ -463,13 +463,13 @@ public sealed class CatalogInfrastructureTests
     {
         using var root = TempDirectory.Create();
         var projectRoot = Path.Combine(root.Path, "project-a");
-        Directory.CreateDirectory(Path.Combine(projectRoot, ".codealta"));
+        Directory.CreateDirectory(Path.Combine(projectRoot, ".alta"));
 
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.Path });
         store.SaveGlobalProviderPreference(AgentBackendIds.Codex.Value, "gpt-5.4", AgentReasoningEffort.High);
 
         File.WriteAllText(
-            Path.Combine(projectRoot, ".codealta", "config.toml"),
+            Path.Combine(projectRoot, ".alta", "config.toml"),
             """
             [providers.codex]
             reasoning_effort = "medium"
@@ -485,7 +485,7 @@ public sealed class CatalogInfrastructureTests
     public async Task SkillCatalog_ListAndGet_Works()
     {
         using var root = TempDirectory.Create();
-        var skillsRoot = Path.Combine(root.Path, ".codealta", "skills");
+        var skillsRoot = Path.Combine(root.Path, ".alta", "skills");
         var skillPath = Path.Combine(skillsRoot, "sample-skill");
         Directory.CreateDirectory(skillPath);
 
@@ -515,7 +515,7 @@ public sealed class CatalogInfrastructureTests
     public async Task SkillCatalog_GetResourceAsync_ReadsBytes()
     {
         using var root = TempDirectory.Create();
-        var skillsRoot = Path.Combine(root.Path, ".codealta", "skills");
+        var skillsRoot = Path.Combine(root.Path, ".alta", "skills");
         var skillPath = Path.Combine(skillsRoot, "sample-skill");
         Directory.CreateDirectory(skillPath);
 
@@ -589,10 +589,10 @@ public sealed class CatalogInfrastructureTests
                         Checkout = new CheckoutRule { PathTemplate = checkout },
                     },
                     CheckoutPath = checkout,
-                    CodeAltaRoot = Path.Combine(checkout, ".codealta"),
+                    CodeAltaRoot = Path.Combine(checkout, ".alta"),
                 },
             ],
-            CodeAltaRoots = [Path.Combine(checkout, ".codealta")],
+            CodeAltaRoots = [Path.Combine(checkout, ".alta")],
         };
 
         var bootstrapper = new ProjectBootstrapper(new ProjectBootstrapPlanner(), new GitService());
@@ -601,7 +601,7 @@ public sealed class CatalogInfrastructureTests
         Assert.AreEqual(1, results.Count);
         Assert.IsTrue(results[0].Success);
         Assert.IsTrue(Directory.Exists(Path.Combine(checkout, ".git")));
-        Assert.IsTrue(Directory.Exists(Path.Combine(checkout, ".codealta")));
+        Assert.IsTrue(Directory.Exists(Path.Combine(checkout, ".alta")));
     }
 
     private static ProjectDescriptor CreateProjectDescriptor(string slug, string name, string displayName)
@@ -642,7 +642,7 @@ public sealed class CatalogInfrastructureTests
             BackendSessionId = "platform-search-review",
             ProjectRef = Guid.CreateVersion7().ToString(),
             ParentThreadId = "copilot:global-thread",
-            WorkingDirectory = @"C:\Users\alexa\.codealta\threads\internal\platform-search-review",
+            WorkingDirectory = @"C:\Users\alexa\.alta\threads\internal\platform-search-review",
             Title = "Review sqlitevec integration",
             Status = WorkThreadStatus.Active,
             CreatedAt = timestamp,

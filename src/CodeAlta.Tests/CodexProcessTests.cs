@@ -40,11 +40,11 @@ public sealed class CodexProcessTests
     public void GetInstallDirectory_UsesLocalBinCodexTag()
     {
         var installDirectory = CodexReleaseInstaller.GetInstallDirectory(
-            @"C:\Users\test\.codealta\local",
+            @"C:\Users\test\.codealta\cache",
             "rust-v0.118.0");
 
         Assert.AreEqual(
-            Path.Combine(@"C:\Users\test\.codealta\local", "bin", "codex", "rust-v0.118.0"),
+            Path.Combine(@"C:\Users\test\.codealta\cache", "bin", "codex", "rust-v0.118.0"),
             installDirectory);
     }
 

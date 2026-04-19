@@ -718,7 +718,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
         foreach (var projectRoot in projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)))
         {
-            roots.Add(Path.Combine(projectRoot, ".codealta", "agents"));
+            roots.Add(Path.Combine(projectRoot, ".alta", "agents"));
         }
 
         return roots;

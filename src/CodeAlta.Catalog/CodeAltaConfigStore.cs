@@ -409,7 +409,7 @@ public sealed class CodeAltaConfigStore
     private static string GetProjectConfigPath(string projectRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
-        return Path.Combine(projectRoot, ".codealta", "config.toml");
+        return Path.Combine(projectRoot, ".alta", "config.toml");
     }
 
     private static CodeAltaConfigDocument LoadDocument(string path)

@@ -21,7 +21,7 @@ public sealed class CodexProcessOptions
 
     /// <summary>
     /// Gets or sets the CodeAlta local root used for pinned Codex installations.
-    /// When <see langword="null"/>, this defaults to <c>~/.codealta/local</c>.
+    /// When <see langword="null"/>, this defaults to <c>~/.codealta/cache</c>.
     /// </summary>
     public string? LocalRootPath { get; set; }
 

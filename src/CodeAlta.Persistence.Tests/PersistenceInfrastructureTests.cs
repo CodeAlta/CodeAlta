@@ -105,7 +105,7 @@ public sealed class PersistenceInfrastructureTests
     {
         using var temp = TempDirectory.Create();
         var store = new ArtifactStore();
-        var path = Path.Combine(temp.Path, "repo", ".codealta", "knowledge", "record.md");
+        var path = Path.Combine(temp.Path, "repo", ".alta", "knowledge", "record.md");
 
         var frontmatter = new ArtifactFrontmatter
         {
@@ -179,7 +179,7 @@ public sealed class PersistenceInfrastructureTests
             Uri = "artifact://project-1/knowledge/overview",
             ProjectId = "project-1",
             Type = "knowledge.record",
-            Path = Path.Combine(temp.Path, "repo", ".codealta", "knowledge", "overview.md"),
+            Path = Path.Combine(temp.Path, "repo", ".alta", "knowledge", "overview.md"),
             FrontmatterJson = JsonSerializer.Serialize(new { tags = new[] { "architecture" } }),
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,

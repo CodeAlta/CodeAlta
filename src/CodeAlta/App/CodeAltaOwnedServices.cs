@@ -86,19 +86,22 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     {
         var homeRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".alta");
+        var legacyRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".codealta");
+        var cacheRoot = Path.Combine(legacyRoot, "cache");
+        MigrateLegacyStorage(legacyRoot, homeRoot, cacheRoot);
         Directory.CreateDirectory(homeRoot);
         var ownsLogging = CodeAltaLogging.Initialize(homeRoot);
 
-        var localRoot = Path.Combine(homeRoot, "local");
-        MigrateLegacyMachineRoot(homeRoot, localRoot);
-        Directory.CreateDirectory(localRoot);
+        Directory.CreateDirectory(cacheRoot);
         var codexInstallProgress = new CodexInstallProgressReporter();
 
         var db = new CodeAltaDb(
             new CodeAltaDbOptions
             {
-                DatabasePath = Path.Combine(localRoot, "codealta.db"),
+                DatabasePath = Path.Combine(cacheRoot, "codealta.db"),
             });
         await db.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
@@ -119,7 +122,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         var modelsDevCatalogService = new ModelsDevCatalogService(
             new ModelsDevCatalogServiceOptions
             {
-                CacheFilePath = Path.Combine(localRoot, "model-catalog", "models_dev_db.json"),
+                CacheFilePath = Path.Combine(cacheRoot, "model-catalog", "models_dev_db.json"),
             });
         modelsDevCatalogService.StartBackgroundRefresh();
 
@@ -137,7 +140,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                     ProcessOptions = new CodexProcessOptions
                     {
                         CodexPath = codexPath,
-                        LocalRootPath = localRoot,
+                        LocalRootPath = cacheRoot,
                         ReleaseTag = codexPath is null ? CodexClient.CompiledAgainstReleaseTag : null,
                         Progress = codexPath is null ? codexInstallProgress : null,
                     },
@@ -155,7 +158,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
             RawApiBackendRegistrar.RegisterConfiguredBackends(
                 backendFactory,
                 configStore,
-                Path.Combine(localRoot, "agents"),
+                homeRoot,
                 modelsDevCatalogService));
         foreach (var definition in configStore.LoadEffectiveAcpBackendDefinitions(installedBackendStore.Load()))
         {
@@ -221,18 +224,50 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         }
     }
 
-    private static void MigrateLegacyMachineRoot(string homeRoot, string localRoot)
+    private static void MigrateLegacyStorage(string legacyRoot, string homeRoot, string cacheRoot)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(legacyRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeRoot);
-        ArgumentException.ThrowIfNullOrWhiteSpace(localRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cacheRoot);
 
-        var legacyRoot = Path.Combine(homeRoot, "machine");
-        if (!Directory.Exists(legacyRoot) || Directory.Exists(localRoot))
+        if (!Directory.Exists(legacyRoot))
         {
             return;
         }
 
-        Directory.Move(legacyRoot, localRoot);
+        var legacyLocalRoot = Path.Combine(legacyRoot, "local");
+        if (Directory.Exists(legacyLocalRoot) && !Directory.Exists(cacheRoot))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(cacheRoot)!);
+            Directory.Move(legacyLocalRoot, cacheRoot);
+        }
+
+        Directory.CreateDirectory(homeRoot);
+
+        foreach (var directory in Directory.EnumerateDirectories(legacyRoot))
+        {
+            var name = Path.GetFileName(directory);
+            if (string.Equals(name, "local", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "cache", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var destination = Path.Combine(homeRoot, name);
+            if (!Directory.Exists(destination))
+            {
+                Directory.Move(directory, destination);
+            }
+        }
+
+        foreach (var file in Directory.EnumerateFiles(legacyRoot))
+        {
+            var destination = Path.Combine(homeRoot, Path.GetFileName(file));
+            if (!File.Exists(destination))
+            {
+                File.Move(file, destination);
+            }
+        }
     }
 
     public async ValueTask DisposeAsync()

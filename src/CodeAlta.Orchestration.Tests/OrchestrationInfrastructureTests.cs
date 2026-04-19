@@ -15,9 +15,9 @@ public sealed class OrchestrationInfrastructureTests
     public async Task RoleProfileStore_ParsesAgentMarkdownAndProjectOverlay()
     {
         using var temp = TempDirectory.Create();
-        var globalAgentsRoot = Path.Combine(temp.Path, ".codealta", "agents");
+        var globalAgentsRoot = Path.Combine(temp.Path, ".alta", "agents");
         var projectRoot = Path.Combine(temp.Path, "repo-main");
-        var projectAgentsRoot = Path.Combine(projectRoot, ".codealta", "agents");
+        var projectAgentsRoot = Path.Combine(projectRoot, ".alta", "agents");
         Directory.CreateDirectory(globalAgentsRoot);
         Directory.CreateDirectory(projectAgentsRoot);
 
@@ -55,7 +55,7 @@ public sealed class OrchestrationInfrastructureTests
 
         var store = new RoleProfileStore();
         var profiles = await store.LoadCatalogAgentsAsync(
-                Path.Combine(temp.Path, ".codealta"),
+                Path.Combine(temp.Path, ".alta"),
                 [projectRoot])
             .ConfigureAwait(false);
 

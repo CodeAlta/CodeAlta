@@ -21,7 +21,7 @@ public sealed record ProjectScopeResolution
     public required IReadOnlyList<ResolvedProject> Projects { get; init; }
 
     /// <summary>
-    /// Gets all relevant <c>.codealta</c> roots for this scope.
+    /// Gets all relevant <c>.alta</c> roots for this scope.
     /// </summary>
     public required IReadOnlyList<string> CodeAltaRoots { get; init; }
 }

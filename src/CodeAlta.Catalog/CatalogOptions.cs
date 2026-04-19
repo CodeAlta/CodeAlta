@@ -68,16 +68,50 @@ public sealed class CatalogOptions
     /// <summary>
     /// Gets the local runtime root path under the global catalog.
     /// </summary>
-    public string LocalRoot => Path.Combine(GlobalRoot, "local");
+    [Obsolete("Use CacheRoot for caches or the dedicated roots such as SessionsRoot and PromptDraftsRoot.")]
+    public string LocalRoot => CacheRoot;
 
     /// <summary>
-    /// Gets the legacy machine-local runtime root path under the global catalog.
+    /// Gets the machine-local cache root.
     /// </summary>
-    [Obsolete("Use LocalRoot. The machine root path was renamed to local.")]
-    public string MachineRoot => LocalRoot;
+    public string CacheRoot => Path.Combine(GetLegacyGlobalRoot(), "cache");
+
+    /// <summary>
+    /// Gets the session journals root path under the global catalog.
+    /// </summary>
+    public string SessionsRoot => Path.Combine(GlobalRoot, "sessions");
+
+    /// <summary>
+    /// Gets the saved prompt drafts root path under the global catalog.
+    /// </summary>
+    public string PromptDraftsRoot => Path.Combine(GlobalRoot, "saved_prompts");
+
+    /// <summary>
+    /// Gets the thread view state path.
+    /// </summary>
+    public string UiStatePath => Path.Combine(GlobalRoot, "ui-state.yaml");
+
+    /// <summary>
+    /// Gets the legacy machine-local runtime root path under the legacy catalog.
+    /// </summary>
+    [Obsolete("Use CacheRoot. The machine root path was renamed to cache.")]
+    public string MachineRoot => CacheRoot;
 
     /// <summary>
     /// Gets the internal thread linkage root path under the global catalog.
     /// </summary>
     public string InternalThreadsRoot => Path.Combine(GlobalRoot, "threads", "internal");
+
+    private string GetLegacyGlobalRoot()
+    {
+        var fullGlobalRoot = Path.GetFullPath(GlobalRoot);
+        var parent = Path.GetDirectoryName(fullGlobalRoot);
+        return string.Equals(
+                Path.GetFileName(fullGlobalRoot),
+                ".alta",
+                StringComparison.OrdinalIgnoreCase) &&
+               !string.IsNullOrWhiteSpace(parent)
+            ? Path.Combine(parent, ".codealta")
+            : Path.Combine(fullGlobalRoot, ".codealta");
+    }
 }

@@ -46,13 +46,13 @@ public sealed class BootstrapTools
     /// </summary>
     [McpServerTool(Name = "codealta.bootstrap.ensure_global_repo"), Description("Ensures the global knowledge repo exists and is initialized.")]
     public async Task<string> EnsureGlobalRepoAsync(
-        [Description("Optional override for global repo root. Default is ~/.codealta/repo.")] string? globalRepoRoot = null,
+        [Description("Optional override for global repo root. Default is ~/.alta/repo.")] string? globalRepoRoot = null,
         [Description("Optional remote URL to clone or set as origin.")] string? remoteUrl = null,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var root = string.IsNullOrWhiteSpace(globalRepoRoot)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codealta", "repo")
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "repo")
             : globalRepoRoot;
 
         var sink = progress is null ? null : new Progress<string>(message =>
@@ -86,13 +86,13 @@ public sealed class BootstrapTools
     /// </summary>
     [McpServerTool(Name = "codealta.bootstrap.sync"), Description("Syncs the global knowledge repo (pull/commit/push).")]
     public async Task<string> SyncAsync(
-        [Description("Optional override for global repo root. Default is ~/.codealta/repo.")] string? globalRepoRoot = null,
+        [Description("Optional override for global repo root. Default is ~/.alta/repo.")] string? globalRepoRoot = null,
         [Description("Optional commit message used for debounced sync commits.")] string? commitMessage = null,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var root = string.IsNullOrWhiteSpace(globalRepoRoot)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codealta", "repo")
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "repo")
             : globalRepoRoot;
 
         var sink = progress is null ? null : new Progress<string>(message =>

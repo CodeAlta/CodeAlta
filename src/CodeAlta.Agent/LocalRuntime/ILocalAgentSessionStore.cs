@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.LocalRuntime;
 public interface ILocalAgentSessionStore
 {
     /// <summary>
-    /// Creates or loads a provider registration.
+    /// Creates or updates a persisted provider registration.
     /// </summary>
     /// <param name="provider">Provider descriptor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -28,10 +28,10 @@ public interface ILocalAgentSessionStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Creates or updates the persisted session summary.
-    /// </summary>
-    /// <param name="session">Session summary.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+     /// Creates or updates the persisted session summary.
+     /// </summary>
+     /// <param name="session">Session summary.</param>
+     /// <param name="cancellationToken">Cancellation token.</param>
     Task UpsertSessionAsync(
         LocalAgentSessionSummary session,
         CancellationToken cancellationToken = default);

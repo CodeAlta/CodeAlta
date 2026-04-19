@@ -16,7 +16,7 @@ public sealed record ResolvedProject
     public required string CheckoutPath { get; init; }
 
     /// <summary>
-    /// Gets the project-local <c>.codealta</c> root path.
+    /// Gets the project-local <c>.alta</c> root path.
     /// </summary>
     public required string CodeAltaRoot { get; init; }
 }

@@ -179,7 +179,7 @@ public sealed class DotNetDiagnosticsService
 
         return Path.Combine(
             Path.GetFullPath(repoRoot),
-            ".codealta",
+            ".alta",
             "knowledge",
             "dotnet");
     }

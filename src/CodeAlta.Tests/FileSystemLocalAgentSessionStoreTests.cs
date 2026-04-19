@@ -8,10 +8,10 @@ namespace CodeAlta.Tests;
 public sealed class FileSystemLocalAgentSessionStoreTests
 {
     [TestMethod]
-    public async Task UpsertSessionAndStateAsync_PersistsProviderFirstFilesAndListsMostRecentFirst()
+    public async Task UpsertSessionAndStateAsync_PersistsSessionJournalSnapshotsAndListsMostRecentFirst()
     {
         using var temp = TestTempDirectory.Create();
-        var layout = new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"));
+        var layout = new LocalAgentRuntimePathLayout(temp.Path);
         var store = new FileSystemLocalAgentSessionStore(layout);
         var provider = CreateProvider();
 
@@ -45,13 +45,17 @@ public sealed class FileSystemLocalAgentSessionStoreTests
         Assert.IsNotNull(persistedState);
         Assert.AreEqual("resp_123", persistedState.ProviderSessionId);
         CollectionAssert.AreEqual(new[] { "session-2", "session-1" }, sessions.Select(static session => session.SessionId).ToArray());
+
+        var persistedJournal = layout.GetSessionFilePath(newerSession.SessionId, newerSession.CreatedAt);
+        Assert.IsTrue(File.Exists(persistedJournal));
+        Assert.AreEqual(2, Directory.EnumerateFiles(layout.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories).Count());
     }
 
     [TestMethod]
     public async Task AppendEventsAsync_ReadEventsAsync_RoundTripsCanonicalEventLog()
     {
         using var temp = TestTempDirectory.Create();
-        var layout = new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"));
+        var layout = new LocalAgentRuntimePathLayout(temp.Path);
         var store = new FileSystemLocalAgentSessionStore(layout);
         var session = CreateSession("session-events", createdAt: "2026-04-06T10:00:00+00:00", updatedAt: "2026-04-06T10:00:00+00:00");
 
@@ -90,7 +94,7 @@ public sealed class FileSystemLocalAgentSessionStoreTests
     public async Task ReadEventsAsync_IgnoresTruncatedFinalLine()
     {
         using var temp = TestTempDirectory.Create();
-        var layout = new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"));
+        var layout = new LocalAgentRuntimePathLayout(temp.Path);
         var store = new FileSystemLocalAgentSessionStore(layout);
         var session = CreateSession("session-truncated", createdAt: "2026-04-06T10:00:00+00:00", updatedAt: "2026-04-06T10:00:00+00:00");
 
@@ -110,9 +114,8 @@ public sealed class FileSystemLocalAgentSessionStoreTests
                 ])
             .ConfigureAwait(false);
 
-        var sessionRoot = layout.GetSessionRootPath("openai", "openai", session.SessionId, session.CreatedAt);
-        var eventsPath = layout.GetSessionEventsPath(sessionRoot);
-        await File.AppendAllTextAsync(eventsPath, """{"$type":"contentCompleted","broken":""").ConfigureAwait(false);
+        var sessionFile = layout.GetSessionFilePath(session.SessionId, session.CreatedAt);
+        await File.AppendAllTextAsync(sessionFile, """{"$type":"contentCompleted","broken":""").ConfigureAwait(false);
 
         var persistedEvents = await store.ReadEventsAsync("openai", "openai", session.SessionId).ConfigureAwait(false);
 

@@ -74,7 +74,7 @@ public sealed class ProjectsTools
     }
 
     /// <summary>
-    /// Resolves a scope selector into concrete checkout and .codealta roots.
+    /// Resolves a scope selector into concrete checkout and .alta roots.
     /// </summary>
     [McpServerTool(Name = "codealta.projects.resolve_scope"), Description("Resolves a scope selector into concrete project roots.")]
     public async Task<string> ResolveScopeAsync(

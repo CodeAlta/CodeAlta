@@ -1,14 +1,14 @@
 namespace CodeAlta.Agent.LocalRuntime;
 
 /// <summary>
-/// Provides the provider-first filesystem layout for local raw-API sessions.
+/// Provides the filesystem layout for local raw-API providers and session journals.
 /// </summary>
 public sealed class LocalAgentRuntimePathLayout
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalAgentRuntimePathLayout"/> class.
     /// </summary>
-    /// <param name="rootPath">Machine-scoped root path, typically <c>~/.codealta/local/agents</c>.</param>
+    /// <param name="rootPath">Runtime root path, typically <c>~/.alta</c>.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="rootPath" /> is empty.</exception>
     public LocalAgentRuntimePathLayout(string rootPath)
     {
@@ -17,9 +17,19 @@ public sealed class LocalAgentRuntimePathLayout
     }
 
     /// <summary>
-    /// Gets the machine-scoped agents root path.
+    /// Gets the runtime root path.
     /// </summary>
     public string RootPath { get; }
+
+    /// <summary>
+    /// Gets the providers root path.
+    /// </summary>
+    public string ProvidersRootPath => Path.Combine(RootPath, "providers");
+
+    /// <summary>
+    /// Gets the sessions root path.
+    /// </summary>
+    public string SessionsRootPath => Path.Combine(RootPath, "sessions");
 
     /// <summary>
     /// Gets the provider root path.
@@ -28,7 +38,7 @@ public sealed class LocalAgentRuntimePathLayout
     /// <param name="providerKey">Provider key.</param>
     /// <returns>The provider root path.</returns>
     public string GetProviderRootPath(string protocolFamily, string providerKey)
-        => Path.Combine(RootPath, NormalizeSegment(protocolFamily), NormalizeSegment(providerKey));
+        => Path.Combine(ProvidersRootPath, NormalizeSegment(protocolFamily), NormalizeSegment(providerKey));
 
     /// <summary>
     /// Gets the provider descriptor path.
@@ -40,61 +50,33 @@ public sealed class LocalAgentRuntimePathLayout
         => Path.Combine(GetProviderRootPath(protocolFamily, providerKey), "provider.json");
 
     /// <summary>
-    /// Gets the sessions root path for a provider.
+    /// Gets the shared sessions root path.
     /// </summary>
     /// <param name="protocolFamily">Protocol family.</param>
     /// <param name="providerKey">Provider key.</param>
-    /// <returns>The provider sessions root path.</returns>
+    /// <returns>The shared sessions root path.</returns>
     public string GetProviderSessionsRootPath(string protocolFamily, string providerKey)
-        => Path.Combine(GetProviderRootPath(protocolFamily, providerKey), "sessions");
+        => SessionsRootPath;
 
     /// <summary>
-    /// Gets the session root path.
+    /// Gets the session journal path.
     /// </summary>
-    /// <param name="protocolFamily">Protocol family.</param>
-    /// <param name="providerKey">Provider key.</param>
     /// <param name="sessionId">Local session identifier.</param>
     /// <param name="createdAt">Creation timestamp used for date sharding.</param>
-    /// <returns>The session root path.</returns>
-    public string GetSessionRootPath(
-        string protocolFamily,
-        string providerKey,
+    /// <returns>The session journal path.</returns>
+    public string GetSessionFilePath(
         string sessionId,
         DateTimeOffset createdAt)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
         return Path.Combine(
-            GetProviderSessionsRootPath(protocolFamily, providerKey),
+            SessionsRootPath,
             createdAt.UtcDateTime.ToString("yyyy", System.Globalization.CultureInfo.InvariantCulture),
             createdAt.UtcDateTime.ToString("MM", System.Globalization.CultureInfo.InvariantCulture),
             createdAt.UtcDateTime.ToString("dd", System.Globalization.CultureInfo.InvariantCulture),
-            NormalizeSegment(sessionId));
+            $"{NormalizeSegment(sessionId)}.jsonl");
     }
-
-    /// <summary>
-    /// Gets the session summary path.
-    /// </summary>
-    public string GetSessionSummaryPath(string sessionRootPath)
-        => Path.Combine(sessionRootPath, "session.json");
-
-    /// <summary>
-    /// Gets the canonical events log path.
-    /// </summary>
-    public string GetSessionEventsPath(string sessionRootPath)
-        => Path.Combine(sessionRootPath, "events.jsonl");
-
-    /// <summary>
-    /// Gets the session state path.
-    /// </summary>
-    public string GetSessionStatePath(string sessionRootPath)
-        => Path.Combine(sessionRootPath, "state.json");
-
-    /// <summary>
-    /// Gets the attachments directory path.
-    /// </summary>
-    public string GetAttachmentsDirectoryPath(string sessionRootPath)
-        => Path.Combine(sessionRootPath, "attachments");
 
     private static string NormalizeSegment(string value)
     {
