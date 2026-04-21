@@ -66,6 +66,33 @@ public sealed class LocalAgentToolsTests
     }
 
     [TestMethod]
+    public async Task ReadFileTool_AcceptsAbsolutePath()
+    {
+        using var temp = TestTempDirectory.Create();
+        var filePath = Path.Combine(temp.Path, "sample.txt");
+        await File.WriteAllLinesAsync(filePath, ["alpha", "beta"]).ConfigureAwait(false);
+
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "read_file");
+        using var args = JsonDocument.Parse($$"""{"path":{{JsonSerializer.Serialize(filePath)}}}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "    1: alpha");
+        StringAssert.Contains(output, "    2: beta");
+    }
+
+    [TestMethod]
     public async Task GrepTool_UsesXenoAtomGlobPatternMatching()
     {
         using var temp = TestTempDirectory.Create();
@@ -90,6 +117,33 @@ public sealed class LocalAgentToolsTests
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
         StringAssert.Contains(output, "file7.txt:1: match");
         Assert.IsFalse(output.Contains("filex.txt:1: match", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ListDirTool_AcceptsAbsolutePath()
+    {
+        using var temp = TestTempDirectory.Create();
+        var folderPath = Path.Combine(temp.Path, "nested");
+        Directory.CreateDirectory(folderPath);
+        await File.WriteAllTextAsync(Path.Combine(folderPath, "sample.txt"), "hello").ConfigureAwait(false);
+
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "list_dir");
+        using var args = JsonDocument.Parse($$"""{"path":{{JsonSerializer.Serialize(folderPath)}}}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "[file] sample.txt");
     }
 
     [TestMethod]
@@ -140,6 +194,32 @@ public sealed class LocalAgentToolsTests
         var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
         var tool = tools.Single(static tool => tool.Spec.Name == "grep");
         using var args = JsonDocument.Parse("""{"path":"sample.txt","pattern":"^Beta\\d+$"}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        Assert.AreEqual("sample.txt:2: Beta42", output);
+    }
+
+    [TestMethod]
+    public async Task GrepTool_AcceptsAbsolutePath()
+    {
+        using var temp = TestTempDirectory.Create();
+        var filePath = Path.Combine(temp.Path, "sample.txt");
+        await File.WriteAllLinesAsync(filePath, ["Alpha", "Beta42"]).ConfigureAwait(false);
+
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "grep");
+        using var args = JsonDocument.Parse($$"""{"path":{{JsonSerializer.Serialize(filePath)}},"pattern":"^Beta\\d+$"}""");
 
         var result = await tool.Handler(
                 new AgentToolInvocation(
@@ -597,6 +677,51 @@ public sealed class LocalAgentToolsTests
     }
 
     [TestMethod]
+    public async Task WriteAndReplaceTools_AcceptAbsolutePathsInsideWorkspace()
+    {
+        using var temp = TestTempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(temp.Path, "src"));
+        var filePath = Path.Combine(temp.Path, "src", "sample.txt");
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var writeFile = tools.Single(static tool => tool.Spec.Name == "write_file");
+        var replaceInFile = tools.Single(static tool => tool.Spec.Name == "replace_in_file");
+
+        using var writeArgs = JsonDocument.Parse($$"""{"path":{{JsonSerializer.Serialize(filePath)}},"content":"alpha\nbeta\n"}""");
+        var writeResult = await writeFile.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    writeFile.Spec.Name,
+                    writeArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(writeResult.Success);
+
+        using var replaceArgs = JsonDocument.Parse(
+            $$"""
+            {
+              "path": {{JsonSerializer.Serialize(filePath)}},
+              "old_string": "alpha",
+              "new_string": "gamma"
+            }
+            """);
+        var replaceResult = await replaceInFile.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-2",
+                    replaceInFile.Spec.Name,
+                    replaceArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(replaceResult.Success);
+        Assert.AreEqual("gamma\nbeta\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+    }
+
+    [TestMethod]
     public async Task ReplaceInFileTool_FailsWhenMultipleMatchesExistAndReplaceAllIsFalse()
     {
         using var temp = TestTempDirectory.Create();
@@ -681,6 +806,50 @@ public sealed class LocalAgentToolsTests
 
         Assert.IsTrue(deleteResult.Success);
         Assert.IsFalse(File.Exists(Path.Combine(temp.Path, "delete-me.txt")));
+    }
+
+    [TestMethod]
+    public async Task DeleteAndRenameTools_AcceptAbsolutePathsInsideWorkspace()
+    {
+        using var temp = TestTempDirectory.Create();
+        var sourcePath = Path.Combine(temp.Path, "old-dir");
+        var destinationPath = Path.Combine(temp.Path, "new-dir");
+        Directory.CreateDirectory(sourcePath);
+        await File.WriteAllTextAsync(Path.Combine(sourcePath, "data.txt"), "hello").ConfigureAwait(false);
+        var deletePath = Path.Combine(temp.Path, "delete-me.txt");
+        await File.WriteAllTextAsync(deletePath, "bye").ConfigureAwait(false);
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var rename = tools.Single(static tool => tool.Spec.Name == "rename_file_or_dir");
+        var delete = tools.Single(static tool => tool.Spec.Name == "delete_file_or_dir");
+
+        using var renameArgs = JsonDocument.Parse(
+            $$"""{"old_path":{{JsonSerializer.Serialize(sourcePath)}},"new_path":{{JsonSerializer.Serialize(destinationPath)}}}""");
+        var renameResult = await rename.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    rename.Spec.Name,
+                    renameArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(renameResult.Success);
+        Assert.IsTrue(File.Exists(Path.Combine(destinationPath, "data.txt")));
+
+        using var deleteArgs = JsonDocument.Parse($$"""{"path":{{JsonSerializer.Serialize(deletePath)}}}""");
+        var deleteResult = await delete.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-2",
+                    delete.Spec.Name,
+                    deleteArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(deleteResult.Success);
+        Assert.IsFalse(File.Exists(deletePath));
     }
 
     [TestMethod]

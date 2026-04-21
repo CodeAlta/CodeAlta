@@ -1164,9 +1164,12 @@ public static class LocalAgentBuiltInToolFactory
             throw new ArgumentException("A path or working directory is required.");
         }
 
+        var baseDirectory = workingDirectory ?? Environment.CurrentDirectory;
+        // Path-like tool arguments should resolve relative inputs from the session working directory
+        // while still accepting rooted inputs unchanged.
         return Path.GetFullPath(Path.IsPathRooted(candidate)
             ? candidate
-            : Path.Combine(workingDirectory ?? Environment.CurrentDirectory, candidate));
+            : Path.Combine(baseDirectory, candidate));
     }
 
     private static bool IsImagePath(string path)

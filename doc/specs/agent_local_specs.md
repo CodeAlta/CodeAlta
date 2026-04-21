@@ -368,6 +368,7 @@ Deterministic edit tools for all providers
 - `rename_file_or_dir` should rename or move files and directories
 - `delete_file_or_dir` should delete files or directories recursively
 - these tools should stay easy to describe, easy to call, and return clear failure messages
+- path-like tool arguments should resolve relative paths from the session working directory while still accepting absolute paths unchanged
 - `read_file` should support negative line offsets to read from the end of a text file (`-1` = last line)
 - text-oriented tools such as `read_file`, `replace_in_file`, `grep`, and `apply_patch` should reject or skip likely-binary files instead of dumping binary content into the conversation
 
