@@ -95,6 +95,25 @@ public sealed class CodeAltaAppTabStripTests
     }
 
     [TestMethod]
+    public void Build_AppendsFileTabs_AndPrefersExplicitSelectedFileTab()
+    {
+        var projection = ThreadTabStripProjectionBuilder.Build(
+            openThreadIds: ["thread-1"],
+            availableThreadIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "thread-1" },
+            draftTabOpen: true,
+            draftTabId: CodeAltaApp.DraftTabId,
+            selectedThreadId: "thread-1",
+            openFileTabIds: ["file:C:/code/CodeAlta/readme.md"],
+            selectedTabIdOverride: "file:C:/code/CodeAlta/readme.md");
+
+        CollectionAssert.AreEqual(
+            new[] { "thread-1", CodeAltaApp.DraftTabId, "file:C:/code/CodeAlta/readme.md" },
+            projection.Tabs.Select(static tab => tab.TabId).ToArray());
+        Assert.AreEqual("file:C:/code/CodeAlta/readme.md", projection.SelectedTabId);
+        Assert.IsTrue(projection.Tabs[2].IsFile);
+    }
+
+    [TestMethod]
     public void CanCloseTab_HidesCloseButtonForOnlyDraftTab()
     {
         Assert.IsFalse(ThreadTabStripCoordinator.CanCloseTab(

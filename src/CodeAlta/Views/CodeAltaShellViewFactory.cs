@@ -16,7 +16,8 @@ internal static class CodeAltaShellViewFactory
         Action openAcpManager,
         Action toggleTerminalLoopCallback,
         Action focusSidebar,
-        Action focusPromptEditor)
+        Action focusPromptEditor,
+        Func<bool> canUseCommandPalette)
     {
         ArgumentNullException.ThrowIfNull(sidebar);
         ArgumentNullException.ThrowIfNull(threadWorkspace);
@@ -26,6 +27,7 @@ internal static class CodeAltaShellViewFactory
         ArgumentNullException.ThrowIfNull(toggleTerminalLoopCallback);
         ArgumentNullException.ThrowIfNull(focusSidebar);
         ArgumentNullException.ThrowIfNull(focusPromptEditor);
+        ArgumentNullException.ThrowIfNull(canUseCommandPalette);
 
         var shellView = new CodeAltaShellView(
             sidebar,
@@ -41,14 +43,29 @@ internal static class CodeAltaShellViewFactory
             Presentation = CommandPresentation.CommandBar,
             Execute = _ => toggleTerminalLoopCallback(),
         });
-        shellView.Root.AddCommand(ShellCommandViewFactory.Create(
-            ShellCommandCatalog.Get("CodeAlta.Shell.CommandPalette"),
-            shellCommandSurfaceCoordinator.ShowCommandPalette,
-            CommandPresentation.CommandBar));
+        var commandPaletteMetadata = ShellCommandCatalog.Get("CodeAlta.Shell.CommandPalette");
+        shellView.Root.AddCommand(new Command
+        {
+            Id = commandPaletteMetadata.Id,
+            LabelMarkup = commandPaletteMetadata.DisplayLabelMarkup,
+            Name = commandPaletteMetadata.CommandName,
+            SearchText = commandPaletteMetadata.CommandSearchText,
+            DescriptionMarkup = commandPaletteMetadata.DescriptionMarkup,
+            Gesture = commandPaletteMetadata.Gesture,
+            Sequence = commandPaletteMetadata.Sequence,
+            Presentation = CommandPresentation.CommandBar,
+            Execute = _ => shellCommandSurfaceCoordinator.ShowCommandPalette(),
+            CanExecute = _ => canUseCommandPalette(),
+            IsVisible = _ => canUseCommandPalette(),
+            ConsumesGestureWhenUnavailable = false,
+        });
         shellView.Root.AddCommand(ShellCommandViewFactory.Create(
             ShellCommandCatalog.Get("CodeAlta.Project.OpenFolder"),
             () => _ = shellCommandSurfaceCoordinator.ShowOpenFolderDialogAsync(),
             CommandPresentation.CommandPalette));
+        shellView.Root.AddCommand(ShellCommandViewFactory.Create(
+            ShellCommandCatalog.Get("CodeAlta.File.Edit"),
+            () => _ = shellCommandSurfaceCoordinator.OpenFileEditorAsync()));
         shellView.Root.AddCommand(ShellCommandViewFactory.Create(
             ShellCommandCatalog.Get("CodeAlta.Acp.Manage"),
             openAcpManager));

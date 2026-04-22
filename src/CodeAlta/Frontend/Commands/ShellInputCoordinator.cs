@@ -14,6 +14,7 @@ internal sealed class ShellInputCoordinator
     private readonly Func<Task> _showCommandPaletteAsync;
     private readonly Func<Task> _exitAppAsync;
     private readonly Func<string?, Task> _showOpenFolderAsync;
+    private readonly Func<Task> _openFileEditorAsync;
     private readonly Func<Task> _focusSidebarAsync;
     private readonly Func<Task> _focusPromptAsync;
     private readonly Func<Task> _showSessionUsageAsync;
@@ -35,6 +36,7 @@ internal sealed class ShellInputCoordinator
         Func<Task> showCommandPaletteAsync,
         Func<Task> exitAppAsync,
         Func<string?, Task> showOpenFolderAsync,
+        Func<Task> openFileEditorAsync,
         Func<Task> focusSidebarAsync,
         Func<Task> focusPromptAsync,
         Func<Task> showSessionUsageAsync,
@@ -55,6 +57,7 @@ internal sealed class ShellInputCoordinator
         ArgumentNullException.ThrowIfNull(showCommandPaletteAsync);
         ArgumentNullException.ThrowIfNull(exitAppAsync);
         ArgumentNullException.ThrowIfNull(showOpenFolderAsync);
+        ArgumentNullException.ThrowIfNull(openFileEditorAsync);
         ArgumentNullException.ThrowIfNull(focusSidebarAsync);
         ArgumentNullException.ThrowIfNull(focusPromptAsync);
         ArgumentNullException.ThrowIfNull(showSessionUsageAsync);
@@ -75,6 +78,7 @@ internal sealed class ShellInputCoordinator
         _showCommandPaletteAsync = showCommandPaletteAsync;
         _exitAppAsync = exitAppAsync;
         _showOpenFolderAsync = showOpenFolderAsync;
+        _openFileEditorAsync = openFileEditorAsync;
         _focusSidebarAsync = focusSidebarAsync;
         _focusPromptAsync = focusPromptAsync;
         _showSessionUsageAsync = showSessionUsageAsync;
@@ -181,6 +185,10 @@ internal sealed class ShellInputCoordinator
 
             case OpenFolderIntent openFolder:
                 await _showOpenFolderAsync(openFolder.InitialPath);
+                return;
+
+            case OpenFileEditorIntent:
+                await _openFileEditorAsync();
                 return;
 
             case FocusSidebarIntent:

@@ -15,6 +15,7 @@ public sealed class ShellCommandHelpTests
         var paletteCommand = ShellCommandCatalog.Get("CodeAlta.Shell.CommandPalette");
         var exitCommand = ShellCommandCatalog.Get("CodeAlta.Shell.Exit");
         var openFolderCommand = ShellCommandCatalog.Get("CodeAlta.Project.OpenFolder");
+        var editFileCommand = ShellCommandCatalog.Get("CodeAlta.File.Edit");
         var goToSidebarCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusSidebar");
         var goToPromptCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusPrompt");
         var fullPromptCommand = ShellCommandCatalog.Get("CodeAlta.Thread.ExpandPrompt");
@@ -29,6 +30,9 @@ public sealed class ShellCommandHelpTests
         var openFolderEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, openFolderCommand.Label, StringComparison.Ordinal));
+        var editFileEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, editFileCommand.Label, StringComparison.Ordinal));
         var exitEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, exitCommand.Label, StringComparison.Ordinal));
@@ -48,6 +52,7 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(exitEntry.Bindings.ToArray(), "/exit");
         CollectionAssert.Contains(openFolderEntry.Bindings.ToArray(), "/open_folder");
         CollectionAssert.Contains(openFolderEntry.Bindings.ToArray(), "/open");
+        CollectionAssert.Contains(editFileEntry.Bindings.ToArray(), "/edit");
         CollectionAssert.Contains(goToSidebarEntry.Bindings.ToArray(), "/go_to_sidebar");
         CollectionAssert.Contains(goToSidebarEntry.Bindings.ToArray(), "/sidebar");
         CollectionAssert.Contains(goToPromptEntry.Bindings.ToArray(), "/go_to_prompt");

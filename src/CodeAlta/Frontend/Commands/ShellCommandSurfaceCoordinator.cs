@@ -36,6 +36,7 @@ internal sealed class ShellCommandSurfaceCoordinator
     private readonly Func<Visual?> _getHelpFocusTarget;
     private readonly Func<IReadOnlyList<ProjectDescriptor>> _getProjects;
     private readonly Func<string, bool, Task> _openFolderAsync;
+    private readonly Func<Task> _openFileEditorAsync;
     private readonly Func<WorkThreadDescriptor?> _getSelectedThread;
     private readonly Func<WorkThreadDescriptor, OpenThreadState> _ensureThreadTab;
     private readonly Action _focusSidebar;
@@ -57,6 +58,7 @@ internal sealed class ShellCommandSurfaceCoordinator
         ThreadCommandCoordinator threadCommandCoordinator,
         Func<IReadOnlyList<ProjectDescriptor>> getProjects,
         Func<string, bool, Task> openFolderAsync,
+        Func<Task> openFileEditorAsync,
         Func<string?> getPromptText,
         Func<Task> closeCurrentTabAsync,
         Action<string, bool, StatusTone> setStatus,
@@ -77,6 +79,7 @@ internal sealed class ShellCommandSurfaceCoordinator
         ArgumentNullException.ThrowIfNull(threadCommandCoordinator);
         ArgumentNullException.ThrowIfNull(getProjects);
         ArgumentNullException.ThrowIfNull(openFolderAsync);
+        ArgumentNullException.ThrowIfNull(openFileEditorAsync);
         ArgumentNullException.ThrowIfNull(getPromptText);
         ArgumentNullException.ThrowIfNull(closeCurrentTabAsync);
         ArgumentNullException.ThrowIfNull(setStatus);
@@ -97,6 +100,7 @@ internal sealed class ShellCommandSurfaceCoordinator
         _threadCommandCoordinator = threadCommandCoordinator;
         _getProjects = getProjects;
         _openFolderAsync = openFolderAsync;
+        _openFileEditorAsync = openFileEditorAsync;
         _getHelpBounds = getHelpBounds;
         _getHelpFocusTarget = getHelpFocusTarget;
         _getSelectedThread = getSelectedThread;
@@ -118,6 +122,7 @@ internal sealed class ShellCommandSurfaceCoordinator
             ShowCommandPaletteAsync,
             ExitAppAsync,
             ShowOpenFolderDialogAsync,
+            OpenFileEditorAsync,
             FocusSidebarAsync,
             FocusPromptAsync,
             ShowSelectedSessionUsageAsync,
@@ -137,6 +142,7 @@ internal sealed class ShellCommandSurfaceCoordinator
         [
             CreateCommandBinding("CodeAlta.Shell.Help", () => ObserveUiTask(ShowHelpAsync(), "show help")),
             CreateCommandBinding("CodeAlta.Project.OpenFolder", () => ObserveUiTask(ShowOpenFolderDialogAsync(), "open a project")),
+            CreateCommandBinding("CodeAlta.File.Edit", () => ObserveUiTask(OpenFileEditorAsync(), "open a file")),
             CreateCommandBinding("CodeAlta.Thread.SessionUsage", _openSessionUsage),
             CreateCommandBinding("CodeAlta.Thread.Info", _openThreadInfo),
             CreateCommandBinding("CodeAlta.Thread.ExpandPrompt", _openExpandedPromptEditor),
@@ -207,6 +213,9 @@ internal sealed class ShellCommandSurfaceCoordinator
             .Show();
         return Task.CompletedTask;
     }
+
+    public Task OpenFileEditorAsync()
+        => _openFileEditorAsync();
 
     private ThreadWorkspaceCommandBinding CreateCommandBinding(string commandId, Action execute)
     {

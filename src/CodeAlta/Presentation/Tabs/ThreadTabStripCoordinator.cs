@@ -13,6 +13,8 @@ internal sealed class ThreadTabStripCoordinator
 {
     private readonly ThreadSelectionContext _threadSelection;
     private readonly ThreadTabContext _threadTabs;
+    private readonly Func<IReadOnlyList<string>> _getOpenFileTabIds;
+    private readonly Func<string?> _getSelectedTabIdOverride;
     private bool _syncingSelection;
     private bool _syncingPages;
     private int _lastObservedSelectedIndex = -1;
@@ -20,13 +22,19 @@ internal sealed class ThreadTabStripCoordinator
 
     public ThreadTabStripCoordinator(
         ThreadSelectionContext threadSelection,
-        ThreadTabContext threadTabs)
+        ThreadTabContext threadTabs,
+        Func<IReadOnlyList<string>> getOpenFileTabIds,
+        Func<string?> getSelectedTabIdOverride)
     {
         ArgumentNullException.ThrowIfNull(threadSelection);
         ArgumentNullException.ThrowIfNull(threadTabs);
+        ArgumentNullException.ThrowIfNull(getOpenFileTabIds);
+        ArgumentNullException.ThrowIfNull(getSelectedTabIdOverride);
 
         _threadSelection = threadSelection;
         _threadTabs = threadTabs;
+        _getOpenFileTabIds = getOpenFileTabIds;
+        _getSelectedTabIdOverride = getSelectedTabIdOverride;
     }
 
     public void SyncControl()
@@ -98,6 +106,7 @@ internal sealed class ThreadTabStripCoordinator
         {
             if (selection.Target is WorkspaceTarget.Draft)
             {
+                _threadTabs.ActivateThreadSurface();
                 return;
             }
 
@@ -105,28 +114,39 @@ internal sealed class ThreadTabStripCoordinator
             return;
         }
 
-        if (tabControl.Tabs[selectedIndex].Data is not string threadId ||
-            string.Equals(threadId, selection.SelectedThreadId, StringComparison.OrdinalIgnoreCase))
+        if (tabControl.Tabs[selectedIndex].Data is not string tabId)
         {
             return;
         }
 
-        if (string.Equals(threadId, _pendingThreadSelectionThreadId, StringComparison.OrdinalIgnoreCase))
+        if (_threadTabs.GetFileTab(tabId) is not null)
+        {
+            _threadTabs.SelectFileTab(tabId);
+            return;
+        }
+
+        if (string.Equals(tabId, selection.SelectedThreadId, StringComparison.OrdinalIgnoreCase))
+        {
+            _threadTabs.ActivateThreadSurface();
+            return;
+        }
+
+        if (string.Equals(tabId, _pendingThreadSelectionThreadId, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        _pendingThreadSelectionThreadId = threadId;
+        _pendingThreadSelectionThreadId = tabId;
         _threadTabs.GetUiDispatcher().Post(
             () =>
             {
-                if (!string.Equals(threadId, _pendingThreadSelectionThreadId, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(tabId, _pendingThreadSelectionThreadId, StringComparison.OrdinalIgnoreCase))
                 {
                     return;
                 }
 
                 _pendingThreadSelectionThreadId = null;
-                _threadTabs.OpenThread(threadId);
+                _threadTabs.OpenThread(tabId);
             });
     }
 
@@ -206,7 +226,9 @@ internal sealed class ThreadTabStripCoordinator
             availableThreadIds,
             selection.Target is WorkspaceTarget.Draft,
             CodeAltaApp.DraftTabId,
-            selection.SelectedThreadId);
+            selection.SelectedThreadId,
+            _getOpenFileTabIds(),
+            _getSelectedTabIdOverride());
     }
 
     private List<TabPage> BuildDesiredPages(ThreadTabStripProjection projection)
@@ -218,7 +240,9 @@ internal sealed class ThreadTabStripCoordinator
         {
             pages.Add(tab.IsDraft
                 ? EnsureDraftPage(CanCloseTab(tab, projection.Tabs.Count))
-                : EnsureThreadPage(tab.TabId, CanCloseTab(tab, projection.Tabs.Count)));
+                : tab.IsFile
+                    ? EnsureFilePage(tab.TabId)
+                    : EnsureThreadPage(tab.TabId, CanCloseTab(tab, projection.Tabs.Count)));
         }
 
         return pages;
@@ -280,6 +304,41 @@ internal sealed class ThreadTabStripCoordinator
         };
 
         workspaceView.RememberTabPage(thread.ThreadId, page);
+        return page;
+    }
+
+    private TabPage EnsureFilePage(string tabId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
+        var workspaceView = _threadTabs.GetWorkspaceView() ?? throw new InvalidOperationException("Thread workspace view is not initialized.");
+
+        if (workspaceView.TryGetTabPage(tabId, out var existingPage))
+        {
+            existingPage.Data = tabId;
+            existingPage.ShowCloseButton = true;
+            return existingPage;
+        }
+
+        var fileTab = _threadTabs.GetFileTab(tabId)
+            ?? throw new InvalidOperationException($"File tab '{tabId}' was not found when creating a tab page.");
+
+        var page = new TabPage(fileTab.CreateTabHeader(_threadTabs.CreateComputedVisual), CodeAltaApp.CreateThreadTabPageContentPlaceholder())
+        {
+            Data = tabId,
+            ShowCloseButton = true,
+        };
+        page.RequestClosing += (_, e) =>
+        {
+            if (e.Reason != TabCloseReason.CloseButton || e.Page.Data is not string currentTabId)
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            _threadTabs.CloseFileTab(currentTabId);
+        };
+
+        workspaceView.RememberTabPage(tabId, page);
         return page;
     }
 
@@ -372,9 +431,14 @@ internal sealed class ThreadTabStripCoordinator
         }
 
         var selection = _threadSelection.Selection;
-        var selectedTabId = selection.Target is WorkspaceTarget.Draft
-            ? CodeAltaApp.DraftTabId
-            : selection.SelectedThreadId;
+        var selectedTabId = _getSelectedTabIdOverride();
+        if (string.IsNullOrWhiteSpace(selectedTabId))
+        {
+            selectedTabId = selection.Target is WorkspaceTarget.Draft
+                ? CodeAltaApp.DraftTabId
+                : selection.SelectedThreadId;
+        }
+
         if (!string.IsNullOrWhiteSpace(selectedTabId))
         {
             for (var i = 0; i < tabControl.Tabs.Count; i++)

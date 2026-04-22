@@ -47,6 +47,7 @@ internal sealed class ShellInputRouter
                 ? new SteerPromptIntent(trimmed)
                 : new SendPromptIntent(trimmed),
             { Id: "CodeAlta.Project.OpenFolder" } => new OpenFolderIntent(arguments),
+            { Id: "CodeAlta.File.Edit" } => new OpenFileEditorIntent(),
             { Id: "CodeAlta.Shell.FocusSidebar" } => new FocusSidebarIntent(),
             { Id: "CodeAlta.Shell.FocusPrompt" } => new FocusPromptIntent(),
             { Id: "CodeAlta.Thread.SessionUsage" } => new OpenSessionUsageIntent(),

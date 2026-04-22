@@ -22,17 +22,19 @@ internal sealed class ProjectFilePickerDialog
     private readonly TextBlock _headerTextBlock;
     private readonly TextBlock _statisticsTextBlock;
     private readonly TextBlock _statusTextBlock;
+    private readonly TextBlock _hintTextBlock;
     private readonly Dialog _dialog;
     private IReadOnlyList<ProjectFileReferencePopupItem> _items = [];
     private bool _isOpen;
     private bool _suppressListSelectionChanged;
     private bool _suppressQueryDocumentChanged;
 
-    public ProjectFilePickerDialog()
+    public ProjectFilePickerDialog(string hintText = "Arrows move · Enter insert link · Esc close")
     {
         _headerTextBlock = CreateLabel(string.Empty, Colors.White);
         _statisticsTextBlock = CreateLabel(string.Empty, UiPalette.PromptPlaceholderColor);
         _statusTextBlock = CreateLabel(string.Empty, UiPalette.PromptPlaceholderColor);
+        _hintTextBlock = CreateLabel(hintText, UiPalette.PromptPlaceholderColor);
 
         _queryBox = new TextBox()
             .Placeholder("Search files and folders…")
@@ -69,7 +71,7 @@ internal sealed class ProjectFilePickerDialog
         _dialog = new Dialog()
             .Title(_headerTextBlock)
             .TopRightText(_statisticsTextBlock)
-            .BottomLeftText(CreateLabel("Arrows move · Enter insert link · Esc close", UiPalette.PromptPlaceholderColor))
+            .BottomLeftText(_hintTextBlock)
             .BottomRightText(_statusTextBlock)
             .Padding(0)
             .IsModal(true)

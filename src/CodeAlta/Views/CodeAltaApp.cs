@@ -8,6 +8,7 @@ using CodeAlta.Frontend.Commands;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Presentation.Chat;
+using CodeAlta.Presentation.Editing;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.Presentation.Tabs;
@@ -68,13 +69,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private readonly WorkspaceRefreshContext _workspaceRefreshContext;
     private readonly AcpManagementCoordinator? _acpManagementCoordinator;
     private readonly AcpFrontendCoordinator _acpUi;
+    private readonly FileEditorWorkspaceCoordinator _fileEditorWorkspaceCoordinator;
+    private readonly InitialCatalogStateCoordinator _initialCatalogStateCoordinator;
     private CodeAltaShellView? _shellView;
     private ThreadWorkspaceView? _threadWorkspaceView;
     private SessionUsagePresenter? _sessionUsagePresenter;
     private ThreadInfoPresenter? _threadInfoPresenter;
     private IUiDispatcher? _uiDispatcher;
-    private Task<ShellThreadStateCoordinator.InitialCatalogState>? _initialCatalogStateTask;
-    private bool _initialCatalogStateResolved;
     private bool _disableTerminalLoopCallback;
     private WorkThreadViewState _viewState
     {
@@ -241,6 +242,12 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         _shellWorkspaceContext = composition.ShellWorkspaceContext;
         _threadSelectionContext = composition.ThreadSelectionContext;
         _workspaceRefreshContext = composition.WorkspaceRefreshContext;
+        _initialCatalogStateCoordinator = new InitialCatalogStateCoordinator(
+            cancellationToken => _threadStateCoordinator.LoadInitialCatalogStateAsync(cancellationToken),
+            _threadStateCoordinator.ApplyInitialCatalogState,
+            RefreshCatalogAndThreadWorkspace,
+            FocusPromptEditor,
+            SetStatus);
         _acpUi = new AcpFrontendCoordinator(
             _ownedServices,
             _chatBackendInitializationCoordinator,
@@ -256,26 +263,45 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             agentId => _acpUi.ProbeBackendAsync(agentId),
             () => DialogBoundsResolver.ResolveAppBounds(ThreadInput is Visual threadInput ? threadInput : _sidebarCoordinator.View.Tree),
             () => ThreadInput is Visual threadInput ? threadInput : _sidebarCoordinator.View.Tree);
+        _fileEditorWorkspaceCoordinator = new FileEditorWorkspaceCoordinator(
+            projectFileSearchService,
+            () => PromptReferenceProjectRootResolver.Resolve(GetSelectedThread(), GetProjectById, GetSelectedProject),
+            () => ThreadInput,
+            () => _threadWorkspaceView,
+            DispatchToUiDeferred,
+            SyncThreadTabControl,
+            SetStatus);
         _threadTabContext = new ThreadTabContext(
             () => ThreadTabControl,
             () => _threadWorkspaceView,
             build => CreateComputedVisual(build),
             GetUiDispatcher,
             () => ObserveUiTask(ActivateDraftTabAsync(), "activate the draft tab"),
+            ActivateThreadSurface,
             threadId => ObserveUiTask(CloseThreadAsync(threadId), "close the thread tab"),
             () => ObserveUiTask(CloseDraftTabAsync(), "close the draft tab"),
-            threadId => ObserveUiTask(_shellController.OpenThreadAsync(threadId, CancellationToken.None), "open the thread tab"));
+            threadId => ObserveUiTask(_shellController.OpenThreadAsync(threadId, CancellationToken.None), "open the thread tab"),
+            tabId => _fileEditorWorkspaceCoordinator.GetFileTab(tabId),
+            tabId => _fileEditorWorkspaceCoordinator.SelectFileTab(tabId),
+            tabId => ObserveUiTask(_fileEditorWorkspaceCoordinator.CloseFileTabAsync(tabId), "close the file tab"));
         _threadTabStripCoordinator = new ThreadTabStripCoordinator(
             _threadSelectionContext,
-            _threadTabContext);
+            _threadTabContext,
+            () => _fileEditorWorkspaceCoordinator.OpenTabIds,
+            () => _fileEditorWorkspaceCoordinator.SelectedTabId);
         _shellCommandSurfaceCoordinator = new ShellCommandSurfaceCoordinator(
             _promptComposerViewModel,
             _threadWorkspaceViewModel,
             _threadCommandCoordinator,
             () => _threadStateCoordinator.Projects,
             OpenFolderAsync,
+            _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
             () => ReadBindableState(() => _promptDraftUiCoordinator.PromptText),
-            CloseCurrentShellTabAsync,
+            () => _fileEditorWorkspaceCoordinator.GetSelectedFileTab() is { } fileTab
+                ? _fileEditorWorkspaceCoordinator.CloseFileTabAsync(fileTab.TabId)
+                : GetSelectedThread() is not null
+                    ? CloseSelectedThreadAsync()
+                    : CloseDraftTabAsync(),
             SetStatus,
             () => DialogBoundsResolver.ResolveAppBounds(ThreadInput),
             () => ThreadInput,
@@ -316,6 +342,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _fileEditorWorkspaceCoordinator.DisposeAsync();
         await _runtimeEventPump.DisposeAsync();
         await _shellController.DisposeAsync();
         await _promptDraftUiCoordinator.DisposeAsync();
@@ -356,31 +383,16 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         }
     }
 
-    private string? GetExpandedSidebarProjectId()
-        => SidebarSelectionResolver.ResolvePreferredExpandedProjectId(GetSelectedThread()?.ProjectRef);
-
-    private SidebarSelectionTarget ResolveSidebarTargetForCurrentState()
-        => SidebarSelectionResolver.ResolveCurrentTarget(
-            _threadStateCoordinator.Selection.SelectedThreadId,
-            _threadStateCoordinator.Selection.SelectedProjectId,
-            _threadStateCoordinator.Selection.Target is WorkspaceTarget.Draft { IsGlobal: true });
-
     private void RefreshSidebarProjection()
-    {
-        _sidebarCoordinator.RefreshProjection(
-            _threadStateCoordinator.Projects,
-            _threadStateCoordinator.Threads,
-            GetExpandedSidebarProjectId(),
-            ResolveSidebarTargetForCurrentState(),
-            _threadStateCoordinator.NavigatorSettings,
-            threadId => _threadStateCoordinator.FindOpenThread(threadId) is { } tab
-                ? new ThreadVisualState(tab.StatusBusy, tab.HasPromptDraft)
-                : new ThreadVisualState(false, _promptDraftUiCoordinator.HasPersistedPromptDraft(threadId)),
+        => SidebarUiStateHelpers.RefreshProjection(
+            _sidebarCoordinator,
+            _threadStateCoordinator,
+            _promptDraftUiCoordinator,
+            threadId => _threadStateCoordinator.FindOpenThread(threadId),
             VerifyBindableAccess);
-    }
 
     private void SyncSidebarSelectionToCurrentState()
-        => _sidebarCoordinator.SyncSelectionToCurrentState(ResolveSidebarTargetForCurrentState());
+        => _sidebarCoordinator.SyncSelectionToCurrentState(SidebarUiStateHelpers.ResolveCurrentTarget(_threadStateCoordinator));
 
     private void ApplyPendingSidebarSelection()
         => _sidebarCoordinator.ApplyPendingSelection();
@@ -397,7 +409,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
         _shellAnimationRuntime.Advance();
         _sidebarCoordinator.RefreshRecency(DateTimeOffset.UtcNow, VerifyBindableAccess);
-        EnsureInitialCatalogStateStarted(cancellationToken);
+        _initialCatalogStateCoordinator.EnsureStarted(cancellationToken);
         if (!TryResolveInitialCatalogState(cancellationToken))
         {
             return TerminalLoopResult.Continue;
@@ -416,40 +428,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             tone: _disableTerminalLoopCallback ? StatusTone.Warning : StatusTone.Info);
     }
 
-    private void EnsureInitialCatalogStateStarted(CancellationToken cancellationToken)
-        => _initialCatalogStateTask ??= _threadStateCoordinator.LoadInitialCatalogStateAsync(cancellationToken);
-
     private bool TryResolveInitialCatalogState(CancellationToken cancellationToken)
-    {
-        if (_initialCatalogStateResolved)
-        {
-            return true;
-        }
-
-        var task = _initialCatalogStateTask;
-        if (task is null || !task.IsCompleted)
-        {
-            return false;
-        }
-
-        try
-        {
-            _threadStateCoordinator.ApplyInitialCatalogState(task.GetAwaiter().GetResult());
-            RefreshCatalogAndThreadWorkspace();
-            FocusPromptEditor();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return false;
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"Failed to load saved state: {ex.Message}", tone: StatusTone.Error);
-        }
-
-        _initialCatalogStateResolved = true;
-        return true;
-    }
+        => _initialCatalogStateCoordinator.TryResolve(cancellationToken);
 
     private void RefreshChatSelectorsForDraftScope(AgentBackendId? preferredBackendId = null)
         => _chatSelectorCoordinator.RefreshForDraftScope(preferredBackendId);
@@ -516,6 +496,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             _promptDraftUiCoordinator.PromptTextBinding,
             _shellAnimationRuntime.ThinkingPhase01,
             OnChatAutoScrollChanged);
+        _fileEditorWorkspaceCoordinator.RefreshActiveContent();
 
         RefreshCatalogAndThreadWorkspace();
 
@@ -527,7 +508,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             OpenAcpManagement,
             ToggleTerminalLoopCallback,
             FocusSidebar,
-            FocusPromptEditor);
+            FocusPromptEditor,
+            () => _fileEditorWorkspaceCoordinator.SelectedTabId is null);
 
         return _shellView;
     }
@@ -540,8 +522,17 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private void RefreshHeaderAndThreadWorkspace()
         => _workspaceCoordinator.RefreshHeaderAndThreadWorkspace();
     private void RefreshSelectionAndThreadWorkspace() { _threadInfoPresenter?.InvalidateSelection(); _workspaceCoordinator.RefreshSelectionAndThreadWorkspace(); }
-    internal void SelectGlobalScope() => _threadStateCoordinator.SelectGlobalScope();
-    internal void SelectProjectScope(string projectId) => _threadStateCoordinator.SelectProjectScope(projectId);
+    internal void SelectGlobalScope()
+    {
+        ActivateThreadSurface();
+        _threadStateCoordinator.SelectGlobalScope();
+    }
+
+    internal void SelectProjectScope(string projectId)
+    {
+        ActivateThreadSurface();
+        _threadStateCoordinator.SelectProjectScope(projectId);
+    }
     private void EnsureSelectionDefaults() => _threadStateCoordinator.EnsureSelectionDefaults();
     internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info) => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
     private void SetThreadStatus(
@@ -620,6 +611,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private async Task ActivateDraftTabAsync()
     {
+        ActivateThreadSurface();
         ResetPendingThreadTabSelection();
         _threadStateCoordinator.DraftTabOpen = true;
         _threadStateCoordinator.SelectedThreadId = null;
@@ -631,6 +623,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private async Task CloseDraftTabAsync()
     {
+        ActivateThreadSurface();
         if (_threadStateCoordinator.Selection.Target is WorkspaceTarget.Draft)
         {
             _threadStateCoordinator.SelectedThreadId = _viewState.OpenThreadIds.FirstOrDefault();
@@ -641,9 +634,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         await PersistViewStateAsync();
         RefreshSelectionAndThreadWorkspace();
     }
-
-    private Task CloseCurrentShellTabAsync()
-        => GetSelectedThread() is not null ? CloseSelectedThreadAsync() : CloseDraftTabAsync();
 
     private Task OpenFolderAsync(string folderPath, bool includeHidden)
         => _shellController.OpenFolderAsync(folderPath, includeHidden, CancellationToken.None);
@@ -666,10 +656,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable
     private async Task RegisterCreatedThreadAsync(WorkThreadDescriptor thread)
         => await _threadStateCoordinator.RegisterCreatedThreadAsync(thread);
 
-    internal void OpenThread(string threadId)
-        => _threadStateCoordinator.OpenThread(threadId);
+    internal void OpenThread(string threadId) { ActivateThreadSurface(); _threadStateCoordinator.OpenThread(threadId); }
+    internal void FocusPromptEditor() { ActivateThreadSurface(); ThreadPaneLayout?.App?.Focus(ThreadInput); }
 
-    internal void FocusPromptEditor() => ThreadPaneLayout?.App?.Focus(ThreadInput);
     internal void OpenAcpManagement() { if (_acpManagementCoordinator is null) { SetStatus("ACP management is unavailable in this app instance.", tone: StatusTone.Warning); return; } _acpManagementCoordinator.Open(); }
     internal void FocusSidebar() { SyncSidebarSelectionToCurrentState(); ApplyPendingSidebarSelection(); _sidebarCoordinator.View.Tree.App?.Focus(_sidebarCoordinator.View.Tree); }
     private async Task CloseSelectedThreadAsync()
@@ -689,6 +678,12 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private void ResetThreadTab(OpenThreadState tab)
         => _threadStateCoordinator.ResetThreadTab(tab);
+
+    private void ActivateThreadSurface()
+    {
+        _fileEditorWorkspaceCoordinator.ActivateThreadSurface();
+        DispatchToUiDeferred(() => ThreadPaneLayout?.App?.Focus(ThreadInput));
+    }
 
     private ProjectDescriptor? GetSelectedProject()
         => _threadStateCoordinator.GetSelectedProject();

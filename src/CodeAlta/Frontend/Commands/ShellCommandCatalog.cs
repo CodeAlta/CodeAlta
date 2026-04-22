@@ -60,6 +60,16 @@ internal static class ShellCommandCatalog
             Aliases: ["open"],
             ShowInCommandBar: false),
         new(
+            "CodeAlta.File.Edit",
+            "Edit File",
+            "Open a project file in a dedicated editor tab.",
+            ShellCommandHelpCategory.General,
+            ShellCommandScope.AnyShell,
+            ShellCommandAvailability.Always,
+            Gesture: new KeyGesture(TerminalChar.CtrlE, TerminalModifiers.Ctrl),
+            CommandName: "edit",
+            Aliases: ["open_file"]),
+        new(
             "CodeAlta.Acp.Manage",
             "ACP Agents",
             "Browse the ACP registry and inspect installed ACP backends.",

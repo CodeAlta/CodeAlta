@@ -23,6 +23,7 @@ internal sealed class ThreadWorkspaceView
 {
     private Markup? _statusIconVisual;
     private readonly Dictionary<string, TabPage> _tabPages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly State<int> _activeTabContentVersion = new(0);
     private readonly PromptComposerViewModel _promptComposerViewModel;
     private readonly Binding<string?> _promptTextBinding;
     private readonly Action _openHelp;
@@ -30,6 +31,7 @@ internal sealed class ThreadWorkspaceView
     private readonly IProjectFileSearchService _projectFileSearchService;
     private readonly Func<string?> _getPromptReferenceProjectRoot;
     private Dialog? _expandedPromptDialog;
+    private Visual? _activeTabContent;
 
     internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
     internal static readonly KeySequence SessionUsageShortcutSequence = ShellCommandCatalog.SessionUsageShortcutSequence;
@@ -178,8 +180,8 @@ internal sealed class ThreadWorkspaceView
         };
 
         ThreadTabControl = new TabControl();
-        ThreadTabControl.KeyDown((_, _) => onSelectedTabChanged(ThreadTabControl.SelectedIndex));
-        ThreadTabControl.PointerReleased((_, _) => onSelectedTabChanged(ThreadTabControl.SelectedIndex));
+        ThreadTabControl.KeyDown((_, _) => ThreadTabControl.Dispatcher.Post(() => onSelectedTabChanged(ThreadTabControl.SelectedIndex)));
+        ThreadTabControl.PointerReleased((_, _) => ThreadTabControl.Dispatcher.Post(() => onSelectedTabChanged(ThreadTabControl.SelectedIndex)));
 
         Visual? threadInfoButton = null;
         ThreadInput = CreatePromptEditor(
@@ -329,6 +331,14 @@ internal sealed class ThreadWorkspaceView
             MinFirst = 6,
             MinSecond = 7,
         };
+        _activeTabContent = ThreadBodySplitter;
+
+        var activeTabContentHost = new ComputedVisual(
+            () =>
+            {
+                _ = _activeTabContentVersion.Value;
+                return _activeTabContent ?? ThreadBodySplitter;
+            });
 
         var threadPaneLayout = new Grid
             {
@@ -341,10 +351,17 @@ internal sealed class ThreadWorkspaceView
             .Columns(
                 new ColumnDefinition { Width = GridLength.Star(1) });
         threadPaneLayout.Cell(ThreadTabControl.Stretch(), 0, 0);
-        threadPaneLayout.Cell(ThreadBodySplitter, 1, 0);
+        threadPaneLayout.Cell(activeTabContentHost.Stretch(), 1, 0);
 
         ThreadPaneLayout = threadPaneLayout;
         Root = ThreadPaneLayout;
+        foreach (var binding in commandBindings)
+        {
+            if (IsSharedEditorCommand(binding.Metadata.Id))
+            {
+                Root.AddCommand(BuildCommand(binding));
+            }
+        }
     }
 
     public Visual Root { get; }
@@ -396,6 +413,18 @@ internal sealed class ThreadWorkspaceView
         return _tabPages.Remove(tabId);
     }
 
+    public void SetActiveTabContent(Visual content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (ReferenceEquals(_activeTabContent, content))
+        {
+            return;
+        }
+
+        _activeTabContent = content;
+        _activeTabContentVersion.Value++;
+    }
+
     public void OpenExpandedPromptDialog()
         => OpenExpandedPromptDialog(_promptComposerViewModel, _promptTextBinding);
 
@@ -436,6 +465,13 @@ internal sealed class ThreadWorkspaceView
 
         return editor;
     }
+
+    private static bool IsSharedEditorCommand(string commandId)
+        => commandId is
+            "CodeAlta.Shell.Help" or
+            "CodeAlta.Thread.CloseTab" or
+            "CodeAlta.Thread.TabLeft" or
+            "CodeAlta.Thread.TabRight";
 
     private static Command BuildCommand(ThreadWorkspaceCommandBinding binding)
     {

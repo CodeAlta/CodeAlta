@@ -18,6 +18,8 @@ internal sealed record FocusSidebarIntent : ShellInputIntent;
 
 internal sealed record FocusPromptIntent : ShellInputIntent;
 
+internal sealed record OpenFileEditorIntent : ShellInputIntent;
+
 internal sealed record OpenSessionUsageIntent : ShellInputIntent;
 
 internal sealed record OpenThreadInfoIntent : ShellInputIntent;
