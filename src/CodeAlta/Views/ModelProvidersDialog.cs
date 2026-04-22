@@ -4,6 +4,7 @@ using CodeAlta.ViewModels;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Collections;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -43,14 +44,12 @@ internal sealed class ModelProvidersDialog
     private readonly Func<Visual?> _getFocusTarget;
     private readonly Dialog _dialog;
     private readonly ListBox<ModelProviderEditorItemViewModel> _providerList;
-    private readonly State<int> _detailVersion = new(0);
+    private readonly BindableList<ModelProviderEditorItemViewModel> _providers;
+    private readonly State<int> _selectedProviderIndex = new(-1);
     private readonly Markup _statusMarkup;
     private readonly Visual _detailHost;
-    private readonly List<ModelProviderEditorItemViewModel> _providers = [];
-    private Visual? _detailContent;
-    private bool _dirty;
+    private IReadOnlyList<ProviderDraftSnapshot> _loadedSnapshot = [];
     private int _activeOperationCount;
-    private int _selectedIndex = -1;
     private string _statusText = "[dim]Configure model providers and save to refresh the runtime.[/]";
 
     public ModelProvidersDialog(
@@ -83,12 +82,11 @@ internal sealed class ModelProvidersDialog
         _providerList = new ListBox<ModelProviderEditorItemViewModel>()
             .MinWidth(28)
             .Stretch();
+        _providers = _providerList.Items;
+        _providerList.SelectedIndex(_selectedProviderIndex.Bind.Value);
         _providerList.ItemTemplate = new DataTemplate<ModelProviderEditorItemViewModel>(
-            static (DataTemplateValue<ModelProviderEditorItemViewModel> value, in DataTemplateContext _) => BuildProviderListItem(value.GetValue()),
+            (DataTemplateValue<ModelProviderEditorItemViewModel> value, in DataTemplateContext _) => BuildProviderListItem(value),
             null);
-        _providerList.KeyDown((_, _) => ScheduleProviderSelectionSync());
-        _providerList.PointerReleased((_, _) => ScheduleProviderSelectionSync());
-        _providerList.PointerWheel((_, _) => ScheduleProviderSelectionSync());
 
         _statusMarkup = new Markup(() => _statusText)
         {
@@ -98,8 +96,10 @@ internal sealed class ModelProvidersDialog
         _detailHost = new ComputedVisual(
             () =>
             {
-                _ = _detailVersion.Value;
-                return _detailContent ?? BuildEmptyState();
+                var index = _selectedProviderIndex.Value;
+                return index >= 0 && index < _providers.Count
+                    ? BuildDetailPane(_providers[index])
+                    : BuildEmptyState();
             });
 
         var addButton = new Button($"{NerdFont.MdPlus} Add")
@@ -110,10 +110,10 @@ internal sealed class ModelProvidersDialog
             .Click(DeleteSelectedProvider);
         var reloadButton = new Button("Reload")
             .Tone(ControlTone.Warning)
-            .Click(() => _ = ReloadAsync(confirmWhenDirty: true));
+            .Click(() => StartReload(confirmWhenDirty: true));
         var saveButton = new Button("Save")
             .Tone(ControlTone.Success)
-            .Click(() => _ = SaveAsync());
+            .Click(StartSave);
 
         var toolbar = new HStack(addButton, deleteButton, reloadButton, saveButton)
         {
@@ -148,7 +148,7 @@ internal sealed class ModelProvidersDialog
             MinSecond = 50,
         };
 
-        var intro = new Markup("[dim]Enable the providers you want available in CodeAlta. Save applies the configuration and refreshes the runtime immediately.[/]")
+        var intro = new Markup("[dim]Enable the providers you want available in CodeAlta. Warnings explain why a provider may not start, and Test Provider verifies the current settings before you save.[/]")
         {
             Wrap = true,
         };
@@ -196,19 +196,23 @@ internal sealed class ModelProvidersDialog
         }
 
         _dialog.Show();
-        _ = ReloadAsync(confirmWhenDirty: false);
+        StartReload(confirmWhenDirty: false);
     }
 
-    private async Task ReloadAsync(bool confirmWhenDirty)
+    private void StartReload(bool confirmWhenDirty)
     {
-        if (confirmWhenDirty && _dirty)
+        if (confirmWhenDirty && HasUnsavedChanges())
         {
             new ConfirmationDialog(
                 "Reload Provider Configuration?",
                 ["Discard unsaved provider changes and reload from disk?"],
                 "Reload",
                 ControlTone.Warning,
-                async () => await ReloadAsync(confirmWhenDirty: false),
+                () =>
+                {
+                    StartReload(confirmWhenDirty: false);
+                    return Task.CompletedTask;
+                },
                 _getBounds,
                 _getFocusTarget)
                 .Show();
@@ -222,14 +226,19 @@ internal sealed class ModelProvidersDialog
 
         try
         {
-            LoadDefinitionsIntoDialog(
-                _loadDefinitions(),
-                emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
-                loadedStatusText: "[dim]Provider configuration loaded from disk.[/]");
+            _statusText = "[primary]Loading provider configuration...[/]";
+            QueueBackgroundOperation(
+                _loadDefinitions,
+                definitions => LoadDefinitionsIntoDialog(
+                    definitions,
+                    emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
+                    loadedStatusText: "[dim]Provider configuration loaded from disk.[/]"),
+                ex => _statusText = $"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]");
         }
-        finally
+        catch
         {
             EndDialogOperation();
+            throw;
         }
     }
 
@@ -245,9 +254,7 @@ internal sealed class ModelProvidersDialog
 
         var item = CreateEditorItem(ModelProviderEditorItemViewModel.Create(providerKey));
         _providers.Add(item);
-        _providerList.Items.Add(item);
-        MarkDirty();
-        SelectProvider(_providers.Count - 1);
+        SetSelectedProviderIndex(_providers.Count - 1);
     }
 
     private void DeleteSelectedProvider()
@@ -266,12 +273,10 @@ internal sealed class ModelProvidersDialog
         }
 
         _providers.Remove(item);
-        _providerList.Items.Remove(item);
-        MarkDirty();
-        SelectProvider(Math.Clamp(_selectedIndex, 0, _providers.Count - 1));
+        SetSelectedProviderIndex(Math.Clamp(_selectedProviderIndex.Value, 0, _providers.Count - 1));
     }
 
-    private async Task SaveAsync()
+    private void StartSave()
     {
         if (!TryBuildDefinitions(out var definitions, out var errorMessage))
         {
@@ -284,29 +289,28 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        try
-        {
-            _statusText = "[primary]Saving provider configuration...[/]";
-            await _saveDefinitionsAsync(definitions);
-            LoadDefinitionsIntoDialog(
-                _loadDefinitions(),
-                emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
-                loadedStatusText: "[success]Provider configuration saved and runtime refreshed.[/]");
-        }
-        catch (Exception ex)
-        {
-            _statusText = $"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]";
-        }
-        finally
-        {
-            EndDialogOperation();
-        }
+        _statusText = "[primary]Saving provider configuration...[/]";
+        QueueBackgroundOperation(
+            async () =>
+            {
+                await _saveDefinitionsAsync(definitions);
+                return _loadDefinitions();
+            },
+            definitionsFromDisk =>
+            {
+                LoadDefinitionsIntoDialog(
+                    definitionsFromDisk,
+                    emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
+                    loadedStatusText: "[success]Provider configuration saved and runtime refreshed.[/]");
+            },
+            ex => _statusText = $"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]");
     }
 
-    private async Task TestSelectedAsync()
+    private void StartTest(ModelProviderEditorItemViewModel item)
     {
-        var item = GetSelectedItem();
-        if (item is null)
+        ArgumentNullException.ThrowIfNull(item);
+
+        if (!_providers.Contains(item))
         {
             _statusText = "[warning]Select a provider to test.[/]";
             return;
@@ -323,38 +327,30 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        try
-        {
-            _statusText = $"[primary]Testing {AnsiMarkup.Escape(item.Label)}...[/]";
-            var result = await _testProviderAsync(definition);
-            _statusText = result.Success
-                ? $"[success]{AnsiMarkup.Escape(result.Message)}[/]"
-                : $"[warning]{AnsiMarkup.Escape(result.Message)}[/]";
-        }
-        catch (Exception ex)
-        {
-            _statusText = $"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]";
-        }
-        finally
-        {
-            EndDialogOperation();
-        }
-    }
+        _statusText = $"[primary]Testing {AnsiMarkup.Escape(item.Label)}...[/]";
+        QueueBackgroundOperation(
+            () => _testProviderAsync(definition),
+            result =>
+            {
+                if (_providers.Contains(item))
+                {
+                    item.SetTestResult(result.Success, result.Message);
+                }
 
-    private void SelectProvider(int index, bool force = false)
-    {
-        if (!force && _selectedIndex == index && _detailContent is not null)
-        {
-            _providerList.SelectedIndex = index;
-            return;
-        }
+                _statusText = result.Success
+                    ? $"[success]{AnsiMarkup.Escape(result.Message)}[/]"
+                    : $"[warning]{AnsiMarkup.Escape(result.Message)}[/]";
+            },
+            ex =>
+            {
+                var message = ex.GetBaseException().Message;
+                if (_providers.Contains(item))
+                {
+                    item.SetTestResult(success: false, message);
+                }
 
-        _selectedIndex = index;
-        _providerList.SelectedIndex = index;
-        _detailContent = index >= 0 && index < _providers.Count
-            ? BuildDetailPane(_providers[index])
-            : BuildEmptyState();
-        _detailVersion.Value++;
+                _statusText = $"[error]{AnsiMarkup.Escape(message)}[/]";
+            });
     }
 
     private Visual BuildDetailPane(ModelProviderEditorItemViewModel item)
@@ -364,14 +360,14 @@ internal sealed class ModelProvidersDialog
         {
             Wrap = true,
         };
-        var summary = new TextBlock(() => BuildSelectedSummary(item))
+        var summary = new Markup(() => BuildSelectedSummaryMarkup(item))
         {
             Wrap = true,
         };
 
         var testButton = new Button("Test Provider")
             .Tone(ControlTone.Primary)
-            .Click(() => _ = TestSelectedAsync());
+            .Click(() => StartTest(item));
 
         var form = new Grid
             {
@@ -395,7 +391,7 @@ internal sealed class ModelProvidersDialog
         if (item.ProviderType is "openai-chat" or "openai-responses" or "anthropic" or "google-genai")
         {
             AddTextRow(form, ref row, "API Key", CreateApiKeyBox(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKey));
-            AddTextRow(form, ref row, "API Key Env", CreateDefaultTextField(bindings.ApiKeyEnv, () => item.UseDefaultApiKeyEnv), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
+            AddTextRow(form, ref row, "API Key Env", CreateApiKeyEnvField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
         }
 
         if (item.ProviderType is "openai-chat" or "openai-responses" or "anthropic" or "google-genai" or "vertex-ai")
@@ -411,8 +407,8 @@ internal sealed class ModelProvidersDialog
 
         if (item.ProviderType == "vertex-ai")
         {
-            AddTextRow(form, ref row, "Project", CreateDefaultTextField(bindings.Project, () => item.UseDefaultProject), CreateDefaultCheckBox("Default", bindings.UseDefaultProject));
-            AddTextRow(form, ref row, "Location", CreateDefaultTextField(bindings.Location, () => item.UseDefaultLocation), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
+            AddTextRow(form, ref row, "Project", CreateVertexProjectField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultProject));
+            AddTextRow(form, ref row, "Location", CreateVertexLocationField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
         }
 
         if (item.ProviderType is "openai-chat" or "openai-responses" or "anthropic" or "google-genai" or "vertex-ai")
@@ -442,9 +438,10 @@ internal sealed class ModelProvidersDialog
     private Visual CreateKeyField(ModelProviderEditorItemViewModel item)
     {
         var binding = GetBindings(item).ProviderKey;
-        return new TextBox(binding)
-            .IsEnabled(!item.IsReserved)
-            .Validate(binding, _ => ValidateProviderKey(item));
+        return CreateValidationField(
+            new TextBox(binding)
+                .IsEnabled(!item.IsReserved),
+            () => ModelProviderEditorDiagnostics.ValidateProviderKey(item, _providers));
     }
 
     private Select<ProviderTypeOption> CreateTypeSelect(ModelProviderEditorItemViewModel item)
@@ -467,7 +464,6 @@ internal sealed class ModelProvidersDialog
                 }
 
                 item.ProviderType = ProviderTypes[e.NewIndex].Id;
-                MarkDirty(rebuildEditor: true);
             });
         return select;
     }
@@ -495,26 +491,52 @@ internal sealed class ModelProvidersDialog
                 }
 
                 item.ReasoningEffort = ReasoningOptions[e.NewIndex].Value;
-                MarkDirty();
             });
         return select;
     }
 
-    private TextBox CreateApiKeyBox(ModelProviderEditorItemViewModel item)
+    private Visual CreateApiKeyBox(ModelProviderEditorItemViewModel item)
     {
         var binding = GetBindings(item).ApiKey;
-        return new TextBox(binding)
+        var editor = new TextBox(binding)
             .IsPassword(true)
             .PasswordRevealMode(PasswordRevealMode.WhileFocused)
             .IsEnabled(() => !item.UseDefaultApiKey);
+        return CreateValidationField(editor, () => ModelProviderEditorDiagnostics.ValidateApiKey(item));
     }
 
     private Visual CreateApiUrlField(ModelProviderEditorItemViewModel item)
     {
         var binding = GetBindings(item).ApiUrl;
-        return new TextBox(binding)
-            .IsEnabled(() => !item.UseDefaultApiUrl)
-            .Validate(binding, _ => ValidateApiUrl(item));
+        return CreateValidationField(
+            new TextBox(binding)
+                .IsEnabled(() => !item.UseDefaultApiUrl),
+            () => ModelProviderEditorDiagnostics.ValidateApiUrl(item) ??
+                  BuildCustomApiUrlGuidance(item));
+    }
+
+    private Visual CreateApiKeyEnvField(ModelProviderEditorItemViewModel item)
+    {
+        var binding = GetBindings(item).ApiKeyEnv;
+        return CreateValidationField(
+            CreateDefaultTextField(binding, () => item.UseDefaultApiKeyEnv),
+            () => ModelProviderEditorDiagnostics.ValidateApiKeyEnv(item));
+    }
+
+    private Visual CreateVertexProjectField(ModelProviderEditorItemViewModel item)
+    {
+        var binding = GetBindings(item).Project;
+        return CreateValidationField(
+            CreateDefaultTextField(binding, () => item.UseDefaultProject),
+            () => ModelProviderEditorDiagnostics.ValidateVertexProject(item));
+    }
+
+    private Visual CreateVertexLocationField(ModelProviderEditorItemViewModel item)
+    {
+        var binding = GetBindings(item).Location;
+        return CreateValidationField(
+            CreateDefaultTextField(binding, () => item.UseDefaultLocation),
+            () => ModelProviderEditorDiagnostics.ValidateVertexLocation(item));
     }
 
     private static Visual CreateDefaultTextField(Binding<string?> binding, Func<bool> getUseDefault)
@@ -527,6 +549,47 @@ internal sealed class ModelProvidersDialog
 
     private static Visual CreateSpacer()
         => new TextBlock(string.Empty);
+
+    private ValidationPresenter CreateValidationField(Visual content, Func<ValidationMessage?> getMessage)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(getMessage);
+
+        ValidationMessage? cachedMessage = null;
+        ValidationSeverity cachedSeverity = default;
+        string? cachedText = null;
+
+        return new ValidationPresenter(content)
+            .Placement(ValidationPlacement.Below)
+            .Message(() =>
+            {
+                var nextMessage = getMessage();
+                if (nextMessage is null)
+                {
+                    cachedMessage = null;
+                    cachedText = null;
+                    return null;
+                }
+
+                var text = GetValidationMessageText(nextMessage.Value);
+                if (cachedMessage is not null &&
+                    cachedSeverity == nextMessage.Value.Severity &&
+                    string.Equals(cachedText, text, StringComparison.Ordinal))
+                {
+                    return cachedMessage;
+                }
+
+                cachedSeverity = nextMessage.Value.Severity;
+                cachedText = text;
+                cachedMessage = new ValidationMessage(
+                    nextMessage.Value.Severity,
+                    new TextBlock(text)
+                    {
+                        Wrap = true,
+                    });
+                return cachedMessage;
+            });
+    }
 
     private static void AddTextRow(Grid form, ref int row, string label, Visual content, Visual trailing)
     {
@@ -553,104 +616,41 @@ internal sealed class ModelProvidersDialog
 
     private string BuildSelectedTitleMarkup(ModelProviderEditorItemViewModel item)
     {
-        var tone = item.Enabled ? "success" : "muted";
-        var icon = item.Enabled ? $"{NerdFont.MdCheckCircleOutline}" : $"{NerdFont.MdPauseCircleOutline}";
-        return $"[{tone}]{icon} {AnsiMarkup.Escape(item.Label)}[/]";
+        var diagnostics = Analyze(item);
+        var (tone, icon) = GetStatusToneAndIcon(diagnostics.StatusKind);
+        return $"[{tone}]{icon} {AnsiMarkup.Escape(item.Label)}[/] [dim]· {AnsiMarkup.Escape(diagnostics.StatusText)}[/]";
     }
 
-    private string BuildSelectedSummary(ModelProviderEditorItemViewModel item)
+    private string BuildSelectedSummaryMarkup(ModelProviderEditorItemViewModel item)
     {
-        var errors = BuildValidationErrors(item);
-        if (errors.Count == 0)
+        var diagnostics = Analyze(item);
+        if (diagnostics.Entries.Count == 0)
         {
             return item.Enabled
-                ? "This provider is enabled. Use Test Provider to validate the current settings before saving."
+                ? "[primary]Configured.[/] Use [bold]Test Provider[/] to confirm this provider works before saving."
                 : "This provider is disabled. Enable it when you are ready to use it.";
         }
 
-        return string.Join(Environment.NewLine, errors.Select(static error => $"• {error}"));
-    }
-
-    private ValidationMessage? ValidateProviderKey(ModelProviderEditorItemViewModel item)
-    {
-        if (string.IsNullOrWhiteSpace(item.ProviderKey))
-        {
-            return new ValidationMessage(ValidationSeverity.Error, "Provider key is required.");
-        }
-
-        var normalized = item.ProviderKey.Trim().ToLowerInvariant();
-        if (normalized.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_')))
-        {
-            return new ValidationMessage(ValidationSeverity.Error, "Use lowercase letters, numbers, '-' or '_'.");
-        }
-
-        if (_providers.Any(other => !ReferenceEquals(other, item) && string.Equals(other.ProviderKey, normalized, StringComparison.OrdinalIgnoreCase)))
-        {
-            return new ValidationMessage(ValidationSeverity.Error, "Provider key is already used.");
-        }
-
-        return null;
-    }
-
-    private static ValidationMessage? ValidateApiUrl(ModelProviderEditorItemViewModel item)
-    {
-        if (item.UseDefaultApiUrl || string.IsNullOrWhiteSpace(item.ApiUrl))
-        {
-            return null;
-        }
-
-        return Uri.TryCreate(item.ApiUrl.Trim(), UriKind.Absolute, out _)
-            ? null
-            : new ValidationMessage(ValidationSeverity.Error, "Use an absolute URL.");
-    }
-
-    private List<string> BuildValidationErrors(ModelProviderEditorItemViewModel item)
-    {
-        var errors = new List<string>();
-        if (ValidateProviderKey(item) is { } keyMessage)
-        {
-            errors.Add(GetValidationText(keyMessage));
-        }
-
-        if (ValidateApiUrl(item) is { } urlMessage)
-        {
-            errors.Add(GetValidationText(urlMessage));
-        }
-
-        if (!item.IsReserved && item.ProviderType is "codex" or "copilot")
-        {
-            errors.Add("Only the reserved codex/copilot entries can use built-in provider types.");
-        }
-
-        if (!item.Enabled)
-        {
-            return errors;
-        }
-
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "anthropic" or "google-genai")
-        {
-            var hasApiKey = !item.UseDefaultApiKey && !string.IsNullOrWhiteSpace(item.ApiKey);
-            var hasApiKeyEnv = !item.UseDefaultApiKeyEnv && !string.IsNullOrWhiteSpace(item.ApiKeyEnv);
-            if (!hasApiKey && !hasApiKeyEnv)
-            {
-                errors.Add("Provide either API Key or API Key Env when the provider is enabled.");
-            }
-        }
-
-        if (item.ProviderType == "vertex-ai")
-        {
-            if (string.IsNullOrWhiteSpace(item.Project))
-            {
-                errors.Add("Project is required for enabled Vertex AI providers.");
-            }
-
-            if (string.IsNullOrWhiteSpace(item.Location))
-            {
-                errors.Add("Location is required for enabled Vertex AI providers.");
-            }
-        }
-
-        return errors.Distinct(StringComparer.Ordinal).ToList();
+        return string.Join(
+            Environment.NewLine,
+            diagnostics.Entries
+                .Distinct()
+                .Select(entry =>
+                {
+                    var tone = entry.Severity switch
+                    {
+                        ValidationSeverity.Error => "error",
+                        ValidationSeverity.Warning => "warning",
+                        _ => "primary",
+                    };
+                    var icon = entry.Severity switch
+                    {
+                        ValidationSeverity.Error => $"{NerdFont.MdCloseCircleOutline}",
+                        ValidationSeverity.Warning => $"{NerdFont.MdAlertOutline}",
+                        _ => $"{NerdFont.MdInformationOutline}",
+                    };
+                    return $"[{tone}]{icon} {AnsiMarkup.Escape(entry.Message)}[/]";
+                }));
     }
 
     private bool TryBuildDefinitions(
@@ -679,8 +679,12 @@ internal sealed class ModelProvidersDialog
         out CodeAltaProviderDocument definition,
         out string errorMessage)
     {
-        var errors = BuildValidationErrors(item);
-        if (errors.Count > 0)
+        var diagnostics = Analyze(item);
+        var errors = diagnostics.Entries
+            .Where(static entry => entry.Severity == ValidationSeverity.Error)
+            .Select(static entry => entry.Message)
+            .ToArray();
+        if (errors.Length > 0)
         {
             definition = null!;
             errorMessage = $"{item.Label}: {errors[0]}";
@@ -692,13 +696,12 @@ internal sealed class ModelProvidersDialog
         return true;
     }
 
-    private void MarkDirty(bool rebuildEditor = false)
+    private void SetSelectedProviderIndex(int index)
     {
-        _dirty = true;
-        if (rebuildEditor)
-        {
-            SelectProvider(_selectedIndex, force: true);
-        }
+        var normalizedIndex = _providers.Count == 0
+            ? -1
+            : Math.Clamp(index, 0, _providers.Count - 1);
+        _selectedProviderIndex.Value = normalizedIndex;
     }
 
     private ModelProviderEditorItemViewModel CreateEditorItem(CodeAltaProviderDocument definition)
@@ -707,20 +710,74 @@ internal sealed class ModelProvidersDialog
     private ModelProviderEditorItemViewModel CreateEditorItem(ModelProviderEditorItemViewModel item)
     {
         ArgumentNullException.ThrowIfNull(item);
-
-        item.Changed += OnProviderItemChanged;
         return item;
     }
 
-    private void OnProviderItemChanged(ModelProviderEditorItemViewModel item, bool rebuildEditor)
+    private void QueueBackgroundOperation<TResult>(
+        Func<TResult> work,
+        Action<TResult> onCompleted,
+        Action<Exception> onFailed)
     {
-        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(work);
+        ArgumentNullException.ThrowIfNull(onCompleted);
+        ArgumentNullException.ThrowIfNull(onFailed);
 
-        MarkDirty(rebuildEditor);
+        _ = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    var result = work();
+                    await PublishBackgroundResultAsync(() => onCompleted(result));
+                }
+                catch (Exception ex)
+                {
+                    await PublishBackgroundResultAsync(() => onFailed(ex));
+                }
+            });
     }
 
-    private void ScheduleProviderSelectionSync()
-        => BindingManager.Current.RunAfterTracking(() => SelectProvider(_providerList.SelectedIndex));
+    private void QueueBackgroundOperation<TResult>(
+        Func<Task<TResult>> workAsync,
+        Action<TResult> onCompleted,
+        Action<Exception> onFailed)
+    {
+        ArgumentNullException.ThrowIfNull(workAsync);
+        ArgumentNullException.ThrowIfNull(onCompleted);
+        ArgumentNullException.ThrowIfNull(onFailed);
+
+        _ = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    var result = await workAsync();
+                    await PublishBackgroundResultAsync(() => onCompleted(result));
+                }
+                catch (Exception ex)
+                {
+                    await PublishBackgroundResultAsync(() => onFailed(ex));
+                }
+            });
+    }
+
+    private Task PublishBackgroundResultAsync(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        return _dialog.Dispatcher.InvokeAsync(
+            () =>
+            {
+                try
+                {
+                    action();
+                }
+                finally
+                {
+                    EndDialogOperation();
+                }
+            });
+    }
 
     private void RequestClose()
     {
@@ -730,7 +787,7 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        if (!_dirty)
+        if (!HasUnsavedChanges())
         {
             Close();
             return;
@@ -762,7 +819,9 @@ internal sealed class ModelProvidersDialog
     }
 
     private ModelProviderEditorItemViewModel? GetSelectedItem()
-        => _selectedIndex >= 0 && _selectedIndex < _providers.Count ? _providers[_selectedIndex] : null;
+        => _selectedProviderIndex.Value >= 0 && _selectedProviderIndex.Value < _providers.Count
+            ? _providers[_selectedProviderIndex.Value]
+            : null;
 
     private static Visual BuildEmptyState()
         => new TextBlock("Add a provider on the left, or enable one of the reserved providers to get started.")
@@ -770,7 +829,28 @@ internal sealed class ModelProvidersDialog
             Wrap = true,
         };
 
-    private static string GetValidationText(ValidationMessage message)
+    private ModelProviderDiagnosticsSnapshot Analyze(ModelProviderEditorItemViewModel item)
+        => ModelProviderEditorDiagnostics.Analyze(item, _providers);
+
+    private static (string Tone, string Icon) GetStatusToneAndIcon(ModelProviderUiStatusKind statusKind)
+        => statusKind switch
+        {
+            ModelProviderUiStatusKind.Success => ("success", $"{NerdFont.MdCheckCircleOutline}"),
+            ModelProviderUiStatusKind.Warning => ("warning", $"{NerdFont.MdAlertOutline}"),
+            ModelProviderUiStatusKind.Error => ("error", $"{NerdFont.MdCloseCircleOutline}"),
+            ModelProviderUiStatusKind.Disabled => ("muted", $"{NerdFont.MdPauseCircleOutline}"),
+            _ => ("primary", $"{NerdFont.MdTuneVariant}"),
+        };
+
+    private static ValidationMessage? BuildCustomApiUrlGuidance(ModelProviderEditorItemViewModel item)
+        => item.Enabled &&
+           !item.UseDefaultApiUrl &&
+           !string.IsNullOrWhiteSpace(item.ApiUrl) &&
+           ModelProviderEditorDiagnostics.ValidateApiUrl(item) is null
+            ? new ValidationMessage(ValidationSeverity.Info, "Use Test Provider to verify this custom endpoint is reachable.")
+            : null;
+
+    private static string GetValidationMessageText(ValidationMessage message)
         => message.Content is TextBlock textBlock
             ? textBlock.Text ?? string.Empty
             : message.Content.ToString() ?? string.Empty;
@@ -788,24 +868,18 @@ internal sealed class ModelProvidersDialog
 
         _providers.Clear();
         _providers.AddRange(definitions.Select(CreateEditorItem));
-        _providerList.Items.Clear();
-        foreach (var provider in _providers)
-        {
-            _providerList.Items.Add(provider);
-        }
-
-        _dirty = false;
+        _loadedSnapshot = definitions.Select(CreateSnapshot).ToArray();
         _statusText = _providers.Count == 0 ? emptyStatusText : loadedStatusText;
 
         var selectedIndex = selectedProviderKey is null
             ? (_providers.Count == 0 ? -1 : 0)
-            : _providers.FindIndex(item => string.Equals(item.ProviderKey, selectedProviderKey, StringComparison.OrdinalIgnoreCase));
+            : FindProviderIndex(selectedProviderKey);
         if (selectedIndex < 0 && _providers.Count > 0)
         {
             selectedIndex = 0;
         }
 
-        SelectProvider(selectedIndex);
+        SetSelectedProviderIndex(selectedIndex);
     }
 
     private bool TryBeginDialogOperation(string operationDescription)
@@ -847,20 +921,96 @@ internal sealed class ModelProvidersDialog
     }
 
 
-    private static Visual BuildProviderListItem(ModelProviderEditorItemViewModel item)
+    private Visual BuildProviderListItem(DataTemplateValue<ModelProviderEditorItemViewModel> value)
     {
-        ArgumentNullException.ThrowIfNull(item);
-
-        return new Markup(() => BuildProviderListItemMarkup(item))
+        return new Markup(() => BuildProviderListItemMarkup(value.GetValue()))
         {
             Wrap = false,
         };
     }
 
-    private static string BuildProviderListItemMarkup(ModelProviderEditorItemViewModel item)
+    private string BuildProviderListItemMarkup(ModelProviderEditorItemViewModel item)
     {
-        var icon = item.Enabled ? $"{NerdFont.MdCheckCircleOutline}" : $"{NerdFont.MdPauseCircleOutline}";
-        var tone = item.Enabled ? "success" : "muted";
-        return $"[{tone}]{icon} {AnsiMarkup.Escape(item.Label)}[/]";
+        var diagnostics = Analyze(item);
+        var (tone, icon) = GetStatusToneAndIcon(diagnostics.StatusKind);
+        return $"[{tone}]{icon} {AnsiMarkup.Escape(item.Label)}[/] [dim]· {AnsiMarkup.Escape(diagnostics.StatusText)}[/]";
     }
+
+    private bool HasUnsavedChanges()
+    {
+        if (_providers.Count != _loadedSnapshot.Count)
+        {
+            return true;
+        }
+
+        for (var index = 0; index < _providers.Count; index++)
+        {
+            if (!CreateSnapshot(_providers[index]).Equals(_loadedSnapshot[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int FindProviderIndex(string providerKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+
+        for (var index = 0; index < _providers.Count; index++)
+        {
+            if (string.Equals(_providers[index].ProviderKey, providerKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static ProviderDraftSnapshot CreateSnapshot(ModelProviderEditorItemViewModel item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return CreateSnapshot(item.ToDocument());
+    }
+
+    private static ProviderDraftSnapshot CreateSnapshot(CodeAltaProviderDocument definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        return new ProviderDraftSnapshot(
+            definition.ProviderKey,
+            definition.Enabled,
+            definition.DisplayName,
+            definition.ProviderType,
+            definition.Model,
+            definition.ReasoningEffort,
+            definition.ApiKey,
+            definition.ApiKeyEnv,
+            definition.ApiUrl,
+            definition.OrganizationId,
+            definition.ProjectId,
+            definition.Project,
+            definition.Location,
+            definition.ModelsDevProviderId,
+            definition.SingleModelId);
+    }
+
+    private readonly record struct ProviderDraftSnapshot(
+        string ProviderKey,
+        bool? Enabled,
+        string? DisplayName,
+        string? ProviderType,
+        string? Model,
+        string? ReasoningEffort,
+        string? ApiKey,
+        string? ApiKeyEnv,
+        string? ApiUrl,
+        string? OrganizationId,
+        string? ProjectId,
+        string? Project,
+        string? Location,
+        string? ModelsDevProviderId,
+        string? SingleModelId);
 }

@@ -1655,7 +1655,8 @@ public sealed class CodeAltaAppTests
 
         var markup = ChatBackendPresentation.BuildProviderSummaryMarkup(states, isInitializing: false);
 
-        StringAssert.Contains(markup, "2 providers");
+        StringAssert.Contains(markup, "1 active provider");
+        StringAssert.Contains(markup, "2 configured");
         StringAssert.Contains(markup, "1 error");
     }
 
@@ -1679,7 +1680,8 @@ public sealed class CodeAltaAppTests
             isInitializing: false,
             configuredProviderCount: 6);
 
-        StringAssert.Contains(markup, "6 providers");
+        StringAssert.Contains(markup, "1 active provider");
+        StringAssert.Contains(markup, "6 configured");
         StringAssert.Contains(markup, "1 error");
     }
 
@@ -1703,7 +1705,8 @@ public sealed class CodeAltaAppTests
             isInitializing: false,
             configuredProviderKeys: ["codex", "copilot", "openai", "anthropic", "google", "vertex"]);
 
-        StringAssert.Contains(markup, "6 providers");
+        StringAssert.Contains(markup, "1 active provider");
+        StringAssert.Contains(markup, "6 configured");
         StringAssert.Contains(markup, "5 errors");
     }
 

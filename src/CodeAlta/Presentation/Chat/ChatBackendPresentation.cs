@@ -148,22 +148,20 @@ internal static class ChatBackendPresentation
             !states.Any(state => string.Equals(state.BackendId.Value, key, StringComparison.OrdinalIgnoreCase))) ?? 0;
         var errorCount = stateErrorCount + missingConfiguredCount;
         var readyCount = states.Count(static state => state.Availability == ChatBackendAvailability.Ready);
-        var tone = errorCount > 0
-            ? "warning"
-            : readyCount > 0
-                ? "success"
-                : "muted";
-        var icon = errorCount > 0
-            ? $"{NerdFont.MdAlertOutline}"
-            : readyCount > 0
-                ? $"{NerdFont.MdCheckCircleOutline}"
-                : $"{NerdFont.MdTuneVariant}";
-        var providerLabel = providerCount == 1 ? "provider" : "providers";
+        var activeLabel = readyCount == 1 ? "active provider" : "active providers";
+        var activeTone = readyCount > 0 ? "success" : "muted";
+        var activeIcon = readyCount > 0
+            ? $"{NerdFont.MdCheckCircleOutline}"
+            : $"{NerdFont.MdTuneVariant}";
+        var activeSegment = $"[{activeTone}]{activeIcon} {readyCount} {activeLabel}[/]";
         var errorSegment = errorCount > 0
             ? $" [warning]· {errorCount} error{(errorCount == 1 ? string.Empty : "s")}[/]"
             : string.Empty;
+        var configuredSegment = providerCount != readyCount
+            ? $" [dim]· {providerCount} configured[/]"
+            : string.Empty;
 
-        return $"[{tone}]{icon} {providerCount} {providerLabel}[/]{errorSegment}";
+        return $"{activeSegment}{configuredSegment}{errorSegment}";
     }
 
     public static string? ResolvePreferredModelId(

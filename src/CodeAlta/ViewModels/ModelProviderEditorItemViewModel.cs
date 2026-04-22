@@ -45,7 +45,11 @@ internal sealed partial class ModelProviderEditorItemViewModel
         _isInitialized = true;
     }
 
-    public event Action<ModelProviderEditorItemViewModel, bool>? Changed;
+    [Bindable]
+    public partial ModelProviderLastTestState LastTestState { get; private set; }
+
+    [Bindable]
+    public partial string? LastTestMessage { get; private set; }
 
     [Bindable]
     public partial string? ProviderKey { get; set; }
@@ -164,33 +168,51 @@ internal sealed partial class ModelProviderEditorItemViewModel
         return definition;
     }
 
-    partial void OnProviderKeyChanged(string? value) => NotifyChanged();
-    partial void OnEnabledChanged(bool value) => NotifyChanged();
-    partial void OnProviderTypeChanged(string value) => NotifyChanged(rebuildEditor: true);
-    partial void OnDisplayNameChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultDisplayNameChanged(bool value) => NotifyChanged();
-    partial void OnModelChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultModelChanged(bool value) => NotifyChanged();
-    partial void OnReasoningEffortChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultReasoningEffortChanged(bool value) => NotifyChanged();
-    partial void OnApiKeyChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultApiKeyChanged(bool value) => NotifyChanged();
-    partial void OnApiKeyEnvChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultApiKeyEnvChanged(bool value) => NotifyChanged();
-    partial void OnApiUrlChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultApiUrlChanged(bool value) => NotifyChanged();
-    partial void OnOrganizationIdChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultOrganizationIdChanged(bool value) => NotifyChanged();
-    partial void OnProjectIdChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultProjectIdChanged(bool value) => NotifyChanged();
-    partial void OnProjectChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultProjectChanged(bool value) => NotifyChanged();
-    partial void OnLocationChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultLocationChanged(bool value) => NotifyChanged();
-    partial void OnModelsDevProviderIdChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultModelsDevProviderIdChanged(bool value) => NotifyChanged();
-    partial void OnSingleModelIdChanged(string? value) => NotifyChanged();
-    partial void OnUseDefaultSingleModelIdChanged(bool value) => NotifyChanged();
+    public bool ClearTestResult()
+    {
+        if (LastTestState == ModelProviderLastTestState.None && LastTestMessage is null)
+        {
+            return false;
+        }
+
+        LastTestState = ModelProviderLastTestState.None;
+        LastTestMessage = null;
+        return true;
+    }
+
+    public void SetTestResult(bool success, string? message)
+    {
+        LastTestState = success ? ModelProviderLastTestState.Success : ModelProviderLastTestState.Failed;
+        LastTestMessage = NormalizeText(message);
+    }
+
+    partial void OnProviderKeyChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnEnabledChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnProviderTypeChanged(string value) => ClearTestResultOnEdit();
+    partial void OnDisplayNameChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultDisplayNameChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnModelChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultModelChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnReasoningEffortChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultReasoningEffortChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnApiKeyChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultApiKeyChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnApiKeyEnvChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultApiKeyEnvChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnApiUrlChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultApiUrlChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnOrganizationIdChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultOrganizationIdChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnProjectIdChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultProjectIdChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnProjectChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultProjectChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnLocationChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultLocationChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnModelsDevProviderIdChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultModelsDevProviderIdChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnSingleModelIdChanged(string? value) => ClearTestResultOnEdit();
+    partial void OnUseDefaultSingleModelIdChanged(bool value) => ClearTestResultOnEdit();
 
     private static CodeAltaProviderDocument Clone(CodeAltaProviderDocument definition)
     {
@@ -221,13 +243,13 @@ internal sealed partial class ModelProviderEditorItemViewModel
     private static string? NormalizeText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private void NotifyChanged(bool rebuildEditor = false)
+    private void ClearTestResultOnEdit()
     {
         if (!_isInitialized)
         {
             return;
         }
 
-        Changed?.Invoke(this, rebuildEditor);
+        ClearTestResult();
     }
 }

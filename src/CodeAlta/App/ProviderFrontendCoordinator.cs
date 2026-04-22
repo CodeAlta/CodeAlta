@@ -98,16 +98,9 @@ internal sealed class ProviderFrontendCoordinator
         }
 
         await using var _ = backend;
-        try
-        {
-            await backend.StartAsync(cancellationToken);
-            var models = await backend.ListModelsAsync(cancellationToken);
-            return new ProviderTestResult(true, $"Connected successfully · {models.Count} model(s) discovered.", models.Count);
-        }
-        finally
-        {
-            await backend.StopAsync(cancellationToken);
-        }
+        await backend.StartAsync(cancellationToken);
+        var models = await backend.ListModelsAsync(cancellationToken);
+        return new ProviderTestResult(true, $"Connected successfully · {models.Count} model(s) discovered.", models.Count);
     }
 
     private bool TryCreateBackend(

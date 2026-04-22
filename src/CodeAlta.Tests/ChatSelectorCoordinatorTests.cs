@@ -169,7 +169,8 @@ public sealed class ChatSelectorCoordinatorTests
 
         coordinator.RefreshForDraftScope(AgentBackendIds.Codex);
 
-        StringAssert.Contains(workspaceViewModel.ProviderSummaryMarkup, "6 providers");
+        StringAssert.Contains(workspaceViewModel.ProviderSummaryMarkup, "1 active provider");
+        StringAssert.Contains(workspaceViewModel.ProviderSummaryMarkup, "6 configured");
         StringAssert.Contains(workspaceViewModel.ProviderSummaryMarkup, "5 errors");
     }
 

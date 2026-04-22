@@ -497,15 +497,24 @@ public sealed class ArchitectureGuardrailTests
         var viewModelSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "ViewModels", "ModelProviderEditorItemViewModel.cs"));
 
         Assert.IsTrue(dialogSource.Contains("new ListBox<ModelProviderEditorItemViewModel>()", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("_providerList.SelectedIndex(_selectedProviderIndex.Bind.Value);", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("BuildProviderListItem(value)", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("BuildProviderListItemMarkup(value.GetValue())", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("BuildProviderListItem(value.GetValue())", StringComparison.Ordinal));
         Assert.IsFalse(dialogSource.Contains("new Select<ModelProviderEditorItemViewModel>()", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("ModelProviderEditorItemViewModel.IBindings", StringComparison.Ordinal));
         Assert.IsFalse(dialogSource.Contains("CreateBinding(", StringComparison.Ordinal));
         Assert.IsFalse(dialogSource.Contains("CreateTrackedCheckBox(", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("LoadDefinitionsIntoDialog(", StringComparison.Ordinal));
         Assert.IsFalse(dialogSource.Contains("private sealed class ModelProviderEditorItem", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("ScheduleProviderSelectionSync", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("_detailVersion", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("_diagnosticsVersion", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("item.Changed +=", StringComparison.Ordinal));
         Assert.IsTrue(viewModelSource.Contains("internal sealed partial class ModelProviderEditorItemViewModel", StringComparison.Ordinal));
         Assert.IsTrue(viewModelSource.Contains("[Bindable]", StringComparison.Ordinal));
-        Assert.IsTrue(viewModelSource.Contains("public event Action<ModelProviderEditorItemViewModel, bool>? Changed;", StringComparison.Ordinal));
+        Assert.IsTrue(viewModelSource.Contains("public partial ModelProviderLastTestState LastTestState { get; private set; }", StringComparison.Ordinal));
+        Assert.IsFalse(viewModelSource.Contains("public event Action<ModelProviderEditorItemViewModel, bool>? Changed;", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -517,6 +526,48 @@ public sealed class ArchitectureGuardrailTests
         Assert.IsTrue(dialogSource.Contains("Please wait for the current provider operation to complete before closing this dialog.", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("TryBeginDialogOperation(", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("EndDialogOperation();", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ProviderFrontendCoordinator_TestProvider_DisposesBackendWithoutDoubleStop()
+    {
+        var coordinatorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ProviderFrontendCoordinator.cs"));
+
+        Assert.IsTrue(coordinatorSource.Contains("await using var _ = backend;", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("await backend.StartAsync(cancellationToken);", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("var models = await backend.ListModelsAsync(cancellationToken);", StringComparison.Ordinal));
+        Assert.IsFalse(coordinatorSource.Contains("await backend.StopAsync(cancellationToken);", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ModelProvidersDialog_CachesValidationMessagesToAvoidComputedLoops()
+    {
+        var dialogSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ModelProvidersDialog.cs"));
+
+        Assert.IsTrue(dialogSource.Contains("ValidationMessage? cachedMessage = null;", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("cachedText = text;", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("return cachedMessage;", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ModelProvidersDialog_QueuesProviderOperationsOutsideInputTracking()
+    {
+        var dialogSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ModelProvidersDialog.cs"));
+
+        Assert.IsTrue(dialogSource.Contains("_dialog.Dispatcher.InvokeAsync(", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("_ = Task.Run(", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains(".Click(() => StartReload(confirmWhenDirty: true));", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains(".Click(StartSave);", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains(".Click(() => StartTest(item));", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("PostToUi(", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("app.Post(action);", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("RunAfterTracking", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains(".Click(() => _ = TestSelectedAsync())", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("RestoreTerminalInputState", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("StartInput(new TerminalInputOptions", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("UseRawMode()", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("SetInputEcho(enabled: false)", StringComparison.Ordinal));
+        Assert.IsFalse(dialogSource.Contains("EnableMouse(TerminalMouseMode.Drag)", StringComparison.Ordinal));
     }
 
     [TestMethod]
