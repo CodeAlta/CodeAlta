@@ -62,7 +62,7 @@ internal sealed class AcpAgentSettingsDialog
 
         _agentIdBox = canEditAgentId ? new TextBox(definition.AgentId) : null;
         _displayNameBox = new TextBox(definition.DisplayName ?? string.Empty);
-        _enabledBox = new CheckBox("Enabled") { IsChecked = definition.Enabled };
+        _enabledBox = new CheckBox("Enabled") { IsChecked = definition.Enabled ?? AcpBackendDefinition.DefaultEnabled };
         _commandBox = new TextBox(definition.Command ?? string.Empty);
         _argsArea = new TextArea(string.Join(Environment.NewLine, definition.Arguments ?? []))
             .MinHeight(3)
@@ -71,10 +71,10 @@ internal sealed class AcpAgentSettingsDialog
         _envArea = new TextArea(FormatEnvironment(definition.EnvironmentVariables))
             .MinHeight(4)
             .MaxHeight(6);
-        _unstableBox = new CheckBox("Allow unstable ACP") { IsChecked = definition.UseUnstable };
-        _filesystemBox = new CheckBox("Enable filesystem bridge") { IsChecked = definition.EnableFilesystem };
-        _terminalBox = new CheckBox("Enable terminal bridge") { IsChecked = definition.EnableTerminal };
-        _elicitationBox = new CheckBox("Enable elicitation") { IsChecked = definition.EnableElicitation };
+        _unstableBox = new CheckBox("Allow unstable ACP") { IsChecked = definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable };
+        _filesystemBox = new CheckBox("Enable filesystem bridge") { IsChecked = definition.EnableFilesystem ?? AcpBackendDefinition.DefaultEnableFilesystem };
+        _terminalBox = new CheckBox("Enable terminal bridge") { IsChecked = definition.EnableTerminal ?? AcpBackendDefinition.DefaultEnableTerminal };
+        _elicitationBox = new CheckBox("Enable elicitation") { IsChecked = definition.EnableElicitation ?? AcpBackendDefinition.DefaultEnableElicitation };
         _validationText = new TextBlock(string.Empty)
         {
             Wrap = true,

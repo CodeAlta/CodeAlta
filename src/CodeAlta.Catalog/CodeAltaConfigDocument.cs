@@ -11,19 +11,19 @@ public sealed class CodeAltaConfigDocument
     /// Gets or sets chat-level defaults and preferences.
     /// </summary>
     [JsonPropertyName("chat")]
-    public CodeAltaChatSettingsDocument Chat { get; set; } = new();
+    public CodeAltaChatSettingsDocument? Chat { get; set; }
 
     /// <summary>
     /// Gets or sets ACP backend definitions keyed by agent id.
     /// </summary>
     [JsonPropertyName("acp")]
-    public CodeAltaAcpSettingsDocument Acp { get; set; } = new();
+    public CodeAltaAcpSettingsDocument? Acp { get; set; }
 
     /// <summary>
     /// Gets or sets configured provider definitions keyed by provider key.
     /// </summary>
     [JsonPropertyName("providers")]
-    public Dictionary<string, CodeAltaProviderDocument> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, CodeAltaProviderDocument>? Providers { get; set; }
 }
 
 /// <summary>
@@ -47,5 +47,5 @@ public sealed class CodeAltaAcpSettingsDocument
     /// Gets or sets configured ACP agent backends keyed by agent id.
     /// </summary>
     [JsonPropertyName("agents")]
-    public Dictionary<string, AcpBackendDefinition> Agents { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, AcpBackendDefinition>? Agents { get; set; }
 }

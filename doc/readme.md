@@ -173,6 +173,7 @@ Additional local providers can target raw provider SDKs such as:
 - `Vertex AI`
 
 These providers are configured from `~/.alta/config.toml` under `providers.<provider-key>`. Each entry represents one provider registration and uses a single canonical `type` field such as `openai-chat`, `openai-responses`, `anthropic`, `google-genai`, or `vertex-ai`. OpenAI-compatible and Anthropic-compatible endpoints may set `api_url`; Vertex uses `project` and `location` instead. Each provider can optionally map to a models.dev provider id and override individual model limits so context usage stays consistent even when the upstream SDK does not expose context-window metadata.
+When CodeAlta writes `config.toml` back, it now omits properties that match built-in defaults such as `enabled = true`, reserved-provider `type`/`display_name`, and default compaction values.
 
 Default provider selection is configured separately:
 

@@ -481,11 +481,67 @@ public sealed class CatalogInfrastructureTests
         var preference = store.GetEffectiveProviderPreference(AgentBackendIds.Codex.Value);
 
         StringAssert.Contains(content, "[providers.codex]");
-        StringAssert.Contains(content, "type = \"codex\"");
         StringAssert.Contains(content, "gpt-5.4");
         StringAssert.Contains(content, "reasoning_effort = \"high\"");
+        Assert.IsFalse(content.Contains("enabled = true", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("display_name = \"Codex\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("type = \"codex\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("[providers.codex.compaction]", StringComparison.Ordinal));
         Assert.AreEqual("gpt-5.4", preference.Model);
         Assert.AreEqual(AgentReasoningEffort.High, preference.ReasoningEffort);
+    }
+
+    [TestMethod]
+    public void CodeAltaConfigStore_SaveGlobalProviderPreference_PrunesReservedProviderDefaults()
+    {
+        using var root = TempDirectory.Create();
+        var configPath = Path.Combine(root.Path, "config.toml");
+        File.WriteAllText(
+            configPath,
+            """
+            [providers.codex]
+            enabled = true
+            display_name = "Codex"
+            type = "codex"
+            model = "gpt-5.4"
+            reasoning_effort = "high"
+
+            [providers.codex.compaction]
+            enabled = true
+            trigger_threshold = 0.85
+            target_threshold = 0.5
+            reserved_output_tokens = 4096
+            reserved_overhead_tokens = 2048
+            keep_last_user_message = true
+            allow_split_turn = true
+            target_context_ratio_ideal = 0.03
+            target_context_ratio_max = 0.1
+            recent_suffix_target_tokens = 20000
+            summary_output_tokens = 1024
+            summary_input_tokens = 24000
+            tool_result_chars_per_item = 1200
+            tool_result_chars_total = 6000
+            reasoning_chars_per_item = 600
+            reasoning_chars_total = 3000
+            reasoning_mode = "adaptive"
+            max_chunk_passes = 4
+            allow_oversized_anchor_reduction = true
+            prefer_recent_messages = true
+            prefer_recent_tool_outputs = true
+            drop_messages_only_when_summary_input_exceeds_budget = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.Path });
+        store.SaveGlobalProviderPreference(AgentBackendIds.Codex.Value, "gpt-5.4", AgentReasoningEffort.High);
+
+        var content = File.ReadAllText(configPath);
+        StringAssert.Contains(content, "[providers.codex]");
+        StringAssert.Contains(content, "model = \"gpt-5.4\"");
+        StringAssert.Contains(content, "reasoning_effort = \"high\"");
+        Assert.IsFalse(content.Contains("enabled = true", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("display_name = \"Codex\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("type = \"codex\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("[providers.codex.compaction]", StringComparison.Ordinal));
     }
 
     [TestMethod]

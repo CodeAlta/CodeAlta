@@ -165,6 +165,11 @@ public sealed class CodeAltaProviderModelOverrideDocument
 public sealed class CodeAltaProviderDocument
 {
     /// <summary>
+    /// The default enabled value.
+    /// </summary>
+    public const bool DefaultEnabled = true;
+
+    /// <summary>
     /// Gets or sets the normalized provider key.
     /// </summary>
     [JsonIgnore]
@@ -174,7 +179,7 @@ public sealed class CodeAltaProviderDocument
     /// Gets or sets whether the provider registration is enabled.
     /// </summary>
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
+    public bool? Enabled { get; set; }
 
     /// <summary>
     /// Gets or sets the user-facing provider display name.

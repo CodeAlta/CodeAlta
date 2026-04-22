@@ -8,6 +8,31 @@ namespace CodeAlta.Catalog;
 public sealed class AcpBackendDefinition
 {
     /// <summary>
+    /// The default enabled value.
+    /// </summary>
+    public const bool DefaultEnabled = true;
+
+    /// <summary>
+    /// The default unstable-features value.
+    /// </summary>
+    public const bool DefaultUseUnstable = true;
+
+    /// <summary>
+    /// The default terminal-capability value.
+    /// </summary>
+    public const bool DefaultEnableTerminal = true;
+
+    /// <summary>
+    /// The default filesystem-capability value.
+    /// </summary>
+    public const bool DefaultEnableFilesystem = true;
+
+    /// <summary>
+    /// The default elicitation-capability value.
+    /// </summary>
+    public const bool DefaultEnableElicitation = false;
+
+    /// <summary>
     /// Gets or sets the ACP agent identifier.
     /// </summary>
     [JsonPropertyName("agent_id")]
@@ -23,7 +48,7 @@ public sealed class AcpBackendDefinition
     /// Gets or sets whether the backend is enabled.
     /// </summary>
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
+    public bool? Enabled { get; set; }
 
     /// <summary>
     /// Gets or sets the ACP registry identifier when known.
@@ -59,23 +84,23 @@ public sealed class AcpBackendDefinition
     /// Gets or sets whether unstable ACP features may be used.
     /// </summary>
     [JsonPropertyName("use_unstable")]
-    public bool UseUnstable { get; set; } = true;
+    public bool? UseUnstable { get; set; }
 
     /// <summary>
     /// Gets or sets whether terminal client capabilities should be exposed.
     /// </summary>
     [JsonPropertyName("enable_terminal")]
-    public bool EnableTerminal { get; set; } = true;
+    public bool? EnableTerminal { get; set; }
 
     /// <summary>
     /// Gets or sets whether filesystem client capabilities should be exposed.
     /// </summary>
     [JsonPropertyName("enable_filesystem")]
-    public bool EnableFilesystem { get; set; } = true;
+    public bool? EnableFilesystem { get; set; }
 
     /// <summary>
     /// Gets or sets whether unstable elicitation should be exposed when supported.
     /// </summary>
     [JsonPropertyName("enable_elicitation")]
-    public bool EnableElicitation { get; set; }
+    public bool? EnableElicitation { get; set; }
 }

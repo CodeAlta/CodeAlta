@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.LocalRuntime.Compaction;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -14,28 +15,28 @@ public sealed class CodeAltaConfigStore
 
     private static readonly CodeAltaProviderCompactionDocument DefaultCompaction = new()
     {
-        Enabled = true,
-        TriggerThreshold = 0.85,
-        TargetThreshold = 0.50,
-        ReservedOutputTokens = 4096,
-        ReservedOverheadTokens = 2048,
-        KeepLastUserMessage = true,
-        AllowSplitTurn = true,
-        TargetContextRatioIdeal = 0.03,
-        TargetContextRatioMax = 0.10,
-        RecentSuffixTargetTokens = 20_000,
-        SummaryOutputTokens = 1_024,
-        SummaryInputTokens = 24_000,
-        ToolResultCharsPerItem = 1_200,
-        ToolResultCharsTotal = 6_000,
-        ReasoningCharsPerItem = 600,
-        ReasoningCharsTotal = 3_000,
+        Enabled = LocalAgentCompactionSettings.DefaultEnabled,
+        TriggerThreshold = LocalAgentCompactionSettings.DefaultTriggerThreshold,
+        TargetThreshold = LocalAgentCompactionSettings.DefaultTargetThreshold,
+        ReservedOutputTokens = LocalAgentCompactionSettings.DefaultReservedOutputTokens,
+        ReservedOverheadTokens = LocalAgentCompactionSettings.DefaultReservedOverheadTokens,
+        KeepLastUserMessage = LocalAgentCompactionSettings.DefaultKeepLastUserMessage,
+        AllowSplitTurn = LocalAgentCompactionSettings.DefaultAllowSplitTurn,
+        TargetContextRatioIdeal = LocalAgentCompactionSettings.DefaultTargetContextRatioIdeal,
+        TargetContextRatioMax = LocalAgentCompactionSettings.DefaultTargetContextRatioMax,
+        RecentSuffixTargetTokens = LocalAgentCompactionSettings.DefaultRecentSuffixTargetTokens,
+        SummaryOutputTokens = LocalAgentCompactionSettings.DefaultSummaryOutputTokens,
+        SummaryInputTokens = LocalAgentCompactionSettings.DefaultSummaryInputTokens,
+        ToolResultCharsPerItem = LocalAgentCompactionSettings.DefaultToolResultCharsPerItem,
+        ToolResultCharsTotal = LocalAgentCompactionSettings.DefaultToolResultCharsTotal,
+        ReasoningCharsPerItem = LocalAgentCompactionSettings.DefaultReasoningCharsPerItem,
+        ReasoningCharsTotal = LocalAgentCompactionSettings.DefaultReasoningCharsTotal,
         ReasoningMode = "adaptive",
-        MaxChunkPasses = 4,
-        AllowOversizedAnchorReduction = true,
-        PreferRecentMessages = true,
-        PreferRecentToolOutputs = true,
-        DropMessagesOnlyWhenSummaryInputExceedsBudget = true,
+        MaxChunkPasses = LocalAgentCompactionSettings.DefaultMaxChunkPasses,
+        AllowOversizedAnchorReduction = LocalAgentCompactionSettings.DefaultAllowOversizedAnchorReduction,
+        PreferRecentMessages = LocalAgentCompactionSettings.DefaultPreferRecentMessages,
+        PreferRecentToolOutputs = LocalAgentCompactionSettings.DefaultPreferRecentToolOutputs,
+        DropMessagesOnlyWhenSummaryInputExceedsBudget = LocalAgentCompactionSettings.DefaultDropMessagesOnlyWhenSummaryInputExceedsBudget,
     };
 
     private readonly CatalogOptions _options;
@@ -109,13 +110,13 @@ public sealed class CodeAltaConfigStore
 
         if (normalizedModel is null && normalizedReasoning is null)
         {
-            if (document.Providers.TryGetValue(normalizedProviderKey, out var existing))
+            if (document.Providers?.TryGetValue(normalizedProviderKey, out var existing) == true)
             {
                 existing.Model = null;
                 existing.ReasoningEffort = null;
                 if (CanDropProviderEntry(normalizedProviderKey, existing))
                 {
-                    document.Providers.Remove(normalizedProviderKey);
+                    document.Providers!.Remove(normalizedProviderKey);
                 }
             }
         }
@@ -138,8 +139,8 @@ public sealed class CodeAltaConfigStore
     {
         var global = LoadGlobal();
         var project = LoadProject(projectRoot);
-        return NormalizeProviderKey(project.Chat.DefaultProvider)
-            ?? NormalizeProviderKey(global.Chat.DefaultProvider);
+        return NormalizeProviderKey(project.Chat?.DefaultProvider)
+            ?? NormalizeProviderKey(global.Chat?.DefaultProvider);
     }
 
     /// <summary>
@@ -150,6 +151,7 @@ public sealed class CodeAltaConfigStore
     {
         var document = LoadGlobal();
         NormalizeDocument(document);
+        document.Chat ??= new CodeAltaChatSettingsDocument();
         document.Chat.DefaultProvider = NormalizeProviderKey(providerKey);
         SaveDocument(_options.ConfigPath, document);
     }
@@ -163,7 +165,8 @@ public sealed class CodeAltaConfigStore
     {
         var document = LoadGlobal();
         NormalizeDocument(document);
-        var definitions = document.Providers.Values
+        var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
+            .Values
             .Select(CloneProviderDefinition)
             .ToDictionary(
                 static definition => definition.ProviderKey,
@@ -179,7 +182,7 @@ public sealed class CodeAltaConfigStore
         }
 
         return definitions.Values
-            .Where(definition => includeDisabled || definition.Enabled)
+            .Where(definition => includeDisabled || definition.Enabled != false)
             .OrderBy(static definition => definition.DisplayName ?? definition.ProviderKey, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -202,8 +205,9 @@ public sealed class CodeAltaConfigStore
     {
         var document = LoadGlobal();
         NormalizeDocument(document);
-        return document.Acp.Agents.Values
-            .Where(definition => includeDisabled || definition.Enabled)
+        return (document.Acp?.Agents ?? new Dictionary<string, AcpBackendDefinition>(StringComparer.OrdinalIgnoreCase))
+            .Values
+            .Where(definition => includeDisabled || definition.Enabled != false)
             .Select(CloneAcpBackendDefinition)
             .OrderBy(static definition => definition.DisplayName ?? definition.AgentId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -220,7 +224,7 @@ public sealed class CodeAltaConfigStore
 
         var document = LoadGlobal();
         NormalizeDocument(document);
-        return document.Acp.Agents.TryGetValue(agentId.Trim(), out var definition)
+        return document.Acp?.Agents?.TryGetValue(agentId.Trim(), out var definition) == true
             ? CloneAcpBackendDefinition(definition)
             : null;
     }
@@ -239,6 +243,8 @@ public sealed class CodeAltaConfigStore
 
         var document = LoadGlobal();
         NormalizeDocument(document);
+        document.Acp ??= new CodeAltaAcpSettingsDocument();
+        document.Acp.Agents ??= new Dictionary<string, AcpBackendDefinition>(StringComparer.OrdinalIgnoreCase);
         var normalized = CloneAcpBackendDefinition(definition);
         normalized.AgentId = NormalizeAcpAgentId(normalized.AgentId)
             ?? throw new ArgumentException("ACP agent id is required.", nameof(definition));
@@ -264,7 +270,7 @@ public sealed class CodeAltaConfigStore
 
         var document = LoadGlobal();
         NormalizeDocument(document);
-        var removed = document.Acp.Agents.Remove(agentId.Trim());
+        var removed = document.Acp?.Agents?.Remove(agentId.Trim()) == true;
         if (removed)
         {
             SaveDocument(_options.ConfigPath, document);
@@ -280,7 +286,7 @@ public sealed class CodeAltaConfigStore
     {
         var document = LoadGlobal();
         NormalizeDocument(document);
-        if (document.Acp.Agents.Count == 0)
+        if (document.Acp?.Agents?.Count is not > 0)
         {
             return;
         }
@@ -300,7 +306,7 @@ public sealed class CodeAltaConfigStore
 
         var document = LoadGlobal();
         NormalizeDocument(document);
-        return document.Acp.Agents.ContainsKey(agentId.Trim());
+        return document.Acp?.Agents?.ContainsKey(agentId.Trim()) == true;
     }
 
     /// <summary>
@@ -314,7 +320,7 @@ public sealed class CodeAltaConfigStore
         var effective = new Dictionary<string, AcpBackendDefinition>(StringComparer.OrdinalIgnoreCase);
         if (installedDefinitions is not null)
         {
-            foreach (var installedDefinition in installedDefinitions.Where(static definition => definition.Enabled))
+            foreach (var installedDefinition in installedDefinitions.Where(static definition => definition.Enabled != false))
             {
                 effective[installedDefinition.AgentId] = CloneAcpBackendDefinition(installedDefinition);
             }
@@ -326,7 +332,7 @@ public sealed class CodeAltaConfigStore
         }
 
         return effective.Values
-            .Where(static definition => definition.Enabled)
+            .Where(static definition => definition.Enabled != false)
             .OrderBy(static definition => definition.DisplayName ?? definition.AgentId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -384,7 +390,7 @@ public sealed class CodeAltaConfigStore
             return null;
         }
 
-        if (document.Providers.TryGetValue(normalizedProviderKey, out var settings))
+        if (document.Providers?.TryGetValue(normalizedProviderKey, out var settings) == true)
         {
             return settings;
         }
@@ -451,39 +457,61 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        document.Chat ??= new CodeAltaChatSettingsDocument();
-        document.Chat.DefaultProvider = NormalizeProviderKey(document.Chat.DefaultProvider);
+        if (document.Chat is not null)
+        {
+            document.Chat.DefaultProvider = NormalizeProviderKey(document.Chat.DefaultProvider);
+            if (document.Chat.DefaultProvider is null)
+            {
+                document.Chat = null;
+            }
+        }
 
-        document.Acp ??= new CodeAltaAcpSettingsDocument();
-        document.Acp.Agents = document.Acp.Agents
-            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
-            .Select(
-                static entry =>
-                {
-                    var definition = entry.Value ?? new AcpBackendDefinition();
-                    definition.AgentId = NormalizeAcpAgentId(definition.AgentId) ?? entry.Key.Trim();
-                    definition.DisplayName = NormalizeText(definition.DisplayName);
-                    definition.RegistryId = NormalizeAcpAgentId(definition.RegistryId);
-                    definition.Command = NormalizeText(definition.Command);
-                    definition.WorkingDirectory = NormalizeText(definition.WorkingDirectory);
-                    definition.Arguments = NormalizeList(definition.Arguments);
-                    definition.EnvironmentVariables = NormalizeDictionary(definition.EnvironmentVariables);
-                    return KeyValuePair.Create(entry.Key.Trim(), definition);
-                })
-            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Value.AgentId))
-            .ToDictionary(
-                static entry => entry.Value.AgentId,
-                static entry => entry.Value,
-                StringComparer.OrdinalIgnoreCase);
+        if (document.Acp?.Agents is not null)
+        {
+            var agents = document.Acp.Agents
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
+                .Select(static entry => NormalizeAcpEntry(entry.Key, entry.Value))
+                .Where(static definition => !string.IsNullOrWhiteSpace(definition.AgentId) && CanPersistAcpEntry(definition))
+                .ToDictionary(
+                    static definition => definition.AgentId,
+                    static definition => definition,
+                    StringComparer.OrdinalIgnoreCase);
 
-        document.Providers = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
-            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
-            .Select(static entry => NormalizeProviderEntry(entry.Key, entry.Value))
-            .Where(static definition => !string.IsNullOrWhiteSpace(definition.ProviderKey))
-            .ToDictionary(
-                static definition => definition.ProviderKey,
-                static definition => definition,
-                StringComparer.OrdinalIgnoreCase);
+            document.Acp.Agents = agents.Count == 0 ? null : agents;
+        }
+
+        if (document.Acp?.Agents is null)
+        {
+            document.Acp = null;
+        }
+
+        if (document.Providers is not null)
+        {
+            var providers = document.Providers
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
+                .Select(static entry => NormalizeProviderEntry(entry.Key, entry.Value))
+                .Where(static definition => !string.IsNullOrWhiteSpace(definition.ProviderKey) && CanPersistProviderEntry(definition))
+                .ToDictionary(
+                    static definition => definition.ProviderKey,
+                    static definition => definition,
+                    StringComparer.OrdinalIgnoreCase);
+
+            document.Providers = providers.Count == 0 ? null : providers;
+        }
+    }
+
+    private static AcpBackendDefinition NormalizeAcpEntry(string key, AcpBackendDefinition? value)
+    {
+        var definition = value ?? new AcpBackendDefinition();
+        definition.AgentId = NormalizeAcpAgentId(definition.AgentId) ?? key.Trim();
+        definition.DisplayName = NormalizeText(definition.DisplayName);
+        definition.RegistryId = NormalizeAcpAgentId(definition.RegistryId);
+        definition.Command = NormalizeText(definition.Command);
+        definition.WorkingDirectory = NormalizeText(definition.WorkingDirectory);
+        definition.Arguments = NormalizeList(definition.Arguments);
+        definition.EnvironmentVariables = NormalizeDictionary(definition.EnvironmentVariables);
+        PruneAcpDefaults(definition);
+        return definition;
     }
 
     private static CodeAltaProviderDocument NormalizeProviderEntry(string key, CodeAltaProviderDocument? value)
@@ -506,10 +534,9 @@ public sealed class CodeAltaConfigStore
         definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
         definition.Profile = NormalizeProfile(definition.Profile);
         definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
-        definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
-
-        ApplyReservedProviderDefaults(definition);
-        ValidateReservedProviderKey(definition);
+        definition.Compaction = NormalizeCompaction(definition.Compaction);
+        CompleteAndValidateProviderDefinition(CloneProviderDefinition(definition));
+        PruneProviderDefaults(definition);
         return definition;
     }
 
@@ -545,8 +572,55 @@ public sealed class CodeAltaConfigStore
             .ToDictionary(
                 static entry => entry.Key.Trim(),
                 static entry => entry.Value ?? string.Empty,
-                StringComparer.OrdinalIgnoreCase);
+            StringComparer.OrdinalIgnoreCase);
         return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static void PruneAcpDefaults(AcpBackendDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        if (definition.Enabled == AcpBackendDefinition.DefaultEnabled)
+        {
+            definition.Enabled = null;
+        }
+
+        if (definition.UseUnstable == AcpBackendDefinition.DefaultUseUnstable)
+        {
+            definition.UseUnstable = null;
+        }
+
+        if (definition.EnableTerminal == AcpBackendDefinition.DefaultEnableTerminal)
+        {
+            definition.EnableTerminal = null;
+        }
+
+        if (definition.EnableFilesystem == AcpBackendDefinition.DefaultEnableFilesystem)
+        {
+            definition.EnableFilesystem = null;
+        }
+
+        if (definition.EnableElicitation == AcpBackendDefinition.DefaultEnableElicitation)
+        {
+            definition.EnableElicitation = null;
+        }
+    }
+
+    private static bool CanPersistAcpEntry(AcpBackendDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        return !string.IsNullOrWhiteSpace(definition.DisplayName) ||
+               definition.Enabled is not null ||
+               !string.IsNullOrWhiteSpace(definition.RegistryId) ||
+               !string.IsNullOrWhiteSpace(definition.Command) ||
+               definition.Arguments is { Count: > 0 } ||
+               !string.IsNullOrWhiteSpace(definition.WorkingDirectory) ||
+               definition.EnvironmentVariables is { Count: > 0 } ||
+               definition.UseUnstable is not null ||
+               definition.EnableTerminal is not null ||
+               definition.EnableFilesystem is not null ||
+               definition.EnableElicitation is not null;
     }
 
     private static string? NormalizeAcpAgentId(string? value)
@@ -606,9 +680,11 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(definition);
 
+        definition.Enabled ??= CodeAltaProviderDocument.DefaultEnabled;
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
                 $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, anthropic, google-genai, vertex-ai.");
+        definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyReservedProviderDefaults(definition);
         ValidateReservedProviderKey(definition);
         ValidateProviderFields(definition);
@@ -658,12 +734,12 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
                 RejectUnsupportedField(definition, "project_id", definition.ProjectId);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
-                if (definition.Enabled && string.IsNullOrWhiteSpace(definition.Project))
+                if (definition.Enabled != false && string.IsNullOrWhiteSpace(definition.Project))
                 {
                     throw new InvalidOperationException($"providers.{definition.ProviderKey} project is required for type 'vertex-ai'.");
                 }
 
-                if (definition.Enabled && string.IsNullOrWhiteSpace(definition.Location))
+                if (definition.Enabled != false && string.IsNullOrWhiteSpace(definition.Location))
                 {
                     throw new InvalidOperationException($"providers.{definition.ProviderKey} location is required for type 'vertex-ai'.");
                 }
@@ -693,25 +769,18 @@ public sealed class CodeAltaConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentNullException.ThrowIfNull(definition);
 
-        if (IsReservedProviderKey(providerKey))
-        {
-            return !definition.Enabled &&
-                string.IsNullOrWhiteSpace(definition.DisplayName) &&
-                string.IsNullOrWhiteSpace(definition.Model) &&
-                string.IsNullOrWhiteSpace(definition.ReasoningEffort);
-        }
-
-        return false;
+        return IsReservedProviderKey(providerKey) && !CanPersistProviderEntry(definition);
     }
 
     private static CodeAltaProviderDocument GetOrCreateProviderPreferenceEntry(CodeAltaConfigDocument document, string providerKey)
     {
+        document.Providers ??= new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase);
         if (document.Providers.TryGetValue(providerKey, out var existing))
         {
             return existing;
         }
 
-        var created = CreateImplicitReservedProviderDefinition(providerKey);
+        var created = CreateReservedProviderPlaceholder(providerKey);
         if (created is null)
         {
             throw new InvalidOperationException($"Provider '{providerKey}' is not configurable through the provider config store.");
@@ -730,14 +799,14 @@ public sealed class CodeAltaConfigStore
         if (string.Equals(definition.ProviderKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase))
         {
             definition.ProviderType ??= CodexProviderKey;
-            definition.DisplayName ??= "Codex";
+            definition.DisplayName ??= GetReservedProviderDisplayName(CodexProviderKey);
             return;
         }
 
         if (string.Equals(definition.ProviderKey, CopilotProviderKey, StringComparison.OrdinalIgnoreCase))
         {
             definition.ProviderType ??= CopilotProviderKey;
-            definition.DisplayName ??= "GitHub Copilot";
+            definition.DisplayName ??= GetReservedProviderDisplayName(CopilotProviderKey);
         }
     }
 
@@ -760,14 +829,28 @@ public sealed class CodeAltaConfigStore
         return new CodeAltaProviderDocument
         {
             ProviderKey = normalizedProviderKey,
-            Enabled = true,
+            Enabled = CodeAltaProviderDocument.DefaultEnabled,
             ProviderType = normalizedProviderKey,
-            DisplayName = string.Equals(normalizedProviderKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase)
-                ? "Codex"
-                : "GitHub Copilot",
+            DisplayName = GetReservedProviderDisplayName(normalizedProviderKey),
             Compaction = NormalizeAndCompleteCompactionSettings(null, DefaultCompaction),
         };
     }
+
+    private static CodeAltaProviderDocument? CreateReservedProviderPlaceholder(string providerKey)
+    {
+        var normalizedProviderKey = NormalizeProviderKey(providerKey);
+        return string.IsNullOrWhiteSpace(normalizedProviderKey) || !IsReservedProviderKey(normalizedProviderKey)
+            ? null
+            : new CodeAltaProviderDocument
+            {
+                ProviderKey = normalizedProviderKey,
+            };
+    }
+
+    private static string GetReservedProviderDisplayName(string providerKey)
+        => string.Equals(providerKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase)
+            ? "Codex"
+            : "GitHub Copilot";
 
     private static CodeAltaProviderProfileDocument? NormalizeProfile(CodeAltaProviderProfileDocument? profile)
     {
@@ -803,8 +886,57 @@ public sealed class CodeAltaConfigStore
             .ToDictionary(
                 static entry => entry.Key,
                 static entry => entry.Value,
-                StringComparer.OrdinalIgnoreCase);
+            StringComparer.OrdinalIgnoreCase);
         return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static void PruneProviderDefaults(CodeAltaProviderDocument definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        if (definition.Enabled == CodeAltaProviderDocument.DefaultEnabled)
+        {
+            definition.Enabled = null;
+        }
+
+        if (IsReservedProviderKey(definition.ProviderKey))
+        {
+            if (string.Equals(definition.ProviderType, definition.ProviderKey, StringComparison.Ordinal))
+            {
+                definition.ProviderType = null;
+            }
+
+            if (string.Equals(definition.DisplayName, GetReservedProviderDisplayName(definition.ProviderKey), StringComparison.Ordinal))
+            {
+                definition.DisplayName = null;
+            }
+        }
+
+        definition.Compaction = PruneCompactionDefaults(definition.Compaction);
+    }
+
+    private static bool CanPersistProviderEntry(CodeAltaProviderDocument definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        return definition.Enabled is not null ||
+               !string.IsNullOrWhiteSpace(definition.DisplayName) ||
+               !string.IsNullOrWhiteSpace(definition.ProviderType) ||
+               !string.IsNullOrWhiteSpace(definition.Model) ||
+               !string.IsNullOrWhiteSpace(definition.ReasoningEffort) ||
+               !string.IsNullOrWhiteSpace(definition.ApiKey) ||
+               !string.IsNullOrWhiteSpace(definition.ApiKeyEnv) ||
+               !string.IsNullOrWhiteSpace(definition.ApiUrl) ||
+               !string.IsNullOrWhiteSpace(definition.OrganizationId) ||
+               !string.IsNullOrWhiteSpace(definition.ProjectId) ||
+               !string.IsNullOrWhiteSpace(definition.Project) ||
+               !string.IsNullOrWhiteSpace(definition.Location) ||
+               !string.IsNullOrWhiteSpace(definition.ModelsDevProviderId) ||
+               !string.IsNullOrWhiteSpace(definition.SingleModelId) ||
+               definition.ExtraBody is { Count: > 0 } ||
+               definition.Profile is not null ||
+               definition.Compaction is not null ||
+               definition.ModelOverrides is { Count: > 0 };
     }
 
     private static AcpBackendDefinition CloneAcpBackendDefinition(AcpBackendDefinition definition)
@@ -956,6 +1088,168 @@ public sealed class CodeAltaConfigStore
             };
     }
 
+    private static CodeAltaProviderCompactionDocument? NormalizeCompaction(CodeAltaProviderCompactionDocument? compaction)
+    {
+        if (compaction is null)
+        {
+            return null;
+        }
+
+        var normalized = CloneCompaction(compaction);
+        normalized.ReasoningMode = NormalizeCompactionReasoningMode(normalized.ReasoningMode);
+        return IsEmptyCompaction(normalized) ? null : normalized;
+    }
+
+    private static CodeAltaProviderCompactionDocument? PruneCompactionDefaults(CodeAltaProviderCompactionDocument? compaction)
+    {
+        if (compaction is null)
+        {
+            return null;
+        }
+
+        var pruned = CloneCompaction(compaction);
+
+        if (pruned.Enabled == LocalAgentCompactionSettings.DefaultEnabled)
+        {
+            pruned.Enabled = null;
+        }
+
+        if (pruned.TriggerThreshold == LocalAgentCompactionSettings.DefaultTriggerThreshold)
+        {
+            pruned.TriggerThreshold = null;
+        }
+
+        if (pruned.TargetThreshold == LocalAgentCompactionSettings.DefaultTargetThreshold)
+        {
+            pruned.TargetThreshold = null;
+        }
+
+        if (pruned.ReservedOutputTokens == LocalAgentCompactionSettings.DefaultReservedOutputTokens)
+        {
+            pruned.ReservedOutputTokens = null;
+        }
+
+        if (pruned.ReservedOverheadTokens == LocalAgentCompactionSettings.DefaultReservedOverheadTokens)
+        {
+            pruned.ReservedOverheadTokens = null;
+        }
+
+        if (pruned.KeepLastUserMessage == LocalAgentCompactionSettings.DefaultKeepLastUserMessage)
+        {
+            pruned.KeepLastUserMessage = null;
+        }
+
+        if (pruned.AllowSplitTurn == LocalAgentCompactionSettings.DefaultAllowSplitTurn)
+        {
+            pruned.AllowSplitTurn = null;
+        }
+
+        if (pruned.TargetContextRatioIdeal == LocalAgentCompactionSettings.DefaultTargetContextRatioIdeal)
+        {
+            pruned.TargetContextRatioIdeal = null;
+        }
+
+        if (pruned.TargetContextRatioMax == LocalAgentCompactionSettings.DefaultTargetContextRatioMax)
+        {
+            pruned.TargetContextRatioMax = null;
+        }
+
+        if (pruned.RecentSuffixTargetTokens == LocalAgentCompactionSettings.DefaultRecentSuffixTargetTokens)
+        {
+            pruned.RecentSuffixTargetTokens = null;
+        }
+
+        if (pruned.SummaryOutputTokens == LocalAgentCompactionSettings.DefaultSummaryOutputTokens)
+        {
+            pruned.SummaryOutputTokens = null;
+        }
+
+        if (pruned.SummaryInputTokens == LocalAgentCompactionSettings.DefaultSummaryInputTokens)
+        {
+            pruned.SummaryInputTokens = null;
+        }
+
+        if (pruned.ToolResultCharsPerItem == LocalAgentCompactionSettings.DefaultToolResultCharsPerItem)
+        {
+            pruned.ToolResultCharsPerItem = null;
+        }
+
+        if (pruned.ToolResultCharsTotal == LocalAgentCompactionSettings.DefaultToolResultCharsTotal)
+        {
+            pruned.ToolResultCharsTotal = null;
+        }
+
+        if (pruned.ReasoningCharsPerItem == LocalAgentCompactionSettings.DefaultReasoningCharsPerItem)
+        {
+            pruned.ReasoningCharsPerItem = null;
+        }
+
+        if (pruned.ReasoningCharsTotal == LocalAgentCompactionSettings.DefaultReasoningCharsTotal)
+        {
+            pruned.ReasoningCharsTotal = null;
+        }
+
+        if (string.Equals(pruned.ReasoningMode, "adaptive", StringComparison.Ordinal))
+        {
+            pruned.ReasoningMode = null;
+        }
+
+        if (pruned.MaxChunkPasses == LocalAgentCompactionSettings.DefaultMaxChunkPasses)
+        {
+            pruned.MaxChunkPasses = null;
+        }
+
+        if (pruned.AllowOversizedAnchorReduction == LocalAgentCompactionSettings.DefaultAllowOversizedAnchorReduction)
+        {
+            pruned.AllowOversizedAnchorReduction = null;
+        }
+
+        if (pruned.PreferRecentMessages == LocalAgentCompactionSettings.DefaultPreferRecentMessages)
+        {
+            pruned.PreferRecentMessages = null;
+        }
+
+        if (pruned.PreferRecentToolOutputs == LocalAgentCompactionSettings.DefaultPreferRecentToolOutputs)
+        {
+            pruned.PreferRecentToolOutputs = null;
+        }
+
+        if (pruned.DropMessagesOnlyWhenSummaryInputExceedsBudget == LocalAgentCompactionSettings.DefaultDropMessagesOnlyWhenSummaryInputExceedsBudget)
+        {
+            pruned.DropMessagesOnlyWhenSummaryInputExceedsBudget = null;
+        }
+
+        return IsEmptyCompaction(pruned) ? null : pruned;
+    }
+
+    private static bool IsEmptyCompaction(CodeAltaProviderCompactionDocument compaction)
+    {
+        ArgumentNullException.ThrowIfNull(compaction);
+
+        return compaction.Enabled is null &&
+               compaction.TriggerThreshold is null &&
+               compaction.TargetThreshold is null &&
+               compaction.ReservedOutputTokens is null &&
+               compaction.ReservedOverheadTokens is null &&
+               compaction.KeepLastUserMessage is null &&
+               compaction.AllowSplitTurn is null &&
+               compaction.TargetContextRatioIdeal is null &&
+               compaction.TargetContextRatioMax is null &&
+               compaction.RecentSuffixTargetTokens is null &&
+               compaction.SummaryOutputTokens is null &&
+               compaction.SummaryInputTokens is null &&
+               compaction.ToolResultCharsPerItem is null &&
+               compaction.ToolResultCharsTotal is null &&
+               compaction.ReasoningCharsPerItem is null &&
+               compaction.ReasoningCharsTotal is null &&
+               compaction.ReasoningMode is null &&
+               compaction.MaxChunkPasses is null &&
+               compaction.AllowOversizedAnchorReduction is null &&
+               compaction.PreferRecentMessages is null &&
+               compaction.PreferRecentToolOutputs is null &&
+               compaction.DropMessagesOnlyWhenSummaryInputExceedsBudget is null;
+    }
+
     private static Dictionary<string, CodeAltaProviderModelOverrideDocument>? CloneModelOverrides(
         Dictionary<string, CodeAltaProviderModelOverrideDocument>? overrides)
     {
@@ -1015,28 +1309,28 @@ public sealed class CodeAltaConfigStore
             merged.DropMessagesOnlyWhenSummaryInputExceedsBudget = normalized.DropMessagesOnlyWhenSummaryInputExceedsBudget ?? merged.DropMessagesOnlyWhenSummaryInputExceedsBudget;
         }
 
-        merged.Enabled ??= true;
-        merged.TriggerThreshold ??= 0.85;
-        merged.TargetThreshold ??= 0.50;
-        merged.ReservedOutputTokens ??= 4096;
-        merged.ReservedOverheadTokens ??= 2048;
-        merged.KeepLastUserMessage ??= true;
-        merged.AllowSplitTurn ??= true;
-        merged.TargetContextRatioIdeal ??= 0.03;
-        merged.TargetContextRatioMax ??= 0.10;
-        merged.RecentSuffixTargetTokens ??= 20_000;
-        merged.SummaryOutputTokens ??= 1_024;
-        merged.SummaryInputTokens ??= 24_000;
-        merged.ToolResultCharsPerItem ??= 1_200;
-        merged.ToolResultCharsTotal ??= 6_000;
-        merged.ReasoningCharsPerItem ??= 600;
-        merged.ReasoningCharsTotal ??= 3_000;
+        merged.Enabled ??= LocalAgentCompactionSettings.DefaultEnabled;
+        merged.TriggerThreshold ??= LocalAgentCompactionSettings.DefaultTriggerThreshold;
+        merged.TargetThreshold ??= LocalAgentCompactionSettings.DefaultTargetThreshold;
+        merged.ReservedOutputTokens ??= LocalAgentCompactionSettings.DefaultReservedOutputTokens;
+        merged.ReservedOverheadTokens ??= LocalAgentCompactionSettings.DefaultReservedOverheadTokens;
+        merged.KeepLastUserMessage ??= LocalAgentCompactionSettings.DefaultKeepLastUserMessage;
+        merged.AllowSplitTurn ??= LocalAgentCompactionSettings.DefaultAllowSplitTurn;
+        merged.TargetContextRatioIdeal ??= LocalAgentCompactionSettings.DefaultTargetContextRatioIdeal;
+        merged.TargetContextRatioMax ??= LocalAgentCompactionSettings.DefaultTargetContextRatioMax;
+        merged.RecentSuffixTargetTokens ??= LocalAgentCompactionSettings.DefaultRecentSuffixTargetTokens;
+        merged.SummaryOutputTokens ??= LocalAgentCompactionSettings.DefaultSummaryOutputTokens;
+        merged.SummaryInputTokens ??= LocalAgentCompactionSettings.DefaultSummaryInputTokens;
+        merged.ToolResultCharsPerItem ??= LocalAgentCompactionSettings.DefaultToolResultCharsPerItem;
+        merged.ToolResultCharsTotal ??= LocalAgentCompactionSettings.DefaultToolResultCharsTotal;
+        merged.ReasoningCharsPerItem ??= LocalAgentCompactionSettings.DefaultReasoningCharsPerItem;
+        merged.ReasoningCharsTotal ??= LocalAgentCompactionSettings.DefaultReasoningCharsTotal;
         merged.ReasoningMode = NormalizeCompactionReasoningMode(merged.ReasoningMode) ?? "adaptive";
-        merged.MaxChunkPasses ??= 4;
-        merged.AllowOversizedAnchorReduction ??= true;
-        merged.PreferRecentMessages ??= true;
-        merged.PreferRecentToolOutputs ??= true;
-        merged.DropMessagesOnlyWhenSummaryInputExceedsBudget ??= true;
+        merged.MaxChunkPasses ??= LocalAgentCompactionSettings.DefaultMaxChunkPasses;
+        merged.AllowOversizedAnchorReduction ??= LocalAgentCompactionSettings.DefaultAllowOversizedAnchorReduction;
+        merged.PreferRecentMessages ??= LocalAgentCompactionSettings.DefaultPreferRecentMessages;
+        merged.PreferRecentToolOutputs ??= LocalAgentCompactionSettings.DefaultPreferRecentToolOutputs;
+        merged.DropMessagesOnlyWhenSummaryInputExceedsBudget ??= LocalAgentCompactionSettings.DefaultDropMessagesOnlyWhenSummaryInputExceedsBudget;
 
         ValidateCompaction(merged);
         return merged;

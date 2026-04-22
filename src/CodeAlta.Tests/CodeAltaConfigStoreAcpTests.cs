@@ -33,7 +33,7 @@ public sealed class CodeAltaConfigStoreAcpTests
         var loaded = store.LoadGlobalAcpBackendDefinition("sample-agent");
         Assert.IsNotNull(loaded);
         Assert.AreEqual("sample-agent", loaded.AgentId);
-        Assert.IsFalse(loaded.Enabled);
+        Assert.AreEqual(false, loaded.Enabled);
         Assert.AreEqual("Sample Agent", loaded.DisplayName);
         Assert.AreEqual("sample-agent", loaded.RegistryId);
         CollectionAssert.AreEqual(new[] { "--yes", "@sample/agent" }, loaded.Arguments);
@@ -61,6 +61,32 @@ public sealed class CodeAltaConfigStoreAcpTests
         Assert.IsTrue(store.DeleteGlobalAcpBackendDefinition("sample-agent"));
         Assert.IsFalse(store.HasGlobalAcpBackendDefinition("sample-agent"));
         Assert.IsNull(store.LoadGlobalAcpBackendDefinition("sample-agent"));
+    }
+
+    [TestMethod]
+    public void SaveGlobalAcpBackendDefinition_OmitsDefaultFlags()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        store.SaveGlobalAcpBackendDefinition(new AcpBackendDefinition
+        {
+            AgentId = "sample-agent",
+            DisplayName = "Sample Agent",
+            Command = "npx",
+            UseUnstable = true,
+            EnableFilesystem = true,
+            EnableTerminal = true,
+            EnableElicitation = false,
+            Enabled = true,
+        });
+
+        var content = File.ReadAllText(Path.Combine(temp.Path, "config.toml"));
+        StringAssert.Contains(content, "[acp.agents.sample-agent]");
+        Assert.IsFalse(content.Contains("enabled = true", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("use_unstable = true", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("enable_filesystem = true", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("enable_terminal = true", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("enable_elicitation = false", StringComparison.Ordinal));
     }
 
     private sealed class TempDirectory(string path) : IDisposable

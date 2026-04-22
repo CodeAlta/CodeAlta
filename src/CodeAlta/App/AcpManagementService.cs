@@ -152,10 +152,10 @@ internal sealed class AcpManagementService
         {
             AgentId = agentId.Trim().ToLowerInvariant(),
             DisplayName = agentId.Trim(),
-            Enabled = true,
-            UseUnstable = true,
-            EnableFilesystem = true,
-            EnableTerminal = true,
+            Enabled = AcpBackendDefinition.DefaultEnabled,
+            UseUnstable = AcpBackendDefinition.DefaultUseUnstable,
+            EnableFilesystem = AcpBackendDefinition.DefaultEnableFilesystem,
+            EnableTerminal = AcpBackendDefinition.DefaultEnableTerminal,
         };
     }
 
@@ -163,10 +163,10 @@ internal sealed class AcpManagementService
     {
         return new AcpBackendDefinition
         {
-            Enabled = true,
-            UseUnstable = true,
-            EnableFilesystem = true,
-            EnableTerminal = true,
+            Enabled = AcpBackendDefinition.DefaultEnabled,
+            UseUnstable = AcpBackendDefinition.DefaultUseUnstable,
+            EnableFilesystem = AcpBackendDefinition.DefaultEnableFilesystem,
+            EnableTerminal = AcpBackendDefinition.DefaultEnableTerminal,
         };
     }
 
@@ -273,7 +273,10 @@ internal sealed class AcpManagementService
             IsInRegistry: manifest is not null,
             IsInstalled: installedDefinition is not null,
             HasConfiguration: configuredDefinition is not null,
-            IsEnabled: effectiveDefinition?.Enabled ?? false,
+            IsEnabled: effectiveDefinition?.Enabled ??
+                configuredDefinition?.Enabled ??
+                installedDefinition?.Enabled ??
+                AcpBackendDefinition.DefaultEnabled,
             IsManual: manifest is null && string.IsNullOrWhiteSpace(definitionForDisplay?.RegistryId),
             IsBroken: isBroken,
             CommandSummary: commandSummary,

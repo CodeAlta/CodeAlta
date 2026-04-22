@@ -128,7 +128,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         var backendDescriptors = new List<AgentBackendDescriptor>();
         var codexPath = ResolveCodexExecutablePath(
             Environment.GetEnvironmentVariable(CodexPathOverrideEnvironmentVariable));
-        if (providerDefinitions.TryGetValue("codex", out var codexProvider) && codexProvider.Enabled)
+        if (providerDefinitions.TryGetValue("codex", out var codexProvider) && codexProvider.Enabled != false)
         {
             backendFactory.RegisterCodex(
                 new CodexAgentBackendOptions
@@ -144,7 +144,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
             backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex"));
         }
 
-        if (providerDefinitions.TryGetValue("copilot", out var copilotProvider) && copilotProvider.Enabled)
+        if (providerDefinitions.TryGetValue("copilot", out var copilotProvider) && copilotProvider.Enabled != false)
         {
             backendFactory.RegisterCopilot(new CopilotAgentBackendOptions());
             backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "GitHub Copilot"));
@@ -324,17 +324,18 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                 EnvironmentVariables = definition.EnvironmentVariables,
             },
             StateRootPath = Path.Combine(catalogOptions.AcpStateRoot, normalizedAgentId),
-            EnableFilesystem = definition.EnableFilesystem,
-            EnableTerminal = definition.EnableTerminal,
-            EnableElicitation = definition.EnableElicitation,
-            UseUnstableFeatures = definition.UseUnstable,
+            EnableFilesystem = definition.EnableFilesystem ?? AcpBackendDefinition.DefaultEnableFilesystem,
+            EnableTerminal = definition.EnableTerminal ?? AcpBackendDefinition.DefaultEnableTerminal,
+            EnableElicitation = definition.EnableElicitation ?? AcpBackendDefinition.DefaultEnableElicitation,
+            UseUnstableFeatures = definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable,
             UnstableFeatures = new AcpUnstableFeatureOptions
             {
-                UseSessionResume = definition.UseUnstable,
-                UseSessionClose = definition.UseUnstable,
-                UseSessionDelete = definition.UseUnstable,
-                UseElicitation = definition.UseUnstable && definition.EnableElicitation,
-                UseSetModel = definition.UseUnstable,
+                UseSessionResume = definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable,
+                UseSessionClose = definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable,
+                UseSessionDelete = definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable,
+                UseElicitation = (definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable) &&
+                    (definition.EnableElicitation ?? AcpBackendDefinition.DefaultEnableElicitation),
+                UseSetModel = definition.UseUnstable ?? AcpBackendDefinition.DefaultUseUnstable,
             },
         };
         return true;
