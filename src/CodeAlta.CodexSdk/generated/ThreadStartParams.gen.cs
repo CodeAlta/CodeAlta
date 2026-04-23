@@ -27,6 +27,9 @@ public sealed partial record ThreadStartParams
     public string? Model { get; set; }
     [JsonPropertyName("modelProvider")]
     public string? ModelProvider { get; set; }
+    /// <summary>Full permissions override for this thread. Cannot be combined with `sandbox`.</summary>
+    [JsonPropertyName("permissionProfile")]
+    public PermissionProfile? PermissionProfile { get; set; }
     [JsonPropertyName("personality")]
     public Personality? Personality { get; set; }
     [JsonPropertyName("sandbox")]

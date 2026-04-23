@@ -10,10 +10,11 @@ public sealed partial record PluginMarketplaceEntry
 {
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
-    [JsonPropertyName("path")]
-    public AbsolutePathBuf Path { get; set; } = default!;
     [JsonPropertyName("plugins")]
     public List<PluginSummary> Plugins { get; set; } = [];
     [JsonPropertyName("interface")]
     public MarketplaceInterface? Interface { get; set; }
+    /// <summary>Local marketplace file path when the marketplace is backed by a local file. Remote-only catalog marketplaces do not have a local path.</summary>
+    [JsonPropertyName("path")]
+    public AbsolutePathBuf? Path { get; set; }
 }

@@ -122,7 +122,7 @@ public sealed class CodexAgentBackend : ICodexAgentBackend
                     {
                         Cursor = cursor,
                         Limit = 100,
-                        Cwd = filter?.Cwd
+                        Cwd = !string.IsNullOrEmpty(filter?.Cwd) ? new ThreadListCwdFilter.StringValue() { Value = filter.Cwd } : null,
                     },
                     cancellationToken)
                 .ConfigureAwait(false);

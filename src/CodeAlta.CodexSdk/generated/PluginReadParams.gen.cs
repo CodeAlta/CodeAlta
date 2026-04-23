@@ -8,8 +8,10 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record PluginReadParams
 {
-    [JsonPropertyName("marketplacePath")]
-    public AbsolutePathBuf MarketplacePath { get; set; } = default!;
     [JsonPropertyName("pluginName")]
     public string PluginName { get; set; } = string.Empty;
+    [JsonPropertyName("marketplacePath")]
+    public AbsolutePathBuf? MarketplacePath { get; set; }
+    [JsonPropertyName("remoteMarketplaceName")]
+    public string? RemoteMarketplaceName { get; set; }
 }

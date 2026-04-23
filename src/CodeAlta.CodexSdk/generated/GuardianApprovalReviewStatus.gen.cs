@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.CodexSdk;
 
 /// <summary>
-/// [UNSTABLE] Lifecycle state for a guardian approval review.
+/// [UNSTABLE] Lifecycle state for an approval auto-review.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<GuardianApprovalReviewStatus>))]
 public enum GuardianApprovalReviewStatus

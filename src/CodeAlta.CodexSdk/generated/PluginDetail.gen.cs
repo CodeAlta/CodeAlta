@@ -12,8 +12,6 @@ public sealed partial record PluginDetail
     public List<AppSummary> Apps { get; set; } = [];
     [JsonPropertyName("marketplaceName")]
     public string MarketplaceName { get; set; } = string.Empty;
-    [JsonPropertyName("marketplacePath")]
-    public AbsolutePathBuf MarketplacePath { get; set; } = default!;
     [JsonPropertyName("mcpServers")]
     public List<string> McpServers { get; set; } = [];
     [JsonPropertyName("skills")]
@@ -22,4 +20,6 @@ public sealed partial record PluginDetail
     public PluginSummary Summary { get; set; } = default!;
     [JsonPropertyName("description")]
     public string? Description { get; set; }
+    [JsonPropertyName("marketplacePath")]
+    public AbsolutePathBuf? MarketplacePath { get; set; }
 }

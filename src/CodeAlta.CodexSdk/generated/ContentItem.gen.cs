@@ -20,6 +20,8 @@ public abstract partial record ContentItem
 
     public sealed partial record InputImageContentItem : ContentItem
     {
+        [JsonPropertyName("detail")]
+        public ImageDetail? Detail { get; set; }
         [JsonPropertyName("image_url")]
         public string ImageUrl { get; set; } = string.Empty;
     }

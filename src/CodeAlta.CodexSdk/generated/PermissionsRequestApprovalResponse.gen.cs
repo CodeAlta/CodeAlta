@@ -12,4 +12,7 @@ public sealed partial record PermissionsRequestApprovalResponse
     public GrantedPermissionProfile Permissions { get; set; } = default!;
     [JsonPropertyName("scope")]
     public PermissionGrantScope Scope { get; set; } = default!;
+    /// <summary>Review every subsequent command in this turn before normal sandboxed execution.</summary>
+    [JsonPropertyName("strictAutoReview")]
+    public bool? StrictAutoReview { get; set; }
 }

@@ -23,6 +23,7 @@ internal sealed class CodexErrorInfoJsonConverter : JsonConverter<CodexErrorInfo
                 "contextWindowExceeded" => new CodexErrorInfo.ContextWindowExceeded(),
                 "usageLimitExceeded" => new CodexErrorInfo.UsageLimitExceeded(),
                 "serverOverloaded" => new CodexErrorInfo.ServerOverloaded(),
+                "cyberPolicy" => new CodexErrorInfo.CyberPolicy(),
                 "internalServerError" => new CodexErrorInfo.InternalServerError(),
                 "unauthorized" => new CodexErrorInfo.Unauthorized(),
                 "badRequest" => new CodexErrorInfo.BadRequest(),
@@ -95,6 +96,9 @@ internal sealed class CodexErrorInfoJsonConverter : JsonConverter<CodexErrorInfo
                 break;
             case CodexErrorInfo.ServerOverloaded:
                 writer.WriteStringValue("serverOverloaded");
+                break;
+            case CodexErrorInfo.CyberPolicy:
+                writer.WriteStringValue("cyberPolicy");
                 break;
             case CodexErrorInfo.InternalServerError:
                 writer.WriteStringValue("internalServerError");
@@ -183,6 +187,7 @@ public abstract partial record CodexErrorInfo
     public sealed partial record ContextWindowExceeded : CodexErrorInfo;
     public sealed partial record UsageLimitExceeded : CodexErrorInfo;
     public sealed partial record ServerOverloaded : CodexErrorInfo;
+    public sealed partial record CyberPolicy : CodexErrorInfo;
     public sealed partial record InternalServerError : CodexErrorInfo;
     public sealed partial record Unauthorized : CodexErrorInfo;
     public sealed partial record BadRequest : CodexErrorInfo;

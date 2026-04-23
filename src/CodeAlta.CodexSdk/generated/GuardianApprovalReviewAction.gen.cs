@@ -12,6 +12,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ApplyPatchGuardianApprovalReviewAction), typeDiscriminator: "applyPatch")]
 [JsonDerivedType(typeof(NetworkAccessGuardianApprovalReviewAction), typeDiscriminator: "networkAccess")]
 [JsonDerivedType(typeof(McpToolCallGuardianApprovalReviewAction), typeDiscriminator: "mcpToolCall")]
+[JsonDerivedType(typeof(RequestPermissionsGuardianApprovalReviewAction), typeDiscriminator: "requestPermissions")]
 public abstract partial record GuardianApprovalReviewAction
 {
     public sealed partial record CommandGuardianApprovalReviewAction : GuardianApprovalReviewAction
@@ -68,6 +69,14 @@ public abstract partial record GuardianApprovalReviewAction
         public string ToolName { get; set; } = string.Empty;
         [JsonPropertyName("toolTitle")]
         public string? ToolTitle { get; set; }
+    }
+
+    public sealed partial record RequestPermissionsGuardianApprovalReviewAction : GuardianApprovalReviewAction
+    {
+        [JsonPropertyName("permissions")]
+        public RequestPermissionProfile Permissions { get; set; } = default!;
+        [JsonPropertyName("reason")]
+        public string? Reason { get; set; }
     }
 
 }

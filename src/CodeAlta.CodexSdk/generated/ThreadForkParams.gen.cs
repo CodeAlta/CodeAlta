@@ -37,6 +37,9 @@ public sealed partial record ThreadForkParams
     public string? Model { get; set; }
     [JsonPropertyName("modelProvider")]
     public string? ModelProvider { get; set; }
+    /// <summary>Full permissions override for the forked thread. Cannot be combined with `sandbox`.</summary>
+    [JsonPropertyName("permissionProfile")]
+    public PermissionProfile? PermissionProfile { get; set; }
     [JsonPropertyName("sandbox")]
     public SandboxMode? Sandbox { get; set; }
     [JsonPropertyName("serviceTier")]

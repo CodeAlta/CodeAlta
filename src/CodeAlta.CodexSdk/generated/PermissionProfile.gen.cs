@@ -8,10 +8,8 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record PermissionProfile
 {
-    [JsonPropertyName("file_system")]
-    public FileSystemPermissions? FileSystem { get; set; }
-    [JsonPropertyName("macos")]
-    public MacOsSeatbeltProfileExtensions? Macos { get; set; }
+    [JsonPropertyName("fileSystem")]
+    public PermissionProfileFileSystemPermissions? FileSystem { get; set; }
     [JsonPropertyName("network")]
-    public NetworkPermissions? Network { get; set; }
+    public PermissionProfileNetworkPermissions? Network { get; set; }
 }

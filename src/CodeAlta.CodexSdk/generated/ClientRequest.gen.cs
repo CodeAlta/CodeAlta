@@ -21,16 +21,22 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ThreadUnarchiveRequest), typeDiscriminator: "thread/unarchive")]
 [JsonDerivedType(typeof(ThreadCompactStartRequest), typeDiscriminator: "thread/compact/start")]
 [JsonDerivedType(typeof(ThreadShellCommandRequest), typeDiscriminator: "thread/shellCommand")]
+[JsonDerivedType(typeof(ThreadApproveGuardianDeniedActionRequest), typeDiscriminator: "thread/approveGuardianDeniedAction")]
 [JsonDerivedType(typeof(ThreadRollbackRequest), typeDiscriminator: "thread/rollback")]
 [JsonDerivedType(typeof(ThreadListRequest), typeDiscriminator: "thread/list")]
 [JsonDerivedType(typeof(ThreadLoadedListRequest), typeDiscriminator: "thread/loaded/list")]
 [JsonDerivedType(typeof(ThreadReadRequest), typeDiscriminator: "thread/read")]
+[JsonDerivedType(typeof(ThreadTurnsListRequest), typeDiscriminator: "thread/turns/list")]
 [JsonDerivedType(typeof(ThreadInjectItemsRequest), typeDiscriminator: "thread/inject_items")]
 [JsonDerivedType(typeof(SkillsListRequest), typeDiscriminator: "skills/list")]
 [JsonDerivedType(typeof(MarketplaceAddRequest), typeDiscriminator: "marketplace/add")]
+[JsonDerivedType(typeof(MarketplaceRemoveRequest), typeDiscriminator: "marketplace/remove")]
 [JsonDerivedType(typeof(PluginListRequest), typeDiscriminator: "plugin/list")]
 [JsonDerivedType(typeof(PluginReadRequest), typeDiscriminator: "plugin/read")]
 [JsonDerivedType(typeof(AppListRequest), typeDiscriminator: "app/list")]
+[JsonDerivedType(typeof(DeviceKeyCreateRequest), typeDiscriminator: "device/key/create")]
+[JsonDerivedType(typeof(DeviceKeyPublicRequest), typeDiscriminator: "device/key/public")]
+[JsonDerivedType(typeof(DeviceKeySignRequest), typeDiscriminator: "device/key/sign")]
 [JsonDerivedType(typeof(FsReadFileRequest), typeDiscriminator: "fs/readFile")]
 [JsonDerivedType(typeof(FsWriteFileRequest), typeDiscriminator: "fs/writeFile")]
 [JsonDerivedType(typeof(FsCreateDirectoryRequest), typeDiscriminator: "fs/createDirectory")]
@@ -60,6 +66,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(AccountLoginCancelRequest), typeDiscriminator: "account/login/cancel")]
 [JsonDerivedType(typeof(AccountLogoutRequest), typeDiscriminator: "account/logout")]
 [JsonDerivedType(typeof(AccountRateLimitsReadRequest), typeDiscriminator: "account/rateLimits/read")]
+[JsonDerivedType(typeof(AccountSendAddCreditsNudgeEmailRequest), typeDiscriminator: "account/sendAddCreditsNudgeEmail")]
 [JsonDerivedType(typeof(FeedbackUploadRequest), typeDiscriminator: "feedback/upload")]
 [JsonDerivedType(typeof(CommandExecRequest), typeDiscriminator: "command/exec")]
 [JsonDerivedType(typeof(CommandExecWriteRequest), typeDiscriminator: "command/exec/write")]
@@ -166,6 +173,14 @@ public abstract partial record ClientRequest
         public ThreadShellCommandParams Params { get; set; } = default!;
     }
 
+    public sealed partial record ThreadApproveGuardianDeniedActionRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public ThreadApproveGuardianDeniedActionParams Params { get; set; } = default!;
+    }
+
     public sealed partial record ThreadRollbackRequest : ClientRequest
     {
         [JsonPropertyName("id")]
@@ -198,6 +213,14 @@ public abstract partial record ClientRequest
         public ThreadReadParams Params { get; set; } = default!;
     }
 
+    public sealed partial record ThreadTurnsListRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public ThreadTurnsListParams Params { get; set; } = default!;
+    }
+
     /// <summary>
     /// Append raw Responses API items to the thread history without starting a user turn.
     /// </summary>
@@ -225,6 +248,14 @@ public abstract partial record ClientRequest
         public MarketplaceAddParams Params { get; set; } = default!;
     }
 
+    public sealed partial record MarketplaceRemoveRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public MarketplaceRemoveParams Params { get; set; } = default!;
+    }
+
     public sealed partial record PluginListRequest : ClientRequest
     {
         [JsonPropertyName("id")]
@@ -247,6 +278,30 @@ public abstract partial record ClientRequest
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
         public AppsListParams Params { get; set; } = default!;
+    }
+
+    public sealed partial record DeviceKeyCreateRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public DeviceKeyCreateParams Params { get; set; } = default!;
+    }
+
+    public sealed partial record DeviceKeyPublicRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public DeviceKeyPublicParams Params { get; set; } = default!;
+    }
+
+    public sealed partial record DeviceKeySignRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public DeviceKeySignParams Params { get; set; } = default!;
     }
 
     public sealed partial record FsReadFileRequest : ClientRequest
@@ -479,6 +534,14 @@ public abstract partial record ClientRequest
         public RequestId Id { get; set; } = default!;
         [JsonPropertyName("params")]
         public JsonElement? Params { get; set; }
+    }
+
+    public sealed partial record AccountSendAddCreditsNudgeEmailRequest : ClientRequest
+    {
+        [JsonPropertyName("id")]
+        public RequestId Id { get; set; } = default!;
+        [JsonPropertyName("params")]
+        public SendAddCreditsNudgeEmailParams Params { get; set; } = default!;
     }
 
     public sealed partial record FeedbackUploadRequest : ClientRequest

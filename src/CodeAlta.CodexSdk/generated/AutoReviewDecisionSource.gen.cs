@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.CodexSdk;
 
 /// <summary>
-/// [UNSTABLE] Source that produced a terminal guardian approval review decision.
+/// [UNSTABLE] Source that produced a terminal approval auto-review decision.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<AutoReviewDecisionSource>))]
 public enum AutoReviewDecisionSource

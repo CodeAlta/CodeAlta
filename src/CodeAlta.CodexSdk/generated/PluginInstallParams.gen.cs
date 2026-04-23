@@ -8,11 +8,10 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record PluginInstallParams
 {
-    [JsonPropertyName("marketplacePath")]
-    public AbsolutePathBuf MarketplacePath { get; set; } = default!;
     [JsonPropertyName("pluginName")]
     public string PluginName { get; set; } = string.Empty;
-    /// <summary>When true, apply the remote plugin change before the local install flow.</summary>
-    [JsonPropertyName("forceRemoteSync")]
-    public bool? ForceRemoteSync { get; set; }
+    [JsonPropertyName("marketplacePath")]
+    public AbsolutePathBuf? MarketplacePath { get; set; }
+    [JsonPropertyName("remoteMarketplaceName")]
+    public string? RemoteMarketplaceName { get; set; }
 }

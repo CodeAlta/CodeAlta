@@ -32,6 +32,8 @@ public sealed partial record HookRunSummary
     public long? CompletedAt { get; set; }
     [JsonPropertyName("durationMs")]
     public long? DurationMs { get; set; }
+    [JsonPropertyName("source")]
+    public HookSource Source { get; set; } = default!;
     [JsonPropertyName("statusMessage")]
     public string? StatusMessage { get; set; }
 }

@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.CodexSdk;
 
 /// <summary>
-/// [UNSTABLE] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.
+/// [UNSTABLE] Temporary notification payload for approval auto-review. This shape is expected to change soon.
 /// </summary>
 public sealed partial record ItemGuardianApprovalReviewCompletedNotification
 {

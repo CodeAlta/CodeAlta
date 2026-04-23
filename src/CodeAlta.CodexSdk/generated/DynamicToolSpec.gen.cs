@@ -16,4 +16,6 @@ public sealed partial record DynamicToolSpec
     public string Name { get; set; } = string.Empty;
     [JsonPropertyName("deferLoading")]
     public bool? DeferLoading { get; set; }
+    [JsonPropertyName("namespace")]
+    public string? Namespace { get; set; }
 }

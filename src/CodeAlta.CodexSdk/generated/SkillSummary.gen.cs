@@ -14,10 +14,10 @@ public sealed partial record SkillSummary
     public bool Enabled { get; set; }
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
-    [JsonPropertyName("path")]
-    public AbsolutePathBuf Path { get; set; } = default!;
     [JsonPropertyName("interface")]
     public SkillInterface? Interface { get; set; }
+    [JsonPropertyName("path")]
+    public AbsolutePathBuf? Path { get; set; }
     [JsonPropertyName("shortDescription")]
     public string? ShortDescription { get; set; }
 }

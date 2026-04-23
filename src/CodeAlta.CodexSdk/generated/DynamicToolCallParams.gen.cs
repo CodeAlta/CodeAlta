@@ -18,4 +18,6 @@ public sealed partial record DynamicToolCallParams
     public string Tool { get; set; } = string.Empty;
     [JsonPropertyName("turnId")]
     public string TurnId { get; set; } = string.Empty;
+    [JsonPropertyName("namespace")]
+    public string? Namespace { get; set; }
 }

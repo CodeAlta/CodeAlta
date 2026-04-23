@@ -8,8 +8,14 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record AdditionalFileSystemPermissions
 {
+    [JsonPropertyName("entries")]
+    public List<FileSystemSandboxEntry>? Entries { get; set; }
+    [JsonPropertyName("globScanMaxDepth")]
+    public uint? GlobScanMaxDepth { get; set; }
+    /// <summary>This will be removed in favor of `entries`.</summary>
     [JsonPropertyName("read")]
     public List<AbsolutePathBuf>? Read { get; set; }
+    /// <summary>This will be removed in favor of `entries`.</summary>
     [JsonPropertyName("write")]
     public List<AbsolutePathBuf>? Write { get; set; }
 }

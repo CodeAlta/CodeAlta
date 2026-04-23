@@ -30,6 +30,9 @@ public sealed partial record TurnStartParams
     /// <summary>Optional JSON Schema used to constrain the final assistant message for this turn.</summary>
     [JsonPropertyName("outputSchema")]
     public JsonElement? OutputSchema { get; set; }
+    /// <summary>Override the full permissions profile for this turn and subsequent turns. Cannot be combined with `sandboxPolicy`.</summary>
+    [JsonPropertyName("permissionProfile")]
+    public PermissionProfile? PermissionProfile { get; set; }
     /// <summary>Override the personality for this turn and subsequent turns.</summary>
     [JsonPropertyName("personality")]
     public Personality? Personality { get; set; }

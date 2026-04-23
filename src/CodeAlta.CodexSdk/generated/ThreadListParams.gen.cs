@@ -14,9 +14,9 @@ public sealed partial record ThreadListParams
     /// <summary>Opaque pagination cursor returned by a previous call.</summary>
     [JsonPropertyName("cursor")]
     public string? Cursor { get; set; }
-    /// <summary>Optional cwd filter; when set, only threads whose session cwd exactly matches this path are returned.</summary>
+    /// <summary>Optional cwd filter or filters; when set, only threads whose session cwd exactly matches one of these paths are returned.</summary>
     [JsonPropertyName("cwd")]
-    public string? Cwd { get; set; }
+    public ThreadListCwdFilter? Cwd { get; set; }
     /// <summary>Optional page size; defaults to a reasonable server-side value.</summary>
     [JsonPropertyName("limit")]
     public uint? Limit { get; set; }
@@ -26,10 +26,16 @@ public sealed partial record ThreadListParams
     /// <summary>Optional substring filter for the extracted thread title.</summary>
     [JsonPropertyName("searchTerm")]
     public string? SearchTerm { get; set; }
+    /// <summary>Optional sort direction; defaults to descending (newest first).</summary>
+    [JsonPropertyName("sortDirection")]
+    public SortDirection? SortDirection { get; set; }
     /// <summary>Optional sort key; defaults to created_at.</summary>
     [JsonPropertyName("sortKey")]
     public ThreadSortKey? SortKey { get; set; }
     /// <summary>Optional source filter; when set, only sessions from these source kinds are returned. When omitted or empty, defaults to interactive sources.</summary>
     [JsonPropertyName("sourceKinds")]
     public List<ThreadSourceKind>? SourceKinds { get; set; }
+    /// <summary>If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.</summary>
+    [JsonPropertyName("useStateDbOnly")]
+    public bool? UseStateDbOnly { get; set; }
 }

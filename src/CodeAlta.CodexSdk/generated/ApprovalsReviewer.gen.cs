@@ -7,13 +7,15 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.CodexSdk;
 
 /// <summary>
-/// Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `guardian_subagent` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request.
+/// Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<ApprovalsReviewer>))]
 public enum ApprovalsReviewer
 {
     [JsonStringEnumMemberName("user")]
     User,
+    [JsonStringEnumMemberName("auto_review")]
+    AutoReview,
     [JsonStringEnumMemberName("guardian_subagent")]
     GuardianSubagent
 }

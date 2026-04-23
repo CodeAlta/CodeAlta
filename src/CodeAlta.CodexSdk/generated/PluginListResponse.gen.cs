@@ -14,6 +14,4 @@ public sealed partial record PluginListResponse
     public List<string>? FeaturedPluginIds { get; set; }
     [JsonPropertyName("marketplaceLoadErrors")]
     public List<MarketplaceLoadErrorInfo>? MarketplaceLoadErrors { get; set; }
-    [JsonPropertyName("remoteSyncError")]
-    public string? RemoteSyncError { get; set; }
 }

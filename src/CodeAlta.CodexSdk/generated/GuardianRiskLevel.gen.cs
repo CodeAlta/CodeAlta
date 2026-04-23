@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.CodexSdk;
 
 /// <summary>
-/// [UNSTABLE] Risk level assigned by guardian approval review.
+/// [UNSTABLE] Risk level assigned by approval auto-review.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<GuardianRiskLevel>))]
 public enum GuardianRiskLevel

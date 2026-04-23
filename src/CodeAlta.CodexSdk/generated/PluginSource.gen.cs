@@ -6,10 +6,33 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexSdk;
 
-public sealed partial record PluginSource
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(LocalPluginSource), typeDiscriminator: "local")]
+[JsonDerivedType(typeof(GitPluginSource), typeDiscriminator: "git")]
+[JsonDerivedType(typeof(RemotePluginSource), typeDiscriminator: "remote")]
+public abstract partial record PluginSource
 {
-    [JsonPropertyName("path")]
-    public AbsolutePathBuf Path { get; set; } = default!;
-    [JsonPropertyName("type")]
-    public string Type { get; set; } = string.Empty;
+    public sealed partial record LocalPluginSource : PluginSource
+    {
+        [JsonPropertyName("path")]
+        public AbsolutePathBuf Path { get; set; } = default!;
+    }
+
+    public sealed partial record GitPluginSource : PluginSource
+    {
+        [JsonPropertyName("path")]
+        public string? Path { get; set; }
+        [JsonPropertyName("refName")]
+        public string? RefName { get; set; }
+        [JsonPropertyName("sha")]
+        public string? Sha { get; set; }
+        [JsonPropertyName("url")]
+        public string Url { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// The plugin is available in the remote catalog. Download metadata is kept server-side and is not exposed through the app-server API.
+    /// </summary>
+    public sealed partial record RemotePluginSource : PluginSource;
+
 }

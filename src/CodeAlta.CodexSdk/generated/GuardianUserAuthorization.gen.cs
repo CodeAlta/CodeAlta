@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.CodexSdk;
 
 /// <summary>
-/// [UNSTABLE] Authorization level assigned by guardian approval review.
+/// [UNSTABLE] Authorization level assigned by approval auto-review.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<GuardianUserAuthorization>))]
 public enum GuardianUserAuthorization

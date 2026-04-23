@@ -10,6 +10,9 @@ public sealed partial record ThreadListResponse
 {
     [JsonPropertyName("data")]
     public List<Thread> Data { get; set; } = [];
+    /// <summary>Opaque cursor to pass as `cursor` when reversing `sortDirection`. This is only populated when the page contains at least one thread. Use it with the opposite `sortDirection`; for timestamp sorts it anchors at the start of the page timestamp so same-second updates are not skipped.</summary>
+    [JsonPropertyName("backwardsCursor")]
+    public string? BackwardsCursor { get; set; }
     /// <summary>Opaque cursor to pass to the next call to continue after the last item. if None, there are no more items to return.</summary>
     [JsonPropertyName("nextCursor")]
     public string? NextCursor { get; set; }

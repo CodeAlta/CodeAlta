@@ -126,6 +126,8 @@ public abstract partial record ThreadItem
         public McpToolCallError? Error { get; set; }
         [JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("mcpAppResourceUri")]
+        public string? McpAppResourceUri { get; set; }
         [JsonPropertyName("result")]
         public McpToolCallResult? Result { get; set; }
         [JsonPropertyName("server")]
@@ -147,6 +149,8 @@ public abstract partial record ThreadItem
         public long? DurationMs { get; set; }
         [JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("namespace")]
+        public string? Namespace { get; set; }
         [JsonPropertyName("status")]
         public DynamicToolCallStatus Status { get; set; } = default!;
         [JsonPropertyName("success")]

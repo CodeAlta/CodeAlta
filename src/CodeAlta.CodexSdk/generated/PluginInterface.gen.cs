@@ -10,14 +10,22 @@ public sealed partial record PluginInterface
 {
     [JsonPropertyName("capabilities")]
     public List<string> Capabilities { get; set; } = [];
+    /// <summary>Local screenshot paths, resolved from the installed plugin package.</summary>
     [JsonPropertyName("screenshots")]
     public List<AbsolutePathBuf> Screenshots { get; set; } = [];
+    /// <summary>Remote screenshot URLs from the plugin catalog.</summary>
+    [JsonPropertyName("screenshotUrls")]
+    public List<string> ScreenshotUrls { get; set; } = [];
     [JsonPropertyName("brandColor")]
     public string? BrandColor { get; set; }
     [JsonPropertyName("category")]
     public string? Category { get; set; }
+    /// <summary>Local composer icon path, resolved from the installed plugin package.</summary>
     [JsonPropertyName("composerIcon")]
     public AbsolutePathBuf? ComposerIcon { get; set; }
+    /// <summary>Remote composer icon URL from the plugin catalog.</summary>
+    [JsonPropertyName("composerIconUrl")]
+    public string? ComposerIconUrl { get; set; }
     /// <summary>Starter prompts for the plugin. Capped at 3 entries with a maximum of 128 characters per entry.</summary>
     [JsonPropertyName("defaultPrompt")]
     public List<string>? DefaultPrompt { get; set; }
@@ -25,8 +33,12 @@ public sealed partial record PluginInterface
     public string? DeveloperName { get; set; }
     [JsonPropertyName("displayName")]
     public string? DisplayName { get; set; }
+    /// <summary>Local logo path, resolved from the installed plugin package.</summary>
     [JsonPropertyName("logo")]
     public AbsolutePathBuf? Logo { get; set; }
+    /// <summary>Remote logo URL from the plugin catalog.</summary>
+    [JsonPropertyName("logoUrl")]
+    public string? LogoUrl { get; set; }
     [JsonPropertyName("longDescription")]
     public string? LongDescription { get; set; }
     [JsonPropertyName("privacyPolicyUrl")]

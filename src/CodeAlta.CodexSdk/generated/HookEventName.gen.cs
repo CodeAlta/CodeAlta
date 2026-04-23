@@ -11,6 +11,8 @@ public enum HookEventName
 {
     [JsonStringEnumMemberName("preToolUse")]
     PreToolUse,
+    [JsonStringEnumMemberName("permissionRequest")]
+    PermissionRequest,
     [JsonStringEnumMemberName("postToolUse")]
     PostToolUse,
     [JsonStringEnumMemberName("sessionStart")]

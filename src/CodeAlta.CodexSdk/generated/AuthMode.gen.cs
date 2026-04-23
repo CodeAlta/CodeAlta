@@ -17,5 +17,7 @@ public enum AuthMode
     [JsonStringEnumMemberName("chatgpt")]
     Chatgpt,
     [JsonStringEnumMemberName("chatgptAuthTokens")]
-    ChatgptAuthTokens
+    ChatgptAuthTokens,
+    [JsonStringEnumMemberName("agentIdentity")]
+    AgentIdentity
 }

@@ -35,6 +35,7 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(ItemCommandExecutionOutputDeltaNotification), typeDiscriminator: "item/commandExecution/outputDelta")]
 [JsonDerivedType(typeof(ItemCommandExecutionTerminalInteractionNotification), typeDiscriminator: "item/commandExecution/terminalInteraction")]
 [JsonDerivedType(typeof(ItemFileChangeOutputDeltaNotification), typeDiscriminator: "item/fileChange/outputDelta")]
+[JsonDerivedType(typeof(ItemFileChangePatchUpdatedNotification), typeDiscriminator: "item/fileChange/patchUpdated")]
 [JsonDerivedType(typeof(ServerRequestResolvedNotification), typeDiscriminator: "serverRequest/resolved")]
 [JsonDerivedType(typeof(ItemMcpToolCallProgressNotification), typeDiscriminator: "item/mcpToolCall/progress")]
 [JsonDerivedType(typeof(McpServerOauthLoginCompletedNotification), typeDiscriminator: "mcpServer/oauthLogin/completed")]
@@ -42,12 +43,16 @@ namespace CodeAlta.CodexSdk;
 [JsonDerivedType(typeof(AccountUpdatedNotification), typeDiscriminator: "account/updated")]
 [JsonDerivedType(typeof(AccountRateLimitsUpdatedNotification), typeDiscriminator: "account/rateLimits/updated")]
 [JsonDerivedType(typeof(AppListUpdatedNotification), typeDiscriminator: "app/list/updated")]
+[JsonDerivedType(typeof(ExternalAgentConfigImportCompletedNotification), typeDiscriminator: "externalAgentConfig/import/completed")]
 [JsonDerivedType(typeof(FsChangedNotification), typeDiscriminator: "fs/changed")]
 [JsonDerivedType(typeof(ItemReasoningSummaryTextDeltaNotification), typeDiscriminator: "item/reasoning/summaryTextDelta")]
 [JsonDerivedType(typeof(ItemReasoningSummaryPartAddedNotification), typeDiscriminator: "item/reasoning/summaryPartAdded")]
 [JsonDerivedType(typeof(ItemReasoningTextDeltaNotification), typeDiscriminator: "item/reasoning/textDelta")]
 [JsonDerivedType(typeof(ThreadCompactedNotification), typeDiscriminator: "thread/compacted")]
 [JsonDerivedType(typeof(ModelReroutedNotification), typeDiscriminator: "model/rerouted")]
+[JsonDerivedType(typeof(ModelVerificationNotification), typeDiscriminator: "model/verification")]
+[JsonDerivedType(typeof(WarningNotification), typeDiscriminator: "warning")]
+[JsonDerivedType(typeof(GuardianWarningNotification), typeDiscriminator: "guardianWarning")]
 [JsonDerivedType(typeof(DeprecationNoticeNotification), typeDiscriminator: "deprecationNotice")]
 [JsonDerivedType(typeof(ConfigWarningNotification), typeDiscriminator: "configWarning")]
 [JsonDerivedType(typeof(FuzzyFileSearchSessionUpdatedNotification), typeDiscriminator: "fuzzyFileSearch/sessionUpdated")]
@@ -224,6 +229,12 @@ public abstract partial record ServerNotification
         public FileChangeOutputDeltaNotification Params { get; set; } = default!;
     }
 
+    public sealed partial record ItemFileChangePatchUpdatedNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public FileChangePatchUpdatedNotification Params { get; set; } = default!;
+    }
+
     public sealed partial record ServerRequestResolvedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
@@ -266,6 +277,12 @@ public abstract partial record ServerNotification
         public AppListUpdatedNotification Params { get; set; } = default!;
     }
 
+    public sealed partial record ExternalAgentConfigImportCompletedNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public ExternalAgentConfigImportCompletedNotification Params { get; set; } = default!;
+    }
+
     public sealed partial record FsChangedNotification : ServerNotification
     {
         [JsonPropertyName("params")]
@@ -303,6 +320,24 @@ public abstract partial record ServerNotification
     {
         [JsonPropertyName("params")]
         public ModelReroutedNotification Params { get; set; } = default!;
+    }
+
+    public sealed partial record ModelVerificationNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public ModelVerificationNotification Params { get; set; } = default!;
+    }
+
+    public sealed partial record WarningNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public WarningNotification Params { get; set; } = default!;
+    }
+
+    public sealed partial record GuardianWarningNotification : ServerNotification
+    {
+        [JsonPropertyName("params")]
+        public GuardianWarningNotification Params { get; set; } = default!;
     }
 
     public sealed partial record DeprecationNoticeNotification : ServerNotification

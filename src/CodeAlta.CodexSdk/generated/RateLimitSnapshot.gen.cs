@@ -18,6 +18,8 @@ public sealed partial record RateLimitSnapshot
     public PlanType? PlanType { get; set; }
     [JsonPropertyName("primary")]
     public RateLimitWindow? Primary { get; set; }
+    [JsonPropertyName("rateLimitReachedType")]
+    public RateLimitReachedType? RateLimitReachedType { get; set; }
     [JsonPropertyName("secondary")]
     public RateLimitWindow? Secondary { get; set; }
 }

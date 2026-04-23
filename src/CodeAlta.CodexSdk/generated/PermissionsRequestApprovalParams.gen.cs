@@ -8,6 +8,8 @@ namespace CodeAlta.CodexSdk;
 
 public sealed partial record PermissionsRequestApprovalParams
 {
+    [JsonPropertyName("cwd")]
+    public AbsolutePathBuf Cwd { get; set; } = default!;
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = string.Empty;
     [JsonPropertyName("permissions")]

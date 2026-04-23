@@ -10,8 +10,8 @@ public sealed partial record McpResourceReadParams
 {
     [JsonPropertyName("server")]
     public string Server { get; set; } = string.Empty;
-    [JsonPropertyName("threadId")]
-    public string ThreadId { get; set; } = string.Empty;
     [JsonPropertyName("uri")]
     public string Uri { get; set; } = string.Empty;
+    [JsonPropertyName("threadId")]
+    public string? ThreadId { get; set; }
 }
