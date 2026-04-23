@@ -30,6 +30,10 @@ public sealed class McpInfrastructureTests
         CollectionAssert.Contains(names, "codealta.agents.register");
         CollectionAssert.Contains(names, "codealta.roles.list");
         CollectionAssert.Contains(names, "codealta.skills.list");
+        CollectionAssert.Contains(names, "codealta.skills.get");
+        CollectionAssert.Contains(names, "codealta.skills.get_resource");
+        CollectionAssert.Contains(names, "codealta.skills.validate");
+        CollectionAssert.Contains(names, "codealta.skills.activate");
         CollectionAssert.Contains(names, "codealta.bootstrap.ensure_global_repo");
         CollectionAssert.Contains(names, "codealta.dotnet.list_projects");
     }
@@ -185,6 +189,90 @@ public sealed class McpInfrastructureTests
         Assert.AreEqual(JsonValueKind.Array, payload.RootElement.ValueKind);
         Assert.IsTrue(payload.RootElement.EnumerateArray().Any(x =>
             string.Equals(x.GetProperty("name").GetString(), "sample-skill", StringComparison.OrdinalIgnoreCase)));
+        var sample = payload.RootElement.EnumerateArray().Single(x => string.Equals(x.GetProperty("name").GetString(), "sample-skill", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(sample.GetProperty("isModelVisible").GetBoolean());
+        Assert.AreEqual("ProjectAlta", sample.GetProperty("sourceKind").GetString());
+    }
+
+    [TestMethod]
+    public async Task Mcp_Skills_Get_ReturnsParsedMetadataAndBody()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var result = await context.Connection.Client.CallToolAsync(
+            "codealta.skills.get",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = "project",
+                ["projectSlug"] = "repo-main",
+                ["skillName"] = "sample-skill",
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(result));
+        Assert.AreEqual("sample-skill", payload.RootElement.GetProperty("name").GetString());
+        Assert.AreEqual("Apache-2.0", payload.RootElement.GetProperty("frontmatter").GetProperty("license").GetString());
+        StringAssert.Contains(payload.RootElement.GetProperty("body").GetString()!, "Demo skill used for MCP tests.");
+        StringAssert.Contains(payload.RootElement.GetProperty("rawContent").GetString()!, "allowed-tools: Read");
+    }
+
+    [TestMethod]
+    public async Task Mcp_Skills_GetResource_ReturnsResourceTextAndBase64()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var result = await context.Connection.Client.CallToolAsync(
+            "codealta.skills.get_resource",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = "project",
+                ["projectSlug"] = "repo-main",
+                ["skillName"] = "sample-skill",
+                ["relativePath"] = "references/guide.md",
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(result));
+        Assert.AreEqual("guide text", payload.RootElement.GetProperty("text").GetString());
+        Assert.AreEqual("references/guide.md", payload.RootElement.GetProperty("relativePath").GetString());
+        Assert.IsFalse(string.IsNullOrWhiteSpace(payload.RootElement.GetProperty("contentBase64").GetString()));
+    }
+
+    [TestMethod]
+    public async Task Mcp_Skills_Validate_ReturnsStructuredDiagnostics()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var result = await context.Connection.Client.CallToolAsync(
+            "codealta.skills.validate",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = "project",
+                ["projectSlug"] = "repo-main",
+                ["skillName"] = "broken-skill",
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(result));
+        Assert.AreEqual(1, payload.RootElement.GetArrayLength());
+        var diagnostics = payload.RootElement[0].GetProperty("diagnostics");
+        Assert.IsTrue(diagnostics.EnumerateArray().Any(x => string.Equals(x.GetProperty("code").GetString(), "unknown-frontmatter-field", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public async Task Mcp_Skills_Activate_ReturnsCanonicalPayload()
+    {
+        await using var context = await TestContext.CreateAsync().ConfigureAwait(false);
+
+        var result = await context.Connection.Client.CallToolAsync(
+            "codealta.skills.activate",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = "project",
+                ["projectSlug"] = "repo-main",
+                ["skillName"] = "sample-skill",
+            }).ConfigureAwait(false);
+
+        var payload = ParseJson(ReadTextContent(result));
+        StringAssert.Contains(payload.RootElement.GetProperty("payload").GetString()!, "<skill_content name=\"sample-skill\"");
+        Assert.IsTrue(payload.RootElement.GetProperty("files").EnumerateArray().Any(x => string.Equals(x.GetString(), "references/guide.md", StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]
@@ -405,14 +493,38 @@ public sealed class McpInfrastructureTests
                 # Main Repo
                 """).ConfigureAwait(false);
 
-            var skillRoot = Path.Combine(globalRepoRoot, "checkouts", "Repo.Main", ".alta", "skills", "sample-skill");
+            var checkoutRoot = Path.Combine(globalRepoRoot, "checkouts", "Repo.Main");
+            var skillRoot = Path.Combine(checkoutRoot, ".alta", "skills", "sample-skill");
+            var brokenSkillRoot = Path.Combine(checkoutRoot, ".agents", "skills", "broken-skill");
             Directory.CreateDirectory(skillRoot);
+            Directory.CreateDirectory(brokenSkillRoot);
             await File.WriteAllTextAsync(
                 Path.Combine(skillRoot, "SKILL.md"),
                 """
+                ---
+                name: sample-skill
+                description: Demo skill used for MCP tests.
+                license: Apache-2.0
+                compatibility: Requires test checkout access.
+                metadata:
+                  owner: tests
+                allowed-tools: Read
+                ---
                 # Sample Skill
 
                 Demo skill used for MCP tests.
+                """).ConfigureAwait(false);
+            Directory.CreateDirectory(Path.Combine(skillRoot, "references"));
+            await File.WriteAllTextAsync(Path.Combine(skillRoot, "references", "guide.md"), "guide text").ConfigureAwait(false);
+            await File.WriteAllTextAsync(
+                Path.Combine(brokenSkillRoot, "SKILL.md"),
+                """
+                ---
+                name: broken-skill
+                description: Broken skill used for diagnostics.
+                unsupported: true
+                ---
+                # Broken Skill
                 """).ConfigureAwait(false);
         }
 
