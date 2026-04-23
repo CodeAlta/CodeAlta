@@ -42,6 +42,7 @@
   <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
   <Project Path="CodeAlta.Persistence.Tests/CodeAlta.Persistence.Tests.csproj" />
   <Project Path="CodeAlta.Persistence/CodeAlta.Persistence.csproj" />
+  <Project Path="CodeAlta.Search/CodeAlta.Search.csproj" />
   <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
   <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
   <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
