@@ -1,5 +1,10 @@
+#pragma warning disable OPENAI001
+
 using System.ClientModel.Primitives;
 using System.Net;
+using CodeAlta.Agent;
+using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.CodexSubscription;
 
 namespace CodeAlta.Tests;
@@ -103,6 +108,75 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsFalse(handler.Requests[0].ContainsKey("x-codex-turn-state"));
         Assert.AreEqual("sticky-state", handler.Requests[1]["x-codex-turn-state"]);
         Assert.IsFalse(handler.Requests[2].ContainsKey("x-codex-turn-state"));
+    }
+
+    [TestMethod]
+    public async Task Pipeline_ResolvesAccountHeadersFromAuthManager()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
+        await store.SaveAsync(
+                "codex_subscription",
+                new OpenAICodexSubscriptionCredential
+                {
+                    AccessToken = "access-secret",
+                    ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                    AccountId = "acct_from_store",
+                    IsFedRamp = true,
+                })
+            .ConfigureAwait(false);
+        var handler = new RecordingHttpMessageHandler(CreateResponse());
+        using var httpClient = new HttpClient(handler);
+        var authManager = new OpenAICodexSubscriptionAuthManager(
+            store,
+            new OpenAICodexSubscriptionOAuthClient(new HttpClient(new RecordingHttpMessageHandler())),
+            "codex_subscription");
+        var pipeline = CreatePipeline(
+            authManager,
+            new CodexSubscriptionHeaderContext(
+                AccountId: null,
+                SessionId: "session_456",
+                IsFedRamp: false,
+                SendResponsesBetaHeader: true,
+                TurnState: new CodexTurnState(),
+                AuthManager: authManager),
+            httpClient);
+
+        await SendAsync(pipeline).ConfigureAwait(false);
+
+        Assert.AreEqual("acct_from_store", handler.Requests[0]["ChatGPT-Account-Id"]);
+        Assert.AreEqual("true", handler.Requests[0]["X-OpenAI-Fedramp"]);
+    }
+
+    [TestMethod]
+    public void SdkFactory_CreatesCodexSubscriptionClientWithConfiguredEndpoint()
+    {
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            StateRootPath = AppContext.BaseDirectory,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        };
+        var client = OpenAIProviderSdkFactory.CreateResponsesClient(
+            provider,
+            new OpenAIResponsesClientFactoryContext(
+                "gpt-5.3-codex",
+                "session_456",
+                new AgentRunId("run_789"),
+                new LocalAgentProviderDescriptor
+                {
+                    ProtocolFamily = "openai-codex-subscription",
+                    ProviderKey = "codex_subscription",
+                    DisplayName = "Codex (ChatGPT subscription)",
+                    BackendId = new AgentBackendId("codex_subscription"),
+                    TransportKind = LocalAgentTransportKind.OpenAIResponses,
+                }));
+
+        Assert.AreEqual("https://chatgpt.com/backend-api/codex", client.Endpoint.ToString());
     }
 
     private static ClientPipeline CreatePipeline(

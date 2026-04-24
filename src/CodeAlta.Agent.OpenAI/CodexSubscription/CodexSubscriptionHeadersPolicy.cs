@@ -21,7 +21,7 @@ internal sealed class CodexSubscriptionHeadersPolicy : PipelinePolicy
 
     public override async ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
     {
-        ApplyRequestHeaders(message);
+        await ApplyRequestHeadersAsync(message).ConfigureAwait(false);
         await ProcessNextAsync(message, pipeline, currentIndex).ConfigureAwait(false);
         CaptureResponseHeaders(message);
     }
@@ -29,10 +29,36 @@ internal sealed class CodexSubscriptionHeadersPolicy : PipelinePolicy
     private void ApplyRequestHeaders(PipelineMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
+        var accountContext = _context.AuthManager is null
+            ? null
+            : _context.AuthManager
+                .GetAccountContextAsync(message.CancellationToken)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+        ApplyRequestHeadersCore(message, accountContext);
+    }
+
+    private async ValueTask ApplyRequestHeadersAsync(PipelineMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        var accountContext = _context.AuthManager is null
+            ? null
+            : await _context.AuthManager.GetAccountContextAsync(message.CancellationToken).ConfigureAwait(false);
+        ApplyRequestHeadersCore(message, accountContext);
+    }
+
+    private void ApplyRequestHeadersCore(
+        PipelineMessage message,
+        OpenAICodexSubscriptionAccountContext? accountContext)
+    {
         var headers = message.Request.Headers;
-        if (!string.IsNullOrWhiteSpace(_context.AccountId))
+        var accountId = !string.IsNullOrWhiteSpace(_context.AccountId)
+            ? _context.AccountId
+            : accountContext?.AccountId;
+        if (!string.IsNullOrWhiteSpace(accountId))
         {
-            headers.Set("ChatGPT-Account-Id", _context.AccountId);
+            headers.Set("ChatGPT-Account-Id", accountId);
         }
 
         headers.Set("originator", "codealta");
@@ -46,7 +72,7 @@ internal sealed class CodexSubscriptionHeadersPolicy : PipelinePolicy
             headers.Set("session_id", _context.SessionId);
         }
 
-        if (_context.IsFedRamp)
+        if (_context.IsFedRamp || accountContext?.IsFedRamp == true)
         {
             headers.Set("X-OpenAI-Fedramp", "true");
         }
@@ -72,4 +98,5 @@ internal sealed record CodexSubscriptionHeaderContext(
     string? SessionId,
     bool IsFedRamp,
     bool SendResponsesBetaHeader,
-    CodexTurnState TurnState);
+    CodexTurnState TurnState,
+    OpenAICodexSubscriptionAuthManager? AuthManager = null);

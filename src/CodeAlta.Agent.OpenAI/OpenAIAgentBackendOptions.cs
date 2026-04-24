@@ -128,6 +128,8 @@ public sealed class OpenAIProviderOptions
 
     internal Func<OpenAIResponsesClientFactoryContext, ResponsesClient>? ResponsesClientContextFactory { get; set; }
 
+    internal string? StateRootPath { get; set; }
+
     internal Func<string?, ChatClient>? ChatClientFactory { get; set; }
 
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }

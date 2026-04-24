@@ -1,8 +1,10 @@
 #pragma warning disable OPENAI001
 
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.ModelCatalog;
+using CodeAlta.Agent.OpenAI.CodexSubscription;
 using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Models;
@@ -14,6 +16,7 @@ namespace CodeAlta.Agent.OpenAI;
 internal static class OpenAIProviderSdkFactory
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
+    private static readonly HttpClient CodexOAuthHttpClient = new();
 
     public static OpenAIClient CreateClient(OpenAIProviderOptions provider)
         => new(CreateCredential(provider), CreateClientOptions(provider));
@@ -33,6 +36,11 @@ internal static class OpenAIProviderSdkFactory
         if (provider.ResponsesClientContextFactory is not null)
         {
             return provider.ResponsesClientContextFactory(context);
+        }
+
+        if (provider.CodexSubscription is not null)
+        {
+            return CreateCodexSubscriptionResponsesClient(provider, context);
         }
 
         return CreateResponsesClient(provider, context.ModelId);
@@ -115,6 +123,49 @@ internal static class OpenAIProviderSdkFactory
             OrganizationId = provider.OrganizationId,
             ProjectId = provider.ProjectId,
         };
+
+    private static ResponsesClient CreateCodexSubscriptionResponsesClient(
+        OpenAIProviderOptions provider,
+        OpenAIResponsesClientFactoryContext context)
+    {
+        var options = provider.CodexSubscription
+            ?? throw new InvalidOperationException("Codex subscription options are required.");
+        var stateRootPath = string.IsNullOrWhiteSpace(provider.StateRootPath)
+            ? Path.Combine(AppContext.BaseDirectory, ".codealta-state")
+            : provider.StateRootPath;
+        var credentialStore = new FileOpenAICodexSubscriptionCredentialStore(stateRootPath);
+        var authManager = new OpenAICodexSubscriptionAuthManager(
+            credentialStore,
+            new OpenAICodexSubscriptionOAuthClient(CodexOAuthHttpClient),
+            provider.ProviderKey,
+            options.AuthSource,
+            options.AccountId,
+            CodexAuthFileReader.ResolveCodexHome());
+        var clientOptions = CreateClientOptions(provider);
+        clientOptions.UserAgentApplicationId = CreateCodeAltaUserAgentApplicationId();
+        clientOptions.AddPolicy(
+            new CodexSubscriptionHeadersPolicy(
+                new CodexSubscriptionHeaderContext(
+                    AccountId: options.AccountId,
+                    SessionId: context.SessionId,
+                    IsFedRamp: false,
+                    SendResponsesBetaHeader: options.SendResponsesBetaHeader,
+                    TurnState: new CodexTurnState(),
+                    AuthManager: authManager)),
+            PipelinePosition.BeforeTransport);
+
+        return new ResponsesClient(
+            new ChatGptOAuthAuthenticationPolicy(authManager),
+            clientOptions);
+    }
+
+    private static string CreateCodeAltaUserAgentApplicationId()
+    {
+        var version = typeof(OpenAIProviderSdkFactory).Assembly.GetName().Version?.ToString();
+        return string.IsNullOrWhiteSpace(version)
+            ? "CodeAlta"
+            : "CodeAlta/" + version;
+    }
 
     private static bool TryListModelsFromCatalog(
         OpenAIProviderOptions provider,

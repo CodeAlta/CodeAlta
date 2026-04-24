@@ -36,6 +36,11 @@ internal static class OpenAIBackendFactory
             throw new ArgumentException("At least one provider registration is required.", nameof(options));
         }
 
+        foreach (var provider in options.Providers)
+        {
+            provider.StateRootPath ??= options.StateRootPath;
+        }
+
         return new LocalAgentBackend(
             backendId,
             displayName,
