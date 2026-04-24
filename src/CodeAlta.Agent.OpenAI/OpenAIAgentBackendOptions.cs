@@ -136,6 +136,8 @@ public sealed class OpenAIProviderOptions
 
     internal HttpClient? CodexSubscriptionHttpClient { get; set; }
 
+    internal Func<CancellationToken, ValueTask>? CodexSubscriptionCredentialRefreshAsync { get; set; }
+
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
 }
 

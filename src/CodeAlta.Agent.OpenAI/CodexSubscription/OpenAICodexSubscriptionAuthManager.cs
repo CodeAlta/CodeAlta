@@ -65,6 +65,22 @@ internal sealed class OpenAICodexSubscriptionAuthManager
     public async ValueTask<string> GetAccessTokenAsync(CancellationToken cancellationToken = default)
         => (await GetCredentialAsync(cancellationToken).ConfigureAwait(false)).AccessToken;
 
+    public async ValueTask ForceRefreshCredentialAsync(CancellationToken cancellationToken = default)
+    {
+        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var credential = await LoadCredentialAsync(cancellationToken, forceReload: true).ConfigureAwait(false);
+            var refreshed = await RefreshAsync(credential, cancellationToken).ConfigureAwait(false);
+            _cachedCredential = refreshed;
+            await _credentialStore.SaveAsync(_providerKey, refreshed, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
     public async ValueTask<OpenAICodexSubscriptionAccountContext> GetAccountContextAsync(
         CancellationToken cancellationToken = default)
     {

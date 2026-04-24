@@ -57,6 +57,29 @@ internal static class OpenAIProviderSdkFactory
             ? provider.ChatClientFactory(model)
             : new ChatClient(model ?? string.Empty, CreateCredential(provider), CreateClientOptions(provider));
 
+    public static async ValueTask ForceRefreshCodexSubscriptionCredentialAsync(
+        OpenAIProviderOptions provider,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (provider.CodexSubscription is not { } options)
+        {
+            return;
+        }
+
+        if (provider.CodexSubscriptionCredentialRefreshAsync is not null)
+        {
+            await provider.CodexSubscriptionCredentialRefreshAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var authManager = CreateCodexSubscriptionAuthManager(
+            provider,
+            options,
+            ResolveStateRootPath(provider));
+        await authManager.ForceRefreshCredentialAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public static OpenAIModelClient CreateModelClient(OpenAIProviderOptions provider)
         => CreateClient(provider).GetOpenAIModelClient();
 

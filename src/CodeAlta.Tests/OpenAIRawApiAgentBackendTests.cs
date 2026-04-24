@@ -1206,6 +1206,82 @@ public sealed class OpenAIRawApiAgentBackendTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_RefreshesCodexCredentialOnceAfterUnauthorized()
+    {
+        var unauthorized = new HttpRequestException("Unauthorized.", null, HttpStatusCode.Unauthorized);
+        var responsesClient = new FlakyOpenAIResponseClient(
+            [unauthorized],
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-after-refresh",
+                    modelId: "gpt-5.3-codex",
+                    text: "Authorized answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: null),
+            ]);
+        var refreshCount = 0;
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscriptionCredentialRefreshAsync = _ =>
+            {
+                refreshCount++;
+                return ValueTask.CompletedTask;
+            },
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateCodexTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(1, refreshCount);
+        Assert.AreEqual(2, responsesClient.RequestCount);
+        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        Assert.AreEqual("Authorized answer.", text);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_RefreshesCodexCredentialOnlyOnceAfterUnauthorized()
+    {
+        var responsesClient = new FlakyOpenAIResponseClient(
+            [
+                new HttpRequestException("Unauthorized once.", null, HttpStatusCode.Unauthorized),
+                new HttpRequestException("Unauthorized twice.", null, HttpStatusCode.Unauthorized),
+            ],
+            []);
+        var refreshCount = 0;
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscriptionCredentialRefreshAsync = _ =>
+            {
+                refreshCount++;
+                return ValueTask.CompletedTask;
+            },
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, refreshCount);
+        Assert.AreEqual(2, responsesClient.RequestCount);
+        StringAssert.Contains(exception.Failure.Message, "re-authentication");
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_RetriesCodexTransientErrorsWithinBudget()
     {
         var transient = new HttpRequestException("Service unavailable.", null, HttpStatusCode.ServiceUnavailable);

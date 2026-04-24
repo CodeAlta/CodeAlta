@@ -31,6 +31,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         try
         {
             var retryBudget = provider.CodexSubscription is null ? 1 : 3;
+            var refreshedCredentialAfterUnauthorized = false;
             for (var attempt = 1; ; attempt++)
             {
                 var streamStarted = false;
@@ -148,6 +149,27 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                         ProviderState = CreateProviderState(completedResponse),
                         Summary = ExtractSummary(assistantMessage),
                     };
+                }
+                catch (Exception ex) when (ShouldRefreshCodexSubscriptionCredential(
+                    provider,
+                    ex,
+                    streamStarted,
+                    refreshedCredentialAfterUnauthorized))
+                {
+                    refreshedCredentialAfterUnauthorized = true;
+                    try
+                    {
+                        await OpenAIProviderSdkFactory.ForceRefreshCodexSubscriptionCredentialAsync(
+                                provider,
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception refreshException) when (refreshException is not OperationCanceledException)
+                    {
+                        throw new InvalidOperationException(
+                            "ChatGPT/Codex authentication failed; re-authentication is required.",
+                            refreshException);
+                    }
                 }
                 catch (Exception ex) when (ShouldRetryCodexSubscriptionRequest(
                     provider,
@@ -720,6 +742,16 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
         return exception;
     }
+
+    private static bool ShouldRefreshCodexSubscriptionCredential(
+        OpenAIProviderOptions provider,
+        Exception exception,
+        bool streamStarted,
+        bool alreadyRefreshed)
+        => provider.CodexSubscription is not null &&
+           !streamStarted &&
+           !alreadyRefreshed &&
+           exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized };
 
     private static bool ShouldRetryCodexSubscriptionRequest(
         OpenAIProviderOptions provider,
