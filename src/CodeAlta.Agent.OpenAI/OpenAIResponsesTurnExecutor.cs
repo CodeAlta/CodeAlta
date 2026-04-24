@@ -233,8 +233,39 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         }
 
         OpenAIExtraBodyPatchHelper.Apply(ref options.Patch, provider.ExtraBody);
+        provider.ResponsesRequestCustomizer?.Invoke(new OpenAIResponsesRequestCustomizationContext(request, options));
+
+        if (provider.CodexSubscription is not null)
+        {
+            ApplyCodexSubscriptionRequestCustomization(request, options, provider.CodexSubscription);
+        }
 
         return options;
+    }
+
+    private static void ApplyCodexSubscriptionRequestCustomization(
+        LocalAgentTurnRequest request,
+        CreateResponseOptions options,
+        OpenAICodexSubscriptionOptions codexOptions)
+    {
+        options.StoredOutputEnabled = false;
+        options.StreamingEnabled = true;
+        options.PreviousResponseId = null;
+
+        if (request.Tools.Count > 0)
+        {
+            options.ParallelToolCallsEnabled = true;
+            options.ToolChoice ??= ResponseToolChoice.CreateAutoChoice();
+        }
+
+        if (codexOptions.IncludeEncryptedReasoning &&
+            !options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent))
+        {
+            options.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
+        }
+
+        options.Patch.Set("$.prompt_cache_key"u8, request.SessionId);
+        options.Patch.Set("$.text.verbosity"u8, codexOptions.TextVerbosity);
     }
 
     private static string? ComposeInstructions(LocalAgentTurnRequest request)

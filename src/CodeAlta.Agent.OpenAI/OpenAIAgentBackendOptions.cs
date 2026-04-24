@@ -130,6 +130,8 @@ public sealed class OpenAIProviderOptions
 
     internal string? StateRootPath { get; set; }
 
+    internal Action<OpenAIResponsesRequestCustomizationContext>? ResponsesRequestCustomizer { get; set; }
+
     internal Func<string?, ChatClient>? ChatClientFactory { get; set; }
 
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
@@ -196,3 +198,7 @@ internal sealed record OpenAIResponsesClientFactoryContext(
     string SessionId,
     AgentRunId RunId,
     LocalAgentProviderDescriptor Provider);
+
+internal sealed record OpenAIResponsesRequestCustomizationContext(
+    LocalAgentTurnRequest Request,
+    CreateResponseOptions Options);

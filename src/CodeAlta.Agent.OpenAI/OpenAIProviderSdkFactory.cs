@@ -38,12 +38,17 @@ internal static class OpenAIProviderSdkFactory
             return provider.ResponsesClientContextFactory(context);
         }
 
+        if (provider.ResponsesClientFactory is not null)
+        {
+            return provider.ResponsesClientFactory(context.ModelId);
+        }
+
         if (provider.CodexSubscription is not null)
         {
             return CreateCodexSubscriptionResponsesClient(provider, context);
         }
 
-        return CreateResponsesClient(provider, context.ModelId);
+        return new ResponsesClient(CreateCredential(provider), CreateClientOptions(provider));
     }
 
     public static ChatClient CreateChatClient(OpenAIProviderOptions provider, string? model)

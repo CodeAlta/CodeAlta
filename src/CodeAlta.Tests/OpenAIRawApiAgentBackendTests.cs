@@ -784,6 +784,110 @@ public sealed class OpenAIRawApiAgentBackendTests
         Assert.AreEqual("gpt-test", capturedModel);
     }
 
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_InvokesRequestCustomizerAfterCommonMapping()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-customizer",
+                    modelId: "gpt-test",
+                    text: "Answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: null),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesRequestCustomizer = context =>
+            {
+                Assert.AreEqual("session-1", context.Request.SessionId);
+                context.Options.Patch.Set("$.customized"u8, true);
+            },
+        });
+
+        _ = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.IsTrue(responsesClient.Requests[0].Options.Patch.TryGetValue("$.customized"u8, out bool customized));
+        Assert.IsTrue(customized);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AppliesCodexSubscriptionRequestDeltas()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-codex",
+                    modelId: "gpt-5.3-codex",
+                    text: "Answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: "encrypted-reasoning"),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                IncludeEncryptedReasoning = true,
+                TextVerbosity = "low",
+            },
+        });
+        var request = CreateTurnRequest() with
+        {
+            Provider = CreateTurnRequest().Provider with
+            {
+                ProtocolFamily = "openai-codex-subscription",
+                ProviderKey = "codex_subscription",
+                DisplayName = "Codex (ChatGPT subscription)",
+                Profile = new LocalAgentProviderProfile
+                {
+                    SupportsStore = false,
+                    SupportsReasoningEffort = true,
+                },
+            },
+            ModelId = "gpt-5.3-codex",
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec(
+                        "inspect_file",
+                        "Inspect a file.",
+                        JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
+                    static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
+            ],
+        };
+
+        _ = await executor.ExecuteTurnAsync(
+            request,
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var options = responsesClient.Requests[0].Options;
+        Assert.IsFalse(options.StoredOutputEnabled);
+        Assert.IsTrue(options.StreamingEnabled);
+        Assert.IsTrue(options.ParallelToolCallsEnabled);
+        Assert.IsNotNull(options.ToolChoice);
+        Assert.IsNull(options.PreviousResponseId);
+        Assert.IsTrue(options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
+
+        using var document = JsonDocument.Parse(responsesClient.Requests[0].SerializedOptions);
+        Assert.IsFalse(document.RootElement.GetProperty("store").GetBoolean());
+        Assert.IsTrue(document.RootElement.GetProperty("stream").GetBoolean());
+        Assert.AreEqual("session-1", document.RootElement.GetProperty("prompt_cache_key").GetString());
+        Assert.AreEqual("low", document.RootElement.GetProperty("text").GetProperty("verbosity").GetString());
+        Assert.IsTrue(document.RootElement.GetProperty("include").EnumerateArray().Any(
+            static item => item.GetString() == "reasoning.encrypted_content"));
+    }
+
     private static StreamingResponseUpdate CreateAssistantResponseUpdate(
         string responseId,
         string modelId,
@@ -1006,7 +1110,10 @@ public sealed class OpenAIRawApiAgentBackendTests
             CancellationToken cancellationToken = default)
         {
             var clonedOptions = CloneOptions(options);
-            Requests.Add(new ResponseRequestRecord(clonedOptions.InputItems.ToArray(), clonedOptions));
+            Requests.Add(new ResponseRequestRecord(
+                clonedOptions.InputItems.ToArray(),
+                clonedOptions,
+                SerializeModel(options)));
             var requestIndex = Requests.Count - 1;
             var updates = requestIndex < responseBatches.Count
                 ? responseBatches[requestIndex]
@@ -1046,9 +1153,31 @@ public sealed class OpenAIRawApiAgentBackendTests
                     clone.Tools.Add(tool);
                 }
 
+                foreach (var includedProperty in options.IncludedProperties)
+                {
+                    clone.IncludedProperties.Add(includedProperty);
+                }
+
                 if (options.Patch.TryGetValue("$.custom_flag"u8, out bool customFlag))
                 {
                     clone.Patch.Set("$.custom_flag"u8, customFlag);
+                }
+
+                if (options.Patch.TryGetValue("$.customized"u8, out bool customized))
+                {
+                    clone.Patch.Set("$.customized"u8, customized);
+                }
+
+                if (options.Patch.TryGetValue("$.prompt_cache_key"u8, out string? promptCacheKey) &&
+                    promptCacheKey is not null)
+                {
+                    clone.Patch.Set("$.prompt_cache_key"u8, promptCacheKey);
+                }
+
+                if (options.Patch.TryGetValue("$.text.verbosity"u8, out string? textVerbosity) &&
+                    textVerbosity is not null)
+                {
+                    clone.Patch.Set("$.text.verbosity"u8, textVerbosity);
                 }
             }
 
@@ -1120,7 +1249,8 @@ public sealed class OpenAIRawApiAgentBackendTests
 
     private sealed record ResponseRequestRecord(
         IReadOnlyList<ResponseItem> InputItems,
-        CreateResponseOptions Options);
+        CreateResponseOptions Options,
+        string SerializedOptions);
 
     private sealed record ChatRequestRecord(
         IReadOnlyList<ChatMessage> Messages,
