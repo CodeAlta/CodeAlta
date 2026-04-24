@@ -230,6 +230,66 @@ public sealed class CodeAltaProviderDocument
     public string? ApiUrl { get; set; }
 
     /// <summary>
+    /// Gets or sets the ChatGPT/Codex OAuth credential source for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("auth_source")]
+    public string? AuthSource { get; set; }
+
+    /// <summary>
+    /// Gets or sets the explicit ChatGPT account or workspace identifier for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("account_id")]
+    public string? AccountId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum concurrent requests per ChatGPT account for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("max_concurrent_requests")]
+    public int? MaxConcurrentRequests { get; set; }
+
+    /// <summary>
+    /// Gets or sets the configured text verbosity for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("text_verbosity")]
+    public string? TextVerbosity { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether encrypted reasoning continuity should be requested for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("include_encrypted_reasoning")]
+    public bool? IncludeEncryptedReasoning { get; set; }
+
+    /// <summary>
+    /// Gets or sets the model discovery mode for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("model_discovery")]
+    public string? ModelDiscovery { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to send the Responses experimental beta header for the Codex subscription provider.
+    /// </summary>
+    [JsonPropertyName("send_responses_beta_header")]
+    public bool? SendResponsesBetaHeader { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to include a stable installation id in Codex subscription request metadata.
+    /// </summary>
+    [JsonPropertyName("send_installation_id")]
+    public bool? SendInstallationId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the installation id source used when installation metadata is enabled.
+    /// </summary>
+    [JsonPropertyName("installation_id_source")]
+    public string? InstallationIdSource { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the experimental Codex subscription provider is explicitly enabled.
+    /// </summary>
+    [JsonPropertyName("experimental")]
+    public bool? Experimental { get; set; }
+
+    /// <summary>
     /// Gets or sets the optional OpenAI organization id.
     /// </summary>
     [JsonPropertyName("organization_id")]

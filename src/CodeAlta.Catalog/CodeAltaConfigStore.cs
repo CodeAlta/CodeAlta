@@ -12,6 +12,14 @@ public sealed class CodeAltaConfigStore
 {
     private const string CodexProviderKey = "codex";
     private const string CopilotProviderKey = "copilot";
+    private const string CodexSubscriptionProviderType = "openai-codex-subscription";
+    private const string CodexSubscriptionDefaultDisplayName = "Codex (ChatGPT subscription)";
+    private const string CodexSubscriptionDefaultApiUrl = "https://chatgpt.com/backend-api/codex";
+    private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
+    private const string CodexSubscriptionDefaultTextVerbosity = "medium";
+    private const string CodexSubscriptionDefaultModelDiscovery = "codex_endpoint_with_static_fallback";
+    private const string CodexSubscriptionDefaultInstallationIdSource = "codealta_state";
+    private const int CodexSubscriptionDefaultMaxConcurrentRequests = 1;
 
     private static readonly CodeAltaProviderCompactionDocument DefaultCompaction = new()
     {
@@ -571,6 +579,11 @@ public sealed class CodeAltaConfigStore
         definition.ApiKey = NormalizeText(definition.ApiKey);
         definition.ApiKeyEnv = NormalizeText(definition.ApiKeyEnv);
         definition.ApiUrl = NormalizeText(definition.ApiUrl);
+        definition.AuthSource = NormalizeCodexSubscriptionAuthSource(definition.AuthSource);
+        definition.AccountId = NormalizeText(definition.AccountId);
+        definition.TextVerbosity = NormalizeCodexSubscriptionTextVerbosity(definition.TextVerbosity);
+        definition.ModelDiscovery = NormalizeCodexSubscriptionModelDiscovery(definition.ModelDiscovery);
+        definition.InstallationIdSource = NormalizeCodexSubscriptionInstallationIdSource(definition.InstallationIdSource);
         definition.OrganizationId = NormalizeText(definition.OrganizationId);
         definition.ProjectId = NormalizeText(definition.ProjectId);
         definition.Project = NormalizeText(definition.Project);
@@ -591,6 +604,47 @@ public sealed class CodeAltaConfigStore
 
     private static string? NormalizeText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeCodexSubscriptionAuthSource(string? value)
+        => NormalizeText(value)?.ToLowerInvariant() switch
+        {
+            null => null,
+            "codealta_oauth" => "codealta_oauth",
+            "codex_auth_import" => "codex_auth_import",
+            "codex_auth_file_readonly" => "codex_auth_file_readonly",
+            "external_token_command" => "external_token_command",
+            var normalized => normalized,
+        };
+
+    private static string? NormalizeCodexSubscriptionTextVerbosity(string? value)
+        => NormalizeText(value)?.ToLowerInvariant() switch
+        {
+            null => null,
+            "low" => "low",
+            "medium" => "medium",
+            "high" => "high",
+            var normalized => normalized,
+        };
+
+    private static string? NormalizeCodexSubscriptionModelDiscovery(string? value)
+        => NormalizeText(value)?.ToLowerInvariant() switch
+        {
+            null => null,
+            "codex_endpoint_with_static_fallback" => "codex_endpoint_with_static_fallback",
+            "codex_endpoint" => "codex_endpoint",
+            "static" => "static",
+            var normalized => normalized,
+        };
+
+    private static string? NormalizeCodexSubscriptionInstallationIdSource(string? value)
+        => NormalizeText(value)?.ToLowerInvariant() switch
+        {
+            null => null,
+            "codealta_state" => "codealta_state",
+            "codex_home_import" => "codex_home_import",
+            "codex_home_readonly" => "codex_home_readonly",
+            var normalized => normalized,
+        };
 
     private static List<string>? NormalizeList(List<string>? values)
     {
@@ -689,6 +743,7 @@ public sealed class CodeAltaConfigStore
             null => null,
             "openai" or "openai-chat" or "openai-chat-completions" or "chat" or "chat-completions" or "chat_completions" => "openai-chat",
             "openai-responses" or "responses" or "response" => "openai-responses",
+            "openai-codex-subscription" => CodexSubscriptionProviderType,
             "anthropic" or "anthropic-messages" or "messages" or "message" => "anthropic",
             "google" or "google-genai" or "google_genai" or "gemini" or "genai" => "google-genai",
             "vertex" or "vertex-ai" or "google-vertex" or "google_vertex" => "vertex-ai",
@@ -729,15 +784,41 @@ public sealed class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, anthropic, google-genai, vertex-ai.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, openai-codex-subscription, anthropic, google-genai, vertex-ai.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyReservedProviderDefaults(definition);
+        ApplyCodexSubscriptionDefaults(definition);
         ValidateReservedProviderKey(definition);
         ValidateProviderFields(definition);
     }
 
+    private static void ApplyCodexSubscriptionDefaults(CodeAltaProviderDocument definition)
+    {
+        if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        definition.DisplayName ??= CodexSubscriptionDefaultDisplayName;
+        definition.ApiUrl ??= CodexSubscriptionDefaultApiUrl;
+        definition.AuthSource ??= CodexSubscriptionDefaultAuthSource;
+        definition.MaxConcurrentRequests ??= CodexSubscriptionDefaultMaxConcurrentRequests;
+        definition.TextVerbosity ??= CodexSubscriptionDefaultTextVerbosity;
+        definition.IncludeEncryptedReasoning ??= true;
+        definition.ModelDiscovery ??= CodexSubscriptionDefaultModelDiscovery;
+        definition.SendResponsesBetaHeader ??= true;
+        definition.SendInstallationId ??= false;
+        definition.InstallationIdSource ??= CodexSubscriptionDefaultInstallationIdSource;
+        definition.Experimental ??= false;
+    }
+
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
+        if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
+        {
+            RejectCodexSubscriptionOnlyFields(definition);
+        }
+
         switch (definition.ProviderType)
         {
             case "codex":
@@ -763,6 +844,18 @@ public sealed class CodeAltaConfigStore
                     throw new InvalidOperationException($"providers.{definition.ProviderKey} requires api_key or api_key_env when enabled.");
                 }
 
+                break;
+
+            case CodexSubscriptionProviderType:
+                RejectCodexSubscriptionApiKeyFields(definition);
+                RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
+                RejectUnsupportedField(definition, "project_id", definition.ProjectId);
+                RejectUnsupportedField(definition, "project", definition.Project);
+                RejectUnsupportedField(definition, "location", definition.Location);
+                RejectUnsupportedField(definition, "models_dev_provider_id", definition.ModelsDevProviderId);
+                RejectUnsupportedField(definition, "single_model_id", definition.SingleModelId);
+                RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                ValidateCodexSubscriptionFields(definition);
                 break;
 
             case "anthropic":
@@ -819,7 +912,81 @@ public sealed class CodeAltaConfigStore
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} api_url must be an absolute URI.");
         }
+
+        if (string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(definition.ApiUrl) &&
+            Uri.TryCreate(definition.ApiUrl, UriKind.Absolute, out var codexSubscriptionUri) &&
+            !IsHttpsOrLocalhost(codexSubscriptionUri))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} api_url must use HTTPS except for localhost test transports.");
+        }
     }
+
+    private static void RejectCodexSubscriptionOnlyFields(CodeAltaProviderDocument definition)
+    {
+        RejectUnsupportedField(definition, "auth_source", definition.AuthSource);
+        RejectUnsupportedField(definition, "account_id", definition.AccountId);
+        RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
+        RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
+        RejectUnsupportedField(definition, "include_encrypted_reasoning", definition.IncludeEncryptedReasoning);
+        RejectUnsupportedField(definition, "model_discovery", definition.ModelDiscovery);
+        RejectUnsupportedField(definition, "send_responses_beta_header", definition.SendResponsesBetaHeader);
+        RejectUnsupportedField(definition, "send_installation_id", definition.SendInstallationId);
+        RejectUnsupportedField(definition, "installation_id_source", definition.InstallationIdSource);
+        RejectUnsupportedField(definition, "experimental", definition.Experimental);
+    }
+
+    private static void RejectCodexSubscriptionApiKeyFields(CodeAltaProviderDocument definition)
+    {
+        if (!string.IsNullOrWhiteSpace(definition.ApiKey) || !string.IsNullOrWhiteSpace(definition.ApiKeyEnv))
+        {
+            throw new InvalidOperationException(
+                $"providers.{definition.ProviderKey} uses ChatGPT OAuth; api_key and api_key_env are not supported for type '{CodexSubscriptionProviderType}'.");
+        }
+    }
+
+    private static void ValidateCodexSubscriptionFields(CodeAltaProviderDocument definition)
+    {
+        if (definition.Enabled != false && definition.Experimental != true)
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} requires experimental = true for type '{CodexSubscriptionProviderType}'.");
+        }
+
+        if (definition.Enabled != false && string.IsNullOrWhiteSpace(definition.Model))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} model is required for type '{CodexSubscriptionProviderType}'.");
+        }
+
+        if (definition.MaxConcurrentRequests is <= 0)
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} max_concurrent_requests must be greater than zero.");
+        }
+
+        if (definition.AuthSource is not ("codealta_oauth" or "codex_auth_import" or "codex_auth_file_readonly" or "external_token_command"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} auth_source must be one of: codealta_oauth, codex_auth_import, codex_auth_file_readonly, external_token_command.");
+        }
+
+        if (definition.TextVerbosity is not ("low" or "medium" or "high"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} text_verbosity must be one of: low, medium, high.");
+        }
+
+        if (definition.ModelDiscovery is not ("codex_endpoint_with_static_fallback" or "codex_endpoint" or "static"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} model_discovery must be one of: codex_endpoint_with_static_fallback, codex_endpoint, static.");
+        }
+
+        if (definition.InstallationIdSource is not ("codealta_state" or "codex_home_import" or "codex_home_readonly"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} installation_id_source must be one of: codealta_state, codex_home_import, codex_home_readonly.");
+        }
+    }
+
+    private static bool IsHttpsOrLocalhost(Uri uri)
+        => string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+           uri.IsLoopback ||
+           string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase);
 
     private static void RejectUnsupportedField(CodeAltaProviderDocument definition, string fieldName, object? value)
     {
@@ -1007,6 +1174,59 @@ public sealed class CodeAltaConfigStore
             }
         }
 
+        if (string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
+        {
+            if (string.Equals(definition.DisplayName, CodexSubscriptionDefaultDisplayName, StringComparison.Ordinal))
+            {
+                definition.DisplayName = null;
+            }
+
+            if (string.Equals(definition.ApiUrl, CodexSubscriptionDefaultApiUrl, StringComparison.Ordinal))
+            {
+                definition.ApiUrl = null;
+            }
+
+            if (string.Equals(definition.AuthSource, CodexSubscriptionDefaultAuthSource, StringComparison.Ordinal))
+            {
+                definition.AuthSource = null;
+            }
+
+            if (definition.MaxConcurrentRequests == CodexSubscriptionDefaultMaxConcurrentRequests)
+            {
+                definition.MaxConcurrentRequests = null;
+            }
+
+            if (string.Equals(definition.TextVerbosity, CodexSubscriptionDefaultTextVerbosity, StringComparison.Ordinal))
+            {
+                definition.TextVerbosity = null;
+            }
+
+            if (definition.IncludeEncryptedReasoning == true)
+            {
+                definition.IncludeEncryptedReasoning = null;
+            }
+
+            if (string.Equals(definition.ModelDiscovery, CodexSubscriptionDefaultModelDiscovery, StringComparison.Ordinal))
+            {
+                definition.ModelDiscovery = null;
+            }
+
+            if (definition.SendResponsesBetaHeader == true)
+            {
+                definition.SendResponsesBetaHeader = null;
+            }
+
+            if (definition.SendInstallationId == false)
+            {
+                definition.SendInstallationId = null;
+            }
+
+            if (string.Equals(definition.InstallationIdSource, CodexSubscriptionDefaultInstallationIdSource, StringComparison.Ordinal))
+            {
+                definition.InstallationIdSource = null;
+            }
+        }
+
         definition.Compaction = PruneCompactionDefaults(definition.Compaction);
     }
 
@@ -1022,6 +1242,16 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ApiKey) ||
                !string.IsNullOrWhiteSpace(definition.ApiKeyEnv) ||
                !string.IsNullOrWhiteSpace(definition.ApiUrl) ||
+               !string.IsNullOrWhiteSpace(definition.AuthSource) ||
+               !string.IsNullOrWhiteSpace(definition.AccountId) ||
+               definition.MaxConcurrentRequests is not null ||
+               !string.IsNullOrWhiteSpace(definition.TextVerbosity) ||
+               definition.IncludeEncryptedReasoning is not null ||
+               !string.IsNullOrWhiteSpace(definition.ModelDiscovery) ||
+               definition.SendResponsesBetaHeader is not null ||
+               definition.SendInstallationId is not null ||
+               !string.IsNullOrWhiteSpace(definition.InstallationIdSource) ||
+               definition.Experimental is not null ||
                !string.IsNullOrWhiteSpace(definition.OrganizationId) ||
                !string.IsNullOrWhiteSpace(definition.ProjectId) ||
                !string.IsNullOrWhiteSpace(definition.Project) ||
@@ -1088,6 +1318,16 @@ public sealed class CodeAltaConfigStore
             ApiKey = definition.ApiKey,
             ApiKeyEnv = definition.ApiKeyEnv,
             ApiUrl = definition.ApiUrl,
+            AuthSource = definition.AuthSource,
+            AccountId = definition.AccountId,
+            MaxConcurrentRequests = definition.MaxConcurrentRequests,
+            TextVerbosity = definition.TextVerbosity,
+            IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
+            ModelDiscovery = definition.ModelDiscovery,
+            SendResponsesBetaHeader = definition.SendResponsesBetaHeader,
+            SendInstallationId = definition.SendInstallationId,
+            InstallationIdSource = definition.InstallationIdSource,
+            Experimental = definition.Experimental,
             OrganizationId = definition.OrganizationId,
             ProjectId = definition.ProjectId,
             Project = definition.Project,

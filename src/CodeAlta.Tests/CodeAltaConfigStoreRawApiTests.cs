@@ -178,6 +178,193 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionAppliesDefaults()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            model = " gpt-5.3-codex "
+            experimental = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var providers = store.LoadGlobalProviderDefinitions(includeDisabled: true)
+            .ToDictionary(static provider => provider.ProviderKey, StringComparer.OrdinalIgnoreCase);
+
+        var provider = providers["codex_subscription"];
+        Assert.AreEqual("openai-codex-subscription", provider.ProviderType);
+        Assert.AreEqual("Codex (ChatGPT subscription)", provider.DisplayName);
+        Assert.AreEqual("gpt-5.3-codex", provider.Model);
+        Assert.AreEqual("https://chatgpt.com/backend-api/codex", provider.ApiUrl);
+        Assert.AreEqual("codealta_oauth", provider.AuthSource);
+        Assert.AreEqual(1, provider.MaxConcurrentRequests);
+        Assert.AreEqual("medium", provider.TextVerbosity);
+        Assert.IsTrue(provider.IncludeEncryptedReasoning);
+        Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
+        Assert.IsTrue(provider.SendResponsesBetaHeader);
+        Assert.IsFalse(provider.SendInstallationId);
+        Assert.AreEqual("codealta_state", provider.InstallationIdSource);
+        Assert.IsTrue(provider.Experimental);
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionNormalizesExplicitFields()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            enabled = true
+            display_name = " Codex Sub "
+            type = "openai-codex-subscription"
+            model = " gpt-5.4 "
+            api_url = " http://localhost:5111/backend-api/codex "
+            auth_source = " CODEX_AUTH_FILE_READONLY "
+            account_id = " acct_123 "
+            max_concurrent_requests = 2
+            text_verbosity = " HIGH "
+            include_encrypted_reasoning = false
+            model_discovery = " STATIC "
+            send_responses_beta_header = false
+            send_installation_id = true
+            installation_id_source = " CODEX_HOME_READONLY "
+            experimental = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true)
+            .Single(static provider => provider.ProviderKey == "codex_subscription");
+
+        Assert.AreEqual("Codex Sub", provider.DisplayName);
+        Assert.AreEqual("http://localhost:5111/backend-api/codex", provider.ApiUrl);
+        Assert.AreEqual("codex_auth_file_readonly", provider.AuthSource);
+        Assert.AreEqual("acct_123", provider.AccountId);
+        Assert.AreEqual(2, provider.MaxConcurrentRequests);
+        Assert.AreEqual("high", provider.TextVerbosity);
+        Assert.IsFalse(provider.IncludeEncryptedReasoning);
+        Assert.AreEqual("static", provider.ModelDiscovery);
+        Assert.IsFalse(provider.SendResponsesBetaHeader);
+        Assert.IsTrue(provider.SendInstallationId);
+        Assert.AreEqual("codex_home_readonly", provider.InstallationIdSource);
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsApiKeyFields()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            model = "gpt-5.3-codex"
+            api_key_env = "OPENAI_API_KEY"
+            experimental = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "uses ChatGPT OAuth");
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsExtraBody()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            model = "gpt-5.3-codex"
+            experimental = true
+
+            [providers.codex_subscription.extra_body]
+            suspicious = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "extra_body");
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsMissingExperimentalOptIn()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            model = "gpt-5.3-codex"
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "experimental = true");
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsMissingModel()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            experimental = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "model is required");
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsNonHttpsNonLocalEndpoint()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            model = "gpt-5.3-codex"
+            api_url = "http://example.com/backend-api/codex"
+            experimental = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "HTTPS");
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexSubscriptionRejectsInvalidEnums()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.codex_subscription]
+            type = "openai-codex-subscription"
+            model = "gpt-5.3-codex"
+            text_verbosity = "verbose"
+            experimental = true
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "text_verbosity");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_ReservedProvidersReceiveDefaults()
     {
         using var temp = TempDirectory.Create();
