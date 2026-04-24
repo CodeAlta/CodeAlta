@@ -61,6 +61,15 @@ internal static class ModelProviderEditorDiagnostics
                 "Vertex AI uses Google application-default credentials from the current environment."));
         }
 
+        if (item.ProviderType == "openai-codex-subscription")
+        {
+            entries.Add(new ModelProviderDiagnosticEntry(
+                item.Experimental ? ValidationSeverity.Warning : ValidationSeverity.Error,
+                item.Experimental
+                    ? "Experimental ChatGPT/Codex subscription access may count against plan limits; CodeAlta will not rotate accounts or bypass limits."
+                    : "Enable the experimental opt-in before saving this ChatGPT/Codex subscription provider."));
+        }
+
         if (ShouldShowCustomApiUrlGuidance(item))
         {
             entries.Add(new ModelProviderDiagnosticEntry(

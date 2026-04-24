@@ -22,6 +22,7 @@ internal sealed class ModelProvidersDialog
         new("copilot", "GitHub Copilot"),
         new("openai-chat", "OpenAI Chat"),
         new("openai-responses", "OpenAI Responses"),
+        new("openai-codex-subscription", "Codex (ChatGPT subscription)"),
         new("anthropic", "Anthropic"),
         new("google-genai", "Google GenAI"),
         new("vertex-ai", "Vertex AI"),
@@ -388,6 +389,11 @@ internal sealed class ModelProvidersDialog
         AddTextRow(form, ref row, "Provider Key", CreateKeyField(item), CreateSpacer());
         AddSelectRow(form, ref row, "Type", CreateTypeSelect(item), CreateSpacer());
         AddCheckRow(form, ref row, "Enabled", CreateEnabledCheckBox(item), CreateSpacer());
+        if (item.ProviderType == "openai-codex-subscription")
+        {
+            AddCheckRow(form, ref row, "Experimental", CreateExperimentalCheckBox(item), CreateSpacer());
+        }
+
         AddTextRow(form, ref row, "Display Name", CreateDefaultTextField(bindings.DisplayName, () => item.UseDefaultDisplayName), CreateDefaultCheckBox("Default", bindings.UseDefaultDisplayName));
         AddTextRow(form, ref row, "Model", CreateDefaultTextField(bindings.Model, () => item.UseDefaultModel), CreateDefaultCheckBox("Default", bindings.UseDefaultModel));
         AddSelectRow(form, ref row, "Reasoning", CreateReasoningSelect(item), CreateDefaultCheckBox("Default", bindings.UseDefaultReasoningEffort));
@@ -398,7 +404,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "API Key Env", CreateApiKeyEnvField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "anthropic" or "google-genai" or "vertex-ai")
         {
             AddTextRow(form, ref row, "API URL", CreateApiUrlField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiUrl));
         }
@@ -415,7 +421,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "Location", CreateVertexLocationField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "anthropic" or "google-genai" or "vertex-ai")
         {
             AddTextRow(form, ref row, "Models.dev Id", CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox("Default", bindings.UseDefaultModelsDevProviderId));
             AddTextRow(form, ref row, "Single Model Id", CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox("Default", bindings.UseDefaultSingleModelId));
@@ -474,6 +480,10 @@ internal sealed class ModelProvidersDialog
 
     private CheckBox CreateEnabledCheckBox(ModelProviderEditorItemViewModel item)
         => new CheckBox("Enabled").IsChecked(GetBindings(item).Enabled);
+
+    private CheckBox CreateExperimentalCheckBox(ModelProviderEditorItemViewModel item)
+        => new CheckBox("I understand this ChatGPT/Codex subscription provider is experimental")
+            .IsChecked(GetBindings(item).Experimental);
 
     private Visual CreateReasoningSelect(ModelProviderEditorItemViewModel item)
     {

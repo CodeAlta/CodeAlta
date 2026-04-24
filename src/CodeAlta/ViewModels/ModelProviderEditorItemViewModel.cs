@@ -42,6 +42,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         UseDefaultModelsDevProviderId = source.ModelsDevProviderId is null;
         SingleModelId = source.SingleModelId;
         UseDefaultSingleModelId = source.SingleModelId is null;
+        Experimental = source.Experimental == true;
         _isInitialized = true;
     }
 
@@ -134,6 +135,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
     [Bindable]
     public partial bool UseDefaultSingleModelId { get; set; }
 
+    [Bindable]
+    public partial bool Experimental { get; set; }
+
     public string Label => string.IsNullOrWhiteSpace(DisplayName) ? ProviderKey ?? string.Empty : DisplayName.Trim();
 
     public static ModelProviderEditorItemViewModel FromDocument(CodeAltaProviderDocument definition)
@@ -165,6 +169,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.Location = UseDefaultLocation ? null : NormalizeText(Location);
         definition.ModelsDevProviderId = UseDefaultModelsDevProviderId ? null : NormalizeText(ModelsDevProviderId);
         definition.SingleModelId = UseDefaultSingleModelId ? null : NormalizeText(SingleModelId);
+        definition.Experimental = ProviderType == "openai-codex-subscription" ? Experimental : null;
         return definition;
     }
 
@@ -213,6 +218,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
     partial void OnUseDefaultModelsDevProviderIdChanged(bool value) => ClearTestResultOnEdit();
     partial void OnSingleModelIdChanged(string? value) => ClearTestResultOnEdit();
     partial void OnUseDefaultSingleModelIdChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnExperimentalChanged(bool value) => ClearTestResultOnEdit();
 
     private static CodeAltaProviderDocument Clone(CodeAltaProviderDocument definition)
     {
@@ -237,6 +243,16 @@ internal sealed partial class ModelProviderEditorItemViewModel
             Profile = definition.Profile,
             Compaction = definition.Compaction,
             ModelOverrides = definition.ModelOverrides,
+            AuthSource = definition.AuthSource,
+            AccountId = definition.AccountId,
+            MaxConcurrentRequests = definition.MaxConcurrentRequests,
+            TextVerbosity = definition.TextVerbosity,
+            IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
+            ModelDiscovery = definition.ModelDiscovery,
+            SendResponsesBetaHeader = definition.SendResponsesBetaHeader,
+            SendInstallationId = definition.SendInstallationId,
+            InstallationIdSource = definition.InstallationIdSource,
+            Experimental = definition.Experimental,
         };
     }
 
