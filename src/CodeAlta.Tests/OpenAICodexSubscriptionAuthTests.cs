@@ -25,6 +25,14 @@ public sealed class OpenAICodexSubscriptionAuthTests
         };
 
         await store.SaveAsync("codex/subscription", credential).ConfigureAwait(false);
+        var credentialPath = Directory.GetFiles(temp.Path, "*.credential", SearchOption.AllDirectories).Single();
+        var rawCredential = await File.ReadAllTextAsync(credentialPath).ConfigureAwait(false);
+        Assert.IsFalse(rawCredential.Contains("access-secret", StringComparison.Ordinal));
+        Assert.IsFalse(rawCredential.Contains("refresh-secret", StringComparison.Ordinal));
+        StringAssert.StartsWith(
+            rawCredential,
+            OperatingSystem.IsWindows() ? "dpapi:" : "plain64:");
+
         var loaded = await store.LoadAsync("codex/subscription").ConfigureAwait(false);
 
         Assert.IsNotNull(loaded);
