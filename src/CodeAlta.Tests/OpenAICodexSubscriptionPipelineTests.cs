@@ -179,6 +179,37 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual("https://chatgpt.com/backend-api/codex", client.Endpoint.ToString());
     }
 
+    [TestMethod]
+    public void StaticModelCatalog_ReturnsConfiguredHiddenModelAndRejectsUnknownModels()
+    {
+        var provider = new LocalAgentProviderDescriptor
+        {
+            ProtocolFamily = "openai-codex-subscription",
+            ProviderKey = "codex_subscription",
+            DisplayName = "Codex (ChatGPT subscription)",
+            BackendId = new AgentBackendId("codex_subscription"),
+            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+        };
+
+        var visibleModels = CodexSubscriptionStaticModelCatalog.List(provider);
+        Assert.IsTrue(visibleModels.Any(static model => model.Id == "gpt-5.3-codex"));
+        Assert.IsFalse(visibleModels.Any(static model => model.Id == "codex-auto-review"));
+
+        var hiddenConfiguredModel = CodexSubscriptionStaticModelCatalog.List(provider, "codex-auto-review");
+        Assert.AreEqual(1, hiddenConfiguredModel.Count);
+        Assert.AreEqual("codex-auto-review", hiddenConfiguredModel[0].Id);
+        Assert.AreEqual(true, hiddenConfiguredModel[0].Capabilities?["hidden"]);
+        Assert.AreEqual(true, hiddenConfiguredModel[0].Capabilities?["supportedInApi"]);
+        Assert.AreEqual(true, hiddenConfiguredModel[0].Capabilities?["supportsReasoningSummary"]);
+        Assert.AreEqual(true, hiddenConfiguredModel[0].Capabilities?["supportsEncryptedReasoning"]);
+        Assert.AreEqual(true, hiddenConfiguredModel[0].Capabilities?["supportsTextVerbosity"]);
+        Assert.AreEqual(true, hiddenConfiguredModel[0].Capabilities?["supportsTools"]);
+        Assert.AreEqual(false, hiddenConfiguredModel[0].Capabilities?["requiresWebSocket"]);
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => CodexSubscriptionStaticModelCatalog.List(provider, "unknown-codex-model"));
+    }
+
     private static ClientPipeline CreatePipeline(
         OpenAICodexSubscriptionAuthManager authManager,
         CodexSubscriptionHeaderContext headerContext,

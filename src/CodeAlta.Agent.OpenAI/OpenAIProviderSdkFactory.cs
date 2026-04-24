@@ -79,6 +79,11 @@ internal static class OpenAIProviderSdkFactory
     {
         try
         {
+            if (provider.CodexSubscription is not null)
+            {
+                return ListCodexSubscriptionModels(provider, providerDescriptor);
+            }
+
             if (!string.IsNullOrWhiteSpace(provider.SingleModelId))
             {
                 LogInfo(
@@ -116,6 +121,16 @@ internal static class OpenAIProviderSdkFactory
         {
             return models;
         }
+    }
+
+    private static IReadOnlyList<AgentModelInfo> ListCodexSubscriptionModels(
+        OpenAIProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor)
+    {
+        var models = CodexSubscriptionStaticModelCatalog.List(providerDescriptor, provider.SingleModelId);
+        LogInfo(
+            $"Using Codex subscription static model catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
+        return models;
     }
 
     private static ApiKeyCredential CreateCredential(OpenAIProviderOptions provider)
