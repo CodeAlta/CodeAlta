@@ -285,6 +285,12 @@ internal static class ModelProviderEditorDiagnostics
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(entries);
 
+        if (item.ProviderType == "openai-codex-subscription" &&
+            TryResolveCodexSubscriptionStatusText(item, entries, out var codexStatusText))
+        {
+            return codexStatusText;
+        }
+
         if (item.LastTestState == ModelProviderLastTestState.Failed)
         {
             return "Test failed";
@@ -328,5 +334,71 @@ internal static class ModelProviderEditorDiagnostics
             ModelProviderUiStatusKind.Error => "Needs attention",
             _ => "Ready to test",
         };
+    }
+
+    private static bool TryResolveCodexSubscriptionStatusText(
+        ModelProviderEditorItemViewModel item,
+        IReadOnlyList<ModelProviderDiagnosticEntry> entries,
+        out string statusText)
+    {
+        statusText = string.Empty;
+        if (!item.Enabled || !item.Experimental)
+        {
+            statusText = "Not configured";
+            return true;
+        }
+
+        var failure = item.LastTestState == ModelProviderLastTestState.Failed
+            ? item.LastTestMessage ?? string.Empty
+            : string.Empty;
+        if (!string.IsNullOrWhiteSpace(failure))
+        {
+            if (failure.Contains("expired", StringComparison.OrdinalIgnoreCase) &&
+                failure.Contains("refresh", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "Token expired; refresh available";
+                return true;
+            }
+
+            if (failure.Contains("login is required", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("re-authentication", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("authentication failed", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "Login required";
+                return true;
+            }
+
+            if (failure.Contains("account", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("workspace", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("plan", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("policy", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "Account/workspace selection required";
+                return true;
+            }
+
+            if (failure.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("quota", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "Rate or quota limited";
+                return true;
+            }
+
+            if (failure.Contains("protocol", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("unsupported", StringComparison.OrdinalIgnoreCase) ||
+                failure.Contains("request shape", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "Unsupported backend/protocol drift";
+                return true;
+            }
+        }
+
+        if (entries.Any(static entry => entry.Severity == ValidationSeverity.Error))
+        {
+            return false;
+        }
+
+        statusText = "Ready";
+        return true;
     }
 }
