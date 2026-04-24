@@ -210,6 +210,150 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             () => CodexSubscriptionStaticModelCatalog.List(provider, "unknown-codex-model"));
     }
 
+    [TestMethod]
+    public async Task ModelDiscovery_UsesCodexEndpointAndFiltersUnsupportedModels()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var handler = new RecordingHttpMessageHandler(CreateModelsResponse());
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            StateRootPath = temp.Path,
+            CodexSubscriptionHttpClient = new HttpClient(handler),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                AccountId = "acct_configured",
+            },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(
+            provider,
+            CreateProviderDescriptor(),
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(1, models.Count);
+        Assert.AreEqual("gpt-5.3-codex", models[0].Id);
+        Assert.AreEqual("Codex model", models[0].DisplayName);
+        Assert.AreEqual("codex-endpoint", models[0].Capabilities?["source"]);
+        Assert.AreEqual(200000L, models[0].Capabilities?["contextWindow"]);
+        Assert.AreEqual("medium", models[0].Capabilities?["defaultTextVerbosity"]);
+        Assert.AreEqual(
+            "https://chatgpt.com/backend-api/codex/models?client_version=CodeAlta%2F" +
+            typeof(OpenAIProviderSdkFactory).Assembly.GetName().Version,
+            handler.RequestUris[0].ToString());
+        Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
+        Assert.AreEqual("acct_configured", handler.Requests[0]["ChatGPT-Account-Id"]);
+        Assert.AreEqual("codealta", handler.Requests[0]["originator"]);
+        Assert.AreEqual("responses=experimental", handler.Requests[0]["OpenAI-Beta"]);
+    }
+
+    [TestMethod]
+    public async Task ModelDiscovery_AllowsConfiguredHiddenModelFromAuthenticatedResponse()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            StateRootPath = temp.Path,
+            SingleModelId = "hidden-codex",
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(CreateModelsResponse())),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(
+            provider,
+            CreateProviderDescriptor(),
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(1, models.Count);
+        Assert.AreEqual("hidden-codex", models[0].Id);
+        Assert.AreEqual(true, models[0].Capabilities?["hidden"]);
+    }
+
+    [TestMethod]
+    public async Task ModelDiscovery_FallsBackToStaticCatalogOnlyWhenConfigured()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            StateRootPath = temp.Path,
+            SingleModelId = "gpt-5.3-codex",
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
+                new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent("{}"),
+                })),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ModelDiscovery = "codex_endpoint_with_static_fallback",
+            },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(
+            provider,
+            CreateProviderDescriptor(),
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(1, models.Count);
+        Assert.AreEqual("gpt-5.3-codex", models[0].Id);
+
+        provider.CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{}"),
+            }));
+        provider.CodexSubscription.ModelDiscovery = "codex_endpoint";
+
+        await Assert.ThrowsExactlyAsync<CodexSubscriptionModelDiscoveryException>(
+            () => OpenAIProviderSdkFactory.ListModelsAsync(
+                provider,
+                CreateProviderDescriptor(),
+                CancellationToken.None)).ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task ModelDiscovery_DoesNotFallbackOnAuthErrors()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            StateRootPath = temp.Path,
+            SingleModelId = "gpt-5.3-codex",
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
+                new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                {
+                    Content = new StringContent("{}"),
+                })),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ModelDiscovery = "codex_endpoint_with_static_fallback",
+            },
+        };
+
+        var exception = await Assert.ThrowsExactlyAsync<CodexSubscriptionModelDiscoveryException>(
+            () => OpenAIProviderSdkFactory.ListModelsAsync(
+                provider,
+                CreateProviderDescriptor(),
+                CancellationToken.None)).ConfigureAwait(false);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, exception.StatusCode);
+    }
+
     private static ClientPipeline CreatePipeline(
         OpenAICodexSubscriptionAuthManager authManager,
         CodexSubscriptionHeaderContext headerContext,
@@ -236,6 +380,30 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         await pipeline.SendAsync(message).ConfigureAwait(false);
     }
 
+    private static async Task SaveCredentialAsync(string stateRootPath)
+    {
+        var store = new FileOpenAICodexSubscriptionCredentialStore(stateRootPath);
+        await store.SaveAsync(
+            "codex_subscription",
+            new OpenAICodexSubscriptionCredential
+            {
+                AccessToken = "access-token",
+                RefreshToken = "refresh-token",
+                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                AccountId = "acct_from_token",
+            }).ConfigureAwait(false);
+    }
+
+    private static LocalAgentProviderDescriptor CreateProviderDescriptor()
+        => new()
+        {
+            ProtocolFamily = "openai-codex-subscription",
+            ProviderKey = "codex_subscription",
+            DisplayName = "Codex (ChatGPT subscription)",
+            BackendId = new AgentBackendId("codex_subscription"),
+            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+        };
+
     private static HttpResponseMessage CreateResponse(string? turnState = null)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -249,6 +417,47 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
         return response;
     }
+
+    private static HttpResponseMessage CreateModelsResponse()
+        => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "models": [
+                    {
+                      "id": "gpt-5.3-codex",
+                      "display_name": "Codex model",
+                      "supported_in_api": true,
+                      "listable": true,
+                      "hidden": false,
+                      "supports_image_input": true,
+                      "default_reasoning_effort": "high",
+                      "default_text_verbosity": "medium",
+                      "context_window": 200000
+                    },
+                    {
+                      "id": "unsupported-codex",
+                      "supported_in_api": false,
+                      "listable": true
+                    },
+                    {
+                      "id": "hidden-codex",
+                      "display_name": "Hidden Codex",
+                      "supported_in_api": true,
+                      "listable": false,
+                      "hidden": true
+                    },
+                    {
+                      "id": "websocket-only-codex",
+                      "supported_in_api": true,
+                      "listable": true,
+                      "requires_websocket": true
+                    }
+                  ]
+                }
+                """),
+        };
 
     private sealed class RecordingHttpMessageHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {

@@ -134,6 +134,8 @@ public sealed class OpenAIProviderOptions
 
     internal Func<string?, ChatClient>? ChatClientFactory { get; set; }
 
+    internal HttpClient? CodexSubscriptionHttpClient { get; set; }
+
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
 }
 

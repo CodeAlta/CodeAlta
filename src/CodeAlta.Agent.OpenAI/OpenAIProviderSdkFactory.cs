@@ -2,6 +2,7 @@
 
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using System.Text.Json;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.CodexSubscription;
@@ -81,7 +82,10 @@ internal static class OpenAIProviderSdkFactory
         {
             if (provider.CodexSubscription is not null)
             {
-                return ListCodexSubscriptionModels(provider, providerDescriptor);
+                return await ListCodexSubscriptionModelsAsync(
+                    provider,
+                    providerDescriptor,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (!string.IsNullOrWhiteSpace(provider.SingleModelId))
@@ -123,7 +127,48 @@ internal static class OpenAIProviderSdkFactory
         }
     }
 
-    private static IReadOnlyList<AgentModelInfo> ListCodexSubscriptionModels(
+    private static async ValueTask<IReadOnlyList<AgentModelInfo>> ListCodexSubscriptionModelsAsync(
+        OpenAIProviderOptions provider,
+        LocalAgentProviderDescriptor providerDescriptor,
+        CancellationToken cancellationToken)
+    {
+        var options = provider.CodexSubscription
+            ?? throw new InvalidOperationException("Codex subscription options are required.");
+        if (string.Equals(options.ModelDiscovery, "static", StringComparison.OrdinalIgnoreCase))
+        {
+            return ListCodexSubscriptionStaticModels(provider, providerDescriptor);
+        }
+
+        try
+        {
+            var stateRootPath = ResolveStateRootPath(provider);
+            var authManager = CreateCodexSubscriptionAuthManager(provider, options, stateRootPath);
+            var discoveryClient = new CodexSubscriptionModelDiscoveryClient(
+                provider.CodexSubscriptionHttpClient ?? new HttpClient(),
+                authManager,
+                options,
+                CreateCodeAltaUserAgentApplicationId());
+            var discoveredModels = await discoveryClient.GetModelsAsync(
+                provider.BaseUri ?? new Uri("https://chatgpt.com/backend-api/codex"),
+                cancellationToken).ConfigureAwait(false);
+            var models = MapCodexSubscriptionDiscoveredModels(
+                discoveredModels,
+                providerDescriptor,
+                provider.SingleModelId);
+            LogInfo(
+                $"Using Codex subscription authenticated model catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
+            return models;
+        }
+        catch (Exception ex) when (ShouldUseCodexStaticModelFallback(options, ex))
+        {
+            LogWarn(
+                ex,
+                $"Codex model discovery failed; falling back to static catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName}");
+            return ListCodexSubscriptionStaticModels(provider, providerDescriptor);
+        }
+    }
+
+    private static IReadOnlyList<AgentModelInfo> ListCodexSubscriptionStaticModels(
         OpenAIProviderOptions provider,
         LocalAgentProviderDescriptor providerDescriptor)
     {
@@ -132,6 +177,120 @@ internal static class OpenAIProviderSdkFactory
             $"Using Codex subscription static model catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
         return models;
     }
+
+    private static bool ShouldUseCodexStaticModelFallback(
+        OpenAICodexSubscriptionOptions options,
+        Exception exception)
+    {
+        if (!string.Equals(
+                options.ModelDiscovery,
+                "codex_endpoint_with_static_fallback",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return exception switch
+        {
+            HttpRequestException => true,
+            JsonException => true,
+            CodexSubscriptionModelDiscoveryException { StatusCode: System.Net.HttpStatusCode.NotFound } => true,
+            CodexSubscriptionModelDiscoveryException { StatusCode: null } => true,
+            _ => false,
+        };
+    }
+
+    private static IReadOnlyList<AgentModelInfo> MapCodexSubscriptionDiscoveredModels(
+        IReadOnlyList<CodexSubscriptionDiscoveredModel> discoveredModels,
+        LocalAgentProviderDescriptor providerDescriptor,
+        string? configuredModelId)
+    {
+        var supportedModels = discoveredModels
+            .Where(static model => model.SupportedInApi && !model.RequiresWebSocket)
+            .GroupBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.First())
+            .ToArray();
+
+        if (!string.IsNullOrWhiteSpace(configuredModelId))
+        {
+            var trimmedModelId = configuredModelId.Trim();
+            var configuredModel = supportedModels.FirstOrDefault(model =>
+                string.Equals(model.Id, trimmedModelId, StringComparison.OrdinalIgnoreCase));
+            if (configuredModel is null)
+            {
+                throw new InvalidOperationException(
+                    $"Codex subscription model '{trimmedModelId}' is not available from the authenticated API-supported model catalog.");
+            }
+
+            return [CreateModelInfo(configuredModel, providerDescriptor)];
+        }
+
+        return supportedModels
+            .Where(static model => model.Listable && !model.Hidden)
+            .Select(model => CreateModelInfo(model, providerDescriptor))
+            .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static AgentModelInfo CreateModelInfo(
+        CodexSubscriptionDiscoveredModel model,
+        LocalAgentProviderDescriptor providerDescriptor)
+    {
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["source"] = "codex-endpoint",
+            ["supportedInApi"] = model.SupportedInApi,
+            ["hidden"] = model.Hidden,
+            ["listable"] = model.Listable,
+            ["supportsReasoningSummary"] = model.SupportsReasoningSummary,
+            ["supportsEncryptedReasoning"] = model.SupportsEncryptedReasoning,
+            ["supportsTextVerbosity"] = model.SupportsTextVerbosity,
+            ["supportsTools"] = model.SupportsTools,
+            ["supportsImageInput"] = model.SupportsImageInput,
+            ["requiresWebSocket"] = model.RequiresWebSocket,
+        };
+        if (model.ContextWindow is { } contextWindow)
+        {
+            capabilities["contextWindow"] = contextWindow;
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.DefaultTextVerbosity))
+        {
+            capabilities["defaultTextVerbosity"] = model.DefaultTextVerbosity;
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.ETag))
+        {
+            capabilities["etag"] = model.ETag;
+        }
+
+        return new AgentModelInfo(
+            model.Id,
+            DisplayName: model.DisplayName,
+            Provider: providerDescriptor.ProviderKey,
+            DefaultReasoningEffort: ParseReasoningEffort(model.DefaultReasoningEffort),
+            SupportedReasoningEfforts: model.SupportsReasoningEffort
+                ?
+                [
+                    AgentReasoningEffort.Low,
+                    AgentReasoningEffort.Medium,
+                    AgentReasoningEffort.High,
+                    AgentReasoningEffort.XHigh,
+                ]
+                : [],
+            Capabilities: capabilities);
+    }
+
+    private static AgentReasoningEffort? ParseReasoningEffort(string? value)
+        => value?.Trim().ToLowerInvariant() switch
+        {
+            "minimal" => AgentReasoningEffort.Minimal,
+            "low" => AgentReasoningEffort.Low,
+            "medium" => AgentReasoningEffort.Medium,
+            "high" => AgentReasoningEffort.High,
+            "xhigh" => AgentReasoningEffort.XHigh,
+            _ => null,
+        };
 
     private static ApiKeyCredential CreateCredential(OpenAIProviderOptions provider)
         => new(provider.ApiKey ?? string.Empty);
@@ -150,17 +309,10 @@ internal static class OpenAIProviderSdkFactory
     {
         var options = provider.CodexSubscription
             ?? throw new InvalidOperationException("Codex subscription options are required.");
-        var stateRootPath = string.IsNullOrWhiteSpace(provider.StateRootPath)
-            ? Path.Combine(AppContext.BaseDirectory, ".codealta-state")
-            : provider.StateRootPath;
-        var credentialStore = new FileOpenAICodexSubscriptionCredentialStore(stateRootPath);
-        var authManager = new OpenAICodexSubscriptionAuthManager(
-            credentialStore,
-            new OpenAICodexSubscriptionOAuthClient(CodexOAuthHttpClient),
-            provider.ProviderKey,
-            options.AuthSource,
-            options.AccountId,
-            CodexAuthFileReader.ResolveCodexHome());
+        var authManager = CreateCodexSubscriptionAuthManager(
+            provider,
+            options,
+            ResolveStateRootPath(provider));
         var clientOptions = CreateClientOptions(provider);
         clientOptions.UserAgentApplicationId = CreateCodeAltaUserAgentApplicationId();
         clientOptions.AddPolicy(
@@ -178,6 +330,26 @@ internal static class OpenAIProviderSdkFactory
             new ChatGptOAuthAuthenticationPolicy(authManager),
             clientOptions);
     }
+
+    private static OpenAICodexSubscriptionAuthManager CreateCodexSubscriptionAuthManager(
+        OpenAIProviderOptions provider,
+        OpenAICodexSubscriptionOptions options,
+        string stateRootPath)
+    {
+        var credentialStore = new FileOpenAICodexSubscriptionCredentialStore(stateRootPath);
+        return new OpenAICodexSubscriptionAuthManager(
+            credentialStore,
+            new OpenAICodexSubscriptionOAuthClient(CodexOAuthHttpClient),
+            provider.ProviderKey,
+            options.AuthSource,
+            options.AccountId,
+            CodexAuthFileReader.ResolveCodexHome());
+    }
+
+    private static string ResolveStateRootPath(OpenAIProviderOptions provider)
+        => string.IsNullOrWhiteSpace(provider.StateRootPath)
+            ? Path.Combine(AppContext.BaseDirectory, ".codealta-state")
+            : provider.StateRootPath;
 
     private static string CreateCodeAltaUserAgentApplicationId()
     {
