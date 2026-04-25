@@ -85,9 +85,24 @@ internal sealed class ChatBackendInitializationCoordinator
         return (ChatBackendAvailability.Failed, ChatBackendPresentation.BuildFailedBackendMessage(state, message));
     }
 
+    internal static bool CanReuseLoadedBackendState(AgentBackendId backendId, ChatBackendState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        return IsProcessBackedProviderBackend(backendId) &&
+               state.Availability == ChatBackendAvailability.Ready;
+    }
+
     private async Task RefreshAsync(AgentBackendId backendId, CancellationToken cancellationToken)
     {
         var state = _chatBackendStates[backendId.Value];
+        if (CanReuseLoadedBackendState(backendId, state))
+        {
+            LogInfo(
+                $"Skipping chat backend refresh for loaded process-backed backend backend={backendId.Value} displayName={state.DisplayName} models={state.Models.Count}");
+            return;
+        }
+
         LogInfo($"Refreshing chat backend backend={backendId.Value} displayName={state.DisplayName}");
         _dispatchToUi(
             () =>
@@ -155,6 +170,10 @@ internal sealed class ChatBackendInitializationCoordinator
                     _refreshHeaderAndThreadWorkspace();
                 }));
     }
+
+    private static bool IsProcessBackedProviderBackend(AgentBackendId backendId)
+        => string.Equals(backendId.Value, AgentBackendIds.Codex.Value, StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(backendId.Value, AgentBackendIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
 
     private static void LogInfo(string message)
     {

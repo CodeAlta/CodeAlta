@@ -122,6 +122,90 @@ public sealed class AgentHubBackendReloadTests
         Assert.AreEqual(new AgentRunId("blocking-run"), completedRunId);
     }
 
+    [TestMethod]
+    public async Task ListSessionsAsync_CachesProcessBackedBackendSessions()
+    {
+        using var temp = TempDirectory.Create();
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        var backendFactory = new AgentBackendFactory();
+        var backend = new CountingSessionBackend(AgentBackendIds.Codex)
+        {
+            Sessions =
+            [
+                CreateSession("session-a", @"C:\repo-a", "owner/repo-a", "main"),
+                CreateSession("session-b", @"C:\repo-b", "owner/repo-b", "dev"),
+            ],
+        };
+        backendFactory.Register(AgentBackendIds.Codex, () => backend);
+
+        await using var hub = new AgentHub(backendFactory, repository);
+
+        var first = await hub.ListSessionsAsync(AgentBackendIds.Codex).ConfigureAwait(false);
+        var filtered = await hub.ListSessionsAsync(
+                AgentBackendIds.Codex,
+                new AgentSessionListFilter(Cwd: @"C:\repo-b"))
+            .ConfigureAwait(false);
+        var second = await hub.ListSessionsAsync(AgentBackendIds.Codex).ConfigureAwait(false);
+
+        Assert.AreEqual(1, backend.ListSessionsCount);
+        Assert.AreEqual(2, first.Count);
+        Assert.AreEqual(1, filtered.Count);
+        Assert.AreEqual("session-b", filtered[0].SessionId);
+        Assert.AreEqual(2, second.Count);
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_DoesNotCacheRegularBackendSessions()
+    {
+        using var temp = TempDirectory.Create();
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        var backendFactory = new AgentBackendFactory();
+        var backendId = new AgentBackendId("regular");
+        var backend = new CountingSessionBackend(backendId)
+        {
+            Sessions = [CreateSession("session-a", @"C:\repo-a", "owner/repo-a", "main")],
+        };
+        backendFactory.Register(backendId, () => backend);
+
+        await using var hub = new AgentHub(backendFactory, repository);
+
+        _ = await hub.ListSessionsAsync(backendId).ConfigureAwait(false);
+        _ = await hub.ListSessionsAsync(backendId).ConfigureAwait(false);
+
+        Assert.AreEqual(2, backend.ListSessionsCount);
+    }
+
+    [TestMethod]
+    public async Task DeleteSessionAsync_InvalidatesProcessBackedSessionCache()
+    {
+        using var temp = TempDirectory.Create();
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        var backendFactory = new AgentBackendFactory();
+        var backend = new CountingSessionBackend(AgentBackendIds.Copilot)
+        {
+            Sessions =
+            [
+                CreateSession("session-a", @"C:\repo-a", "owner/repo-a", "main"),
+                CreateSession("session-b", @"C:\repo-b", "owner/repo-b", "dev"),
+            ],
+        };
+        backendFactory.Register(AgentBackendIds.Copilot, () => backend);
+
+        await using var hub = new AgentHub(backendFactory, repository);
+
+        _ = await hub.ListSessionsAsync(AgentBackendIds.Copilot).ConfigureAwait(false);
+        var deleted = await hub.DeleteSessionAsync(AgentBackendIds.Copilot, "session-a").ConfigureAwait(false);
+        var afterDelete = await hub.ListSessionsAsync(AgentBackendIds.Copilot).ConfigureAwait(false);
+
+        Assert.IsTrue(deleted);
+        Assert.AreEqual(2, backend.ListSessionsCount);
+        Assert.AreEqual(1, afterDelete.Count);
+        Assert.AreEqual("session-b", afterDelete[0].SessionId);
+    }
+
     private static async Task<CodeAltaDb> CreateDbAsync(string rootPath)
     {
         var dbPath = Path.Combine(rootPath, "state", "db", "codealta.db");
@@ -129,6 +213,22 @@ public sealed class AgentHubBackendReloadTests
         await db.InitializeAsync().ConfigureAwait(false);
         return db;
     }
+
+    private static AgentSessionMetadata CreateSession(
+        string sessionId,
+        string cwd,
+        string repository,
+        string branch)
+        => new(
+            sessionId,
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch,
+            Context: new AgentSessionContext(
+                Cwd: cwd,
+                GitRoot: cwd,
+                Repository: repository,
+                Branch: branch),
+            WorkspacePath: cwd);
 
     private sealed class ReloadableBackend : IAgentBackend
     {
@@ -301,6 +401,52 @@ public sealed class AgentHubBackendReloadTests
 
         public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
+    }
+
+    private sealed class CountingSessionBackend(AgentBackendId backendId) : IAgentBackend
+    {
+        public AgentBackendId BackendId { get; } = backendId;
+
+        public string DisplayName => BackendId.Value;
+
+        public int ListSessionsCount { get; private set; }
+
+        public List<AgentSessionMetadata> Sessions { get; set; } = [];
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]);
+
+        public Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(
+            AgentSessionListFilter? filter = null,
+            CancellationToken cancellationToken = default)
+        {
+            ListSessionsCount++;
+            return Task.FromResult<IReadOnlyList<AgentSessionMetadata>>([.. Sessions]);
+        }
+
+        public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+            var removed = Sessions.RemoveAll(session => string.Equals(session.SessionId, sessionId, StringComparison.Ordinal)) > 0;
+            return Task.FromResult(removed);
+        }
+
+        public Task<IAgentSession> CreateSessionAsync(
+            AgentSessionCreateOptions options,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<IAgentSession> ResumeSessionAsync(
+            string sessionId,
+            AgentSessionResumeOptions options,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class DisposableAction(Action dispose) : IDisposable

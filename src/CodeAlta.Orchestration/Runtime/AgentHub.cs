@@ -14,6 +14,7 @@ public sealed class AgentHub : IAsyncDisposable
     private readonly Dictionary<AgentId, AgentIdentity> _agents = new();
     private readonly Dictionary<AgentId, SessionEntry> _sessions = new();
     private readonly Dictionary<string, IAgentBackend> _backends = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyList<AgentSessionMetadata>> _sessionMetadataCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Channel<OrchestrationEvent> _events = Channel.CreateUnbounded<OrchestrationEvent>();
     private readonly SemaphoreSlim _gate = new(initialCount: 1, maxCount: 1);
     private bool _disposed;
@@ -143,6 +144,7 @@ public sealed class AgentHub : IAsyncDisposable
             }
 
             _sessions[agentId] = sessionEntry;
+            InvalidateSessionMetadataCacheUnsafe(identity.BackendId);
         }
         finally
         {
@@ -214,6 +216,7 @@ public sealed class AgentHub : IAsyncDisposable
             }
 
             _sessions[agentId] = sessionEntry;
+            InvalidateSessionMetadataCacheUnsafe(identity.BackendId);
         }
         finally
         {
@@ -267,7 +270,42 @@ public sealed class AgentHub : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
-        return await backend.ListSessionsAsync(filter, cancellationToken).ConfigureAwait(false);
+        if (!CanCacheSessionMetadata(backendId))
+        {
+            return await backend.ListSessionsAsync(filter, cancellationToken).ConfigureAwait(false);
+        }
+
+        var key = backendId.Value;
+        IReadOnlyList<AgentSessionMetadata>? sessions;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_sessionMetadataCache.TryGetValue(key, out sessions))
+            {
+                return FilterSessionMetadata(sessions, filter);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        var loadedSessions = (await backend.ListSessionsAsync(filter: null, cancellationToken).ConfigureAwait(false)).ToArray();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_sessionMetadataCache.TryGetValue(key, out sessions))
+            {
+                sessions = loadedSessions;
+                _sessionMetadataCache[key] = sessions;
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return FilterSessionMetadata(sessions, filter);
     }
 
     /// <summary>
@@ -285,7 +323,13 @@ public sealed class AgentHub : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
         var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
-        return await backend.DeleteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var deleted = await backend.DeleteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (deleted)
+        {
+            await InvalidateSessionMetadataCacheAsync(backendId, cancellationToken).ConfigureAwait(false);
+        }
+
+        return deleted;
     }
 
     /// <summary>
@@ -311,6 +355,8 @@ public sealed class AgentHub : IAsyncDisposable
             {
                 _backends.Remove(backendId.Value);
             }
+
+            InvalidateSessionMetadataCacheUnsafe(backendId);
         }
         finally
         {
@@ -634,6 +680,7 @@ public sealed class AgentHub : IAsyncDisposable
         }
 
         _sessions.Clear();
+        _sessionMetadataCache.Clear();
 
         foreach (var backend in _backends.Values)
         {
@@ -675,6 +722,67 @@ public sealed class AgentHub : IAsyncDisposable
         {
             _gate.Release();
         }
+    }
+
+    private async Task InvalidateSessionMetadataCacheAsync(AgentBackendId backendId, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            InvalidateSessionMetadataCacheUnsafe(backendId);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private void InvalidateSessionMetadataCacheUnsafe(AgentBackendId backendId)
+        => _sessionMetadataCache.Remove(backendId.Value);
+
+    private static bool CanCacheSessionMetadata(AgentBackendId backendId)
+        => string.Equals(backendId.Value, AgentBackendIds.Codex.Value, StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(backendId.Value, AgentBackendIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<AgentSessionMetadata> FilterSessionMetadata(
+        IReadOnlyList<AgentSessionMetadata> sessions,
+        AgentSessionListFilter? filter)
+    {
+        if (filter is null)
+        {
+            return sessions;
+        }
+
+        return sessions.Where(session => MatchesSessionFilter(session, filter)).ToArray();
+    }
+
+    private static bool MatchesSessionFilter(AgentSessionMetadata session, AgentSessionListFilter filter)
+    {
+        if (!string.IsNullOrWhiteSpace(filter.Cwd) &&
+            !string.Equals(session.Context?.Cwd ?? session.WorkspacePath, filter.Cwd, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.GitRoot) &&
+            !string.Equals(session.Context?.GitRoot, filter.GitRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Repository) &&
+            !string.Equals(session.Context?.Repository, filter.Repository, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Branch) &&
+            !string.Equals(session.Context?.Branch, filter.Branch, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private sealed class SessionEntry : IAsyncDisposable

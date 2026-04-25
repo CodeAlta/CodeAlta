@@ -265,7 +265,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         if (providerDefinitions.TryGetValue("codex", out var codexProvider) && codexProvider.Enabled != false)
         {
             var codexPath = ResolveCodexExecutablePath(Environment.GetEnvironmentVariable(CodexPathOverrideEnvironmentVariable));
-            await AgentHub.UnloadBackendAsync(AgentBackendIds.Codex, cancellationToken).ConfigureAwait(false);
+            // Codex is a process-backed runtime. Replacing the factory is enough for the
+            // next cold start; keep an already loaded backend alive across provider saves.
             _backendFactory.RegisterOrReplaceCodex(
                 new CodexAgentBackendOptions
                 {
@@ -283,7 +284,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
         if (providerDefinitions.TryGetValue("copilot", out var copilotProvider) && copilotProvider.Enabled != false)
         {
-            await AgentHub.UnloadBackendAsync(AgentBackendIds.Copilot, cancellationToken).ConfigureAwait(false);
+            // Copilot is a process-backed runtime. Replacing the factory is enough for the
+            // next cold start; keep an already loaded backend alive across provider saves.
             _backendFactory.RegisterOrReplaceCopilot(new CopilotAgentBackendOptions());
             providerDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "GitHub Copilot"));
             expectedBackendIds.Add(AgentBackendIds.Copilot.Value);
