@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
 
@@ -13,6 +14,8 @@ internal sealed class RecoverableThreadSource : IRecoverableThreadSource
         _runtimeService = runtimeService;
     }
 
+    public Func<AgentBackendId, bool>? ShouldListBackendSessions { get; set; }
+
     public Task<IReadOnlyList<WorkThreadDescriptor>> ListRecoverableThreadsAsync(CancellationToken cancellationToken)
-        => _runtimeService.ListRecoverableThreadsAsync(cancellationToken);
+        => _runtimeService.ListRecoverableThreadsAsync(ShouldListBackendSessions, cancellationToken);
 }

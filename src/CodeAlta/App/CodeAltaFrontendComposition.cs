@@ -73,13 +73,14 @@ internal sealed class CodeAltaFrontendComposition
         var promptComposerViewModel = new PromptComposerViewModel();
         var sessionUsageViewModel = new SessionUsageViewModel();
         var chatBackendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        knownProjectImporter.ShouldLoadProviderSessions = ShouldLoadProviderSessions;
         var configStore = new CodeAltaConfigStore(catalogOptions);
         var backendPreferences = new ChatBackendPreferenceCoordinator(configStore, CodeAlta.Views.CodeAltaApp.UiLogger);
         var shellController = new CodeAltaShellController(
             shell,
             knownProjectImporter,
             new ProjectCatalogStore(projectCatalog),
-            new RecoverableThreadSource(runtimeService),
+            new RecoverableThreadSource(runtimeService) { ShouldListBackendSessions = ShouldLoadProviderSessions },
             new WorkThreadDeleter(runtimeService));
         var runtimeEventPump = new RuntimeEventPump(runtimeService, shellController);
         var terminalLoopCoordinator = new TerminalLoopCoordinator(
@@ -298,6 +299,10 @@ internal sealed class CodeAltaFrontendComposition
             ThreadSelectionContext = threadSelectionContext,
             WorkspaceRefreshContext = workspaceRefreshContext,
         };
+
+        bool ShouldLoadProviderSessions(AgentBackendId backendId)
+            => chatBackendStates.TryGetValue(backendId.Value, out var state) &&
+               state.Availability == ChatBackendAvailability.Ready;
     }
 
     private static Func<string?, string> CreateProviderDisplayNameResolver(

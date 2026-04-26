@@ -68,14 +68,28 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     /// Lists recoverable user-facing threads from backend session history.
     /// </summary>
     public async Task<IReadOnlyList<WorkThreadDescriptor>> ListRecoverableThreadsAsync(CancellationToken cancellationToken = default)
+        => await ListRecoverableThreadsAsync(shouldListBackendSessions: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Lists recoverable user-facing threads from selected backend session history.
+    /// </summary>
+    /// <param name="shouldListBackendSessions">Optional predicate that returns whether a backend's sessions should be listed.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The recoverable user-facing threads.</returns>
+    public async Task<IReadOnlyList<WorkThreadDescriptor>> ListRecoverableThreadsAsync(
+        Func<AgentBackendId, bool>? shouldListBackendSessions,
+        CancellationToken cancellationToken = default)
     {
         var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
         var internalThreads = await _threadCatalog.LoadInternalAsync(cancellationToken).ConfigureAwait(false);
         var results = new List<WorkThreadDescriptor>(internalThreads.Count);
         results.AddRange(internalThreads);
 
+        var backendIds = _agentHub.ListRegisteredBackends()
+            .Where(backendId => shouldListBackendSessions?.Invoke(backendId) != false)
+            .ToArray();
         var sessionResults = await Task.WhenAll(
-                _agentHub.ListRegisteredBackends().Select(LoadBackendSessionsAsync))
+                backendIds.Select(LoadBackendSessionsAsync))
             .ConfigureAwait(false);
 
         foreach (var (backendId, sessions) in sessionResults)

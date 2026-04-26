@@ -27,6 +27,8 @@ internal sealed class KnownProjectImporter : IKnownProjectImporterWithProgress
         _projectCatalog = projectCatalog;
     }
 
+    public Func<AgentBackendId, bool>? ShouldLoadProviderSessions { get; set; }
+
     public Task ImportAsync(CancellationToken cancellationToken)
         => ImportAsync(static _ => { }, cancellationToken);
 
@@ -49,6 +51,13 @@ internal sealed class KnownProjectImporter : IKnownProjectImporterWithProgress
 
         async Task ImportBackendProjectsAsync(AgentBackendDescriptor descriptor)
         {
+            if (ShouldLoadProviderSessions is { } shouldLoadProviderSessions &&
+                !shouldLoadProviderSessions(descriptor.BackendId))
+            {
+                ReportProgress(descriptor);
+                return;
+            }
+
             try
             {
                 var sessions = await _agentHub.ListSessionsAsync(descriptor.BackendId, cancellationToken: cancellationToken).ConfigureAwait(false);
