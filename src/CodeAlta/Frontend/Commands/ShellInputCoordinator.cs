@@ -25,6 +25,10 @@ internal sealed class ShellInputCoordinator
     private readonly Func<Task> _showQueueStatusAsync;
     private readonly Func<Task> _selectTabLeftAsync;
     private readonly Func<Task> _selectTabRightAsync;
+    private readonly Func<Task> _scrollToPreviousMessageAsync;
+    private readonly Func<Task> _scrollToNextMessageAsync;
+    private readonly Func<Task> _scrollToFirstMessageAsync;
+    private readonly Func<Task> _scrollToLastMessageAsync;
     private readonly Func<Task> _clearQueueAsync;
     private readonly ThreadCommandCoordinator _threadCommandCoordinator;
     private readonly Action<string, bool, StatusTone> _setStatus;
@@ -49,6 +53,10 @@ internal sealed class ShellInputCoordinator
         Func<Task> showQueueStatusAsync,
         Func<Task> selectTabLeftAsync,
         Func<Task> selectTabRightAsync,
+        Func<Task> scrollToPreviousMessageAsync,
+        Func<Task> scrollToNextMessageAsync,
+        Func<Task> scrollToFirstMessageAsync,
+        Func<Task> scrollToLastMessageAsync,
         Func<Task> clearQueueAsync,
         ThreadCommandCoordinator threadCommandCoordinator,
         Action<string, bool, StatusTone> setStatus)
@@ -72,6 +80,10 @@ internal sealed class ShellInputCoordinator
         ArgumentNullException.ThrowIfNull(showQueueStatusAsync);
         ArgumentNullException.ThrowIfNull(selectTabLeftAsync);
         ArgumentNullException.ThrowIfNull(selectTabRightAsync);
+        ArgumentNullException.ThrowIfNull(scrollToPreviousMessageAsync);
+        ArgumentNullException.ThrowIfNull(scrollToNextMessageAsync);
+        ArgumentNullException.ThrowIfNull(scrollToFirstMessageAsync);
+        ArgumentNullException.ThrowIfNull(scrollToLastMessageAsync);
         ArgumentNullException.ThrowIfNull(clearQueueAsync);
         ArgumentNullException.ThrowIfNull(threadCommandCoordinator);
         ArgumentNullException.ThrowIfNull(setStatus);
@@ -95,6 +107,10 @@ internal sealed class ShellInputCoordinator
         _showQueueStatusAsync = showQueueStatusAsync;
         _selectTabLeftAsync = selectTabLeftAsync;
         _selectTabRightAsync = selectTabRightAsync;
+        _scrollToPreviousMessageAsync = scrollToPreviousMessageAsync;
+        _scrollToNextMessageAsync = scrollToNextMessageAsync;
+        _scrollToFirstMessageAsync = scrollToFirstMessageAsync;
+        _scrollToLastMessageAsync = scrollToLastMessageAsync;
         _clearQueueAsync = clearQueueAsync;
         _threadCommandCoordinator = threadCommandCoordinator;
         _setStatus = setStatus;
@@ -167,6 +183,22 @@ internal sealed class ShellInputCoordinator
 
             case TabRightIntent:
                 await _selectTabRightAsync();
+                return;
+
+            case MessagePreviousIntent:
+                await _scrollToPreviousMessageAsync();
+                return;
+
+            case MessageNextIntent:
+                await _scrollToNextMessageAsync();
+                return;
+
+            case MessageFirstIntent:
+                await _scrollToFirstMessageAsync();
+                return;
+
+            case MessageLastIntent:
+                await _scrollToLastMessageAsync();
                 return;
 
             case QueueStatusIntent:

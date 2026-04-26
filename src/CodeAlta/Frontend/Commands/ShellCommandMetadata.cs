@@ -29,6 +29,7 @@ internal enum ShellCommandHelpCategory
     General,
     Prompt,
     Thread,
+    Navigation,
     Inspection,
 }
 

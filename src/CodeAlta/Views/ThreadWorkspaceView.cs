@@ -622,7 +622,11 @@ internal sealed class ThreadWorkspaceView
             "CodeAlta.Providers.Manage" or
             "CodeAlta.Thread.CloseTab" or
             "CodeAlta.Thread.TabLeft" or
-            "CodeAlta.Thread.TabRight";
+            "CodeAlta.Thread.TabRight" or
+            "CodeAlta.Thread.MessagePrevious" or
+            "CodeAlta.Thread.MessageNext" or
+            "CodeAlta.Thread.MessageFirst" or
+            "CodeAlta.Thread.MessageLast";
 
     private static Command BuildCommand(ThreadWorkspaceCommandBinding binding)
     {

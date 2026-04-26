@@ -133,4 +133,13 @@ public sealed class ResponsiveDialogSizeTests
 
         Assert.AreEqual(new KeyGesture(TerminalKey.Right, TerminalModifiers.Alt), gesture);
     }
+
+    [TestMethod]
+    public void ShellCommandCatalog_UsesFunctionKeysForMessageNavigation()
+    {
+        Assert.AreEqual(new KeyGesture(TerminalKey.F3), ShellCommandCatalog.Get("CodeAlta.Thread.MessagePrevious").Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F4), ShellCommandCatalog.Get("CodeAlta.Thread.MessageNext").Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F3, TerminalModifiers.Ctrl), ShellCommandCatalog.Get("CodeAlta.Thread.MessageFirst").Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F4, TerminalModifiers.Ctrl), ShellCommandCatalog.Get("CodeAlta.Thread.MessageLast").Gesture);
+    }
 }

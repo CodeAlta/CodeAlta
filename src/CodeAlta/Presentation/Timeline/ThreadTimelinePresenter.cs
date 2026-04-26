@@ -27,6 +27,7 @@ internal sealed class ThreadTimelinePresenter
     private readonly Dictionary<string, ChatStatusState> _activityStates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ChatStatusState> _interactionStates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ChatStatusState> _planStates = new(StringComparer.Ordinal);
+    private readonly List<MessageNavigationAnchor> _messageNavigationAnchors = [];
     private List<DocumentFlowItem>? _bufferedHistoryItems;
     private PendingAssistantState? _pendingAssistant;
     private OptimisticUserPromptState? _optimisticUserPrompt;
@@ -34,6 +35,7 @@ internal sealed class ThreadTimelinePresenter
     private bool _hasSeenUserPrompt;
     private bool _deferredTailScrollQueued;
     private DeferredTailScrollMode _deferredTailScrollMode;
+    private int? _messageNavigationIndex;
     private string? _localFileRootPath;
 
     public ThreadTimelinePresenter(
@@ -85,6 +87,10 @@ internal sealed class ThreadTimelinePresenter
     public FileChangePresenter FileChanges { get; }
 
     public string? LocalFileRootPath => _localFileRootPath;
+
+    public bool HasNavigableMessages => _messageNavigationAnchors.Count > 0;
+
+    internal int? MessageNavigationIndex => _messageNavigationIndex;
 
     public void SetLocalFileRootPath(string? localFileRootPath)
     {
@@ -220,6 +226,7 @@ internal sealed class ThreadTimelinePresenter
 
         _hasSeenUserPrompt = true;
         _optimisticUserPrompt = new OptimisticUserPromptState(entry, items, prompt);
+        TrackNavigableMessage(entry.Item, AgentContentKind.User);
     }
 
     public bool TryConsumeOptimisticUserEcho(AgentContentKind kind, string contentId, DateTimeOffset timestamp, bool completed)
@@ -447,6 +454,18 @@ internal sealed class ThreadTimelinePresenter
                 RequestRevealTail();
             });
 
+    public void ScrollToPreviousMessage()
+        => _uiDispatcher.Post(ScrollToPreviousMessageCore);
+
+    public void ScrollToNextMessage()
+        => _uiDispatcher.Post(ScrollToNextMessageCore);
+
+    public void ScrollToFirstMessage()
+        => _uiDispatcher.Post(ScrollToFirstMessageCore);
+
+    public void ScrollToLastMessage()
+        => _uiDispatcher.Post(ScrollToLastMessageCore);
+
     public void Reset()
     {
         ToolCalls.Reset();
@@ -461,6 +480,8 @@ internal sealed class ThreadTimelinePresenter
         _optimisticUserPrompt = null;
         _truncatedHistory = null;
         _hasSeenUserPrompt = false;
+        _messageNavigationAnchors.Clear();
+        _messageNavigationIndex = null;
     }
 
     internal static string ResolveCompletedContent(string completedContent, StringBuilder bufferedContent)
@@ -529,6 +550,7 @@ internal sealed class ThreadTimelinePresenter
             _pendingAssistant = null;
             var pendingState = new ChatContentState(pending.Item, pending.Markdown, pending.TimestampText, pending.HeaderText, pending.Buffer, kind);
             _contentStates[key] = pendingState;
+            TrackNavigableMessage(pending.Item, kind);
             return pendingState;
         }
 
@@ -543,6 +565,7 @@ internal sealed class ThreadTimelinePresenter
         _contentStates[key] = state;
         if (kind == AgentContentKind.User)
         {
+            TrackNavigableMessage(entry.Item, kind);
             foreach (var item in ChatTimelineVisualFactory.BuildUserPromptTimelineItems(entry.Item, _hasSeenUserPrompt))
             {
                 AppendTimelineItem(item);
@@ -552,6 +575,7 @@ internal sealed class ThreadTimelinePresenter
             return state;
         }
 
+        TrackNavigableMessage(entry.Item, kind);
         AppendTimelineItem(entry.Item);
         return state;
     }
@@ -632,6 +656,7 @@ internal sealed class ThreadTimelinePresenter
             return;
         }
 
+        RemoveMessageNavigationAnchors(items);
         if (_bufferedHistoryItems is not null)
         {
             foreach (var item in items)
@@ -649,6 +674,139 @@ internal sealed class ThreadTimelinePresenter
                 _ = Flow.Items.Remove(item);
             }
         });
+    }
+
+    private void TrackNavigableMessage(DocumentFlowItem item, AgentContentKind kind)
+    {
+        if (kind is not (AgentContentKind.User or AgentContentKind.Assistant))
+        {
+            return;
+        }
+
+        _messageNavigationAnchors.Add(new MessageNavigationAnchor(item, kind));
+        if (Flow.FollowTail)
+        {
+            _messageNavigationIndex = null;
+        }
+    }
+
+    private void RemoveMessageNavigationAnchors(IReadOnlyList<DocumentFlowItem> items)
+    {
+        if (items.Count == 0 || _messageNavigationAnchors.Count == 0)
+        {
+            return;
+        }
+
+        for (var anchorIndex = _messageNavigationAnchors.Count - 1; anchorIndex >= 0; anchorIndex--)
+        {
+            var anchor = _messageNavigationAnchors[anchorIndex];
+            if (!ContainsItemByContent(items, anchor.Item))
+            {
+                continue;
+            }
+
+            _messageNavigationAnchors.RemoveAt(anchorIndex);
+            if (_messageNavigationIndex is { } currentIndex)
+            {
+                if (currentIndex == anchorIndex)
+                {
+                    _messageNavigationIndex = null;
+                }
+                else if (currentIndex > anchorIndex)
+                {
+                    _messageNavigationIndex = currentIndex - 1;
+                }
+            }
+        }
+    }
+
+    private void ScrollToPreviousMessageCore()
+    {
+        if (_messageNavigationAnchors.Count == 0)
+        {
+            return;
+        }
+
+        var targetIndex = !Flow.FollowTail && _messageNavigationIndex is { } currentIndex
+            ? Math.Max(0, currentIndex - 1)
+            : _messageNavigationAnchors.Count - 1;
+        ScrollToMessageAnchor(targetIndex);
+    }
+
+    private void ScrollToNextMessageCore()
+    {
+        if (_messageNavigationAnchors.Count == 0)
+        {
+            return;
+        }
+
+        if (Flow.FollowTail ||
+            _messageNavigationIndex is not { } currentIndex ||
+            currentIndex >= _messageNavigationAnchors.Count - 1)
+        {
+            ScrollToLastMessageCore();
+            return;
+        }
+
+        ScrollToMessageAnchor(currentIndex + 1);
+    }
+
+    private void ScrollToFirstMessageCore()
+    {
+        if (_messageNavigationAnchors.Count == 0)
+        {
+            return;
+        }
+
+        ScrollToMessageAnchor(0);
+    }
+
+    private void ScrollToLastMessageCore()
+    {
+        _messageNavigationIndex = null;
+        RequestRevealTail();
+    }
+
+    private void ScrollToMessageAnchor(int anchorIndex)
+    {
+        if ((uint)anchorIndex >= (uint)_messageNavigationAnchors.Count)
+        {
+            return;
+        }
+
+        var itemIndex = IndexOfFlowItemByContent(Flow, _messageNavigationAnchors[anchorIndex].Item);
+        if (itemIndex < 0 || !Flow.TryScrollToItem(itemIndex))
+        {
+            return;
+        }
+
+        _messageNavigationIndex = anchorIndex;
+    }
+
+    private static bool ContainsItemByContent(IReadOnlyList<DocumentFlowItem> items, DocumentFlowItem target)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (ReferenceEquals(items[i].Content, target.Content))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int IndexOfFlowItemByContent(DocumentFlow flow, DocumentFlowItem target)
+    {
+        for (var i = 0; i < flow.Items.Count; i++)
+        {
+            if (ReferenceEquals(flow.Items[i].Content, target.Content))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private void RequestAutoScrollToTail()
@@ -699,4 +857,6 @@ internal sealed class ThreadTimelinePresenter
                 break;
         }
     }
+
+    private readonly record struct MessageNavigationAnchor(DocumentFlowItem Item, AgentContentKind Kind);
 }

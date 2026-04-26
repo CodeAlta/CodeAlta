@@ -50,6 +50,10 @@ internal sealed class ShellCommandSurfaceCoordinator
     private readonly Action _openExpandedPromptEditor;
     private readonly Func<Task> _selectTabLeftAsync;
     private readonly Func<Task> _selectTabRightAsync;
+    private readonly Func<Task> _scrollToPreviousMessageAsync;
+    private readonly Func<Task> _scrollToNextMessageAsync;
+    private readonly Func<Task> _scrollToFirstMessageAsync;
+    private readonly Func<Task> _scrollToLastMessageAsync;
     private readonly ShellInputCoordinator _shellInputCoordinator;
     private CommandPaletteStyle _activeCommandPaletteStyle = CommandPalettePopupStyle;
     private CommandPalette? _commandPalette;
@@ -78,7 +82,11 @@ internal sealed class ShellCommandSurfaceCoordinator
         Action openThreadInfo,
         Action openExpandedPromptEditor,
         Func<Task> selectTabLeftAsync,
-        Func<Task> selectTabRightAsync)
+        Func<Task> selectTabRightAsync,
+        Func<Task> scrollToPreviousMessageAsync,
+        Func<Task> scrollToNextMessageAsync,
+        Func<Task> scrollToFirstMessageAsync,
+        Func<Task> scrollToLastMessageAsync)
     {
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(threadWorkspaceViewModel);
@@ -103,6 +111,10 @@ internal sealed class ShellCommandSurfaceCoordinator
         ArgumentNullException.ThrowIfNull(openExpandedPromptEditor);
         ArgumentNullException.ThrowIfNull(selectTabLeftAsync);
         ArgumentNullException.ThrowIfNull(selectTabRightAsync);
+        ArgumentNullException.ThrowIfNull(scrollToPreviousMessageAsync);
+        ArgumentNullException.ThrowIfNull(scrollToNextMessageAsync);
+        ArgumentNullException.ThrowIfNull(scrollToFirstMessageAsync);
+        ArgumentNullException.ThrowIfNull(scrollToLastMessageAsync);
 
         _promptComposerViewModel = promptComposerViewModel;
         _threadWorkspaceViewModel = threadWorkspaceViewModel;
@@ -125,6 +137,10 @@ internal sealed class ShellCommandSurfaceCoordinator
         _openExpandedPromptEditor = openExpandedPromptEditor;
         _selectTabLeftAsync = selectTabLeftAsync;
         _selectTabRightAsync = selectTabRightAsync;
+        _scrollToPreviousMessageAsync = scrollToPreviousMessageAsync;
+        _scrollToNextMessageAsync = scrollToNextMessageAsync;
+        _scrollToFirstMessageAsync = scrollToFirstMessageAsync;
+        _scrollToLastMessageAsync = scrollToLastMessageAsync;
         _shellInputCoordinator = new ShellInputCoordinator(
             new ShellInputRouter(),
             getPromptText,
@@ -145,6 +161,10 @@ internal sealed class ShellCommandSurfaceCoordinator
             ShowSelectedThreadQueueStatusAsync,
             SelectTabLeftAsync,
             SelectTabRightAsync,
+            ScrollToPreviousMessageAsync,
+            ScrollToNextMessageAsync,
+            ScrollToFirstMessageAsync,
+            ScrollToLastMessageAsync,
             ClearSelectedThreadQueueAsync,
             threadCommandCoordinator,
             setStatus);
@@ -170,6 +190,10 @@ internal sealed class ShellCommandSurfaceCoordinator
             CreateCommandBinding("CodeAlta.Thread.CloseTab", () => ObserveUiTask(_shellInputCoordinator.CloseCurrentTabAsync(), "close the current tab")),
             CreateCommandBinding("CodeAlta.Thread.TabLeft", () => ObserveUiTask(SelectTabLeftAsync(), "select the tab to the left")),
             CreateCommandBinding("CodeAlta.Thread.TabRight", () => ObserveUiTask(SelectTabRightAsync(), "select the tab to the right")),
+            CreateCommandBinding("CodeAlta.Thread.MessagePrevious", () => ObserveUiTask(ScrollToPreviousMessageAsync(), "scroll to the previous message")),
+            CreateCommandBinding("CodeAlta.Thread.MessageNext", () => ObserveUiTask(ScrollToNextMessageAsync(), "scroll to the next message")),
+            CreateCommandBinding("CodeAlta.Thread.MessageFirst", () => ObserveUiTask(ScrollToFirstMessageAsync(), "scroll to the first message")),
+            CreateCommandBinding("CodeAlta.Thread.MessageLast", () => ObserveUiTask(ScrollToLastMessageAsync(), "scroll to the last message")),
         ];
     }
 
@@ -343,6 +367,18 @@ internal sealed class ShellCommandSurfaceCoordinator
 
     private Task SelectTabRightAsync()
         => _selectTabRightAsync();
+
+    private Task ScrollToPreviousMessageAsync()
+        => _scrollToPreviousMessageAsync();
+
+    private Task ScrollToNextMessageAsync()
+        => _scrollToNextMessageAsync();
+
+    private Task ScrollToFirstMessageAsync()
+        => _scrollToFirstMessageAsync();
+
+    private Task ScrollToLastMessageAsync()
+        => _scrollToLastMessageAsync();
 
     private Task ClearSelectedThreadQueueAsync()
         => _threadCommandCoordinator.ClearSelectedThreadQueueAsync();

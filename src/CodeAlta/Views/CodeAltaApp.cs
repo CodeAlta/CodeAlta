@@ -335,7 +335,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             () => { if (ThreadInput is not null) EnsureThreadInfoPresenter().TogglePopup(ThreadInput); },
             () => _threadWorkspaceView?.OpenExpandedPromptDialog(),
             () => { _ = _threadTabStripCoordinator.TrySelectRelativeTab(-1); return Task.CompletedTask; },
-            () => { _ = _threadTabStripCoordinator.TrySelectRelativeTab(1); return Task.CompletedTask; });
+            () => { _ = _threadTabStripCoordinator.TrySelectRelativeTab(1); return Task.CompletedTask; },
+            () => ScrollSelectedThreadMessageAsync(static tab => tab.Timeline.ScrollToPreviousMessage()),
+            () => ScrollSelectedThreadMessageAsync(static tab => tab.Timeline.ScrollToNextMessage()),
+            () => ScrollSelectedThreadMessageAsync(static tab => tab.Timeline.ScrollToFirstMessage()),
+            () => ScrollSelectedThreadMessageAsync(static tab => tab.Timeline.ScrollToLastMessage()));
         _threadHistoryCoordinator = new ThreadHistoryCoordinator(
             _runtimeService,
             EnsureThreadTab,
@@ -720,6 +724,29 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     internal void OpenThread(string threadId) { ActivateThreadSurface(); _threadStateCoordinator.OpenThread(threadId); }
     internal void FocusPromptEditor() { ActivateThreadSurface(); ThreadPaneLayout?.App?.Focus(ThreadInput); }
+
+    private Task ScrollSelectedThreadMessageAsync(Action<OpenThreadState> scroll)
+    {
+        ArgumentNullException.ThrowIfNull(scroll);
+
+        if (_fileEditorWorkspaceCoordinator.SelectedTabId is not null ||
+            _threadStateCoordinator.Selection.Target is not WorkspaceTarget.Thread ||
+            GetSelectedThread() is not { } thread)
+        {
+            SetStatus("Open a thread tab before navigating messages.", false, StatusTone.Warning);
+            return Task.CompletedTask;
+        }
+
+        var tab = EnsureThreadTab(thread);
+        if (!tab.Timeline.HasNavigableMessages)
+        {
+            SetStatus("No user or assistant messages to navigate in this thread.", false, StatusTone.Info);
+            return Task.CompletedTask;
+        }
+
+        scroll(tab);
+        return Task.CompletedTask;
+    }
 
     internal void OpenAcpManagement() { if (_acpManagementCoordinator is null) { SetStatus("ACP management is unavailable in this app instance.", tone: StatusTone.Warning); return; } _acpManagementCoordinator.Open(); }
     internal Task OpenModelProvidersAsync() => _providerDialogCoordinator.OpenAsync();

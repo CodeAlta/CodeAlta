@@ -234,6 +234,68 @@ public sealed class ThreadTimelinePresenterTests
     }
 
     [TestMethod]
+    public void ScrollToPreviousMessage_FirstPressSelectsLastNavigableMessage()
+    {
+        var presenter = CreatePresenter();
+        RenderCompletedContent(presenter, AgentContentKind.User, "user-1", "First prompt");
+        RenderCompletedContent(presenter, AgentContentKind.Assistant, "assistant-1", "Assistant reply");
+
+        presenter.ScrollToPreviousMessage();
+
+        Assert.AreEqual(1, presenter.MessageNavigationIndex);
+        Assert.IsFalse(presenter.Flow.FollowTail);
+
+        presenter.ScrollToPreviousMessage();
+
+        Assert.AreEqual(0, presenter.MessageNavigationIndex);
+        Assert.IsFalse(presenter.Flow.FollowTail);
+    }
+
+    [TestMethod]
+    public void ScrollToNextMessage_FromLastNavigableMessageReturnsToTail()
+    {
+        var presenter = CreatePresenter();
+        RenderCompletedContent(presenter, AgentContentKind.User, "user-1", "First prompt");
+        RenderCompletedContent(presenter, AgentContentKind.Assistant, "assistant-1", "Assistant reply");
+
+        presenter.ScrollToPreviousMessage();
+        presenter.ScrollToNextMessage();
+
+        Assert.IsNull(presenter.MessageNavigationIndex);
+        Assert.IsTrue(presenter.Flow.FollowTail);
+    }
+
+    [TestMethod]
+    public void ScrollToFirstAndLastMessage_JumpToBounds()
+    {
+        var presenter = CreatePresenter();
+        RenderCompletedContent(presenter, AgentContentKind.User, "user-1", "First prompt");
+        RenderCompletedContent(presenter, AgentContentKind.Assistant, "assistant-1", "Assistant reply");
+
+        presenter.ScrollToFirstMessage();
+
+        Assert.AreEqual(0, presenter.MessageNavigationIndex);
+        Assert.IsFalse(presenter.Flow.FollowTail);
+
+        presenter.ScrollToLastMessage();
+
+        Assert.IsNull(presenter.MessageNavigationIndex);
+        Assert.IsTrue(presenter.Flow.FollowTail);
+    }
+
+    [TestMethod]
+    public void MessageNavigation_IgnoresNonUserAssistantTimelineItems()
+    {
+        var presenter = CreatePresenter();
+
+        presenter.AddStatus(DateTimeOffset.UtcNow, "Working", ChatTimelineTone.Activity, "Activity");
+
+        Assert.IsFalse(presenter.HasNavigableMessages);
+        presenter.ScrollToPreviousMessage();
+        Assert.IsNull(presenter.MessageNavigationIndex);
+    }
+
+    [TestMethod]
     public void Reset_ClearsTimelineItemsAndResetsAssistantTracking()
     {
         var presenter = CreatePresenter();
@@ -273,6 +335,21 @@ public sealed class ThreadTimelinePresenterTests
 
     private static ThreadTimelinePresenter CreatePresenter()
         => new(new InlineUiDispatcher(), () => true, static () => null);
+
+    private static void RenderCompletedContent(
+        ThreadTimelinePresenter presenter,
+        AgentContentKind kind,
+        string contentId,
+        string content)
+        => presenter.FinalizeContent(new AgentContentCompletedEvent(
+            AgentBackendIds.Codex,
+            "session-1",
+            DateTimeOffset.UtcNow,
+            null,
+            kind,
+            contentId,
+            null,
+            content));
 
     private sealed class InlineUiDispatcher : IUiDispatcher
     {

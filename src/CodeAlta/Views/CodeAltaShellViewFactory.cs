@@ -39,7 +39,6 @@ internal static class CodeAltaShellViewFactory
             Id = "CodeAlta.Diagnostics.ToggleTerminalLoop",
             LabelMarkup = "Loop",
             DescriptionMarkup = "Toggle per-frame loop work.",
-            Gesture = new KeyGesture(TerminalKey.F4),
             Presentation = CommandPresentation.CommandBar,
             Execute = _ => toggleTerminalLoopCallback(),
         });

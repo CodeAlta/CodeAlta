@@ -42,6 +42,14 @@ internal sealed record TabLeftIntent : ShellInputIntent;
 
 internal sealed record TabRightIntent : ShellInputIntent;
 
+internal sealed record MessagePreviousIntent : ShellInputIntent;
+
+internal sealed record MessageNextIntent : ShellInputIntent;
+
+internal sealed record MessageFirstIntent : ShellInputIntent;
+
+internal sealed record MessageLastIntent : ShellInputIntent;
+
 internal sealed record ClearQueueIntent : ShellInputIntent;
 
 internal sealed record QueueStatusIntent : ShellInputIntent;

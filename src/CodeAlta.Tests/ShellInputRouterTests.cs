@@ -55,6 +55,10 @@ public sealed class ShellInputRouterTests
         Assert.IsInstanceOfType<CloseTabIntent>(_router.Route("/close", steerRequested: false));
         Assert.IsInstanceOfType<TabLeftIntent>(_router.Route("/tab_left", steerRequested: false));
         Assert.IsInstanceOfType<TabRightIntent>(_router.Route("/tab_right", steerRequested: false));
+        Assert.IsInstanceOfType<MessagePreviousIntent>(_router.Route("/msg_prev", steerRequested: false));
+        Assert.IsInstanceOfType<MessageNextIntent>(_router.Route("/msg_next", steerRequested: false));
+        Assert.IsInstanceOfType<MessageFirstIntent>(_router.Route("/msg_first", steerRequested: false));
+        Assert.IsInstanceOfType<MessageLastIntent>(_router.Route("/msg_last", steerRequested: false));
         Assert.IsInstanceOfType<QueueStatusIntent>(_router.Route("/queue", steerRequested: false));
     }
 
