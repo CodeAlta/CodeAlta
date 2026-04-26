@@ -2,8 +2,24 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.LocalRuntime.Compaction;
 using Tomlyn;
 using Tomlyn.Model;
+using Tomlyn.Text;
 
 namespace CodeAlta.Catalog;
+
+/// <summary>
+/// Describes whether CodeAlta TOML configuration content can be loaded.
+/// </summary>
+/// <param name="IsValid"><see langword="true"/> when the configuration can be loaded.</param>
+/// <param name="Message">The diagnostic message, or <see langword="null"/> when valid.</param>
+/// <param name="Line">The 1-based diagnostic line when available.</param>
+/// <param name="Column">The 1-based diagnostic column when available.</param>
+public sealed record CodeAltaConfigValidationResult(bool IsValid, string? Message, int? Line, int? Column)
+{
+    /// <summary>
+    /// Gets a successful validation result.
+    /// </summary>
+    public static CodeAltaConfigValidationResult Valid { get; } = new(true, null, null, null);
+}
 
 /// <summary>
 /// Loads and persists CodeAlta TOML configuration files.
@@ -72,6 +88,26 @@ public sealed class CodeAltaConfigStore
     /// <returns>The parsed configuration document.</returns>
     public CodeAltaConfigDocument LoadGlobal()
         => LoadDocument(_options.ConfigPath);
+
+    /// <summary>
+    /// Validates global CodeAlta TOML configuration content without starting backends or sessions.
+    /// </summary>
+    /// <param name="content">The TOML content to validate.</param>
+    /// <param name="sourcePath">Optional source path used in diagnostics.</param>
+    /// <returns>The validation result, including the first diagnostic location when available.</returns>
+    public static CodeAltaConfigValidationResult ValidateGlobalConfigContent(string? content, string? sourcePath = null)
+    {
+        try
+        {
+            var document = ParseDocument(content ?? string.Empty, sourcePath);
+            ValidateGlobalDocument(document);
+            return CodeAltaConfigValidationResult.Valid;
+        }
+        catch (Exception ex) when (IsConfigLoadException(ex))
+        {
+            return CreateValidationFailure(ex);
+        }
+    }
 
     /// <summary>
     /// Loads the project-local configuration when present.
@@ -488,16 +524,83 @@ public sealed class CodeAltaConfigStore
 
         try
         {
-            ThrowIfLegacyConfigShapeDetected(content);
-            var document = TomlSerializer.Deserialize<CodeAltaConfigDocument>(content)
-                ?? new CodeAltaConfigDocument();
-            NormalizeDocument(document);
-            return document;
+            return ParseDocument(content, path);
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or IOException or TomlException)
         {
             throw new InvalidDataException($"Failed to parse CodeAlta config '{path}'.", ex);
         }
+    }
+
+    private static CodeAltaConfigDocument ParseDocument(string content, string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return new CodeAltaConfigDocument();
+        }
+
+        ThrowIfLegacyConfigShapeDetected(content, sourcePath);
+        var options = string.IsNullOrWhiteSpace(sourcePath)
+            ? TomlSerializerOptions.Default
+            : TomlSerializerOptions.Default with { SourceName = sourcePath };
+        var document = TomlSerializer.Deserialize<CodeAltaConfigDocument>(content, options)
+            ?? new CodeAltaConfigDocument();
+        NormalizeDocument(document);
+        return document;
+    }
+
+    private static void ValidateGlobalDocument(CodeAltaConfigDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        NormalizeDocument(document);
+        var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
+            .Values
+            .Select(CloneProviderDefinition)
+            .ToDictionary(
+                static definition => definition.ProviderKey,
+                static definition => definition,
+                StringComparer.OrdinalIgnoreCase);
+
+        AddImplicitReservedProvider(definitions, CodexProviderKey);
+        AddImplicitReservedProvider(definitions, CopilotProviderKey);
+
+        foreach (var definition in definitions.Values)
+        {
+            CompleteAndValidateProviderDefinition(definition);
+        }
+    }
+
+    private static bool IsConfigLoadException(Exception ex)
+        => ex is InvalidOperationException or FormatException or IOException or TomlException;
+
+    private static CodeAltaConfigValidationResult CreateValidationFailure(Exception exception)
+    {
+        var tomlException = FindTomlException(exception);
+        var message = exception.GetBaseException().Message;
+        if (tomlException is not null)
+        {
+            message = tomlException.Message;
+        }
+
+        return new CodeAltaConfigValidationResult(
+            IsValid: false,
+            Message: message,
+            Line: tomlException?.Line,
+            Column: tomlException?.Column);
+    }
+
+    private static TomlException? FindTomlException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException!)
+        {
+            if (current is TomlException tomlException)
+            {
+                return tomlException;
+            }
+        }
+
+        return null;
     }
 
     private static void SaveDocument(string path, CodeAltaConfigDocument document)
@@ -1790,11 +1893,11 @@ public sealed class CodeAltaConfigStore
             _ => null,
         };
 
-    private static void ThrowIfLegacyConfigShapeDetected(string content)
+    private static void ThrowIfLegacyConfigShapeDetected(string content, string? sourcePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
 
-        var normalized = content.Replace("\r", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+        var normalized = content.ToLowerInvariant();
         string[] legacyMarkers =
         [
             "[backends",
@@ -1808,11 +1911,47 @@ public sealed class CodeAltaConfigStore
             "\nprovider =",
         ];
 
-        if (legacyMarkers.Any(normalized.Contains) ||
-            normalized.StartsWith("provider =", StringComparison.Ordinal))
+        var markerOffset = normalized.StartsWith("provider =", StringComparison.Ordinal)
+            ? 0
+            : legacyMarkers
+                .Select(marker => normalized.IndexOf(marker, StringComparison.Ordinal))
+                .Where(static index => index >= 0)
+                .DefaultIfEmpty(-1)
+                .Min();
+
+        if (markerOffset >= 0)
         {
-            throw new InvalidOperationException(
+            if (normalized[markerOffset] == '\n')
+            {
+                markerOffset++;
+            }
+
+            var position = GetTomlTextPosition(content, markerOffset);
+            var span = new TomlSourceSpan(sourcePath ?? string.Empty, position, position);
+            throw new TomlException(
+                span,
                 "Legacy CodeAlta config keys are no longer supported. Migrate to [chat].default_provider, providers.<key>.type, and providers.<key>.api_url.");
         }
+    }
+
+    private static TomlTextPosition GetTomlTextPosition(string content, int offset)
+    {
+        var clampedOffset = Math.Clamp(offset, 0, content.Length);
+        var line = 0;
+        var column = 0;
+        for (var i = 0; i < clampedOffset; i++)
+        {
+            if (content[i] == '\n')
+            {
+                line++;
+                column = 0;
+            }
+            else if (content[i] != '\r')
+            {
+                column++;
+            }
+        }
+
+        return new TomlTextPosition(clampedOffset, line, column);
     }
 }
