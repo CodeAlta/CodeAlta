@@ -25,9 +25,9 @@ public static class LocalAgentBuiltInToolFactory
     private const string ReplaceInFileToolDescription =
         "Replace exact text in a file. Deterministic only: no regex, no fuzzy matching. When replace_all is false, the tool errors unless exactly one match exists and leaves the file unchanged. Use replace_all=true to replace every match.";
     private const string DeleteFileOrDirToolDescription =
-        "Delete a file or a directory inside the working directory. Directory deletes are recursive.";
+        "Delete a file or a directory. Directory deletes are recursive.";
     private const string RenameFileOrDirToolDescription =
-        "Rename or move a file or directory inside the working directory. Will not overwrite an existing destination.";
+        "Rename or move a file or directory. Will not overwrite an existing destination.";
     private const string ApplyPatchToolDescription =
         "Use the `apply_patch` tool to edit files.";
 
@@ -36,7 +36,7 @@ public static class LocalAgentBuiltInToolFactory
         {
           "type": "object",
           "properties": {
-            "path": { "type": "string", "description": "File path relative to the working directory." },
+            "path": { "type": "string", "description": "File path. Relative paths resolve from the session working directory; absolute paths are accepted." },
             "content": { "type": "string", "description": "Exact file contents to write." }
           },
           "required": ["path", "content"],
@@ -49,7 +49,7 @@ public static class LocalAgentBuiltInToolFactory
         {
           "type": "object",
           "properties": {
-            "path": { "type": "string", "description": "File path relative to the working directory." },
+            "path": { "type": "string", "description": "File path. Relative paths resolve from the session working directory; absolute paths are accepted." },
             "old_string": { "type": "string", "description": "Exact text to replace. Newlines are matched exactly, with deterministic normalization to the file's newline style when needed." },
             "new_string": { "type": "string", "description": "Replacement text." },
             "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, the tool errors unless exactly one match exists and leaves the file unchanged." }
@@ -64,7 +64,7 @@ public static class LocalAgentBuiltInToolFactory
         {
           "type": "object",
           "properties": {
-            "path": { "type": "string", "description": "File or directory path relative to the working directory." }
+            "path": { "type": "string", "description": "File or directory path. Relative paths resolve from the session working directory; absolute paths are accepted." }
           },
           "required": ["path"],
           "additionalProperties": false
@@ -76,8 +76,8 @@ public static class LocalAgentBuiltInToolFactory
         {
           "type": "object",
           "properties": {
-            "old_path": { "type": "string", "description": "Existing file or directory path relative to the working directory." },
-            "new_path": { "type": "string", "description": "Destination path relative to the working directory. Will not overwrite an existing destination." }
+            "old_path": { "type": "string", "description": "Existing file or directory path. Relative paths resolve from the session working directory; absolute paths are accepted." },
+            "new_path": { "type": "string", "description": "Destination path. Relative paths resolve from the session working directory; absolute paths are accepted. Will not overwrite an existing destination." }
           },
           "required": ["old_path", "new_path"],
           "additionalProperties": false
@@ -91,7 +91,7 @@ public static class LocalAgentBuiltInToolFactory
           "properties": {
             "input": {
               "type": "string",
-              "description": "Patch text in the Codex/OpenAI apply_patch format. Start with '*** Begin Patch' and end with '*** End Patch'. Use '*** Add File:', '*** Delete File:', or '*** Update File:'. An update may include '*** Move to:'. Hunks begin with '@@' or '@@ anchor text'; inside hunks use space for context, '-' for deletions, and '+' for additions."
+              "description": "Patch text in the Codex/OpenAI apply_patch format. Start with '*** Begin Patch' and end with '*** End Patch'. Use '*** Add File:', '*** Delete File:', or '*** Update File:'. Paths resolve from the session working directory unless absolute, and may use '..'. An update may include '*** Move to:'. Hunks begin with '@@' or '@@ anchor text'; inside hunks use space for context, '-' for deletions, and '+' for additions."
             }
           },
           "required": ["input"],
@@ -1041,16 +1041,8 @@ public static class LocalAgentBuiltInToolFactory
         }
 
         var fullPath = ResolvePath(rootPath, path);
-        var relativePath = Path.GetRelativePath(rootPath, fullPath);
-        if (string.Equals(relativePath, "..", StringComparison.Ordinal) ||
-            relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-            relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal) ||
-            Path.IsPathRooted(relativePath))
-        {
-            throw new InvalidOperationException($"Path '{path}' escapes the working directory.");
-        }
-
-        return new WorkspacePathResolution(fullPath, relativePath.Replace(Path.DirectorySeparatorChar, '/'));
+        var displayPath = Path.GetRelativePath(rootPath, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+        return new WorkspacePathResolution(fullPath, displayPath);
     }
 
     private static async Task<AgentToolResult?> RequestFileChangePermissionAsync(

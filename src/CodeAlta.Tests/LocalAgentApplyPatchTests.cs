@@ -405,39 +405,45 @@ public sealed class LocalAgentApplyPatchTests
     }
 
     [TestMethod]
-    public void Apply_ThrowsWhenPatchEscapesWorkingDirectory()
-    {
-        using var temp = TestTempDirectory.Create();
-
-        var exception = Assert.ThrowsExactly<InvalidOperationException>(() => LocalAgentApplyPatch.Apply(
-            """
-            *** Begin Patch
-            *** Add File: ../escape.txt
-            +nope
-            *** End Patch
-            """,
-            temp.Path));
-
-        StringAssert.Contains(exception.Message, "escapes the working directory");
-    }
-
-    [TestMethod]
-    public void Apply_ThrowsWhenPatchEscapesWorkingDirectoryViaSiblingPrefix()
+    public async Task Apply_AllowsRelativeParentPathsOutsideWorkingDirectory()
     {
         using var temp = TestTempDirectory.Create();
         var workingDirectory = Path.Combine(temp.Path, "repo");
         Directory.CreateDirectory(workingDirectory);
+        var outsidePath = Path.Combine(temp.Path, "outside.txt");
 
-        var exception = Assert.ThrowsExactly<InvalidOperationException>(() => LocalAgentApplyPatch.Apply(
+        var result = LocalAgentApplyPatch.Apply(
             """
             *** Begin Patch
-            *** Add File: ../repo2/escape.txt
-            +nope
+            *** Add File: ../outside.txt
+            +hello
             *** End Patch
             """,
-            workingDirectory));
+            workingDirectory);
 
-        StringAssert.Contains(exception.Message, "escapes the working directory");
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual("hello" + Environment.NewLine, await File.ReadAllTextAsync(outsidePath).ConfigureAwait(false));
+    }
+
+    [TestMethod]
+    public async Task Apply_AllowsSiblingPrefixOutsideWorkingDirectory()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workingDirectory = Path.Combine(temp.Path, "repo");
+        Directory.CreateDirectory(workingDirectory);
+        var outsidePath = Path.Combine(temp.Path, "repo2", "outside.txt");
+
+        var result = LocalAgentApplyPatch.Apply(
+            """
+            *** Begin Patch
+            *** Add File: ../repo2/outside.txt
+            +hello
+            *** End Patch
+            """,
+            workingDirectory);
+
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual("hello" + Environment.NewLine, await File.ReadAllTextAsync(outsidePath).ConfigureAwait(false));
     }
 
     private static string AssertTextResult(AgentToolResult result)

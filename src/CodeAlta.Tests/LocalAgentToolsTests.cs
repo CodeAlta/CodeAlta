@@ -1024,6 +1024,53 @@ public sealed class LocalAgentToolsTests
     }
 
     [TestMethod]
+    public async Task WriteAndReplaceTools_AcceptRelativePathsOutsideWorkingDirectory()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workingDirectory = Path.Combine(temp.Path, "repo");
+        Directory.CreateDirectory(workingDirectory);
+        var filePath = Path.Combine(temp.Path, "sibling", "sample.txt");
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(workingDirectory));
+        var writeFile = tools.Single(static tool => tool.Spec.Name == "write_file");
+        var replaceInFile = tools.Single(static tool => tool.Spec.Name == "replace_in_file");
+
+        using var writeArgs = JsonDocument.Parse("""{"path":"../sibling/sample.txt","content":"alpha\nbeta\n"}""");
+        var writeResult = await writeFile.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    writeFile.Spec.Name,
+                    writeArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(writeResult.Success);
+        Assert.AreEqual("alpha\nbeta\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+
+        using var replaceArgs = JsonDocument.Parse(
+            """
+            {
+              "path": "../sibling/sample.txt",
+              "old_string": "alpha",
+              "new_string": "gamma"
+            }
+            """);
+        var replaceResult = await replaceInFile.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-2",
+                    replaceInFile.Spec.Name,
+                    replaceArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(replaceResult.Success);
+        Assert.AreEqual("gamma\nbeta\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+    }
+
+    [TestMethod]
     public async Task ReplaceInFileTool_FailsWhenMultipleMatchesExistAndReplaceAllIsFalse()
     {
         using var temp = TestTempDirectory.Create();
@@ -1140,6 +1187,52 @@ public sealed class LocalAgentToolsTests
         Assert.IsTrue(File.Exists(Path.Combine(destinationPath, "data.txt")));
 
         using var deleteArgs = JsonDocument.Parse($$"""{"path":{{JsonSerializer.Serialize(deletePath)}}}""");
+        var deleteResult = await delete.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-2",
+                    delete.Spec.Name,
+                    deleteArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(deleteResult.Success);
+        Assert.IsFalse(File.Exists(deletePath));
+    }
+
+    [TestMethod]
+    public async Task DeleteAndRenameTools_AcceptRelativePathsOutsideWorkingDirectory()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workingDirectory = Path.Combine(temp.Path, "repo");
+        Directory.CreateDirectory(workingDirectory);
+        var sourcePath = Path.Combine(temp.Path, "sibling-old");
+        var destinationPath = Path.Combine(temp.Path, "sibling-new");
+        Directory.CreateDirectory(sourcePath);
+        await File.WriteAllTextAsync(Path.Combine(sourcePath, "data.txt"), "hello").ConfigureAwait(false);
+        var deletePath = Path.Combine(temp.Path, "delete-me.txt");
+        await File.WriteAllTextAsync(deletePath, "bye").ConfigureAwait(false);
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(workingDirectory));
+        var rename = tools.Single(static tool => tool.Spec.Name == "rename_file_or_dir");
+        var delete = tools.Single(static tool => tool.Spec.Name == "delete_file_or_dir");
+
+        using var renameArgs = JsonDocument.Parse("""{"old_path":"../sibling-old","new_path":"../sibling-new"}""");
+        var renameResult = await rename.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    rename.Spec.Name,
+                    renameArgs.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(renameResult.Success);
+        Assert.IsFalse(Directory.Exists(sourcePath));
+        Assert.IsTrue(File.Exists(Path.Combine(destinationPath, "data.txt")));
+
+        using var deleteArgs = JsonDocument.Parse("""{"path":"../delete-me.txt"}""");
         var deleteResult = await delete.Handler(
                 new AgentToolInvocation(
                     AgentBackendIds.OpenAIResponses,

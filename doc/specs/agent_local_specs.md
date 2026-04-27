@@ -378,7 +378,7 @@ Deterministic edit tools for all providers
 - `rename_file_or_dir` should be explicit that it will not overwrite an existing destination
 - `delete_file_or_dir` should delete files or directories recursively
 - these tools should stay easy to describe, easy to call, and return clear failure messages
-- path-like tool arguments should resolve relative paths from the session working directory while still accepting absolute paths unchanged
+- path-like tool arguments should resolve relative paths from the session working directory while still accepting absolute paths unchanged; they should not reject `..` paths solely because they target files outside the session working directory
 - `read_file` should support negative line offsets to read from the end of a text file (`-1` = last line)
 - `read_file` offsets are 1-based, so `0` should be rejected explicitly rather than silently acting like an empty range
 - `read_file` should document that offsets past EOF return an empty text result rather than an error
@@ -416,7 +416,7 @@ Recommended `apply_patch` grammar and guidance:
 ```
 
 - A new agent should be able to succeed by copying that template verbatim and filling in the paths and hunk lines.
-- Paths are relative to the session working directory.
+- Paths resolve relative to the session working directory unless absolute, and may use `..` to target sibling or parent directories.
 - Use `@@` or `@@ anchor text` before each changed region.
 - Inside hunks, use:
   - space-prefixed lines for unchanged context

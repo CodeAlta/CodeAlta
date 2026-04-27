@@ -171,30 +171,19 @@ internal static class LocalAgentApplyPatch
     private static AgentToolResult Failure(string message)
         => new(false, [new AgentToolResultItem.Text(message)], message);
 
-    private static string ResolvePatchPath(string workingDirectory, string relativePath)
+    private static string ResolvePatchPath(string workingDirectory, string patchPath)
     {
-        if (string.IsNullOrWhiteSpace(relativePath))
+        if (string.IsNullOrWhiteSpace(patchPath))
         {
             throw new InvalidOperationException("Patch paths must not be empty.");
         }
 
-        if (Path.IsPathRooted(relativePath))
-        {
-            throw new InvalidOperationException($"Patch paths must be relative: '{relativePath}'.");
-        }
-
-        var fullPath = Path.GetFullPath(Path.Combine(workingDirectory, relativePath));
-        var relativeToRoot = Path.GetRelativePath(workingDirectory, fullPath);
-        if (string.Equals(relativeToRoot, "..", StringComparison.Ordinal) ||
-            relativeToRoot.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-            relativeToRoot.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal) ||
-            Path.IsPathRooted(relativeToRoot))
-        {
-            // Path.GetRelativePath gives a boundary-safe answer, unlike a plain string prefix check.
-            throw new InvalidOperationException($"Patch path '{relativePath}' escapes the working directory.");
-        }
-
-        return fullPath;
+        // Resolve relative patch paths from the session working directory, but do not confine
+        // edits to that directory. Agents sometimes need to update sibling checkouts or shared
+        // local references using paths such as ../Library/File.cs.
+        return Path.GetFullPath(Path.IsPathRooted(patchPath)
+            ? patchPath
+            : Path.Combine(workingDirectory, patchPath));
     }
 
     private static bool TryApplyHunks(
