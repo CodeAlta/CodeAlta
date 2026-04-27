@@ -1671,13 +1671,21 @@ public sealed class OpenAIRawApiAgentBackendTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexPrematureEndAfterVisibleOutput()
+    public async Task OpenAIResponsesTurnExecutor_RetriesCodexPrematureEndAfterVisibleOutput()
     {
         var prematureEnd = CreatePrematureResponseEndException();
         prematureEnd.Data["Retry-After"] = TimeSpan.Zero;
-        var responsesClient = new PartiallyFailingOpenAIResponseClient(
+        var responsesClient = new PartiallyFailingThenSuccessOpenAIResponseClient(
             CreateOutputTextDeltaUpdate(itemId: "msg_1", delta: "partial"),
-            prematureEnd);
+            prematureEnd,
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-retried",
+                    modelId: "gpt-5.3-codex",
+                    text: "Retried answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: null),
+            ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
             ProviderKey = "codex_subscription",
@@ -1689,19 +1697,19 @@ public sealed class OpenAIRawApiAgentBackendTests
         });
         var deltas = new List<LocalAgentTurnDelta>();
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
-                () => executor.ExecuteTurnAsync(
-                    CreateCodexTurnRequest(),
-                    (delta, _) =>
-                    {
-                        deltas.Add(delta);
-                        return ValueTask.CompletedTask;
-                    }))
+        var response = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                (delta, _) =>
+                {
+                    deltas.Add(delta);
+                    return ValueTask.CompletedTask;
+                })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(1, responsesClient.RequestCount);
+        Assert.AreEqual(2, responsesClient.RequestCount);
         Assert.AreEqual(1, deltas.Count);
-        StringAssert.Contains(exception.Failure.Message, "ended prematurely");
+        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        Assert.AreEqual("Retried answer.", text);
     }
 
     private static StreamingResponseUpdate CreateAssistantResponseUpdate(
@@ -2066,22 +2074,6 @@ public sealed class OpenAIRawApiAgentBackendTests
             }
 
             return new TestAsyncCollectionResult<StreamingResponseUpdate>(successUpdates);
-        }
-    }
-
-    private sealed class PartiallyFailingOpenAIResponseClient(
-        StreamingResponseUpdate firstUpdate,
-        Exception failure)
-        : ResponsesClient(new ApiKeyCredential("test-key"), new OpenAIClientOptions())
-    {
-        public int RequestCount { get; private set; }
-
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
-            CreateResponseOptions options,
-            CancellationToken cancellationToken = default)
-        {
-            RequestCount++;
-            return new FailingAsyncCollectionResult<StreamingResponseUpdate>(firstUpdate, failure);
         }
     }
 

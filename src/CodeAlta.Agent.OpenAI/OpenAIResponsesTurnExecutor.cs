@@ -34,12 +34,13 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
         try
         {
-            var retryBudget = provider.CodexSubscription is null ? 1 : 3;
+            // Codex CLI treats dropped response streams as retryable turn-level failures and
+            // defaults to five reconnect attempts (six total attempts including the original).
+            var retryBudget = provider.CodexSubscription is null ? 1 : 6;
             var refreshedCredentialAfterUnauthorized = false;
             for (var attempt = 1; ; attempt++)
             {
                 var streamStarted = false;
-                var retryUnsafeStreamUpdateObserved = false;
                 try
                 {
                     await using var concurrencyLease = await CreateCodexConcurrencyLeaseAsync(
@@ -71,11 +72,9 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                         {
                             case StreamingResponseCreatedUpdate created:
                                 latestResponse = created.Response;
-                                retryUnsafeStreamUpdateObserved |= created.Response.OutputItems.Count > 0;
                                 break;
                             case StreamingResponseInProgressUpdate inProgress:
                                 latestResponse = inProgress.Response;
-                                retryUnsafeStreamUpdateObserved |= inProgress.Response.OutputItems.Count > 0;
                                 break;
                             case StreamingResponseOutputTextDeltaUpdate outputTextDelta when !string.IsNullOrEmpty(outputTextDelta.Delta):
                                 await onUpdate(
@@ -86,7 +85,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                                         Text = outputTextDelta.Delta,
                                     },
                                     cancellationToken).ConfigureAwait(false);
-                                retryUnsafeStreamUpdateObserved = true;
                                 break;
                             case StreamingResponseRefusalDeltaUpdate refusalDelta when !string.IsNullOrEmpty(refusalDelta.Delta):
                                 await onUpdate(
@@ -97,7 +95,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                                         Text = refusalDelta.Delta,
                                     },
                                     cancellationToken).ConfigureAwait(false);
-                                retryUnsafeStreamUpdateObserved = true;
                                 break;
                             case StreamingResponseReasoningSummaryTextDeltaUpdate reasoningSummaryDelta when !string.IsNullOrEmpty(reasoningSummaryDelta.Delta):
                                 await onUpdate(
@@ -108,7 +105,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                                         Text = reasoningSummaryDelta.Delta,
                                     },
                                     cancellationToken).ConfigureAwait(false);
-                                retryUnsafeStreamUpdateObserved = true;
                                 break;
                             case StreamingResponseReasoningTextDeltaUpdate reasoningTextDelta when !string.IsNullOrEmpty(reasoningTextDelta.Delta):
                                 await onUpdate(
@@ -119,11 +115,9 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                                         Text = reasoningTextDelta.Delta,
                                     },
                                     cancellationToken).ConfigureAwait(false);
-                                retryUnsafeStreamUpdateObserved = true;
                                 break;
                             case StreamingResponseOutputItemDoneUpdate outputItemDone when outputItemDone.Item is not null:
                                 streamedOutputItems[outputItemDone.OutputIndex] = outputItemDone.Item;
-                                retryUnsafeStreamUpdateObserved = true;
                                 break;
                             case StreamingResponseIncompleteUpdate incomplete:
                                 latestResponse = incomplete.Response;
@@ -212,8 +206,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                     ex,
                     attempt,
                     retryBudget,
-                    streamStarted,
-                    retryUnsafeStreamUpdateObserved,
                     out var delay))
                 {
                     LogCodexDiagnostic(
@@ -904,19 +896,12 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         Exception exception,
         int attempt,
         int retryBudget,
-        bool streamStarted,
-        bool retryUnsafeStreamUpdateObserved,
         out TimeSpan delay)
     {
         delay = TimeSpan.Zero;
         if (provider.CodexSubscription is null ||
             attempt >= retryBudget ||
             exception is OperationCanceledException or LocalAgentTurnExecutionException)
-        {
-            return false;
-        }
-
-        if (streamStarted && retryUnsafeStreamUpdateObserved)
         {
             return false;
         }
