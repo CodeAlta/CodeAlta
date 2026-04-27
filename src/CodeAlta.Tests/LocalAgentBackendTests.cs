@@ -120,6 +120,55 @@ public sealed class LocalAgentBackendTests
     }
 
     [TestMethod]
+    public async Task LocalAgentTurnFileChangeTracker_CreateUnifiedDiff_UsesPreciseDiffForLargeFiles()
+    {
+        using var temp = TestTempDirectory.Create();
+        var filePath = Path.Combine(temp.Path, "large.txt");
+        var beforeLines = Enumerable.Range(1, 4_000)
+            .Select(static index => index == 2_000 ? "line 2000 before" : $"line {index}")
+            .ToArray();
+        var afterLines = Enumerable.Range(1, 4_000)
+            .Select(static index => index == 2_000 ? "line 2000 after" : $"line {index}")
+            .ToArray();
+        await File.WriteAllTextAsync(filePath, string.Join('\n', beforeLines) + "\n").ConfigureAwait(false);
+
+        var tracker = new LocalAgentTurnFileChangeTracker(temp.Path);
+        await tracker.CaptureBeforeAsync([filePath], CancellationToken.None).ConfigureAwait(false);
+        await File.WriteAllTextAsync(filePath, string.Join('\n', afterLines) + "\n").ConfigureAwait(false);
+        await tracker.CaptureAfterAsync([filePath], CancellationToken.None).ConfigureAwait(false);
+
+        var diff = tracker.CreateUnifiedDiff();
+
+        Assert.IsNotNull(diff);
+        StringAssert.Contains(diff, "diff --git a/large.txt b/large.txt");
+        StringAssert.Contains(diff, "-line 2000 before");
+        StringAssert.Contains(diff, "+line 2000 after");
+        Assert.IsTrue(CountUnifiedDiffLines(diff!, '+') < 10);
+        Assert.IsTrue(CountUnifiedDiffLines(diff!, '-') < 10);
+    }
+
+    [TestMethod]
+    public async Task LocalAgentTurnFileChangeTracker_CreateUnifiedDiff_DoesNotMatchDifferentLineEndings()
+    {
+        using var temp = TestTempDirectory.Create();
+        var filePath = Path.Combine(temp.Path, "eol.txt");
+        await File.WriteAllTextAsync(filePath, "alpha\r\nbeta\r\n").ConfigureAwait(false);
+
+        var tracker = new LocalAgentTurnFileChangeTracker(temp.Path);
+        await tracker.CaptureBeforeAsync([filePath], CancellationToken.None).ConfigureAwait(false);
+        await File.WriteAllTextAsync(filePath, "alpha\nbeta\n").ConfigureAwait(false);
+        await tracker.CaptureAfterAsync([filePath], CancellationToken.None).ConfigureAwait(false);
+
+        var diff = tracker.CreateUnifiedDiff();
+
+        Assert.IsNotNull(diff);
+        StringAssert.Contains(diff, "-alpha");
+        StringAssert.Contains(diff, "+alpha");
+        Assert.AreEqual(2, CountUnifiedDiffLines(diff!, '+'));
+        Assert.AreEqual(2, CountUnifiedDiffLines(diff!, '-'));
+    }
+
+    [TestMethod]
     public async Task LocalAgentBackend_ResumeSession_RepairsRecoveredUsageUsingEquivalentModelIds()
     {
         using var temp = TestTempDirectory.Create();
@@ -216,6 +265,11 @@ public sealed class LocalAgentBackendTests
                 ],
             });
     }
+
+    private static int CountUnifiedDiffLines(string diff, char prefix)
+        => diff.Split('\n')
+            .Count(line => line.StartsWith(prefix) &&
+                           !line.StartsWith(new string(prefix, 3), StringComparison.Ordinal));
 
     private sealed class RecordingTurnExecutor : ILocalAgentTurnExecutor
     {

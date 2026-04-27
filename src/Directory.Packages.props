@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Anthropic" Version="12.16.0" />
+    <PackageVersion Include="DiffPlex" Version="1.9.0" />
     <PackageVersion Include="GitHub.Copilot.SDK" Version="0.3.0" />
     <PackageVersion Include="LLamaSharp" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.26.0" />

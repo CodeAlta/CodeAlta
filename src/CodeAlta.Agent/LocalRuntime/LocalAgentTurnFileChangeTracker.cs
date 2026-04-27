@@ -1,12 +1,14 @@
 using System.Text;
 using CodeAlta.Agent.LocalRuntime.Tools;
+using DiffPlex;
+using DiffPlex.Chunkers;
+using DiffPlex.Model;
 
 namespace CodeAlta.Agent.LocalRuntime;
 
 internal sealed class LocalAgentTurnFileChangeTracker
 {
     private const int UnifiedDiffContextLineCount = 3;
-    private const int MaxLcsCells = 1_000_000;
 
     private readonly string _rootPath;
     private readonly Dictionary<string, FileChangeState> _changes = new(StringComparer.OrdinalIgnoreCase);
@@ -234,76 +236,65 @@ internal sealed class LocalAgentTurnFileChangeTracker
 
     private static void AppendUnifiedHunks(StringBuilder builder, string beforeText, string afterText)
     {
-        var beforeLines = SplitLines(beforeText);
-        var afterLines = SplitLines(afterText);
-        if (beforeLines.Count == 0 && afterLines.Count == 0)
+        var diffResult = Differ.Instance.CreateDiffs(
+            beforeText,
+            afterText,
+            ignoreWhiteSpace: false,
+            ignoreCase: false,
+            LineEndingsPreservingChunker.Instance);
+        if (diffResult.DiffBlocks.Count == 0)
         {
             return;
         }
 
-        var cellCount = (long)beforeLines.Count * afterLines.Count;
-        var edits = cellCount <= MaxLcsCells
-            ? BuildLcsEdits(beforeLines, afterLines)
-            : BuildWholeFileReplacementEdits(beforeLines, afterLines);
+        var edits = BuildDiffPlexEdits(diffResult);
         AppendHunks(builder, edits);
     }
 
-    private static IReadOnlyList<DiffEdit> BuildLcsEdits(IReadOnlyList<string> beforeLines, IReadOnlyList<string> afterLines)
+    private static IReadOnlyList<DiffEdit> BuildDiffPlexEdits(DiffResult diffResult)
     {
-        var lcs = new int[beforeLines.Count + 1, afterLines.Count + 1];
-        for (var oldIndex = beforeLines.Count - 1; oldIndex >= 0; oldIndex--)
-        {
-            for (var newIndex = afterLines.Count - 1; newIndex >= 0; newIndex--)
-            {
-                lcs[oldIndex, newIndex] = string.Equals(beforeLines[oldIndex], afterLines[newIndex], StringComparison.Ordinal)
-                    ? lcs[oldIndex + 1, newIndex + 1] + 1
-                    : Math.Max(lcs[oldIndex + 1, newIndex], lcs[oldIndex, newIndex + 1]);
-            }
-        }
-
         var edits = new List<DiffEdit>();
         var oldCursor = 0;
         var newCursor = 0;
-        while (oldCursor < beforeLines.Count && newCursor < afterLines.Count)
+        foreach (var block in diffResult.DiffBlocks)
         {
-            if (string.Equals(beforeLines[oldCursor], afterLines[newCursor], StringComparison.Ordinal))
+            while (oldCursor < block.DeleteStartA && newCursor < block.InsertStartB)
             {
-                edits.Add(new DiffEdit(' ', beforeLines[oldCursor]));
+                edits.Add(new DiffEdit(' ', FormatDiffLineText(diffResult.PiecesOld[oldCursor])));
                 oldCursor++;
                 newCursor++;
             }
-            else if (lcs[oldCursor + 1, newCursor] >= lcs[oldCursor, newCursor + 1])
+
+            oldCursor = block.DeleteStartA;
+            newCursor = block.InsertStartB;
+
+            for (var index = 0; index < block.DeleteCountA; index++)
             {
-                edits.Add(new DiffEdit('-', beforeLines[oldCursor++]));
+                edits.Add(new DiffEdit('-', FormatDiffLineText(diffResult.PiecesOld[oldCursor++])));
             }
-            else
+
+            for (var index = 0; index < block.InsertCountB; index++)
             {
-                edits.Add(new DiffEdit('+', afterLines[newCursor++]));
+                edits.Add(new DiffEdit('+', FormatDiffLineText(diffResult.PiecesNew[newCursor++])));
             }
         }
 
-        while (oldCursor < beforeLines.Count)
+        while (oldCursor < diffResult.PiecesOld.Count && newCursor < diffResult.PiecesNew.Count)
         {
-            edits.Add(new DiffEdit('-', beforeLines[oldCursor++]));
-        }
-
-        while (newCursor < afterLines.Count)
-        {
-            edits.Add(new DiffEdit('+', afterLines[newCursor++]));
+            edits.Add(new DiffEdit(' ', FormatDiffLineText(diffResult.PiecesOld[oldCursor])));
+            oldCursor++;
+            newCursor++;
         }
 
         return edits;
     }
 
-    private static IReadOnlyList<DiffEdit> BuildWholeFileReplacementEdits(
-        IReadOnlyList<string> beforeLines,
-        IReadOnlyList<string> afterLines)
-    {
-        var edits = new List<DiffEdit>(beforeLines.Count + afterLines.Count);
-        edits.AddRange(beforeLines.Select(static line => new DiffEdit('-', line)));
-        edits.AddRange(afterLines.Select(static line => new DiffEdit('+', line)));
-        return edits;
-    }
+    private static string FormatDiffLineText(string value)
+        => value.EndsWith("\r\n", StringComparison.Ordinal)
+            ? value[..^2]
+            : value.EndsWith('\r') || value.EndsWith('\n')
+                ? value[..^1]
+                : value;
 
     private static void AppendHunks(StringBuilder builder, IReadOnlyList<DiffEdit> edits)
     {
@@ -380,46 +371,6 @@ internal sealed class LocalAgentTurnFileChangeTracker
         }
 
         return count == 1 ? start.ToString(System.Globalization.CultureInfo.InvariantCulture) : $"{start},{count}";
-    }
-
-    private static IReadOnlyList<string> SplitLines(string text)
-    {
-        if (text.Length == 0)
-        {
-            return [];
-        }
-
-        var lines = new List<string>();
-        var start = 0;
-        for (var index = 0; index < text.Length; index++)
-        {
-            if (text[index] != '\n')
-            {
-                continue;
-            }
-
-            var length = index - start;
-            if (length > 0 && text[index - 1] == '\r')
-            {
-                length--;
-            }
-
-            lines.Add(text.Substring(start, length));
-            start = index + 1;
-        }
-
-        if (start < text.Length)
-        {
-            var length = text.Length - start;
-            if (length > 0 && text[^1] == '\r')
-            {
-                length--;
-            }
-
-            lines.Add(text.Substring(start, length));
-        }
-
-        return lines;
     }
 
     private enum ChangeCapturePhase
