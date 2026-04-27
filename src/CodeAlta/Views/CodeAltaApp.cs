@@ -7,7 +7,6 @@ using CodeAlta.Catalog;
 using CodeAlta.Frontend.Commands;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
-using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Editing;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Sidebar;
@@ -204,6 +203,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 SyncChatSelectorItems = SyncChatSelectorItems,
                 SyncPromptText = session => _promptDraftUiCoordinator!.SyncPromptText(session),
                 UpdatePromptAvailabilityUi = UpdatePromptAvailabilityUi,
+                UpdatePromptImageAttachmentsUi = UpdatePromptImageAttachmentsUi,
                 SyncThreadTabControl = SyncThreadTabControl,
                 DispatchToUi = DispatchToUi,
                 DispatchToUiDeferred = DispatchToUiDeferred,
@@ -216,9 +216,11 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 TrySetPromptUnavailableStatus = TrySetPromptUnavailableStatus,
                 SetReadyStatusForCurrentSelection = SetReadyStatusForCurrentSelection,
                 ClearDraftPromptText = () => _promptDraftUiCoordinator!.ClearDraftPromptText(),
-                ClearPromptText = () => _promptDraftUiCoordinator!.ClearPromptText(),
-                IsPromptTextEmpty = () => ReadBindableState(() => string.IsNullOrWhiteSpace(_promptDraftUiCoordinator!.PromptText)),
+                ClearPromptText = () => _promptDraftUiCoordinator!.ClearPrompt(),
+                IsPromptTextEmpty = () => ReadBindableState(() => string.IsNullOrWhiteSpace(_promptDraftUiCoordinator!.PromptText) && !_promptDraftUiCoordinator.HasCurrentPromptImages),
                 RestorePromptText = prompt => DispatchToUi(() => _promptDraftUiCoordinator!.PromptText = prompt),
+                SnapshotPromptImages = () => ReadBindableState(() => _promptDraftUiCoordinator!.SnapshotPromptImages()),
+                RestorePromptImages = images => DispatchToUi(() => _promptDraftUiCoordinator!.RestorePromptImages(images)),
                 PersistViewStateAsync = PersistViewStateAsync,
                 RegisterCreatedThreadAsync = RegisterCreatedThreadAsync,
                 GetPromptFocusTarget = () => ThreadInput,
@@ -512,11 +514,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         => _chatSelectorCoordinator.GetPreferredBackendId();
     private bool IsChatBackendReady(AgentBackendId backendId)
         => _chatSelectorCoordinator.IsChatBackendReady(backendId);
+
     private bool TryGetPromptUnavailableStatus(out string message, out StatusTone tone)
         => _chatSelectorCoordinator.TryGetPromptUnavailableStatus(out message, out tone);
     private bool TrySetPromptUnavailableStatus() { if (!TryGetPromptUnavailableStatus(out var message, out var tone)) return false; SetStatus(message, tone: tone); return true; }
     private void UpdatePromptAvailabilityUi()
         => _chatSelectorCoordinator.UpdatePromptAvailabilityUi();
+
+    private void UpdatePromptImageAttachmentsUi() { _promptComposerViewModel.PromptImageAttachmentVersion++; RefreshSidebarProjection(); }
     private void SyncThreadTabControl()
         => _threadTabStripCoordinator.SyncControl();
     private void OnThreadTabControlSelectionChanged(int selectedIndex)
@@ -526,6 +531,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable
 
     private CodeAltaShellView EnsureShellView()
     {
+        var imageCallbacks = PromptImageWorkspaceCallbackFactory.Create(
+            _promptDraftUiCoordinator,
+            new PromptImageCapabilityContext(
+                GetSelectedThread,
+                threadId => _threadStateCoordinator.FindOpenThread(threadId),
+                GetPreferredBackendId,
+                _chatBackendStates),
+            (message, tone) => SetStatus(message, tone: tone));
         _threadWorkspaceView ??= new ThreadWorkspaceView(
             _shellViewModel,
             _threadWorkspaceViewModel,
@@ -558,7 +571,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable
             selectedIndex => _threadTabStripCoordinator.ObserveBoundSelection(selectedIndex),
             _promptDraftUiCoordinator.PromptTextBinding,
             _shellAnimationRuntime.ThinkingPhase01,
-            OnChatAutoScrollChanged);
+            OnChatAutoScrollChanged,
+            imageCallbacks);
         ThreadCommandBar!.MultiLine = _commandBarMultiLine;
         _fileEditorWorkspaceCoordinator.RefreshActiveContent();
 

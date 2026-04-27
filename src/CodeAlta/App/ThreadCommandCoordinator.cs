@@ -19,6 +19,7 @@ namespace CodeAlta.App;
 internal sealed class ThreadCommandCoordinator
 {
     private readonly WorkThreadRuntimeService _runtimeService;
+    private readonly IReadOnlyList<AgentBackendDescriptor> _backendDescriptors;
     private readonly Dictionary<string, ChatBackendState> _chatBackendStates;
     private readonly ThreadSelectionContext _threadSelection;
     private readonly ChatSelectorStateContext _selectorState;
@@ -81,6 +82,7 @@ internal sealed class ThreadCommandCoordinator
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
 
         _runtimeService = runtimeService;
+        _backendDescriptors = backendDescriptors;
         _chatBackendStates = chatBackendStates;
         _threadSelection = threadSelection;
         _selectorState = selectorState;
@@ -96,6 +98,7 @@ internal sealed class ThreadCommandCoordinator
             _executionOptionsFactory,
             queueCoordinator,
             commandContext,
+            catalogOptions,
             projectFileSearchService ?? NullProjectFileSearchService.Instance);
     }
 
@@ -106,7 +109,13 @@ internal sealed class ThreadCommandCoordinator
     {
         var thread = _threadSelection.GetSelectedThread();
         var hadExistingThread = thread is not null;
-        var prompt = promptText?.Trim();
+        var prompt = _commandContext.CaptureThreadInput(promptText);
+        if (prompt.Images.Count > 0 && thread is null && !CurrentPromptModelSupportsImages(thread, null))
+        {
+            _commandContext.SetShellStatus("The selected model does not support image input; remove the prompt images or choose a vision-capable model.", false, StatusTone.Warning);
+            return;
+        }
+
         if (thread is null)
         {
             if (steer)
@@ -115,7 +124,7 @@ internal sealed class ThreadCommandCoordinator
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(prompt))
+            if (!prompt.HasContent)
             {
                 return;
             }
@@ -141,7 +150,7 @@ internal sealed class ThreadCommandCoordinator
             _commandContext.SetReadyStatusForCurrentSelection();
             return;
         }
-        if (string.IsNullOrWhiteSpace(prompt))
+        if (!prompt.HasContent)
         {
             if (steer && thread is not null)
             {
@@ -153,6 +162,12 @@ internal sealed class ThreadCommandCoordinator
         }
 
         var tab = _threadSelection.EnsureThreadTab(thread);
+        if (prompt.Images.Count > 0 && !CurrentPromptModelSupportsImages(thread, tab))
+        {
+            _commandContext.SetShellStatus("The selected model does not support image input; remove the prompt images or choose a vision-capable model.", false, StatusTone.Warning);
+            return;
+        }
+
         await _threadSelection.EnsureThreadHistoryLoadedAsync(thread, cancellationToken);
         tab.Timeline.ReplaceTruncatedHistoryLoadButton();
 
@@ -168,6 +183,9 @@ internal sealed class ThreadCommandCoordinator
         _commandContext.ClearThreadInput();
         await _promptDispatchCoordinator.DispatchPromptAsync(thread, tab, prompt, steer, cancellationToken);
     }
+
+    public bool IsCurrentPromptEmpty()
+        => _commandContext.IsThreadInputEmpty();
 
     public async Task DelegateThreadAsync(
         string? promptText,
@@ -187,7 +205,14 @@ internal sealed class ThreadCommandCoordinator
         }
 
         var tab = _threadSelection.EnsureThreadTab(thread);
-        var prompt = promptText?.Trim();
+        var submission = _commandContext.CaptureThreadInput(promptText);
+        if (submission.Images.Count > 0)
+        {
+            _commandContext.SetShellStatus("Delegation does not support prompt images yet; remove the images before delegating internal work.", false, StatusTone.Warning);
+            return;
+        }
+
+        var prompt = submission.Text;
         if (string.IsNullOrWhiteSpace(prompt))
         {
             _commandContext.SetShellStatus("Enter delegation instructions before creating an internal thread.", false, StatusTone.Warning);
@@ -349,7 +374,7 @@ internal sealed class ThreadCommandCoordinator
     public void UpdateSelectedThreadQueuedPromptText(string queuedPromptId, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        ArgumentNullException.ThrowIfNull(text);
         _queueCoordinator.UpdateSelectedThreadQueuedPromptText(queuedPromptId, text);
     }
 
@@ -361,12 +386,22 @@ internal sealed class ThreadCommandCoordinator
 
     public Task DispatchQueuedPromptAsync(
         OpenThreadState tab,
-        string prompt,
+        PromptSubmission prompt,
         bool steer,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(tab);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        if (!prompt.HasContent)
+        {
+            throw new ArgumentException("Prompt text or image attachments are required.", nameof(prompt));
+        }
+
+        if (prompt.Images.Count > 0 && !CurrentPromptModelSupportsImages(tab.Thread, tab))
+        {
+            _commandContext.SetThreadStatus(tab, "The selected model does not support image input; the queued prompt was left in the queue.", false, StatusTone.Warning);
+            throw new InvalidOperationException("The selected model does not support image input.");
+        }
 
         return _promptDispatchCoordinator.DispatchPromptAsync(tab.Thread, tab, prompt, steer, cancellationToken);
     }
@@ -437,6 +472,36 @@ internal sealed class ThreadCommandCoordinator
     private bool IsChatBackendReady(AgentBackendId backendId)
     {
         return _chatBackendStates[backendId.Value].Availability == ChatBackendAvailability.Ready;
+    }
+
+    private bool CurrentPromptModelSupportsImages(WorkThreadDescriptor? thread, OpenThreadState? tab)
+    {
+        var backendId = tab?.BackendId ?? (thread is not null ? new AgentBackendId(thread.BackendId) : ResolveSelectedBackendId());
+        if (!_chatBackendStates.TryGetValue(backendId.Value, out var backendState))
+        {
+            return false;
+        }
+
+        var modelId = tab?.ModelId ?? backendState.SelectedModelId;
+        var model = !string.IsNullOrWhiteSpace(modelId)
+            ? backendState.Models.FirstOrDefault(candidate => string.Equals(candidate.Id, modelId, StringComparison.Ordinal))
+            : null;
+        model ??= ChatBackendPresentation.GetSelectedModel(backendState) ??
+            (backendState.Models.Count == 1 ? backendState.Models[0] : null);
+        return AgentModelCapabilityHelper.SupportsImageInput(backendId, model);
+    }
+
+    private AgentBackendId ResolveSelectedBackendId()
+    {
+        var backendIndex = UiDispatch.Invoke(_selectorState.GetUiDispatcher(), () => _selectorState.GetSelectedBackendIndex());
+        var backendOptions = ChatBackendPresentation.BuildBackendOptions(_backendDescriptors);
+        if (backendIndex is { } index && (uint)index < (uint)backendOptions.Count)
+        {
+            return backendOptions[index].BackendId;
+        }
+
+        return _chatBackendStates.Values.FirstOrDefault(static state => state.Availability == ChatBackendAvailability.Ready)?.BackendId ??
+            AgentBackendIds.Codex;
     }
 
 }

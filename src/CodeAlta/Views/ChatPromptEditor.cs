@@ -120,6 +120,20 @@ internal sealed class ChatPromptEditor : PromptEditor, IProjectFileReferencePopu
     internal void RefreshProjectFileReferencePopup()
         => _projectFileReferencePopupController?.HandleEditorStateChanged();
 
+    internal void InsertTextAtSelection(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        var selectionStart = SelectionStart;
+        TextDocument.Replace(selectionStart, SelectionLength, text.AsSpan());
+        CaretIndex = selectionStart + text.Length;
+        _projectFileReferencePopupController?.HandleEditorStateChanged();
+    }
+
     Visual IProjectFileReferencePopupHost.Visual => this;
 
     void IProjectFileReferencePopupHost.FocusPromptEditor()

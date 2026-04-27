@@ -32,7 +32,9 @@ public abstract record AgentInputItem
     /// A local image path input.
     /// </summary>
     /// <param name="Path">The local path to an image.</param>
-    public sealed record LocalImage(string Path) : AgentInputItem;
+    /// <param name="DisplayName">Optional display name for UI surfaces and backends that support attachment names.</param>
+    /// <param name="MediaType">Optional image MIME type.</param>
+    public sealed record LocalImage(string Path, string? DisplayName = null, string? MediaType = null) : AgentInputItem;
 
     /// <summary>
     /// A file attachment input.

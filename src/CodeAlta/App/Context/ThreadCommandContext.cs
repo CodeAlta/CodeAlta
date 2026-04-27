@@ -1,6 +1,7 @@
 using CodeAlta.App.State;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Threading;
 
 namespace CodeAlta.App.Context;
@@ -18,6 +19,8 @@ internal sealed class ThreadCommandContext
     private readonly Action _clearThreadInput;
     private readonly Func<bool> _isThreadInputEmpty;
     private readonly Action<string> _restoreThreadInput;
+    private readonly Func<IReadOnlyList<PromptImageAttachment>> _snapshotPromptImages;
+    private readonly Action<IReadOnlyList<PromptImageAttachment>> _restorePromptImages;
     private readonly Action _refreshHeaderAndThreadWorkspace;
     private readonly Action _refreshCatalogAndThreadWorkspace;
     private readonly Action<string, bool, StatusTone> _setShellStatus;
@@ -36,6 +39,8 @@ internal sealed class ThreadCommandContext
         Action clearThreadInput,
         Func<bool> isThreadInputEmpty,
         Action<string> restoreThreadInput,
+        Func<IReadOnlyList<PromptImageAttachment>> snapshotPromptImages,
+        Action<IReadOnlyList<PromptImageAttachment>> restorePromptImages,
         Action refreshHeaderAndThreadWorkspace,
         Action refreshCatalogAndThreadWorkspace,
         Action<string, bool, StatusTone> setShellStatus,
@@ -53,6 +58,8 @@ internal sealed class ThreadCommandContext
         ArgumentNullException.ThrowIfNull(clearThreadInput);
         ArgumentNullException.ThrowIfNull(isThreadInputEmpty);
         ArgumentNullException.ThrowIfNull(restoreThreadInput);
+        ArgumentNullException.ThrowIfNull(snapshotPromptImages);
+        ArgumentNullException.ThrowIfNull(restorePromptImages);
         ArgumentNullException.ThrowIfNull(refreshHeaderAndThreadWorkspace);
         ArgumentNullException.ThrowIfNull(refreshCatalogAndThreadWorkspace);
         ArgumentNullException.ThrowIfNull(setShellStatus);
@@ -70,6 +77,8 @@ internal sealed class ThreadCommandContext
         _clearThreadInput = clearThreadInput;
         _isThreadInputEmpty = isThreadInputEmpty;
         _restoreThreadInput = restoreThreadInput;
+        _snapshotPromptImages = snapshotPromptImages;
+        _restorePromptImages = restorePromptImages;
         _refreshHeaderAndThreadWorkspace = refreshHeaderAndThreadWorkspace;
         _refreshCatalogAndThreadWorkspace = refreshCatalogAndThreadWorkspace;
         _setShellStatus = setShellStatus;
@@ -108,6 +117,19 @@ internal sealed class ThreadCommandContext
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         UiDispatch.Invoke(_uiDispatcher, () => _restoreThreadInput(prompt));
+    }
+
+    public PromptSubmission CaptureThreadInput(string? promptText)
+        => UiDispatch.Invoke(_uiDispatcher, () => PromptSubmission.Create(promptText, _snapshotPromptImages()));
+
+    public void RestoreThreadInput(PromptSubmission prompt)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        UiDispatch.Invoke(_uiDispatcher, () =>
+        {
+            _restoreThreadInput(prompt.Text);
+            _restorePromptImages(prompt.Images);
+        });
     }
 
     public void RefreshHeaderAndThreadWorkspace()

@@ -19,13 +19,18 @@ internal static class CopilotAgentMapper
     {
         ArgumentNullException.ThrowIfNull(model);
 
+        var modelCapabilities = model.Capabilities;
         var capabilities = new Dictionary<string, object?>
         {
-            ["capabilities"] = model.Capabilities,
+            ["capabilities"] = modelCapabilities,
             ["policy"] = model.Policy,
             ["billing"] = model.Billing,
             ["supportedReasoningEfforts"] = model.SupportedReasoningEfforts,
-            ["defaultReasoningEffort"] = model.DefaultReasoningEffort
+            ["defaultReasoningEffort"] = model.DefaultReasoningEffort,
+            ["supportsImageInput"] = modelCapabilities?.Supports?.Vision,
+            ["imageInputMaxImages"] = modelCapabilities?.Limits?.Vision?.MaxPromptImages,
+            ["imageInputMaxBytes"] = modelCapabilities?.Limits?.Vision?.MaxPromptImageSize,
+            ["imageInputMediaTypes"] = modelCapabilities?.Limits?.Vision?.SupportedMediaTypes
         };
         var supportedReasoningEfforts = ToAgentReasoningEfforts(model.SupportedReasoningEfforts);
 
@@ -195,7 +200,12 @@ internal static class CopilotAgentMapper
                     break;
 
                 case AgentInputItem.LocalImage localImage:
-                    AppendPromptLine(promptBuilder, $"[local-image] {localImage.Path}");
+                    attachments.Add(new UserMessageAttachmentBlob
+                    {
+                        Data = Convert.ToBase64String(File.ReadAllBytes(localImage.Path)),
+                        DisplayName = string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName,
+                        MimeType = localImage.MediaType ?? GuessImageMediaType(localImage.Path) ?? "application/octet-stream"
+                    });
                     break;
 
                 case AgentInputItem.Skill skill:
@@ -2622,6 +2632,18 @@ internal static class CopilotAgentMapper
             _ => null
         };
     }
+
+    private static string? GuessImageMediaType(string path)
+        => Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".tif" or ".tiff" => "image/tiff",
+            _ => null,
+        };
 
     private static void AppendPromptLine(StringBuilder builder, string line)
     {

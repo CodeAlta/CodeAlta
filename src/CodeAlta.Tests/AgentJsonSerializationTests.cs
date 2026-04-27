@@ -42,6 +42,7 @@ public sealed class AgentJsonSerializationTests
         var input = new AgentInput(
         [
             new AgentInputItem.Text("hello"),
+            new AgentInputItem.LocalImage(@"C:\images\screen.png", "Screen", "image/png"),
             new AgentInputItem.File("Program.cs", "Program.cs", new AgentLineRange(3, 9)),
             new AgentInputItem.Selection(
                 "App.cs",
@@ -57,10 +58,14 @@ public sealed class AgentJsonSerializationTests
 
         Assert.AreEqual("text", items[0].GetProperty("$type").GetString());
         Assert.AreEqual("hello", items[0].GetProperty("value").GetString());
-        Assert.AreEqual("file", items[1].GetProperty("$type").GetString());
-        Assert.AreEqual(3, items[1].GetProperty("lineRange").GetProperty("startLine").GetInt32());
-        Assert.AreEqual("selection", items[2].GetProperty("$type").GetString());
-        Assert.AreEqual("App.cs", items[2].GetProperty("filePath").GetString());
+        Assert.AreEqual("localImage", items[1].GetProperty("$type").GetString());
+        Assert.AreEqual(@"C:\images\screen.png", items[1].GetProperty("path").GetString());
+        Assert.AreEqual("Screen", items[1].GetProperty("displayName").GetString());
+        Assert.AreEqual("image/png", items[1].GetProperty("mediaType").GetString());
+        Assert.AreEqual("file", items[2].GetProperty("$type").GetString());
+        Assert.AreEqual(3, items[2].GetProperty("lineRange").GetProperty("startLine").GetInt32());
+        Assert.AreEqual("selection", items[3].GetProperty("$type").GetString());
+        Assert.AreEqual("App.cs", items[3].GetProperty("filePath").GetString());
     }
 
     [TestMethod]

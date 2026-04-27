@@ -2,6 +2,7 @@ using CodeAlta.App.Context;
 using CodeAlta.App.State;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Threading;
 
 namespace CodeAlta.Tests;
@@ -44,13 +45,58 @@ public sealed class ThreadCommandContextTests
         Assert.AreEqual(1, dispatcher.InvokeFuncCount);
     }
 
+    [TestMethod]
+    public void CaptureThreadInput_IncludesClonedPromptImages()
+    {
+        var dispatcher = new RecordingUiDispatcher();
+        var image = PromptImageAttachment.Create("Image-1", [1, 2, 3], "image/png", ".png");
+        var context = CreateContext(
+            dispatcher,
+            snapshotPromptImages: () => [image]);
+
+        var submission = context.CaptureThreadInput(string.Empty);
+
+        Assert.AreEqual(string.Empty, submission.Text);
+        Assert.AreEqual(1, submission.Images.Count);
+        Assert.AreEqual("Image-1", submission.Images[0].Title);
+        Assert.AreNotSame(image.Bytes, submission.Images[0].Bytes);
+        image.Bytes[0] = 9;
+        Assert.AreEqual(1, submission.Images[0].Bytes[0]);
+    }
+
+    [TestMethod]
+    public void RestoreThreadInput_RestoresTextAndPromptImages()
+    {
+        var dispatcher = new RecordingUiDispatcher();
+        var restoredText = string.Empty;
+        IReadOnlyList<PromptImageAttachment>? restoredImages = null;
+        var context = CreateContext(
+            dispatcher,
+            restoreThreadInput: text => restoredText = text,
+            restorePromptImages: images => restoredImages = images);
+        var image = PromptImageAttachment.Create("Image-1", [1, 2, 3], "image/png", ".png");
+
+        context.RestoreThreadInput(PromptSubmission.Create("retry", [image]));
+
+        Assert.AreEqual("retry", restoredText);
+        Assert.IsNotNull(restoredImages);
+        Assert.AreEqual(1, restoredImages.Count);
+        Assert.AreEqual("Image-1", restoredImages[0].Title);
+    }
+
     private static ThreadCommandContext CreateContext(
         IUiDispatcher dispatcher,
         Action? clearDraftInput = null,
-        Func<bool>? isThreadInputEmpty = null)
+        Func<bool>? isThreadInputEmpty = null,
+        Action<string>? restoreThreadInput = null,
+        Func<IReadOnlyList<PromptImageAttachment>>? snapshotPromptImages = null,
+        Action<IReadOnlyList<PromptImageAttachment>>? restorePromptImages = null)
     {
         clearDraftInput ??= static () => { };
         isThreadInputEmpty ??= static () => true;
+        restoreThreadInput ??= static _ => { };
+        snapshotPromptImages ??= static () => [];
+        restorePromptImages ??= static _ => { };
 
         return new ThreadCommandContext(
             dispatcher,
@@ -63,7 +109,9 @@ public sealed class ThreadCommandContextTests
             static () => { },
             static () => { },
             isThreadInputEmpty,
-            static _ => { },
+            restoreThreadInput,
+            snapshotPromptImages,
+            restorePromptImages,
             static () => { },
             static () => { },
             static (_, _, _) => { },

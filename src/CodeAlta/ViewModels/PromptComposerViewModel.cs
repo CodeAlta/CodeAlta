@@ -44,4 +44,7 @@ public sealed partial class PromptComposerViewModel
 
     [Bindable]
     public partial bool AlwaysEnqueue { get; set; }
+
+    [Bindable]
+    public partial int PromptImageAttachmentVersion { get; set; }
 }

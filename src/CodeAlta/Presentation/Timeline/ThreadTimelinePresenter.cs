@@ -4,6 +4,7 @@ using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Formatting;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -22,6 +23,7 @@ internal sealed class ThreadTimelinePresenter
 
     private readonly IUiDispatcher _uiDispatcher;
     private readonly Func<bool> _isAutoScrollEnabled;
+    private readonly Func<Rectangle?> _getDialogBounds;
     private readonly Action<Action>? _enqueueDeferredUiAction;
     private readonly Dictionary<string, ChatContentState> _contentStates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ChatStatusState> _activityStates = new(StringComparer.Ordinal);
@@ -51,6 +53,7 @@ internal sealed class ThreadTimelinePresenter
 
         _uiDispatcher = uiDispatcher;
         _isAutoScrollEnabled = isAutoScrollEnabled;
+        _getDialogBounds = getDialogBounds;
         _enqueueDeferredUiAction = enqueueDeferredUiAction;
         _localFileRootPath = localFileRootPath;
         Flow = UiDispatch.Invoke(
@@ -205,8 +208,19 @@ internal sealed class ThreadTimelinePresenter
     }
 
     public void RenderOptimisticUserPrompt(string prompt, DateTimeOffset timestamp)
+        => RenderOptimisticUserPrompt(prompt, [], timestamp);
+
+    public void RenderOptimisticUserPrompt(
+        string prompt,
+        IReadOnlyList<PromptImageAttachmentReference> imageAttachments,
+        DateTimeOffset timestamp)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(imageAttachments);
+        if (string.IsNullOrWhiteSpace(prompt) && imageAttachments.Count == 0)
+        {
+            return;
+        }
 
         RollbackOptimisticUserPrompt();
 
@@ -216,7 +230,9 @@ internal sealed class ThreadTimelinePresenter
             ChatTimelineVisualFactory.GetContentTone(AgentContentKind.User),
             headerOverride: ChatTimelineVisualFactory.GetContentHeader(AgentContentKind.User),
             headerSecondary: ChatMarkdownFormatter.GetChatContentHeaderSecondary(AgentContentKind.User, prompt),
-            localFileRootPath: _localFileRootPath);
+            localFileRootPath: _localFileRootPath,
+            imageAttachments: imageAttachments,
+            getDialogBounds: _getDialogBounds);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         var items = ChatTimelineVisualFactory.BuildUserPromptTimelineItems(entry.Item, _hasSeenUserPrompt).ToArray();
         foreach (var item in items)
@@ -260,7 +276,10 @@ internal sealed class ThreadTimelinePresenter
     {
         ArgumentNullException.ThrowIfNull(completed);
 
-        var state = GetOrCreateContentState(completed.Kind, completed.ContentId, completed.Timestamp);
+        var imageAttachments = completed.Kind == AgentContentKind.User
+            ? ExtractUserImageAttachments(completed.Details)
+            : [];
+        var state = GetOrCreateContentState(completed.Kind, completed.ContentId, completed.Timestamp, imageAttachments);
         var content = ResolveCompletedContent(completed.Content, state.Buffer);
         state.Buffer.Clear();
         state.Buffer.Append(content);
@@ -556,7 +575,11 @@ internal sealed class ThreadTimelinePresenter
         return new TruncatedHistoryState(item, rule, omittedMessageCount);
     }
 
-    private ChatContentState GetOrCreateContentState(AgentContentKind kind, string contentId, DateTimeOffset timestamp)
+    private ChatContentState GetOrCreateContentState(
+        AgentContentKind kind,
+        string contentId,
+        DateTimeOffset timestamp,
+        IReadOnlyList<PromptImageAttachmentReference>? imageAttachments = null)
     {
         var key = ChatTimelineVisualFactory.CreateContentKey(kind, contentId);
         if (_contentStates.TryGetValue(key, out var existing))
@@ -580,7 +603,9 @@ internal sealed class ThreadTimelinePresenter
             ChatTimelineVisualFactory.GetContentTone(kind),
             headerOverride: ChatTimelineVisualFactory.GetContentHeader(kind),
             headerSecondary: ChatMarkdownFormatter.GetChatContentHeaderSecondary(kind, string.Empty),
-            localFileRootPath: _localFileRootPath);
+            localFileRootPath: _localFileRootPath,
+            imageAttachments: kind == AgentContentKind.User ? imageAttachments : null,
+            getDialogBounds: _getDialogBounds);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         var state = new ChatContentState(entry.Item, entry.Markdown, entry.TimestampText, entry.HeaderText, new StringBuilder(), kind);
         _contentStates[key] = state;
@@ -666,6 +691,91 @@ internal sealed class ThreadTimelinePresenter
             Flow.Items.Add(item);
             RequestAutoScrollToTail();
         });
+    }
+
+    private static IReadOnlyList<PromptImageAttachmentReference> ExtractUserImageAttachments(System.Text.Json.JsonElement? details)
+    {
+        if (details is not { ValueKind: System.Text.Json.JsonValueKind.Object } root)
+        {
+            return [];
+        }
+
+        var images = new List<PromptImageAttachmentReference>();
+        if (TryGetProperty(root, "items", out var items) && items.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var item in items.EnumerateArray())
+            {
+                if (item.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                    !TryGetStringProperty(item, "$type", out var type) ||
+                    !string.Equals(type, "localImage", StringComparison.OrdinalIgnoreCase) ||
+                    !TryGetStringProperty(item, "path", out var path) ||
+                    string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                _ = TryGetStringProperty(item, "displayName", out var displayName);
+                _ = TryGetStringProperty(item, "mediaType", out var mediaType);
+                images.Add(new PromptImageAttachmentReference(
+                    string.IsNullOrWhiteSpace(displayName) ? Path.GetFileName(path) : displayName,
+                    path,
+                    string.IsNullOrWhiteSpace(mediaType) ? "image/*" : mediaType));
+            }
+        }
+
+        if (TryGetProperty(root, "attachments", out var attachments) && attachments.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var attachment in attachments.EnumerateArray())
+            {
+                if (attachment.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                    !TryGetStringProperty(attachment, "path", out var path) ||
+                    string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                _ = TryGetStringProperty(attachment, "title", out var title);
+                _ = TryGetStringProperty(attachment, "mediaType", out var mediaType);
+                images.Add(new PromptImageAttachmentReference(
+                    string.IsNullOrWhiteSpace(title) ? Path.GetFileName(path) : title,
+                    path,
+                    string.IsNullOrWhiteSpace(mediaType) ? "image/*" : mediaType));
+            }
+        }
+
+        return images;
+    }
+
+    private static bool TryGetStringProperty(System.Text.Json.JsonElement element, string propertyName, out string value)
+    {
+        if (TryGetProperty(element, propertyName, out var property) && property.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            value = property.GetString() ?? string.Empty;
+            return true;
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+    private static bool TryGetProperty(System.Text.Json.JsonElement element, string propertyName, out System.Text.Json.JsonElement value)
+    {
+        if (element.TryGetProperty(propertyName, out value))
+        {
+            return true;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private void RemoveTimelineItems(IReadOnlyList<DocumentFlowItem> items)

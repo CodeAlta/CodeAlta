@@ -114,7 +114,8 @@ internal sealed class CodeAltaFrontendComposition
             new PromptDraftCoordinator(),
             catalogOptions,
             () => threadStateCoordinator.Selection,
-            callbacks.RefreshCatalogAndThreadWorkspace);
+            callbacks.RefreshCatalogAndThreadWorkspace,
+            callbacks.UpdatePromptImageAttachmentsUi);
         var chatSelectorStateContext = new ChatSelectorStateContext(
             threadWorkspaceViewModel,
             callbacks.GetUiDispatcher,
@@ -263,6 +264,8 @@ internal sealed class CodeAltaFrontendComposition
                 callbacks.ClearPromptText,
                 callbacks.IsPromptTextEmpty,
                 callbacks.RestorePromptText,
+                callbacks.SnapshotPromptImages,
+                callbacks.RestorePromptImages,
                 callbacks.RefreshHeaderAndThreadWorkspace,
                 callbacks.RefreshCatalogAndThreadWorkspace,
                 callbacks.SetStatus,

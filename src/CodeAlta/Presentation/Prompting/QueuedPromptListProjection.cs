@@ -13,6 +13,7 @@ public readonly record struct PromptStripItem(
     string Id,
     string Text,
     string PreviewText,
+    int ImageCount,
     int? RemainingCount);
 
 internal readonly record struct QueuedPromptListProjection(
@@ -44,7 +45,8 @@ internal static class QueuedPromptListProjectionBuilder
                         PromptStripItemKind.PendingSteer,
                         prompt.Id,
                         prompt.Text,
-                        BuildPreviewText(prompt.Text),
+                        BuildPreviewText(prompt.Submission),
+                        prompt.Images.Count,
                         RemainingCount: null))
                 .Concat(
                     tab.QueuedPrompts.Select(
@@ -52,7 +54,8 @@ internal static class QueuedPromptListProjectionBuilder
                             PromptStripItemKind.QueuedPrompt,
                             prompt.Id,
                             prompt.Text,
-                            BuildPreviewText(prompt.Text),
+                            BuildPreviewText(prompt.Submission),
+                            prompt.Images.Count,
                             prompt.RemainingCount)))
                 .ToArray();
             return new QueuedPromptListProjection(items, HasQueuedPrompts: tab.QueuedPrompts.Count > 0);
@@ -61,7 +64,7 @@ internal static class QueuedPromptListProjectionBuilder
 
     internal static string BuildPreviewText(string text)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        ArgumentNullException.ThrowIfNull(text);
 
         var builder = new System.Text.StringBuilder(text.Length);
         var pendingWhitespace = false;
@@ -83,5 +86,17 @@ internal static class QueuedPromptListProjectionBuilder
         }
 
         return builder.ToString();
+    }
+
+    private static string BuildPreviewText(PromptSubmission submission)
+    {
+        var text = BuildPreviewText(submission.Text);
+        if (submission.Images.Count == 0)
+        {
+            return string.IsNullOrWhiteSpace(text) ? "Prompt" : text;
+        }
+
+        var imageSuffix = submission.Images.Count == 1 ? "1 image" : $"{submission.Images.Count} images";
+        return string.IsNullOrWhiteSpace(text) ? imageSuffix : $"{text} · {imageSuffix}";
     }
 }

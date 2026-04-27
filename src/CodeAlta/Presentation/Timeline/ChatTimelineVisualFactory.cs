@@ -3,13 +3,20 @@ using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Styling;
 using XenoAtom.Ansi;
+using XenoAtom.Terminal;
+using XenoAtom.Terminal.Graphics;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
+using CodeAlta.Views;
+using ImageControl = XenoAtom.Terminal.UI.Graphics.Image;
 
 namespace CodeAlta.Presentation.Timeline;
 
@@ -76,10 +83,12 @@ internal static class ChatTimelineVisualFactory
         string? headerOverride = null,
         string? headerSecondary = null,
         int maxCodeBlockHeight = 14,
-        string? localFileRootPath = null)
+        string? localFileRootPath = null,
+        IReadOnlyList<PromptImageAttachmentReference>? imageAttachments = null,
+        Func<Rectangle?>? getDialogBounds = null)
         => UiDispatch.InvokeCurrent(
-            static state => CreateChatMarkdownItemCore(state.markdown, state.tone, state.headerOverride, state.headerSecondary, state.maxCodeBlockHeight, state.localFileRootPath),
-            (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight, localFileRootPath));
+            static state => CreateChatMarkdownItemCore(state.markdown, state.tone, state.headerOverride, state.headerSecondary, state.maxCodeBlockHeight, state.localFileRootPath, imageAttachments: state.imageAttachments, getDialogBounds: state.getDialogBounds),
+            (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight, localFileRootPath, imageAttachments, getDialogBounds));
 
     public static ChatMarkdownEntry CreateCollapsibleMarkdownItem(
         string markdown,
@@ -227,7 +236,9 @@ internal static class ChatTimelineVisualFactory
         int maxCodeBlockHeight,
         string? localFileRootPath,
         string? collapsibleHeader = null,
-        string? collapsibleMarkdown = null)
+        string? collapsibleMarkdown = null,
+        IReadOnlyList<PromptImageAttachmentReference>? imageAttachments = null,
+        Func<Rectangle?>? getDialogBounds = null)
     {
         var headerText = CreateChatCardHeader(tone, headerOverride, headerSecondary);
         markdown = markdown.Trim();
@@ -243,7 +254,12 @@ internal static class ChatTimelineVisualFactory
 
         var timestampText = new Markup(string.Empty);
 
-        Visual groupContent = markdownControl;
+        var contentItems = new List<Visual> { markdownControl };
+        if (imageAttachments is { Count: > 0 })
+        {
+            contentItems.Add(CreateImageAttachmentStrip(imageAttachments, getDialogBounds));
+        }
+
         if (!string.IsNullOrWhiteSpace(collapsibleHeader) && !string.IsNullOrWhiteSpace(collapsibleMarkdown))
         {
             var detailsMarkdown = new MarkdownControl(collapsibleMarkdown.Trim())
@@ -252,14 +268,15 @@ internal static class ChatTimelineVisualFactory
                 VerticalAlignment = Align.Start,
                 Options = CreateThreadMarkdownOptions(maxCodeBlockHeight, localFileRootPath),
             };
-            groupContent = new VStack(
-                    markdownControl,
-                    new Collapsible()
-                        .Header(collapsibleHeader)
-                        .Content(detailsMarkdown)
-                        .IsExpanded(false))
-                .Spacing(1);
+            contentItems.Add(new Collapsible()
+                .Header(collapsibleHeader)
+                .Content(detailsMarkdown)
+                .IsExpanded(false));
         }
+
+        Visual groupContent = contentItems.Count == 1
+            ? contentItems[0]
+            : new VStack(contentItems.ToArray()).Spacing(1);
 
         var group = new Group(headerText, groupContent)
             .TopRightText(copyButton)
@@ -277,6 +294,74 @@ internal static class ChatTimelineVisualFactory
             markdownControl,
             timestampText,
             headerText);
+    }
+
+    private static Visual CreateImageAttachmentStrip(
+        IReadOnlyList<PromptImageAttachmentReference> imageAttachments,
+        Func<Rectangle?>? getDialogBounds)
+    {
+        var children = new List<Visual>(imageAttachments.Count + 1)
+        {
+            new Markup($"[dim]Images ({imageAttachments.Count})[/]") { Wrap = false },
+        };
+        foreach (var attachment in imageAttachments)
+        {
+            var current = attachment;
+            var button = new Button(new TextBlock($"▧ {current.Title}") { Wrap = false });
+            button.Click(() => OpenImageAttachmentDialog(current, button, getDialogBounds));
+            children.Add(button.Tooltip(new TextBlock($"Open attached image {current.Title}")));
+        }
+
+        return new HStack([.. children]) { Spacing = 1, HorizontalAlignment = Align.Stretch };
+    }
+
+    private static void OpenImageAttachmentDialog(
+        PromptImageAttachmentReference attachment,
+        Button? anchor,
+        Func<Rectangle?>? getDialogBounds)
+    {
+        Dialog? dialog = null;
+        var bounds = getDialogBounds?.Invoke() ?? anchor?.GetAbsoluteBounds();
+        var size = ResponsiveDialogSize.Resolve(bounds, minWidth: 64, minHeight: 20, widthFactor: 0.8, heightFactor: 0.8);
+        var preview = CreateImageAttachmentPreview(attachment, Math.Max(24, size.Width - 6), Math.Max(8, size.Height - 6));
+        var closeButton = new Button(new TextBlock("Close")) { HorizontalAlignment = Align.End };
+        closeButton.Click(() => dialog?.Close());
+        dialog = new Dialog()
+            .Title(attachment.Title)
+            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .IsModal(true)
+            .Padding(1)
+            .Content(new DockLayout(top: null, content: new Border(preview).Padding(1), bottom: closeButton));
+        dialog.Width(size.Width).Height(size.Height).MinWidth(64).MinHeight(20);
+        dialog.AddCommand(new Command { Id = "CodeAlta.Timeline.Image.Close", LabelMarkup = "Close", DescriptionMarkup = "Close image preview.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => dialog?.Close() });
+        dialog.Show();
+    }
+
+    private static Visual CreateImageAttachmentPreview(PromptImageAttachmentReference attachment, int cellWidth, int cellHeight)
+    {
+        var fallback = new Border(new VStack(
+            new TextBlock(attachment.Title) { Wrap = false },
+            new TextBlock($"{attachment.MediaType} · {attachment.Path}") { Wrap = true }))
+        {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
+        };
+        if (string.IsNullOrWhiteSpace(attachment.Path) || !File.Exists(attachment.Path))
+        {
+            return fallback;
+        }
+
+        return new ImageControl(TerminalImageSource.FromFile(attachment.Path))
+        {
+            CellWidth = cellWidth,
+            CellHeight = cellHeight,
+            ScaleMode = ImageScaleMode.Fit,
+            PreserveAspectRatio = true,
+            AccessibilityText = attachment.Title,
+            FallbackContent = fallback,
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
+        };
     }
 
     private static string SplitPascalCase(string value)

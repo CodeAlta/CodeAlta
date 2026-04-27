@@ -276,48 +276,63 @@ public sealed class CopilotAgentMapperTests
     [TestMethod]
     public void ToSendMessageOptions_MapsAttachmentsAndPromptFallbacks()
     {
-        var options = new AgentSendOptions
+        var imageBytes = new byte[] { 0x89, 0x50, 0x4e, 0x47 };
+        var imagePath = Path.Combine(Path.GetTempPath(), $"CodeAlta.Tests.{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(imagePath, imageBytes);
+        try
         {
-            Input = new AgentInput(
-            [
-                new AgentInputItem.Text("Review these files"),
-                new AgentInputItem.File("Program.cs", "Program.cs", new AgentLineRange(2, 8)),
-                new AgentInputItem.Directory("src", "source"),
-                new AgentInputItem.Selection(
-                    "App.cs",
-                    "Selection",
-                    "Console.WriteLine(\"hello\");",
-                    new AgentSelectionRange(
-                        new AgentPosition(1, 3),
-                        new AgentPosition(4, 1))),
-                new AgentInputItem.ImageUrl("https://example.com/image.png"),
-                new AgentInputItem.LocalImage(@"C:\img\local.png"),
-                new AgentInputItem.Skill("linter", "/skills/linter"),
-                new AgentInputItem.Mention("workspace", "/mentions/workspace")
-            ])
-        };
+            var options = new AgentSendOptions
+            {
+                Input = new AgentInput(
+                [
+                    new AgentInputItem.Text("Review these files"),
+                    new AgentInputItem.File("Program.cs", "Program.cs", new AgentLineRange(2, 8)),
+                    new AgentInputItem.Directory("src", "source"),
+                    new AgentInputItem.Selection(
+                        "App.cs",
+                        "Selection",
+                        "Console.WriteLine(\"hello\");",
+                        new AgentSelectionRange(
+                            new AgentPosition(1, 3),
+                            new AgentPosition(4, 1))),
+                    new AgentInputItem.ImageUrl("https://example.com/image.png"),
+                    new AgentInputItem.LocalImage(imagePath, "Screenshot", "image/png"),
+                    new AgentInputItem.Skill("linter", "/skills/linter"),
+                    new AgentInputItem.Mention("workspace", "/mentions/workspace")
+                ])
+            };
 
-        var mapped = CopilotAgentMapper.ToSendMessageOptions(options);
+            var mapped = CopilotAgentMapper.ToSendMessageOptions(options);
 
-        Assert.AreEqual("enqueue", mapped.Mode);
-        Assert.IsNotNull(mapped.Attachments);
-        Assert.AreEqual(3, mapped.Attachments.Count);
+            Assert.AreEqual("enqueue", mapped.Mode);
+            Assert.IsNotNull(mapped.Attachments);
+            Assert.AreEqual(4, mapped.Attachments.Count);
 
-        Assert.IsInstanceOfType<UserMessageAttachmentFile>(mapped.Attachments[0]);
-        Assert.IsInstanceOfType<UserMessageAttachmentDirectory>(mapped.Attachments[1]);
-        Assert.IsInstanceOfType<UserMessageAttachmentSelection>(mapped.Attachments[2]);
+            Assert.IsInstanceOfType<UserMessageAttachmentFile>(mapped.Attachments[0]);
+            Assert.IsInstanceOfType<UserMessageAttachmentDirectory>(mapped.Attachments[1]);
+            Assert.IsInstanceOfType<UserMessageAttachmentSelection>(mapped.Attachments[2]);
+            Assert.IsInstanceOfType<UserMessageAttachmentBlob>(mapped.Attachments[3]);
 
-        var fileAttachment = (UserMessageAttachmentFile)mapped.Attachments[0];
-        Assert.AreEqual("Program.cs", fileAttachment.Path);
-        Assert.IsNotNull(fileAttachment.LineRange);
-        Assert.AreEqual(2d, fileAttachment.LineRange.Start);
-        Assert.AreEqual(8d, fileAttachment.LineRange.End);
+            var fileAttachment = (UserMessageAttachmentFile)mapped.Attachments[0];
+            Assert.AreEqual("Program.cs", fileAttachment.Path);
+            Assert.IsNotNull(fileAttachment.LineRange);
+            Assert.AreEqual(2d, fileAttachment.LineRange.Start);
+            Assert.AreEqual(8d, fileAttachment.LineRange.End);
 
-        Assert.IsTrue(mapped.Prompt.Contains("Review these files", StringComparison.Ordinal));
-        Assert.IsTrue(mapped.Prompt.Contains("[image-url] https://example.com/image.png", StringComparison.Ordinal));
-        Assert.IsTrue(mapped.Prompt.Contains(@"[local-image] C:\img\local.png", StringComparison.Ordinal));
-        Assert.IsTrue(mapped.Prompt.Contains("[skill] name=linter path=/skills/linter", StringComparison.Ordinal));
-        Assert.IsTrue(mapped.Prompt.Contains("[mention] name=workspace path=/mentions/workspace", StringComparison.Ordinal));
+            var imageAttachment = (UserMessageAttachmentBlob)mapped.Attachments[3];
+            Assert.AreEqual(Convert.ToBase64String(imageBytes), imageAttachment.Data);
+            Assert.AreEqual("Screenshot", imageAttachment.DisplayName);
+            Assert.AreEqual("image/png", imageAttachment.MimeType);
+
+            Assert.IsTrue(mapped.Prompt.Contains("Review these files", StringComparison.Ordinal));
+            Assert.IsTrue(mapped.Prompt.Contains("[image-url] https://example.com/image.png", StringComparison.Ordinal));
+            Assert.IsTrue(mapped.Prompt.Contains("[skill] name=linter path=/skills/linter", StringComparison.Ordinal));
+            Assert.IsTrue(mapped.Prompt.Contains("[mention] name=workspace path=/mentions/workspace", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
     }
 
     [TestMethod]

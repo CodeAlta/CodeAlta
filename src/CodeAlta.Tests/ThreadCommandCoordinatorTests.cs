@@ -7,6 +7,7 @@ using CodeAlta.Catalog.Roles;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Persistence;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Threading;
 using CodeAlta.ViewModels;
 using CodeAlta.Views;
@@ -108,6 +109,8 @@ public sealed class ThreadCommandCoordinatorTests
             },
             () => string.IsNullOrWhiteSpace(threadInput.Text),
             prompt => threadInput.Text = prompt,
+            static () => [],
+            static _ => { },
             static () => { },
             static () => { },
             static (_, _, _) => { },
@@ -238,6 +241,8 @@ public sealed class ThreadCommandCoordinatorTests
             () => threadInput.Text = string.Empty,
             () => string.IsNullOrWhiteSpace(threadInput.Text),
             prompt => threadInput.Text = prompt,
+            static () => [],
+            static _ => { },
             static () => { },
             static () => { },
             static (_, _, _) => { },
@@ -272,7 +277,7 @@ public sealed class ThreadCommandCoordinatorTests
         var harness = await CreateSelectedThreadHarnessAsync(temp.Path, backend).ConfigureAwait(false);
         await using var _ = harness.Hub;
 
-        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Fallback prompt", steer: true).ConfigureAwait(false);
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, PromptSubmission.TextOnly("Fallback prompt"), steer: true).ConfigureAwait(false);
 
         Assert.AreEqual(1, backend.SendCount);
         Assert.AreEqual(0, backend.SteerCount);
@@ -292,7 +297,7 @@ public sealed class ThreadCommandCoordinatorTests
         await using var _ = harness.Hub;
         harness.ThreadInput.Text = string.Empty;
 
-        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Retry prompt", steer: false).ConfigureAwait(false);
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, PromptSubmission.TextOnly("Retry prompt"), steer: false).ConfigureAwait(false);
 
         Assert.AreEqual("Retry prompt", harness.ThreadInput.Text);
         Assert.AreEqual(2, harness.Tab.Timeline.Flow.Items.Count);
@@ -310,7 +315,7 @@ public sealed class ThreadCommandCoordinatorTests
         await using var _ = harness.Hub;
         harness.ThreadInput.Text = "replacement draft";
 
-        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Original prompt", steer: false).ConfigureAwait(false);
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, PromptSubmission.TextOnly("Original prompt"), steer: false).ConfigureAwait(false);
 
         Assert.AreEqual("replacement draft", harness.ThreadInput.Text);
     }
@@ -328,7 +333,7 @@ public sealed class ThreadCommandCoordinatorTests
         harness.Tab.ActiveRunId = new AgentRunId("active-run-1");
         harness.ThreadInput.Text = string.Empty;
 
-        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Retry steer", steer: true).ConfigureAwait(false);
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, PromptSubmission.TextOnly("Retry steer"), steer: true).ConfigureAwait(false);
 
         Assert.AreEqual(0, harness.Tab.PendingSteers.Count);
         Assert.AreEqual("Retry steer", harness.ThreadInput.Text);
@@ -348,7 +353,7 @@ public sealed class ThreadCommandCoordinatorTests
         harness.Tab.ActiveRunId = new AgentRunId("active-run-1");
         harness.ThreadInput.Text = string.Empty;
 
-        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, "Retry later", steer: true).ConfigureAwait(false);
+        await harness.Coordinator.DispatchQueuedPromptAsync(harness.Tab, PromptSubmission.TextOnly("Retry later"), steer: true).ConfigureAwait(false);
 
         Assert.AreEqual(1, backend.SteerCount);
         Assert.AreEqual(1, harness.Tab.QueuedPrompts.Count);
@@ -469,6 +474,8 @@ public sealed class ThreadCommandCoordinatorTests
             () => threadInput.Text = string.Empty,
             () => string.IsNullOrWhiteSpace(threadInput.Text),
             prompt => threadInput.Text = prompt,
+            static () => [],
+            static _ => { },
             static () => { },
             static () => { },
             static (_, _, _) => { },

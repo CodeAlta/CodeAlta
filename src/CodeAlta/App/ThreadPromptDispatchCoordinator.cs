@@ -20,18 +20,21 @@ internal sealed class ThreadPromptDispatchCoordinator
     private readonly ThreadPromptQueueCoordinator _queueCoordinator;
     private readonly ThreadCommandContext _commandContext;
     private readonly IProjectFileSearchService _projectFileSearchService;
+    private readonly PromptImageAttachmentStore _promptImageAttachmentStore;
 
     public ThreadPromptDispatchCoordinator(
         WorkThreadRuntimeService runtimeService,
         ThreadExecutionOptionsFactory executionOptionsFactory,
         ThreadPromptQueueCoordinator queueCoordinator,
         ThreadCommandContext commandContext,
+        CatalogOptions catalogOptions,
         IProjectFileSearchService projectFileSearchService)
     {
         ArgumentNullException.ThrowIfNull(runtimeService);
         ArgumentNullException.ThrowIfNull(executionOptionsFactory);
         ArgumentNullException.ThrowIfNull(queueCoordinator);
         ArgumentNullException.ThrowIfNull(commandContext);
+        ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(projectFileSearchService);
 
         _runtimeService = runtimeService;
@@ -39,6 +42,7 @@ internal sealed class ThreadPromptDispatchCoordinator
         _queueCoordinator = queueCoordinator;
         _commandContext = commandContext;
         _projectFileSearchService = projectFileSearchService;
+        _promptImageAttachmentStore = new PromptImageAttachmentStore(catalogOptions);
     }
 
     public Task DispatchPromptAsync(
@@ -47,10 +51,22 @@ internal sealed class ThreadPromptDispatchCoordinator
         string prompt,
         bool steer,
         CancellationToken cancellationToken = default)
+        => DispatchPromptAsync(thread, tab, PromptSubmission.TextOnly(prompt), steer, cancellationToken);
+
+    public Task DispatchPromptAsync(
+        WorkThreadDescriptor thread,
+        OpenThreadState tab,
+        PromptSubmission prompt,
+        bool steer,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(thread);
         ArgumentNullException.ThrowIfNull(tab);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        if (!prompt.HasContent)
+        {
+            throw new ArgumentException("Prompt text or image attachments are required.", nameof(prompt));
+        }
 
         return DispatchPromptCoreAsync(thread, tab, prompt, steer, cancellationToken);
     }
@@ -92,6 +108,12 @@ internal sealed class ThreadPromptDispatchCoordinator
         return candidate[..(MaxInitialThreadTitleLength - 3)].TrimEnd() + "...";
     }
 
+    public static string CreateInitialThreadTitle(PromptSubmission prompt)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        return CreateInitialThreadTitle(prompt.CreateFallbackTitle());
+    }
+
     private static int FindFirstSentenceLength(string content)
     {
         for (var i = 0; i < content.Length; i++)
@@ -121,7 +143,7 @@ internal sealed class ThreadPromptDispatchCoordinator
     private async Task DispatchPromptCoreAsync(
         WorkThreadDescriptor thread,
         OpenThreadState tab,
-        string prompt,
+        PromptSubmission prompt,
         bool steer,
         CancellationToken cancellationToken)
     {
@@ -132,10 +154,12 @@ internal sealed class ThreadPromptDispatchCoordinator
             _commandContext.SetThreadStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
             var executionOptions = _executionOptionsFactory.BuildExecutionOptions(thread, tab);
             var promptInput = await ProjectFilePromptInputBuilder.BuildAsync(
-                    prompt,
+                    prompt.Text,
                     ResolveReferenceProjectRoot(executionOptions),
                     _projectFileSearchService,
                     cancellationToken);
+            var imageReferences = await _promptImageAttachmentStore.SaveAsync(thread, prompt.Images, cancellationToken);
+            var agentInput = prompt.AppendImageItems(promptInput.Input, imageReferences);
             var dispatchAsSteer = steer && tab.ActiveRunId is not null;
             _ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);
             AgentRunId runId;
@@ -147,7 +171,7 @@ internal sealed class ThreadPromptDispatchCoordinator
                         executionOptions,
                         new AgentSteerOptions
                         {
-                            Input = promptInput.Input,
+                            Input = agentInput,
                             ExpectedRunId = tab.ActiveRunId,
                         },
                         cancellationToken)
@@ -155,15 +179,12 @@ internal sealed class ThreadPromptDispatchCoordinator
             }
             else
             {
-                if (thread.StartedAt is null)
-                {
-                    tab.Timeline.RenderOptimisticUserPrompt(prompt, DateTimeOffset.UtcNow);
-                }
+                tab.Timeline.RenderOptimisticUserPrompt(promptInput.NormalizedPromptText, imageReferences, DateTimeOffset.UtcNow);
 
                 runId = await _runtimeService.SendAsync(
                         thread,
                         executionOptions,
-                        new AgentSendOptions { Input = promptInput.Input },
+                        new AgentSendOptions { Input = agentInput },
                         cancellationToken)
                     ;
             }
@@ -224,12 +245,12 @@ internal sealed class ThreadPromptDispatchCoordinator
         return executionOptions.ProjectRoots.FirstOrDefault() ?? executionOptions.WorkingDirectory;
     }
 
-    private static string BuildPromptDispatchFailureMarkdown(string errorMessage, string prompt, bool restoredToDraft)
+    private static string BuildPromptDispatchFailureMarkdown(string errorMessage, PromptSubmission prompt, bool restoredToDraft)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(errorMessage);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
 
-        var normalizedPrompt = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
+        var normalizedPrompt = prompt.Text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
         var builder = new System.Text.StringBuilder();
         builder.Append("Failed to send prompt: ").Append(errorMessage);
         builder.AppendLine();
@@ -240,10 +261,20 @@ internal sealed class ThreadPromptDispatchCoordinator
         builder.AppendLine();
         builder.AppendLine("Prompt:");
 
-        foreach (var line in normalizedPrompt.Split('\n'))
+        foreach (var line in (string.IsNullOrWhiteSpace(normalizedPrompt) ? prompt.CreateFallbackTitle() : normalizedPrompt).Split('\n'))
         {
             builder.Append("> ");
             builder.AppendLine(line);
+        }
+
+        if (prompt.Images.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Images:");
+            foreach (var image in prompt.Images)
+            {
+                builder.Append("- ").Append(image.Title).Append(" (").Append(image.MediaType).AppendLine(")");
+            }
         }
 
         return builder.ToString().TrimEnd();

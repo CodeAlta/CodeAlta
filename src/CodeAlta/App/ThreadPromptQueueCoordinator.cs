@@ -13,8 +13,8 @@ internal sealed class ThreadPromptQueueCoordinator
     private readonly Action _updatePromptAvailabilityUi;
     private readonly Action<Action> _dispatchToUi;
     private readonly Action _verifyBindableAccess;
-    private readonly Func<OpenThreadState, string, CancellationToken, Task> _dispatchQueuedPromptAsync;
-    private readonly Func<OpenThreadState, string, CancellationToken, Task> _dispatchSteeringPromptAsync;
+    private readonly Func<OpenThreadState, PromptSubmission, CancellationToken, Task> _dispatchQueuedPromptAsync;
+    private readonly Func<OpenThreadState, PromptSubmission, CancellationToken, Task> _dispatchSteeringPromptAsync;
 
     public ThreadPromptQueueCoordinator(
         ThreadWorkspaceViewModel workspaceViewModel,
@@ -22,8 +22,8 @@ internal sealed class ThreadPromptQueueCoordinator
         Action updatePromptAvailabilityUi,
         Action<Action> dispatchToUi,
         Action verifyBindableAccess,
-        Func<OpenThreadState, string, CancellationToken, Task> dispatchQueuedPromptAsync,
-        Func<OpenThreadState, string, CancellationToken, Task> dispatchSteeringPromptAsync)
+        Func<OpenThreadState, PromptSubmission, CancellationToken, Task> dispatchQueuedPromptAsync,
+        Func<OpenThreadState, PromptSubmission, CancellationToken, Task> dispatchSteeringPromptAsync)
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
         ArgumentNullException.ThrowIfNull(threadSelection);
@@ -53,9 +53,16 @@ internal sealed class ThreadPromptQueueCoordinator
     }
 
     public void EnqueuePrompt(OpenThreadState tab, string prompt)
+        => EnqueuePrompt(tab, PromptSubmission.TextOnly(prompt));
+
+    public void EnqueuePrompt(OpenThreadState tab, PromptSubmission prompt)
     {
         ArgumentNullException.ThrowIfNull(tab);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        if (!prompt.HasContent)
+        {
+            throw new ArgumentException("Queued prompt text or image attachments are required.", nameof(prompt));
+        }
 
         lock (tab.PromptStripSyncRoot)
         {
@@ -127,7 +134,7 @@ internal sealed class ThreadPromptQueueCoordinator
     public void UpdateSelectedThreadQueuedPromptText(string queuedPromptId, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queuedPromptId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        ArgumentNullException.ThrowIfNull(text);
 
         if (!TryGetSelectedTabWithQueue(out var tab) || tab is null)
         {
@@ -156,7 +163,7 @@ internal sealed class ThreadPromptQueueCoordinator
 
         try
         {
-            await DispatchQueuedPromptForCurrentThreadStateAsync(tab, queuedPrompt.Text, cancellationToken);
+            await DispatchQueuedPromptForCurrentThreadStateAsync(tab, queuedPrompt.Submission, cancellationToken);
             ConsumeQueuedPrompt(tab, queuedPrompt.Id);
         }
         catch
@@ -176,7 +183,7 @@ internal sealed class ThreadPromptQueueCoordinator
 
         try
         {
-            await _dispatchQueuedPromptAsync(tab, queuedPrompt.Text, cancellationToken);
+            await _dispatchQueuedPromptAsync(tab, queuedPrompt.Submission, cancellationToken);
             ConsumeQueuedPrompt(tab, queuedPrompt.Id);
         }
         catch
@@ -196,7 +203,7 @@ internal sealed class ThreadPromptQueueCoordinator
 
         try
         {
-            await DispatchQueuedPromptForCurrentThreadStateAsync(tab, queuedPrompt.Text, cancellationToken);
+            await DispatchQueuedPromptForCurrentThreadStateAsync(tab, queuedPrompt.Submission, cancellationToken);
             ConsumeQueuedPrompt(tab, queuedPrompt.Id);
         }
         catch
@@ -208,9 +215,16 @@ internal sealed class ThreadPromptQueueCoordinator
         => _dispatchToUi(RefreshSelectedThreadQueueUiCore);
 
     public string AddPendingSteer(OpenThreadState tab, string prompt)
+        => AddPendingSteer(tab, PromptSubmission.TextOnly(prompt));
+
+    public string AddPendingSteer(OpenThreadState tab, PromptSubmission prompt)
     {
         ArgumentNullException.ThrowIfNull(tab);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        if (!prompt.HasContent)
+        {
+            throw new ArgumentException("Pending steer prompt text or image attachments are required.", nameof(prompt));
+        }
 
         PendingSteerPrompt pendingSteer;
         lock (tab.PromptStripSyncRoot)
@@ -321,10 +335,14 @@ internal sealed class ThreadPromptQueueCoordinator
         RefreshSelectedThreadQueueUi();
     }
 
-    private Task DispatchQueuedPromptForCurrentThreadStateAsync(OpenThreadState tab, string prompt, CancellationToken cancellationToken)
+    private Task DispatchQueuedPromptForCurrentThreadStateAsync(OpenThreadState tab, PromptSubmission prompt, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(tab);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        if (!prompt.HasContent)
+        {
+            throw new ArgumentException("Prompt text or image attachments are required.", nameof(prompt));
+        }
 
         return tab.ActiveRunId is not null
             ? _dispatchSteeringPromptAsync(tab, prompt, cancellationToken)
@@ -400,7 +418,7 @@ internal sealed class ThreadPromptQueueCoordinator
                 return false;
             }
 
-            queuedPrompt = new QueuedPromptSnapshot(existing.Id, existing.Text, existing.RemainingCount);
+            queuedPrompt = new QueuedPromptSnapshot(existing.Id, existing.Submission.Copy(), existing.RemainingCount);
             return true;
         }
     }
@@ -416,7 +434,7 @@ internal sealed class ThreadPromptQueueCoordinator
             }
 
             var existing = tab.QueuedPrompts[0];
-            queuedPrompt = new QueuedPromptSnapshot(existing.Id, existing.Text, existing.RemainingCount);
+            queuedPrompt = new QueuedPromptSnapshot(existing.Id, existing.Submission.Copy(), existing.RemainingCount);
             return true;
         }
     }
@@ -434,6 +452,6 @@ internal sealed class ThreadPromptQueueCoordinator
 
     private readonly record struct QueuedPromptSnapshot(
         string Id,
-        string Text,
+        PromptSubmission Submission,
         int RemainingCount);
 }

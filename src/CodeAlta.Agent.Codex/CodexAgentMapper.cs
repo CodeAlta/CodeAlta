@@ -1147,7 +1147,8 @@ internal static class CodexAgentMapper
                 AgentContentKind.User,
                 userMessage.Id,
                 notification.TurnId,
-                ExtractUserMessageText(userMessage)),
+                ExtractUserMessageText(userMessage),
+                CreateUserMessageImageDetails(userMessage.Content)),
 
             ThreadItem.AgentMessageThreadItem message => new AgentContentCompletedEvent(
                 AgentBackendIds.Codex,
@@ -2464,6 +2465,61 @@ internal static class CodexAgentMapper
                     _ => string.Empty
                 }).Where(static value => !string.IsNullOrWhiteSpace(value)));
     }
+
+    private static JsonElement? CreateUserMessageImageDetails(IReadOnlyList<UserInput> content)
+    {
+        if (!content.Any(static item => item is UserInput.LocalImageUserInput or UserInput.ImageUserInput))
+        {
+            return null;
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WritePropertyName("attachments");
+            writer.WriteStartArray();
+            foreach (var item in content)
+            {
+                switch (item)
+                {
+                    case UserInput.LocalImageUserInput localImage when !string.IsNullOrWhiteSpace(localImage.Path):
+                        writer.WriteStartObject();
+                        writer.WriteString("kind", "image");
+                        writer.WriteString("title", Path.GetFileName(localImage.Path));
+                        writer.WriteString("path", localImage.Path);
+                        writer.WriteString("mediaType", GuessImageMediaType(localImage.Path) ?? "image/*");
+                        writer.WriteEndObject();
+                        break;
+                    case UserInput.ImageUserInput image when !string.IsNullOrWhiteSpace(image.Url):
+                        writer.WriteStartObject();
+                        writer.WriteString("kind", "image");
+                        writer.WriteString("title", image.Url);
+                        writer.WriteString("path", image.Url);
+                        writer.WriteString("mediaType", GuessImageMediaType(image.Url) ?? "image/*");
+                        writer.WriteEndObject();
+                        break;
+                }
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
+    private static string? GuessImageMediaType(string pathOrUrl)
+        => Path.GetExtension(pathOrUrl).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".tif" or ".tiff" => "image/tiff",
+            _ => null,
+        };
 
     private static string ExtractReasoningThreadText(ThreadItem.ReasoningThreadItem reasoning)
     {

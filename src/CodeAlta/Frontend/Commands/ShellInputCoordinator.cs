@@ -144,7 +144,16 @@ internal sealed class ShellInputCoordinator
         string? rawInput,
         bool steer,
         CancellationToken cancellationToken = default)
-        => await ExecuteIntentAsync(_router.Route(rawInput, steer), cancellationToken);
+    {
+        var intent = _router.Route(rawInput, steer);
+        if (intent is EmptyShellInputIntent && !_threadCommandCoordinator.IsCurrentPromptEmpty())
+        {
+            await _threadCommandCoordinator.SendPromptAsync(rawInput, steer, cancellationToken);
+            return;
+        }
+
+        await ExecuteIntentAsync(intent, cancellationToken);
+    }
 
     private async Task ExecuteIntentAsync(ShellInputIntent intent, CancellationToken cancellationToken)
     {

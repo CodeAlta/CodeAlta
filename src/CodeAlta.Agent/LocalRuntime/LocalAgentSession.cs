@@ -1575,8 +1575,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 case AgentInputItem.LocalImage localImage:
                     parts.Add(new LocalAgentMessagePart.Data(
                         Convert.ToBase64String(File.ReadAllBytes(localImage.Path)),
-                        GuessMediaType(localImage.Path) ?? "application/octet-stream",
-                        Path.GetFileName(localImage.Path)));
+                        localImage.MediaType ?? GuessMediaType(localImage.Path) ?? "application/octet-stream",
+                        string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName));
                     break;
                 case AgentInputItem.File file:
                     parts.Add(new LocalAgentMessagePart.Text(RenderFileInput(file)));
@@ -1615,7 +1615,9 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             {
                 AgentInputItem.Text text => text.Value,
                 AgentInputItem.ImageUrl imageUrl => $"Image URL: {imageUrl.Url}",
-                AgentInputItem.LocalImage localImage => $"Local image: {localImage.Path}",
+                AgentInputItem.LocalImage localImage => string.IsNullOrWhiteSpace(localImage.DisplayName)
+                    ? $"Local image: {localImage.Path}"
+                    : $"Local image ({localImage.DisplayName}): {localImage.Path}",
                 AgentInputItem.File file => RenderFileInput(file),
                 AgentInputItem.Directory directory => $"Directory: {directory.Path}",
                 AgentInputItem.Selection selection => $"Selection: {selection.FilePath}",
@@ -1665,6 +1667,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             ".jpg" or ".jpeg" => "image/jpeg",
             ".gif" => "image/gif",
             ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".tif" or ".tiff" => "image/tiff",
             ".pdf" => "application/pdf",
             ".txt" => "text/plain",
             _ => null,

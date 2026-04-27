@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.App.State;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Threading;
 using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
@@ -41,6 +42,7 @@ internal sealed class CodeAltaFrontendCallbacks
     public required Action SyncChatSelectorItems { get; init; }
     public required Action<ThreadSessionState?> SyncPromptText { get; init; }
     public required Action UpdatePromptAvailabilityUi { get; init; }
+    public required Action UpdatePromptImageAttachmentsUi { get; init; }
     public required Action SyncThreadTabControl { get; init; }
     public required Action<Action> DispatchToUi { get; init; }
     public required Action<Action> DispatchToUiDeferred { get; init; }
@@ -56,6 +58,8 @@ internal sealed class CodeAltaFrontendCallbacks
     public required Action ClearPromptText { get; init; }
     public required Func<bool> IsPromptTextEmpty { get; init; }
     public required Action<string> RestorePromptText { get; init; }
+    public required Func<IReadOnlyList<PromptImageAttachment>> SnapshotPromptImages { get; init; }
+    public required Action<IReadOnlyList<PromptImageAttachment>> RestorePromptImages { get; init; }
     public required Func<Task> PersistViewStateAsync { get; init; }
     public required Func<WorkThreadDescriptor, Task> RegisterCreatedThreadAsync { get; init; }
     public required Func<Visual?> GetPromptFocusTarget { get; init; }

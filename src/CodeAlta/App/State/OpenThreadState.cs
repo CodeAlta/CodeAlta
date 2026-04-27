@@ -127,7 +127,7 @@ internal sealed class OpenThreadState
     }
 
     public bool HasPromptDraft
-        => !string.IsNullOrWhiteSpace(Session.PromptDraftText);
+        => !string.IsNullOrWhiteSpace(Session.PromptDraftText) || Session.PromptImageAttachments.Count > 0;
 
     public string? StatusMessage
     {

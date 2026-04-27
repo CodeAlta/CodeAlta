@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Presentation.Prompting;
 
 namespace CodeAlta.Models;
 
@@ -13,6 +14,8 @@ internal sealed class ThreadSessionState
     public bool AutoScroll { get; set; } = true;
 
     public string PromptDraftText { get; set; } = string.Empty;
+
+    public List<PromptImageAttachment> PromptImageAttachments { get; } = [];
 
     public bool HistoryLoaded { get; set; }
 
