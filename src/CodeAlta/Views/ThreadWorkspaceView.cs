@@ -683,7 +683,7 @@ internal sealed class ThreadWorkspaceView
             image,
             cellWidth: Math.Max(24, size.Width - 6),
             cellHeight: Math.Max(8, size.Height - 9));
-        var addButton = new Button(new TextBlock("Add To Prompt"));
+        var addButton = new Button(new TextBlock("Add To Prompt")) { Tone = ControlTone.Primary };
         var cancelButton = new Button(new TextBlock("Cancel"));
 
         void AddImage()
@@ -740,7 +740,7 @@ internal sealed class ThreadWorkspaceView
             image,
             cellWidth: Math.Max(24, size.Width - 8),
             cellHeight: Math.Max(8, size.Height - 10));
-        var saveButton = new Button(new TextBlock("Rename"));
+        var saveButton = new Button(new TextBlock("Rename")) { Tone = ControlTone.Primary };
         var deleteButton = new Button(new TextBlock("Delete")) { Tone = ControlTone.Error };
         var closeButton = new Button(new TextBlock("Close"));
 
