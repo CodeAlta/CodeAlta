@@ -2,6 +2,7 @@ using CodeAlta.Threading;
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Timeline;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -52,6 +53,22 @@ public sealed class ThreadTimelinePresenterTests
         Assert.AreEqual(2, items.Count);
         Assert.AreSame(pending.UserItem.Content, items[0].Content);
         Assert.AreSame(followup.AssistantItem.Content, items[1].Content);
+    }
+
+    [TestMethod]
+    public void CreateImageAttachmentDialogBottom_IncludesFullAttachmentPath()
+    {
+        var fullPath = @"C:\code\CodeAlta\.alta\attachments\prompt-image.png";
+        var bottom = ChatTimelineVisualFactory.CreateImageAttachmentDialogBottom(
+            new PromptImageAttachmentReference("Prompt image", fullPath, "image/png"),
+            new Button("Close"));
+
+        var pathText = bottom.EnumerateVisualsDepthFirst()
+            .OfType<TextBlock>()
+            .Single(static textBlock => textBlock.Text?.StartsWith("Path: ", StringComparison.Ordinal) == true);
+
+        Assert.AreEqual($"Path: {fullPath}", pathText.Text);
+        Assert.IsTrue(pathText.Wrap);
     }
 
     [TestMethod]

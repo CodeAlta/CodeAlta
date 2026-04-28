@@ -323,18 +323,37 @@ internal static class ChatTimelineVisualFactory
         Dialog? dialog = null;
         var bounds = getDialogBounds?.Invoke() ?? anchor?.GetAbsoluteBounds();
         var size = ResponsiveDialogSize.Resolve(bounds, minWidth: 64, minHeight: 20, widthFactor: 0.8, heightFactor: 0.8);
-        var preview = CreateImageAttachmentPreview(attachment, Math.Max(24, size.Width - 6), Math.Max(8, size.Height - 6));
+        var preview = CreateImageAttachmentPreview(attachment, Math.Max(24, size.Width - 6), Math.Max(8, size.Height - 8));
         var closeButton = new Button(new TextBlock("Close")) { HorizontalAlignment = Align.End };
         closeButton.Click(() => dialog?.Close());
+        var bottom = CreateImageAttachmentDialogBottom(attachment, closeButton);
         dialog = new Dialog()
             .Title(attachment.Title)
             .BottomRightText(new Markup("[dim]Esc Close[/]"))
             .IsModal(true)
             .Padding(1)
-            .Content(new DockLayout(top: null, content: new Border(preview).Padding(1), bottom: closeButton));
+            .Content(new DockLayout(top: null, content: new Border(preview).Padding(1), bottom: bottom));
         dialog.Width(size.Width).Height(size.Height).MinWidth(64).MinHeight(20);
         dialog.AddCommand(new Command { Id = "CodeAlta.Timeline.Image.Close", LabelMarkup = "Close", DescriptionMarkup = "Close image preview.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => dialog?.Close() });
         dialog.Show();
+    }
+
+    internal static Visual CreateImageAttachmentDialogBottom(PromptImageAttachmentReference attachment, Button closeButton)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        ArgumentNullException.ThrowIfNull(closeButton);
+
+        return new VStack(
+            new TextBlock($"Path: {attachment.Path}")
+            {
+                Wrap = true,
+                HorizontalAlignment = Align.Stretch,
+            },
+            closeButton)
+        {
+            Spacing = 1,
+            HorizontalAlignment = Align.Stretch,
+        };
     }
 
     private static Visual CreateImageAttachmentPreview(PromptImageAttachmentReference attachment, int cellWidth, int cellHeight)
