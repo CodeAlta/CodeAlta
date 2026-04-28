@@ -1570,12 +1570,20 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                     parts.Add(new LocalAgentMessagePart.Text(text.Value));
                     break;
                 case AgentInputItem.ImageUrl imageUrl:
-                    parts.Add(new LocalAgentMessagePart.Uri(imageUrl.Url, GuessMediaType(imageUrl.Url)));
+                    if (AgentDataUri.TryParseBase64(imageUrl.Url, out var mediaType, out var base64Data))
+                    {
+                        parts.Add(new LocalAgentMessagePart.Data(base64Data, mediaType, "image"));
+                    }
+                    else
+                    {
+                        parts.Add(new LocalAgentMessagePart.Uri(imageUrl.Url, GuessMediaType(imageUrl.Url)));
+                    }
+
                     break;
                 case AgentInputItem.LocalImage localImage:
                     parts.Add(new LocalAgentMessagePart.Data(
                         Convert.ToBase64String(File.ReadAllBytes(localImage.Path)),
-                        localImage.MediaType ?? GuessMediaType(localImage.Path) ?? "application/octet-stream",
+                        ResolveMediaType(localImage.MediaType, localImage.Path),
                         string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName));
                     break;
                 case AgentInputItem.File file:
@@ -1673,6 +1681,11 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             ".txt" => "text/plain",
             _ => null,
         };
+
+    private static string ResolveMediaType(string? mediaType, string pathOrUri)
+        => string.IsNullOrWhiteSpace(mediaType)
+            ? GuessMediaType(pathOrUri) ?? "application/octet-stream"
+            : mediaType.Trim();
 
     private static JsonElement SerializeAgentInput(AgentInput input)
         => JsonSerializer.SerializeToElement(input, AgentJsonSerializerContext.Default.AgentInput);

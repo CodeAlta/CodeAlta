@@ -184,15 +184,41 @@ internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
                 CreateFunctionResult(toolResult.Result)),
             LocalAgentMessagePart.Uri uri => new UriContent(
                 new Uri(uri.Value, UriKind.RelativeOrAbsolute),
-                uri.MediaType ?? "application/octet-stream"),
+                NormalizeMediaType(uri.MediaType, uri.Value)),
             LocalAgentMessagePart.Data data => new DataContent(
                 Convert.FromBase64String(data.Base64Data),
-                data.MediaType)
+                NormalizeMediaType(data.MediaType, data.Name))
             {
                 Name = data.Name,
             },
             _ => new TextContent(string.Empty),
         };
+
+    private static string NormalizeMediaType(string? mediaType, string? nameOrPath)
+    {
+        if (!string.IsNullOrWhiteSpace(mediaType))
+        {
+            return mediaType.Trim();
+        }
+
+        return GuessMediaType(nameOrPath) ?? "application/octet-stream";
+    }
+
+    private static string? GuessMediaType(string? nameOrPath)
+        => string.IsNullOrWhiteSpace(nameOrPath)
+            ? null
+            : Path.GetExtension(nameOrPath).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".bmp" => "image/bmp",
+                ".tif" or ".tiff" => "image/tiff",
+                ".pdf" => "application/pdf",
+                ".txt" => "text/plain",
+                _ => null,
+            };
 
     private static object? CreateFunctionResult(AgentToolResult result)
     {

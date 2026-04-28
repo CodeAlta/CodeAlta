@@ -153,6 +153,88 @@ public sealed class LocalAgentChatClientTurnExecutorTests
         Assert.IsNotNull(client.LastOptions.Reasoning);
     }
 
+    [TestMethod]
+    public async Task ExecuteTurnAsync_MapsInlineImageDataWithMediaTypeIntoChatClientRequest()
+    {
+        var imageBytes = new byte[] { 1, 2, 3 };
+        var client = new RecordingChatClient
+        {
+            Updates =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")])
+                {
+                    MessageId = "message-3",
+                    ResponseId = "response-3",
+                },
+            ],
+        };
+        var executor = new LocalAgentChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+        var request = CreateTurnRequest(
+            conversation:
+            [
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.User,
+                    [
+                        new LocalAgentMessagePart.Text("inspect the image"),
+                        new LocalAgentMessagePart.Data(Convert.ToBase64String(imageBytes), " image/png ", "image.png"),
+                    ]),
+            ]);
+
+        _ = await executor.ExecuteTurnAsync(
+                request,
+                static (_, _) => ValueTask.CompletedTask,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsNotNull(client.LastMessages);
+        Assert.AreEqual(ChatRole.User, client.LastMessages[0].Role);
+        Assert.AreEqual(2, client.LastMessages[0].Contents.Count);
+        var dataContent = Assert.IsInstanceOfType<DataContent>(client.LastMessages[0].Contents[1]);
+        Assert.AreEqual("image/png", dataContent.MediaType);
+        Assert.AreEqual("image.png", dataContent.Name);
+        CollectionAssert.AreEqual(imageBytes, dataContent.Data.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ExecuteTurnAsync_InfersBlankInlineImageMediaTypeFromName()
+    {
+        var imageBytes = new byte[] { 4, 5, 6 };
+        var client = new RecordingChatClient
+        {
+            Updates =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")])
+                {
+                    MessageId = "message-4",
+                    ResponseId = "response-4",
+                },
+            ],
+        };
+        var executor = new LocalAgentChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+        var request = CreateTurnRequest(
+            conversation:
+            [
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.User,
+                    [new LocalAgentMessagePart.Data(Convert.ToBase64String(imageBytes), " ", "photo.jpeg")]),
+            ]);
+
+        _ = await executor.ExecuteTurnAsync(
+                request,
+                static (_, _) => ValueTask.CompletedTask,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsNotNull(client.LastMessages);
+        var dataContent = Assert.IsInstanceOfType<DataContent>(client.LastMessages[0].Contents.Single());
+        Assert.AreEqual("image/jpeg", dataContent.MediaType);
+        CollectionAssert.AreEqual(imageBytes, dataContent.Data.ToArray());
+    }
+
     private static LocalAgentTurnRequest CreateTurnRequest(IReadOnlyList<LocalAgentConversationMessage>? conversation = null)
         => new()
         {

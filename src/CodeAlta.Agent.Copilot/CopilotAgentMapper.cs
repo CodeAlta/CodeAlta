@@ -196,7 +196,20 @@ internal static class CopilotAgentMapper
                     break;
 
                 case AgentInputItem.ImageUrl imageUrl:
-                    AppendPromptLine(promptBuilder, $"[image-url] {imageUrl.Url}");
+                    if (TryParseBase64DataUri(imageUrl.Url, out var mediaType, out var base64Data))
+                    {
+                        attachments.Add(new UserMessageAttachmentBlob
+                        {
+                            Data = base64Data,
+                            DisplayName = "image",
+                            MimeType = mediaType
+                        });
+                    }
+                    else
+                    {
+                        AppendPromptLine(promptBuilder, $"[image-url] {imageUrl.Url}");
+                    }
+
                     break;
 
                 case AgentInputItem.LocalImage localImage:
@@ -204,7 +217,7 @@ internal static class CopilotAgentMapper
                     {
                         Data = Convert.ToBase64String(File.ReadAllBytes(localImage.Path)),
                         DisplayName = string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName,
-                        MimeType = localImage.MediaType ?? GuessImageMediaType(localImage.Path) ?? "application/octet-stream"
+                        MimeType = ResolveImageMediaType(localImage.MediaType, localImage.Path)
                     });
                     break;
 
@@ -2644,6 +2657,64 @@ internal static class CopilotAgentMapper
             ".tif" or ".tiff" => "image/tiff",
             _ => null,
         };
+
+    private static string ResolveImageMediaType(string? mediaType, string path)
+        => string.IsNullOrWhiteSpace(mediaType)
+            ? GuessImageMediaType(path) ?? "application/octet-stream"
+            : mediaType.Trim();
+
+    private static bool TryParseBase64DataUri(string value, out string mediaType, out string base64Data)
+    {
+        mediaType = string.Empty;
+        base64Data = string.Empty;
+        if (!value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var commaIndex = value.IndexOf(',', StringComparison.Ordinal);
+        if (commaIndex < 0)
+        {
+            return false;
+        }
+
+        var metadata = value.AsSpan(5, commaIndex - 5);
+        var isBase64 = false;
+        foreach (var segmentRange in metadata.Split(';'))
+        {
+            if (metadata[segmentRange].Equals("base64", StringComparison.OrdinalIgnoreCase))
+            {
+                isBase64 = true;
+                break;
+            }
+        }
+
+        if (!isBase64)
+        {
+            return false;
+        }
+
+        var payload = value[(commaIndex + 1)..].Trim();
+        if (payload.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = Convert.FromBase64String(payload);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        var separatorIndex = metadata.IndexOf(';');
+        var parsedMediaType = separatorIndex < 0 ? metadata : metadata[..separatorIndex];
+        mediaType = parsedMediaType.IsWhiteSpace() ? "application/octet-stream" : parsedMediaType.Trim().ToString();
+        base64Data = payload;
+        return true;
+    }
 
     private static void AppendPromptLine(StringBuilder builder, string line)
     {

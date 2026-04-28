@@ -336,6 +336,58 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
+    public void ToSendMessageOptions_InfersBlankLocalImageMediaTypeFromPath()
+    {
+        var imageBytes = new byte[] { 1, 2, 3 };
+        var imagePath = Path.Combine(Path.GetTempPath(), $"CodeAlta.Tests.{Guid.NewGuid():N}.jpg");
+        File.WriteAllBytes(imagePath, imageBytes);
+        try
+        {
+            var options = new AgentSendOptions
+            {
+                Input = new AgentInput(
+                [
+                    new AgentInputItem.LocalImage(imagePath, "Photo", " "),
+                ])
+            };
+
+            var mapped = CopilotAgentMapper.ToSendMessageOptions(options);
+
+            Assert.IsNotNull(mapped.Attachments);
+            var imageAttachment = Assert.IsInstanceOfType<UserMessageAttachmentBlob>(mapped.Attachments.Single());
+            Assert.AreEqual(Convert.ToBase64String(imageBytes), imageAttachment.Data);
+            Assert.AreEqual("Photo", imageAttachment.DisplayName);
+            Assert.AreEqual("image/jpeg", imageAttachment.MimeType);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [TestMethod]
+    public void ToSendMessageOptions_MapsDataUriImageUrlToBlobAttachment()
+    {
+        var options = new AgentSendOptions
+        {
+            Input = new AgentInput(
+            [
+                new AgentInputItem.Text("review"),
+                new AgentInputItem.ImageUrl("data:image/png;base64,AQID"),
+            ])
+        };
+
+        var mapped = CopilotAgentMapper.ToSendMessageOptions(options);
+
+        Assert.IsNotNull(mapped.Attachments);
+        var imageAttachment = Assert.IsInstanceOfType<UserMessageAttachmentBlob>(mapped.Attachments.Single());
+        Assert.AreEqual("AQID", imageAttachment.Data);
+        Assert.AreEqual("image", imageAttachment.DisplayName);
+        Assert.AreEqual("image/png", imageAttachment.MimeType);
+        Assert.AreEqual("review", mapped.Prompt);
+    }
+
+    [TestMethod]
     public void ToSteerMessageOptions_UsesImmediateMode()
     {
         var options = new AgentSteerOptions
