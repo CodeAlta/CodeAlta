@@ -650,10 +650,13 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
     private static bool TryCreateInputContentPart(LocalAgentMessagePart.Data part, out ResponseContentPart contentPart)
     {
-        var data = BinaryData.FromBytes(Convert.FromBase64String(part.Base64Data));
-        contentPart = IsImageMediaType(part.MediaType)
-            ? ResponseContentPart.CreateInputImagePart(data, part.MediaType ?? "image/*")
-            : ResponseContentPart.CreateInputFilePart(data, part.MediaType ?? "application/octet-stream", part.Name ?? "attachment");
+        var mediaType = string.IsNullOrWhiteSpace(part.MediaType)
+            ? "application/octet-stream"
+            : part.MediaType;
+        var data = BinaryData.FromBytes(Convert.FromBase64String(part.Base64Data), mediaType);
+        contentPart = IsImageMediaType(mediaType)
+            ? ResponseContentPart.CreateInputImagePart(data)
+            : ResponseContentPart.CreateInputFilePart(data, mediaType, part.Name ?? "attachment");
         return true;
     }
 

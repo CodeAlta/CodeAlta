@@ -607,6 +607,51 @@ public sealed class OpenAIRawApiAgentBackendTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_SendsInlineImagesWithMediaType()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-image",
+                    modelId: "gpt-test",
+                    text: "Image received.",
+                    reasoningText: string.Empty,
+                    encryptedReasoning: null),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var imageBytes = new byte[] { 1, 2, 3 };
+        var request = CreateTurnRequest() with
+        {
+            Conversation =
+            [
+                new LocalAgentConversationMessage(
+                    LocalAgentConversationRole.User,
+                    [
+                        new LocalAgentMessagePart.Text("Describe this image."),
+                        new LocalAgentMessagePart.Data(Convert.ToBase64String(imageBytes), "image/png", "image.png"),
+                    ]),
+            ],
+        };
+
+        var response = await executor.ExecuteTurnAsync(
+            request,
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        Assert.AreEqual("Image received.", text);
+        var message = Assert.IsInstanceOfType<MessageResponseItem>(responsesClient.Requests[0].InputItems.Single());
+        var imagePart = message.Content.Single(static part => part.Kind == ResponseContentPartKind.InputImage);
+        Assert.AreEqual("data:image/png;base64,AQID", imagePart.InputImageUri);
+        Assert.IsNull(imagePart.InputImageDetailLevel);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_UsesStreamedOutputItemsWhenCompletedPayloadOmitsOutput()
     {
         var completedResponse = new ResponseResult
