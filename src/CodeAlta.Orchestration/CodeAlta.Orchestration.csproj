@@ -18,7 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Runtime\Prompts\system_prompt.md" />
+    <Content Include="content\**\*.*"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             TargetPath="content\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

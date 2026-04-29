@@ -1,6 +1,7 @@
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Roles;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 using System.Text;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -10,10 +11,9 @@ namespace CodeAlta.Orchestration.Runtime;
 /// </summary>
 public sealed class AgentInstructionTemplateProvider
 {
-    private const string SystemPromptResourceName = "CodeAlta.Orchestration.Runtime.Prompts.system_prompt.md";
-    private static readonly Lazy<string> DefaultSystemPrompt = new(LoadDefaultSystemPrompt);
     private readonly SkillCatalog? _skillCatalog;
     private readonly CatalogOptions? _catalogOptions;
+    private readonly ISystemPromptContentLocator _contentLocator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentInstructionTemplateProvider"/> class.
@@ -22,10 +22,12 @@ public sealed class AgentInstructionTemplateProvider
     /// <param name="catalogOptions">Optional catalog options used to resolve user/global skill roots.</param>
     public AgentInstructionTemplateProvider(
         SkillCatalog? skillCatalog = null,
-        CatalogOptions? catalogOptions = null)
+        CatalogOptions? catalogOptions = null,
+        ISystemPromptContentLocator? contentLocator = null)
     {
         _skillCatalog = skillCatalog;
         _catalogOptions = catalogOptions;
+        _contentLocator = contentLocator ?? new FileSystemPromptContentLocator();
     }
 
     /// <summary>
@@ -48,7 +50,7 @@ public sealed class AgentInstructionTemplateProvider
 
         return new AgentInstructionBundle
         {
-            SystemMessage = DefaultSystemPrompt.Value,
+            SystemMessage = LoadDefaultSystemPrompt(),
             DeveloperInstructions = BuildSkillsDeveloperInstructions(thread, project, profile),
         };
     }
@@ -73,7 +75,7 @@ public sealed class AgentInstructionTemplateProvider
 
         return new AgentInstructionBundle
         {
-            SystemMessage = DefaultSystemPrompt.Value,
+            SystemMessage = LoadDefaultSystemPrompt(),
             DeveloperInstructions = BuildSkillsDeveloperInstructions(thread, project, profile),
         };
     }
@@ -184,16 +186,18 @@ public sealed class AgentInstructionTemplateProvider
             .Replace(">", "&gt;", StringComparison.Ordinal)
             .Replace("\"", "&quot;", StringComparison.Ordinal);
 
-    private static string LoadDefaultSystemPrompt()
+    private string LoadDefaultSystemPrompt()
     {
-        var assembly = typeof(AgentInstructionTemplateProvider).Assembly;
-        using var stream = assembly.GetManifestResourceStream(SystemPromptResourceName)
-            ?? throw new InvalidOperationException($"Embedded system prompt '{SystemPromptResourceName}' was not found.");
-        using var reader = new StreamReader(stream);
-        var prompt = reader.ReadToEnd().Trim();
+        var promptPath = _contentLocator.ResolveBuiltInPromptPath(Path.Combine("base", "default.system-prompt.md"));
+        if (!File.Exists(promptPath))
+        {
+            throw new InvalidOperationException($"Built-in system prompt '{promptPath}' was not found.");
+        }
+
+        var prompt = File.ReadAllText(promptPath).Trim();
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            throw new InvalidOperationException($"Embedded system prompt '{SystemPromptResourceName}' is empty.");
+            throw new InvalidOperationException($"Built-in system prompt '{promptPath}' is empty.");
         }
 
         return prompt;

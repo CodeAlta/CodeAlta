@@ -1,0 +1,7 @@
+version: 1
+base: team-default
+role: team-reviewer
+skills: true
+project_context: true
+runtime_context: true
+tool_guidance: true

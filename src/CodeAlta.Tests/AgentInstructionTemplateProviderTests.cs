@@ -3,6 +3,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Roles;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 namespace CodeAlta.Tests;
 
@@ -10,7 +11,7 @@ namespace CodeAlta.Tests;
 public sealed class AgentInstructionTemplateProviderTests
 {
     [TestMethod]
-    public void BuildGeneralInstructions_LoadsEmbeddedDefaultSystemPrompt()
+    public void BuildGeneralInstructions_LoadsFileBackedDefaultSystemPrompt()
     {
         var provider = new AgentInstructionTemplateProvider();
 
@@ -22,7 +23,7 @@ public sealed class AgentInstructionTemplateProviderTests
     }
 
     [TestMethod]
-    public void BuildCoordinatorInstructions_LoadsEmbeddedDefaultSystemPrompt()
+    public void BuildCoordinatorInstructions_LoadsFileBackedDefaultSystemPrompt()
     {
         var provider = new AgentInstructionTemplateProvider();
 
@@ -31,6 +32,20 @@ public sealed class AgentInstructionTemplateProviderTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(instructions.SystemMessage));
         StringAssert.Contains(instructions.SystemMessage, "software engineering agent");
         Assert.IsNull(instructions.DeveloperInstructions);
+    }
+
+    [TestMethod]
+    public void PromptContentLocator_ResolvesCopiedShippedContent()
+    {
+        var locator = new FileSystemPromptContentLocator();
+
+        var basePath = locator.ResolveBuiltInPromptPath(Path.Combine("base", "default.system-prompt.md"));
+        var rolePath = locator.ResolveBuiltInPromptPath(Path.Combine("roles", "default.role.md"));
+        var authoringDocPath = locator.ResolveBuiltInDocPath("system-prompt-authoring.md");
+
+        Assert.IsTrue(File.Exists(basePath), basePath);
+        Assert.IsTrue(File.Exists(rolePath), rolePath);
+        Assert.IsTrue(File.Exists(authoringDocPath), authoringDocPath);
     }
 
     [TestMethod]
