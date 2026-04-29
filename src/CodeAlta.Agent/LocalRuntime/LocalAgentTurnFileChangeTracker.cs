@@ -1,15 +1,11 @@
 using System.Text;
+using CodeAlta.Agent.Diffing;
 using CodeAlta.Agent.LocalRuntime.Tools;
-using DiffPlex;
-using DiffPlex.Chunkers;
-using DiffPlex.Model;
 
 namespace CodeAlta.Agent.LocalRuntime;
 
 internal sealed class LocalAgentTurnFileChangeTracker
 {
-    private const int UnifiedDiffContextLineCount = 3;
-
     private readonly string _rootPath;
     private readonly Dictionary<string, FileChangeState> _changes = new(StringComparer.OrdinalIgnoreCase);
 
@@ -219,12 +215,14 @@ internal sealed class LocalAgentTurnFileChangeTracker
             return;
         }
 
-        builder.Append(before.Exists ? $"--- a/{path}" : "--- /dev/null").AppendLine();
-        builder.Append(after.Exists ? $"+++ b/{path}" : "+++ /dev/null").AppendLine();
-
         var beforeText = before.Text ?? string.Empty;
         var afterText = after.Text ?? string.Empty;
-        AppendUnifiedHunks(builder, beforeText, afterText);
+        builder.Append(UnifiedDiffBuilder.CreateUnifiedDiff(
+            beforeText,
+            afterText,
+            before.Exists ? $"a/{path}" : "/dev/null",
+            after.Exists ? $"b/{path}" : "/dev/null",
+            includeHeaderWhenTextEqual: true));
     }
 
     private static void AppendBinaryDiff(StringBuilder builder, string path, FileSnapshot before, FileSnapshot after)
@@ -232,145 +230,6 @@ internal sealed class LocalAgentTurnFileChangeTracker
         var beforePath = before.Exists ? $"a/{path}" : "/dev/null";
         var afterPath = after.Exists ? $"b/{path}" : "/dev/null";
         builder.Append("Binary files ").Append(beforePath).Append(" and ").Append(afterPath).AppendLine(" differ");
-    }
-
-    private static void AppendUnifiedHunks(StringBuilder builder, string beforeText, string afterText)
-    {
-        var diffResult = Differ.Instance.CreateDiffs(
-            beforeText,
-            afterText,
-            ignoreWhiteSpace: false,
-            ignoreCase: false,
-            LineEndingsPreservingChunker.Instance);
-        if (diffResult.DiffBlocks.Count == 0)
-        {
-            return;
-        }
-
-        var edits = BuildDiffPlexEdits(diffResult);
-        AppendHunks(builder, edits);
-    }
-
-    private static IReadOnlyList<DiffEdit> BuildDiffPlexEdits(DiffResult diffResult)
-    {
-        var edits = new List<DiffEdit>();
-        var oldCursor = 0;
-        var newCursor = 0;
-        foreach (var block in diffResult.DiffBlocks)
-        {
-            while (oldCursor < block.DeleteStartA && newCursor < block.InsertStartB)
-            {
-                edits.Add(new DiffEdit(' ', FormatDiffLineText(diffResult.PiecesOld[oldCursor])));
-                oldCursor++;
-                newCursor++;
-            }
-
-            oldCursor = block.DeleteStartA;
-            newCursor = block.InsertStartB;
-
-            for (var index = 0; index < block.DeleteCountA; index++)
-            {
-                edits.Add(new DiffEdit('-', FormatDiffLineText(diffResult.PiecesOld[oldCursor++])));
-            }
-
-            for (var index = 0; index < block.InsertCountB; index++)
-            {
-                edits.Add(new DiffEdit('+', FormatDiffLineText(diffResult.PiecesNew[newCursor++])));
-            }
-        }
-
-        while (oldCursor < diffResult.PiecesOld.Count && newCursor < diffResult.PiecesNew.Count)
-        {
-            edits.Add(new DiffEdit(' ', FormatDiffLineText(diffResult.PiecesOld[oldCursor])));
-            oldCursor++;
-            newCursor++;
-        }
-
-        return edits;
-    }
-
-    private static string FormatDiffLineText(string value)
-        => value.EndsWith("\r\n", StringComparison.Ordinal)
-            ? value[..^2]
-            : value.EndsWith('\r') || value.EndsWith('\n')
-                ? value[..^1]
-                : value;
-
-    private static void AppendHunks(StringBuilder builder, IReadOnlyList<DiffEdit> edits)
-    {
-        var oldLineBefore = new int[edits.Count];
-        var newLineBefore = new int[edits.Count];
-        var oldLine = 1;
-        var newLine = 1;
-        for (var index = 0; index < edits.Count; index++)
-        {
-            oldLineBefore[index] = oldLine;
-            newLineBefore[index] = newLine;
-            if (edits[index].Kind is ' ' or '-')
-            {
-                oldLine++;
-            }
-
-            if (edits[index].Kind is ' ' or '+')
-            {
-                newLine++;
-            }
-        }
-
-        var changeIndexes = edits
-            .Select((edit, index) => edit.Kind == ' ' ? -1 : index)
-            .Where(static index => index >= 0)
-            .ToArray();
-        var nextChangeCursor = 0;
-        while (nextChangeCursor < changeIndexes.Length)
-        {
-            var hunkStart = Math.Max(0, changeIndexes[nextChangeCursor] - UnifiedDiffContextLineCount);
-            var hunkEnd = Math.Min(edits.Count - 1, changeIndexes[nextChangeCursor] + UnifiedDiffContextLineCount);
-            nextChangeCursor++;
-
-            while (nextChangeCursor < changeIndexes.Length && changeIndexes[nextChangeCursor] <= hunkEnd + UnifiedDiffContextLineCount)
-            {
-                hunkEnd = Math.Min(edits.Count - 1, changeIndexes[nextChangeCursor] + UnifiedDiffContextLineCount);
-                nextChangeCursor++;
-            }
-
-            var oldStart = oldLineBefore[hunkStart];
-            var newStart = newLineBefore[hunkStart];
-            var oldCount = 0;
-            var newCount = 0;
-            for (var index = hunkStart; index <= hunkEnd; index++)
-            {
-                if (edits[index].Kind is ' ' or '-')
-                {
-                    oldCount++;
-                }
-
-                if (edits[index].Kind is ' ' or '+')
-                {
-                    newCount++;
-                }
-            }
-
-            builder.Append("@@ -")
-                .Append(FormatRange(oldStart, oldCount))
-                .Append(" +")
-                .Append(FormatRange(newStart, newCount))
-                .AppendLine(" @@");
-            for (var index = hunkStart; index <= hunkEnd; index++)
-            {
-                builder.Append(edits[index].Kind).Append(edits[index].Line).AppendLine();
-            }
-        }
-    }
-
-    private static string FormatRange(int start, int count)
-    {
-        if (count == 0)
-        {
-            return $"{Math.Max(0, start - 1)},0";
-        }
-
-        return count == 1 ? start.ToString(System.Globalization.CultureInfo.InvariantCulture) : $"{start},{count}";
     }
 
     private enum ChangeCapturePhase
@@ -396,6 +255,4 @@ internal sealed class LocalAgentTurnFileChangeTracker
 
         public static FileSnapshot BinaryExists { get; } = new(Exists: true, IsBinary: true, Text: null);
     }
-
-    private sealed record DiffEdit(char Kind, string Line);
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Diffing;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Presentation.Formatting;
@@ -144,11 +145,12 @@ internal static class ChatMarkdownFormatter
 
         var previousPrompt = FormatSystemPromptVerbatimMarkdown(previousPromptEvent);
         var currentPrompt = FormatSystemPromptVerbatimMarkdown(promptEvent);
-        var diff = DiffDisplayFormatter.CreateUnifiedDiff(
+        var diff = UnifiedDiffBuilder.CreateUnifiedDiff(
             previousPrompt,
             currentPrompt,
             $"system-prompt/{previousPromptEvent.EffectivePromptHash}",
-            $"system-prompt/{promptEvent.EffectivePromptHash}");
+            $"system-prompt/{promptEvent.EffectivePromptHash}",
+            contextLineCount: int.MaxValue);
 
         return string.IsNullOrWhiteSpace(diff)
             ? string.Empty
