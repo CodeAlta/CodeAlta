@@ -51,9 +51,11 @@ Read these first, in order:
    - ACP generator, runtime, registry, and backend adapter design
 6. `doc/specs/agent_instruction_templates_spec.md`
    - base instructions for coordinator, project, and internal agents
-7. `doc/specs/agent_configuration_spec.md`
+7. `doc/specs/system_prompt_specs.md`
+   - system prompt builder, base/role resources, prompt templates, and prompt diagnostics
+8. `doc/specs/agent_configuration_spec.md`
    - file format for agent definitions
-8. `doc/specs/template_system_spec.md`
+9. `doc/specs/template_system_spec.md`
    - scaffold/enrichment model for catalog files
 
 ## 3. Implement first
@@ -84,6 +86,7 @@ These documents drive the active MVP:
 - `doc/specs/agent_api_specs.md`
 - `doc/specs/agent_acp_specs.md`
 - `doc/specs/agent_instruction_templates_spec.md`
+- `doc/specs/system_prompt_specs.md`
 - `doc/specs/agent_configuration_spec.md`
 - `doc/specs/template_system_spec.md`
 
@@ -117,5 +120,6 @@ If you are implementing the MVP:
 - use `filesystem_metadata_catalog_spec.md` for durable state
 - use `agent_api_specs.md` for backend boundaries
 - use `agent_instruction_templates_spec.md` for session instructions
+- use `system_prompt_specs.md` for prompt composition, base/role resources, prompt templates, and prompt diagnostics
 - consult deferred specs only when a current task explicitly depends on them
 
