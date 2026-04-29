@@ -122,7 +122,8 @@ public sealed class OrchestrationInfrastructureTests
 
         Assert.IsFalse(string.IsNullOrWhiteSpace(instructions.SystemMessage));
         StringAssert.Contains(instructions.SystemMessage, "You are CodeAlta");
-        Assert.IsNull(instructions.DeveloperInstructions);
+        Assert.IsNotNull(instructions.DeveloperInstructions);
+        StringAssert.Contains(instructions.DeveloperInstructions, "# Role");
     }
 
     [TestMethod]
@@ -501,7 +502,8 @@ public sealed class OrchestrationInfrastructureTests
         Assert.AreEqual(AgentReasoningEffort.High, fakeBackend.LastCreateOptions.ReasoningEffort);
         Assert.IsFalse(string.IsNullOrWhiteSpace(fakeBackend.LastCreateOptions.SystemMessage));
         StringAssert.Contains(fakeBackend.LastCreateOptions.SystemMessage, "You are CodeAlta");
-        Assert.IsNull(fakeBackend.LastCreateOptions.DeveloperInstructions);
+        Assert.IsNotNull(fakeBackend.LastCreateOptions.DeveloperInstructions);
+        StringAssert.Contains(fakeBackend.LastCreateOptions.DeveloperInstructions, "# Role");
 
         var history = await runtime.GetHistoryAsync(thread.ThreadId).ConfigureAwait(false);
         var assistant = history.OfType<AgentContentCompletedEvent>().Single();

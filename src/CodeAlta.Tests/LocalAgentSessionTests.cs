@@ -192,6 +192,14 @@ public sealed class LocalAgentSessionTests
         Assert.AreEqual("sample.txt", toolInvocations[0].Arguments.GetProperty("path").GetString());
 
         var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        var systemPromptIndex = FindEventIndex(history, static evt => evt is AgentSystemPromptEvent);
+        var firstUserIndex = FindEventIndex(history, static evt => evt is AgentRawEvent { BackendEventType: "local.userMessage" });
+        Assert.IsTrue(systemPromptIndex >= 0 && firstUserIndex >= 0 && systemPromptIndex < firstUserIndex);
+        var systemPromptEvent = (AgentSystemPromptEvent)history[systemPromptIndex];
+        Assert.AreEqual("session_start", systemPromptEvent.Reason);
+        Assert.AreEqual("native-system-and-developer", systemPromptEvent.ProviderPayloadSummary.ChannelMapping);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(systemPromptEvent.EffectivePromptHash));
+        Assert.IsFalse(string.IsNullOrWhiteSpace(systemPromptEvent.DeveloperInstructions));
         Assert.IsTrue(history.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.userMessage"));
         Assert.IsTrue(history.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.assistantMessage"));
         Assert.IsTrue(history.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.toolMessage"));
@@ -213,6 +221,7 @@ public sealed class LocalAgentSessionTests
 
         var persistedHistory = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
         Assert.IsFalse(persistedHistory.OfType<AgentContentDeltaEvent>().Any());
+        Assert.IsTrue(persistedHistory.OfType<AgentSystemPromptEvent>().Any());
         Assert.IsTrue(persistedHistory.OfType<AgentContentCompletedEvent>().Any(static evt => evt.Kind == AgentContentKind.Assistant));
 
         var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
@@ -3171,6 +3180,19 @@ public sealed class LocalAgentSessionTests
             WorkingDirectory = workingDirectory,
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         };
+    }
+
+    private static int FindEventIndex(IReadOnlyList<AgentEvent> events, Func<AgentEvent, bool> predicate)
+    {
+        for (var i = 0; i < events.Count; i++)
+        {
+            if (predicate(events[i]))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static LocalAgentProviderDescriptor CreateProvider(LocalAgentCompactionSettings? compaction = null)

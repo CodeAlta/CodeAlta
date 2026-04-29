@@ -223,6 +223,10 @@ internal sealed class ThreadHistoryCoordinator
                     count++;
                     break;
 
+                case AgentSystemPromptEvent:
+                    count++;
+                    break;
+
                 case AgentSessionUpdateEvent update:
                     if (update.Kind == AgentSessionUpdateKind.DiffUpdated)
                     {

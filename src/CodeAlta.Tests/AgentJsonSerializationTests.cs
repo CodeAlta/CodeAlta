@@ -37,6 +37,33 @@ public sealed class AgentJsonSerializationTests
     }
 
     [TestMethod]
+    public void AgentEvent_ToJson_SerializesSystemPromptEvent()
+    {
+        AgentEvent @event = new AgentSystemPromptEvent(
+            new AgentBackendId("local"),
+            "session-1",
+            DateTimeOffset.Parse("2026-04-28T12:34:56+00:00"),
+            new AgentRunId("run-1"),
+            "session_start",
+            "sha256:abc",
+            "System text",
+            "Developer text",
+            new AgentSystemPromptProviderPayloadSummary("native-system-and-developer", true, false),
+            null,
+            new AgentSystemPromptStatistics(3, 4, 7, 11, 14),
+            new AgentSystemPromptChangeSummary("initial", ["system"], [], []));
+
+        using var document = JsonDocument.Parse(@event.ToJson());
+        var root = document.RootElement;
+
+        Assert.AreEqual("system_prompt", root.GetProperty("$type").GetString());
+        Assert.AreEqual("sha256:abc", root.GetProperty("effectivePromptHash").GetString());
+        Assert.AreEqual("System text", root.GetProperty("systemMessage").GetString());
+        Assert.AreEqual("native-system-and-developer", root.GetProperty("providerPayloadSummary").GetProperty("channelMapping").GetString());
+        Assert.AreEqual(7, root.GetProperty("statistics").GetProperty("totalApproxTokens").GetInt32());
+    }
+
+    [TestMethod]
     public void AgentInput_ToJson_SerializesPolymorphicItems()
     {
         var input = new AgentInput(

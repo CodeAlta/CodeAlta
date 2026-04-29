@@ -161,9 +161,28 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         try
         {
             var fileChangeTracker = new LocalAgentTurnFileChangeTracker(_summary.WorkingDirectory);
-            await AppendUserMessageAsync(options.Input, runId, linkedCts.Token).ConfigureAwait(false);
+            if (TryCreateUserActivatedSkillState(options.Input, out var userActivatedSkill))
+            {
+                _state = _state with
+                {
+                    LoadedSkills = MergeLoadedSkill(_state.LoadedSkills, userActivatedSkill),
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+            }
 
             var instructionBundle = LocalAgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+            var requestDeveloperInstructions = CombineDeveloperInstructions(
+                instructionBundle.DeveloperInstructions,
+                instructionBundle.RuntimeContext);
+            await AppendSystemPromptEventIfChangedAsync(
+                    runId,
+                    instructionBundle.SystemMessage,
+                    requestDeveloperInstructions,
+                    instructionBundle.InstructionHash,
+                    linkedCts.Token)
+                .ConfigureAwait(false);
+            await AppendUserMessageAsync(options.Input, runId, linkedCts.Token).ConfigureAwait(false);
+
             _state = _state with
             {
                 InstructionHash = instructionBundle.InstructionHash,
@@ -174,9 +193,6 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             var allTools = BuildAvailableTools();
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = LocalAgentToolBridge.CreateDefinitionMap(allTools);
-            var requestDeveloperInstructions = CombineDeveloperInstructions(
-                instructionBundle.DeveloperInstructions,
-                instructionBundle.RuntimeContext);
 
             while (true)
             {
@@ -939,6 +955,78 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             null,
             delta.Text);
         await AppendEventsAsync([@event], LocalAgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task AppendSystemPromptEventIfChangedAsync(
+        AgentRunId runId,
+        string? systemMessage,
+        string? developerInstructions,
+        string effectivePromptHash,
+        CancellationToken cancellationToken)
+    {
+        var previousHash = string.IsNullOrWhiteSpace(_state.InstructionHash) ? null : _state.InstructionHash;
+        if (string.Equals(previousHash, effectivePromptHash, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var statistics = CreateSystemPromptStatistics(systemMessage, developerInstructions);
+        var promptEvent = new AgentSystemPromptEvent(
+            BackendId,
+            SessionId,
+            DateTimeOffset.UtcNow,
+            runId,
+            previousHash is null ? "session_start" : "changed",
+            effectivePromptHash,
+            systemMessage,
+            developerInstructions,
+            new AgentSystemPromptProviderPayloadSummary("native-system-and-developer", AppliedToProvider: true, Lossy: false),
+            CreateSystemPromptManifest(effectivePromptHash, statistics),
+            statistics,
+            new AgentSystemPromptChangeSummary(
+                previousHash is null ? "initial" : "changed",
+                previousHash is null ? ["system", "developer"] : [],
+                [],
+                previousHash is null ? [] : ["effective_prompt"]));
+        await AppendEventsAsync([promptEvent], cancellationToken).ConfigureAwait(false);
+    }
+
+    private static AgentSystemPromptStatistics CreateSystemPromptStatistics(string? systemMessage, string? developerInstructions)
+    {
+        var systemChars = systemMessage?.Length ?? 0;
+        var developerChars = developerInstructions?.Length ?? 0;
+        var systemTokens = EstimatePromptTokens(systemMessage);
+        var developerTokens = EstimatePromptTokens(developerInstructions);
+        return new AgentSystemPromptStatistics(systemTokens, developerTokens, systemTokens + developerTokens, systemChars, developerChars);
+    }
+
+    private static int EstimatePromptTokens(string? text)
+        => string.IsNullOrEmpty(text) ? 0 : Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
+
+    private static JsonElement CreateSystemPromptManifest(string effectivePromptHash, AgentSystemPromptStatistics statistics)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("version", 1);
+            writer.WriteString("effectivePromptHash", effectivePromptHash);
+            writer.WriteStartObject("provider");
+            writer.WriteString("channelMapping", "native-system-and-developer");
+            writer.WriteBoolean("appliedToProvider", true);
+            writer.WriteBoolean("lossy", false);
+            writer.WriteEndObject();
+            writer.WriteStartObject("statistics");
+            writer.WriteNumber("systemApproxTokens", statistics.SystemApproxTokens);
+            writer.WriteNumber("developerApproxTokens", statistics.DeveloperApproxTokens);
+            writer.WriteNumber("totalApproxTokens", statistics.TotalApproxTokens);
+            writer.WriteNumber("systemChars", statistics.SystemChars);
+            writer.WriteNumber("developerChars", statistics.DeveloperChars);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
     private async Task AppendEventsAsync(

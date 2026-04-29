@@ -154,6 +154,17 @@ internal sealed class ThreadRuntimeTimelineRenderer
                     ChatTimelineTone.Interaction);
                 break;
 
+            case AgentSystemPromptEvent systemPrompt:
+                tab.Timeline.AddCollapsibleStatus(
+                    systemPrompt.Timestamp,
+                    ChatMarkdownFormatter.FormatSystemPromptSummaryMarkdown(systemPrompt),
+                    "Verbatim prompt",
+                    ChatMarkdownFormatter.FormatSystemPromptVerbatimMarkdown(systemPrompt),
+                    ChatTimelineTone.Notice,
+                    headerOverride: "Notice",
+                    headerSecondary: "System Prompt");
+                break;
+
             case AgentSessionUpdateEvent update:
                 tab.Timeline.FileChanges.ObserveSessionUpdate(update);
                 if (update.Kind == AgentSessionUpdateKind.Idle || !ChatMarkdownFormatter.ShouldDisplaySessionUpdate(update))

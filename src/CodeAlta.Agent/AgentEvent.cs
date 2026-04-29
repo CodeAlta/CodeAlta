@@ -15,6 +15,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentContentDeltaEvent), "contentDelta")]
 [JsonDerivedType(typeof(AgentContentCompletedEvent), "contentCompleted")]
 [JsonDerivedType(typeof(AgentActivityEvent), "activity")]
+[JsonDerivedType(typeof(AgentSystemPromptEvent), "system_prompt")]
 [JsonDerivedType(typeof(AgentSessionUpdateEvent), "sessionUpdate")]
 [JsonDerivedType(typeof(AgentPlanSnapshotEvent), "planSnapshot")]
 [JsonDerivedType(typeof(AgentInteractionEvent), "interaction")]
@@ -444,6 +445,63 @@ public sealed record AgentActivityEvent(
     string? Message,
     JsonElement? Details = null)
     : AgentEvent(BackendId, SessionId, Timestamp, RunId);
+
+/// <summary>
+/// Auditable system prompt event containing the logical prompt applied to a session turn.
+/// </summary>
+/// <param name="BackendId">The backend identifier.</param>
+/// <param name="SessionId">The session identifier.</param>
+/// <param name="Timestamp">Event timestamp.</param>
+/// <param name="RunId">Optional run identifier.</param>
+/// <param name="Reason">Reason the prompt event was emitted.</param>
+/// <param name="EffectivePromptHash">Stable effective prompt hash.</param>
+/// <param name="SystemMessage">Logical system message.</param>
+/// <param name="DeveloperInstructions">Logical developer instructions.</param>
+/// <param name="ProviderPayloadSummary">Provider payload summary.</param>
+/// <param name="Manifest">Prompt manifest.</param>
+/// <param name="Statistics">Prompt statistics.</param>
+/// <param name="Change">Change summary compared with the previous prompt event.</param>
+public sealed record AgentSystemPromptEvent(
+    AgentBackendId BackendId,
+    string SessionId,
+    DateTimeOffset Timestamp,
+    AgentRunId? RunId,
+    string Reason,
+    string EffectivePromptHash,
+    string? SystemMessage,
+    string? DeveloperInstructions,
+    AgentSystemPromptProviderPayloadSummary ProviderPayloadSummary,
+    JsonElement? Manifest,
+    AgentSystemPromptStatistics Statistics,
+    AgentSystemPromptChangeSummary Change)
+    : AgentEvent(BackendId, SessionId, Timestamp, RunId);
+
+/// <summary>
+/// Provider payload mapping summary for a system prompt event.
+/// </summary>
+/// <param name="ChannelMapping">Channel mapping label.</param>
+/// <param name="AppliedToProvider">Whether the prompt was applied to the provider request.</param>
+/// <param name="Lossy">Whether the mapping was lossy.</param>
+public sealed record AgentSystemPromptProviderPayloadSummary(string ChannelMapping, bool AppliedToProvider, bool Lossy);
+
+/// <summary>
+/// Approximate system prompt statistics.
+/// </summary>
+/// <param name="SystemApproxTokens">Approximate system token count.</param>
+/// <param name="DeveloperApproxTokens">Approximate developer token count.</param>
+/// <param name="TotalApproxTokens">Approximate total token count.</param>
+/// <param name="SystemChars">System character count.</param>
+/// <param name="DeveloperChars">Developer character count.</param>
+public sealed record AgentSystemPromptStatistics(int SystemApproxTokens, int DeveloperApproxTokens, int TotalApproxTokens, int SystemChars, int DeveloperChars);
+
+/// <summary>
+/// Change summary for a system prompt event.
+/// </summary>
+/// <param name="Kind">Change kind.</param>
+/// <param name="AddedParts">Added prompt part keys.</param>
+/// <param name="RemovedParts">Removed prompt part keys.</param>
+/// <param name="ChangedParts">Changed prompt part keys.</param>
+public sealed record AgentSystemPromptChangeSummary(string Kind, IReadOnlyList<string> AddedParts, IReadOnlyList<string> RemovedParts, IReadOnlyList<string> ChangedParts);
 
 /// <summary>
 /// Generic session update event.

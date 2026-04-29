@@ -106,6 +106,51 @@ internal static class ChatMarkdownFormatter
         return update.Message ?? string.Empty;
     }
 
+    public static string FormatSystemPromptSummaryMarkdown(AgentSystemPromptEvent promptEvent)
+    {
+        ArgumentNullException.ThrowIfNull(promptEvent);
+        var builder = new StringBuilder();
+        builder.Append("System Prompt ")
+            .Append(promptEvent.Change.Kind == "initial" ? "recorded" : "changed")
+            .Append(": `")
+            .Append(promptEvent.EffectivePromptHash)
+            .AppendLine("`");
+        builder.Append("- Mapping: ").AppendLine(promptEvent.ProviderPayloadSummary.ChannelMapping);
+        builder.Append("- Tokens: ")
+            .Append(promptEvent.Statistics.TotalApproxTokens)
+            .Append(" approx total (`system` ")
+            .Append(promptEvent.Statistics.SystemApproxTokens)
+            .Append(", `developer` ")
+            .Append(promptEvent.Statistics.DeveloperApproxTokens)
+            .AppendLine(")");
+        if (promptEvent.ProviderPayloadSummary.Lossy)
+        {
+            builder.AppendLine("- Warning: provider mapping is lossy.");
+        }
+
+        return builder.ToString();
+    }
+
+    public static string FormatSystemPromptVerbatimMarkdown(AgentSystemPromptEvent promptEvent)
+    {
+        ArgumentNullException.ThrowIfNull(promptEvent);
+        var builder = new StringBuilder();
+        builder.AppendLine("<!-- SystemMessage -->");
+        if (!string.IsNullOrWhiteSpace(promptEvent.SystemMessage))
+        {
+            builder.AppendLine(promptEvent.SystemMessage.Trim());
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("<!-- DeveloperInstructions -->");
+        if (!string.IsNullOrWhiteSpace(promptEvent.DeveloperInstructions))
+        {
+            builder.AppendLine(promptEvent.DeveloperInstructions.Trim());
+        }
+
+        return builder.ToString();
+    }
+
     public static bool TryGetCompactionSummaryMarkdown(AgentSessionUpdateEvent update, out string summaryMarkdown)
     {
         ArgumentNullException.ThrowIfNull(update);
