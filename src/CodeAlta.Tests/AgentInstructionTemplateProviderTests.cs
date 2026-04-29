@@ -21,6 +21,8 @@ public sealed class AgentInstructionTemplateProviderTests
 
         Assert.IsFalse(string.IsNullOrWhiteSpace(instructions.SystemMessage));
         StringAssert.Contains(instructions.SystemMessage, "You are CodeAlta");
+        StringAssert.Contains(instructions.SystemMessage, "# Engineering Discipline");
+        StringAssert.Contains(instructions.SystemMessage, "Make complexity earn its place.");
         Assert.IsNotNull(instructions.DeveloperInstructions);
         StringAssert.Contains(instructions.DeveloperInstructions, "# Role");
         StringAssert.Contains(instructions.DeveloperInstructions, "# Runtime Context");
