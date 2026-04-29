@@ -1162,48 +1162,48 @@ Use this checklist to track implementation progress. Items should remain uncheck
 
 ### Slice 1: File-backed shipped content
 
-- [ ] Move current built-in prompt markdown out of embedded resources.
-- [ ] Add `content/system_prompts/base/default.system-prompt.md` and `content/system_prompts/roles/default.role.md`.
-- [ ] Add `Content` copy rules with `PreserveNewest`.
-- [ ] Add content locator and tests that resolve files from output.
+- [x] Move current built-in prompt markdown out of embedded resources.
+- [x] Add `content/system_prompts/base/default.system-prompt.md` and `content/system_prompts/roles/default.role.md`.
+- [x] Add `Content` copy rules with `PreserveNewest`.
+- [x] Add content locator and tests that resolve files from output.
 
 ### Slice 2: Naming-convention discovery and prompt templates
 
-- [ ] Implement prompt resource scanning by folder and suffix.
-- [ ] Derive resource kind/name/key from paths.
-- [ ] Implement optional `template.yml` loading.
-- [ ] Implement base/role selection and prompt-part toggle precedence.
-- [ ] Reject or warn on invalid files with clear diagnostics.
+- [x] Implement prompt resource scanning by folder and suffix.
+- [x] Derive resource kind/name/key from paths.
+- [x] Implement optional `template.yml` loading.
+- [x] Implement base/role selection and prompt-part toggle precedence.
+- [x] Reject or warn on invalid files with clear diagnostics.
 
 ### Slice 3: Composition builder and manifest
 
-- [ ] Implement prompt resource loading and validation.
-- [ ] Implement fixed deterministic system/developer composition.
-- [ ] Return `SystemPromptBundle` with manifest, statistics, diagnostics, and effective hash.
+- [x] Implement prompt resource loading and validation.
+- [x] Implement fixed deterministic system/developer composition.
+- [x] Return `SystemPromptBundle` with manifest, statistics, diagnostics, and effective hash.
 
 ### Slice 4: JSONL and timeline audit
 
-- [ ] Persist `system_prompt` events with verbatim content and manifest.
-- [ ] Render compact collapsible timeline cards.
+- [x] Persist `system_prompt` events with verbatim content and manifest.
+- [x] Render compact collapsible timeline cards.
 - [ ] Add copy-verbatim markdown action.
 - [ ] Emit provider/model switch events before prompt change cards.
 
 ### Slice 5: User/project overrides
 
-- [ ] Load `~/.alta/system_prompts/` and project `.alta/system_prompts/`.
-- [ ] Support base overrides and base selection with clear diagnostics.
-- [ ] Support role overrides and role selection with clear diagnostics.
+- [x] Load `~/.alta/system_prompts/` and project `.alta/system_prompts/`.
+- [x] Support base overrides and base selection with clear diagnostics.
+- [x] Support role overrides and role selection with clear diagnostics.
 
 ### Slice 6: Provider mapping and refresh behavior
 
-- [ ] Rebuild before user prompt dispatch.
-- [ ] Compare hashes against previous prompt event.
-- [ ] Emit prompt events only when changed or missing.
-- [ ] Record provider mapping status in JSONL.
+- [x] Rebuild before user prompt dispatch.
+- [x] Compare hashes against previous prompt event.
+- [x] Emit prompt events only when changed or missing.
+- [x] Record provider mapping status in JSONL.
 
 ### Slice 7: Authoring support
 
-- [ ] Ship prompt authoring docs and starter examples as content files.
+- [x] Ship prompt authoring docs and starter examples as content files.
 - [ ] Add UI/commands to open prompt roots and create override/template files.
 
 ## 18. Open Questions
