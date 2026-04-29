@@ -188,6 +188,45 @@ internal sealed class ThreadHistoryCoordinator
         return startIndex;
     }
 
+    public static AgentSystemPromptEvent? FindPriorSystemPromptForFirstRenderedSystemPrompt(
+        IReadOnlyList<AgentEvent> history,
+        IReadOnlyList<AgentEvent> eventsToRender)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(eventsToRender);
+
+        var firstRenderedSystemPrompt = eventsToRender.OfType<AgentSystemPromptEvent>().FirstOrDefault();
+        if (firstRenderedSystemPrompt is null)
+        {
+            return null;
+        }
+
+        var firstRenderedIndex = -1;
+        for (var index = 0; index < history.Count; index++)
+        {
+            if (ReferenceEquals(history[index], firstRenderedSystemPrompt))
+            {
+                firstRenderedIndex = index;
+                break;
+            }
+        }
+
+        if (firstRenderedIndex <= 0)
+        {
+            return null;
+        }
+
+        for (var index = firstRenderedIndex - 1; index >= 0; index--)
+        {
+            if (history[index] is AgentSystemPromptEvent systemPrompt)
+            {
+                return systemPrompt;
+            }
+        }
+
+        return null;
+    }
+
     public static int CountRenderableMessages(IEnumerable<AgentEvent> history)
     {
         ArgumentNullException.ThrowIfNull(history);
@@ -350,6 +389,7 @@ internal sealed class ThreadHistoryCoordinator
             var plan = loadOnlyFromLastUserPrompt
                 ? CreateInitialLoadPlan(history)
                 : new ThreadHistoryLoadPlan(history, OmittedMessageCount: 0);
+            tab.Session.LastRenderedSystemPromptEvent = FindPriorSystemPromptForFirstRenderedSystemPrompt(history, plan.EventsToRender);
             DocumentFlowItem? truncatedHistoryItem = null;
             if (plan.OmittedMessageCount > 0)
             {

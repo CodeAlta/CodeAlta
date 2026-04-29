@@ -151,6 +151,27 @@ public sealed class ThreadRuntimeEventCoordinatorTests
     }
 
     [TestMethod]
+    public void RenderAgentEvent_SystemPromptChangeUsesSeededPriorPromptForDiffSection()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        var renderer = new ThreadRuntimeTimelineRenderer(static () => false);
+        var timestamp = DateTimeOffset.UtcNow;
+        var initial = CreateSystemPromptEvent(timestamp, "sha256:old", "system\nold", "developer", "initial");
+        var changed = CreateSystemPromptEvent(timestamp.AddSeconds(1), "sha256:new", "system\nnew", "developer", "changed");
+        tab.Session.LastRenderedSystemPromptEvent = initial;
+
+        renderer.RenderAgentEvent(tab, changed);
+
+        Assert.AreSame(changed, tab.Session.LastRenderedSystemPromptEvent);
+        Assert.AreEqual(1, tab.Timeline.Flow.Items.Count);
+        var changedStack = GetChatCardStack(tab.Timeline.Flow.Items[0]);
+        Assert.AreEqual(3, changedStack.Children.Count);
+        Assert.IsInstanceOfType<Collapsible>(changedStack.Children[1]);
+        Assert.IsInstanceOfType<Collapsible>(changedStack.Children[2]);
+    }
+
+    [TestMethod]
     public void HandleAgentEvent_RemovesPendingSteerOnFirstLiveUserContentOnly()
     {
         var thread = CreateThread();

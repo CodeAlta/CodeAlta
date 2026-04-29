@@ -474,6 +474,30 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void FindPriorSystemPromptForFirstRenderedSystemPrompt_SeedsPinnedPromptDiff()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var initialSystemPrompt = CreateSystemPromptEvent(timestamp, "sha256:old");
+        var changedSystemPrompt = CreateSystemPromptEvent(timestamp.AddSeconds(3), "sha256:new", changeKind: "changed");
+        AgentEvent[] history =
+        [
+            initialSystemPrompt,
+            new AgentContentCompletedEvent(AgentBackendIds.Copilot, "session-1", timestamp.AddSeconds(1), null, AgentContentKind.User, "user-1", null, "First prompt"),
+            new AgentContentCompletedEvent(AgentBackendIds.Copilot, "session-1", timestamp.AddSeconds(2), null, AgentContentKind.Assistant, "assistant-1", null, "First reply"),
+            changedSystemPrompt,
+            new AgentContentCompletedEvent(AgentBackendIds.Copilot, "session-1", timestamp.AddSeconds(4), null, AgentContentKind.User, "user-2", null, "Second prompt"),
+            new AgentContentCompletedEvent(AgentBackendIds.Copilot, "session-1", timestamp.AddSeconds(5), null, AgentContentKind.Assistant, "assistant-2", null, "Second reply"),
+        ];
+        var plan = ThreadHistoryCoordinator.CreateInitialLoadPlan(history);
+
+        var seed = ThreadHistoryCoordinator.FindPriorSystemPromptForFirstRenderedSystemPrompt(history, plan.EventsToRender);
+
+        Assert.AreSame(changedSystemPrompt, plan.EventsToRender[0]);
+        Assert.AreSame(initialSystemPrompt, seed);
+        Assert.IsNull(ThreadHistoryCoordinator.FindPriorSystemPromptForFirstRenderedSystemPrompt(history, history));
+    }
+
+    [TestMethod]
     public void BuildTruncatedHistoryTexts_UseHelpfulPluralization()
     {
         Assert.AreEqual("Load 1 previous message", ChatTimelineVisualFactory.BuildTruncatedHistoryLoadButtonText(1));
