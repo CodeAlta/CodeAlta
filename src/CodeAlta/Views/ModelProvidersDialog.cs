@@ -162,9 +162,9 @@ internal sealed class ModelProvidersDialog
         header.Cell(toolbar, 0, 1);
 
         var leftPane = new VStack(
-            new TextBlock("Providers") { Wrap = false },
-            new Border(_providerList.Stretch())
-                .Style(BorderStyle.Rounded)
+            new Group("Providers")
+                .Style(GroupStyle.Rounded)
+                .Content(_providerList.Stretch())
                 .Padding(new Thickness(1, 0, 1, 0))
                 .HorizontalAlignment(Align.Stretch)
                 .VerticalAlignment(Align.Stretch),
@@ -177,8 +177,9 @@ internal sealed class ModelProvidersDialog
 
         var splitter = new HSplitter(
             leftPane,
-            new Border(new ScrollViewer(_detailHost).Stretch())
-                .Style(BorderStyle.Rounded)
+            new Group("Provider Details")
+                .Style(GroupStyle.Rounded)
+                .Content(new ScrollViewer(_detailHost).Stretch())
                 .Padding(1)
                 .HorizontalAlignment(Align.Stretch)
                 .VerticalAlignment(Align.Stretch))
@@ -216,7 +217,7 @@ internal sealed class ModelProvidersDialog
             .IsModal(true)
             .Padding(1)
             .Content(content);
-        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 110, minHeight: 28, widthFactor: 0.60, heightFactor: 0.82);
+        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 110, minHeight: 28, widthFactor: 0.80, heightFactor: 0.80);
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Manage.Close",
