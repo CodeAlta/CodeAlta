@@ -19,10 +19,7 @@ public sealed class AgentInstructionTemplateProviderTests
 
         var instructions = provider.BuildGeneralInstructions(CreateThread(), project: null, CreateProfile());
 
-        Assert.IsFalse(string.IsNullOrWhiteSpace(instructions.SystemMessage));
-        StringAssert.Contains(instructions.SystemMessage, "You are CodeAlta");
-        StringAssert.Contains(instructions.SystemMessage, "# Engineering Discipline");
-        StringAssert.Contains(instructions.SystemMessage, "minimal churn");
+        AssertLoadsDefaultSystemPrompt(instructions);
         Assert.IsNotNull(instructions.DeveloperInstructions);
         StringAssert.Contains(instructions.DeveloperInstructions, "# Role");
         StringAssert.Contains(instructions.DeveloperInstructions, "# Runtime Context");
@@ -43,11 +40,9 @@ public sealed class AgentInstructionTemplateProviderTests
 
         var instructions = provider.BuildCoordinatorInstructions(CreateThread(), project: null, CreateProfile());
 
-        Assert.IsFalse(string.IsNullOrWhiteSpace(instructions.SystemMessage));
-        StringAssert.Contains(instructions.SystemMessage, "software-engineering agent");
+        AssertLoadsDefaultSystemPrompt(instructions);
         Assert.IsNotNull(instructions.DeveloperInstructions);
         StringAssert.Contains(instructions.DeveloperInstructions, "# Role");
-        Assert.IsNotNull(instructions.PromptBundle);
     }
 
     [TestMethod]
@@ -186,6 +181,28 @@ public sealed class AgentInstructionTemplateProviderTests
 
     private static string NormalizeNewlines(string text)
         => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+    private static void AssertLoadsDefaultSystemPrompt(AgentInstructionBundle instructions)
+    {
+        Assert.IsFalse(string.IsNullOrWhiteSpace(instructions.SystemMessage));
+        Assert.IsNotNull(instructions.PromptBundle);
+        Assert.AreEqual(instructions.PromptBundle.SystemMessage, instructions.SystemMessage);
+        Assert.AreEqual("default", instructions.PromptBundle.Manifest.Template.BaseName);
+        Assert.IsFalse(
+            instructions.PromptBundle.Diagnostics.Any(static diagnostic => diagnostic.Severity == SystemPromptDiagnosticSeverity.Error),
+            string.Join(Environment.NewLine, instructions.PromptBundle.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+
+        var basePart = instructions.PromptBundle.Manifest.Parts.SingleOrDefault(static part =>
+            part.Kind == "base" &&
+            part.Name == "default" &&
+            part.Target == "system" &&
+            part.Status == "selected");
+        Assert.IsNotNull(basePart);
+        Assert.IsTrue(
+            basePart.Path?.EndsWith(Path.Combine("base", "default.system-prompt.md"), StringComparison.OrdinalIgnoreCase) == true,
+            basePart.Path);
+        Assert.IsTrue(File.Exists(basePart.Path), basePart.Path);
+    }
 
     private static async Task WriteSkillAsync(string projectRoot, string name, string description)
     {
