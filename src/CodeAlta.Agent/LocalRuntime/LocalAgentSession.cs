@@ -540,20 +540,29 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
         _disposed = true;
         _activeRunCancellation?.Cancel();
-        _activeRunCancellation?.Dispose();
-        _pendingSteerInputs.Clear();
-        _stateGate.Dispose();
-        _eventChannel.Writer.TryComplete();
-        return ValueTask.CompletedTask;
+        try
+        {
+            if (_turnExecutor is ILocalAgentProviderSessionCleanup providerSessionCleanup)
+            {
+                await providerSessionCleanup.DisposeProviderSessionAsync(SessionId).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _activeRunCancellation?.Dispose();
+            _pendingSteerInputs.Clear();
+            _stateGate.Dispose();
+            _eventChannel.Writer.TryComplete();
+        }
     }
 
     private IReadOnlyList<AgentToolDefinition> BuildAvailableTools()

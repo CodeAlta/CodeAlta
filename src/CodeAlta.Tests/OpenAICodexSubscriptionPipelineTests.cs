@@ -202,6 +202,118 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
+    public void WebSocketSession_MapsWrappedErrorFramesToHttpRequestException()
+    {
+        var mapped = TryCreateWebSocketResponseUpdateMessage(
+            BinaryData.FromString(
+                """
+                {
+                  "type": "error",
+                  "status_code": 429,
+                  "error": {
+                    "type": "usage_limit_reached",
+                    "message": "The usage limit has been reached."
+                  },
+                  "headers": {
+                    "Retry-After": "0",
+                    "x-codex-primary-used-percent": 100
+                  }
+                }
+                """),
+            out _,
+            out var eventType,
+            out var exception);
+
+        Assert.IsFalse(mapped);
+        Assert.AreEqual("error", eventType);
+        var httpException = Assert.IsInstanceOfType<HttpRequestException>(exception);
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, httpException.StatusCode);
+        StringAssert.Contains(httpException.Message, "usage_limit_reached");
+        StringAssert.Contains(httpException.Message, "usage limit");
+        Assert.AreEqual(true, httpException.Data["OpenAI.WebSocketWrappedError"]);
+        Assert.AreEqual("0", httpException.Data["Retry-After"]);
+        Assert.AreEqual("100", httpException.Data["x-codex-primary-used-percent"]);
+    }
+
+    [TestMethod]
+    public void WebSocketSession_MapsConnectionLimitErrorAsRetryableWithoutHttpStatus()
+    {
+        var mapped = TryCreateWebSocketResponseUpdateMessage(
+            BinaryData.FromString(
+                """
+                {
+                  "type": "error",
+                  "status": 400,
+                  "error": {
+                    "type": "invalid_request_error",
+                    "code": "websocket_connection_limit_reached",
+                    "message": "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue."
+                  }
+                }
+                """),
+            out _,
+            out var eventType,
+            out var exception);
+
+        Assert.IsFalse(mapped);
+        Assert.AreEqual("error", eventType);
+        var httpException = Assert.IsInstanceOfType<HttpRequestException>(exception);
+        Assert.IsNull(httpException.StatusCode);
+        Assert.AreEqual("websocket_connection_limit_reached", httpException.Data["OpenAI.WebSocketErrorCode"]);
+        StringAssert.Contains(httpException.Message, "connection limit");
+    }
+
+    [TestMethod]
+    public void WebSocketSession_IgnoresSideChannelEventsAndNormalizesDone()
+    {
+        var rateLimitsHandled = TryCreateWebSocketResponseUpdateMessage(
+            BinaryData.FromString(
+                """
+                {
+                  "type": "codex.rate_limits",
+                  "primary": { "used_percent": 12.5 }
+                }
+                """),
+            out _,
+            out var rateLimitsType,
+            out var rateLimitsException);
+        var modelHandled = TryCreateWebSocketResponseUpdateMessage(
+            BinaryData.FromString(
+                """
+                {
+                  "type": "server_model",
+                  "model": "gpt-5.3-codex"
+                }
+                """),
+            out _,
+            out var modelType,
+            out var modelException);
+        var doneHandled = TryCreateWebSocketResponseUpdateMessage(
+            BinaryData.FromString(
+                """
+                {
+                  "type": "response.done",
+                  "sequence_number": 3,
+                  "response": { "id": "resp_1", "status": "completed" }
+                }
+                """),
+            out var normalizedDone,
+            out var doneType,
+            out var doneException);
+
+        Assert.IsFalse(rateLimitsHandled);
+        Assert.AreEqual("codex.rate_limits", rateLimitsType);
+        Assert.IsNull(rateLimitsException);
+        Assert.IsFalse(modelHandled);
+        Assert.AreEqual("server_model", modelType);
+        Assert.IsNull(modelException);
+        Assert.IsTrue(doneHandled);
+        Assert.AreEqual("response.done", doneType);
+        Assert.IsNull(doneException);
+        StringAssert.Contains(normalizedDone.ToString(), "response.completed");
+    }
+
+    [TestMethod]
     public void StaticModelCatalog_ReturnsConfiguredHiddenModelAndRejectsUnknownModels()
     {
         var provider = new LocalAgentProviderDescriptor
@@ -258,7 +370,8 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             CreateProviderDescriptor(),
             CancellationToken.None).ConfigureAwait(false);
 
-        Assert.AreEqual(2, models.Count);
+        var webSocketAvailable = IsCodexSubscriptionWebSocketAvailable();
+        Assert.AreEqual(webSocketAvailable ? 2 : 1, models.Count);
         Assert.AreEqual("gpt-5.3-codex", models[0].Id);
         Assert.AreEqual("Codex model", models[0].DisplayName);
         Assert.AreEqual("codex-endpoint", models[0].Capabilities?["source"]);
@@ -267,8 +380,11 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(AgentReasoningEffort.High, models[0].DefaultReasoningEffort);
         Assert.AreEqual(true, models[0].Capabilities?["supportsImageInput"]);
         Assert.AreEqual(true, models[0].Capabilities?["supportsTextVerbosity"]);
-        Assert.AreEqual("websocket-only-codex", models[1].Id);
-        Assert.AreEqual(true, models[1].Capabilities?["requiresWebSocket"]);
+        if (webSocketAvailable)
+        {
+            Assert.AreEqual("websocket-only-codex", models[1].Id);
+            Assert.AreEqual(true, models[1].Capabilities?["requiresWebSocket"]);
+        }
         var version = typeof(OpenAIProviderSdkFactory).Assembly.GetName().Version!;
         Assert.AreEqual(
             $"https://chatgpt.com/backend-api/codex/models?client_version={version.Major}.{version.Minor}.{version.Build}",
@@ -461,6 +577,36 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             ?? throw new InvalidOperationException("OpenAI client option factory was not found.");
         return (OpenAIClientOptions)method.Invoke(null, [provider])!;
     }
+
+    private static bool TryCreateWebSocketResponseUpdateMessage(
+        BinaryData message,
+        out BinaryData normalizedMessage,
+        out string? eventType,
+        out Exception? exception)
+    {
+        var sessionType = GetCodexSubscriptionWebSocketSessionType();
+        var method = sessionType?.GetMethod(
+            "TryCreateResponseUpdateMessage",
+            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+        if (method is null)
+        {
+            Assert.Inconclusive("Codex subscription WebSocket parser is available only when CodeAlta.Agent.OpenAI is built with the local OpenAI SDK project.");
+        }
+
+        object?[] parameters = [message, null, null, null];
+        var result = (bool)method.Invoke(null, parameters)!;
+        normalizedMessage = (BinaryData)parameters[1]!;
+        eventType = (string?)parameters[2];
+        exception = (Exception?)parameters[3];
+        return result;
+    }
+
+    private static bool IsCodexSubscriptionWebSocketAvailable()
+        => GetCodexSubscriptionWebSocketSessionType() is not null;
+
+    private static Type? GetCodexSubscriptionWebSocketSessionType()
+        => typeof(OpenAIProviderSdkFactory).Assembly.GetType(
+            "CodeAlta.Agent.OpenAI.OpenAICodexSubscriptionWebSocketSession");
 
     private static ClientPipeline CreatePipeline(
         OpenAICodexSubscriptionAuthManager authManager,

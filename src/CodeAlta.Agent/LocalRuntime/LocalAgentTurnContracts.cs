@@ -30,6 +30,11 @@ public interface ILocalAgentTurnExecutor
         CancellationToken cancellationToken = default);
 }
 
+internal interface ILocalAgentProviderSessionCleanup
+{
+    ValueTask DisposeProviderSessionAsync(string sessionId);
+}
+
 internal sealed record LocalAgentTurnFailure(
     string Message,
     bool IsContextOverflow);

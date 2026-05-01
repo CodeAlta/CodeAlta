@@ -3405,6 +3405,32 @@ public sealed class LocalAgentSessionTests
         };
     }
 
+    [TestMethod]
+    public async Task LocalAgentSession_DisposeAsyncDisposesProviderSessionState()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-dispose");
+        var state = CreateState("session-dispose");
+        var executor = new CleanupRecordingTurnExecutor();
+        var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            executor,
+            CreateOptions(provider, temp.Path),
+            allowProviderContinuation: true);
+
+        await session.DisposeAsync().ConfigureAwait(false);
+        await session.DisposeAsync().ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(new[] { "session-dispose" }, executor.DisposedSessionIds);
+    }
+
     private static int FindEventIndex(IReadOnlyList<AgentEvent> events, Func<AgentEvent, bool> predicate)
     {
         for (var i = 0; i < events.Count; i++)
@@ -3513,6 +3539,34 @@ public sealed class LocalAgentSessionTests
             </skill_files>
             </skill_content>
             """;
+    }
+
+    private sealed class CleanupRecordingTurnExecutor : ILocalAgentTurnExecutor, ILocalAgentProviderSessionCleanup
+    {
+        public List<string> DisposedSessionIds { get; } = [];
+
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
+            LocalAgentProviderDescriptor provider,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([new AgentModelInfo("gpt-5.4", "GPT-5.4")]);
+
+        public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
+            LocalAgentTurnRequest request,
+            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(
+                new LocalAgentTurnResponse
+                {
+                    AssistantMessage = new LocalAgentConversationMessage(
+                        LocalAgentConversationRole.Assistant,
+                        [new LocalAgentMessagePart.Text("Done.")]),
+                });
+
+        public ValueTask DisposeProviderSessionAsync(string sessionId)
+        {
+            DisposedSessionIds.Add(sessionId);
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class ScriptedTurnExecutor : ILocalAgentTurnExecutor

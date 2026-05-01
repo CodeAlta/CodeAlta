@@ -4,6 +4,7 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
 using System.Collections.Concurrent;
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Agent.LocalRuntime;
@@ -14,15 +15,20 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.OpenAI;
 
-internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider) : ILocalAgentTurnExecutor, IAsyncDisposable
+internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider) : ILocalAgentTurnExecutor, ILocalAgentProviderSessionCleanup, IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
     private static readonly ResponseReasoningEffortLevel XHighReasoningEffortLevel = new("xhigh");
     private static readonly TimeSpan CodexBaseRetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan DefaultWebSocketIdleTimeout = TimeSpan.FromMinutes(5);
     private static readonly Random SharedRandom = Random.Shared;
+    private const string WebSocketErrorCodeDataKey = "OpenAI.WebSocketErrorCode";
+    private const string WebSocketWrappedErrorDataKey = "OpenAI.WebSocketWrappedError";
+    private const string WebSocketConnectionLimitReachedCode = "websocket_connection_limit_reached";
 
     private readonly ConcurrentDictionary<string, OpenAIResponsesLiveContinuation> _liveContinuations = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, IOpenAIResponsesWebSocketSession> _webSocketSessions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, OpenAIResponsesWebSocketSessionEntry> _webSocketSessions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _webSocketHttpFallbackSessions = new(StringComparer.Ordinal);
 
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         LocalAgentProviderDescriptor providerDescriptor,
@@ -38,6 +44,16 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
         _webSocketSessions.Clear();
         _liveContinuations.Clear();
+        _webSocketHttpFallbackSessions.Clear();
+        return ValueTask.CompletedTask;
+    }
+
+    ValueTask ILocalAgentProviderSessionCleanup.DisposeProviderSessionAsync(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ResetWebSocketSession(sessionId);
+        ClearLiveContinuation(sessionId);
+        _webSocketHttpFallbackSessions.TryRemove(sessionId, out _);
         return ValueTask.CompletedTask;
     }
 
@@ -75,7 +91,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                     LogCodexDiagnostic("request", request, attempt);
                     WriteCodexConsoleDiagnostic(
                         provider,
-                        $"request attempt={attempt} session={request.SessionId} run={request.RunId.Value} transport={ResolveInitialTransport(provider)} payload={FormatCodexConsolePayload(SerializeModel(options))}");
+                        $"request attempt={attempt} session={request.SessionId} run={request.RunId.Value} transport={ResolveInitialTransport(request)} payload={FormatCodexConsolePayload(SerializeModel(options))}");
                     ResponseResult? completedResponse = null;
                     ResponseResult? latestResponse = null;
                     var streamedOutputItems = new SortedDictionary<int, ResponseItem>();
@@ -86,6 +102,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                                 client,
                                 request,
                                 options,
+                                fullOptions,
                                 transport,
                                 cancellationToken).ConfigureAwait(false))
                         {
@@ -160,13 +177,14 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                         }
                     }
 
-                    var initialTransport = ResolveInitialTransport(provider);
+                    var initialTransport = ResolveInitialTransport(request);
                     try
                     {
                         await ProcessStreamAsync(initialTransport).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (ShouldFallbackFromWebSocket(provider, initialTransport, streamStarted, ex))
                     {
+                        MarkWebSocketHttpFallback(request.SessionId);
                         ResetWebSocketSession(request.SessionId);
                         WriteCodexConsoleDiagnostic(
                             provider,
@@ -283,7 +301,16 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         }
     }
 
-    private static OpenAIResponsesTransport ResolveInitialTransport(OpenAIProviderOptions provider)
+    private OpenAIResponsesTransport ResolveInitialTransport(LocalAgentTurnRequest request)
+    {
+        var transport = ResolveConfiguredInitialTransport(provider);
+        return transport == OpenAIResponsesTransport.WebSocket &&
+               _webSocketHttpFallbackSessions.ContainsKey(request.SessionId)
+            ? OpenAIResponsesTransport.Http
+            : transport;
+    }
+
+    private static OpenAIResponsesTransport ResolveConfiguredInitialTransport(OpenAIProviderOptions provider)
     {
         if (provider.CodexSubscription is not { } codexOptions)
         {
@@ -301,36 +328,79 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         OpenAIResponsesTransport transport,
         bool streamStarted,
         Exception exception)
-        => provider.CodexSubscription is not null &&
-           transport == OpenAIResponsesTransport.WebSocket &&
-           !streamStarted &&
-           exception is not OperationCanceledException;
+    {
+        if (provider.CodexSubscription is null ||
+            transport != OpenAIResponsesTransport.WebSocket ||
+            streamStarted ||
+            exception is OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (IsWebSocketConnectionLimitReached(exception))
+        {
+            return false;
+        }
+
+        if (IsWrappedWebSocketError(exception))
+        {
+            return exception is HttpRequestException { StatusCode: HttpStatusCode.UpgradeRequired };
+        }
+
+        if (exception is HttpRequestException { StatusCode: { } statusCode })
+        {
+            return statusCode == HttpStatusCode.UpgradeRequired;
+        }
+
+        return true;
+    }
 
     private async IAsyncEnumerable<StreamingResponseUpdate> CreateResponseStreamingAsync(
         ResponsesClient client,
         LocalAgentTurnRequest request,
         CreateResponseOptions options,
+        CreateResponseOptions fullOptions,
         OpenAIResponsesTransport transport,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var stream = transport == OpenAIResponsesTransport.WebSocket
-            ? (await GetOrCreateWebSocketSessionAsync(request, cancellationToken).ConfigureAwait(false))
-                .CreateResponseStreamingAsync(options, cancellationToken)
-            : client.CreateResponseStreamingAsync(options, cancellationToken);
+        if (transport == OpenAIResponsesTransport.WebSocket)
+        {
+            var entry = await GetOrCreateWebSocketSessionAsync(request, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await foreach (var update in entry.Session
+                    .CreateResponseStreamingAsync(options, fullOptions, cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    yield return update;
+                }
+            }
+            finally
+            {
+                ArmWebSocketSessionIdle(request.SessionId, entry);
+            }
 
-        await foreach (var update in stream.ConfigureAwait(false))
+            yield break;
+        }
+
+        await foreach (var update in client.CreateResponseStreamingAsync(options, cancellationToken).ConfigureAwait(false))
         {
             yield return update;
         }
     }
 
-    private async ValueTask<IOpenAIResponsesWebSocketSession> GetOrCreateWebSocketSessionAsync(
+    private async ValueTask<OpenAIResponsesWebSocketSessionEntry> GetOrCreateWebSocketSessionAsync(
         LocalAgentTurnRequest request,
         CancellationToken cancellationToken)
     {
-        if (_webSocketSessions.TryGetValue(request.SessionId, out var existing))
+        while (_webSocketSessions.TryGetValue(request.SessionId, out var existing))
         {
-            return existing;
+            if (existing.TryBeginUse())
+            {
+                return existing;
+            }
+
+            _webSocketSessions.TryRemove(new KeyValuePair<string, OpenAIResponsesWebSocketSessionEntry>(request.SessionId, existing));
         }
 
         var created = provider.ResponsesWebSocketSessionFactory is not null
@@ -342,14 +412,20 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                         request.Provider))
                 .ConfigureAwait(false)
             : await CreateDefaultWebSocketSessionAsync(request, cancellationToken).ConfigureAwait(false);
+        var createdEntry = new OpenAIResponsesWebSocketSessionEntry(created);
 
-        if (_webSocketSessions.TryAdd(request.SessionId, created))
+        if (_webSocketSessions.TryAdd(request.SessionId, createdEntry))
         {
-            return created;
+            if (createdEntry.TryBeginUse())
+            {
+                return createdEntry;
+            }
+
+            ResetWebSocketSession(request.SessionId, createdEntry);
         }
 
-        created.Dispose();
-        return _webSocketSessions[request.SessionId];
+        createdEntry.Dispose();
+        return await GetOrCreateWebSocketSessionAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     private ValueTask<IOpenAIResponsesWebSocketSession> CreateDefaultWebSocketSessionAsync(
@@ -383,11 +459,50 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
     }
 
     private void ResetWebSocketSession(string sessionId)
+        => ResetWebSocketSession(sessionId, expectedEntry: null);
+
+    private void ResetWebSocketSession(string sessionId, OpenAIResponsesWebSocketSessionEntry? expectedEntry)
     {
-        if (_webSocketSessions.TryRemove(sessionId, out var session))
+        OpenAIResponsesWebSocketSessionEntry? removed = null;
+        if (expectedEntry is null)
         {
-            session.Dispose();
+            _webSocketSessions.TryRemove(sessionId, out removed);
         }
+        else if (_webSocketSessions.TryRemove(new KeyValuePair<string, OpenAIResponsesWebSocketSessionEntry>(sessionId, expectedEntry)))
+        {
+            removed = expectedEntry;
+        }
+
+        removed?.Dispose();
+    }
+
+    private void MarkWebSocketHttpFallback(string sessionId)
+        => _webSocketHttpFallbackSessions[sessionId] = 0;
+
+    private void ArmWebSocketSessionIdle(string sessionId, OpenAIResponsesWebSocketSessionEntry entry)
+    {
+        if (!_webSocketSessions.TryGetValue(sessionId, out var current) ||
+            !ReferenceEquals(current, entry))
+        {
+            entry.EndUse();
+            return;
+        }
+
+        var timeout = provider.ResponsesWebSocketIdleTimeout ?? DefaultWebSocketIdleTimeout;
+        entry.EndUseAndArmIdle(timeout, generation => ExpireIdleWebSocketSession(sessionId, entry, generation));
+    }
+
+    private void ExpireIdleWebSocketSession(
+        string sessionId,
+        OpenAIResponsesWebSocketSessionEntry entry,
+        long generation)
+    {
+        if (!entry.TryExpireIdle(generation))
+        {
+            return;
+        }
+
+        _webSocketSessions.TryRemove(new KeyValuePair<string, OpenAIResponsesWebSocketSessionEntry>(sessionId, entry));
     }
 
     private void ClearLiveContinuation(string sessionId)
@@ -1213,6 +1328,12 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                 System.Net.HttpStatusCode.BadRequest => "ChatGPT/Codex rejected the request shape.",
                 _ => $"ChatGPT/Codex request failed with HTTP {(int)statusCode}.",
             };
+            if (!string.IsNullOrWhiteSpace(exception.Message) &&
+                !exception.Message.StartsWith("Response status code", StringComparison.OrdinalIgnoreCase))
+            {
+                message = $"{message} {exception.Message}";
+            }
+
             return new InvalidOperationException(message, exception);
         }
 
@@ -1289,6 +1410,11 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
     private static bool IsRetryableCodexSubscriptionException(Exception exception)
     {
+        if (IsWebSocketConnectionLimitReached(exception))
+        {
+            return true;
+        }
+
         if (IsPrematureResponseEnded(exception))
         {
             return true;
@@ -1303,6 +1429,29 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         return statusCode is null ||
             statusCode is System.Net.HttpStatusCode.TooManyRequests ||
             statusCode >= System.Net.HttpStatusCode.InternalServerError;
+    }
+
+    private static bool IsWebSocketConnectionLimitReached(Exception exception)
+    {
+        if (exception.Data.Contains(WebSocketErrorCodeDataKey) &&
+            exception.Data[WebSocketErrorCodeDataKey] is string code &&
+            string.Equals(code, WebSocketConnectionLimitReachedCode, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return exception.InnerException is not null && IsWebSocketConnectionLimitReached(exception.InnerException);
+    }
+
+    private static bool IsWrappedWebSocketError(Exception exception)
+    {
+        if (exception.Data.Contains(WebSocketWrappedErrorDataKey) &&
+            exception.Data[WebSocketWrappedErrorDataKey] is bool wrappedError && wrappedError)
+        {
+            return true;
+        }
+
+        return exception.InnerException is not null && IsWrappedWebSocketError(exception.InnerException);
     }
 
     private static TimeSpan? GetRetryAfterDelay(Exception exception)
@@ -1380,6 +1529,144 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
     {
         Http,
         WebSocket,
+    }
+
+    private sealed class OpenAIResponsesWebSocketSessionEntry(IOpenAIResponsesWebSocketSession session) : IDisposable
+    {
+        private readonly object _gate = new();
+        private Timer? _idleTimer;
+        private bool _active;
+        private bool _disposed;
+        private int _sessionDisposed;
+        private long _idleGeneration;
+
+        public IOpenAIResponsesWebSocketSession Session { get; } = session;
+
+        public bool TryBeginUse()
+        {
+            Timer? timer;
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return false;
+                }
+
+                _active = true;
+                _idleGeneration++;
+                timer = _idleTimer;
+                _idleTimer = null;
+            }
+
+            timer?.Dispose();
+            return true;
+        }
+
+        public void EndUse()
+        {
+            lock (_gate)
+            {
+                _active = false;
+            }
+        }
+
+        public void EndUseAndArmIdle(TimeSpan timeout, Action<long> expire)
+        {
+            ArgumentNullException.ThrowIfNull(expire);
+
+            Timer? previousTimer;
+            long generation;
+            lock (_gate)
+            {
+                _active = false;
+                if (_disposed || timeout == Timeout.InfiniteTimeSpan)
+                {
+                    return;
+                }
+
+                previousTimer = _idleTimer;
+                _idleTimer = null;
+                generation = ++_idleGeneration;
+            }
+
+            previousTimer?.Dispose();
+            if (timeout <= TimeSpan.Zero)
+            {
+                expire(generation);
+                return;
+            }
+
+            var timer = new Timer(
+                static state =>
+                {
+                    var callback = (IdleExpirationCallback)state!;
+                    callback.Expire(callback.Generation);
+                },
+                new IdleExpirationCallback(expire, generation),
+                timeout,
+                Timeout.InfiniteTimeSpan);
+
+            lock (_gate)
+            {
+                if (_disposed || _active || _idleGeneration != generation)
+                {
+                    timer.Dispose();
+                    return;
+                }
+
+                _idleTimer = timer;
+            }
+        }
+
+        public bool TryExpireIdle(long generation)
+        {
+            Timer? timer;
+            lock (_gate)
+            {
+                if (_disposed || _active || _idleGeneration != generation)
+                {
+                    return false;
+                }
+
+                _disposed = true;
+                timer = _idleTimer;
+                _idleTimer = null;
+            }
+
+            timer?.Dispose();
+            DisposeSession();
+            return true;
+        }
+
+        public void Dispose()
+        {
+            Timer? timer;
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                _active = false;
+                timer = _idleTimer;
+                _idleTimer = null;
+            }
+
+            timer?.Dispose();
+            DisposeSession();
+        }
+
+        private void DisposeSession()
+        {
+            if (Interlocked.Exchange(ref _sessionDisposed, 1) == 0)
+            {
+                Session.Dispose();
+            }
+        }
+
+        private sealed record IdleExpirationCallback(Action<long> Expire, long Generation);
     }
 
     private sealed record OpenAIResponsesLiveContinuation(

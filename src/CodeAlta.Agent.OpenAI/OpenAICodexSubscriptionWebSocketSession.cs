@@ -3,6 +3,7 @@
 using System.Buffers;
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using System.Net;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -15,6 +16,11 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
 {
     private const int ReceiveBufferSize = 1024 * 16;
     private const string ResponsesWebSocketsBetaHeader = "responses_websockets=2026-02-06";
+    private const string WebSocketErrorCodeDataKey = "OpenAI.WebSocketErrorCode";
+    private const string WebSocketErrorPayloadDataKey = "OpenAI.WebSocketErrorPayload";
+    private const string WebSocketWrappedErrorDataKey = "OpenAI.WebSocketWrappedError";
+    private const string WebSocketConnectionLimitReachedCode = "websocket_connection_limit_reached";
+    private const string WebSocketConnectionLimitReachedMessage = "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.";
 
     private readonly Uri _baseUri;
     private readonly OpenAICodexSubscriptionOptions _options;
@@ -47,6 +53,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
 
     public AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
         CreateResponseOptions options,
+        CreateResponseOptions? reconnectOptions = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -56,8 +63,15 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
                 $"{nameof(CreateResponseOptions.StreamingEnabled)} must be set to true for Codex subscription WebSocket streaming.");
         }
 
+        reconnectOptions ??= options;
+        if (reconnectOptions.StreamingEnabled != true)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(CreateResponseOptions.StreamingEnabled)} must be set to true for Codex subscription WebSocket reconnect streaming.");
+        }
+
         return new OpenAIResponsesWebSocketUpdateCollection(
-            CreateResponseStreamingCoreAsync(options, cancellationToken));
+            CreateResponseStreamingCoreAsync(options, reconnectOptions, cancellationToken));
     }
 
     public void Dispose()
@@ -70,7 +84,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         _disposed = true;
         _webSocket?.Dispose();
         _webSocket = null;
-        _streamSemaphore.Dispose();
+        // Keep the semaphore alive because Dispose can race an active stream whose finally block still releases it.
     }
 
     internal static Uri ResolveWebSocketUri(Uri baseUri)
@@ -92,6 +106,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
 
     private async IAsyncEnumerable<StreamingResponseUpdate> CreateResponseStreamingCoreAsync(
         CreateResponseOptions options,
+        CreateResponseOptions reconnectOptions,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await _streamSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -99,17 +114,49 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
 
         try
         {
+            var reusedOpenConnection = _webSocket?.State == WebSocketState.Open;
             await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            await SendRequestAsync(CreateWebSocketRequest(options), cancellationToken).ConfigureAwait(false);
+            await SendRequestWithStaleReconnectAsync(
+                    options,
+                    reconnectOptions,
+                    reusedOpenConnection,
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             await foreach (var message in ReceiveMessagesAsync(_webSocket!, cancellationToken).ConfigureAwait(false))
             {
-                var normalizedMessage = NormalizeWebSocketMessage(message, out var eventType);
-                var update = ModelReaderWriter.Read<StreamingResponseUpdate>(
-                    normalizedMessage,
-                    new ModelReaderWriterOptions("J"),
-                    OpenAIResponsesContext.Default)
-                    ?? throw new InvalidOperationException("Codex subscription WebSocket returned an unsupported response update.");
+                if (!TryCreateResponseUpdateMessage(message, out var normalizedMessage, out var eventType, out var messageException))
+                {
+                    if (messageException is not null)
+                    {
+                        throw messageException;
+                    }
+
+                    continue;
+                }
+
+                StreamingResponseUpdate? update;
+                try
+                {
+                    update = ModelReaderWriter.Read<StreamingResponseUpdate>(
+                        normalizedMessage,
+                        new ModelReaderWriterOptions("J"),
+                        OpenAIResponsesContext.Default);
+                }
+                catch (JsonException) when (!IsTerminalEvent(eventType))
+                {
+                    continue;
+                }
+
+                if (update is null)
+                {
+                    if (IsTerminalEvent(eventType))
+                    {
+                        throw new InvalidOperationException("Codex subscription WebSocket returned an unsupported terminal response update.");
+                    }
+
+                    continue;
+                }
 
                 yield return update;
 
@@ -172,6 +219,11 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         string accessToken,
         OpenAICodexSubscriptionAccountContext accountContext)
     {
+        options.DangerousDeflateOptions = new WebSocketDeflateOptions
+        {
+            ClientContextTakeover = false,
+            ServerContextTakeover = false,
+        };
         options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
         options.SetRequestHeader("OpenAI-Beta", ResponsesWebSocketsBetaHeader);
         options.SetRequestHeader("originator", "codealta");
@@ -190,6 +242,24 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         if (accountContext.IsFedRamp)
         {
             options.SetRequestHeader("X-OpenAI-Fedramp", "true");
+        }
+    }
+
+    private async Task SendRequestWithStaleReconnectAsync(
+        CreateResponseOptions options,
+        CreateResponseOptions reconnectOptions,
+        bool reusedOpenConnection,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SendRequestAsync(CreateWebSocketRequest(options), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (reusedOpenConnection && ex is not OperationCanceledException)
+        {
+            await CloseWebSocketSilentlyAsync().ConfigureAwait(false);
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+            await SendRequestAsync(CreateWebSocketRequest(reconnectOptions), cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -296,37 +366,219 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         return BinaryData.FromBytes(stream.ToArray());
     }
 
-    private static BinaryData NormalizeWebSocketMessage(BinaryData message, out string? eventType)
+    internal static bool TryCreateResponseUpdateMessage(
+        BinaryData message,
+        out BinaryData normalizedMessage,
+        out string? eventType,
+        out Exception? exception)
     {
-        using var document = JsonDocument.Parse(message);
-        eventType = document.RootElement.TryGetProperty("type"u8, out var typeElement)
-            ? typeElement.GetString()
-            : null;
-        if (!string.Equals(eventType, "response.done", StringComparison.Ordinal))
+        ArgumentNullException.ThrowIfNull(message);
+
+        normalizedMessage = message;
+        eventType = null;
+        exception = null;
+
+        JsonDocument document;
+        try
         {
-            return message;
+            document = JsonDocument.Parse(message);
+        }
+        catch (JsonException ex)
+        {
+            exception = new InvalidOperationException("Codex subscription WebSocket returned an invalid JSON text frame.", ex);
+            return false;
         }
 
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
+        using (document)
         {
-            writer.WriteStartObject();
-            foreach (var property in document.RootElement.EnumerateObject())
+            eventType = document.RootElement.TryGetProperty("type"u8, out var typeElement)
+                ? typeElement.GetString()
+                : null;
+
+            if (string.Equals(eventType, "error", StringComparison.Ordinal))
             {
-                if (property.NameEquals("type"u8))
-                {
-                    writer.WriteString("type"u8, "response.completed");
-                }
-                else
-                {
-                    property.WriteTo(writer);
-                }
+                exception = CreateWrappedWebSocketErrorException(document.RootElement, message.ToString());
+                return false;
             }
 
-            writer.WriteEndObject();
+            if (IsIgnorableSideChannelEvent(eventType))
+            {
+                return false;
+            }
+
+            if (!string.Equals(eventType, "response.done", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    if (property.NameEquals("type"u8))
+                    {
+                        writer.WriteString("type"u8, "response.completed");
+                    }
+                    else
+                    {
+                        property.WriteTo(writer);
+                    }
+                }
+
+                writer.WriteEndObject();
+            }
+
+            normalizedMessage = BinaryData.FromBytes(stream.ToArray());
+            return true;
+        }
+    }
+
+    internal static bool IsIgnorableSideChannelEvent(string? eventType)
+        => string.IsNullOrWhiteSpace(eventType) ||
+           !eventType.StartsWith("response.", StringComparison.Ordinal);
+
+    internal static Exception CreateWrappedWebSocketErrorException(JsonElement errorEvent, string payload)
+    {
+        var code = GetNestedString(errorEvent, "error", "code");
+        var errorType = GetNestedString(errorEvent, "error", "type");
+        var message = GetNestedString(errorEvent, "error", "message") ??
+                      GetString(errorEvent, "message");
+
+        if (string.Equals(code, WebSocketConnectionLimitReachedCode, StringComparison.Ordinal))
+        {
+            var retryable = new HttpRequestException(
+                string.IsNullOrWhiteSpace(message) ? WebSocketConnectionLimitReachedMessage : message);
+            PopulateWebSocketErrorData(retryable, errorEvent, payload, code);
+            return retryable;
         }
 
-        return BinaryData.FromBytes(stream.ToArray());
+        if (TryGetStatusCode(errorEvent, out var statusCode) && (int)statusCode >= 400)
+        {
+            var httpException = new HttpRequestException(
+                CreateWrappedWebSocketErrorMessage(statusCode, code, errorType, message),
+                inner: null,
+                statusCode);
+            PopulateWebSocketErrorData(httpException, errorEvent, payload, code);
+            return httpException;
+        }
+
+        var protocolException = new InvalidOperationException(
+            CreateWrappedWebSocketErrorMessage(null, code, errorType, message));
+        PopulateWebSocketErrorData(protocolException, errorEvent, payload, code);
+        return protocolException;
+    }
+
+    private static string CreateWrappedWebSocketErrorMessage(
+        HttpStatusCode? statusCode,
+        string? code,
+        string? errorType,
+        string? message)
+    {
+        var detail = string.IsNullOrWhiteSpace(message)
+            ? "Codex subscription WebSocket returned an error event."
+            : message.Trim();
+        var identifier = !string.IsNullOrWhiteSpace(code) ? code : errorType;
+        if (!string.IsNullOrWhiteSpace(identifier) &&
+            !detail.Contains(identifier, StringComparison.OrdinalIgnoreCase))
+        {
+            detail = $"{identifier}: {detail}";
+        }
+
+        return statusCode is { } status
+            ? $"Codex subscription WebSocket failed with HTTP {(int)status}: {detail}"
+            : detail;
+    }
+
+    private static void PopulateWebSocketErrorData(
+        Exception exception,
+        JsonElement errorEvent,
+        string payload,
+        string? code)
+    {
+        exception.Data[WebSocketWrappedErrorDataKey] = true;
+        exception.Data[WebSocketErrorPayloadDataKey] = payload;
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            exception.Data[WebSocketErrorCodeDataKey] = code;
+        }
+
+        if (!errorEvent.TryGetProperty("headers"u8, out var headersElement) ||
+            headersElement.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (var header in headersElement.EnumerateObject())
+        {
+            if (TryGetScalarString(header.Value, out var value))
+            {
+                exception.Data[header.Name] = value;
+            }
+        }
+    }
+
+    private static bool TryGetStatusCode(JsonElement element, out HttpStatusCode statusCode)
+    {
+        if ((TryGetInt32(element, "status", out var status) || TryGetInt32(element, "status_code", out status)) &&
+            status is >= 100 and <= 599)
+        {
+            statusCode = (HttpStatusCode)status;
+            return true;
+        }
+
+        statusCode = default;
+        return false;
+    }
+
+    private static bool TryGetInt32(JsonElement element, string propertyName, out int value)
+    {
+        if (element.TryGetProperty(propertyName, out var property))
+        {
+            if (property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out value))
+            {
+                return true;
+            }
+
+            if (property.ValueKind == JsonValueKind.String &&
+                int.TryParse(property.GetString(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out value))
+            {
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? GetNestedString(JsonElement element, string objectName, string propertyName)
+        => element.TryGetProperty(objectName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? GetString(nested, propertyName)
+            : null;
+
+    private static string? GetString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property) &&
+           property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    private static bool TryGetScalarString(JsonElement element, out string value)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                value = element.GetString() ?? string.Empty;
+                return true;
+            case JsonValueKind.Number:
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                value = element.GetRawText();
+                return true;
+            default:
+                value = string.Empty;
+                return false;
+        }
     }
 
     private static Uri ResolveResponsesUri(Uri baseUri)

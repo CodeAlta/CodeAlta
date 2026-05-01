@@ -216,7 +216,7 @@ Do not create an `OpenAIClient` root client for this provider unless a future Co
 
 Use the local OpenAI .NET SDK source when available so CodeAlta builds against `ResponsesClientOptions` and the Responses WebSocket APIs. The NuGet fallback remains supported for HTTP/SSE-only builds.
 
-HTTP/SSE requests use `ResponsesClient`. The ChatGPT subscription WebSocket path uses a session-scoped WebSocket transport that mirrors the local SDK request/update shape while applying ChatGPT OAuth/session headers instead of platform API-key auth. If WebSocket connection or request setup fails before any stream update is emitted, retry the same turn over HTTP/SSE unless `response_transport = "http"` already forced HTTP-only mode.
+HTTP/SSE requests use `ResponsesClient`. The ChatGPT subscription WebSocket path uses a session-scoped WebSocket transport that mirrors the local SDK request/update shape while applying ChatGPT OAuth/session headers instead of platform API-key auth. If WebSocket connection or request setup fails before any stream update is emitted, retry the same turn over HTTP/SSE unless `response_transport = "http"` already forced HTTP-only mode; after such fallback, keep that live CodeAlta session on HTTP/SSE to avoid repeated failed WebSocket handshakes.
 
 ## 8. Auth implementation
 
@@ -571,6 +571,10 @@ Transport rules:
 - Do not bypass CodeAlta's LocalRuntime tool/permission model for either transport.
 - Fall back from WebSocket to HTTP/SSE only before any stream update is emitted; after the stream starts, surface the stream failure so CodeAlta does not duplicate partial output or tool calls.
 - Reuse one WebSocket session per active CodeAlta agent session and serialize requests on that session.
+- Close and remove the per-session WebSocket when the CodeAlta session is disposed, and idle-expire cached WebSocket sessions after five minutes of inactivity.
+- If a reused WebSocket is stale and fails while sending the next request, reconnect once and send the full request payload instead of a `previous_response_id` delta.
+- Parse wrapped WebSocket error frames such as `{ "type": "error", "status": ..., "error": ... }` into status-bearing request failures; treat `websocket_connection_limit_reached` as retryable on a fresh connection rather than as an HTTP fallback signal.
+- Ignore known non-response side-channel frames such as `codex.rate_limits`, model verification, and server-model notifications unless CodeAlta gains an explicit UI/event surface for them.
 - `previous_response_id` and input-delta continuation may be used only for in-memory CodeAlta sessions created in the current process. Sessions reloaded from disk must send full replayable input and must not resume a stored provider response id.
 - When request fields change or the transcript is not a strict extension of the previous request plus assistant/tool output, send full input and clear continuation state.
 - The local OpenAI SDK WebSocket implementation requires platform API-key auth; the ChatGPT subscription transport applies the equivalent Responses WebSocket message shape with ChatGPT OAuth/account headers.

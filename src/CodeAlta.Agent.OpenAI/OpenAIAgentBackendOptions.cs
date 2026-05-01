@@ -131,6 +131,8 @@ public sealed class OpenAIProviderOptions
 
     internal Func<OpenAIResponsesWebSocketSessionFactoryContext, ValueTask<IOpenAIResponsesWebSocketSession>>? ResponsesWebSocketSessionFactory { get; set; }
 
+    internal TimeSpan? ResponsesWebSocketIdleTimeout { get; set; }
+
     internal string? StateRootPath { get; set; }
 
     internal Action<OpenAIResponsesRequestCustomizationContext>? ResponsesRequestCustomizer { get; set; }
@@ -225,5 +227,6 @@ internal interface IOpenAIResponsesWebSocketSession : IDisposable
 {
     AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
         CreateResponseOptions options,
+        CreateResponseOptions? reconnectOptions = null,
         CancellationToken cancellationToken = default);
 }
