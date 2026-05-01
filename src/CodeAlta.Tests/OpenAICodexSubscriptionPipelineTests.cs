@@ -370,8 +370,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             CreateProviderDescriptor(),
             CancellationToken.None).ConfigureAwait(false);
 
-        var webSocketAvailable = IsCodexSubscriptionWebSocketAvailable();
-        Assert.AreEqual(webSocketAvailable ? 2 : 1, models.Count);
+        Assert.AreEqual(2, models.Count);
         Assert.AreEqual("gpt-5.3-codex", models[0].Id);
         Assert.AreEqual("Codex model", models[0].DisplayName);
         Assert.AreEqual("codex-endpoint", models[0].Capabilities?["source"]);
@@ -380,11 +379,8 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(AgentReasoningEffort.High, models[0].DefaultReasoningEffort);
         Assert.AreEqual(true, models[0].Capabilities?["supportsImageInput"]);
         Assert.AreEqual(true, models[0].Capabilities?["supportsTextVerbosity"]);
-        if (webSocketAvailable)
-        {
-            Assert.AreEqual("websocket-only-codex", models[1].Id);
-            Assert.AreEqual(true, models[1].Capabilities?["requiresWebSocket"]);
-        }
+        Assert.AreEqual("websocket-only-codex", models[1].Id);
+        Assert.AreEqual(true, models[1].Capabilities?["requiresWebSocket"]);
         var version = typeof(OpenAIProviderSdkFactory).Assembly.GetName().Version!;
         Assert.AreEqual(
             $"https://chatgpt.com/backend-api/codex/models?client_version={version.Major}.{version.Minor}.{version.Build}",
@@ -590,7 +586,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
         if (method is null)
         {
-            Assert.Inconclusive("Codex subscription WebSocket parser is available only when CodeAlta.Agent.OpenAI is built with the local OpenAI SDK project.");
+            Assert.Fail("Codex subscription WebSocket parser was not found.");
         }
 
         object?[] parameters = [message, null, null, null];
@@ -600,9 +596,6 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         exception = (Exception?)parameters[3];
         return result;
     }
-
-    private static bool IsCodexSubscriptionWebSocketAvailable()
-        => GetCodexSubscriptionWebSocketSessionType() is not null;
 
     private static Type? GetCodexSubscriptionWebSocketSessionType()
         => typeof(OpenAIProviderSdkFactory).Assembly.GetType(

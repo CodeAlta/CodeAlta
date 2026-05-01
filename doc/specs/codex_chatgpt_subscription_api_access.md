@@ -41,7 +41,7 @@ Primary local source references:
   - `src/CodeAlta.Agent/LocalRuntime/LocalAgentTurnContracts.cs`
   - `src/CodeAlta.Agent/LocalRuntime/LocalAgentSession.cs`
   - `src/CodeAlta.Agent/LocalRuntime/FileSystemLocalAgentSessionStore.cs`
-- OpenAI .NET SDK source at `C:\code\openai-dotnet` (`OpenAI` package `2.10.0`):
+- OpenAI .NET SDK NuGet package (`OpenAI` package `2.10.0`):
   - `OpenAI.Responses.ResponsesClient`
   - `OpenAI.Responses.CreateResponseOptions`
   - `System.ClientModel.Primitives.AuthenticationPolicy`
@@ -214,7 +214,7 @@ Then update `OpenAIProviderSdkFactory.CreateResponsesClient(...)` and `OpenAIRes
 
 Do not create an `OpenAIClient` root client for this provider unless a future Codex-specific endpoint needs it. The only SDK client needed in v1 is `ResponsesClient`.
 
-Use the local OpenAI .NET SDK source when available so CodeAlta builds against `ResponsesClientOptions` and the Responses WebSocket APIs. The NuGet fallback remains supported for HTTP/SSE-only builds.
+Use the OpenAI .NET SDK NuGet package for `ResponsesClient` and generated Responses protocol models. CodeAlta owns the ChatGPT subscription WebSocket transport in `CodeAlta.Agent.OpenAI` so builds do not require a local `C:\code\openai-dotnet` checkout.
 
 HTTP/SSE requests use `ResponsesClient`. The ChatGPT subscription WebSocket path uses a session-scoped WebSocket transport that mirrors the local SDK request/update shape while applying ChatGPT OAuth/session headers instead of platform API-key auth. If WebSocket connection or request setup fails before any stream update is emitted, retry the same turn over HTTP/SSE unless `response_transport = "http"` already forced HTTP-only mode; after such fallback, keep that live CodeAlta session on HTTP/SSE to avoid repeated failed WebSocket handshakes.
 
@@ -577,7 +577,7 @@ Transport rules:
 - Ignore known non-response side-channel frames such as `codex.rate_limits`, model verification, and server-model notifications unless CodeAlta gains an explicit UI/event surface for them.
 - `previous_response_id` and input-delta continuation may be used only for in-memory CodeAlta sessions created in the current process. Sessions reloaded from disk must send full replayable input and must not resume a stored provider response id.
 - When request fields change or the transcript is not a strict extension of the previous request plus assistant/tool output, send full input and clear continuation state.
-- The local OpenAI SDK WebSocket implementation requires platform API-key auth; the ChatGPT subscription transport applies the equivalent Responses WebSocket message shape with ChatGPT OAuth/account headers.
+- CodeAlta's ChatGPT subscription WebSocket transport applies the Responses WebSocket message shape with ChatGPT OAuth/account headers and must remain independent from platform API-key WebSocket helpers in the OpenAI SDK.
 
 ## 14. Concurrency, retry, and rate-limit behavior
 

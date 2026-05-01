@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
-    <CodeAltaOpenAISdkProjectPath Condition="'$(CodeAltaOpenAISdkProjectPath)' == ''">$(MSBuildThisFileDirectory)..\..\..\openai-dotnet\OpenAI\src\OpenAI.csproj</CodeAltaOpenAISdkProjectPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,16 +16,7 @@
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('$(CodeAltaOpenAISdkProjectPath)')">
-    <ProjectReference Include="$(CodeAltaOpenAISdkProjectPath)" />
-  </ItemGroup>
-
-  <PropertyGroup Condition="Exists('$(CodeAltaOpenAISdkProjectPath)')">
-    <DefineConstants>$(DefineConstants);CODEALTA_LOCAL_OPENAI_SDK</DefineConstants>
-  </PropertyGroup>
-
-  <ItemGroup Condition="!Exists('$(CodeAltaOpenAISdkProjectPath)')">
-    <Compile Remove="OpenAICodexSubscriptionWebSocketSession.cs" />
+  <ItemGroup>
     <PackageReference Include="OpenAI" />
   </ItemGroup>
 </Project>

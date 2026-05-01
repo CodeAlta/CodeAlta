@@ -312,14 +312,9 @@ internal static class OpenAIProviderSdkFactory
 
     private static bool AllowsWebSocketRequiredModels(OpenAICodexSubscriptionOptions? options)
     {
-#if CODEALTA_LOCAL_OPENAI_SDK
         return options is not null &&
                !string.Equals(options.ResponseTransport, "http", StringComparison.OrdinalIgnoreCase) &&
                !string.Equals(options.ResponseTransport, "sse", StringComparison.OrdinalIgnoreCase);
-#else
-        _ = options;
-        return false;
-#endif
     }
 
     private static AgentReasoningEffort? ParseReasoningEffort(string? value)
@@ -348,19 +343,8 @@ internal static class OpenAIProviderSdkFactory
             NetworkTimeout = provider.CodexSubscription is null ? null : CodexSubscriptionNetworkTimeout,
         };
 
-#if CODEALTA_LOCAL_OPENAI_SDK
-    private static ResponsesClientOptions CreateResponsesClientOptions(OpenAIProviderOptions provider)
-        => new()
-        {
-            Endpoint = provider.BaseUri,
-            OrganizationId = provider.OrganizationId,
-            ProjectId = provider.ProjectId,
-            NetworkTimeout = provider.CodexSubscription is null ? null : CodexSubscriptionNetworkTimeout,
-        };
-#else
     private static OpenAIClientOptions CreateResponsesClientOptions(OpenAIProviderOptions provider)
         => CreateClientOptions(provider);
-#endif
 
     private static ResponsesClient CreateCodexSubscriptionResponsesClient(
         OpenAIProviderOptions provider,

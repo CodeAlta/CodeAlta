@@ -14,7 +14,7 @@ Primary references:
 - `C:\code\pi-mono\packages\ai\src\providers\openai-responses.ts`
 - `C:\code\pi-mono\packages\ai\src\providers\anthropic.ts`
 - `C:\code\pi-mono\packages\ai\src\providers\google-shared.ts`
-- `C:\code\openai-dotnet\src\`
+- OpenAI .NET SDK NuGet package
 - `C:\code\anthropic-sdk-csharp\src\`
 - `C:\code\dotnet-genai\Google.GenAI\`
 - `~/.copilot/session-state/<session-id>/events.jsonl`

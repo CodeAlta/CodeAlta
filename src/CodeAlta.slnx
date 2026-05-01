@@ -38,8 +38,6 @@
   <Project Path="CodeAlta.Agent.Copilot/CodeAlta.Agent.Copilot.csproj" />
   <Project Path="CodeAlta.Agent.GoogleGenAI/CodeAlta.Agent.GoogleGenAI.csproj" />
   <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
-  <Project Path="../../openai-dotnet/OpenAI.Responses/src/OpenAI.Responses.csproj" />
-  <Project Path="../../openai-dotnet/OpenAI/src/OpenAI.csproj" />
   <Project Path="CodeAlta.CodexSdk/CodeAlta.CodexSdk.csproj" Id="4507c156-d675-4280-bd1c-2a5d8285c07f" />
   <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
   <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />

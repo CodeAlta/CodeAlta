@@ -8,6 +8,7 @@ using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CodeAlta.Agent.OpenAI.CodexSubscription;
+using OpenAI;
 using OpenAI.Responses;
 
 namespace CodeAlta.Agent.OpenAI;
@@ -141,7 +142,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
                     update = ModelReaderWriter.Read<StreamingResponseUpdate>(
                         normalizedMessage,
                         new ModelReaderWriterOptions("J"),
-                        OpenAIResponsesContext.Default);
+                        OpenAIContext.Default);
                 }
                 catch (JsonException) when (!IsTerminalEvent(eventType))
                 {

@@ -432,7 +432,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         LocalAgentTurnRequest request,
         CancellationToken cancellationToken)
     {
-#if CODEALTA_LOCAL_OPENAI_SDK
         if (provider.CodexSubscription is not { } codexOptions)
         {
             throw new InvalidOperationException("OpenAI Responses WebSocket transport is only configured for Codex subscription providers.");
@@ -450,12 +449,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             request.SessionId,
             OpenAIProviderSdkFactory.CreateCodeAltaUserAgentApplicationId());
         return ValueTask.FromResult(session);
-#else
-        _ = request;
-        _ = cancellationToken;
-        throw new InvalidOperationException(
-            "OpenAI Responses WebSocket transport requires building CodeAlta.Agent.OpenAI with the local OpenAI SDK project.");
-#endif
     }
 
     private void ResetWebSocketSession(string sessionId)
@@ -619,13 +612,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
     }
 
     private static CreateResponseOptions CloneResponseOptions(CreateResponseOptions options)
-#if CODEALTA_LOCAL_OPENAI_SDK
-        => ModelReaderWriter.Read<CreateResponseOptions>(
-            BinaryData.FromString(SerializeModel(options)),
-            new ModelReaderWriterOptions("J"),
-            OpenAIResponsesContext.Default)
-            ?? throw new InvalidOperationException("Unable to clone OpenAI response options.");
-#else
     {
         var clone = new CreateResponseOptions
         {
@@ -673,7 +659,6 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
         return clone;
     }
-#endif
 
     private static string GetRequestWithoutInputJson(CreateResponseOptions options)
     {
