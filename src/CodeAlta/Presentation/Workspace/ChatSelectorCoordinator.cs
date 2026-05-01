@@ -465,6 +465,25 @@ internal sealed class ChatSelectorCoordinator
         _promptComposerViewModel.CanCloseTab = projection.CanCloseTab;
         _promptComposerViewModel.CanClearQueue = projection.CanClearQueue;
         _promptComposerViewModel.CanAlwaysEnqueue = projection.CanAlwaysEnqueue;
+        UpdateThreadBackendSelectionAvailability();
+    }
+
+    private void UpdateThreadBackendSelectionAvailability()
+    {
+        if (_threadSelection.Selection.Target is not WorkspaceTarget.Thread)
+        {
+            return;
+        }
+
+        var selectedThread = _threadSelection.GetSelectedThread();
+        if (selectedThread is null ||
+            _threadSelection.FindOpenThread(selectedThread.ThreadId) is not { } selectedTab)
+        {
+            return;
+        }
+
+        _workspaceViewModel.CanSelectBackend = _workspaceViewModel.BackendOptions.Count > 0 &&
+            _canSelectThreadBackend(selectedThread, selectedTab);
     }
 
     private AgentBackendId GetPreferredDraftBackendId(IReadOnlyList<ChatBackendOption> backendOptions)

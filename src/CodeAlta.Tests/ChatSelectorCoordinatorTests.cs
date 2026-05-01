@@ -227,6 +227,66 @@ public sealed class ChatSelectorCoordinatorTests
     }
 
     [TestMethod]
+    public void UpdatePromptAvailabilityUi_RefreshesThreadBackendSelectionCapability()
+    {
+        using var temp = TempDirectory.Create();
+        var threadStateCoordinator = CreateThreadStateCoordinator(temp.Path, out var thread);
+        var threadSelection = new ThreadSelectionContext(
+            threadStateCoordinator,
+            static (_, _) => Task.CompletedTask,
+            static _ => true);
+        var tab = threadStateCoordinator.EnsureThreadTab(thread);
+
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var promptComposerViewModel = new PromptComposerViewModel();
+        AgentBackendDescriptor[] backendDescriptors =
+        [
+            new(new AgentBackendId("openai"), "OpenAI"),
+            new(new AgentBackendId("anthropic"), "Anthropic"),
+        ];
+        var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        backendStates["openai"].Availability = ChatBackendAvailability.Ready;
+        backendStates["anthropic"].Availability = ChatBackendAvailability.Ready;
+
+        var selectorState = new ChatSelectorStateContext(
+            workspaceViewModel,
+            static () => new InlineUiDispatcher(),
+            static () => { });
+        var preferences = new ChatPreferenceContext(
+            ApplyDraftBackendPreference,
+            static _ => { },
+            static (_, _, _) => { },
+            static (_, _, _, _, _) => { });
+        var workspaceRefresh = new WorkspaceRefreshContext(
+            static () => { },
+            static () => { });
+        var coordinator = new ChatSelectorCoordinator(
+            backendDescriptors,
+            workspaceViewModel,
+            promptComposerViewModel,
+            backendStates,
+            selectorState,
+            threadSelection,
+            preferences,
+            workspaceRefresh,
+            static _ => null,
+            static () => { },
+            static (_, selectedTab) => !selectedTab.StatusBusy);
+
+        coordinator.RefreshForThread(tab);
+        Assert.IsTrue(workspaceViewModel.CanSelectBackend);
+
+        tab.StatusBusy = true;
+        coordinator.UpdatePromptAvailabilityUi();
+        Assert.IsFalse(workspaceViewModel.CanSelectBackend);
+
+        tab.StatusBusy = false;
+        coordinator.UpdatePromptAvailabilityUi();
+
+        Assert.IsTrue(workspaceViewModel.CanSelectBackend);
+    }
+
+    [TestMethod]
     public async Task OnBackendSelectionChangedAsync_UsesSwitchCallbackForSelectedThread()
     {
         using var temp = TempDirectory.Create();
