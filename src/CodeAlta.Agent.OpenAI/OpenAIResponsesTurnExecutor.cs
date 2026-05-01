@@ -198,6 +198,9 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                         WriteCodexConsoleDiagnostic(
                             provider,
                             $"websocket fallback session={request.SessionId} run={request.RunId.Value} error={ex.GetType().Name}");
+                        completedResponse = null;
+                        latestResponse = null;
+                        streamedOutputItems.Clear();
                         emittedUpdate = false;
                         await ProcessStreamAsync(OpenAIResponsesTransport.Http).ConfigureAwait(false);
                     }

@@ -1566,6 +1566,47 @@ public sealed class OpenAIRawApiAgentBackendTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketFallbackDiscardsAbandonedStreamState()
+    {
+        var webSocketSession = new PartiallyFailingOpenAIResponsesWebSocketSession(
+            CreateOutputItemDoneUpdate(
+                0,
+                ResponseItem.CreateAssistantMessageItem("Abandoned WebSocket answer.", [])),
+            new WebSocketException("The remote party closed the WebSocket connection without completing the close handshake."));
+        var fallbackResponse = new ResponseResult
+        {
+            Id = "response-http-empty",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Model = "gpt-5.3-codex",
+            Status = ResponseStatus.Completed,
+        };
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateCompletedUpdate(fallbackResponse)],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex_subscription",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, webSocketSession.RequestCount);
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual("response-http-empty", response.ProviderSessionId);
+        Assert.AreEqual(0, response.AssistantMessage.Parts.Count);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CodexHttpOnlyTransportSkipsWebSocket()
     {
         var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
