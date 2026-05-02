@@ -43,6 +43,8 @@ public sealed class HelloPlugin : PluginBase
 - `readme.md` package documentation is optional, not required for discovery or activation.
 - A single assembly can contain multiple plugin classes.
 - `PluginDiscovery` exposes helper predicates for the runtime rule: visible, concrete, non-generic `PluginBase` subclasses with public parameterless constructors.
+- `PluginScope` is assigned by the runtime from the load location, not by plugin code: `~/.alta/plugins` produces global plugins, while `{project}/.alta/plugins` produces project-scoped plugins.
+- Project-scoped plugins expose `ScopeProjectId` / `ScopeProjectPath` through `PluginRuntimeContext` and operation contexts so the runtime can restrict prompt injections, commands, resources, and other contributions to the matching project.
 - Contributions are declarative objects returned from virtual methods; the runtime owns registration and removal.
 - Simple contributions do not require author-supplied IDs. The runtime creates contribution handles from plugin identity, contribution point, natural names, and ordinals.
 - Plugins receive a direct `XenoAtom.Logging.Logger` through `PluginRuntimeContext` and `PluginBase.Logger`.

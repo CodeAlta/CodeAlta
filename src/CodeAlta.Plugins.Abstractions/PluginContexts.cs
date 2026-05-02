@@ -4,6 +4,27 @@ using XenoAtom.Logging;
 namespace CodeAlta.Plugins.Abstractions;
 
 /// <summary>
+/// Identifies where a plugin was loaded from and where its contributions apply by default.
+/// </summary>
+/// <remarks>
+/// The runtime sets this value from the plugin load location. Plugin authors do not choose their own scope.
+/// Plugins loaded from the user plugin directory are global; plugins loaded from a project-local plugin
+/// directory are project-scoped.
+/// </remarks>
+public enum PluginScope
+{
+    /// <summary>
+    /// The plugin was loaded from the user-wide plugin location and applies globally.
+    /// </summary>
+    Global,
+
+    /// <summary>
+    /// The plugin was loaded from a project-local plugin location and applies only to that project by default.
+    /// </summary>
+    Project,
+}
+
+/// <summary>
 /// Describes the CodeAlta host seen by a plugin.
 /// </summary>
 public sealed record PluginHostInfo
@@ -55,14 +76,51 @@ public sealed class PluginRuntimeContext
     /// <summary>Gets the plugin package directory.</summary>
     public required string PackageDirectory { get; init; }
 
+    /// <summary>
+    /// Gets the runtime-assigned plugin scope.
+    /// </summary>
+    /// <remarks>
+    /// This value is determined by where the runtime loaded the plugin from, such as <c>~/.alta/plugins</c>
+    /// for global plugins or <c>{project}/.alta/plugins</c> for project-scoped plugins.
+    /// </remarks>
+    public PluginScope Scope { get; init; } = PluginScope.Global;
+
+    /// <summary>Gets the project identifier for a project-scoped plugin, when known.</summary>
+    public string? ScopeProjectId { get; init; }
+
+    /// <summary>Gets the project path for a project-scoped plugin, when known.</summary>
+    public string? ScopeProjectPath { get; init; }
+
     /// <summary>Gets a lifetime cancellation token cancelled when the plugin is deactivated.</summary>
     public CancellationToken LifetimeCancellationToken { get; init; }
+
+    /// <summary>Gets a value indicating whether this plugin is global.</summary>
+    public bool IsGlobalScope => Scope == PluginScope.Global;
+
+    /// <summary>Gets a value indicating whether this plugin is project-scoped.</summary>
+    public bool IsProjectScope => Scope == PluginScope.Project;
 
     /// <summary>Gets a value indicating whether this context is still valid.</summary>
     public bool IsValid => _isValid && !LifetimeCancellationToken.IsCancellationRequested;
 
     /// <summary>Invalidates the context after deactivation or reload.</summary>
     public void Invalidate() => _isValid = false;
+
+    /// <summary>
+    /// Determines whether this plugin scope applies to a project.
+    /// </summary>
+    /// <param name="projectId">The project identifier to test.</param>
+    /// <param name="projectPath">The project path to test.</param>
+    /// <returns><see langword="true"/> when a global plugin applies, or when a project-scoped plugin matches the supplied project.</returns>
+    public bool AppliesToProject(string? projectId, string? projectPath)
+    {
+        if (Scope == PluginScope.Global)
+        {
+            return true;
+        }
+
+        return MatchesScopedProject(projectId, projectPath);
+    }
 
     /// <summary>Throws when the context is no longer valid.</summary>
     /// <exception cref="ObjectDisposedException">Thrown when the context is invalid.</exception>
@@ -72,6 +130,26 @@ public sealed class PluginRuntimeContext
         {
             throw new ObjectDisposedException(nameof(PluginRuntimeContext), "The plugin runtime context is no longer valid.");
         }
+    }
+
+    private bool MatchesScopedProject(string? projectId, string? projectPath)
+    {
+        if (!string.IsNullOrWhiteSpace(ScopeProjectId) &&
+            !string.IsNullOrWhiteSpace(projectId) &&
+            string.Equals(ScopeProjectId, projectId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ScopeProjectPath) &&
+            !string.IsNullOrWhiteSpace(projectPath))
+        {
+            var scopedPath = Path.GetFullPath(ScopeProjectPath);
+            var candidatePath = Path.GetFullPath(projectPath);
+            return string.Equals(scopedPath, candidatePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 }
 
@@ -87,6 +165,15 @@ public abstract class PluginOperationContext
 
     /// <summary>Gets host services.</summary>
     public required IPluginServices Services { get; init; }
+
+    /// <summary>Gets the runtime-assigned plugin scope.</summary>
+    public PluginScope Scope { get; init; } = PluginScope.Global;
+
+    /// <summary>Gets the project identifier for a project-scoped plugin, when known.</summary>
+    public string? ScopeProjectId { get; init; }
+
+    /// <summary>Gets the project path for a project-scoped plugin, when known.</summary>
+    public string? ScopeProjectPath { get; init; }
 
     /// <summary>Gets the project identifier, when known.</summary>
     public string? ProjectId { get; init; }
@@ -114,6 +201,35 @@ public abstract class PluginOperationContext
 
     /// <summary>Invalidates the context after the operation finishes.</summary>
     public void Invalidate() => _isValid = false;
+
+    /// <summary>
+    /// Determines whether this plugin operation applies to its current project.
+    /// </summary>
+    /// <returns><see langword="true"/> when the plugin is global, or when the project-scoped plugin matches the operation project.</returns>
+    public bool AppliesToCurrentProject()
+    {
+        if (Scope == PluginScope.Global)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ScopeProjectId) &&
+            !string.IsNullOrWhiteSpace(ProjectId) &&
+            string.Equals(ScopeProjectId, ProjectId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ScopeProjectPath) &&
+            !string.IsNullOrWhiteSpace(ProjectPath))
+        {
+            var scopedPath = Path.GetFullPath(ScopeProjectPath);
+            var candidatePath = Path.GetFullPath(ProjectPath);
+            return string.Equals(scopedPath, candidatePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
 
     /// <summary>Throws when the context is no longer valid.</summary>
     /// <exception cref="ObjectDisposedException">Thrown when the context is invalid.</exception>

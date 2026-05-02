@@ -36,6 +36,28 @@ public abstract class PluginBase : IAsyncDisposable
     protected IPluginUiService Ui => Context.Services.Ui;
 
     /// <summary>
+    /// Gets the runtime-assigned plugin scope.
+    /// </summary>
+    /// <remarks>
+    /// The runtime determines this from the plugin load location. Plugins loaded from <c>~/.alta/plugins</c>
+    /// are global; plugins loaded from <c>{project}/.alta/plugins</c> are project-scoped.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Thrown when the plugin has not been attached to a runtime context.</exception>
+    protected PluginScope Scope => Context.Scope;
+
+    /// <summary>
+    /// Gets the scoped project identifier for a project-scoped plugin, when known.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the plugin has not been attached to a runtime context.</exception>
+    protected string? ScopeProjectId => Context.ScopeProjectId;
+
+    /// <summary>
+    /// Gets the scoped project path for a project-scoped plugin, when known.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the plugin has not been attached to a runtime context.</exception>
+    protected string? ScopeProjectPath => Context.ScopeProjectPath;
+
+    /// <summary>
     /// Attaches a runtime context to this plugin instance.
     /// </summary>
     /// <param name="context">The runtime context.</param>

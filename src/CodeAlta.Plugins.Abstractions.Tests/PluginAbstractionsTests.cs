@@ -43,11 +43,32 @@ public sealed class PluginAbstractionsTests
 
         Assert.AreSame(context.Logger, plugin.ReadLoggerAfterAttach());
         Assert.AreSame(context.Services, plugin.ReadServicesAfterAttach());
+        Assert.AreEqual(PluginScope.Global, plugin.ReadScopeAfterAttach());
         Assert.IsTrue(context.IsValid);
+        Assert.IsTrue(context.AppliesToProject("any", Path.Combine(Path.GetTempPath(), "any")));
 
         context.Invalidate();
 
         Assert.ThrowsExactly<ObjectDisposedException>(context.ThrowIfInvalid);
+    }
+
+    [TestMethod]
+    public void ProjectScopedRuntimeContextCarriesRuntimeAssignedScope()
+    {
+        var plugin = new EmptyPlugin();
+        var projectPath = Path.Combine(Path.GetTempPath(), "scope-project");
+        var context = CreateRuntimeContext(typeof(EmptyPlugin), PluginScope.Project, "project-1", projectPath);
+
+        plugin.AttachRuntimeContext(context);
+
+        Assert.AreEqual(PluginScope.Project, plugin.ReadScopeAfterAttach());
+        Assert.AreEqual("project-1", plugin.ReadScopeProjectIdAfterAttach());
+        Assert.AreEqual(projectPath, plugin.ReadScopeProjectPathAfterAttach());
+        Assert.IsTrue(context.IsProjectScope);
+        Assert.IsFalse(context.IsGlobalScope);
+        Assert.IsTrue(context.AppliesToProject("project-1", null));
+        Assert.IsTrue(context.AppliesToProject(null, projectPath));
+        Assert.IsFalse(context.AppliesToProject("project-2", Path.Combine(Path.GetTempPath(), "other-project")));
     }
 
     [TestMethod]
@@ -215,6 +236,8 @@ public sealed class PluginAbstractionsTests
         {
             Plugin = CreateDescriptor(typeof(EmptyPlugin)),
             Services = NoopPluginServices.Create(),
+            Scope = PluginScope.Project,
+            ScopeProjectId = "project",
             Event = new AgentRawEvent(new AgentBackendId("fake"), "session", DateTimeOffset.UtcNow, "raw", document.RootElement.Clone()),
             ProjectId = "project",
             ThreadId = "thread",
@@ -222,6 +245,7 @@ public sealed class PluginAbstractionsTests
 
         Assert.AreEqual("project", context.ProjectId);
         Assert.AreEqual("fake", context.Event.BackendId.Value);
+        Assert.IsTrue(context.AppliesToCurrentProject());
         context.Invalidate();
         Assert.ThrowsExactly<ObjectDisposedException>(context.ThrowIfInvalid);
     }
@@ -248,7 +272,11 @@ public sealed class PluginAbstractionsTests
             static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")])));
     }
 
-    private static PluginRuntimeContext CreateRuntimeContext(Type pluginType)
+    private static PluginRuntimeContext CreateRuntimeContext(
+        Type pluginType,
+        PluginScope scope = PluginScope.Global,
+        string? scopeProjectId = null,
+        string? scopeProjectPath = null)
     {
         var services = NoopPluginServices.Create();
         return new PluginRuntimeContext
@@ -265,6 +293,9 @@ public sealed class PluginAbstractionsTests
             Logger = services.Logger,
             Services = services,
             PackageDirectory = Path.GetTempPath(),
+            Scope = scope,
+            ScopeProjectId = scopeProjectId,
+            ScopeProjectPath = scopeProjectPath,
         };
     }
 
@@ -335,6 +366,12 @@ public sealed class PluginAbstractionsTests
         public XenoAtom.Logging.Logger ReadLoggerAfterAttach() => Logger;
 
         public IPluginServices ReadServicesAfterAttach() => Services;
+
+        public PluginScope ReadScopeAfterAttach() => Scope;
+
+        public string? ReadScopeProjectIdAfterAttach() => ScopeProjectId;
+
+        public string? ReadScopeProjectPathAfterAttach() => ScopeProjectPath;
     }
 
     [Plugin("sample-key", DisplayName = "Sample Plugin", Description = "Sample.", Author = "Tester", ProjectUrl = "https://example.com", ReadmeAnchor = "docs", Tags = ["one", "two"])]
