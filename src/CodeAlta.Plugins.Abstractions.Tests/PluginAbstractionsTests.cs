@@ -2,6 +2,9 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Terminal.UI.Controls;
+using CliCommand = XenoAtom.CommandLine.Command;
+using CliCommandGroup = XenoAtom.CommandLine.CommandGroup;
+using CliCommandNode = XenoAtom.CommandLine.CommandNode;
 
 namespace CodeAlta.Plugins.Abstractions.Tests;
 
@@ -14,6 +17,7 @@ public sealed class PluginAbstractionsTests
         var plugin = new EmptyPlugin();
 
         Assert.ThrowsExactly<InvalidOperationException>(plugin.ReadLoggerBeforeAttach);
+        CollectionAssert.AreEqual(Array.Empty<CliCommandNode>(), plugin.GetCommandLineContributions().ToArray());
         CollectionAssert.AreEqual(Array.Empty<PluginCommandContribution>(), plugin.GetCommands().ToArray());
         CollectionAssert.AreEqual(Array.Empty<PluginAgentToolContribution>(), plugin.GetAgentTools().ToArray());
         CollectionAssert.AreEqual(Array.Empty<PluginAgentBackendContribution>(), plugin.GetAgentBackends().ToArray());
@@ -127,9 +131,9 @@ public sealed class PluginAbstractionsTests
         var inputDialog = PluginUi.InputDialog("Input", "seed");
         var confirmDialog = PluginUi.ConfirmDialog("Confirm", "Continue?");
         var resource = Resources.SkillRoot("skills");
-        var flag = CommandLine.Flag("plugin-test", "Enable plugin test mode.");
-        var option = CommandLine.Option("plugin-value", "Set a plugin value.");
-        var listOption = CommandLine.ListOption("plugin-list", "Set repeated plugin values.");
+        var cliCommand = new CliCommand("plugin", "Plugin command-line commands.");
+        var cliGroup = new CliCommandGroup();
+        XenoAtom.CommandLine.CommandExtensions.Add(cliGroup, "plugin-test", "Enable plugin test mode.", static _ => { });
         var startup = Startup.Resources("early-resources", [resource]);
         var attachment = Attachments.File("src/Program.cs", "Program.cs");
         var tool = Tool.FromDefinition(CreateToolDefinition(), promptSnippet: "Use hello_tool.");
@@ -148,9 +152,9 @@ public sealed class PluginAbstractionsTests
         Assert.AreEqual(2, confirmDialog.Buttons.Count);
         Assert.AreEqual(PluginResourceKind.SkillRoot, resource.Kind);
         Assert.IsTrue(resource.IsPackageRelative);
-        Assert.AreEqual(PluginCommandLineValueKind.Boolean, flag.ValueKind);
-        Assert.AreEqual(PluginCommandLineValueKind.String, option.ValueKind);
-        Assert.AreEqual(PluginCommandLineValueKind.StringList, listOption.ValueKind);
+        Assert.AreEqual("plugin", cliCommand.Name);
+        Assert.IsInstanceOfType(cliGroup.Nodes.Single(), typeof(XenoAtom.CommandLine.Option));
+        Assert.AreEqual("plugin-test", ((XenoAtom.CommandLine.Option)cliGroup.Nodes.Single()).Prototype);
         Assert.AreEqual(resource, startup.Resources[0]);
         Assert.AreEqual(PluginPromptAttachmentKind.File, attachment.Kind);
         Assert.AreEqual("hello_tool", tool.Definition.Spec.Name);

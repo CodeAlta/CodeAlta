@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="XenoAtom.CommandLine" VersionOverride="2.0.3" />
     <PackageReference Include="XenoAtom.Logging" />
     <PackageReference Include="XenoAtom.Terminal.UI" />
     <PackageReference Include="XenoAtom.Terminal.UI.Extensions.CodeEditor.TextMateSharp" />

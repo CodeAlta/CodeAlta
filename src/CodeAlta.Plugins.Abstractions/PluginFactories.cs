@@ -123,58 +123,6 @@ public static class Startup
 }
 
 /// <summary>
-/// Low-ceremony factories for command-line option contributions.
-/// </summary>
-public static class CommandLine
-{
-    /// <summary>Creates a boolean command-line flag contribution.</summary>
-    /// <param name="name">The option name without leading dashes.</param>
-    /// <param name="description">The option description.</param>
-    /// <param name="handler">Optional option handler.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The command-line contribution.</returns>
-    public static PluginCommandLineContribution Flag(string name, string description, PluginCommandLineHandler? handler = null, int order = 0)
-        => Create(name, description, PluginCommandLineValueKind.Boolean, handler, order);
-
-    /// <summary>Creates a string command-line option contribution.</summary>
-    /// <param name="name">The option name without leading dashes.</param>
-    /// <param name="description">The option description.</param>
-    /// <param name="handler">Optional option handler.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The command-line contribution.</returns>
-    public static PluginCommandLineContribution Option(string name, string description, PluginCommandLineHandler? handler = null, int order = 0)
-        => Create(name, description, PluginCommandLineValueKind.String, handler, order);
-
-    /// <summary>Creates a repeated string command-line option contribution.</summary>
-    /// <param name="name">The option name without leading dashes.</param>
-    /// <param name="description">The option description.</param>
-    /// <param name="handler">Optional option handler.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The command-line contribution.</returns>
-    public static PluginCommandLineContribution ListOption(string name, string description, PluginCommandLineHandler? handler = null, int order = 0)
-        => Create(name, description, PluginCommandLineValueKind.StringList, handler, order);
-
-    private static PluginCommandLineContribution Create(
-        string name,
-        string description,
-        PluginCommandLineValueKind valueKind,
-        PluginCommandLineHandler? handler,
-        int order)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(description);
-        return new PluginCommandLineContribution
-        {
-            Name = name,
-            Description = description,
-            ValueKind = valueKind,
-            Handler = handler,
-            Order = order,
-        };
-    }
-}
-
-/// <summary>
 /// Low-ceremony factories for prompt contributions.
 /// </summary>
 public static class Prompt

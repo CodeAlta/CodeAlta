@@ -255,19 +255,6 @@ public sealed class PluginStartupContext : PluginOperationContext
     public IReadOnlyDictionary<string, string?> Environment { get; init; } = new Dictionary<string, string?>();
 }
 
-/// <summary>Context for plugin command-line option handlers.</summary>
-public sealed class PluginCommandLineContext : PluginOperationContext
-{
-    /// <summary>Gets the option name without leading dashes.</summary>
-    public required string Name { get; init; }
-
-    /// <summary>Gets the raw option values.</summary>
-    public IReadOnlyList<string> Values { get; init; } = [];
-
-    /// <summary>Gets raw startup arguments.</summary>
-    public IReadOnlyList<string> RawArguments { get; init; } = [];
-}
-
 /// <summary>Context for plugin command handlers.</summary>
 public sealed class PluginCommandContext : PluginOperationContext
 {

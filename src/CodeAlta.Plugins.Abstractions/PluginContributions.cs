@@ -130,12 +130,6 @@ public sealed record PluginContributionMetadata
 /// <returns>A task representing asynchronous startup work.</returns>
 public delegate ValueTask PluginStartupHandler(PluginStartupContext context, CancellationToken cancellationToken);
 
-/// <summary>Delegate for command-line option handlers.</summary>
-/// <param name="context">The command-line context.</param>
-/// <param name="cancellationToken">A token to cancel the operation.</param>
-/// <returns>A task representing asynchronous command-line work.</returns>
-public delegate ValueTask PluginCommandLineHandler(PluginCommandLineContext context, CancellationToken cancellationToken);
-
 /// <summary>Delegate for command handlers.</summary>
 /// <param name="context">The command context.</param>
 /// <param name="cancellationToken">A token to cancel the operation.</param>
@@ -207,36 +201,6 @@ public sealed record PluginStartupContribution
 
     /// <summary>Gets early resource contributions.</summary>
     public IReadOnlyList<PluginResourceContribution> Resources { get; init; } = [];
-}
-
-/// <summary>Describes a plugin-contributed command-line option.</summary>
-public sealed record PluginCommandLineContribution
-{
-    /// <summary>Gets the option name without leading dashes.</summary>
-    public required string Name { get; init; }
-
-    /// <summary>Gets the option description.</summary>
-    public string? Description { get; init; }
-
-    /// <summary>Gets the option value kind.</summary>
-    public PluginCommandLineValueKind ValueKind { get; init; }
-
-    /// <summary>Gets the option handler.</summary>
-    public PluginCommandLineHandler? Handler { get; init; }
-
-    /// <summary>Gets the ordering hint.</summary>
-    public int Order { get; init; }
-}
-
-/// <summary>Identifies a command-line option value kind.</summary>
-public enum PluginCommandLineValueKind
-{
-    /// <summary>A boolean flag.</summary>
-    Boolean,
-    /// <summary>A single string value.</summary>
-    String,
-    /// <summary>A repeated string value.</summary>
-    StringList,
 }
 
 /// <summary>Describes a command or shortcut contribution.</summary>

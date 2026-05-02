@@ -7,6 +7,7 @@ A simple plugin usually references only `CodeAlta.Plugins.Abstractions`, inherit
 ```csharp
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Terminal.UI.Controls;
+using CliCommand = XenoAtom.CommandLine.Command;
 
 [Plugin(DisplayName = "Hello Plugin", Description = "Adds a command, prompt guidance, and status row.")]
 public sealed class HelloPlugin : PluginBase
@@ -26,6 +27,11 @@ public sealed class HelloPlugin : PluginBase
     public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContributions()
     {
         yield return Prompt.Developer("When the user asks about the hello plugin, explain that it is installed.");
+    }
+
+    public override IEnumerable<XenoAtom.CommandLine.CommandNode> GetCommandLineContributions()
+    {
+        yield return new CliCommand("hello", "Run hello plugin command-line actions.");
     }
 
     public override IEnumerable<PluginUiContribution> GetUiContributions()
@@ -53,7 +59,7 @@ public sealed class HelloPlugin : PluginBase
 
 The abstraction package includes contracts for:
 
-- early startup and command-line options;
+- early startup hooks and command-line contributions using `XenoAtom.CommandLine` nodes;
 - shell, prompt, and thread commands with shortcut/presentation metadata;
 - UI visuals, status rows, dialogs, and renderer hooks using XenoAtom `Visual` types;
 - prompt processors, system/developer prompt parts, and before-agent-run hooks;
@@ -64,8 +70,9 @@ The abstraction package includes contracts for:
 - normalized agent event observation;
 - diagnostics, lifecycle states, context invalidation, and no-op/headless service implementations.
 
-Low-ceremony factories are available for common authoring tasks: `Command`, `CommandLine`, `Startup`, `Prompt`, `Attachments`, `PluginUi`, `Resources`, `Tool`, and `PluginBackend`.
+Low-ceremony factories are available for common authoring tasks: `Command`, `Startup`, `Prompt`, `Attachments`, `PluginUi`, `Resources`, `Tool`, and `PluginBackend`.
 `PluginUi` also creates dialog requests for notifications, confirmations, input text, text editor dialogs, selections, and custom visuals.
+Command-line contributions intentionally use plain `XenoAtom.CommandLine` objects such as `Command` and `CommandGroup`, with options, arguments, validation, completion, and callbacks added through the command-line API directly instead of a CodeAlta-specific wrapper.
 
 ## Backend/provider example
 

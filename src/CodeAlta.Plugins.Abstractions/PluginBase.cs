@@ -1,3 +1,5 @@
+using XenoAtom.CommandLine;
+
 namespace CodeAlta.Plugins.Abstractions;
 
 /// <summary>
@@ -103,10 +105,10 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginStartupContribution> GetStartupContributions() => [];
 
     /// <summary>
-    /// Gets command-line option contributions.
+    /// Gets command-line contributions.
     /// </summary>
     /// <returns>Command-line contributions.</returns>
-    public virtual IEnumerable<PluginCommandLineContribution> GetCommandLineContributions() => [];
+    public virtual IEnumerable<CommandNode> GetCommandLineContributions() => [];
 
     /// <summary>
     /// Gets command and shortcut contributions.
