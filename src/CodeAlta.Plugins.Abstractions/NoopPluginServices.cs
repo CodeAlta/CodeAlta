@@ -114,6 +114,14 @@ public sealed class NoopPluginUiService : IPluginUiService
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<PluginDialogResponse?>((PluginDialogResponse?)null);
+    }
 }
 
 /// <summary>

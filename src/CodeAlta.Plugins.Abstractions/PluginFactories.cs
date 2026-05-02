@@ -79,6 +79,102 @@ public static class Command
 }
 
 /// <summary>
+/// Low-ceremony factories for early startup contributions.
+/// </summary>
+public static class Startup
+{
+    /// <summary>Creates a startup hook contribution.</summary>
+    /// <param name="name">The hook name.</param>
+    /// <param name="handler">The startup handler.</param>
+    /// <param name="description">Optional description.</param>
+    /// <param name="order">Ordering hint.</param>
+    /// <returns>The startup contribution.</returns>
+    public static PluginStartupContribution Hook(string name, PluginStartupHandler handler, string? description = null, int order = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(handler);
+        return new PluginStartupContribution
+        {
+            Name = name,
+            Description = description,
+            Order = order,
+            Handler = handler,
+        };
+    }
+
+    /// <summary>Creates a startup contribution that exposes early resources.</summary>
+    /// <param name="name">The contribution name.</param>
+    /// <param name="resources">The early resources.</param>
+    /// <param name="description">Optional description.</param>
+    /// <param name="order">Ordering hint.</param>
+    /// <returns>The startup contribution.</returns>
+    public static PluginStartupContribution Resources(string name, IReadOnlyList<PluginResourceContribution> resources, string? description = null, int order = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(resources);
+        return new PluginStartupContribution
+        {
+            Name = name,
+            Description = description,
+            Order = order,
+            Resources = resources,
+        };
+    }
+}
+
+/// <summary>
+/// Low-ceremony factories for command-line option contributions.
+/// </summary>
+public static class CommandLine
+{
+    /// <summary>Creates a boolean command-line flag contribution.</summary>
+    /// <param name="name">The option name without leading dashes.</param>
+    /// <param name="description">The option description.</param>
+    /// <param name="handler">Optional option handler.</param>
+    /// <param name="order">Ordering hint.</param>
+    /// <returns>The command-line contribution.</returns>
+    public static PluginCommandLineContribution Flag(string name, string description, PluginCommandLineHandler? handler = null, int order = 0)
+        => Create(name, description, PluginCommandLineValueKind.Boolean, handler, order);
+
+    /// <summary>Creates a string command-line option contribution.</summary>
+    /// <param name="name">The option name without leading dashes.</param>
+    /// <param name="description">The option description.</param>
+    /// <param name="handler">Optional option handler.</param>
+    /// <param name="order">Ordering hint.</param>
+    /// <returns>The command-line contribution.</returns>
+    public static PluginCommandLineContribution Option(string name, string description, PluginCommandLineHandler? handler = null, int order = 0)
+        => Create(name, description, PluginCommandLineValueKind.String, handler, order);
+
+    /// <summary>Creates a repeated string command-line option contribution.</summary>
+    /// <param name="name">The option name without leading dashes.</param>
+    /// <param name="description">The option description.</param>
+    /// <param name="handler">Optional option handler.</param>
+    /// <param name="order">Ordering hint.</param>
+    /// <returns>The command-line contribution.</returns>
+    public static PluginCommandLineContribution ListOption(string name, string description, PluginCommandLineHandler? handler = null, int order = 0)
+        => Create(name, description, PluginCommandLineValueKind.StringList, handler, order);
+
+    private static PluginCommandLineContribution Create(
+        string name,
+        string description,
+        PluginCommandLineValueKind valueKind,
+        PluginCommandLineHandler? handler,
+        int order)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+        return new PluginCommandLineContribution
+        {
+            Name = name,
+            Description = description,
+            ValueKind = valueKind,
+            Handler = handler,
+            Order = order,
+        };
+    }
+}
+
+/// <summary>
 /// Low-ceremony factories for prompt contributions.
 /// </summary>
 public static class Prompt
@@ -200,6 +296,138 @@ public static class PluginUi
     {
         ArgumentNullException.ThrowIfNull(renderer);
         return new PluginRendererContribution { Region = region, Target = target, Renderer = renderer, Order = order };
+    }
+
+    /// <summary>Creates a notification dialog request.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="message">The dialog message.</param>
+    /// <returns>The dialog request.</returns>
+    public static PluginDialogRequest NotifyDialog(string title, string message)
+        => Dialog(PluginDialogKind.Notification, title, message);
+
+    /// <summary>Creates a confirmation dialog request.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="message">The dialog message.</param>
+    /// <returns>The dialog request.</returns>
+    public static PluginDialogRequest ConfirmDialog(string title, string message)
+        => Dialog(PluginDialogKind.Confirmation, title, message) with
+        {
+            Buttons =
+            [
+                new PluginDialogButton { Name = "yes", Label = "Yes", IsDefault = true },
+                new PluginDialogButton { Name = "no", Label = "No", IsCancel = true },
+            ],
+        };
+
+    /// <summary>Creates an input dialog request.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="initialText">Optional initial text.</param>
+    /// <returns>The dialog request.</returns>
+    public static PluginDialogRequest InputDialog(string title, string? initialText = null)
+        => Dialog(PluginDialogKind.Input, title, null) with { InitialText = initialText };
+
+    /// <summary>Creates a text editor dialog request.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="text">Initial editor text.</param>
+    /// <returns>The dialog request.</returns>
+    public static PluginDialogRequest TextEditorDialog(string title, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return Dialog(PluginDialogKind.TextEditor, title, null) with { InitialText = text };
+    }
+
+    /// <summary>Creates a selection dialog request.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="items">Selectable item labels.</param>
+    /// <returns>The dialog request.</returns>
+    public static PluginDialogRequest SelectionDialog(string title, IReadOnlyList<string> items)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(items);
+        return new PluginDialogRequest
+        {
+            Kind = PluginDialogKind.Selection,
+            Title = title,
+            SelectionItems = items,
+        };
+    }
+
+    /// <summary>Creates a custom visual dialog request.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="content">The dialog content.</param>
+    /// <returns>The dialog request.</returns>
+    public static PluginDialogRequest CustomDialog(string title, Visual content)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(content);
+        return new PluginDialogRequest
+        {
+            Kind = PluginDialogKind.Custom,
+            Title = title,
+            Content = content,
+        };
+    }
+
+    private static PluginDialogRequest Dialog(PluginDialogKind kind, string title, string? message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        return new PluginDialogRequest
+        {
+            Kind = kind,
+            Title = title,
+            Message = message,
+        };
+    }
+}
+
+/// <summary>
+/// Low-ceremony factories for prompt attachments.
+/// </summary>
+public static class Attachments
+{
+    /// <summary>Creates a text attachment.</summary>
+    /// <param name="text">The attachment text.</param>
+    /// <param name="displayName">Optional display name.</param>
+    /// <returns>The attachment.</returns>
+    public static PluginPromptAttachment Text(string text, string? displayName = null)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return new PluginPromptAttachment { Kind = PluginPromptAttachmentKind.Text, Text = text, DisplayName = displayName };
+    }
+
+    /// <summary>Creates a file attachment.</summary>
+    /// <param name="path">The file path.</param>
+    /// <param name="displayName">Optional display name.</param>
+    /// <returns>The attachment.</returns>
+    public static PluginPromptAttachment File(string path, string? displayName = null) => PathBacked(PluginPromptAttachmentKind.File, path, displayName);
+
+    /// <summary>Creates a directory attachment.</summary>
+    /// <param name="path">The directory path.</param>
+    /// <param name="displayName">Optional display name.</param>
+    /// <returns>The attachment.</returns>
+    public static PluginPromptAttachment Directory(string path, string? displayName = null) => PathBacked(PluginPromptAttachmentKind.Directory, path, displayName);
+
+    /// <summary>Creates an image attachment.</summary>
+    /// <param name="pathOrUrl">The image path or URL.</param>
+    /// <param name="displayName">Optional display name.</param>
+    /// <param name="mediaType">Optional media type.</param>
+    /// <returns>The attachment.</returns>
+    public static PluginPromptAttachment Image(string pathOrUrl, string? displayName = null, string? mediaType = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pathOrUrl);
+        return new PluginPromptAttachment
+        {
+            Kind = PluginPromptAttachmentKind.Image,
+            Path = pathOrUrl,
+            DisplayName = displayName,
+            MediaType = mediaType,
+        };
+    }
+
+    private static PluginPromptAttachment PathBacked(PluginPromptAttachmentKind kind, string path, string? displayName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return new PluginPromptAttachment { Kind = kind, Path = path, DisplayName = displayName };
     }
 }
 

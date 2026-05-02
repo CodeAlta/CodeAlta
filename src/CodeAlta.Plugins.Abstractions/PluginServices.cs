@@ -79,6 +79,12 @@ public interface IPluginUiService
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>A task representing asynchronous UI work.</returns>
     ValueTask ShowDialogAsync(PluginDialogRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Shows a custom dialog request and returns a response when the host supports result-bearing dialogs.</summary>
+    /// <param name="request">The dialog request.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The dialog response, or <see langword="null"/> when cancelled or unsupported.</returns>
+    ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -273,10 +279,58 @@ public sealed record PluginDialogRequest
     /// <summary>Gets optional custom dialog content.</summary>
     public Visual? Content { get; init; }
 
+    /// <summary>Gets initial text for input or editor dialogs.</summary>
+    public string? InitialText { get; init; }
+
+    /// <summary>Gets selection item labels for selection dialogs.</summary>
+    public IReadOnlyList<string> SelectionItems { get; init; } = [];
+
+    /// <summary>Gets custom dialog buttons.</summary>
+    public IReadOnlyList<PluginDialogButton> Buttons { get; init; } = [];
+
     /// <summary>Gets the dialog kind.</summary>
     public PluginDialogKind Kind { get; init; } = PluginDialogKind.Custom;
 
     /// <summary>Gets custom metadata for runtime-specific dialogs.</summary>
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } = new Dictionary<string, string>();
+}
+
+/// <summary>
+/// Describes a button in a plugin dialog.
+/// </summary>
+public sealed record PluginDialogButton
+{
+    /// <summary>Gets the stable button name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Gets the button label.</summary>
+    public required string Label { get; init; }
+
+    /// <summary>Gets a value indicating whether this is the default button.</summary>
+    public bool IsDefault { get; init; }
+
+    /// <summary>Gets a value indicating whether this button cancels the dialog.</summary>
+    public bool IsCancel { get; init; }
+}
+
+/// <summary>
+/// Describes the result of a plugin dialog.
+/// </summary>
+public sealed record PluginDialogResponse
+{
+    /// <summary>Gets the activated button name, when available.</summary>
+    public string? ButtonName { get; init; }
+
+    /// <summary>Gets a value indicating whether the dialog was cancelled.</summary>
+    public bool Cancelled { get; init; }
+
+    /// <summary>Gets text entered by the user.</summary>
+    public string? Text { get; init; }
+
+    /// <summary>Gets the selected item index.</summary>
+    public int? SelectedIndex { get; init; }
+
+    /// <summary>Gets response metadata supplied by the host.</summary>
     public IReadOnlyDictionary<string, string> Metadata { get; init; } = new Dictionary<string, string>();
 }
 

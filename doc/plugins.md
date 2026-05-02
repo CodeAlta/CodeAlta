@@ -42,6 +42,7 @@ public sealed class HelloPlugin : PluginBase
 - `PluginAttribute` metadata is optional; a runtime can derive descriptor data from the assembly and type.
 - `readme.md` package documentation is optional, not required for discovery or activation.
 - A single assembly can contain multiple plugin classes.
+- `PluginDiscovery` exposes helper predicates for the runtime rule: visible, concrete, non-generic `PluginBase` subclasses with public parameterless constructors.
 - Contributions are declarative objects returned from virtual methods; the runtime owns registration and removal.
 - Simple contributions do not require author-supplied IDs. The runtime creates contribution handles from plugin identity, contribution point, natural names, and ordinals.
 - Plugins receive a direct `XenoAtom.Logging.Logger` through `PluginRuntimeContext` and `PluginBase.Logger`.
@@ -60,6 +61,9 @@ The abstraction package includes contracts for:
 - compaction hooks for before/instruction/reducer/after participation;
 - normalized agent event observation;
 - diagnostics, lifecycle states, context invalidation, and no-op/headless service implementations.
+
+Low-ceremony factories are available for common authoring tasks: `Command`, `CommandLine`, `Startup`, `Prompt`, `Attachments`, `PluginUi`, `Resources`, `Tool`, and `PluginBackend`.
+`PluginUi` also creates dialog requests for notifications, confirmations, input text, text editor dialogs, selections, and custom visuals.
 
 ## Backend/provider example
 

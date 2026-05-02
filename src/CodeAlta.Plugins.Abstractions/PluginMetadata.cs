@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace CodeAlta.Plugins.Abstractions;
@@ -350,6 +351,49 @@ public static class PluginDescriptorFactory
 
         return tags.Where(static tag => !string.IsNullOrWhiteSpace(tag))
             .Select(static tag => tag.Trim())
+            .ToArray();
+    }
+}
+
+/// <summary>
+/// Provides helper methods for discovering plugin entry-point types in an assembly.
+/// </summary>
+public static class PluginDiscovery
+{
+    /// <summary>
+    /// Determines whether a type satisfies the v1 plugin discovery contract.
+    /// </summary>
+    /// <param name="type">The type to inspect.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="type"/> is a visible, concrete, non-generic
+    /// <see cref="PluginBase"/> subclass with a public parameterless constructor; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is <see langword="null"/>.</exception>
+    public static bool IsDiscoverablePluginType(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        return type.IsClass &&
+            type.IsVisible &&
+            !type.IsAbstract &&
+            !type.ContainsGenericParameters &&
+            typeof(PluginBase).IsAssignableFrom(type) &&
+            type.GetConstructor(Type.EmptyTypes) is not null;
+    }
+
+    /// <summary>
+    /// Discovers plugin entry-point types in an assembly.
+    /// </summary>
+    /// <param name="assembly">The assembly to inspect.</param>
+    /// <returns>Discoverable plugin types in deterministic full-name order.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="assembly"/> is <see langword="null"/>.</exception>
+    [RequiresUnreferencedCode("Plugin type discovery scans assembly metadata and is intended for the non-trimmed plugin loader/runtime path.")]
+    public static IReadOnlyList<Type> DiscoverPluginTypes(Assembly assembly)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        return assembly.GetTypes()
+            .Where(IsDiscoverablePluginType)
+            .OrderBy(static type => type.FullName, StringComparer.Ordinal)
             .ToArray();
     }
 }
