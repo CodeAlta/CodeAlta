@@ -38,13 +38,13 @@ Agent role profiles can list associated skills with `skills:` or `codealta.skill
 
 Codex and Copilot backends manage their own native skills. CodeAlta therefore does not inject CodeAlta-managed skill advertisements or the `codealta.skills.activate` tool into Codex/Copilot sessions.
 
-Activated local-runtime skills are recorded in the session journal so thread info can show loaded skills after resume. If a previously loaded skill is missing on disk, CodeAlta preserves the history and reports the missing path.
+Activated local-runtime skills are recorded in the session journal so thread info can show loaded skills after resume. Before compaction, the activated payload remains ordinary replayed conversation context; after compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions keep skill guidance without duplicating current context. If a compacted prompt-integrated skill is missing on disk, CodeAlta preserves the history and reports the missing path.
 
 ## Browsing skills in the UI
 
 Use `/skills` or `/skill`, the command palette entry, or `Ctrl+G Ctrl+K` to open the skills browser. The browser can show combined, current-project, or user/global discovery scopes; it includes source kind, validation state, model visibility, shadowing, provenance paths, diagnostics, and a refresh action.
 
-Use **Activate** on a valid, unshadowed skill to load it into the selected local/raw backend thread through the host-owned runtime path. CodeAlta records the activation in the local session journal and injects the canonical skill payload as session context; it does not paste raw skill text into the prompt draft. Codex and Copilot threads are excluded because those providers manage their own native skills.
+Use **Activate** on a valid, unshadowed skill to load it into the selected local/raw backend thread through the host-owned runtime path. CodeAlta records the activation in the local session journal and injects the canonical skill payload as session context; it does not paste raw skill text into the prompt draft before compaction. Codex and Copilot threads are excluded because those providers manage their own native skills.
 
 Use **Open SKILL.md** to open the selected skill in the existing editor. Because `SKILL.md` is a Markdown file, it uses the editor's normal Markdown/TextMate highlighting path.
 

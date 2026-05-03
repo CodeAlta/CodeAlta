@@ -469,7 +469,8 @@ Recommended compaction behavior for local-runtime sessions:
 - retain replay-significant skill activation events in the durable log
 - allow the compacted summary/state to include a small `loaded_skills` set for fast restore
 - do not drop skill activation history merely because the full `SKILL.md` body was compacted away
-- when replaying a compacted session, restore the active-skill set first, then rehydrate skill content on demand if needed
+- before compaction, keep activated skill payloads as ordinary replayed transcript/tool context rather than duplicating them into the composed prompt
+- when replaying a compacted session, restore the active-skill set first, then rehydrate prompt-integrated skill content on demand if needed
 
 If a skill is still relevant after compaction, CodeAlta may re-activate it from the catalog rather than preserving duplicated text forever.
 

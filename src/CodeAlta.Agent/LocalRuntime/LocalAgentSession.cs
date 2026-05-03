@@ -167,16 +167,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         try
         {
             var fileChangeTracker = new LocalAgentTurnFileChangeTracker(_summary.WorkingDirectory);
-            if (TryCreateUserActivatedSkillState(options.Input, out var userActivatedSkill))
-            {
-                _state = _state with
-                {
-                    LoadedSkills = MergeLoadedSkill(_state.LoadedSkills, userActivatedSkill),
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                };
-            }
-
-            var instructionBundle = LocalAgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+            var instructionBundle = LocalAgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
             var requestDeveloperInstructions = CombineDeveloperInstructions(
                 instructionBundle.DeveloperInstructions,
                 instructionBundle.RuntimeContext);
@@ -599,6 +590,18 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
 
                {runtimeContext}
                """;
+    }
+
+    private IReadOnlyList<LocalAgentLoadedSkillState> GetPromptIntegratedLoadedSkills()
+    {
+        if (_state.LoadedSkills.Count == 0 || _state.LastCompactedAt is not { } lastCompactedAt)
+        {
+            return [];
+        }
+
+        return _state.LoadedSkills
+            .Where(skill => skill.ActivatedAt <= lastCompactedAt)
+            .ToArray();
     }
 
     private LocalAgentTurnRequest CreateTurnRequest(

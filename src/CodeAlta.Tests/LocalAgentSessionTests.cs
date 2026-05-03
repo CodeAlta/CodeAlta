@@ -273,7 +273,7 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
-    public async Task LocalAgentSession_SendAsync_PersistsSkillActivationAndRestoresLoadedSkills()
+    public async Task LocalAgentSession_SendAsync_PersistsSkillActivationWithoutPromptPromotionBeforeCompaction()
     {
         using var temp = TestTempDirectory.Create();
         var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
@@ -368,9 +368,19 @@ public sealed class LocalAgentSessionTests
                 (request, _, _) =>
                 {
                     Assert.IsNotNull(request.DeveloperInstructions);
-                    StringAssert.Contains(request.DeveloperInstructions, "<active_skills>");
-                    StringAssert.Contains(request.DeveloperInstructions, "code-review");
-                    StringAssert.Contains(request.DeveloperInstructions, "Review code for regressions.");
+                    Assert.IsFalse(
+                        request.DeveloperInstructions.Contains("<active_skills>", StringComparison.Ordinal),
+                        "Activated skills should stay in replayed conversation context until compaction promotes them into instructions.");
+                    Assert.IsTrue(
+                        request.Conversation
+                            .SelectMany(static message => message.Parts)
+                            .OfType<LocalAgentMessagePart.ToolResult>()
+                            .SelectMany(static part => part.Result.Items)
+                            .OfType<AgentToolResultItem.Text>()
+                            .Any(static item =>
+                                item.Value.Contains("<skill_content", StringComparison.OrdinalIgnoreCase) &&
+                                item.Value.Contains("code-review", StringComparison.Ordinal)),
+                        "The activated skill payload should still be replayed as conversation context before compaction.");
                     return Task.FromResult(
                         new LocalAgentTurnResponse
                         {
@@ -390,6 +400,8 @@ public sealed class LocalAgentSessionTests
             });
 
         _ = await resumedSession.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Continue.") }).ConfigureAwait(false);
+        var resumedHistory = await resumedSession.GetHistoryAsync().ConfigureAwait(false);
+        Assert.AreEqual(1, resumedHistory.OfType<AgentSystemPromptEvent>().Count());
     }
 
     [TestMethod]
@@ -420,9 +432,9 @@ public sealed class LocalAgentSessionTests
                 (request, _, _) =>
                 {
                     Assert.IsNotNull(request.DeveloperInstructions);
-                    StringAssert.Contains(request.DeveloperInstructions, "<active_skills>");
-                    StringAssert.Contains(request.DeveloperInstructions, "code-review");
-                    StringAssert.Contains(request.DeveloperInstructions, "Review code for regressions.");
+                    Assert.IsFalse(
+                        request.DeveloperInstructions.Contains("<active_skills>", StringComparison.Ordinal),
+                        "User-activated skills are already present in the current user message and should not be duplicated into instructions before compaction.");
                     Assert.AreEqual(1, request.Conversation.Count);
                     Assert.AreEqual(LocalAgentConversationRole.User, request.Conversation[0].Role);
                     Assert.IsTrue(request.Conversation[0].Parts.OfType<LocalAgentMessagePart.Text>().Any(part => part.Value.Contains("<skill_content", StringComparison.Ordinal)));
@@ -467,7 +479,7 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
-    public async Task LocalAgentSession_ResumeSession_SurfacesMissingLoadedSkills()
+    public async Task LocalAgentSession_ResumeSession_DoesNotPromptPromoteMissingLoadedSkillsBeforeCompaction()
     {
         using var temp = TestTempDirectory.Create();
         var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
@@ -546,8 +558,17 @@ public sealed class LocalAgentSessionTests
                 (request, _, _) =>
                 {
                     Assert.IsNotNull(request.DeveloperInstructions);
-                    StringAssert.Contains(request.DeveloperInstructions, "<skill_missing");
-                    StringAssert.Contains(request.DeveloperInstructions, "no longer available on disk");
+                    Assert.IsFalse(
+                        request.DeveloperInstructions.Contains("<skill_missing", StringComparison.Ordinal),
+                        "Missing loaded skills should not be promoted into prompt diagnostics until compaction requires prompt rehydration.");
+                    Assert.IsTrue(
+                        request.Conversation
+                            .SelectMany(static message => message.Parts)
+                            .OfType<LocalAgentMessagePart.ToolResult>()
+                            .SelectMany(static part => part.Result.Items)
+                            .OfType<AgentToolResultItem.Text>()
+                            .Any(static item => item.Value.Contains("<skill_content", StringComparison.OrdinalIgnoreCase)),
+                        "The historical skill payload should remain replayable conversation context before compaction.");
                     return Task.FromResult(
                         new LocalAgentTurnResponse
                         {
