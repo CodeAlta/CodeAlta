@@ -164,7 +164,7 @@ public static class LocalAgentBuiltInToolFactory
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "grep",
-                    $"Search files for line-based matches using a .NET regular expression. Recurses into directories, defaults to case-insensitive matching, skips likely-binary files, and returns '(no matches)' when nothing matches.",
+                    $"Search one or more files or directories for line-based matches using a .NET regular expression. Recurses into directories, defaults to case-insensitive matching, skips likely-binary files, accepts one or more optional globs, and returns '(no matches)' when nothing matches.",
                     CreateGrepSchema(options)),
                 (invocation, cancellationToken) => GrepAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
@@ -320,25 +320,22 @@ public static class LocalAgentBuiltInToolFactory
         CancellationToken cancellationToken)
     {
         var pattern = GetRequiredString(invocation.Arguments, "pattern");
-        var targetPath = ResolvePath(options.WorkingDirectory, GetOptionalString(invocation.Arguments, "path"));
-        if (!File.Exists(targetPath) && !Directory.Exists(targetPath))
+        if (!TryResolveGrepTargetPaths(options.WorkingDirectory, invocation.Arguments, out var targetPaths, out var targetPathError))
         {
-            return Task.FromResult(Failure($"Path '{targetPath}' was not found."));
+            return Task.FromResult(Failure(targetPathError));
         }
 
-        var glob = GetOptionalString(invocation.Arguments, "glob");
-        GlobPattern? globPattern = null;
-        var useRelativePathGlob = false;
-        if (!string.IsNullOrWhiteSpace(glob))
+        foreach (var targetPath in targetPaths)
         {
-            var parseResult = GlobPattern.TryParse(glob);
-            if (!parseResult.Success)
+            if (!File.Exists(targetPath) && !Directory.Exists(targetPath))
             {
-                return Task.FromResult(Failure($"Invalid glob pattern '{glob}'."));
+                return Task.FromResult(Failure($"Path '{targetPath}' was not found."));
             }
+        }
 
-            globPattern = parseResult.Pattern;
-            useRelativePathGlob = glob.Contains('/') || glob.Contains('\\');
+        if (!TryGetGrepGlobPatterns(invocation.Arguments, out var globPatterns, out var globError))
+        {
+            return Task.FromResult(Failure(globError));
         }
 
         var caseSensitive = GetOptionalBool(invocation.Arguments, "caseSensitive") ?? false;
@@ -358,50 +355,64 @@ public static class LocalAgentBuiltInToolFactory
 
         var matches = new List<string>(maxMatches);
 
-        IEnumerable<FileTreeEntry>? entries = null;
-        if (Directory.Exists(targetPath))
+        var visitedFiles = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (var targetPath in targetPaths)
         {
-            var walkOptions = new FileTreeWalkOptions
+            IEnumerable<FileTreeEntry>? entries = null;
+            if (Directory.Exists(targetPath))
             {
-                CancellationToken = cancellationToken,
-                RepositoryContext = RepositoryDiscovery.TryDiscover(targetPath, out var repositoryContext) ? repositoryContext : null,
-            };
-            entries = FileTreeWalker.Enumerate(targetPath, walkOptions);
-        }
-
-        foreach (var file in EnumerateSearchFiles(targetPath, entries))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (globPattern is not null && !GlobMatches(globPattern, file, useRelativePathGlob))
-            {
-                continue;
+                var walkOptions = new FileTreeWalkOptions
+                {
+                    CancellationToken = cancellationToken,
+                    RepositoryContext = RepositoryDiscovery.TryDiscover(targetPath, out var repositoryContext) ? repositoryContext : null,
+                };
+                entries = FileTreeWalker.Enumerate(targetPath, walkOptions);
             }
 
-            if (IsImagePath(file.FullPath))
+            foreach (var file in EnumerateSearchFiles(targetPath, entries))
             {
-                continue;
-            }
-
-            try
-            {
-                if (LocalAgentFileTypeDetector.IsProbablyBinaryFile(file.FullPath))
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!visitedFiles.Add(file.FullPath))
                 {
                     continue;
                 }
 
-                SearchFileLines(file.FullPath, file.DisplayPath, regex, maxMatches, matches, cancellationToken);
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-            catch (DecoderFallbackException)
-            {
-                continue;
+                if (globPatterns.Length > 0 && !GlobMatches(globPatterns, file))
+                {
+                    continue;
+                }
+
+                if (IsImagePath(file.FullPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (LocalAgentFileTypeDetector.IsProbablyBinaryFile(file.FullPath))
+                    {
+                        continue;
+                    }
+
+                    SearchFileLines(file.FullPath, file.DisplayPath, regex, maxMatches, matches, cancellationToken);
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+                catch (DecoderFallbackException)
+                {
+                    continue;
+                }
+
+                if (matches.Count >= maxMatches)
+                {
+                    break;
+                }
             }
 
             if (matches.Count >= maxMatches)
@@ -1140,10 +1151,167 @@ public static class LocalAgentBuiltInToolFactory
             ? globPattern.IsMatch(entry.RelativePath)
             : globPattern.IsMatch(entry.Name);
 
+    private static bool GlobMatches(IReadOnlyList<SearchGlobPattern> globPatterns, SearchFileTarget entry)
+    {
+        foreach (var globPattern in globPatterns)
+        {
+            if (GlobMatches(globPattern.Pattern, entry, globPattern.UseRelativePath))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool GlobMatches(GlobPattern globPattern, SearchFileTarget entry, bool useRelativePath)
         => useRelativePath
             ? globPattern.IsMatch(entry.RelativePath)
             : globPattern.IsMatch(entry.Name);
+
+    private static bool TryResolveGrepTargetPaths(
+        string? workingDirectory,
+        JsonElement arguments,
+        out string[] targetPaths,
+        [NotNullWhen(false)] out string? errorMessage)
+    {
+        targetPaths = [];
+        errorMessage = null;
+
+        if (!arguments.TryGetProperty("path", out var pathElement) || pathElement.ValueKind == JsonValueKind.Null)
+        {
+            targetPaths = [ResolvePath(workingDirectory, null)];
+            return true;
+        }
+
+        if (pathElement.ValueKind == JsonValueKind.String)
+        {
+            targetPaths = [ResolvePath(workingDirectory, pathElement.GetString())];
+            return true;
+        }
+
+        if (pathElement.ValueKind != JsonValueKind.Array)
+        {
+            errorMessage = "The 'path' field must be a string or an array of strings.";
+            return false;
+        }
+
+        var paths = new List<string>();
+        foreach (var item in pathElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                errorMessage = "The 'path' field must be a string or an array of strings.";
+                return false;
+            }
+
+            var path = item.GetString();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                errorMessage = "The 'path' array must not contain empty paths.";
+                return false;
+            }
+
+            paths.Add(ResolvePath(workingDirectory, path));
+        }
+
+        if (paths.Count == 0)
+        {
+            errorMessage = "The 'path' array must include at least one path.";
+            return false;
+        }
+
+        targetPaths = DeduplicatePaths(paths);
+        return true;
+    }
+
+    private static bool TryGetGrepGlobPatterns(
+        JsonElement arguments,
+        out SearchGlobPattern[] globPatterns,
+        [NotNullWhen(false)] out string? errorMessage)
+    {
+        globPatterns = [];
+        errorMessage = null;
+
+        if (!arguments.TryGetProperty("glob", out var globElement) || globElement.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        var patterns = new List<SearchGlobPattern>();
+        if (globElement.ValueKind == JsonValueKind.String)
+        {
+            if (!TryAddGrepGlobPattern(globElement.GetString(), patterns, out errorMessage))
+            {
+                return false;
+            }
+
+            globPatterns = patterns.ToArray();
+            return true;
+        }
+
+        if (globElement.ValueKind != JsonValueKind.Array)
+        {
+            errorMessage = "The 'glob' field must be a string or an array of strings.";
+            return false;
+        }
+
+        foreach (var item in globElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                errorMessage = "The 'glob' field must be a string or an array of strings.";
+                return false;
+            }
+
+            if (!TryAddGrepGlobPattern(item.GetString(), patterns, out errorMessage))
+            {
+                return false;
+            }
+        }
+
+        globPatterns = patterns.ToArray();
+        return true;
+    }
+
+    private static bool TryAddGrepGlobPattern(
+        string? glob,
+        List<SearchGlobPattern> patterns,
+        [NotNullWhen(false)] out string? errorMessage)
+    {
+        errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(glob))
+        {
+            return true;
+        }
+
+        var parseResult = GlobPattern.TryParse(glob);
+        if (!parseResult.Success)
+        {
+            errorMessage = $"Invalid glob pattern '{glob}'.";
+            return false;
+        }
+
+        patterns.Add(new SearchGlobPattern(parseResult.Pattern!, glob.Contains('/') || glob.Contains('\\')));
+        return true;
+    }
+
+    private static string[] DeduplicatePaths(IReadOnlyList<string> paths)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var seen = new HashSet<string>(comparer);
+        var uniquePaths = new List<string>(paths.Count);
+        foreach (var path in paths)
+        {
+            if (seen.Add(path))
+            {
+                uniquePaths.Add(path);
+            }
+        }
+
+        return uniquePaths.ToArray();
+    }
 
     private static IEnumerable<SearchFileTarget> EnumerateSearchFiles(
         string targetPath,
@@ -1287,8 +1455,8 @@ public static class LocalAgentBuiltInToolFactory
               "type": "object",
               "properties": {
                 "pattern": { "type": "string", "description": "Regular expression to search within each line (.NET regex syntax)." },
-                "path": { "type": "string", "description": "File or directory to search. Defaults to the session working directory." },
-                "glob": { "type": "string", "description": "Optional file-name glob like *.cs. If it includes path separators, it is matched against each file's relative path." },
+                "path": { "type": ["string", "array"], "items": { "type": "string" }, "description": "File or directory, or array of files/directories, to search. Defaults to the session working directory." },
+                "glob": { "type": ["string", "array"], "items": { "type": "string" }, "description": "Optional file-name glob or globs like *.cs. Multiple globs match when any glob matches. If a glob includes path separators, it is matched against each file's relative path." },
                 "caseSensitive": { "type": "boolean", "description": "Whether matching is case-sensitive. Defaults to false." },
                 "maxMatches": { "type": "integer", "description": "Maximum matches to return. Defaults to {{options.MaxGrepMatches}}.", "minimum": 1 }
               },
@@ -1502,6 +1670,8 @@ public static class LocalAgentBuiltInToolFactory
     private sealed record ShellProcessSpec(ProcessStartInfo StartInfo);
 
     private readonly record struct WorkspacePathResolution(string FullPath, string DisplayPath);
+
+    private readonly record struct SearchGlobPattern(GlobPattern Pattern, bool UseRelativePath);
 
     private readonly record struct SearchFileTarget(string FullPath, string DisplayPath, string RelativePath, string Name);
 }

@@ -170,6 +170,41 @@ public sealed class LocalAgentToolsTests
     }
 
     [TestMethod]
+    public async Task GrepTool_SearchesMultiplePathsAndGlobs()
+    {
+        using var temp = TestTempDirectory.Create();
+        var sourcePath = Path.Combine(temp.Path, "src");
+        var docsPath = Path.Combine(temp.Path, "docs");
+        Directory.CreateDirectory(sourcePath);
+        Directory.CreateDirectory(docsPath);
+        await File.WriteAllLinesAsync(Path.Combine(sourcePath, "alpha.cs"), ["match from cs"]).ConfigureAwait(false);
+        await File.WriteAllLinesAsync(Path.Combine(docsPath, "guide.md"), ["match from md"]).ConfigureAwait(false);
+        await File.WriteAllLinesAsync(Path.Combine(docsPath, "notes.txt"), ["match from txt"]).ConfigureAwait(false);
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "outside.cs"), ["match outside requested paths"]).ConfigureAwait(false);
+
+        var tools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path));
+        var tool = tools.Single(static tool => tool.Spec.Name == "grep");
+        using var args = JsonDocument.Parse("""{"path":["src","docs"],"pattern":"match","glob":["*.cs","*.md"]}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(
+                    AgentBackendIds.OpenAIResponses,
+                    "session-1",
+                    "tool-1",
+                    tool.Spec.Name,
+                    args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "alpha.cs:1: match from cs");
+        StringAssert.Contains(output, "guide.md:1: match from md");
+        Assert.IsFalse(output.Contains("notes.txt:1: match from txt", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains("outside.cs:1: match outside requested paths", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task ListDirTool_AcceptsAbsolutePath()
     {
         using var temp = TestTempDirectory.Create();
@@ -824,6 +859,11 @@ public sealed class LocalAgentToolsTests
         var grepSchema = LocalAgentToolBridge.CreateOpenAIStrictInputSchema(grep.Spec.InputSchema);
         StringAssert.Contains(grep.Spec.Description, "defaults to case-insensitive");
         StringAssert.Contains(grep.Spec.Description, "returns '(no matches)'");
+        StringAssert.Contains(grep.Spec.Description, "one or more optional globs");
+        var grepPathTypes = grepSchema.GetProperty("properties").GetProperty("path").GetProperty("type").EnumerateArray().Select(static item => item.GetString()).ToArray();
+        Assert.IsTrue(grepPathTypes.Contains("array"));
+        var grepGlobTypes = grepSchema.GetProperty("properties").GetProperty("glob").GetProperty("type").EnumerateArray().Select(static item => item.GetString()).ToArray();
+        Assert.IsTrue(grepGlobTypes.Contains("array"));
         StringAssert.Contains(
             grepSchema.GetProperty("properties").GetProperty("caseSensitive").GetProperty("description").GetString(),
             "Defaults to false");

@@ -379,6 +379,7 @@ Deterministic edit tools for all providers
 - `read_file` offsets are 1-based, so `0` should be rejected explicitly rather than silently acting like an empty range
 - `read_file` should document that offsets past EOF return an empty text result rather than an error
 - `grep` should document its no-match sentinel if it returns a literal string such as `(no matches)` instead of an empty array/object
+- `grep` should accept one or more search paths and one or more file-name globs so agents can use `rg`-style multi-path and repeated-`-g` workflows without falling back to shell commands
 - `read_file` descriptions should document the default line limit used when `limit` is omitted
 - `list_dir` should fail clearly when the target path exists but is not a directory
 - `list_dir` should use an explicit empty-directory marker instead of returning a visually blank result
