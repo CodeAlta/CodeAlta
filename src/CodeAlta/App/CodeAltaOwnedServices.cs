@@ -143,7 +143,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         },
                         SafeMode = pluginBootstrapOptions.PluginSafeMode,
                         IsHeadless = false,
-                        KeepBuildLiveOutput = pluginBootstrapOptions.KeepPluginLiveOutput,
+                        WaitForEnterAfterBuildLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
                         RawArguments = rawArguments,
                     },
                     cancellationToken)

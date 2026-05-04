@@ -74,25 +74,25 @@ public sealed class CodeAltaCliOptionsTests
     }
 
     [TestMethod]
-    public void TryParse_ParsesPluginsKeepLiveOutput()
+    public void TryParse_ParsesPluginsWaitForEnter()
     {
-        var result = CodeAltaCliOptions.TryParse(["--plugins-keep-live-output"], out var options, out var error);
+        var result = CodeAltaCliOptions.TryParse(["--plugins-wait-for-enter"], out var options, out var error);
 
         Assert.IsTrue(result);
         Assert.IsNull(error);
         Assert.IsNotNull(options);
-        Assert.IsTrue(options.KeepPluginLiveOutput);
-        Assert.IsTrue(CodeAltaCliOptions.GetPluginBootstrapOptions(["--plugins-keep-live-output"]).KeepPluginLiveOutput);
+        Assert.IsTrue(options.WaitForEnterAfterPluginLiveOutput);
+        Assert.IsTrue(CodeAltaCliOptions.GetPluginBootstrapOptions(["--plugins-wait-for-enter"]).WaitForEnterAfterPluginLiveOutput);
     }
 
     [TestMethod]
     public void GetPluginBootstrapOptions_IgnoresPluginContributedArguments()
     {
-        var options = CodeAltaCliOptions.GetPluginBootstrapOptions(["plugin-command", "--plugin-test-option", "--plugins-keep-live-output"]);
+        var options = CodeAltaCliOptions.GetPluginBootstrapOptions(["plugin-command", "--plugin-test-option", "--plugins-wait-for-enter"]);
 
         Assert.IsFalse(options.PluginSafeMode);
         Assert.IsFalse(options.PluginsStatus);
-        Assert.IsTrue(options.KeepPluginLiveOutput);
+        Assert.IsTrue(options.WaitForEnterAfterPluginLiveOutput);
     }
 
     [TestMethod]

@@ -2,6 +2,7 @@ using System.Text;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Plugins;
@@ -96,14 +97,14 @@ public sealed class PluginStartupFeedbackReporter
     /// </summary>
     /// <param name="scheduler">The build scheduler.</param>
     /// <param name="requests">The stale build requests.</param>
-    /// <param name="keepLiveOutput">A value indicating whether the final live region should remain visible after builds complete.</param>
+    /// <param name="waitForEnterAfterCompletion">A value indicating whether the live region should wait for Enter after builds complete.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The build results.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="scheduler" /> or <paramref name="requests" /> is <see langword="null" />.</exception>
     public static async ValueTask<IReadOnlyList<PluginBuildResult>> BuildWithInteractiveLiveAsync(
         PluginBuildScheduler scheduler,
         IReadOnlyList<PluginBuildRequest> requests,
-        bool keepLiveOutput = false,
+        bool waitForEnterAfterCompletion = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
@@ -119,7 +120,7 @@ public sealed class PluginStartupFeedbackReporter
         }
 
         var status = new PluginBuildLiveStatus(requests);
-        var liveRegion = status.CreateVisual();
+        var liveRegion = status.CreateVisual(waitForEnterAfterCompletion);
         void OnProgress(object? _, PluginBuildProgress progress)
         {
             status.Report(progress);
@@ -133,14 +134,19 @@ public sealed class PluginStartupFeedbackReporter
                 liveRegion,
                 _ =>
                 {
-                    if (!buildTask.IsCompleted && !cancellationToken.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return TerminalLoopResult.Stop;
+                    }
+
+                    if (!buildTask.IsCompleted)
                     {
                         return TerminalLoopResult.Continue;
                     }
 
                     status.MarkCompleted();
-                    return keepLiveOutput
-                        ? TerminalLoopResult.StopAndKeepVisual
+                    return waitForEnterAfterCompletion && !status.ContinueRequested
+                        ? TerminalLoopResult.Continue
                         : TerminalLoopResult.Stop;
                 });
             return await buildTask.ConfigureAwait(false);
@@ -156,20 +162,35 @@ public sealed class PluginStartupFeedbackReporter
         private readonly Lock _lock = new();
         private readonly PluginBuildLiveItem[] _items;
         private bool _completed;
+        private bool _continueRequested;
 
         public PluginBuildLiveStatus(IReadOnlyList<PluginBuildRequest> requests)
         {
             _items = requests.Select(static request => new PluginBuildLiveItem(request.Package)).ToArray();
         }
 
-        public Visual CreateVisual()
-            => new VStack(
+        public bool ContinueRequested
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _continueRequested;
+                }
+            }
+        }
+
+        public Visual CreateVisual(bool waitForEnterAfterCompletion)
+            => new PluginBuildLiveVisual(
+                this,
+                new VStack(
                     new HStack(
                             new Spinner().Style(SpinnerStyles.Dots),
                             new Markup(BuildHeaderMarkup))
                         .Spacing(1),
-                    new VStack(_items.Select((_, index) => (Visual)new Markup(() => BuildItemMarkup(index))).ToArray()))
-                .Spacing(1);
+                    new VStack(_items.Select((_, index) => (Visual)new Markup(() => BuildItemMarkup(index))).ToArray()),
+                    new Markup(() => BuildFooterMarkup(waitForEnterAfterCompletion)))
+                .Spacing(1));
 
         public void Report(PluginBuildProgress progress)
         {
@@ -190,6 +211,17 @@ public sealed class PluginStartupFeedbackReporter
             lock (_lock)
             {
                 _completed = true;
+            }
+        }
+
+        public void RequestContinueIfCompleted()
+        {
+            lock (_lock)
+            {
+                if (_completed)
+                {
+                    _continueRequested = true;
+                }
             }
         }
 
@@ -247,8 +279,44 @@ public sealed class PluginStartupFeedbackReporter
             };
         }
 
+        private string BuildFooterMarkup(bool waitForEnterAfterCompletion)
+        {
+            if (!waitForEnterAfterCompletion)
+            {
+                return string.Empty;
+            }
+
+            lock (_lock)
+            {
+                return _completed
+                    ? "✓ Plugin build live output paused. Press Enter to continue."
+                    : "Press Enter after plugin builds finish to continue.";
+            }
+        }
+
         private static string EscapeMarkup(string text)
             => text.Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal);
+    }
+
+    private sealed class PluginBuildLiveVisual : Padder
+    {
+        private readonly PluginBuildLiveStatus _status;
+
+        public PluginBuildLiveVisual(PluginBuildLiveStatus status, Visual content) : base(content)
+        {
+            ArgumentNullException.ThrowIfNull(status);
+            _status = status;
+            Focusable = true;
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.Key == TerminalKey.Enter)
+            {
+                _status.RequestContinueIfCompleted();
+                e.Handled = true;
+            }
+        }
     }
 
     private sealed class PluginBuildLiveItem(SourcePluginPackage package)

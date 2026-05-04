@@ -9,13 +9,13 @@ internal sealed class CodeAltaCliOptions
 {
     private static readonly TimeSpan DefaultTestDuration = TimeSpan.FromSeconds(10);
 
-    private CodeAltaCliOptions(bool testMode, TimeSpan? testDuration, bool pluginSafeMode, bool pluginsStatus, bool keepPluginLiveOutput)
+    private CodeAltaCliOptions(bool testMode, TimeSpan? testDuration, bool pluginSafeMode, bool pluginsStatus, bool waitForEnterAfterPluginLiveOutput)
     {
         TestMode = testMode;
         TestDuration = testDuration;
         PluginSafeMode = pluginSafeMode;
         PluginsStatus = pluginsStatus;
-        KeepPluginLiveOutput = keepPluginLiveOutput;
+        WaitForEnterAfterPluginLiveOutput = waitForEnterAfterPluginLiveOutput;
     }
 
     public bool TestMode { get; }
@@ -26,7 +26,7 @@ internal sealed class CodeAltaCliOptions
 
     public bool PluginsStatus { get; }
 
-    public bool KeepPluginLiveOutput { get; }
+    public bool WaitForEnterAfterPluginLiveOutput { get; }
 
     public static CodeAltaPluginBootstrapOptions GetPluginBootstrapOptions(IReadOnlyList<string> args)
     {
@@ -39,13 +39,13 @@ internal sealed class CodeAltaCliOptions
             return new CodeAltaPluginBootstrapOptions(
                 PluginRuntimeConfigResolver.IsSafeModeEnabled([]),
                 PluginsStatus: false,
-                KeepPluginLiveOutput: false);
+                WaitForEnterAfterPluginLiveOutput: false);
         }
 
         return new CodeAltaPluginBootstrapOptions(
             state.PluginSafeMode || PluginRuntimeConfigResolver.IsSafeModeEnabled([]),
             state.PluginsStatus,
-            state.KeepPluginLiveOutput);
+            state.WaitForEnterAfterPluginLiveOutput);
     }
 
     public static bool TryParse(
@@ -113,7 +113,7 @@ internal sealed class CodeAltaCliOptions
             { "no-plugins", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
             { "plugin-safe-mode", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
             { "plugins-status", "Print plugin discovery/config status and exit without starting the TUI", value => state.PluginsStatus = value is not null },
-            { "plugins-keep-live-output", "Keep source plugin build live output visible after builds complete", value => state.KeepPluginLiveOutput = value is not null },
+            { "plugins-wait-for-enter", "Wait for Enter after source plugin live progress finishes", value => state.WaitForEnterAfterPluginLiveOutput = value is not null },
         };
 
         if (pluginCommandLineContributions is not null)
@@ -165,7 +165,7 @@ internal sealed class CodeAltaCliOptions
                 : null,
             state.PluginSafeMode || PluginRuntimeConfigResolver.IsSafeModeEnabled([]),
             state.PluginsStatus,
-            state.KeepPluginLiveOutput);
+            state.WaitForEnterAfterPluginLiveOutput);
         error = null;
         return true;
     }
@@ -181,7 +181,7 @@ internal sealed class CodeAltaCliOptions
             { "no-plugins", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
             { "plugin-safe-mode", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
             { "plugins-status", "Print plugin discovery/config status and exit without starting the TUI", value => state.PluginsStatus = value is not null },
-            { "plugins-keep-live-output", "Keep source plugin build live output visible after builds complete", value => state.KeepPluginLiveOutput = value is not null },
+            { "plugins-wait-for-enter", "Wait for Enter after source plugin live progress finishes", value => state.WaitForEnterAfterPluginLiveOutput = value is not null },
             { "<>", "Arguments parsed by the full command app after plugin startup" },
             static _ => ValueTask.FromResult(0),
         };
@@ -197,11 +197,11 @@ internal sealed class CodeAltaCliOptions
 
         public bool PluginsStatus { get; set; }
 
-        public bool KeepPluginLiveOutput { get; set; }
+        public bool WaitForEnterAfterPluginLiveOutput { get; set; }
     }
 }
 
 internal readonly record struct CodeAltaPluginBootstrapOptions(
     bool PluginSafeMode,
     bool PluginsStatus,
-    bool KeepPluginLiveOutput);
+    bool WaitForEnterAfterPluginLiveOutput);

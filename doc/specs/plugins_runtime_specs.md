@@ -592,7 +592,7 @@ Recommended interactive behavior:
 - use a transient `Terminal.Live` region for per-plugin build status when builds run;
 - use the built-in `Spinner` control instead of hand-rolled spinner frames;
 - return `TerminalLoopResult.Stop` when the build task completes so the live region is discarded before command output or fullscreen TUI startup;
-- support `--plugins-keep-live-output` to return `TerminalLoopResult.StopAndKeepVisual` and retain the final live region for troubleshooting;
+- support `--plugins-wait-for-enter` to keep the transient live region running after source plugin builds complete until Enter is pressed, then discard it with `TerminalLoopResult.Stop`;
 - show package id and current state (`queued`, `building`, `built`, `failed`, `up-to-date`) with plain icons and minimal color styling;
 - summarize warnings/errors after the discarded live region;
 - avoid dumping full MSBuild logs unless a plugin fails or verbose diagnostics are enabled.

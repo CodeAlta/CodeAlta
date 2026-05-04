@@ -30,8 +30,8 @@ public sealed record PluginRuntimeManagerOptions
     /// <summary>Gets the maximum number of source plugin builds that can run in parallel.</summary>
     public int MaxParallelBuilds { get; init; } = Math.Min(Environment.ProcessorCount, 4);
 
-    /// <summary>Gets a value indicating whether interactive plugin build live output should remain visible after builds complete.</summary>
-    public bool KeepBuildLiveOutput { get; init; }
+    /// <summary>Gets a value indicating whether interactive plugin build live output should wait for Enter after builds complete.</summary>
+    public bool WaitForEnterAfterBuildLiveOutput { get; init; }
 }
 
 /// <summary>
@@ -164,7 +164,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
             var scheduler = new PluginBuildScheduler(new PluginBuildService(manifestStore), new PluginBuildSchedulerOptions { MaxDegreeOfParallelism = Math.Max(1, options.MaxParallelBuilds) });
             buildResults.AddRange(options.IsHeadless
                 ? await scheduler.BuildAsync(plan.BuildRequests, cancellationToken).ConfigureAwait(false)
-                : await PluginStartupFeedbackReporter.BuildWithInteractiveLiveAsync(scheduler, plan.BuildRequests, options.KeepBuildLiveOutput, cancellationToken).ConfigureAwait(false));
+                : await PluginStartupFeedbackReporter.BuildWithInteractiveLiveAsync(scheduler, plan.BuildRequests, options.WaitForEnterAfterBuildLiveOutput, cancellationToken).ConfigureAwait(false));
 
             var loader = new PluginAssemblyLoader();
             var typeDiscovery = new PluginTypeDiscoveryService();

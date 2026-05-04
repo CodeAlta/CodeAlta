@@ -132,7 +132,7 @@ internal partial class Program
                     },
                     SafeMode = pluginBootstrapOptions.PluginSafeMode,
                     IsHeadless = false,
-                    KeepBuildLiveOutput = pluginBootstrapOptions.KeepPluginLiveOutput,
+                    WaitForEnterAfterBuildLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
                     RawArguments = args,
                 },
                 cancellationToken);
@@ -162,7 +162,7 @@ internal partial class Program
             return;
         }
 
-        if (checkedPackageCount > 0 || failedPackageCount > 0 || pluginBootstrapOptions.PluginsStatus || pluginBootstrapOptions.KeepPluginLiveOutput)
+        if (checkedPackageCount > 0 || failedPackageCount > 0 || pluginBootstrapOptions.PluginsStatus || pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput)
         {
             var buildSummary = checkedPackageCount == 0
                 ? "no source plugins checked"
