@@ -31,10 +31,21 @@ internal sealed class CodeAltaCliOptions
     public static CodeAltaPluginBootstrapOptions GetPluginBootstrapOptions(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
+        var state = new ParseState();
+        var app = CreatePluginBootstrapCommandApp(state);
+        var result = app.Parse(args);
+        if (result.HasErrors)
+        {
+            return new CodeAltaPluginBootstrapOptions(
+                PluginRuntimeConfigResolver.IsSafeModeEnabled([]),
+                PluginsStatus: false,
+                KeepPluginLiveOutput: false);
+        }
+
         return new CodeAltaPluginBootstrapOptions(
-            PluginRuntimeConfigResolver.IsSafeModeEnabled(args),
-            args.Any(IsPluginsStatusOption),
-            args.Any(IsPluginsKeepLiveOutputOption));
+            state.PluginSafeMode || PluginRuntimeConfigResolver.IsSafeModeEnabled([]),
+            state.PluginsStatus,
+            state.KeepPluginLiveOutput);
     }
 
     public static bool TryParse(
@@ -159,11 +170,22 @@ internal sealed class CodeAltaCliOptions
         return true;
     }
 
-    private static bool IsPluginsStatusOption(string arg)
-        => string.Equals(arg, "--plugins-status", StringComparison.OrdinalIgnoreCase);
+    private static CommandApp CreatePluginBootstrapCommandApp(ParseState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
 
-    private static bool IsPluginsKeepLiveOutputOption(string arg)
-        => string.Equals(arg, "--plugins-keep-live-output", StringComparison.OrdinalIgnoreCase);
+        return new CommandApp(
+            "alta",
+            config: new CommandConfig { StrictOptionParsing = false })
+        {
+            { "no-plugins", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
+            { "plugin-safe-mode", "Disable plugin discovery, build, and load for this process", value => state.PluginSafeMode = value is not null },
+            { "plugins-status", "Print plugin discovery/config status and exit without starting the TUI", value => state.PluginsStatus = value is not null },
+            { "plugins-keep-live-output", "Keep source plugin build live output visible after builds complete", value => state.KeepPluginLiveOutput = value is not null },
+            { "<>", "Arguments parsed by the full command app after plugin startup" },
+            static _ => ValueTask.FromResult(0),
+        };
+    }
 
     private sealed class ParseState
     {
