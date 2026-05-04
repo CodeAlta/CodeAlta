@@ -1,3 +1,4 @@
+using System.Text;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -90,7 +91,7 @@ public sealed class PluginStartupFeedbackReporter
     }
 
     /// <summary>
-    /// Builds stale plugin requests while rendering interactive terminal progress with <c>Terminal.WriteMarkupLine</c> and <c>Terminal.Live</c>.
+    /// Builds stale plugin requests while rendering interactive terminal progress with <c>Terminal.Live</c>.
     /// </summary>
     /// <param name="scheduler">The build scheduler.</param>
     /// <param name="requests">The stale build requests.</param>
@@ -109,27 +110,16 @@ public sealed class PluginStartupFeedbackReporter
             return [];
         }
 
-        Terminal.WriteMarkupLine($"[dim]Building {requests.Count} stale plugin{(requests.Count == 1 ? string.Empty : "s")}...[/]");
-        var tasks = requests.Select(static request => new ProgressTask(new Markup(request.Package.PackageId))
+        if (!Terminal.Instance.IsInitialized || Terminal.Instance.Capabilities.IsOutputRedirected)
         {
-            Minimum = 0,
-            Maximum = 1,
-            Value = 0,
-        }).ToArray();
-        var group = new ProgressTaskGroup(tasks);
+            return await scheduler.BuildAsync(requests, cancellationToken).ConfigureAwait(false);
+        }
+
+        var status = new PluginBuildLiveStatus(requests);
+        var liveRegion = new Markup(status.BuildMarkup) { Wrap = true };
         void OnProgress(object? _, PluginBuildProgress progress)
         {
-            if ((uint)progress.Index >= (uint)tasks.Length)
-            {
-                return;
-            }
-
-            tasks[progress.Index].Value = progress.State switch
-            {
-                PluginBuildProgressState.Queued => 0,
-                PluginBuildProgressState.Running => 0.5,
-                _ => 1,
-            };
+            status.Report(progress);
         }
 
         scheduler.ProgressChanged += OnProgress;
@@ -137,9 +127,9 @@ public sealed class PluginStartupFeedbackReporter
         {
             var buildTask = scheduler.BuildAsync(requests, cancellationToken).AsTask();
             Terminal.Live(
-                group,
+                liveRegion,
                 _ => buildTask.IsCompleted || cancellationToken.IsCancellationRequested
-                    ? TerminalLoopResult.StopAndKeepVisual
+                    ? TerminalLoopResult.Stop
                     : TerminalLoopResult.Continue);
             return await buildTask.ConfigureAwait(false);
         }
@@ -147,6 +137,104 @@ public sealed class PluginStartupFeedbackReporter
         {
             scheduler.ProgressChanged -= OnProgress;
         }
+    }
+
+    private sealed class PluginBuildLiveStatus
+    {
+        private static readonly string[] SpinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        private readonly Lock _lock = new();
+        private readonly PluginBuildLiveItem[] _items;
+        private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+
+        public PluginBuildLiveStatus(IReadOnlyList<PluginBuildRequest> requests)
+        {
+            _items = requests.Select(static request => new PluginBuildLiveItem(request.Package)).ToArray();
+        }
+
+        public void Report(PluginBuildProgress progress)
+        {
+            if ((uint)progress.Index >= (uint)_items.Length)
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                var item = _items[progress.Index];
+                item.State = progress.State;
+                item.Timestamp = progress.Timestamp;
+            }
+        }
+
+        public string BuildMarkup()
+        {
+            lock (_lock)
+            {
+                var completed = _items.Count(static item => item.State is PluginBuildProgressState.Succeeded or PluginBuildProgressState.Failed or PluginBuildProgressState.UpToDate);
+                var failed = _items.Count(static item => item.State == PluginBuildProgressState.Failed);
+                var running = _items.Count(static item => item.State == PluginBuildProgressState.Running);
+                var elapsed = DateTimeOffset.UtcNow - _startedAt;
+                var spinner = SpinnerFrames[(int)(elapsed.TotalMilliseconds / 90) % SpinnerFrames.Length];
+                var builder = new StringBuilder();
+                builder.Append("[primary]").Append(spinner).Append("[/] [bold]Building source plugins[/] ")
+                    .Append("[dim](").Append(completed.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    .Append('/').Append(_items.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(" complete");
+                if (running > 0)
+                {
+                    builder.Append(", ").Append(running.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(" running");
+                }
+
+                if (failed > 0)
+                {
+                    builder.Append(", ").Append(failed.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(" failed");
+                }
+
+                builder.AppendLine(")[/]");
+
+                for (var index = 0; index < _items.Length; index++)
+                {
+                    AppendItem(builder, _items[index], index, spinner);
+                }
+
+                return builder.ToString().TrimEnd();
+            }
+        }
+
+        private static void AppendItem(StringBuilder builder, PluginBuildLiveItem item, int index, string spinner)
+        {
+            var ordinal = (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture).PadLeft(2);
+            var packageId = EscapeMarkup(item.Package.PackageId);
+            switch (item.State)
+            {
+                case PluginBuildProgressState.Queued:
+                    builder.Append("[dim]○[/] [dim]").Append(ordinal).Append(". Queued ").Append(packageId).AppendLine("[/]");
+                    break;
+                case PluginBuildProgressState.Running:
+                    builder.Append("[primary]").Append(spinner).Append("[/] [primary]").Append(ordinal).Append(". Building ").Append(packageId).AppendLine("[/]");
+                    break;
+                case PluginBuildProgressState.Succeeded:
+                    builder.Append("[success]✓[/] [success]").Append(ordinal).Append(". Plugin ").Append(packageId).AppendLine(" built successfully[/]");
+                    break;
+                case PluginBuildProgressState.Failed:
+                    builder.Append("[error]✗[/] [error]").Append(ordinal).Append(". Plugin ").Append(packageId).AppendLine(" build failed[/]");
+                    break;
+                case PluginBuildProgressState.UpToDate:
+                    builder.Append("[dim]◇[/] [dim]").Append(ordinal).Append(". Plugin ").Append(packageId).AppendLine(" is up-to-date[/]");
+                    break;
+            }
+        }
+
+        private static string EscapeMarkup(string text)
+            => text.Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal);
+    }
+
+    private sealed class PluginBuildLiveItem(SourcePluginPackage package)
+    {
+        public SourcePluginPackage Package { get; } = package;
+
+        public PluginBuildProgressState State { get; set; } = PluginBuildProgressState.Queued;
+
+        public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
     }
 
     private void Write(string message)

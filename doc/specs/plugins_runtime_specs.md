@@ -589,10 +589,10 @@ On first startup with stale enabled plugins, CodeAlta should provide visible pro
 
 Recommended interactive behavior:
 
-- use `Terminal.WriteMarkupLine` for a concise startup message such as `Building 3 CodeAlta plugins...`;
-- use `Terminal.Live` / live progress tasks for per-plugin build status when multiple builds run;
-- show package id, scope, current state (`queued`, `building`, `loaded`, `failed`, `skipped`), and elapsed time;
-- summarize warnings/errors after the live region;
+- use a transient `Terminal.Live` region for per-plugin build status when builds run;
+- return `TerminalLoopResult.Stop` when the build task completes so the live region is discarded before command output or fullscreen TUI startup;
+- show package id, current state (`queued`, `building`, `built`, `failed`, `up-to-date`), and elapsed time/progress context with colors and spinner/icons;
+- summarize warnings/errors after the discarded live region;
 - avoid dumping full MSBuild logs unless a plugin fails or verbose diagnostics are enabled.
 
 Recommended headless/non-interactive behavior:

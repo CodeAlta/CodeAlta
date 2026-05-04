@@ -159,7 +159,9 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
             var cacheRoot = Path.Combine(options.GlobalRoot, "cache");
             var manifestStore = new PluginBuildManifestStore(cacheRoot, ResolveCodeAltaBuildIdentity(), ResolveSdkIdentity());
             var scheduler = new PluginBuildScheduler(new PluginBuildService(manifestStore), new PluginBuildSchedulerOptions { MaxDegreeOfParallelism = Math.Max(1, options.MaxParallelBuilds) });
-            buildResults.AddRange(await scheduler.BuildAsync(plan.BuildRequests, cancellationToken).ConfigureAwait(false));
+            buildResults.AddRange(options.IsHeadless
+                ? await scheduler.BuildAsync(plan.BuildRequests, cancellationToken).ConfigureAwait(false)
+                : await PluginStartupFeedbackReporter.BuildWithInteractiveLiveAsync(scheduler, plan.BuildRequests, cancellationToken).ConfigureAwait(false));
 
             var loader = new PluginAssemblyLoader();
             var typeDiscovery = new PluginTypeDiscoveryService();
