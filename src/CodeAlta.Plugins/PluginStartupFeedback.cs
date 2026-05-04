@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -119,53 +120,113 @@ public sealed class PluginStartupFeedbackReporter
             return await scheduler.BuildAsync(requests, cancellationToken).ConfigureAwait(false);
         }
 
-        var status = new PluginBuildLiveStatus(requests);
-        var liveRegion = status.CreateVisual(waitForEnterAfterCompletion);
-        void OnProgress(object? _, PluginBuildProgress progress)
-        {
-            status.Report(progress);
-        }
-
-        scheduler.ProgressChanged += OnProgress;
-        try
-        {
-            var buildTask = scheduler.BuildAsync(requests, cancellationToken).AsTask();
-            Terminal.Live(
-                liveRegion,
-                _ =>
+        return await RunWithInteractiveLiveAsync(
+                requests,
+                waitForEnterAfterCompletion,
+                async (status, token) =>
                 {
-                    status.ApplyPendingProgress();
-
-                    if (cancellationToken.IsCancellationRequested)
+                    void OnProgress(object? _, PluginBuildProgress progress)
                     {
-                        return TerminalLoopResult.Stop;
+                        status.Report(progress);
                     }
 
-                    if (!buildTask.IsCompleted)
+                    scheduler.ProgressChanged += OnProgress;
+                    try
                     {
-                        return TerminalLoopResult.Continue;
+                        var results = await scheduler.BuildAsync(requests, token).ConfigureAwait(false);
+                        status.MarkBuildsCompleted();
+                        return results;
                     }
-
-                    status.ApplyPendingProgress();
-                    status.MarkCompleted();
-                    return waitForEnterAfterCompletion && !status.ContinueRequested
-                        ? TerminalLoopResult.Continue
-                        : TerminalLoopResult.Stop;
-                });
-            return await buildTask.ConfigureAwait(false);
-        }
-        finally
-        {
-            scheduler.ProgressChanged -= OnProgress;
-        }
+                    finally
+                    {
+                        scheduler.ProgressChanged -= OnProgress;
+                    }
+                },
+                static (results, elapsed) => BuildBuildOnlySummary(results, elapsed),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
-    private sealed class PluginBuildLiveStatus
+    internal static string BuildStartupSummary(IReadOnlyList<PluginBuildResult> buildResults, int activatedSourcePluginCount, TimeSpan elapsed)
     {
-        private readonly Lock _pendingProgressLock = new();
-        private readonly Queue<PluginBuildProgress> _pendingProgress = new();
+        ArgumentNullException.ThrowIfNull(buildResults);
+        var checkedPackageCount = buildResults.Count;
+        var builtPackageCount = buildResults.Count(static build => build.Succeeded && !build.IsUpToDate);
+        var upToDatePackageCount = buildResults.Count(static build => build.Succeeded && build.IsUpToDate);
+        var failedPackageCount = buildResults.Count(static build => !build.Succeeded);
+        var buildSummary = checkedPackageCount == 0
+            ? "no source plugins checked"
+            : $"{checkedPackageCount} source plugin {Pluralize(checkedPackageCount, "package")} checked ({builtPackageCount} built, {upToDatePackageCount} up-to-date{(failedPackageCount == 0 ? string.Empty : $", {failedPackageCount} failed")})";
+        return $"CodeAlta plugins: {buildSummary}; {activatedSourcePluginCount} source {Pluralize(activatedSourcePluginCount, "plugin")} activated in {FormatElapsed(elapsed)}.";
+    }
+
+    internal static async ValueTask<T> RunWithInteractiveLiveAsync<T>(
+        IReadOnlyList<PluginBuildRequest> requests,
+        bool waitForEnterAfterCompletion,
+        Func<PluginBuildLiveStatus, CancellationToken, ValueTask<T>> operation,
+        Func<T, TimeSpan, string> summaryFactory,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentNullException.ThrowIfNull(summaryFactory);
+
+        if (!Terminal.Instance.IsInitialized || Terminal.Instance.Capabilities.IsOutputRedirected)
+        {
+            var status = new PluginBuildLiveStatus(requests);
+            var started = Stopwatch.StartNew();
+            var result = await operation(status, cancellationToken).ConfigureAwait(false);
+            started.Stop();
+            status.MarkCompleted(summaryFactory(result, started.Elapsed));
+            return result;
+        }
+
+        var liveStatus = new PluginBuildLiveStatus(requests);
+        var liveRegion = liveStatus.CreateVisual(waitForEnterAfterCompletion);
+        var stopwatch = Stopwatch.StartNew();
+        var operationTask = operation(liveStatus, cancellationToken).AsTask();
+        var completionApplied = false;
+        Terminal.Live(
+            liveRegion,
+            _ =>
+            {
+                liveStatus.ApplyPendingUpdates();
+
+                if (cancellationToken.IsCancellationRequested || operationTask.IsCanceled || operationTask.IsFaulted)
+                {
+                    return TerminalLoopResult.Stop;
+                }
+
+                if (!operationTask.IsCompleted)
+                {
+                    return TerminalLoopResult.Continue;
+                }
+
+                if (!completionApplied)
+                {
+                    stopwatch.Stop();
+                    liveStatus.ApplyPendingUpdates();
+                    var result = operationTask.GetAwaiter().GetResult();
+                    liveStatus.MarkCompleted(summaryFactory(result, stopwatch.Elapsed));
+                    completionApplied = true;
+                }
+
+                return waitForEnterAfterCompletion && !liveStatus.ContinueRequested
+                    ? TerminalLoopResult.Continue
+                    : TerminalLoopResult.Stop;
+            });
+        return await operationTask.ConfigureAwait(false);
+    }
+
+    internal sealed class PluginBuildLiveStatus
+    {
+        private readonly Lock _pendingUpdatesLock = new();
+        private readonly Queue<Action> _pendingUpdates = new();
         private readonly PluginBuildLiveItem[] _items;
+        private readonly State<PluginStartupLivePhase> _phase = new(PluginStartupLivePhase.Building);
         private readonly State<bool> _completed = new(false);
+        private readonly State<bool> _spinnerActive = new(true);
+        private readonly State<string?> _summaryMarkup = new(null);
         private bool _continueRequested;
 
         public PluginBuildLiveStatus(IReadOnlyList<PluginBuildRequest> requests)
@@ -182,16 +243,52 @@ public sealed class PluginStartupFeedbackReporter
         }
 
         public Visual CreateVisual(bool waitForEnterAfterCompletion)
-            => new PluginBuildLiveVisual(
+        {
+            var spinner = new Spinner().Style(SpinnerStyles.Dots);
+            spinner.IsActive(_spinnerActive);
+            spinner.IsVisible(_spinnerActive);
+            return new PluginBuildLiveVisual(
                 this,
                 new VStack(
-                    new HStack(
-                            new Spinner().Style(SpinnerStyles.Dots),
-                            new Markup(BuildHeaderMarkup))
-                        .Spacing(1),
-                    new VStack(_items.Select((_, index) => (Visual)new Markup(() => BuildItemMarkup(index))).ToArray()),
-                    new Markup(() => BuildFooterMarkup(waitForEnterAfterCompletion)))
-                .Spacing(1));
+                        new HStack(
+                                spinner,
+                                new Markup(BuildHeaderMarkup).Wrap(true))
+                            .Spacing(1),
+                        new VStack(_items.Select((_, index) => (Visual)new Markup(() => BuildItemMarkup(index)).Wrap(true)).ToArray()),
+                        new Markup(() => _summaryMarkup.Value ?? string.Empty).Wrap(true),
+                        new Markup(() => BuildFooterMarkup(waitForEnterAfterCompletion)).Wrap(true))
+                    .Spacing(1));
+        }
+
+        public void MarkPreparing()
+            => ApplyOrQueueStateUpdate(() =>
+            {
+            _phase.Value = PluginStartupLivePhase.Preparing;
+            _spinnerActive.Value = true;
+            });
+
+        public void MarkBuilding()
+            => ApplyOrQueueStateUpdate(() =>
+            {
+                _phase.Value = PluginStartupLivePhase.Building;
+                _spinnerActive.Value = true;
+            });
+
+        public void MarkBuildsCompleted()
+            => ApplyOrQueueStateUpdate(() =>
+            {
+            if (_phase.Value == PluginStartupLivePhase.Building)
+            {
+                _phase.Value = PluginStartupLivePhase.Activating;
+            }
+            });
+
+        public void MarkActivating()
+            => ApplyOrQueueStateUpdate(() =>
+            {
+            _phase.Value = PluginStartupLivePhase.Activating;
+            _spinnerActive.Value = true;
+            });
 
         public void Report(PluginBuildProgress progress)
         {
@@ -202,31 +299,32 @@ public sealed class PluginStartupFeedbackReporter
 
             // Scheduler progress is raised from build worker tasks; defer bindable State updates
             // to the live UI update callback so XenoAtom.Terminal.UI can track and render them.
-            lock (_pendingProgressLock)
+            EnqueueStateUpdate(() => _items[progress.Index].State.Value = progress.State);
+        }
+
+        public void ApplyPendingUpdates()
+        {
+            while (TryDequeueUpdate(out var update))
             {
-                _pendingProgress.Enqueue(progress);
+                update();
             }
         }
 
-        public void ApplyPendingProgress()
+        public void MarkCompleted(string summary)
         {
-            while (TryDequeueProgress(out var progress))
+            ArgumentNullException.ThrowIfNull(summary);
+            ApplyOrQueueStateUpdate(() =>
             {
-                if ((uint)progress.Index >= (uint)_items.Length)
+                if (_completed.Value)
                 {
-                    continue;
+                    return;
                 }
 
-                _items[progress.Index].State.Value = progress.State;
-            }
-        }
-
-        public void MarkCompleted()
-        {
-            if (!_completed.Value)
-            {
+                _phase.Value = PluginStartupLivePhase.Completed;
+                _summaryMarkup.Value = EscapeMarkup(summary);
+                _spinnerActive.Value = false;
                 _completed.Value = true;
-            }
+            });
         }
 
         public void RequestContinueIfCompleted()
@@ -243,7 +341,14 @@ public sealed class PluginStartupFeedbackReporter
             var failed = _items.Count(static item => item.State.Value == PluginBuildProgressState.Failed);
             var running = _items.Count(static item => item.State.Value == PluginBuildProgressState.Running);
             var builder = new StringBuilder();
-            builder.Append(_completed.Value ? "✓ Plugin builds finished" : "Building source plugins")
+            builder.Append(_phase.Value switch
+                {
+                    PluginStartupLivePhase.Preparing => "Preparing source plugins",
+                    PluginStartupLivePhase.Activating => "Activating source plugins",
+                    PluginStartupLivePhase.Completed when failed > 0 => "[error]✗[/] Plugin startup finished with build failures",
+                    PluginStartupLivePhase.Completed => "[success]✓[/] Plugin startup complete",
+                    _ => "Building source plugins",
+                })
                 .Append(" (").Append(completed.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 .Append('/').Append(_items.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(" complete");
             if (running > 0)
@@ -257,7 +362,7 @@ public sealed class PluginStartupFeedbackReporter
             }
 
             builder.Append(')');
-            return EscapeMarkup(builder.ToString());
+            return builder.ToString();
         }
 
         private string BuildItemMarkup(int index)
@@ -274,12 +379,12 @@ public sealed class PluginStartupFeedbackReporter
             var packageId = EscapeMarkup(package.PackageId);
             return state switch
             {
-                PluginBuildProgressState.Queued => $"○ {ordinal}. Queued {packageId}",
-                PluginBuildProgressState.Running => $"◌ {ordinal}. Building {packageId}",
-                PluginBuildProgressState.Succeeded => $"✓ {ordinal}. Plugin {packageId} built successfully",
-                PluginBuildProgressState.Failed => $"✗ {ordinal}. Plugin {packageId} build failed",
-                PluginBuildProgressState.UpToDate => $"◇ {ordinal}. Plugin {packageId} is up-to-date",
-                _ => $"○ {ordinal}. {packageId}",
+                PluginBuildProgressState.Queued => $"[dim]○[/] {ordinal}. [dim]Queued[/] {packageId}",
+                PluginBuildProgressState.Running => $"[warning]◌[/] {ordinal}. [warning]Building[/] {packageId}",
+                PluginBuildProgressState.Succeeded => $"[success]✓[/] {ordinal}. Built {packageId}",
+                PluginBuildProgressState.Failed => $"[error]✗[/] {ordinal}. Build failed {packageId}",
+                PluginBuildProgressState.UpToDate => $"[success]✓[/] {ordinal}. Checked {packageId} [dim](up-to-date)[/]",
+                _ => $"[dim]○[/] {ordinal}. {packageId}",
             };
         }
 
@@ -291,27 +396,54 @@ public sealed class PluginStartupFeedbackReporter
             }
 
             return _completed.Value
-                ? "✓ Plugin build live output paused. Press Enter to continue."
-                : "Plugin builds are still running. Press Enter after they finish to continue.";
+                ? "[dim]Press Enter to continue.[/]"
+                : "Plugin startup is still running. Press Enter after it finishes to continue.";
         }
 
-        private bool TryDequeueProgress(out PluginBuildProgress progress)
+        private void ApplyOrQueueStateUpdate(Action update)
         {
-            lock (_pendingProgressLock)
+            if (XenoAtom.Terminal.UI.Threading.Dispatcher.Current.CheckAccess())
             {
-                if (_pendingProgress.Count == 0)
+                update();
+                return;
+            }
+
+            EnqueueStateUpdate(update);
+        }
+
+        private void EnqueueStateUpdate(Action update)
+        {
+            lock (_pendingUpdatesLock)
+            {
+                _pendingUpdates.Enqueue(update);
+            }
+        }
+
+        private bool TryDequeueUpdate(out Action update)
+        {
+            lock (_pendingUpdatesLock)
+            {
+                if (_pendingUpdates.Count == 0)
                 {
-                    progress = default!;
+                    update = null!;
                     return false;
                 }
 
-                progress = _pendingProgress.Dequeue();
+                update = _pendingUpdates.Dequeue();
                 return true;
             }
         }
 
         private static string EscapeMarkup(string text)
             => text.Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal);
+    }
+
+    private enum PluginStartupLivePhase
+    {
+        Preparing,
+        Building,
+        Activating,
+        Completed,
     }
 
     private sealed class PluginBuildLiveVisual : Padder
@@ -353,4 +485,20 @@ public sealed class PluginStartupFeedbackReporter
             _headlessSink(message);
         }
     }
+
+    private static string Pluralize(int count, string singular)
+        => count == 1 ? singular : singular + "s";
+
+    private static string BuildBuildOnlySummary(IReadOnlyList<PluginBuildResult> buildResults, TimeSpan elapsed)
+    {
+        var failedPackageCount = buildResults.Count(static build => !build.Succeeded);
+        return failedPackageCount == 0
+            ? $"Plugin builds finished in {FormatElapsed(elapsed)}."
+            : $"Plugin builds finished with {failedPackageCount} {Pluralize(failedPackageCount, "failure")} in {FormatElapsed(elapsed)}.";
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+        => elapsed.TotalSeconds >= 1
+            ? elapsed.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "s"
+            : Math.Max(0, (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero)).ToString(System.Globalization.CultureInfo.InvariantCulture) + "ms";
 }

@@ -589,11 +589,13 @@ On first startup with stale enabled plugins, CodeAlta should provide visible pro
 
 Recommended interactive behavior:
 
-- use a transient `Terminal.Live` region for per-plugin build status when builds run;
+- use a transient `Terminal.Live` region for per-plugin build and activation status when builds run;
 - use the built-in `Spinner` control instead of hand-rolled spinner frames;
-- return `TerminalLoopResult.Stop` when the build task completes so the live region is discarded before command output or fullscreen TUI startup;
-- support `--plugins-wait-for-enter` to keep the transient live region running after source plugin builds complete until Enter is pressed, then discard it with `TerminalLoopResult.Stop`;
-- show package id and current state (`queued`, `building`, `built`, `failed`, `up-to-date`) with plain icons and minimal color styling;
+- stop or hide the spinner once plugin startup has completed so finished output does not look busy;
+- return `TerminalLoopResult.Stop` when plugin startup completes so the live region is discarded before command output or fullscreen TUI startup;
+- support `--plugins-wait-for-enter` to keep the transient live region running after source plugin startup completes until Enter is pressed, then discard it with `TerminalLoopResult.Stop`;
+- show package id and current state (`queued`, `building`, `built`, `failed`, `up-to-date`) with state icons and minimal success/warning/error color styling;
+- include the concise `CodeAlta plugins: ...` build/activation timing summary in the paused live region when `--plugins-wait-for-enter` is used;
 - summarize warnings/errors after the discarded live region;
 - avoid dumping full MSBuild logs unless a plugin fails or verbose diagnostics are enabled.
 
@@ -603,7 +605,7 @@ Recommended headless/non-interactive behavior:
 - avoid terminal control sequences;
 - continue startup if plugins are skipped by fast path.
 
-Fast-path loads should produce only a minimal one-line summary after any live startup progress, such as `CodeAlta plugins: 7 source plugin packages checked (0 built, 7 up-to-date); 7 source plugins activated in 120ms.` Startup should not feel slow or noisy when plugins are already up to date.
+Fast-path loads should produce only a minimal one-line summary after transient live startup progress (or inside the paused live region when `--plugins-wait-for-enter` is used), such as `CodeAlta plugins: 7 source plugin packages checked (0 built, 7 up-to-date); 7 source plugins activated in 120ms.` Startup should not feel slow or noisy when plugins are already up to date.
 
 ## 13. File change watching and reload notifications
 

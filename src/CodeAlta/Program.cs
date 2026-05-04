@@ -162,7 +162,11 @@ internal partial class Program
             return;
         }
 
-        if (checkedPackageCount > 0 || failedPackageCount > 0 || pluginBootstrapOptions.PluginsStatus || pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput)
+        var startupSummaryShownInLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput
+            && checkedPackageCount > 0
+            && Terminal.Instance.IsInitialized
+            && !Terminal.Instance.Capabilities.IsOutputRedirected;
+        if (!startupSummaryShownInLiveOutput && (checkedPackageCount > 0 || failedPackageCount > 0 || pluginBootstrapOptions.PluginsStatus || pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput))
         {
             var buildSummary = checkedPackageCount == 0
                 ? "no source plugins checked"

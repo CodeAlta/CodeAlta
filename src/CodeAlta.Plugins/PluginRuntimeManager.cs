@@ -145,8 +145,50 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
         var plan = new PluginStartupPlanner().PlanSourceBuilds(packages, globalConfig, projectConfig, options.SafeMode);
         diagnostics.AddRange(plan.Diagnostics);
 
-        if (plan.BuildRequests.Count > 0)
+        if (!options.IsHeadless && plan.BuildRequests.Count > 0)
         {
+            return await PluginStartupFeedbackReporter.RunWithInteractiveLiveAsync(
+                    plan.BuildRequests,
+                    options.WaitForEnterAfterBuildLiveOutput,
+                    CompleteStartupAsync,
+                    static (result, elapsed) => PluginStartupFeedbackReporter.BuildStartupSummary(
+                        result.BuildResults,
+                        result.ActivePlugins.Count(static plugin => plugin.SourcePackage is not null),
+                        elapsed),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return await CompleteStartupAsync(null, cancellationToken).ConfigureAwait(false);
+
+        async ValueTask<PluginRuntimeManagerStartResult> CompleteStartupAsync(PluginStartupFeedbackReporter.PluginBuildLiveStatus? liveStatus, CancellationToken token)
+        {
+            await BuildAndActivateSourcePluginsAsync(liveStatus, token).ConfigureAwait(false);
+            lock (_lock)
+            {
+                _activePlugins.AddRange(activePlugins);
+            }
+
+            liveStatus?.MarkActivating();
+            var startup = await Adapter.RunStartupAsync(activePlugins, options.RawArguments, CreateAdapterOptions(options), token).ConfigureAwait(false);
+            diagnostics.AddRange(startup.Diagnostics);
+            _diagnostics.AddRange(diagnostics);
+            return new PluginRuntimeManagerStartResult
+            {
+                ActivePlugins = activePlugins,
+                BuildResults = buildResults,
+                Diagnostics = diagnostics,
+            };
+        }
+
+        async ValueTask BuildAndActivateSourcePluginsAsync(PluginStartupFeedbackReporter.PluginBuildLiveStatus? liveStatus, CancellationToken token)
+        {
+            if (plan.BuildRequests.Count == 0)
+            {
+                return;
+            }
+
+            liveStatus?.MarkPreparing();
             var generationOptions = new PluginRootBuildFileOptions
             {
                 CodeAltaExeFolder = AppContext.BaseDirectory,
@@ -155,17 +197,38 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
             };
             foreach (var root in plan.BuildRequests.Select(static request => request.Package.Root).DistinctBy(static root => root.RootPath, StringComparer.OrdinalIgnoreCase))
             {
-                var generation = await new PluginRootBuildFileGenerator().GenerateAsync(root, generationOptions, cancellationToken).ConfigureAwait(false);
+                var generation = await new PluginRootBuildFileGenerator().GenerateAsync(root, generationOptions, token).ConfigureAwait(false);
                 diagnostics.AddRange(generation.Diagnostics);
             }
 
+            liveStatus?.MarkBuilding();
             var cacheRoot = Path.Combine(options.GlobalRoot, "cache");
             var manifestStore = new PluginBuildManifestStore(cacheRoot, ResolveCodeAltaBuildIdentity(), ResolveSdkIdentity());
             var scheduler = new PluginBuildScheduler(new PluginBuildService(manifestStore), new PluginBuildSchedulerOptions { MaxDegreeOfParallelism = Math.Max(1, options.MaxParallelBuilds) });
-            buildResults.AddRange(options.IsHeadless
-                ? await scheduler.BuildAsync(plan.BuildRequests, cancellationToken).ConfigureAwait(false)
-                : await PluginStartupFeedbackReporter.BuildWithInteractiveLiveAsync(scheduler, plan.BuildRequests, options.WaitForEnterAfterBuildLiveOutput, cancellationToken).ConfigureAwait(false));
+            void OnProgress(object? _, PluginBuildProgress progress)
+            {
+                liveStatus?.Report(progress);
+            }
 
+            if (liveStatus is not null)
+            {
+                scheduler.ProgressChanged += OnProgress;
+            }
+
+            try
+            {
+                buildResults.AddRange(await scheduler.BuildAsync(plan.BuildRequests, token).ConfigureAwait(false));
+            }
+            finally
+            {
+                if (liveStatus is not null)
+                {
+                    scheduler.ProgressChanged -= OnProgress;
+                }
+            }
+
+            liveStatus?.MarkBuildsCompleted();
+            liveStatus?.MarkActivating();
             var loader = new PluginAssemblyLoader();
             var typeDiscovery = new PluginTypeDiscoveryService();
             foreach (var buildResult in buildResults)
@@ -192,7 +255,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
                             buildResult.Package,
                             load.LoadContext,
                             new PluginActivationOptions { HostInfo = hostInfo, ActivationGeneration = ++_activationGeneration },
-                            cancellationToken)
+                            token)
                         .ConfigureAwait(false);
                     diagnostics.AddRange(activation.Diagnostics);
                     if (activation.ActivePlugin is not null)
@@ -202,21 +265,6 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
                 }
             }
         }
-
-        lock (_lock)
-        {
-            _activePlugins.AddRange(activePlugins);
-        }
-
-        var startup = await Adapter.RunStartupAsync(activePlugins, options.RawArguments, CreateAdapterOptions(options), cancellationToken).ConfigureAwait(false);
-        diagnostics.AddRange(startup.Diagnostics);
-        _diagnostics.AddRange(diagnostics);
-        return new PluginRuntimeManagerStartResult
-        {
-            ActivePlugins = activePlugins,
-            BuildResults = buildResults,
-            Diagnostics = diagnostics,
-        };
     }
 
     /// <summary>Deactivates all active plugins and releases runtime-owned handles.</summary>
