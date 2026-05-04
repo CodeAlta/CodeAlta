@@ -200,7 +200,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("gpt-5.3-codex", provider.Model);
         Assert.AreEqual("https://chatgpt.com/backend-api/codex", provider.ApiUrl);
         Assert.AreEqual("codealta_oauth", provider.AuthSource);
-        Assert.AreEqual(1, provider.MaxConcurrentRequests);
+        Assert.AreEqual(16, provider.MaxConcurrentRequests);
         Assert.AreEqual("medium", provider.TextVerbosity);
         Assert.IsTrue(provider.IncludeEncryptedReasoning);
         Assert.AreEqual("static", provider.ModelDiscovery);

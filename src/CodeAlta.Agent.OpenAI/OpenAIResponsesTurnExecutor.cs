@@ -16,7 +16,9 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.OpenAI;
 
-internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider) : ILocalAgentTurnExecutor, ILocalAgentProviderSessionCleanup, IAsyncDisposable
+internal sealed class OpenAIResponsesTurnExecutor(
+    OpenAIProviderOptions provider,
+    CodexSubscriptionConcurrencyLimiter? codexSubscriptionConcurrencyLimiter = null) : ILocalAgentTurnExecutor, ILocalAgentProviderSessionCleanup, IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
     private static readonly ResponseReasoningEffortLevel XHighReasoningEffortLevel = new("xhigh");
@@ -29,6 +31,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
     private const string WebSocketWrappedErrorDataKey = "OpenAI.WebSocketWrappedError";
     private const string WebSocketConnectionLimitReachedCode = "websocket_connection_limit_reached";
 
+    private readonly CodexSubscriptionConcurrencyLimiter _codexSubscriptionConcurrencyLimiter = codexSubscriptionConcurrencyLimiter ?? new CodexSubscriptionConcurrencyLimiter();
     private readonly ConcurrentDictionary<string, OpenAIResponsesLiveContinuation> _liveContinuations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, OpenAIResponsesWebSocketSessionEntry> _webSocketSessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _webSocketHttpFallbackSessions = new(StringComparer.Ordinal);
@@ -97,6 +100,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
                     var turnState = GetCodexTurnState(request);
                     await using var concurrencyLease = await CreateCodexConcurrencyLeaseAsync(
                         request,
+                        onSessionUpdate,
                         cancellationToken).ConfigureAwait(false);
                     var client = OpenAIProviderSdkFactory.CreateResponsesClient(
                         provider,
@@ -855,6 +859,7 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
 
     private ValueTask<IAsyncDisposable?> CreateCodexConcurrencyLeaseAsync(
         LocalAgentTurnRequest request,
+        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
         if (provider.CodexSubscription is not { } codexOptions)
@@ -862,18 +867,24 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
             return ValueTask.FromResult<IAsyncDisposable?>(null);
         }
 
-        return AcquireCodexConcurrencyLeaseAsync(request, codexOptions, cancellationToken);
+        return AcquireCodexConcurrencyLeaseAsync(request, codexOptions, onSessionUpdate, cancellationToken);
     }
 
     private async ValueTask<IAsyncDisposable?> AcquireCodexConcurrencyLeaseAsync(
         LocalAgentTurnRequest request,
         OpenAICodexSubscriptionOptions codexOptions,
+        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
-        => await CodexSubscriptionConcurrencyLimiter.AcquireAsync(
+        => await _codexSubscriptionConcurrencyLimiter.AcquireAsync(
             provider.ProviderKey,
             request.SessionId,
             codexOptions.AccountId,
             codexOptions.MaxConcurrentRequests,
+            async (waitInfo, waitCancellationToken) =>
+                await onSessionUpdate(
+                        CreateCodexConcurrencyLimitWaitSessionUpdate(provider.ProviderKey, waitInfo.MaxConcurrentRequests),
+                        waitCancellationToken)
+                    .ConfigureAwait(false),
             cancellationToken).ConfigureAwait(false);
 
     private static ResponseResult? CreateResponseFromTerminalOrStreamedItems(
@@ -1887,6 +1898,18 @@ internal sealed class OpenAIResponsesTurnExecutor(OpenAIProviderOptions provider
         {
             Kind = AgentSessionUpdateKind.Reconnecting,
             Message = $"Reconnecting to ChatGPT/Codex... {retryText}/{maxRetriesText}",
+        };
+    }
+
+    private static LocalAgentTurnSessionUpdate CreateCodexConcurrencyLimitWaitSessionUpdate(
+        string providerKey,
+        int maxConcurrentRequests)
+    {
+        var maxConcurrentRequestsText = maxConcurrentRequests.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return new LocalAgentTurnSessionUpdate
+        {
+            Kind = AgentSessionUpdateKind.Warning,
+            Message = $"Waiting for CodeAlta's local ChatGPT/Codex concurrency guard: {maxConcurrentRequestsText} active request(s) for this ChatGPT account are already running. Codex CLI and pi-mono do not impose an equivalent account-wide limiter. To allow more parallel sessions, set max_concurrent_requests to a higher value under [providers.{providerKey}] in config.toml.",
         };
     }
 

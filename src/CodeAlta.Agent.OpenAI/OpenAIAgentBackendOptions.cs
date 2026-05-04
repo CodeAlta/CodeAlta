@@ -39,7 +39,10 @@ public abstract class OpenAIAgentBackendOptions
 /// <summary>
 /// Options for the OpenAI Responses backend.
 /// </summary>
-public sealed class OpenAIResponsesAgentBackendOptions : OpenAIAgentBackendOptions;
+public sealed class OpenAIResponsesAgentBackendOptions : OpenAIAgentBackendOptions
+{
+    internal CodexSubscriptionConcurrencyLimiter? CodexSubscriptionConcurrencyLimiter { get; set; }
+}
 
 /// <summary>
 /// Options for the OpenAI Chat/Completions backend.
@@ -165,7 +168,7 @@ public sealed class OpenAICodexSubscriptionOptions
     /// <summary>
     /// Gets or sets the maximum concurrent requests per ChatGPT account.
     /// </summary>
-    public int MaxConcurrentRequests { get; set; } = 1;
+    public int MaxConcurrentRequests { get; set; } = 16;
 
     /// <summary>
     /// Gets or sets the configured text verbosity.

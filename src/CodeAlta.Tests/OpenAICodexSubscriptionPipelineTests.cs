@@ -589,20 +589,22 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
-    public async Task ConcurrencyLimiter_AllowsOnlyOneTurnPerSessionAndAccountByDefault()
+    public async Task ConcurrencyLimiter_AllowsOnlyOneTurnPerSessionAndHonorsConfiguredAccountLimit()
     {
-        var first = await CodexSubscriptionConcurrencyLimiter.AcquireAsync(
+        var limiter = new CodexSubscriptionConcurrencyLimiter();
+        var accountId = "acct_" + Guid.NewGuid().ToString("N");
+        var first = await limiter.AcquireAsync(
             "codex_subscription",
             "session-one",
-            "acct_123",
-            maxConcurrentRequests: 1,
+            accountId,
+            maxConcurrentRequests: 16,
             CancellationToken.None).ConfigureAwait(false);
 
-        var sameSession = CodexSubscriptionConcurrencyLimiter.AcquireAsync(
+        var sameSession = limiter.AcquireAsync(
             "codex_subscription",
             "session-one",
-            "acct_123",
-            maxConcurrentRequests: 1,
+            accountId,
+            maxConcurrentRequests: 16,
             CancellationToken.None).AsTask();
         await Task.Delay(25).ConfigureAwait(false);
         Assert.IsFalse(sameSession.IsCompleted);
@@ -611,24 +613,102 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var second = await sameSession.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
         await second.DisposeAsync().ConfigureAwait(false);
 
-        var accountFirst = await CodexSubscriptionConcurrencyLimiter.AcquireAsync(
+        var accountLeases = new List<IAsyncDisposable>();
+        try
+        {
+            for (var i = 0; i < 16; i++)
+            {
+                accountLeases.Add(await limiter.AcquireAsync(
+                    "codex_subscription",
+                    "account-session-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    accountId,
+                    maxConcurrentRequests: 16,
+                    CancellationToken.None).ConfigureAwait(false));
+            }
+
+            var sameAccount = limiter.AcquireAsync(
+                "codex_subscription",
+                "blocked-account-session",
+                accountId,
+                maxConcurrentRequests: 16,
+                CancellationToken.None).AsTask();
+            await Task.Delay(25).ConfigureAwait(false);
+            Assert.IsFalse(sameAccount.IsCompleted);
+
+            await accountLeases[0].DisposeAsync().ConfigureAwait(false);
+            accountLeases.RemoveAt(0);
+            var third = await sameAccount.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            await third.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            foreach (var lease in accountLeases)
+            {
+                await lease.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ConcurrencyLimiter_NotifiesWhenWaitingForAccountLimit()
+    {
+        var limiter = new CodexSubscriptionConcurrencyLimiter();
+        var accountId = "acct_" + Guid.NewGuid().ToString("N");
+        var first = await limiter.AcquireAsync(
             "codex_subscription",
-            "session-two",
-            "acct_123",
+            "session-one",
+            accountId,
             maxConcurrentRequests: 1,
             CancellationToken.None).ConfigureAwait(false);
-        var sameAccount = CodexSubscriptionConcurrencyLimiter.AcquireAsync(
+        var waitNotifications = new List<CodexSubscriptionConcurrencyWaitInfo>();
+
+        var waiting = limiter.AcquireAsync(
             "codex_subscription",
-            "session-three",
-            "acct_123",
+            "session-two",
+            accountId,
+            maxConcurrentRequests: 1,
+            (waitInfo, _) =>
+            {
+                waitNotifications.Add(waitInfo);
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None).AsTask();
+        await Task.Delay(25).ConfigureAwait(false);
+
+        Assert.IsFalse(waiting.IsCompleted);
+        Assert.AreEqual(1, waitNotifications.Count);
+        Assert.AreEqual(accountId, waitNotifications[0].AccountKey);
+        Assert.AreEqual(1, waitNotifications[0].MaxConcurrentRequests);
+
+        await first.DisposeAsync().ConfigureAwait(false);
+        var second = await waiting.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await second.DisposeAsync().ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task ConcurrencyLimiter_SharesAccountLimitAcrossProviderDefinitionsInSameLimiter()
+    {
+        var limiter = new CodexSubscriptionConcurrencyLimiter();
+        var accountId = "acct_" + Guid.NewGuid().ToString("N");
+        var first = await limiter.AcquireAsync(
+            "codex_subscription_primary",
+            "session-one",
+            accountId,
+            maxConcurrentRequests: 1,
+            CancellationToken.None).ConfigureAwait(false);
+
+        var sameAccountDifferentProvider = limiter.AcquireAsync(
+            "codex_subscription_secondary",
+            "session-two",
+            accountId,
             maxConcurrentRequests: 1,
             CancellationToken.None).AsTask();
         await Task.Delay(25).ConfigureAwait(false);
-        Assert.IsFalse(sameAccount.IsCompleted);
+        Assert.IsFalse(sameAccountDifferentProvider.IsCompleted);
 
-        await accountFirst.DisposeAsync().ConfigureAwait(false);
-        var third = await sameAccount.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
-        await third.DisposeAsync().ConfigureAwait(false);
+        await first.DisposeAsync().ConfigureAwait(false);
+        var second = await sameAccountDifferentProvider.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        await second.DisposeAsync().ConfigureAwait(false);
     }
 
     private static OpenAIClientOptions CreateClientOptions(OpenAIProviderOptions provider)

@@ -5,6 +5,7 @@ using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.LocalRuntime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
+using CodeAlta.Agent.OpenAI.CodexSubscription;
 using CodeAlta.Catalog;
 using Tomlyn.Model;
 using XenoAtom.Logging;
@@ -26,9 +27,10 @@ internal static class RawApiBackendRegistrar
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
         var descriptors = new List<AgentBackendDescriptor>();
+        var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
         foreach (var definition in configStore.LoadGlobalProviderDefinitions())
         {
-            if (TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, out var descriptor, out var createBackend))
+            if (TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend))
             {
                 backendFactory.RegisterOrReplace(descriptor.BackendId, createBackend);
                 descriptors.Add(descriptor);
@@ -49,9 +51,10 @@ internal static class RawApiBackendRegistrar
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
         var descriptors = new List<AgentBackendDescriptor>();
+        var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
         foreach (var definition in definitions)
         {
-            if (!TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, out var descriptor, out var createBackend))
+            if (!TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend))
             {
                 continue;
             }
@@ -69,8 +72,24 @@ internal static class RawApiBackendRegistrar
         ModelsDevCatalogService? modelCatalog,
         out AgentBackendDescriptor descriptor,
         out Func<IAgentBackend> createBackend)
+        => TryCreateBackendRegistration(
+            definition,
+            stateRootPath,
+            modelCatalog,
+            new CodexSubscriptionConcurrencyLimiter(),
+            out descriptor,
+            out createBackend);
+
+    private static bool TryCreateBackendRegistration(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
+        out AgentBackendDescriptor descriptor,
+        out Func<IAgentBackend> createBackend)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(codexSubscriptionConcurrencyLimiter);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
         switch (definition.ProviderType)
@@ -80,7 +99,7 @@ internal static class RawApiBackendRegistrar
             case "openai-responses":
                 return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
             case "openai-codex-subscription":
-                return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createBackend);
             case "anthropic":
                 return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
             case "google-genai":
@@ -222,6 +241,7 @@ internal static class RawApiBackendRegistrar
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         out AgentBackendDescriptor descriptor,
         out Func<IAgentBackend> createBackend)
     {
@@ -247,7 +267,7 @@ internal static class RawApiBackendRegistrar
             {
                 AuthSource = NormalizeText(definition.AuthSource) ?? "codealta_oauth",
                 AccountId = NormalizeText(definition.AccountId),
-                MaxConcurrentRequests = definition.MaxConcurrentRequests ?? 1,
+                MaxConcurrentRequests = definition.MaxConcurrentRequests ?? 16,
                 TextVerbosity = NormalizeText(definition.TextVerbosity) ?? "medium",
                 IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning ?? true,
                 ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? "static",
@@ -264,6 +284,7 @@ internal static class RawApiBackendRegistrar
             BackendIdOverride = backendId,
             DisplayNameOverride = displayName,
             StateRootPath = stateRootPath,
+            CodexSubscriptionConcurrencyLimiter = codexSubscriptionConcurrencyLimiter,
             Providers = { providerOptions },
         };
 

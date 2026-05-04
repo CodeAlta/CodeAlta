@@ -1,21 +1,25 @@
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.OpenAI.CodexSubscription;
 
 namespace CodeAlta.Agent.OpenAI;
 
 internal static class OpenAIBackendFactory
 {
     public static IAgentBackend CreateResponsesBackend(OpenAIResponsesAgentBackendOptions options)
-        => CreateBackend(
+    {
+        var codexSubscriptionConcurrencyLimiter = options.CodexSubscriptionConcurrencyLimiter ?? new CodexSubscriptionConcurrencyLimiter();
+        return CreateBackend(
             options.BackendIdOverride ?? AgentBackendIds.OpenAIResponses,
             string.IsNullOrWhiteSpace(options.DisplayNameOverride) ? "OpenAI Responses" : options.DisplayNameOverride.Trim(),
             "openai-responses",
             LocalAgentTransportKind.OpenAIResponses,
             options,
-            static provider => new OpenAIResponsesTurnExecutor(provider),
+            provider => new OpenAIResponsesTurnExecutor(provider, codexSubscriptionConcurrencyLimiter),
             static provider => provider.CodexSubscription is null
                 ? "openai-responses"
                 : "openai-codex-subscription");
+    }
 
     public static IAgentBackend CreateChatBackend(OpenAIChatAgentBackendOptions options)
         => CreateBackend(

@@ -36,7 +36,7 @@ public sealed class CodeAltaConfigStore
     private const string CodexSubscriptionDefaultModelDiscovery = "static";
     private const string CodexSubscriptionDefaultResponseTransport = "websocket_with_http_fallback";
     private const string CodexSubscriptionDefaultInstallationIdSource = "codealta_state";
-    private const int CodexSubscriptionDefaultMaxConcurrentRequests = 1;
+    private const int CodexSubscriptionDefaultMaxConcurrentRequests = 16;
 
     private static readonly CodeAltaProviderCompactionDocument DefaultCompaction = new()
     {

@@ -204,7 +204,7 @@ public sealed class RawApiBackendRegistrarTests
             Model = "gpt-5.3-codex",
             ApiUrl = "https://chatgpt.com/backend-api/codex",
             AuthSource = "codealta_oauth",
-            MaxConcurrentRequests = 1,
+            MaxConcurrentRequests = 16,
             TextVerbosity = "medium",
             IncludeEncryptedReasoning = true,
             ModelDiscovery = "static",

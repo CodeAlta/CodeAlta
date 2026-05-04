@@ -113,7 +113,7 @@ Required or defaulted fields:
 | `base_url` / `api_url` | URI | no | `https://chatgpt.com/backend-api/codex` | Advanced/debug only. Reject non-HTTPS except localhost test transports. |
 | `auth_source` | enum | no | `codealta_oauth` | See auth sources below. |
 | `account_id` | string | no | token default | Explicit ChatGPT account/workspace id override. |
-| `max_concurrent_requests` | int | no | `1` | Per credential/account. Must not be higher than a conservative cap without warning. |
+| `max_concurrent_requests` | int | no | `16` | Local CodeAlta safety limit per credential/account. Codex CLI and pi-mono do not impose an equivalent account-wide limiter; lower this only when the service or network shows instability. |
 | `reasoning_effort` | enum | no | backend/model default | Normal CodeAlta reasoning mapping. |
 | `text_verbosity` | enum | no | `medium` | `low`, `medium`, or `high`. |
 | `include_encrypted_reasoning` | bool | no | `true` | Adds `reasoning.encrypted_content`. |
@@ -587,9 +587,11 @@ Transport rules:
 
 Defaults:
 
-- one active request per ChatGPT account;
+- up to 16 active requests per ChatGPT account by default, configurable with `max_concurrent_requests`;
 - one active turn per CodeAlta LocalRuntime session;
 - no request replay after partial streamed output or after tool execution begins.
+
+The account-level guard is a local CodeAlta safety valve, not a behavior observed in Codex CLI or pi-mono. If all slots are busy, CodeAlta should surface an explicit waiting message that points users to `max_concurrent_requests` under the affected provider in `config.toml`.
 
 Retries:
 
