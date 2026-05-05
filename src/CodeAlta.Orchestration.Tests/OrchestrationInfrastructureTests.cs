@@ -1168,6 +1168,67 @@ public sealed class OrchestrationInfrastructureTests
     }
 
     [TestMethod]
+    public async Task WorkThreadRuntimeService_ListRecoverableThreadsAsync_LoadsSharedLocalRuntimeSessionsOnce()
+    {
+        using var temp = TempDirectory.Create();
+        var catalogOptions = new CatalogOptions { GlobalRoot = temp.Path };
+        var projectCatalog = new ProjectCatalog(catalogOptions);
+        var threadCatalog = new WorkThreadCatalog(catalogOptions);
+        var roleStore = new RoleProfileStore();
+        var instructionProvider = new AgentInstructionTemplateProvider();
+
+        var project = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Slug = "repo-main",
+            DisplayName = "Main Repo",
+            ProjectPath = Path.Combine(temp.Path, "repo-main"),
+            DefaultBranch = "main",
+        };
+        Directory.CreateDirectory(project.ProjectPath);
+        await projectCatalog.SaveAsync(project).ConfigureAwait(false);
+
+        var createdAt = DateTimeOffset.UtcNow.AddMinutes(-12);
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(catalogOptions.GlobalRoot));
+        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        {
+            SessionId = "local-session-1",
+            BackendId = new AgentBackendId("provider-b"),
+            ProtocolFamily = "openai-responses",
+            ProviderKey = "provider-b",
+            WorkingDirectory = project.ProjectPath,
+            Title = "Shared local session",
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt.AddMinutes(2),
+        }).ConfigureAwait(false);
+
+        var providerA = new SharedSessionStoreFakeBackend(new AgentBackendId("provider-a"));
+        var providerB = new SharedSessionStoreFakeBackend(new AgentBackendId("provider-b"));
+        var backendFactory = new AgentBackendFactory();
+        backendFactory.Register("provider-a", () => providerA);
+        backendFactory.Register("provider-b", () => providerB);
+
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var repository = new AgentRepository(db);
+        await using var hub = new AgentHub(backendFactory, repository);
+        await using var runtime = new WorkThreadRuntimeService(
+            hub,
+            projectCatalog,
+            threadCatalog,
+            roleStore,
+            instructionProvider,
+            catalogOptions);
+
+        var recoverable = await runtime.ListRecoverableThreadsAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, recoverable.Count);
+        Assert.AreEqual("provider-b", recoverable[0].BackendId);
+        Assert.AreEqual("provider-b:local-session-1", recoverable[0].ThreadId);
+        Assert.AreEqual(0, providerB.ListSessionsCount);
+        Assert.AreEqual(0, providerA.ListSessionsCount);
+    }
+
+    [TestMethod]
     public async Task WorkThreadRuntimeService_ListRecoverableThreadsAsync_ContinuesWhenBackendIsUnavailable()
     {
         using var temp = TempDirectory.Create();
@@ -1263,7 +1324,7 @@ public sealed class OrchestrationInfrastructureTests
         }
     }
 
-    private sealed class FakeBackend : IAgentBackend
+    private class FakeBackend : IAgentBackend
     {
         private int _runCounter;
         private readonly AgentBackendId _backendId;
@@ -1295,6 +1356,8 @@ public sealed class OrchestrationInfrastructureTests
 
         public int ResumeSessionCount { get; private set; }
 
+        public int ListSessionsCount { get; private set; }
+
         public AgentCompactionOutcome? CompactionOutcome { get; set; }
 
         public FakeSession? LastSession { get; private set; }
@@ -1311,7 +1374,10 @@ public sealed class OrchestrationInfrastructureTests
         public Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(
             AgentSessionListFilter? filter = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(_sessions);
+        {
+            ListSessionsCount++;
+            return Task.FromResult(_sessions);
+        }
 
         public Task<IAgentSession> CreateSessionAsync(
             AgentSessionCreateOptions options,
@@ -1460,6 +1526,10 @@ public sealed class OrchestrationInfrastructureTests
                 ];
             }
         }
+    }
+
+    private sealed class SharedSessionStoreFakeBackend(AgentBackendId backendId) : FakeBackend(backendId), IAgentSharedSessionMetadataBackend
+    {
     }
 
     private sealed class DisposableAction : IDisposable

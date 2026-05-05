@@ -3,7 +3,7 @@ namespace CodeAlta.Agent.OpenAI;
 /// <summary>
 /// Local-runtime backend for OpenAI-compatible Chat/Completions providers.
 /// </summary>
-public sealed class OpenAIChatAgentBackend : IAgentBackend
+public sealed class OpenAIChatAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend
 {
     private readonly IAgentBackend _inner;
 

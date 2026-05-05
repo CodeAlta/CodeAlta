@@ -90,10 +90,14 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             .Where(backendId => shouldListBackendSessions?.Invoke(backendId) != false)
             .OrderBy(static backendId => IsProviderManagedBackend(backendId) ? 1 : 0)
             .ToArray();
-        results.AddRange(await LoadNativeLocalMirrorThreadsAsync(backendIds, projects, cancellationToken).ConfigureAwait(false));
+
+        var sharedSessionMetadataBackendIds = await LoadSharedSessionMetadataBackendIdsAsync(backendIds, cancellationToken).ConfigureAwait(false);
+        results.AddRange(await LoadSharedLocalRuntimeThreadsAsync(backendIds, projects, cancellationToken).ConfigureAwait(false));
 
         var sessionResults = await Task.WhenAll(
-                backendIds.Select(LoadBackendSessionsAsync))
+                backendIds
+                    .Where(backendId => !sharedSessionMetadataBackendIds.Contains(backendId.Value))
+                    .Select(LoadBackendSessionsAsync))
             .ConfigureAwait(false);
 
         foreach (var (backendId, sessions) in sessionResults)
@@ -152,35 +156,58 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         }
     }
 
-    private async Task<IReadOnlyList<RecoverableThreadCandidate>> LoadNativeLocalMirrorThreadsAsync(
+    private async Task<IReadOnlySet<string>> LoadSharedSessionMetadataBackendIdsAsync(
+        IReadOnlyList<AgentBackendId> backendIds,
+        CancellationToken cancellationToken)
+    {
+        var results = await Task.WhenAll(backendIds.Select(LoadSharedBackendIdAsync)).ConfigureAwait(false);
+        return results
+            .Where(static backendId => backendId is not null)
+            .Select(static backendId => backendId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        async Task<string?> LoadSharedBackendIdAsync(AgentBackendId backendId)
+        {
+            try
+            {
+                return await _agentHub.UsesSharedSessionMetadataStoreAsync(backendId, cancellationToken).ConfigureAwait(false)
+                    ? backendId.Value
+                    : null;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<RecoverableThreadCandidate>> LoadSharedLocalRuntimeThreadsAsync(
         IReadOnlyList<AgentBackendId> backendIds,
         IReadOnlyList<ProjectDescriptor> projects,
         CancellationToken cancellationToken)
     {
-        var nativeBackendIds = backendIds
-            .Where(static backendId => IsProviderManagedBackend(backendId))
-            .ToArray();
-        if (nativeBackendIds.Length == 0)
-        {
-            return [];
-        }
+        var loadableBackendIds = backendIds
+            .Select(static backendId => backendId.Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(_catalogOptions.GlobalRoot));
         var results = new List<RecoverableThreadCandidate>();
-        foreach (var backendId in nativeBackendIds)
+        foreach (var session in await store.ListSessionsAsync(cancellationToken).ConfigureAwait(false))
         {
-            var sessions = await store.ListSessionsAsync(
-                    backendId.Value,
-                    backendId.Value,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            foreach (var session in sessions)
+            if (string.IsNullOrWhiteSpace(session.ProviderKey) || !loadableBackendIds.Contains(session.ProviderKey))
             {
-                var thread = TryCreateRecoverableThread(backendId, ToAgentSessionMetadata(session), projects);
-                if (thread is not null)
-                {
-                    results.Add(new RecoverableThreadCandidate(thread, IsCodeAltaSession: true));
-                }
+                continue;
+            }
+
+            var backendId = new AgentBackendId(session.ProviderKey);
+            var thread = TryCreateRecoverableThread(backendId, ToAgentSessionMetadata(session), projects);
+            if (thread is not null)
+            {
+                results.Add(new RecoverableThreadCandidate(thread, IsCodeAltaSession: true));
             }
         }
 

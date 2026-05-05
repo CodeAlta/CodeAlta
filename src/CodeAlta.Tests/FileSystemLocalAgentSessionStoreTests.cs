@@ -116,6 +116,36 @@ public sealed class FileSystemLocalAgentSessionStoreTests
         Assert.AreEqual(1, persistedEvents.Count);
         Assert.IsInstanceOfType<AgentSessionUpdateEvent>(persistedEvents[0]);
     }
+
+    [TestMethod]
+    public async Task MetadataReads_RefreshCachedProjectionWhenJournalChanges()
+    {
+        using var temp = TestTempDirectory.Create();
+        var layout = new LocalAgentRuntimePathLayout(temp.Path);
+        var firstStore = new FileSystemLocalAgentSessionStore(layout);
+        var secondStore = new FileSystemLocalAgentSessionStore(layout);
+        var session = CreateSession("session-cache", createdAt: "2026-04-06T10:00:00+00:00", updatedAt: "2026-04-06T10:00:00+00:00");
+
+        await firstStore.UpsertSessionAsync(session).ConfigureAwait(false);
+        _ = await firstStore.ListSessionsAsync("openai", "openai").ConfigureAwait(false);
+
+        await secondStore.UpsertStateAsync(
+                new LocalAgentSessionState
+                {
+                    SessionId = session.SessionId,
+                    ProtocolFamily = session.ProtocolFamily,
+                    ProviderKey = session.ProviderKey,
+                    ProviderSessionId = "resp_cached",
+                    UpdatedAt = DateTimeOffset.Parse("2026-04-06T10:01:00+00:00"),
+                })
+            .ConfigureAwait(false);
+
+        var refreshedState = await firstStore.GetStateAsync("openai", "openai", session.SessionId).ConfigureAwait(false);
+
+        Assert.IsNotNull(refreshedState);
+        Assert.AreEqual("resp_cached", refreshedState.ProviderSessionId);
+    }
+
     private static LocalAgentSessionSummary CreateSession(string sessionId, string createdAt, string updatedAt)
     {
         using var metadata = JsonDocument.Parse("""{"profile":"default"}""");

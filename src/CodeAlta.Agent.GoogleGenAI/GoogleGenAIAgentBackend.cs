@@ -10,7 +10,7 @@ namespace CodeAlta.Agent.GoogleGenAI;
 /// <summary>
 /// Local-runtime backend for Google GenAI providers.
 /// </summary>
-public sealed class GoogleGenAIAgentBackend : IAgentBackend
+public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend
 {
     private readonly IAgentBackend _inner;
 

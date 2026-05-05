@@ -12,7 +12,7 @@ namespace CodeAlta.Agent.Anthropic;
 /// <summary>
 /// Local-runtime backend for Anthropic Messages providers.
 /// </summary>
-public sealed class AnthropicAgentBackend : IAgentBackend
+public sealed class AnthropicAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Anthropic");
     private readonly IAgentBackend _inner;

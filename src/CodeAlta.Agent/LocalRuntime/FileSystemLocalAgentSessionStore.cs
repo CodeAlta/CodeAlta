@@ -14,6 +14,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
     private const string SessionStateEventType = "local.sessionState";
 
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly ConcurrentDictionary<string, CachedSessionProjection> MetadataProjectionCache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly LocalAgentRuntimePathLayout _layout;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _pathLocks = new(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +60,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var projection = await TryProjectSessionAsync(sessionId, includeHistory: false, cancellationToken).ConfigureAwait(false);
         if (projection is null || projection.Summary is null)
         {
             return null;
@@ -76,6 +77,19 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string providerKey,
         CancellationToken cancellationToken = default)
     {
+        var sessions = await ListSessionsAsync(cancellationToken).ConfigureAwait(false);
+        return sessions
+            .Where(session => MatchesScope(session, protocolFamily, providerKey))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Lists all local-runtime sessions across configured providers.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Session summaries ordered by most recent update first.</returns>
+    public async Task<IReadOnlyList<LocalAgentSessionSummary>> ListSessionsAsync(CancellationToken cancellationToken = default)
+    {
         if (!Directory.Exists(_layout.SessionsRootPath))
         {
             return [];
@@ -88,9 +102,9 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
 
             try
             {
-                var projection = await ProjectSessionFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+                var projection = await ProjectSessionFileAsync(sessionFile, includeHistory: false, cancellationToken).ConfigureAwait(false);
                 var summary = projection.Summary;
-                if (summary is null || !MatchesScope(summary, protocolFamily, providerKey))
+                if (summary is null)
                 {
                     continue;
                 }
@@ -145,7 +159,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var projection = await TryProjectSessionAsync(sessionId, includeHistory: true, cancellationToken).ConfigureAwait(false);
         if (projection is null || projection.Summary is null || !MatchesScope(projection.Summary, protocolFamily, providerKey))
         {
             return [];
@@ -181,7 +195,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var projection = await TryProjectSessionAsync(sessionId, includeHistory: false, cancellationToken).ConfigureAwait(false);
         if (projection is null || projection.Summary is null || projection.State is null)
         {
             return null;
@@ -205,7 +219,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
             return false;
         }
 
-        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var projection = await TryProjectSessionAsync(sessionId, includeHistory: false, cancellationToken).ConfigureAwait(false);
         if (projection?.Summary is not null && !MatchesScope(projection.Summary, protocolFamily, providerKey))
         {
             return false;
@@ -222,6 +236,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
 
             File.Delete(sessionFile);
             _sessionFiles.TryRemove(sessionId, out _);
+            InvalidateMetadataProjectionCache(sessionFile);
             DeleteEmptySessionDirectories(Path.GetDirectoryName(sessionFile));
             return true;
         }
@@ -300,12 +315,13 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         string providerKey,
         CancellationToken cancellationToken)
     {
-        var projection = await TryProjectSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var projection = await TryProjectSessionAsync(sessionId, includeHistory: false, cancellationToken).ConfigureAwait(false);
         return projection?.Summary?.BackendId ?? new AgentBackendId(providerKey);
     }
 
     private async Task<SessionProjection?> TryProjectSessionAsync(
         string sessionId,
+        bool includeHistory,
         CancellationToken cancellationToken)
     {
         var sessionFile = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
@@ -314,10 +330,81 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
             return null;
         }
 
-        return await ProjectSessionFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        return await ProjectSessionFileAsync(sessionFile, includeHistory, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SessionProjection> ProjectSessionFileAsync(
+        string sessionFile,
+        bool includeHistory,
+        CancellationToken cancellationToken)
+    {
+        return includeHistory
+            ? await ProjectSessionFileWithHistoryAsync(sessionFile, cancellationToken).ConfigureAwait(false)
+            : await ProjectSessionMetadataFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SessionProjection> ProjectSessionMetadataFileAsync(
+        string sessionFile,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = Path.GetFullPath(sessionFile);
+        var before = GetFileStamp(sessionFile);
+        if (before is not null &&
+            MetadataProjectionCache.TryGetValue(cacheKey, out var cached) &&
+            cached.Stamp == before)
+        {
+            return cached.Projection;
+        }
+
+        var projection = await ProjectSessionMetadataFileUncachedAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        var after = GetFileStamp(sessionFile);
+        if (before is not null && before == after)
+        {
+            MetadataProjectionCache[cacheKey] = new CachedSessionProjection(before.Value, projection);
+        }
+
+        return projection;
+    }
+
+    private async Task<SessionProjection> ProjectSessionMetadataFileUncachedAsync(
+        string sessionFile,
+        CancellationToken cancellationToken)
+    {
+        LocalAgentSessionSummary? summary = null;
+        LocalAgentSessionState? state = null;
+
+        await using var stream = new FileStream(
+            sessionFile,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite,
+            bufferSize: 4096,
+            useAsync: true);
+        using var reader = new StreamReader(stream, Utf8WithoutBom, detectEncodingFromByteOrderMarks: true);
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                ProjectMetadataSnapshot(document.RootElement, ref summary, ref state);
+            }
+            catch (JsonException) when (reader.Peek() < 0)
+            {
+                break;
+            }
+        }
+
+        return new SessionProjection(summary, state, []);
+    }
+
+    private async Task<SessionProjection> ProjectSessionFileWithHistoryAsync(
         string sessionFile,
         CancellationToken cancellationToken)
     {
@@ -356,6 +443,45 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         }
 
         return new SessionProjection(summary, state, history);
+    }
+
+    private static void ProjectMetadataSnapshot(
+        JsonElement element,
+        ref LocalAgentSessionSummary? summary,
+        ref LocalAgentSessionState? state)
+    {
+        if (!element.TryGetProperty("$type", out var typeElement) ||
+            !string.Equals(typeElement.GetString(), "raw", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!element.TryGetProperty("backendEventType", out var eventTypeElement) ||
+            !element.TryGetProperty("raw", out var rawElement))
+        {
+            return;
+        }
+
+        var eventType = eventTypeElement.GetString();
+        if (string.Equals(eventType, SessionSummaryEventType, StringComparison.Ordinal))
+        {
+            var snapshot = rawElement.Deserialize(AgentJsonSerializerContext.Default.LocalAgentSessionSummary);
+            if (snapshot is not null)
+            {
+                summary = snapshot;
+            }
+
+            return;
+        }
+
+        if (string.Equals(eventType, SessionStateEventType, StringComparison.Ordinal))
+        {
+            var snapshot = rawElement.Deserialize(AgentJsonSerializerContext.Default.LocalAgentSessionState);
+            if (snapshot is not null)
+            {
+                state = snapshot;
+            }
+        }
     }
 
     private async IAsyncEnumerable<AgentEvent> ReadJournalEventsAsync(
@@ -424,8 +550,20 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         finally
         {
             pathLock.Release();
+            InvalidateMetadataProjectionCache(path);
         }
     }
+
+    private static FileStamp? GetFileStamp(string path)
+    {
+        var fileInfo = new FileInfo(path);
+        return fileInfo.Exists
+            ? new FileStamp(fileInfo.LastWriteTimeUtc, fileInfo.Length)
+            : null;
+    }
+
+    private static void InvalidateMetadataProjectionCache(string path)
+        => MetadataProjectionCache.TryRemove(Path.GetFullPath(path), out _);
 
     private async Task WriteFileAtomicallyAsync(
         string path,
@@ -521,4 +659,8 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
         LocalAgentSessionSummary? Summary,
         LocalAgentSessionState? State,
         IReadOnlyList<AgentEvent> History);
+
+    private readonly record struct FileStamp(DateTime LastWriteTimeUtc, long Length);
+
+    private sealed record CachedSessionProjection(FileStamp Stamp, SessionProjection Projection);
 }

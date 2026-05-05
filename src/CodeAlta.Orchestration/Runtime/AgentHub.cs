@@ -401,6 +401,20 @@ public sealed class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Returns whether a backend uses the CodeAlta-owned shared session metadata store.
+    /// </summary>
+    /// <param name="backendId">The backend identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true" /> when sessions can be recovered once from the shared store.</returns>
+    public async Task<bool> UsesSharedSessionMetadataStoreAsync(
+        AgentBackendId backendId,
+        CancellationToken cancellationToken = default)
+    {
+        var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
+        return backend is IAgentSharedSessionMetadataBackend;
+    }
+
+    /// <summary>
     /// Lists registered backend identifiers known to the orchestration runtime.
     /// </summary>
     /// <returns>The registered backend identifiers.</returns>

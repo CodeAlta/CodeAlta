@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.LocalRuntime;
 /// <summary>
 /// Shared <see cref="IAgentBackend"/> implementation for provider-backed local raw-API runtimes.
 /// </summary>
-public sealed class LocalAgentBackend : IAgentBackend
+public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.LocalRuntime");
     private readonly LocalAgentBackendOptions _options;
