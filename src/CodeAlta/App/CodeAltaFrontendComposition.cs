@@ -74,6 +74,8 @@ internal sealed class CodeAltaFrontendComposition
         var promptComposerViewModel = new PromptComposerViewModel();
         var sessionUsageViewModel = new SessionUsageViewModel();
         var chatBackendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        var sessionLoadableBackendIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sessionLoadableBackendIdsGate = new object();
         knownProjectImporter.ShouldLoadProviderSessions = ShouldLoadProviderSessions;
         var configStore = new CodeAltaConfigStore(catalogOptions);
         var backendPreferences = new ChatBackendPreferenceCoordinator(configStore, CodeAlta.Views.CodeAltaApp.UiLogger);
@@ -221,7 +223,8 @@ internal sealed class CodeAltaFrontendComposition
             callbacks.DispatchToUi,
             callbacks.RefreshHeaderAndThreadWorkspace,
             codexInstallProgress,
-            callbacks.SetProviderSessionLoadStatus);
+            callbacks.SetProviderSessionLoadStatus,
+            SetBackendSessionLoadingEnabled);
         var threadRuntimeEventCoordinator = new ThreadRuntimeEventCoordinator(
             threadId => threadStateCoordinator.FindThread(threadId),
             threadId => threadStateCoordinator.FindOpenThread(threadId),
@@ -274,7 +277,8 @@ internal sealed class CodeAltaFrontendComposition
                 callbacks.RefreshCatalogAndThreadWorkspace,
                 callbacks.SetStatus,
                 callbacks.SetThreadStatus,
-                threadRuntimeEventCoordinator.TryRenderInteraction),
+                threadRuntimeEventCoordinator.TryRenderInteraction,
+                callbacks.RekeyThreadIdentity),
             threadPromptQueueCoordinator,
             promptComposerViewModel,
             projectFileSearchService,
@@ -311,8 +315,33 @@ internal sealed class CodeAltaFrontendComposition
         };
 
         bool ShouldLoadProviderSessions(AgentBackendId backendId)
-            => chatBackendStates.TryGetValue(backendId.Value, out var state) &&
-               state.Availability == ChatBackendAvailability.Ready;
+        {
+            lock (sessionLoadableBackendIdsGate)
+            {
+                if (sessionLoadableBackendIds.Contains(backendId.Value))
+                {
+                    return true;
+                }
+            }
+
+            return chatBackendStates.TryGetValue(backendId.Value, out var state) &&
+                   state.Availability == ChatBackendAvailability.Ready;
+        }
+
+        void SetBackendSessionLoadingEnabled(AgentBackendId backendId, bool enabled)
+        {
+            lock (sessionLoadableBackendIdsGate)
+            {
+                if (enabled)
+                {
+                    sessionLoadableBackendIds.Add(backendId.Value);
+                }
+                else
+                {
+                    sessionLoadableBackendIds.Remove(backendId.Value);
+                }
+            }
+        }
     }
 
     private static Func<string?, string> CreateProviderDisplayNameResolver(

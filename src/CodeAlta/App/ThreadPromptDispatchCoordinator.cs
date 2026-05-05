@@ -223,27 +223,43 @@ internal sealed class ThreadPromptDispatchCoordinator
             if (dispatchAsSteer)
             {
                 pendingSteerId = _queueCoordinator.AddPendingSteer(tab, prompt);
-                runId = await _runtimeService.SteerAsync(
-                        thread,
-                        executionOptions,
-                        new AgentSteerOptions
-                        {
-                            Input = agentInput,
-                            ExpectedRunId = tab.ActiveRunId,
-                        },
-                        cancellationToken)
-                    ;
+                var oldThreadId = thread.ThreadId;
+                try
+                {
+                    runId = await _runtimeService.SteerAsync(
+                            thread,
+                            executionOptions,
+                            new AgentSteerOptions
+                            {
+                                Input = agentInput,
+                                ExpectedRunId = tab.ActiveRunId,
+                            },
+                            cancellationToken)
+                        ;
+                }
+                finally
+                {
+                    RekeyThreadIfNeeded(oldThreadId, thread, tab);
+                }
             }
             else
             {
                 tab.Timeline.RenderOptimisticUserPrompt(promptInput.NormalizedPromptText, imageReferences, DateTimeOffset.UtcNow);
 
-                runId = await _runtimeService.SendAsync(
-                        thread,
-                        executionOptions,
-                        new AgentSendOptions { Input = agentInput },
-                        cancellationToken)
-                    ;
+                var oldThreadId = thread.ThreadId;
+                try
+                {
+                    runId = await _runtimeService.SendAsync(
+                            thread,
+                            executionOptions,
+                            new AgentSendOptions { Input = agentInput },
+                            cancellationToken)
+                        ;
+                }
+                finally
+                {
+                    RekeyThreadIfNeeded(oldThreadId, thread, tab);
+                }
             }
 
             // Local runtime sessions can complete and publish Idle before SendAsync returns.
@@ -337,6 +353,19 @@ internal sealed class ThreadPromptDispatchCoordinator
     private static bool IsCodeAltaManagedBackend(AgentBackendId backendId)
         => !string.Equals(backendId.Value, AgentBackendIds.Codex.Value, StringComparison.OrdinalIgnoreCase) &&
            !string.Equals(backendId.Value, AgentBackendIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
+
+    private void RekeyThreadIfNeeded(string oldThreadId, WorkThreadDescriptor thread, OpenThreadState tab)
+    {
+        if (string.IsNullOrWhiteSpace(oldThreadId) ||
+            string.Equals(oldThreadId, thread.ThreadId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        tab.Thread = thread;
+        tab.ViewModel.ThreadId = thread.ThreadId;
+        _commandContext.RekeyThreadIdentity(oldThreadId, thread);
+    }
 
     private static string? ResolveReferenceProjectRoot(WorkThreadExecutionOptions executionOptions)
     {

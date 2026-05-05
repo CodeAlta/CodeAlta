@@ -85,6 +85,45 @@ public sealed class ChatBackendInitializationCoordinatorTests
     }
 
     [TestMethod]
+    public async Task RefreshBackendAsync_EnablesSessionLoadingBeforeUiStateIsApplied()
+    {
+        using var temp = TempDirectory.Create();
+        var db = await CreateDbAsync(temp.Path).ConfigureAwait(false);
+        var backendId = new AgentBackendId("codex_subscription");
+        var backendFactory = new AgentBackendFactory();
+        backendFactory.Register(backendId, () => new CountingBackend(backendId));
+
+        await using var hub = new AgentHub(backendFactory, new AgentRepository(db));
+        var state = new ChatBackendState(backendId, "ChatGPT");
+        var queuedUiActions = new Queue<Action>();
+        var sessionLoadingUpdates = new List<(AgentBackendId BackendId, bool Enabled)>();
+        var coordinator = new ChatBackendInitializationCoordinator(
+            hub,
+            [new AgentBackendDescriptor(backendId, "ChatGPT")],
+            new Dictionary<string, ChatBackendState>(StringComparer.OrdinalIgnoreCase)
+            {
+                [backendId.Value] = state,
+            },
+            action => queuedUiActions.Enqueue(action),
+            static () => { },
+            setBackendSessionLoadingEnabled: (id, enabled) => sessionLoadingUpdates.Add((id, enabled)));
+
+        await coordinator.RefreshBackendAsync(backendId, CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(ChatBackendAvailability.Unknown, state.Availability);
+        Assert.IsTrue(
+            sessionLoadingUpdates.Any(update => update.BackendId == backendId && update.Enabled),
+            "Session loading should be enabled as soon as backend discovery succeeds, before queued UI state updates run.");
+
+        while (queuedUiActions.TryDequeue(out var action))
+        {
+            action();
+        }
+
+        Assert.AreEqual(ChatBackendAvailability.Ready, state.Availability);
+    }
+
+    [TestMethod]
     public void FormatProviderInitializationStatus_ShowsProgressAndProviderNames()
     {
         var status = ChatBackendInitializationCoordinator.FormatProviderInitializationStatus(

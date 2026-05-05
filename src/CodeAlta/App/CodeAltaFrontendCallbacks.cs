@@ -33,6 +33,7 @@ internal sealed class CodeAltaFrontendCallbacks
     public required Action<AgentBackendId, string?, AgentReasoningEffort?> RememberGlobalBackendPreference { get; init; }
     public required Action InvalidateSelectedSessionUsage { get; init; }
     public required Action RefreshHeaderAndThreadWorkspace { get; init; }
+    public required Action<string, WorkThreadDescriptor> RekeyThreadIdentity { get; init; }
     public required Func<bool> HasWorkspaceSurface { get; init; }
     public required Action<Visual> SetThreadPaneContent { get; init; }
     public required Action EnsureSelectionDefaults { get; init; }

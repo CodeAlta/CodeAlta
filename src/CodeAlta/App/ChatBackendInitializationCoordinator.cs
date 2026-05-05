@@ -18,6 +18,7 @@ internal sealed class ChatBackendInitializationCoordinator
     private readonly Action _refreshHeaderAndThreadWorkspace;
     private readonly CodexInstallProgressReporter? _codexInstallProgress;
     private readonly Action<string?>? _setProviderInitializationStatus;
+    private readonly Action<AgentBackendId, bool>? _setBackendSessionLoadingEnabled;
 
     public ChatBackendInitializationCoordinator(
         AgentHub agentHub,
@@ -26,7 +27,8 @@ internal sealed class ChatBackendInitializationCoordinator
         Action<Action> dispatchToUi,
         Action refreshHeaderAndThreadWorkspace,
         CodexInstallProgressReporter? codexInstallProgress = null,
-        Action<string?>? setProviderInitializationStatus = null)
+        Action<string?>? setProviderInitializationStatus = null,
+        Action<AgentBackendId, bool>? setBackendSessionLoadingEnabled = null)
     {
         ArgumentNullException.ThrowIfNull(agentHub);
         ArgumentNullException.ThrowIfNull(backendDescriptors);
@@ -41,6 +43,7 @@ internal sealed class ChatBackendInitializationCoordinator
         _refreshHeaderAndThreadWorkspace = refreshHeaderAndThreadWorkspace;
         _codexInstallProgress = codexInstallProgress;
         _setProviderInitializationStatus = setProviderInitializationStatus;
+        _setBackendSessionLoadingEnabled = setBackendSessionLoadingEnabled;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -149,11 +152,13 @@ internal sealed class ChatBackendInitializationCoordinator
         var state = _chatBackendStates[backendId.Value];
         if (CanReuseLoadedBackendState(backendId, state))
         {
+            _setBackendSessionLoadingEnabled?.Invoke(backendId, true);
             LogInfo(
                 $"Skipping chat backend refresh for loaded process-backed backend backend={backendId.Value} displayName={state.DisplayName} models={state.Models.Count}");
             return;
         }
 
+        _setBackendSessionLoadingEnabled?.Invoke(backendId, false);
         LogInfo($"Refreshing chat backend backend={backendId.Value} displayName={state.DisplayName}");
         _dispatchToUi(
             () =>
@@ -169,6 +174,7 @@ internal sealed class ChatBackendInitializationCoordinator
             // Backend discovery is explicit background I/O. Any state mutation after this point
             // must go back through the UI dispatcher.
             var models = await _agentHub.ListModelsAsync(backendId, cancellationToken).ConfigureAwait(false);
+            _setBackendSessionLoadingEnabled?.Invoke(backendId, true);
             _dispatchToUi(
                 () =>
                 {
@@ -187,6 +193,7 @@ internal sealed class ChatBackendInitializationCoordinator
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _setBackendSessionLoadingEnabled?.Invoke(backendId, false);
             var (availability, statusMessage) = ClassifyFailure(state, ex);
             LogWarn(
                 ex,

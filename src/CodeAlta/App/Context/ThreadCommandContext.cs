@@ -23,6 +23,7 @@ internal sealed class ThreadCommandContext
     private readonly Action<IReadOnlyList<PromptImageAttachment>> _restorePromptImages;
     private readonly Action _refreshHeaderAndThreadWorkspace;
     private readonly Action _refreshCatalogAndThreadWorkspace;
+    private readonly Action<string, WorkThreadDescriptor>? _rekeyThreadIdentity;
     private readonly Action<string, bool, StatusTone> _setShellStatus;
     private readonly Action<OpenThreadState, string, bool, StatusTone> _setThreadStatus;
     private readonly Action<OpenThreadState, Action, string> _tryRenderInteraction;
@@ -45,7 +46,8 @@ internal sealed class ThreadCommandContext
         Action refreshCatalogAndThreadWorkspace,
         Action<string, bool, StatusTone> setShellStatus,
         Action<OpenThreadState, string, bool, StatusTone> setThreadStatus,
-        Action<OpenThreadState, Action, string> tryRenderInteraction)
+        Action<OpenThreadState, Action, string> tryRenderInteraction,
+        Action<string, WorkThreadDescriptor>? rekeyThreadIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(uiDispatcher);
         ArgumentNullException.ThrowIfNull(trySetPromptUnavailableStatus);
@@ -81,6 +83,7 @@ internal sealed class ThreadCommandContext
         _restorePromptImages = restorePromptImages;
         _refreshHeaderAndThreadWorkspace = refreshHeaderAndThreadWorkspace;
         _refreshCatalogAndThreadWorkspace = refreshCatalogAndThreadWorkspace;
+        _rekeyThreadIdentity = rekeyThreadIdentity;
         _setShellStatus = setShellStatus;
         _setThreadStatus = setThreadStatus;
         _tryRenderInteraction = tryRenderInteraction;
@@ -137,6 +140,18 @@ internal sealed class ThreadCommandContext
 
     public void RefreshCatalogAndThreadWorkspace()
         => UiDispatch.Invoke(_uiDispatcher, _refreshCatalogAndThreadWorkspace);
+
+    public void RekeyThreadIdentity(string oldThreadId, WorkThreadDescriptor thread)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(oldThreadId);
+        ArgumentNullException.ThrowIfNull(thread);
+        if (_rekeyThreadIdentity is null)
+        {
+            return;
+        }
+
+        UiDispatch.Invoke(_uiDispatcher, () => _rekeyThreadIdentity(oldThreadId, thread));
+    }
 
     public void SetShellStatus(string message, bool showSpinner, StatusTone tone)
     {

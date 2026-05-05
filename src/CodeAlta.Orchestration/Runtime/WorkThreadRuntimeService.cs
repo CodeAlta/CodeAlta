@@ -457,7 +457,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         };
 
         string backendSessionId;
-        if (string.IsNullOrWhiteSpace(thread.BackendSessionId))
+        if (string.IsNullOrWhiteSpace(thread.BackendSessionId) || ShouldReplaceDraftSession(thread, options.BackendId))
         {
             backendSessionId = await _agentHub.StartSessionAsync(agentId, sessionOptions, cancellationToken).ConfigureAwait(false);
         }
@@ -900,6 +900,14 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     private static bool IsProviderManagedBackend(AgentBackendId backendId)
         => string.Equals(backendId.Value, AgentBackendIds.Codex.Value, StringComparison.OrdinalIgnoreCase) ||
            string.Equals(backendId.Value, AgentBackendIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ShouldReplaceDraftSession(WorkThreadDescriptor thread, AgentBackendId backendId)
+    {
+        return thread.StartedAt is null &&
+               thread.Status == WorkThreadStatus.Draft &&
+               !string.IsNullOrWhiteSpace(thread.BackendSessionId) &&
+               IsProviderManagedBackend(backendId);
+    }
 
     private static string NormalizePath(string path)
     {

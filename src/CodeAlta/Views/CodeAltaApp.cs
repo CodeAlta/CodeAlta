@@ -154,6 +154,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         _agentHub = agentHub;
         _knownProjectImporter = knownProjectImporter ?? new KnownProjectImporter(agentHub, backendDescriptors, projectCatalog, catalogOptions);
         _ownedServices = ownedServices;
+        ShellThreadStateCoordinator? tsc = null;
         var composition = CodeAltaFrontendComposition.Create(
             backendDescriptors,
             projectCatalog,
@@ -188,6 +189,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
                 RememberGlobalBackendPreference = RememberGlobalBackendPreference,
                 InvalidateSelectedSessionUsage = InvalidateSelectedSessionUsage,
                 RefreshHeaderAndThreadWorkspace = RefreshHeaderAndThreadWorkspace,
+                RekeyThreadIdentity = (oldId, thread) => tsc!.RekeyThreadIdentity(oldId, thread),
                 HasWorkspaceSurface = () => _threadWorkspaceView is not null,
                 SetThreadPaneContent = content =>
                 {
@@ -234,6 +236,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable
         _terminalLoopCoordinator = composition.TerminalLoopCoordinator;
         _chatBackendInitializationCoordinator = composition.ChatBackendInitializationCoordinator;
         _threadStateCoordinator = composition.ThreadStateCoordinator;
+        tsc = _threadStateCoordinator;
         _workspaceCoordinator = composition.WorkspaceCoordinator;
         _threadRuntimeEventCoordinator = composition.ThreadRuntimeEventCoordinator;
         _threadPromptQueueCoordinator = composition.ThreadPromptQueueCoordinator;
