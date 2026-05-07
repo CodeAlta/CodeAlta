@@ -6,7 +6,7 @@ namespace CodeAlta.Views;
 
 internal sealed class ProviderDialogCoordinator
 {
-    private readonly ProviderFrontendCoordinator _providerUi;
+    private readonly IModelProviderDialogService _modelProviders;
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
     private ModelProvidersDialog? _dialog;
@@ -20,7 +20,7 @@ internal sealed class ProviderDialogCoordinator
         ArgumentNullException.ThrowIfNull(getBounds);
         ArgumentNullException.ThrowIfNull(getFocusTarget);
 
-        _providerUi = providerUi;
+        _modelProviders = new ModelProviderDialogService(providerUi);
         _getBounds = getBounds;
         _getFocusTarget = getFocusTarget;
     }
@@ -28,17 +28,9 @@ internal sealed class ProviderDialogCoordinator
     public Task OpenAsync()
     {
         (_dialog ??= new ModelProvidersDialog(
-            () => _providerUi.LoadProviderDefinitions(),
-            definitions => _providerUi.SaveProviderDefinitionsAsync(definitions, CancellationToken.None),
-            definition => _providerUi.TestProviderAsync(definition, CancellationToken.None),
+            _modelProviders,
             _getBounds,
-            _getFocusTarget,
-            (definition, report) => _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, report, CancellationToken.None),
-            (definition, report) => _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, report, CancellationToken.None),
-            definition => _providerUi.LogoutCodexSubscriptionAsync(definition, CancellationToken.None),
-            definition => _providerUi.TestCodexSubscriptionAuthenticationAsync(definition, CancellationToken.None),
-            definition => _providerUi.ListCodexSubscriptionModelsAsync(definition, CancellationToken.None),
-            definition => _providerUi.ListCodexSubscriptionAccountsAsync(definition, CancellationToken.None))).Show();
+            _getFocusTarget)).Show();
         return Task.CompletedTask;
     }
 }

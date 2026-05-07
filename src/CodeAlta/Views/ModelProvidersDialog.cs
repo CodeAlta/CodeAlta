@@ -38,15 +38,7 @@ internal sealed class ModelProvidersDialog
         new("xhigh", "XHigh"),
     ];
 
-    private readonly Func<IReadOnlyList<CodeAltaProviderDocument>> _loadDefinitions;
-    private readonly Func<IReadOnlyList<CodeAltaProviderDocument>, Task> _saveDefinitionsAsync;
-    private readonly Func<CodeAltaProviderDocument, Task<ProviderTestResult>> _testProviderAsync;
-    private readonly Func<CodeAltaProviderDocument, Action<string>, Task<ProviderTestResult>> _browserLoginAsync;
-    private readonly Func<CodeAltaProviderDocument, Action<string>, Task<ProviderTestResult>> _deviceLoginAsync;
-    private readonly Func<CodeAltaProviderDocument, Task<ProviderTestResult>> _logoutAsync;
-    private readonly Func<CodeAltaProviderDocument, Task<ProviderTestResult>> _testAuthAsync;
-    private readonly Func<CodeAltaProviderDocument, Task<ProviderTestResult>> _listModelsAsync;
-    private readonly Func<CodeAltaProviderDocument, Task<ProviderTestResult>> _listAccountsAsync;
+    private readonly IModelProviderDialogService _modelProviders;
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
     private readonly Dialog _dialog;
@@ -64,33 +56,15 @@ internal sealed class ModelProvidersDialog
     private readonly State<string> _statusText = new("[dim]Configure model providers and save to refresh the runtime.[/]");
 
     public ModelProvidersDialog(
-        Func<IReadOnlyList<CodeAltaProviderDocument>> loadDefinitions,
-        Func<IReadOnlyList<CodeAltaProviderDocument>, Task> saveDefinitionsAsync,
-        Func<CodeAltaProviderDocument, Task<ProviderTestResult>> testProviderAsync,
+        IModelProviderDialogService modelProviders,
         Func<Rectangle?> getBounds,
-        Func<Visual?> getFocusTarget,
-        Func<CodeAltaProviderDocument, Action<string>, Task<ProviderTestResult>>? browserLoginAsync = null,
-        Func<CodeAltaProviderDocument, Action<string>, Task<ProviderTestResult>>? deviceLoginAsync = null,
-        Func<CodeAltaProviderDocument, Task<ProviderTestResult>>? logoutAsync = null,
-        Func<CodeAltaProviderDocument, Task<ProviderTestResult>>? testAuthAsync = null,
-        Func<CodeAltaProviderDocument, Task<ProviderTestResult>>? listModelsAsync = null,
-        Func<CodeAltaProviderDocument, Task<ProviderTestResult>>? listAccountsAsync = null)
+        Func<Visual?> getFocusTarget)
     {
-        ArgumentNullException.ThrowIfNull(loadDefinitions);
-        ArgumentNullException.ThrowIfNull(saveDefinitionsAsync);
-        ArgumentNullException.ThrowIfNull(testProviderAsync);
+        ArgumentNullException.ThrowIfNull(modelProviders);
         ArgumentNullException.ThrowIfNull(getBounds);
         ArgumentNullException.ThrowIfNull(getFocusTarget);
 
-        _loadDefinitions = loadDefinitions;
-        _saveDefinitionsAsync = saveDefinitionsAsync;
-        _testProviderAsync = testProviderAsync;
-        _browserLoginAsync = browserLoginAsync ?? ((_, _) => Task.FromResult(new ProviderTestResult(false, "Browser login is unavailable in this host.", 0)));
-        _deviceLoginAsync = deviceLoginAsync ?? ((_, _) => Task.FromResult(new ProviderTestResult(false, "Device-code login is unavailable in this host.", 0)));
-        _logoutAsync = logoutAsync ?? (_ => Task.FromResult(new ProviderTestResult(false, "Logout is unavailable in this host.", 0)));
-        _testAuthAsync = testAuthAsync ?? testProviderAsync;
-        _listModelsAsync = listModelsAsync ?? testProviderAsync;
-        _listAccountsAsync = listAccountsAsync ?? (_ => Task.FromResult(new ProviderTestResult(false, "Account/workspace listing is unavailable in this host.", 0)));
+        _modelProviders = modelProviders;
         _getBounds = getBounds;
         _getFocusTarget = getFocusTarget;
 
@@ -272,7 +246,7 @@ internal sealed class ModelProvidersDialog
         {
             SetStatus("[primary]Loading provider configuration...[/]");
             QueueBackgroundOperation(
-                _loadDefinitions,
+                _modelProviders.LoadDefinitions,
                 definitions => LoadDefinitionsIntoDialog(
                     definitions,
                     emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
@@ -347,8 +321,8 @@ internal sealed class ModelProvidersDialog
         QueueBackgroundOperation(
             async () =>
             {
-                await _saveDefinitionsAsync(definitions);
-                return _loadDefinitions();
+                await _modelProviders.SaveDefinitionsAsync(definitions);
+                return _modelProviders.LoadDefinitions();
             },
             definitionsFromDisk =>
             {
@@ -383,7 +357,7 @@ internal sealed class ModelProvidersDialog
 
         SetStatus($"[primary]Testing {AnsiMarkup.Escape(item.Label)}...[/]");
         QueueBackgroundOperation(
-            () => _testProviderAsync(definition),
+            () => _modelProviders.TestProviderAsync(definition),
             result =>
             {
                 if (_providers.Contains(item))
@@ -603,42 +577,42 @@ internal sealed class ModelProvidersDialog
                         item,
                         "start ChatGPT browser login",
                         "Starting ChatGPT browser login...",
-                        _browserLoginAsync)),
+                        _modelProviders.LoginWithBrowserAsync)),
                 new Button("Device Login")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
                         "start ChatGPT device-code login",
                         "Requesting ChatGPT device code...",
-                        _deviceLoginAsync)),
+                        _modelProviders.LoginWithDeviceCodeAsync)),
                 new Button("Test Auth")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
                         "test ChatGPT authentication",
                         "Testing ChatGPT authentication without sending a model turn...",
-                        _testAuthAsync)),
+                        _modelProviders.TestAuthenticationAsync)),
                 new Button("List Models")
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
                         "list Codex subscription models",
                         "Listing Codex subscription models without sending a model turn...",
-                        _listModelsAsync)),
+                        _modelProviders.ListModelsAsync)),
                 new Button("List Accounts")
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
                         "list ChatGPT accounts/workspaces",
                         "Reading ChatGPT account/workspace metadata...",
-                        _listAccountsAsync)),
+                        _modelProviders.ListAccountsAsync)),
                 new Button("Logout")
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
                         "logout ChatGPT credentials",
                         "Deleting CodeAlta-owned ChatGPT/Codex credentials...",
-                        _logoutAsync)))
+                        _modelProviders.LogoutAsync)))
             {
                 Spacing = 1,
             })

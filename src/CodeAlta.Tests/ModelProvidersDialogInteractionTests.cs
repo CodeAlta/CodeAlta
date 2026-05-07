@@ -28,12 +28,7 @@ public sealed class ModelProvidersDialogInteractionTests
                 ApiKey = "key-1",
             },
         };
-        var dialog = new ModelProvidersDialog(
-            () => definitions,
-            _ => Task.CompletedTask,
-            definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)),
-            () => new Rectangle(0, 0, 120, 40),
-            () => null);
+        var dialog = CreateDialog(() => definitions);
 
         InvokeLoadDefinitionsIntoDialog(
             dialog,
@@ -76,7 +71,7 @@ public sealed class ModelProvidersDialogInteractionTests
             },
         ];
 
-        var dialog = new ModelProvidersDialog(
+        var dialog = CreateDialog(
             () => definitionsFromDisk,
             definitions =>
             {
@@ -90,9 +85,7 @@ public sealed class ModelProvidersDialogInteractionTests
                 }).ToArray();
                 return Task.CompletedTask;
             },
-            definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)),
-            () => new Rectangle(0, 0, 120, 40),
-            () => root);
+            getFocusTarget: () => root);
 
         InvokeTerminalApp(app, "BeginRun");
         try
@@ -141,12 +134,7 @@ public sealed class ModelProvidersDialogInteractionTests
             },
         };
 
-        var dialog = new ModelProvidersDialog(
-            () => definitions,
-            _ => Task.CompletedTask,
-            definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)),
-            () => new Rectangle(0, 0, 120, 40),
-            () => root);
+        var dialog = CreateDialog(() => definitions, getFocusTarget: () => root);
 
         InvokeTerminalApp(app, "BeginRun");
         try
@@ -199,7 +187,7 @@ public sealed class ModelProvidersDialogInteractionTests
         ];
         var saveCount = 0;
 
-        var dialog = new ModelProvidersDialog(
+        var dialog = CreateDialog(
             () => definitionsFromDisk,
             definitions =>
             {
@@ -208,7 +196,6 @@ public sealed class ModelProvidersDialogInteractionTests
                 return Task.CompletedTask;
             },
             _ => Task.FromResult(new ProviderTestResult(false, "Endpoint temporarily rejected model discovery.", 0)),
-            () => new Rectangle(0, 0, 120, 40),
             () => root);
 
         InvokeTerminalApp(app, "BeginRun");
@@ -267,7 +254,7 @@ public sealed class ModelProvidersDialogInteractionTests
         ];
         var saveCount = 0;
 
-        var dialog = new ModelProvidersDialog(
+        var dialog = CreateDialog(
             () => definitionsFromDisk,
             definitions =>
             {
@@ -275,9 +262,7 @@ public sealed class ModelProvidersDialogInteractionTests
                 definitionsFromDisk = definitions.ToArray();
                 return Task.CompletedTask;
             },
-            definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)),
-            () => new Rectangle(0, 0, 120, 40),
-            () => root);
+            getFocusTarget: () => root);
 
         InvokeTerminalApp(app, "BeginRun");
         try
@@ -324,16 +309,13 @@ public sealed class ModelProvidersDialogInteractionTests
                 ApiKey = "key-1",
             },
         };
-        var dialog = new ModelProvidersDialog(
+        var dialog = CreateDialog(
             () =>
             {
                 loadCount++;
                 return definitions;
             },
-            _ => Task.CompletedTask,
-            definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)),
-            () => new Rectangle(0, 0, 120, 40),
-            () => root);
+            getFocusTarget: () => root);
 
         InvokeTerminalApp(app, "BeginRun");
         try
@@ -385,12 +367,7 @@ public sealed class ModelProvidersDialogInteractionTests
             },
         };
 
-        var dialog = new ModelProvidersDialog(
-            () => definitions,
-            _ => Task.CompletedTask,
-            definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)),
-            () => new Rectangle(0, 0, 120, 40),
-            () => root);
+        var dialog = CreateDialog(() => definitions, getFocusTarget: () => root);
 
         InvokeTerminalApp(app, "BeginRun");
         try
@@ -421,6 +398,18 @@ public sealed class ModelProvidersDialogInteractionTests
         {
             InvokeTerminalApp(app, "EndRun");
         }
+    }
+
+    private static ModelProvidersDialog CreateDialog(
+        Func<IReadOnlyList<CodeAltaProviderDocument>> loadDefinitions,
+        Func<IReadOnlyList<CodeAltaProviderDocument>, Task>? saveDefinitionsAsync = null,
+        Func<CodeAltaProviderDocument, Task<ProviderTestResult>>? testProviderAsync = null,
+        Func<Visual?>? getFocusTarget = null)
+    {
+        return new ModelProvidersDialog(
+            new TestModelProviderDialogService(loadDefinitions, saveDefinitionsAsync, testProviderAsync),
+            () => new Rectangle(0, 0, 120, 40),
+            getFocusTarget ?? (() => null));
     }
 
     private static void WaitUntil(Func<bool> predicate, TerminalApp app)
@@ -510,4 +499,43 @@ public sealed class ModelProvidersDialogInteractionTests
 
     private static void InvokeTerminalApp(TerminalApp app, string methodName)
         => typeof(TerminalApp).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(app, null);
+
+    private sealed class TestModelProviderDialogService : IModelProviderDialogService
+    {
+        private readonly Func<IReadOnlyList<CodeAltaProviderDocument>> _loadDefinitions;
+        private readonly Func<IReadOnlyList<CodeAltaProviderDocument>, Task> _saveDefinitionsAsync;
+        private readonly Func<CodeAltaProviderDocument, Task<ProviderTestResult>> _testProviderAsync;
+
+        public TestModelProviderDialogService(
+            Func<IReadOnlyList<CodeAltaProviderDocument>> loadDefinitions,
+            Func<IReadOnlyList<CodeAltaProviderDocument>, Task>? saveDefinitionsAsync,
+            Func<CodeAltaProviderDocument, Task<ProviderTestResult>>? testProviderAsync)
+        {
+            _loadDefinitions = loadDefinitions;
+            _saveDefinitionsAsync = saveDefinitionsAsync ?? (_ => Task.CompletedTask);
+            _testProviderAsync = testProviderAsync ?? (definition => Task.FromResult(new ProviderTestResult(true, $"Connected successfully · {definition.ProviderKey}", 1)));
+        }
+
+        public IReadOnlyList<CodeAltaProviderDocument> LoadDefinitions() => _loadDefinitions();
+
+        public Task SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions) => _saveDefinitionsAsync(definitions);
+
+        public Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition) => _testProviderAsync(definition);
+
+        public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
+            => Task.FromResult(new ProviderTestResult(false, "Browser login is unavailable in this host.", 0));
+
+        public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
+            => Task.FromResult(new ProviderTestResult(false, "Device-code login is unavailable in this host.", 0));
+
+        public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition)
+            => Task.FromResult(new ProviderTestResult(false, "Logout is unavailable in this host.", 0));
+
+        public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition) => TestProviderAsync(definition);
+
+        public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition) => TestProviderAsync(definition);
+
+        public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition)
+            => Task.FromResult(new ProviderTestResult(false, "Account/workspace listing is unavailable in this host.", 0));
+    }
 }
