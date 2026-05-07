@@ -26,8 +26,6 @@ internal sealed class ShellThreadStateCoordinator
     private readonly Func<WorkThreadDescriptor, bool> _isBackendReady;
     private readonly Action<string> _deletePromptDraft;
     private readonly Func<WorkThreadDescriptor, CancellationToken, Task> _ensureThreadHistoryLoadedAsync;
-    private readonly Action _refreshSelectionAndThreadWorkspace;
-    private readonly Action _refreshCatalogAndThreadWorkspace;
     private readonly Action _resetPendingThreadTabSelection;
     private readonly Action<string> _removeTabPage;
     private readonly Action<string, bool, StatusTone> _setStatus;
@@ -43,8 +41,6 @@ internal sealed class ShellThreadStateCoordinator
         Action<OpenThreadState> applyThreadPreference,
         Action<string, string?, AgentReasoningEffort?, bool> rememberThreadPreference,
         Func<WorkThreadDescriptor, CancellationToken, Task> ensureThreadHistoryLoadedAsync,
-        Action refreshSelectionAndThreadWorkspace,
-        Action refreshCatalogAndThreadWorkspace,
         Action resetPendingThreadTabSelection,
         Action<string> removeTabPage,
         Action<string, bool, StatusTone> setStatus,
@@ -61,8 +57,6 @@ internal sealed class ShellThreadStateCoordinator
         ArgumentNullException.ThrowIfNull(applyThreadPreference);
         ArgumentNullException.ThrowIfNull(rememberThreadPreference);
         ArgumentNullException.ThrowIfNull(ensureThreadHistoryLoadedAsync);
-        ArgumentNullException.ThrowIfNull(refreshSelectionAndThreadWorkspace);
-        ArgumentNullException.ThrowIfNull(refreshCatalogAndThreadWorkspace);
         ArgumentNullException.ThrowIfNull(resetPendingThreadTabSelection);
         ArgumentNullException.ThrowIfNull(removeTabPage);
         ArgumentNullException.ThrowIfNull(setStatus);
@@ -83,8 +77,6 @@ internal sealed class ShellThreadStateCoordinator
         _isBackendReady = isBackendReady;
         _deletePromptDraft = deletePromptDraft;
         _ensureThreadHistoryLoadedAsync = ensureThreadHistoryLoadedAsync;
-        _refreshSelectionAndThreadWorkspace = refreshSelectionAndThreadWorkspace;
-        _refreshCatalogAndThreadWorkspace = refreshCatalogAndThreadWorkspace;
         _resetPendingThreadTabSelection = resetPendingThreadTabSelection;
         _removeTabPage = removeTabPage;
         _setStatus = setStatus;
@@ -180,7 +172,6 @@ internal sealed class ShellThreadStateCoordinator
 
         EnsureSelectionDefaults();
         SyncStateStore(catalogChanged: true, selectionChanged: true);
-        _refreshCatalogAndThreadWorkspace();
     }
 
     public async Task PersistThreadLocalStateAsync(WorkThreadDescriptor thread)
@@ -292,7 +283,6 @@ internal sealed class ShellThreadStateCoordinator
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         _ = PersistViewStateAsync();
         SyncStateStore(selectionChanged: true);
-        _refreshSelectionAndThreadWorkspace();
     }
 
     public SelectionChangeResult SelectProjectScope(string projectId)
@@ -306,7 +296,6 @@ internal sealed class ShellThreadStateCoordinator
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         _ = PersistViewStateAsync();
         SyncStateStore(selectionChanged: true);
-        _refreshSelectionAndThreadWorkspace();
         return Selection == previousSelection
             ? SelectionChangeResult.Unchanged
             : SelectionChangeResult.Changed;
@@ -362,7 +351,6 @@ internal sealed class ShellThreadStateCoordinator
 
         _ = PersistViewStateAsync();
         SyncStateStore(selectionChanged: true);
-        _refreshSelectionAndThreadWorkspace();
         _ = _ensureThreadHistoryLoadedAsync(thread, CancellationToken.None);
         return alreadyOpen
             ? OpenThreadResult.AlreadyOpen
@@ -399,7 +387,6 @@ internal sealed class ShellThreadStateCoordinator
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         await PersistViewStateAsync();
         SyncStateStore(selectionChanged: true);
-        _refreshSelectionAndThreadWorkspace();
         return wasOpen
             ? TabCloseResult.Closed
             : TabCloseResult.NotOpen;
@@ -457,7 +444,6 @@ internal sealed class ShellThreadStateCoordinator
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         _ = PersistViewStateAsync();
         SyncStateStore(catalogChanged: true, selectionChanged: true);
-        _refreshSelectionAndThreadWorkspace();
     }
 
     public void RemoveDeletedProject(string projectId, IReadOnlyList<string> deletedThreadIds)
@@ -495,7 +481,6 @@ internal sealed class ShellThreadStateCoordinator
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         _ = PersistViewStateAsync();
         SyncStateStore(catalogChanged: true, selectionChanged: true);
-        _refreshSelectionAndThreadWorkspace();
     }
 
     public OpenThreadState EnsureThreadTab(WorkThreadDescriptor thread)

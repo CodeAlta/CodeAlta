@@ -188,8 +188,6 @@ public sealed class ShellWorkspaceCoordinatorTests
             static (_, _, _, _) => { },
             static (_, _) => Task.CompletedTask,
             static () => { },
-            static () => { },
-            static () => { },
             static _ => { },
             static (_, _, _) => { });
 

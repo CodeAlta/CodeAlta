@@ -3,6 +3,7 @@ using CodeAlta.Threading;
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.App.Context;
+using CodeAlta.App.Events;
 using CodeAlta.Catalog;
 using CodeAlta.Frontend.Commands;
 using CodeAlta.Models;
@@ -26,7 +27,7 @@ using XenoAtom.Terminal.UI.Threading;
 
 namespace CodeAlta.Views;
 
-internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycle
+internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycle, IShellProjectionInvalidator
 {
     internal static readonly Logger UiLogger = LogManager.GetLogger("CodeAlta.UI");
     internal const string DraftTabId = "__draft__";
@@ -41,6 +42,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private readonly RuntimeEventPump _runtimeEventPump;
     private readonly TerminalLoopCoordinator _terminalLoopCoordinator;
     private readonly ShellFrontendHost _frontendHost;
+    private readonly ShellProjectionCoordinator _projectionCoordinator;
     private readonly ChatBackendInitializationCoordinator _chatBackendInitializationCoordinator;
     private readonly ShellThreadStateCoordinator _threadStateCoordinator;
     private readonly ShellWorkspaceCoordinator _workspaceCoordinator;
@@ -173,6 +175,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         _shellController = composition.ShellController;
         _runtimeEventPump = composition.RuntimeEventPump;
         _terminalLoopCoordinator = composition.TerminalLoopCoordinator;
+        _projectionCoordinator = new ShellProjectionCoordinator(composition.FrontendEvents, this);
         _chatBackendInitializationCoordinator = composition.ChatBackendInitializationCoordinator;
         _threadStateCoordinator = composition.ThreadStateCoordinator;
         _workspaceCoordinator = composition.WorkspaceCoordinator;
@@ -313,6 +316,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()
     {
+        _projectionCoordinator.Dispose();
         await _fileEditorWorkspaceCoordinator.DisposeAsync();
         await _runtimeEventPump.DisposeAsync();
         await _shellController.DisposeAsync();
@@ -524,7 +528,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             FocusSidebar,
             FocusPromptEditor,
             () => _fileEditorWorkspaceCoordinator.SelectedTabId is null,
-            ComposePluginFooter(ThreadCommandBar!, _ownedServices?.PluginHostBridge));
+            ShellPluginFooterComposer.Compose(ThreadCommandBar!, _ownedServices?.PluginHostBridge));
 
         return _shellView;
     }
@@ -532,32 +536,20 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void RefreshShellChrome()
         => _workspaceCoordinator.RefreshShellChrome();
 
-    private static Visual ComposePluginFooter(Visual threadCommandBar, PluginHostBridge? pluginHostBridge)
-    {
-        ArgumentNullException.ThrowIfNull(threadCommandBar);
-        if (pluginHostBridge is null)
-        {
-            return threadCommandBar;
-        }
-
-        var visuals = pluginHostBridge.CreateVisuals(PluginUiRegion.CommandBar)
-            .Concat(pluginHostBridge.CreateVisuals(PluginUiRegion.ThreadFooter))
-            .ToArray();
-        if (visuals.Length == 0)
-        {
-            return threadCommandBar;
-        }
-
-        return new VStack(visuals.Append(threadCommandBar).ToArray())
-        {
-            HorizontalAlignment = Align.Stretch,
-        };
-    }
-
     internal void RefreshCatalogAndThreadWorkspace() { _threadInfoPresenter?.InvalidateSelection(); _workspaceCoordinator.RefreshCatalogAndThreadWorkspace(); }
+    void IShellProjectionInvalidator.RefreshCatalogAndThreadWorkspace() => RefreshCatalogAndThreadWorkspace();
+
     internal void RefreshHeaderAndThreadWorkspace()
         => _workspaceCoordinator.RefreshHeaderAndThreadWorkspace();
+    void IShellProjectionInvalidator.RefreshHeaderAndThreadWorkspace() => RefreshHeaderAndThreadWorkspace();
+
     internal void RefreshSelectionAndThreadWorkspace() { _threadInfoPresenter?.InvalidateSelection(); _workspaceCoordinator.RefreshSelectionAndThreadWorkspace(); }
+    void IShellProjectionInvalidator.RefreshSelectionAndThreadWorkspace() => RefreshSelectionAndThreadWorkspace();
+
+    void IShellProjectionInvalidator.RefreshShellChrome() => RefreshShellChrome();
+
+    void IShellProjectionInvalidator.UpdatePromptAvailabilityUi() => UpdatePromptAvailabilityUi();
+
     internal void SelectGlobalScope()
     {
         ActivateThreadSurface();

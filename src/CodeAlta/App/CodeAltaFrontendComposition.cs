@@ -120,8 +120,6 @@ internal sealed class CodeAltaFrontendComposition
             frontend.ApplyThreadPreference,
             frontend.RememberThreadPreference,
             frontend.EnsureThreadHistoryLoadedAsync,
-            frontend.RefreshSelectionAndThreadWorkspace,
-            frontend.RefreshCatalogAndThreadWorkspace,
             frontend.ResetPendingThreadTabSelection,
             frontend.RemoveThreadTabPage,
             frontend.SetStatus,
