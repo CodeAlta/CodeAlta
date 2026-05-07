@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="GitHub.Copilot.SDK" />
+    <PackageReference Include="Nerdbank.MessagePack" />
     <PackageReference Include="XenoAtom.Logging" />
   </ItemGroup>
 
