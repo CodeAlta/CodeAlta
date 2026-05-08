@@ -81,7 +81,6 @@ public sealed class ThreadPromptQueueCoordinatorTests
         return new ThreadPromptQueueCoordinator(
             new ThreadWorkspaceViewModel(),
             threadSelection,
-            static () => { },
             static action => action(),
             static () => { },
             dispatchQueuedPromptAsync,

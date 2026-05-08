@@ -66,6 +66,7 @@ internal sealed class ShellProjectionCoordinator : IDisposable
                 break;
             case QueuedPromptListChangedEvent:
                 _invalidator.RefreshQueuedPromptList();
+                _invalidator.UpdatePromptAvailabilityUi();
                 break;
             case SessionUsageChangedEvent:
                 _invalidator.InvalidateSelectedSessionUsage();

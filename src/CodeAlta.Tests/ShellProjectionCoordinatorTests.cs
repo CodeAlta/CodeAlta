@@ -67,7 +67,7 @@ public sealed class ShellProjectionCoordinatorTests
     }
 
     [TestMethod]
-    public void Publish_QueuedPromptListChanged_RefreshesQueuedPromptList()
+    public void Publish_QueuedPromptListChanged_RefreshesQueueAndPromptAvailability()
     {
         var invalidator = new CapturingProjectionInvalidator();
         var publisher = new FrontendEventPublisher(new InlineUiDispatcher());
@@ -75,7 +75,7 @@ public sealed class ShellProjectionCoordinatorTests
 
         publisher.Publish(new QueuedPromptListChangedEvent("thread-1"));
 
-        CollectionAssert.AreEqual(new[] { "queue" }, invalidator.Calls);
+        CollectionAssert.AreEqual(new[] { "queue", "prompt" }, invalidator.Calls);
     }
 
     [TestMethod]

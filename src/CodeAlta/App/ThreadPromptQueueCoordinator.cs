@@ -10,7 +10,6 @@ internal sealed class ThreadPromptQueueCoordinator
 {
     private readonly ThreadWorkspaceViewModel _workspaceViewModel;
     private readonly ThreadSelectionContext _threadSelection;
-    private readonly Action _updatePromptAvailabilityUi;
     private readonly Action<Action> _dispatchToUi;
     private readonly Action _verifyBindableAccess;
     private readonly Func<OpenThreadState, PromptSubmission, CancellationToken, Task> _dispatchQueuedPromptAsync;
@@ -19,7 +18,6 @@ internal sealed class ThreadPromptQueueCoordinator
     public ThreadPromptQueueCoordinator(
         ThreadWorkspaceViewModel workspaceViewModel,
         ThreadSelectionContext threadSelection,
-        Action updatePromptAvailabilityUi,
         Action<Action> dispatchToUi,
         Action verifyBindableAccess,
         Func<OpenThreadState, PromptSubmission, CancellationToken, Task> dispatchQueuedPromptAsync,
@@ -27,7 +25,6 @@ internal sealed class ThreadPromptQueueCoordinator
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
         ArgumentNullException.ThrowIfNull(threadSelection);
-        ArgumentNullException.ThrowIfNull(updatePromptAvailabilityUi);
         ArgumentNullException.ThrowIfNull(dispatchToUi);
         ArgumentNullException.ThrowIfNull(verifyBindableAccess);
         ArgumentNullException.ThrowIfNull(dispatchQueuedPromptAsync);
@@ -35,7 +32,6 @@ internal sealed class ThreadPromptQueueCoordinator
 
         _workspaceViewModel = workspaceViewModel;
         _threadSelection = threadSelection;
-        _updatePromptAvailabilityUi = updatePromptAvailabilityUi;
         _dispatchToUi = dispatchToUi;
         _verifyBindableAccess = verifyBindableAccess;
         _dispatchQueuedPromptAsync = dispatchQueuedPromptAsync;
@@ -328,7 +324,6 @@ internal sealed class ThreadPromptQueueCoordinator
         var tab = selectedThread is null ? null : _threadSelection.FindOpenThread(selectedThread.ThreadId);
         var projection = QueuedPromptListProjectionBuilder.Build(tab);
         _workspaceViewModel.SetPromptStripItems(projection.Items, projection.HasQueuedPrompts);
-        _updatePromptAvailabilityUi();
     }
 
     private void ClearQueue(OpenThreadState tab)

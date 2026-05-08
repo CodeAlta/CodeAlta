@@ -238,7 +238,6 @@ internal sealed class CodeAltaFrontendComposition
         threadPromptQueueCoordinator = new ThreadPromptQueueCoordinator(
             threadWorkspaceViewModel,
             threadSelectionContext,
-            frontend.UpdatePromptAvailabilityUi,
             frontend.DispatchToUi,
             frontend.VerifyBindableAccess,
             (tab, prompt, cancellationToken) => threadCommandCoordinator!.DispatchQueuedPromptAsync(tab, prompt, steer: false, cancellationToken),
