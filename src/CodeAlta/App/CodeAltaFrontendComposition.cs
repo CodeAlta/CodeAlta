@@ -122,7 +122,6 @@ internal sealed class CodeAltaFrontendComposition
             frontend.EnsureThreadHistoryLoadedAsync,
             frontend.ResetPendingThreadTabSelection,
             frontend.RemoveThreadTabPage,
-            frontend.SetStatus,
             frontendEvents);
         var threadSelectionContext = new ThreadSelectionContext(
             threadStateCoordinator,

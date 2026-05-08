@@ -716,7 +716,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal async Task RegisterCreatedThreadAsync(WorkThreadDescriptor thread)
         => await _threadStateCoordinator.RegisterCreatedThreadAsync(thread);
 
-    internal void OpenThread(string threadId) { ActivateThreadSurface(); _threadStateCoordinator.OpenThread(threadId); }
+    internal void OpenThread(string threadId)
+    {
+        ActivateThreadSurface();
+        if (_threadStateCoordinator.OpenThread(threadId) == OpenThreadResult.NotFound)
+        {
+            SetStatus($"Thread '{threadId}' was not found.", false, StatusTone.Warning);
+        }
+    }
     internal void FocusPromptEditor() { ActivateThreadSurface(); ThreadPaneLayout?.App?.Focus(ThreadInput); }
     internal void FocusPromptTarget() => ThreadPaneLayout?.App?.Focus(ThreadInput);
 

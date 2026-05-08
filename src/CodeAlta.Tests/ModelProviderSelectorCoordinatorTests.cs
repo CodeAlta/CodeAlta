@@ -488,8 +488,7 @@ public sealed class ModelProviderSelectorCoordinatorTests
             static (_, _, _, _) => { },
             static (_, _) => Task.CompletedTask,
             static () => { },
-            static _ => { },
-            static (_, _, _) => { });
+            static _ => { });
 
         var project = new ProjectDescriptor
         {

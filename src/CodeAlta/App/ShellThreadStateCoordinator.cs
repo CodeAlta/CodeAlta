@@ -28,7 +28,6 @@ internal sealed class ShellThreadStateCoordinator
     private readonly Func<WorkThreadDescriptor, CancellationToken, Task> _ensureThreadHistoryLoadedAsync;
     private readonly Action _resetPendingThreadTabSelection;
     private readonly Action<string> _removeTabPage;
-    private readonly Action<string, bool, StatusTone> _setStatus;
     public ShellThreadStateCoordinator(
         ProjectCatalog projectCatalog,
         WorkThreadCatalog threadCatalog,
@@ -43,7 +42,6 @@ internal sealed class ShellThreadStateCoordinator
         Func<WorkThreadDescriptor, CancellationToken, Task> ensureThreadHistoryLoadedAsync,
         Action resetPendingThreadTabSelection,
         Action<string> removeTabPage,
-        Action<string, bool, StatusTone> setStatus,
         FrontendEventPublisher? frontendEvents = null)
     {
         ArgumentNullException.ThrowIfNull(projectCatalog);
@@ -59,7 +57,6 @@ internal sealed class ShellThreadStateCoordinator
         ArgumentNullException.ThrowIfNull(ensureThreadHistoryLoadedAsync);
         ArgumentNullException.ThrowIfNull(resetPendingThreadTabSelection);
         ArgumentNullException.ThrowIfNull(removeTabPage);
-        ArgumentNullException.ThrowIfNull(setStatus);
 
         _uiDispatcher = uiDispatcher;
         _stateStore = stateStore;
@@ -78,7 +75,6 @@ internal sealed class ShellThreadStateCoordinator
         _ensureThreadHistoryLoadedAsync = ensureThreadHistoryLoadedAsync;
         _resetPendingThreadTabSelection = resetPendingThreadTabSelection;
         _removeTabPage = removeTabPage;
-        _setStatus = setStatus;
     }
 
     public IReadOnlyList<ProjectDescriptor> Projects => _catalogStateCoordinator.Projects;
@@ -328,7 +324,6 @@ internal sealed class ShellThreadStateCoordinator
         var thread = FindThread(threadId);
         if (thread is null)
         {
-            _setStatus($"Thread '{threadId}' was not found.", false, StatusTone.Warning);
             return OpenThreadResult.NotFound;
         }
 

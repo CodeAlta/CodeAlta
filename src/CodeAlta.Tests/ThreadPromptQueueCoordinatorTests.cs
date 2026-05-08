@@ -104,8 +104,7 @@ public sealed class ThreadPromptQueueCoordinatorTests
             static (_, _, _, _) => { },
             static (_, _) => Task.CompletedTask,
             static () => { },
-            static _ => { },
-            static (_, _, _) => { });
+            static _ => { });
         threadState.ViewState = new WorkThreadViewState();
 
         return new ThreadSelectionContext(

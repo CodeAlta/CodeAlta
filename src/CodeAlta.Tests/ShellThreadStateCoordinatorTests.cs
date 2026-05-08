@@ -435,7 +435,6 @@ public sealed class ShellThreadStateCoordinatorTests
             static (_, _) => Task.CompletedTask,
             static () => { },
             static _ => { },
-            static (_, _, _) => { },
             frontendEvents);
     }
 

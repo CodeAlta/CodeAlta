@@ -188,8 +188,7 @@ public sealed class ShellWorkspaceCoordinatorTests
             static (_, _, _, _) => { },
             static (_, _) => Task.CompletedTask,
             static () => { },
-            static _ => { },
-            static (_, _, _) => { });
+            static _ => { });
 
     private static Dictionary<string, ChatBackendState> CreateChatBackendStates()
         => new(StringComparer.Ordinal)
