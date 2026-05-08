@@ -20,7 +20,6 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
     private readonly ProjectFileOpenDialogController _filePickerController;
     private readonly Dictionary<string, FileEditorTab> _fileTabsById = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, FileEditorTab> _fileTabsByPath = new(StringComparer.OrdinalIgnoreCase);
-    private string? _selectedTabId;
 
     public FileEditorWorkspaceCoordinator(
         IProjectFileSearchService projectFileSearchService,
@@ -62,11 +61,9 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
     public IReadOnlyList<string> OpenTabIds => GetOpenEditorTabIds();
 
     public string? SelectedTabId
-        => _selectedTabId is { Length: > 0 } selectedTabId &&
-           _shellTabs.TryGetTab(new ShellTabId(selectedTabId), out var shellTab) &&
-           shellTab.Kind == ShellTabKind.Editor
-            ? selectedTabId
-            : null;
+        => _shellTabs.GetTabs()
+            .FirstOrDefault(static shellTab => shellTab is { IsSelected: true, Kind: ShellTabKind.Editor })
+            ?.TabId.Value;
 
     public async ValueTask DisposeAsync()
     {
@@ -142,7 +139,6 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
             return;
         }
 
-        _selectedTabId = tabId;
         _shellTabs.SelectTabAsync(new ShellTabId(tabId)).GetAwaiter().GetResult();
         _syncThreadTabControl();
         if (_fileTabsById.TryGetValue(tabId, out var fileTab))
@@ -181,8 +177,6 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
 
     public void ActivateThreadSurface()
     {
-        _selectedTabId = null;
-        _syncThreadTabControl();
     }
 
     public Visual? GetActiveWorkspaceFocusTarget()

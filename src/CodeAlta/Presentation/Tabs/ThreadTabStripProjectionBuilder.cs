@@ -1,58 +1,39 @@
+using CodeAlta.App;
+
 namespace CodeAlta.Presentation.Tabs;
 
 internal static class ThreadTabStripProjectionBuilder
 {
-    public static ThreadTabStripProjection Build(
-        IReadOnlyList<string> openThreadIds,
-        IReadOnlySet<string> availableThreadIds,
-        bool draftTabOpen,
-        string draftTabId,
-        string? selectedThreadId,
-        IReadOnlyList<string>? openFileTabIds = null,
-        string? selectedTabIdOverride = null)
+    public static ThreadTabStripProjection Build(IReadOnlyList<ShellTabSnapshot> shellTabs)
     {
-        ArgumentNullException.ThrowIfNull(openThreadIds);
-        ArgumentNullException.ThrowIfNull(availableThreadIds);
-        ArgumentException.ThrowIfNullOrWhiteSpace(draftTabId);
+        ArgumentNullException.ThrowIfNull(shellTabs);
 
-        var tabs = new List<ThreadTabStripItemProjection>(openThreadIds.Count + (draftTabOpen ? 1 : 0) + (openFileTabIds?.Count ?? 0));
-        foreach (var threadId in openThreadIds)
+        var workspaceTabCount = shellTabs.Count(static tab => IsWorkspaceTab(tab.Kind));
+        var tabs = new List<ThreadTabStripItemProjection>(workspaceTabCount);
+        string? selectedTabId = null;
+        foreach (var shellTab in shellTabs)
         {
-            if (!availableThreadIds.Contains(threadId))
+            if (!IsWorkspaceTab(shellTab.Kind))
             {
                 continue;
             }
 
-            tabs.Add(new ThreadTabStripItemProjection(threadId, IsDraft: false));
-        }
-
-        if (draftTabOpen)
-        {
-            tabs.Add(new ThreadTabStripItemProjection(draftTabId, IsDraft: true));
-        }
-
-        if (openFileTabIds is not null)
-        {
-            foreach (var fileTabId in openFileTabIds)
+            var canClose = shellTab.CanClose;
+            if (shellTab.Kind == ShellTabKind.PromptDraft && workspaceTabCount == 1)
             {
-                if (string.IsNullOrWhiteSpace(fileTabId))
-                {
-                    continue;
-                }
+                canClose = false;
+            }
 
-                tabs.Add(new ThreadTabStripItemProjection(fileTabId, IsDraft: false, IsFile: true));
+            tabs.Add(new ThreadTabStripItemProjection(shellTab.TabId.Value, shellTab.Kind, canClose));
+            if (shellTab.IsSelected)
+            {
+                selectedTabId = shellTab.TabId.Value;
             }
         }
 
-        var selectedTabId = !string.IsNullOrWhiteSpace(selectedTabIdOverride) &&
-                            tabs.Any(tab => string.Equals(tab.TabId, selectedTabIdOverride, StringComparison.OrdinalIgnoreCase))
-            ? selectedTabIdOverride
-            : string.IsNullOrWhiteSpace(selectedThreadId)
-                ? (draftTabOpen ? draftTabId : tabs.FirstOrDefault()?.TabId)
-                : tabs.Any(tab => string.Equals(tab.TabId, selectedThreadId, StringComparison.OrdinalIgnoreCase))
-                    ? selectedThreadId
-                    : tabs.FirstOrDefault()?.TabId;
-
-        return new ThreadTabStripProjection(tabs, selectedTabId);
+        return new ThreadTabStripProjection(tabs, selectedTabId ?? tabs.FirstOrDefault()?.TabId);
     }
+
+    private static bool IsWorkspaceTab(ShellTabKind kind)
+        => kind is ShellTabKind.PromptDraft or ShellTabKind.Thread or ShellTabKind.Editor or ShellTabKind.Plugin;
 }

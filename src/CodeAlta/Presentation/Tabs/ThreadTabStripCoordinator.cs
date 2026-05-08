@@ -15,8 +15,6 @@ internal sealed class ThreadTabStripCoordinator
     private readonly ThreadSelectionContext _threadSelection;
     private readonly ThreadTabContext _threadTabs;
     private readonly IShellTabService _shellTabs;
-    private readonly Func<IReadOnlyList<string>> _getOpenFileTabIds;
-    private readonly Func<string?> _getSelectedTabIdOverride;
     private bool _syncingSelection;
     private bool _syncingPages;
     private int _lastObservedSelectedIndex = -1;
@@ -25,21 +23,15 @@ internal sealed class ThreadTabStripCoordinator
     public ThreadTabStripCoordinator(
         ThreadSelectionContext threadSelection,
         ThreadTabContext threadTabs,
-        IShellTabService shellTabs,
-        Func<IReadOnlyList<string>> getOpenFileTabIds,
-        Func<string?> getSelectedTabIdOverride)
+        IShellTabService shellTabs)
     {
         ArgumentNullException.ThrowIfNull(threadSelection);
         ArgumentNullException.ThrowIfNull(threadTabs);
         ArgumentNullException.ThrowIfNull(shellTabs);
-        ArgumentNullException.ThrowIfNull(getOpenFileTabIds);
-        ArgumentNullException.ThrowIfNull(getSelectedTabIdOverride);
 
         _threadSelection = threadSelection;
         _threadTabs = threadTabs;
         _shellTabs = shellTabs;
-        _getOpenFileTabIds = getOpenFileTabIds;
-        _getSelectedTabIdOverride = getSelectedTabIdOverride;
     }
 
     public void SyncControl()
@@ -122,6 +114,7 @@ internal sealed class ThreadTabStripCoordinator
         var selection = _threadSelection.Selection;
         if (IsDraftTab(tabControl.Tabs[selectedIndex]))
         {
+            SelectShellTab(CodeAltaApp.DraftTabId);
             if (selection.Target is WorkspaceTarget.Draft)
             {
                 _threadTabs.ActivateThreadSurface();
@@ -143,6 +136,13 @@ internal sealed class ThreadTabStripCoordinator
             return;
         }
 
+        if (_shellTabs.TryGetTab(new ShellTabId(tabId), out var shellTab) && shellTab.Kind == ShellTabKind.Plugin)
+        {
+            SelectShellTab(tabId);
+            return;
+        }
+
+        SelectShellTab(tabId);
         if (string.Equals(tabId, selection.SelectedThreadId, StringComparison.OrdinalIgnoreCase))
         {
             _threadTabs.ActivateThreadSurface();
@@ -168,6 +168,18 @@ internal sealed class ThreadTabStripCoordinator
             });
     }
 
+    private void SelectShellTab(string tabId)
+    {
+        if (string.IsNullOrWhiteSpace(tabId) ||
+            !_shellTabs.TryGetTab(new ShellTabId(tabId), out var shellTab) ||
+            shellTab.IsSelected)
+        {
+            return;
+        }
+
+        _shellTabs.SelectTabAsync(shellTab.TabId).GetAwaiter().GetResult();
+    }
+
     public void ObserveBoundSelection(int selectedIndex)
     {
         if (_lastObservedSelectedIndex == selectedIndex)
@@ -182,6 +194,26 @@ internal sealed class ThreadTabStripCoordinator
     public void ResetPendingSelection()
     {
         _pendingThreadSelectionThreadId = null;
+    }
+
+    public void SelectCurrentThreadSurfaceTab()
+    {
+        var workspaceView = _threadTabs.GetWorkspaceView();
+        if (workspaceView is null)
+        {
+            return;
+        }
+
+        EnsureThreadSurfaceShellTabs(workspaceView);
+        var selectedTabId = ResolveThreadSurfaceSelectedTabId();
+        if (string.IsNullOrWhiteSpace(selectedTabId) ||
+            !_shellTabs.TryGetTab(new ShellTabId(selectedTabId), out var selectedTab) ||
+            selectedTab.IsSelected)
+        {
+            return;
+        }
+
+        _shellTabs.SelectTabAsync(selectedTab.TabId).GetAwaiter().GetResult();
     }
 
     public bool TrySelectRelativeTab(int delta)
@@ -228,25 +260,62 @@ internal sealed class ThreadTabStripCoordinator
 
     private ThreadTabStripProjection BuildProjection()
     {
-        var selection = _threadSelection.Selection;
-        var availableThreadIds = _threadSelection.OpenThreadIds
-            .Select(_threadSelection.FindThread)
-            .Where(static thread => thread is not null)
-            .Select(thread =>
+        var workspaceView = _threadTabs.GetWorkspaceView()
+            ?? throw new InvalidOperationException("Thread workspace view is not initialized.");
+
+        EnsureThreadSurfaceShellTabs(workspaceView);
+        EnsureSelectedShellTab();
+        return ThreadTabStripProjectionBuilder.Build(_shellTabs.GetTabs());
+    }
+
+    private void EnsureThreadSurfaceShellTabs(ThreadWorkspaceView workspaceView)
+    {
+        ArgumentNullException.ThrowIfNull(workspaceView);
+
+        foreach (var threadId in _threadSelection.OpenThreadIds)
+        {
+            if (_threadSelection.FindThread(threadId) is { } thread)
             {
-                var current = thread!;
-                _threadSelection.EnsureThreadTab(current);
-                return current.ThreadId;
-            })
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return ThreadTabStripProjectionBuilder.Build(
-            _threadSelection.OpenThreadIds,
-            availableThreadIds,
-            selection.Target is WorkspaceTarget.Draft,
-            CodeAltaApp.DraftTabId,
-            selection.SelectedThreadId,
-            _getOpenFileTabIds(),
-            _getSelectedTabIdOverride());
+                EnsureThreadShellTab(workspaceView, thread);
+            }
+        }
+
+        if (_threadSelection.Selection.Target is WorkspaceTarget.Draft)
+        {
+            EnsureDraftShellTab(workspaceView);
+        }
+    }
+
+    private void EnsureSelectedShellTab()
+    {
+        var visibleTabs = _shellTabs.GetTabs()
+            .Where(static tab => tab.Kind is ShellTabKind.PromptDraft or ShellTabKind.Thread or ShellTabKind.Editor or ShellTabKind.Plugin)
+            .ToArray();
+        if (visibleTabs.Any(static tab => tab.IsSelected))
+        {
+            return;
+        }
+
+        var selectedTabId = ResolveThreadSurfaceSelectedTabId();
+        if (!string.IsNullOrWhiteSpace(selectedTabId) &&
+            _shellTabs.TryGetTab(new ShellTabId(selectedTabId), out var selectedTab))
+        {
+            _shellTabs.SelectTabAsync(selectedTab.TabId).GetAwaiter().GetResult();
+            return;
+        }
+
+        if (visibleTabs.FirstOrDefault() is { } firstTab)
+        {
+            _shellTabs.SelectTabAsync(firstTab.TabId).GetAwaiter().GetResult();
+        }
+    }
+
+    private string? ResolveThreadSurfaceSelectedTabId()
+    {
+        var selection = _threadSelection.Selection;
+        return selection.Target is WorkspaceTarget.Draft
+            ? CodeAltaApp.DraftTabId
+            : selection.SelectedThreadId;
     }
 
     private List<TabPage> BuildDesiredPages(ThreadTabStripProjection projection)
@@ -256,11 +325,13 @@ internal sealed class ThreadTabStripCoordinator
         var pages = new List<TabPage>(projection.Tabs.Count);
         foreach (var tab in projection.Tabs)
         {
-            pages.Add(tab.IsDraft
-                ? EnsureDraftPage(CanCloseTab(tab, projection.Tabs.Count))
-                : tab.IsFile
-                    ? EnsureFilePage(tab.TabId)
-                    : EnsureThreadPage(tab.TabId, CanCloseTab(tab, projection.Tabs.Count)));
+            pages.Add(tab.Kind switch
+            {
+                ShellTabKind.PromptDraft => EnsureDraftPage(CanCloseTab(tab, projection.Tabs.Count)),
+                ShellTabKind.Editor => EnsureFilePage(tab.TabId),
+                ShellTabKind.Plugin => EnsureGenericShellPage(tab.TabId, canClose: CanCloseTab(tab, projection.Tabs.Count)),
+                _ => EnsureThreadPage(tab.TabId, CanCloseTab(tab, projection.Tabs.Count)),
+            });
         }
 
         return pages;
@@ -270,7 +341,7 @@ internal sealed class ThreadTabStripCoordinator
     {
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(totalTabCount);
-        return !tab.IsDraft || totalTabCount > 1;
+        return tab.CanClose && (!tab.IsDraft || totalTabCount > 1);
     }
 
     private TabPage EnsureThreadPage(string threadId, bool canClose)
@@ -284,20 +355,6 @@ internal sealed class ThreadTabStripCoordinator
             throw new InvalidOperationException($"Thread '{threadId}' was not found when creating a tab page.");
         }
 
-        var tab = _threadSelection.EnsureThreadTab(thread);
-        var header = _threadTabs.CreateComputedVisual(
-            () =>
-            {
-                return new HStack(
-                [
-                    ThreadTabVisualFactory.CreateIndicator(tab.ViewModel.StatusBusy, tab.HasPromptDraft, tab.ViewModel.StatusTone),
-                    ThreadTabVisualFactory.CreateTitle(ThreadTabVisualFactory.CompactTitle(tab.ViewModel.Title)),
-                ])
-                {
-                    Spacing = 1,
-                };
-            });
-
         if (workspaceView.TryGetTabPage(threadId, out var existingPage))
         {
             existingPage.Data = CreateThreadPageData(threadId);
@@ -305,11 +362,11 @@ internal sealed class ThreadTabStripCoordinator
             return existingPage;
         }
 
-        var shellTab = OpenThreadShellTab(workspaceView, thread, tab, header);
+        var shellTab = EnsureThreadShellTab(workspaceView, thread);
 
         var page = new TabPage(shellTab.Header, shellTab.Content)
         {
-            Data = new ThreadTabPageData(thread.ThreadId, shellTab.ViewModel),
+            Data = new ThreadTabPageData(thread.ThreadId, shellTab.Kind, shellTab.ViewModel),
             ShowCloseButton = canClose,
         };
         page.RequestClosing += (_, e) =>
@@ -326,6 +383,33 @@ internal sealed class ThreadTabStripCoordinator
 
         workspaceView.RememberTabPage(thread.ThreadId, page);
         return page;
+    }
+
+    private ShellTabSnapshot EnsureThreadShellTab(ThreadWorkspaceView workspaceView, WorkThreadDescriptor thread)
+    {
+        ArgumentNullException.ThrowIfNull(workspaceView);
+        ArgumentNullException.ThrowIfNull(thread);
+
+        if (_shellTabs.TryGetTab(new ShellTabId(thread.ThreadId), out var existingShellTab))
+        {
+            return existingShellTab;
+        }
+
+        var tab = _threadSelection.EnsureThreadTab(thread);
+        var header = _threadTabs.CreateComputedVisual(
+            () =>
+            {
+                return new HStack(
+                [
+                    ThreadTabVisualFactory.CreateIndicator(tab.ViewModel.StatusBusy, tab.HasPromptDraft, tab.ViewModel.StatusTone),
+                    ThreadTabVisualFactory.CreateTitle(ThreadTabVisualFactory.CompactTitle(tab.ViewModel.Title)),
+                ])
+                {
+                    Spacing = 1,
+                };
+            });
+
+        return OpenThreadShellTab(workspaceView, thread, tab, header);
     }
 
     private TabPage EnsureFilePage(string tabId)
@@ -367,6 +451,23 @@ internal sealed class ThreadTabStripCoordinator
             return existingShellPage;
         }
 
+        var shellTab = EnsureDraftShellTab(workspaceView);
+
+        var page = CreateDraftPage(shellTab, canClose);
+
+        workspaceView.RememberTabPage(CodeAltaApp.DraftTabId, page);
+        return page;
+    }
+
+    private ShellTabSnapshot EnsureDraftShellTab(ThreadWorkspaceView workspaceView)
+    {
+        ArgumentNullException.ThrowIfNull(workspaceView);
+
+        if (_shellTabs.TryGetTab(new ShellTabId(CodeAltaApp.DraftTabId), out var existingShellTab))
+        {
+            return existingShellTab;
+        }
+
         var header = _threadTabs.CreateComputedVisual(
             () => new HStack(
             [
@@ -378,7 +479,7 @@ internal sealed class ThreadTabStripCoordinator
             {
                 Spacing = 1,
             });
-        var shellTab = _shellTabs.OpenOrGetTab(new ShellTabDescriptor
+        return _shellTabs.OpenOrGetTab(new ShellTabDescriptor
         {
             TabId = new ShellTabId(CodeAltaApp.DraftTabId),
             Kind = ShellTabKind.PromptDraft,
@@ -396,13 +497,7 @@ internal sealed class ThreadTabStripCoordinator
                         _threadSelection.IsGlobalDraftSelected(),
                         new State<float>(0)))),
             ViewModel = new DraftTabProjectionHandle(CodeAltaApp.DraftTabId),
-            CanClose = canClose,
         });
-
-        var page = CreateDraftPage(shellTab, canClose);
-
-        workspaceView.RememberTabPage(CodeAltaApp.DraftTabId, page);
-        return page;
     }
 
     private void SyncSelection(ThreadTabStripProjection projection, TabControl tabControl)
@@ -451,14 +546,9 @@ internal sealed class ThreadTabStripCoordinator
             return tabControl.SelectedIndex;
         }
 
-        var selection = _threadSelection.Selection;
-        var selectedTabId = _getSelectedTabIdOverride();
-        if (string.IsNullOrWhiteSpace(selectedTabId))
-        {
-            selectedTabId = selection.Target is WorkspaceTarget.Draft
-                ? CodeAltaApp.DraftTabId
-                : selection.SelectedThreadId;
-        }
+        var selectedTabId = _shellTabs.GetTabs()
+            .FirstOrDefault(static tab => tab.IsSelected)
+            ?.TabId.Value ?? ResolveThreadSurfaceSelectedTabId();
 
         if (!string.IsNullOrWhiteSpace(selectedTabId))
         {
@@ -476,13 +566,13 @@ internal sealed class ThreadTabStripCoordinator
     }
 
     private static ThreadTabPageData CreateDraftPageData()
-        => new(CodeAltaApp.DraftTabId, new DraftTabProjectionHandle(CodeAltaApp.DraftTabId));
+        => new(CodeAltaApp.DraftTabId, ShellTabKind.PromptDraft, new DraftTabProjectionHandle(CodeAltaApp.DraftTabId));
 
     private TabPage CreateDraftPage(ShellTabSnapshot shellTab, bool canClose)
     {
         var page = new TabPage(shellTab.Header, shellTab.Content)
         {
-            Data = new ThreadTabPageData(CodeAltaApp.DraftTabId, shellTab.ViewModel),
+            Data = new ThreadTabPageData(CodeAltaApp.DraftTabId, shellTab.Kind, shellTab.ViewModel),
             ShowCloseButton = canClose,
         };
         page.RequestClosing += (_, e) =>
@@ -504,21 +594,21 @@ internal sealed class ThreadTabStripCoordinator
     {
         var thread = _threadSelection.FindThread(threadId)
             ?? throw new InvalidOperationException($"Thread '{threadId}' was not found when updating a tab page.");
-        return new ThreadTabPageData(threadId, _threadSelection.EnsureThreadTab(thread).ViewModel);
+        return new ThreadTabPageData(threadId, ShellTabKind.Thread, _threadSelection.EnsureThreadTab(thread).ViewModel);
     }
 
     private ThreadTabPageData CreateFilePageData(string tabId)
     {
         var fileTab = _threadTabs.GetFileTab(tabId)
             ?? throw new InvalidOperationException($"File tab '{tabId}' was not found when updating a tab page.");
-        return new ThreadTabPageData(tabId, fileTab);
+        return new ThreadTabPageData(tabId, ShellTabKind.Editor, fileTab);
     }
 
     private TabPage CreateFilePage(string tabId, ShellTabSnapshot shellTab)
     {
         var page = new TabPage(shellTab.Header, shellTab.Content)
         {
-            Data = new ThreadTabPageData(tabId, shellTab.ViewModel),
+            Data = new ThreadTabPageData(tabId, shellTab.Kind, shellTab.ViewModel),
             ShowCloseButton = true,
         };
         page.RequestClosing += (_, e) =>
@@ -535,6 +625,48 @@ internal sealed class ThreadTabStripCoordinator
         return page;
     }
 
+    private TabPage EnsureGenericShellPage(string tabId, bool canClose)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
+        var workspaceView = _threadTabs.GetWorkspaceView() ?? throw new InvalidOperationException("Thread workspace view is not initialized.");
+
+        if (workspaceView.TryGetTabPage(tabId, out var existingPage))
+        {
+            if (!_shellTabs.TryGetTab(new ShellTabId(tabId), out var existingShellTab))
+            {
+                throw new InvalidOperationException($"Shell tab '{tabId}' was not found when updating a tab page.");
+            }
+
+            existingPage.Data = new ThreadTabPageData(tabId, existingShellTab.Kind, existingShellTab.ViewModel);
+            existingPage.ShowCloseButton = canClose;
+            return existingPage;
+        }
+
+        if (!_shellTabs.TryGetTab(new ShellTabId(tabId), out var shellTab))
+        {
+            throw new InvalidOperationException($"Shell tab '{tabId}' was not found when creating a tab page.");
+        }
+
+        var page = new TabPage(shellTab.Header, shellTab.Content)
+        {
+            Data = new ThreadTabPageData(tabId, shellTab.Kind, shellTab.ViewModel),
+            ShowCloseButton = canClose,
+        };
+        page.RequestClosing += (_, e) =>
+        {
+            if (e.Reason != TabCloseReason.CloseButton || !TryGetTabId(e.Page, out var currentTabId))
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            _ = _shellTabs.CloseTabAsync(new ShellTabId(currentTabId), ShellTabCloseReason.User);
+        };
+
+        workspaceView.RememberTabPage(tabId, page);
+        return page;
+    }
+
     private static bool IsDraftTab(TabPage page)
         => TryGetTabId(page, out var tabId) &&
            string.Equals(tabId, CodeAltaApp.DraftTabId, StringComparison.Ordinal);
@@ -545,33 +677,50 @@ internal sealed class ThreadTabStripCoordinator
         ArgumentNullException.ThrowIfNull(tabControl);
 
         if (tabControl.SelectedIndex < 0 || tabControl.SelectedIndex >= tabControl.Tabs.Count ||
-            !TryGetTabId(tabControl.Tabs[tabControl.SelectedIndex], out var selectedTabId) ||
-            _threadTabs.GetFileTab(selectedTabId) is not null)
+            !TryGetTabData(tabControl.Tabs[tabControl.SelectedIndex], out var selectedTab))
         {
             workspaceView.ActivateThreadTabContent(null);
             return;
         }
 
-        workspaceView.ActivateThreadTabContent(selectedTabId);
+        if (selectedTab.Kind is ShellTabKind.Editor or ShellTabKind.Plugin)
+        {
+            workspaceView.ActivateThreadTabContent(null);
+            return;
+        }
+
+        workspaceView.ActivateThreadTabContent(selectedTab.TabId);
     }
 
     private static bool TryGetTabId(TabPage page, out string tabId)
     {
+        if (TryGetTabData(page, out var data))
+        {
+            tabId = data.TabId;
+            return true;
+        }
+
+        tabId = string.Empty;
+        return false;
+    }
+
+    private static bool TryGetTabData(TabPage page, out ThreadTabPageData data)
+    {
         switch (page.Data)
         {
-            case ThreadTabPageData data:
-                tabId = data.TabId;
+            case ThreadTabPageData current:
+                data = current;
                 return true;
             case string legacyTabId:
-                tabId = legacyTabId;
+                data = new ThreadTabPageData(legacyTabId, ShellTabKind.Thread, legacyTabId);
                 return true;
             default:
-                tabId = string.Empty;
+                data = default!;
                 return false;
         }
     }
 
-    private sealed record ThreadTabPageData(string TabId, object ViewModel);
+    private sealed record ThreadTabPageData(string TabId, ShellTabKind Kind, object ViewModel);
 
     private sealed record DraftTabProjectionHandle(string TabId);
 

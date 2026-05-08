@@ -441,8 +441,8 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/CodeAltaShellController.cs:71:_initializationTask = Task.Run(",
             "App/CodeAltaShellController.cs:356:var startupProviderLoadTask = Task.Run(",
-            "App/CodeAltaApp.cs:347:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:428:_ = OpenModelProvidersAsync();",
+            "App/CodeAltaApp.cs:345:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:426:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
             "App/ShellThreadStateCoordinator.cs:245:_ = RestoreStartupThreadHistoryAsync(threadId, cancellationToken);",
             "App/ShellThreadStateCoordinator.cs:254:_ = PersistViewStateAsync();",
@@ -577,13 +577,23 @@ public sealed class ArchitectureGuardrailTests
     {
         var coordinatorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Presentation", "Tabs", "ThreadTabStripCoordinator.cs"));
 
-        Assert.IsTrue(coordinatorSource.Contains("private sealed record ThreadTabPageData(string TabId, object ViewModel)", StringComparison.Ordinal));
-        Assert.IsTrue(coordinatorSource.Contains("Data = new ThreadTabPageData(thread.ThreadId, shellTab.ViewModel)", StringComparison.Ordinal));
-        Assert.IsTrue(coordinatorSource.Contains("Data = new ThreadTabPageData(tabId, shellTab.ViewModel)", StringComparison.Ordinal));
-        Assert.IsTrue(coordinatorSource.Contains("Data = new ThreadTabPageData(CodeAltaApp.DraftTabId, shellTab.ViewModel)", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("private sealed record ThreadTabPageData(string TabId, ShellTabKind Kind, object ViewModel)", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("Data = new ThreadTabPageData(thread.ThreadId, shellTab.Kind, shellTab.ViewModel)", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("Data = new ThreadTabPageData(tabId, shellTab.Kind, shellTab.ViewModel)", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("Data = new ThreadTabPageData(CodeAltaApp.DraftTabId, shellTab.Kind, shellTab.ViewModel)", StringComparison.Ordinal));
         Assert.IsFalse(coordinatorSource.Contains("Data = thread.ThreadId", StringComparison.Ordinal));
         Assert.IsFalse(coordinatorSource.Contains("Data = tabId,", StringComparison.Ordinal));
         Assert.IsFalse(coordinatorSource.Contains("Data = CodeAltaApp.DraftTabId", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ThreadTabStripCoordinator_UsesShellTabsAsLogicalTabSource()
+    {
+        var coordinatorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Presentation", "Tabs", "ThreadTabStripCoordinator.cs"));
+
+        StringAssert.Contains(coordinatorSource, "ThreadTabStripProjectionBuilder.Build(_shellTabs.GetTabs())");
+        Assert.IsFalse(coordinatorSource.Contains("_getOpenFileTabIds", StringComparison.Ordinal));
+        Assert.IsFalse(coordinatorSource.Contains("_getSelectedTabIdOverride", StringComparison.Ordinal));
     }
 
     [TestMethod]

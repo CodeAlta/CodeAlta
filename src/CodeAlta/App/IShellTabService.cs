@@ -148,6 +148,8 @@ internal sealed record ShellTabDescriptor
 
     public bool CanClose { get; init; } = true;
 
+    public Func<ShellTabCloseReason, ValueTask>? OnClosedAsync { get; init; }
+
     public void Validate()
     {
         if (TabId.IsEmpty)
@@ -233,18 +235,18 @@ internal sealed class InMemoryShellTabService : IShellTabService
         return Task.CompletedTask;
     }
 
-    public Task<bool> CloseTabAsync(ShellTabId tabId, ShellTabCloseReason reason, CancellationToken cancellationToken = default)
+    public async Task<bool> CloseTabAsync(ShellTabId tabId, ShellTabCloseReason reason, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureTabId(tabId);
         if (!_tabs.TryGetValue(tabId, out var entry))
         {
-            return Task.FromResult(false);
+            return false;
         }
 
         if (!entry.Descriptor.CanClose)
         {
-            return Task.FromResult(false);
+            return false;
         }
 
         _tabs.Remove(tabId);
@@ -254,7 +256,12 @@ internal sealed class InMemoryShellTabService : IShellTabService
         }
 
         RaiseTabsChanged();
-        return Task.FromResult(true);
+        if (entry.Descriptor.OnClosedAsync is not null)
+        {
+            await entry.Descriptor.OnClosedAsync(reason);
+        }
+
+        return true;
     }
 
     public bool TryGetTab(ShellTabId tabId, out ShellTabSnapshot tab)

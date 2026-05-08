@@ -33,7 +33,6 @@ internal sealed class PluginShellTabService : IPluginShellTabService
 {
     private readonly IShellTabService _tabs;
     private readonly bool _hasInteractiveUi;
-    private readonly Dictionary<ShellTabId, Func<ShellTabCloseReason, ValueTask>> _closeCallbacks = new();
 
     public PluginShellTabService(IShellTabService tabs, bool hasInteractiveUi)
     {
@@ -57,11 +56,6 @@ internal sealed class PluginShellTabService : IPluginShellTabService
         }
 
         var tabId = CreateTabId(request.PluginId, request.SurfaceKey);
-        if (request.OnClosedAsync is not null)
-        {
-            _closeCallbacks[tabId] = request.OnClosedAsync;
-        }
-
         return _tabs.OpenOrGetTab(new ShellTabDescriptor
         {
             TabId = tabId,
@@ -70,6 +64,7 @@ internal sealed class PluginShellTabService : IPluginShellTabService
             Header = request.Header,
             Content = request.Content,
             ViewModel = request.ViewModel,
+            OnClosedAsync = request.OnClosedAsync,
         });
     }
 
@@ -85,18 +80,7 @@ internal sealed class PluginShellTabService : IPluginShellTabService
             return false;
         }
 
-        var closed = await _tabs.CloseTabAsync(tabId, reason, cancellationToken);
-        if (!closed)
-        {
-            return false;
-        }
-
-        if (_closeCallbacks.Remove(tabId, out var callback))
-        {
-            await callback(reason);
-        }
-
-        return true;
+        return await _tabs.CloseTabAsync(tabId, reason, cancellationToken);
     }
 
     private static ShellTabId CreateTabId(string pluginId, string surfaceKey)

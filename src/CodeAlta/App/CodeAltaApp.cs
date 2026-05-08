@@ -254,9 +254,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         _threadTabStripCoordinator = new ThreadTabStripCoordinator(
             _threadSelectionContext,
             _threadTabContext,
-            _shellTabService,
-            () => _fileEditorWorkspaceCoordinator.OpenTabIds,
-            () => _fileEditorWorkspaceCoordinator.SelectedTabId);
+            _shellTabService);
         _shellCommandSurfaceCoordinator = new ShellCommandSurfaceCoordinator(
             _promptComposerViewModel,
             _threadWorkspaceViewModel,
@@ -515,17 +513,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     internal void RefreshSelectionAndThreadWorkspace() { _threadInfoPresenter?.InvalidateSelection(); _workspaceCoordinator.RefreshSelectionAndThreadWorkspace(); }
 
-    internal void SelectGlobalScope()
-    {
-        ActivateThreadSurface();
-        _threadStateCoordinator.SelectGlobalScope();
-    }
+    internal void SelectGlobalScope() { _threadStateCoordinator.SelectGlobalScope(); ActivateThreadSurface(); }
 
-    internal void SelectProjectScope(string projectId)
-    {
-        ActivateThreadSurface();
-        _threadStateCoordinator.SelectProjectScope(projectId);
-    }
+    internal void SelectProjectScope(string projectId) { _threadStateCoordinator.SelectProjectScope(projectId); ActivateThreadSurface(); }
     internal void EnsureSelectionDefaults() => _threadStateCoordinator.EnsureSelectionDefaults();
     internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info) => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
     internal void SetProviderSessionLoadStatus(string? message) => _workspaceCoordinator.SetProviderSessionLoadStatus(message);
@@ -646,19 +636,18 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     private async Task ActivateDraftTabAsync()
     {
-        ActivateThreadSurface();
         ResetPendingThreadTabSelection();
         _threadStateCoordinator.DraftTabOpen = true;
         _threadStateCoordinator.SelectedThreadId = null;
         _viewState.SelectedThreadId = null;
         _viewState.UpdatedAt = DateTimeOffset.UtcNow;
+        ActivateThreadSurface();
         await PersistViewStateAsync();
         _frontendEvents.Publish(new SelectionChangedEvent());
     }
 
     private async Task CloseDraftTabAsync()
     {
-        ActivateThreadSurface();
         if (_threadStateCoordinator.Selection.Target is WorkspaceTarget.Draft)
         {
             _threadStateCoordinator.SelectedThreadId = _viewState.OpenThreadIds.FirstOrDefault();
@@ -666,6 +655,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         }
 
         _viewState.UpdatedAt = DateTimeOffset.UtcNow;
+        await _shellTabService.CloseTabAsync(new ShellTabId(DraftTabId), ShellTabCloseReason.User);
+        ActivateThreadSurface();
         await PersistViewStateAsync();
         _frontendEvents.Publish(new SelectionChangedEvent());
     }
@@ -701,11 +692,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     internal void OpenThread(string threadId)
     {
-        ActivateThreadSurface();
         if (_threadStateCoordinator.OpenThread(threadId) == OpenThreadResult.NotFound)
         {
             SetStatus($"Thread '{threadId}' was not found.", false, StatusTone.Warning);
+            return;
         }
+
+        ActivateThreadSurface();
     }
     internal void FocusPromptEditor() { ActivateThreadSurface(); ThreadPaneLayout?.App?.Focus(ThreadInput); }
     internal void FocusPromptTarget() => ThreadPaneLayout?.App?.Focus(ThreadInput);
@@ -757,6 +750,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private void ActivateThreadSurface()
     {
         _fileEditorWorkspaceCoordinator.ActivateThreadSurface();
+        _threadTabStripCoordinator.SelectCurrentThreadSurfaceTab();
+        SyncThreadTabControl();
         DispatchToUiDeferred(() => ThreadPaneLayout?.App?.Focus(ThreadInput));
     }
 
@@ -771,6 +766,4 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     private WorkThreadDescriptor? FindThread(string? threadId)
         => _threadStateCoordinator.FindThread(threadId);
-
-
 }

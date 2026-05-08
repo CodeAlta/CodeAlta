@@ -72,6 +72,27 @@ public sealed class ShellTabServiceTests
     }
 
     [TestMethod]
+    public async Task CloseTabAsync_InvokesDescriptorCloseHook()
+    {
+        var service = new InMemoryShellTabService();
+        ShellTabCloseReason? closeReason = null;
+        service.OpenOrGetTab(CreateDescriptor("tab-1") with
+        {
+            OnClosedAsync = reason =>
+            {
+                closeReason = reason;
+                return ValueTask.CompletedTask;
+            },
+        });
+
+        var closed = await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.Replaced);
+
+        Assert.IsTrue(closed);
+        Assert.AreEqual(ShellTabCloseReason.Replaced, closeReason);
+    }
+
+
+    [TestMethod]
     public void DescriptorValidation_RejectsMissingProjectionSurfaces()
     {
         var service = new InMemoryShellTabService();
