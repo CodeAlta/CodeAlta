@@ -180,15 +180,7 @@ public sealed class ShellWorkspaceCoordinatorTests
             new WorkThreadCatalog(options),
             new InlineUiDispatcher(),
             new ShellStateStore(new InlineUiDispatcher()),
-            static () => null,
-            static _ => true,
-            static _ => null,
-            static _ => { },
-            static _ => { },
-            static (_, _, _, _) => { },
-            static (_, _) => Task.CompletedTask,
-            static () => { },
-            static _ => { });
+            new TestThreadStateFrontendPort());
 
     private static Dictionary<string, ChatBackendState> CreateChatBackendStates()
         => new(StringComparer.Ordinal)

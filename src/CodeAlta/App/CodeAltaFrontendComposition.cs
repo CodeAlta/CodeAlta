@@ -55,6 +55,7 @@ internal sealed class CodeAltaFrontendComposition
         ICodeAltaShell shell,
         KnownProjectImporter knownProjectImporter,
         State<float> welcomePhase01,
+        IThreadStateFrontendPort threadStateFrontend,
         ICodeAltaFrontendServices frontend,
         CodexInstallProgressReporter? codexInstallProgress = null,
         PluginHostBridge? pluginHostBridge = null)
@@ -69,6 +70,7 @@ internal sealed class CodeAltaFrontendComposition
         ArgumentNullException.ThrowIfNull(shell);
         ArgumentNullException.ThrowIfNull(knownProjectImporter);
         ArgumentNullException.ThrowIfNull(welcomePhase01);
+        ArgumentNullException.ThrowIfNull(threadStateFrontend);
         ArgumentNullException.ThrowIfNull(frontend);
 
         var shellViewModel = new CodeAltaShellViewModel();
@@ -113,15 +115,7 @@ internal sealed class CodeAltaFrontendComposition
             threadCatalog,
             uiDispatcher,
             shellStateStore,
-            frontend.GetThreadPaneBounds,
-            thread => frontend.IsModelProviderReady(new AgentBackendId(thread.BackendId)),
-            frontend.LoadPromptDraft,
-            frontend.DeletePromptDraft,
-            frontend.ApplyThreadPreference,
-            frontend.RememberThreadPreference,
-            frontend.EnsureThreadHistoryLoadedAsync,
-            frontend.ResetPendingThreadTabSelection,
-            frontend.RemoveThreadTabPage,
+            threadStateFrontend,
             frontendEvents);
         var threadSelectionContext = new ThreadSelectionContext(
             threadStateCoordinator,

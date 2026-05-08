@@ -95,15 +95,7 @@ public sealed class ThreadPromptQueueCoordinatorTests
             new WorkThreadCatalog(catalogOptions),
             new InlineUiDispatcher(),
             new ShellStateStore(new InlineUiDispatcher()),
-            static () => null,
-            static _ => true,
-            static _ => null,
-            static _ => { },
-            static _ => { },
-            static (_, _, _, _) => { },
-            static (_, _) => Task.CompletedTask,
-            static () => { },
-            static _ => { });
+            new TestThreadStateFrontendPort());
         threadState.ViewState = new WorkThreadViewState();
 
         return new ThreadSelectionContext(

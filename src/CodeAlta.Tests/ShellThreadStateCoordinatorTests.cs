@@ -426,15 +426,9 @@ public sealed class ShellThreadStateCoordinatorTests
             threadCatalog,
             new InlineUiDispatcher(),
             stateStore ?? new ShellStateStore(new InlineUiDispatcher()),
-            static () => null,
-            static _ => true,
-            loadPromptDraft ?? (static _ => null),
-            deletePromptDraft ?? (static _ => { }),
-            static _ => { },
-            static (_, _, _, _) => { },
-            static (_, _) => Task.CompletedTask,
-            static () => { },
-            static _ => { },
+            new TestThreadStateFrontendPort(
+                loadPromptDraft: loadPromptDraft,
+                deletePromptDraft: deletePromptDraft),
             frontendEvents);
     }
 

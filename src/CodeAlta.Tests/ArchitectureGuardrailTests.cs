@@ -302,6 +302,7 @@ public sealed class ArchitectureGuardrailTests
             "App/Context/ShellWorkspaceContext.cs",
             "App/ICodeAltaShell.cs",
             "App/IModelProviderPreferencePort.cs",
+            "App/IThreadStateFrontendPort.cs",
             "App/PluginHostBridge.cs",
             "App/PromptImageCapabilityContext.cs",
             "App/ShellWorkspacePorts.cs",
@@ -347,16 +348,15 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/CodeAltaShellController.cs:71:_initializationTask = Task.Run(",
             "App/CodeAltaShellController.cs:356:var startupProviderLoadTask = Task.Run(",
-            "App/CodeAltaApp.cs:359:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:440:_ = OpenModelProvidersAsync();",
+            "App/CodeAltaApp.cs:360:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:441:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
-            "App/ShellThreadStateCoordinator.cs:270:_ = RestoreStartupThreadHistoryAsync(threadId, cancellationToken);",
-            "App/ShellThreadStateCoordinator.cs:279:_ = PersistViewStateAsync();",
-            "App/ShellThreadStateCoordinator.cs:292:_ = PersistViewStateAsync();",
-            "App/ShellThreadStateCoordinator.cs:346:_ = PersistViewStateAsync();",
-            "App/ShellThreadStateCoordinator.cs:348:_ = _ensureThreadHistoryLoadedAsync(thread, CancellationToken.None);",
-            "App/ShellThreadStateCoordinator.cs:439:_ = PersistViewStateAsync();",
-            "App/ShellThreadStateCoordinator.cs:476:_ = PersistViewStateAsync();",
+            "App/ShellThreadStateCoordinator.cs:245:_ = RestoreStartupThreadHistoryAsync(threadId, cancellationToken);",
+            "App/ShellThreadStateCoordinator.cs:254:_ = PersistViewStateAsync();",
+            "App/ShellThreadStateCoordinator.cs:267:_ = PersistViewStateAsync();",
+            "App/ShellThreadStateCoordinator.cs:321:_ = PersistViewStateAsync();",
+            "App/ShellThreadStateCoordinator.cs:414:_ = PersistViewStateAsync();",
+            "App/ShellThreadStateCoordinator.cs:451:_ = PersistViewStateAsync();",
             "App/SidebarCoordinator.cs:297:_ = CommitInlineRenameAsync(row, projectId, displayName, previousTitle);",
             "App/ThreadPromptDispatchCoordinator.cs:177:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
             "App/ThreadPromptDraftPersistenceCoordinator.cs:83:_ = PersistPromptDraftAsync(threadId, normalizedPrompt, cancellationSource);",
@@ -1159,13 +1159,14 @@ public sealed class ArchitectureGuardrailTests
         var persistenceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ThreadPromptDraftPersistenceCoordinator.cs"));
         var threadStateSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ShellThreadStateCoordinator.cs"));
 
-        Assert.IsTrue(compositionSource.Contains("frontend.LoadPromptDraft", StringComparison.Ordinal));
-        Assert.IsTrue(compositionSource.Contains("frontend.DeletePromptDraft", StringComparison.Ordinal));
+        Assert.IsTrue(compositionSource.Contains("threadStateFrontend", StringComparison.Ordinal));
+        Assert.IsTrue(File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "IThreadStateFrontendPort.cs")).Contains("LoadPromptDraft", StringComparison.Ordinal));
+        Assert.IsTrue(File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "IThreadStateFrontendPort.cs")).Contains("DeletePromptDraft", StringComparison.Ordinal));
         Assert.IsTrue(promptDraftSource.Contains("_promptDraftPersistence.ObservePromptDraft", StringComparison.Ordinal));
         Assert.IsTrue(catalogOptionsSource.Contains("saved_prompts", StringComparison.Ordinal));
         Assert.IsTrue(persistenceSource.Contains("PromptDraftsRoot", StringComparison.Ordinal));
         Assert.IsTrue(persistenceSource.Contains("saved_prompt_", StringComparison.Ordinal));
-        Assert.IsTrue(threadStateSource.Contains("_deletePromptDraft(threadId);", StringComparison.Ordinal));
+        Assert.IsTrue(threadStateSource.Contains("_frontendPort.DeletePromptDraft(threadId);", StringComparison.Ordinal));
     }
 
     [TestMethod]
