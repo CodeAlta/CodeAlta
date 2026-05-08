@@ -152,7 +152,7 @@ public sealed class PluginRootBuildFileGenerator
         "CodeAlta.Catalog",
     ];
 
-    /// <summary>Gets the default shared external and native package references.</summary>
+    /// <summary>Gets the default shared external package references.</summary>
     public static IReadOnlyList<string> DefaultSharedPackageNames { get; } =
     [
         "Microsoft.Extensions.AI.Abstractions",
@@ -163,13 +163,6 @@ public sealed class PluginRootBuildFileGenerator
         "XenoAtom.Terminal.UI.Extensions.Markdown",
         "XenoAtom.Terminal.UI.Extensions.Screenshot",
         "XenoAtom.Terminal.UI.Graphics",
-        "HarfBuzzSharp.NativeAssets.Linux",
-        "HarfBuzzSharp.NativeAssets.macOS",
-        "HarfBuzzSharp.NativeAssets.Win32",
-        "Onigwrap",
-        "SkiaSharp.NativeAssets.Linux",
-        "SkiaSharp.NativeAssets.macOS",
-        "SkiaSharp.NativeAssets.Win32",
     ];
 
     /// <summary>

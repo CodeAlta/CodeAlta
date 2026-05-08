@@ -27,7 +27,8 @@ public sealed class PluginRootBuildFileGeneratorTests
         Assert.IsTrue(File.ReadAllText(targetsPath).Contains("<Private>false</Private>", StringComparison.Ordinal));
         Assert.IsTrue(File.ReadAllText(targetsPath).Contains("<ExcludeAssets>runtime;native</ExcludeAssets>", StringComparison.Ordinal));
         Assert.IsTrue(File.ReadAllText(targetsPath).Contains("<PackageReference Include=\"XenoAtom.CommandLine\" Version=\"2.0.3\">", StringComparison.Ordinal));
-        Assert.IsTrue(File.ReadAllText(targetsPath).Contains("<PackageReference Include=\"HarfBuzzSharp.NativeAssets.Linux\" Version=\"8.3.1.3\">", StringComparison.Ordinal));
+        Assert.IsFalse(File.ReadAllText(targetsPath).Contains("NativeAssets", StringComparison.Ordinal));
+        Assert.IsFalse(File.ReadAllText(targetsPath).Contains("<PackageReference Include=\"Onigwrap\"", StringComparison.Ordinal));
         Assert.IsTrue(File.ReadAllText(targetsPath).Contains("CodeAltaPluginTargetPath", StringComparison.Ordinal));
         Assert.IsTrue(File.ReadAllText(packagesPath).Contains("<ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>", StringComparison.Ordinal));
         Assert.IsTrue(File.Exists(globalJsonPath));
@@ -86,7 +87,8 @@ public sealed class PluginRootBuildFileGeneratorTests
 
         Assert.IsTrue(versions.Any(version => version.Include == "XenoAtom.Terminal.UI"));
         Assert.IsTrue(versions.Any(version => version.Include == "XenoAtom.CommandLine"));
-        Assert.IsTrue(versions.Any(version => version.Include == "SkiaSharp.NativeAssets.Win32"));
+        Assert.IsFalse(versions.Any(version => version.Include.Contains("NativeAssets", StringComparison.Ordinal)));
+        Assert.IsFalse(versions.Any(version => version.Include == "Onigwrap"));
     }
 
     private static PluginRootBuildFileOptions CreateOptions(string codeAltaExeFolder)
@@ -97,7 +99,6 @@ public sealed class PluginRootBuildFileGeneratorTests
             PackageVersions =
             [
                 new PluginPackageVersion { Include = "XenoAtom.CommandLine", Version = "2.0.3" },
-                new PluginPackageVersion { Include = "HarfBuzzSharp.NativeAssets.Linux", Version = "8.3.1.3" },
                 new PluginPackageVersion { Include = "XenoAtom.Terminal.UI", Version = "3.1.0" },
             ],
         };

@@ -303,28 +303,7 @@ Recommended shared package references:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.3">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
-  <PackageReference Include="HarfBuzzSharp.NativeAssets.macOS" Version="8.3.1.3">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
-  <PackageReference Include="HarfBuzzSharp.NativeAssets.Win32" Version="8.3.1.3">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
   <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.5.1">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
-  <PackageReference Include="Onigwrap" Version="1.0.10">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
-  <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.2">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
-  <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.2">
-    <ExcludeAssets>runtime;native</ExcludeAssets>
-  </PackageReference>
-  <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.2">
     <ExcludeAssets>runtime;native</ExcludeAssets>
   </PackageReference>
   <PackageReference Include="XenoAtom.CommandLine" Version="2.0.3">
@@ -351,7 +330,7 @@ Recommended shared package references:
 </ItemGroup>
 ```
 
-The list should stay aligned with `CodeAlta.Plugins.Abstractions` public dependencies and native runtime packages that those shared dependencies bring in transitively. Shared package versions are written directly on generated `PackageReference` items so package-level `#:package Package@Version` directives remain compatible with NuGet's central package management rules.
+The list should stay aligned with `CodeAlta.Plugins.Abstractions` public dependencies. Transitive native runtime packages are not referenced directly; generated shared package references use `<ExcludeAssets>runtime;native</ExcludeAssets>` to keep those assets out of plugin outputs. Shared package versions are written directly on generated `PackageReference` items so package-level `#:package Package@Version` directives remain compatible with NuGet's central package management rules.
 
 The build service may parse only the generated `CodeAltaPluginTargetPath=` message for output discovery. It should not infer diagnostics or output paths from general console formatting.
 
