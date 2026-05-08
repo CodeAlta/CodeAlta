@@ -220,6 +220,96 @@ public sealed class ThreadRuntimeStateReducerTests
     }
 
     [TestMethod]
+    public void ReduceAgentEvent_DelayedIdleCompactionEventsDoNotReviveThinkingStatus()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.PendingManualCompaction = true;
+        var reducer = new ThreadRuntimeStateReducer();
+
+        _ = reducer.ReduceRuntimeEvent(
+            thread,
+            tab,
+            new WorkThreadHostEvent(
+                thread.ThreadId,
+                DateTimeOffset.UtcNow,
+                AgentSessionUpdateKind.CompactionCompleted,
+                "Manual compaction completed."),
+            isSelectedThread: false);
+
+        var startedReduction = reducer.ReduceAgentEvent(
+            thread,
+            tab,
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                new AgentRunId("compaction-run-1"),
+                AgentSessionUpdateKind.CompactionStarted,
+                "Compaction started."),
+            isSelectedThread: true);
+        var activityReduction = reducer.ReduceAgentEvent(
+            thread,
+            tab,
+            new AgentActivityEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                new AgentRunId("compaction-run-1"),
+                AgentActivityKind.Compaction,
+                AgentActivityPhase.Completed,
+                "activity-1",
+                null,
+                "context compaction",
+                "Compaction completed."),
+            isSelectedThread: true);
+        var completedReduction = reducer.ReduceAgentEvent(
+            thread,
+            tab,
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                new AgentRunId("compaction-run-1"),
+                AgentSessionUpdateKind.CompactionCompleted,
+                "Compaction completed."),
+            isSelectedThread: true);
+
+        Assert.IsFalse(tab.PendingManualCompaction);
+        Assert.IsNull(tab.ActiveRunId);
+        Assert.IsNull(tab.ActiveRunStartedAt);
+        Assert.IsNull(startedReduction.ThreadStatus);
+        Assert.IsNull(activityReduction.ThreadStatus);
+        Assert.IsNull(completedReduction.ThreadStatus);
+    }
+
+    [TestMethod]
+    public void ReduceAgentEvent_RunningThreadCompactionKeepsActiveRun()
+    {
+        var thread = CreateThread();
+        var tab = CreateOpenThreadState(thread);
+        tab.ActiveRunId = new AgentRunId("run-1");
+        tab.ActiveRunStartedAt = DateTimeOffset.UtcNow.AddSeconds(-10);
+        var reducer = new ThreadRuntimeStateReducer();
+
+        var reduction = reducer.ReduceAgentEvent(
+            thread,
+            tab,
+            new AgentSessionUpdateEvent(
+                AgentBackendIds.Copilot,
+                "session-1",
+                DateTimeOffset.UtcNow,
+                new AgentRunId("run-1"),
+                AgentSessionUpdateKind.CompactionCompleted,
+                "Compaction completed."),
+            isSelectedThread: true);
+
+        Assert.AreEqual("run-1", tab.ActiveRunId?.Value);
+        Assert.IsNotNull(tab.ActiveRunStartedAt);
+        Assert.IsNull(reduction.ThreadStatus);
+    }
+
+    [TestMethod]
     public void ReduceAgentEvent_IdleRequestsQueuedPromptDrainWithoutUiControls()
     {
         var thread = CreateThread();

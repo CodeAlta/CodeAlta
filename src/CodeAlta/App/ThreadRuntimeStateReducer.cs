@@ -68,13 +68,16 @@ internal sealed class ThreadRuntimeStateReducer
                 when !string.IsNullOrWhiteSpace(completed.Content) &&
                      completed.Kind is not (AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput or AgentContentKind.ToolOutput) => true,
             AgentPlanSnapshotEvent => true,
-            AgentActivityEvent { Phase: AgentActivityPhase.Requested or AgentActivityPhase.Started or AgentActivityPhase.Progressed or AgentActivityPhase.Completed } => true,
+            AgentActivityEvent
+            {
+                Kind: not AgentActivityKind.Compaction,
+                Phase: AgentActivityPhase.Requested or AgentActivityPhase.Started or AgentActivityPhase.Progressed or AgentActivityPhase.Completed
+            } => true,
             AgentSessionUpdateEvent
             {
                 Kind: AgentSessionUpdateKind.Started
                 or AgentSessionUpdateKind.Resumed
                 or AgentSessionUpdateKind.PlanUpdated
-                or AgentSessionUpdateKind.CompactionStarted
             } => true,
             _ => false,
         };
@@ -329,7 +332,7 @@ internal sealed class ThreadRuntimeStateReducer
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentNullException.ThrowIfNull(@event);
 
-        if (@event.RunId is { } runId)
+        if (@event.RunId is { } runId && ShouldTrackRunId(@event))
         {
             if (tab.ActiveRunId != runId)
             {
@@ -345,6 +348,21 @@ internal sealed class ThreadRuntimeStateReducer
             tab.ActiveRunId = null;
             tab.ActiveRunStartedAt = null;
         }
+    }
+
+    private static bool ShouldTrackRunId(AgentEvent @event)
+    {
+        if (@event is not AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted } &&
+            @event is not AgentActivityEvent { Kind: AgentActivityKind.Compaction })
+        {
+            return true;
+        }
+
+        // Some backends report manual idle compaction with a turn/run id even though it
+        // does not leave an agent run in flight. Do not let those compaction lifecycle
+        // updates replace or revive the active run; if a real run is already active, its
+        // existing tracking remains in place so running-thread compaction stays busy.
+        return false;
     }
 
     private static void UpdateThreadFromAgentEvent(WorkThreadDescriptor thread, AgentEvent @event)

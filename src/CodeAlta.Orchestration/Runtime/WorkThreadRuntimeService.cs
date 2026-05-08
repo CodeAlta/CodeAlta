@@ -1173,7 +1173,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
         public void ObserveEvent(AgentEvent @event)
         {
-            if (@event.RunId is { } runId)
+            if (@event.RunId is { } runId && ShouldTrackRunId(@event))
             {
                 ActiveRunId = runId;
             }
@@ -1188,6 +1188,17 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             {
                 IsTerminated = true;
             }
+        }
+
+        private static bool ShouldTrackRunId(AgentEvent @event)
+        {
+            if (@event is not AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted } &&
+                @event is not AgentActivityEvent { Kind: AgentActivityKind.Compaction })
+            {
+                return true;
+            }
+
+            return false;
         }
 
         public void MarkActiveRunIfStillInFlight(AgentRunId runId, DateTimeOffset runStartedAt)

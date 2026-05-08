@@ -116,6 +116,19 @@ public sealed class WorkThreadRuntimeStressTests
     }
 
     [TestMethod]
+    public async Task CompactAsync_IdleCompactionLifecycleEventsDoNotLeaveActiveRun()
+    {
+        using var fixture = RuntimeFixture.Create();
+        var thread = CreateThread("thread-1", fixture.BackendId, fixture.Root);
+        await fixture.Runtime.SendAsync(thread, CreateOptions(fixture.BackendId, fixture.Root), new AgentSendOptions { Input = AgentInput.Text("before compact") });
+
+        await fixture.Runtime.CompactAsync(thread, CreateOptions(fixture.BackendId, fixture.Root)).WaitAsync(TimeSpan.FromSeconds(5));
+        var hasActiveRun = await fixture.Runtime.HasActiveRunAsync(thread, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsFalse(hasActiveRun);
+    }
+
+    [TestMethod]
     public async Task AbortAfterDispose_IsIgnored()
     {
         using var fixture = RuntimeFixture.Create();
@@ -270,7 +283,14 @@ public sealed class WorkThreadRuntimeStressTests
 
             public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default) => SendAsync(new AgentSendOptions { Input = options.Input }, cancellationToken);
             public Task AbortAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref backend.AbortCount); return Task.CompletedTask; }
-            public Task CompactAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref backend.CompactCount); return Task.CompletedTask; }
+            public Task CompactAsync(CancellationToken cancellationToken = default)
+            {
+                Interlocked.Increment(ref backend.CompactCount);
+                var runId = new AgentRunId($"compact-{Guid.NewGuid():N}");
+                Publish(new AgentSessionUpdateEvent(BackendId, SessionId, DateTimeOffset.UtcNow, runId, AgentSessionUpdateKind.CompactionStarted, "compaction started"));
+                Publish(new AgentSessionUpdateEvent(BackendId, SessionId, DateTimeOffset.UtcNow, runId, AgentSessionUpdateKind.CompactionCompleted, "compaction completed"));
+                return Task.CompletedTask;
+            }
             public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
