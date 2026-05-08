@@ -168,7 +168,7 @@ internal sealed class ShellThreadStateCoordinator
         }
 
         _OpenThreadStateStore.RekeyThreadTab(oldThreadId, thread);
-        _frontendPort.RemoveThreadTabPage(oldThreadId);
+        _frontendPort.RemoveThreadTabPage(oldThreadId, ShellTabCloseReason.Replaced);
 
         for (var index = 0; index < ViewState.OpenThreadIds.Count; index++)
         {
@@ -349,7 +349,7 @@ internal sealed class ShellThreadStateCoordinator
         var removedSelectedThread = string.Equals(SelectedThreadId, threadId, StringComparison.OrdinalIgnoreCase);
         var removedThread = FindThread(threadId);
         ViewState.OpenThreadIds.RemoveAll(id => string.Equals(id, threadId, StringComparison.OrdinalIgnoreCase));
-        _frontendPort.RemoveThreadTabPage(threadId);
+        _frontendPort.RemoveThreadTabPage(threadId, ShellTabCloseReason.UserDetached);
         if (removedSelectedThread)
         {
             var nextThreadId = ViewState.OpenThreadIds.FirstOrDefault();
@@ -400,7 +400,7 @@ internal sealed class ShellThreadStateCoordinator
         _frontendPort.ResetPendingThreadTabSelection();
         var removedSelectedThread = string.Equals(SelectedThreadId, threadId, StringComparison.OrdinalIgnoreCase);
         ViewState.OpenThreadIds.RemoveAll(id => string.Equals(id, threadId, StringComparison.OrdinalIgnoreCase));
-        _frontendPort.RemoveThreadTabPage(threadId);
+        _frontendPort.RemoveThreadTabPage(threadId, ShellTabCloseReason.ThreadDeleted);
         _OpenThreadStateStore.RemoveThreadTab(threadId);
         _frontendPort.DeletePromptDraft(threadId);
 
@@ -432,7 +432,7 @@ internal sealed class ShellThreadStateCoordinator
         foreach (var threadId in deletedThreadIds)
         {
             ViewState.OpenThreadIds.RemoveAll(id => string.Equals(id, threadId, StringComparison.OrdinalIgnoreCase));
-            _frontendPort.RemoveThreadTabPage(threadId);
+            _frontendPort.RemoveThreadTabPage(threadId, ShellTabCloseReason.ProjectClosed);
             _OpenThreadStateStore.RemoveThreadTab(threadId);
             _frontendPort.DeletePromptDraft(threadId);
 

@@ -22,7 +22,7 @@ internal interface ICodeAltaFrontendServices : IShellStatusService, IPromptSessi
     void RefreshSelectionAndThreadWorkspace();
     void RefreshCatalogAndThreadWorkspace();
     void ResetPendingThreadTabSelection();
-    void RemoveThreadTabPage(string threadId);
+    void RemoveThreadTabPage(string threadId, ShellTabCloseReason reason);
     void SetProviderSessionLoadStatus(string? message);
     void ApplyDraftModelProviderPreference(ChatBackendState backendState);
     void RememberGlobalModelProviderPreference(AgentBackendId backendId, string? modelId, AgentReasoningEffort? reasoningEffort);

@@ -32,7 +32,7 @@ internal sealed class CodeAltaFrontendServicesAdapter : ICodeAltaFrontendService
     public void RefreshSelectionAndThreadWorkspace() => _app.RefreshSelectionAndThreadWorkspace();
     public void RefreshCatalogAndThreadWorkspace() => _app.RefreshCatalogAndThreadWorkspace();
     public void ResetPendingThreadTabSelection() => _app.ResetPendingThreadTabSelection();
-    public void RemoveThreadTabPage(string threadId) => _app.RemoveThreadTabPage(threadId);
+    public void RemoveThreadTabPage(string threadId, ShellTabCloseReason reason) => _app.RemoveThreadTabPage(threadId, reason);
     public void SetStatus(string message, bool showSpinner, StatusTone tone) => _app.SetStatus(message, showSpinner, tone);
     public void SetProviderSessionLoadStatus(string? message) => _app.SetProviderSessionLoadStatus(message);
     public bool IsSelectedThread(string threadId) => _app.IsSelectedThread(threadId);

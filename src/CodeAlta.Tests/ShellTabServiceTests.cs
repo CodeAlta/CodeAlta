@@ -56,7 +56,7 @@ public sealed class ShellTabServiceTests
         service.OpenOrGetTab(CreateDescriptor("tab-1"));
         service.OpenOrGetTab(CreateDescriptor("tab-2"));
         await service.SelectTabAsync(new ShellTabId("tab-2"));
-        await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.User);
+        await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.UserDetached);
 
         Assert.IsTrue(changes[0].OpenTabsChanged);
         Assert.IsTrue(changes[0].SelectedTabChanged);
@@ -95,7 +95,7 @@ public sealed class ShellTabServiceTests
         var viewModel = new object();
         service.OpenOrGetTab(CreateDescriptor("tab-1", viewModel));
 
-        var closed = await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.User);
+        var closed = await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.UserDetached);
 
         Assert.IsTrue(closed);
         Assert.IsFalse(service.TryGetTab(new ShellTabId("tab-1"), out _));
@@ -108,7 +108,7 @@ public sealed class ShellTabServiceTests
         var service = new InMemoryShellTabService();
         service.OpenOrGetTab(CreateDescriptor("tab-1") with { CanClose = false });
 
-        var closed = await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.User);
+        var closed = await service.CloseTabAsync(new ShellTabId("tab-1"), ShellTabCloseReason.UserDetached);
 
         Assert.IsFalse(closed);
         Assert.IsTrue(service.TryGetTab(new ShellTabId("tab-1"), out var tab));

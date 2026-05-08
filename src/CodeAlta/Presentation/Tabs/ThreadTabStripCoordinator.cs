@@ -415,7 +415,7 @@ internal sealed class ThreadTabStripCoordinator
             }
 
             e.Cancel = true;
-            _ = _shellTabs.CloseTabAsync(new ShellTabId(currentThreadId), ShellTabCloseReason.User);
+            _ = _shellTabs.CloseTabAsync(new ShellTabId(currentThreadId), ShellTabCloseReason.UserDetached);
             _threadTabs.CloseThreadTab(currentThreadId);
         };
 
@@ -621,7 +621,7 @@ internal sealed class ThreadTabStripCoordinator
             }
 
             e.Cancel = true;
-            _ = _shellTabs.CloseTabAsync(new ShellTabId(CodeAltaApp.DraftTabId), ShellTabCloseReason.User);
+            _ = _shellTabs.CloseTabAsync(new ShellTabId(CodeAltaApp.DraftTabId), ShellTabCloseReason.UserDetached);
             _threadTabs.CloseDraftTab();
         };
 
@@ -698,7 +698,7 @@ internal sealed class ThreadTabStripCoordinator
             }
 
             e.Cancel = true;
-            _ = _shellTabs.CloseTabAsync(new ShellTabId(currentTabId), ShellTabCloseReason.User);
+            _ = _shellTabs.CloseTabAsync(new ShellTabId(currentTabId), ShellTabCloseReason.UserDetached);
         };
 
         workspaceView.RememberTabPage(tabId, page);

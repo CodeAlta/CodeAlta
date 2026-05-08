@@ -596,9 +596,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void DeletePromptDraft(string threadId)
         => _promptDraftUiCoordinator!.DeletePersistedPromptDraft(threadId);
 
-    internal void RemoveThreadTabPage(string threadId)
+    internal void RemoveThreadTabPage(string threadId, ShellTabCloseReason reason)
     {
-        _ = _shellTabService.CloseTabAsync(new ShellTabId(threadId), ShellTabCloseReason.User);
+        _ = _shellTabService.CloseTabAsync(new ShellTabId(threadId), reason);
         _threadWorkspaceView?.RemoveTabPage(threadId);
     }
 
@@ -656,7 +656,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         }
 
         _viewState.UpdatedAt = DateTimeOffset.UtcNow;
-        await _shellTabService.CloseTabAsync(new ShellTabId(DraftTabId), ShellTabCloseReason.User);
+        await _shellTabService.CloseTabAsync(new ShellTabId(DraftTabId), ShellTabCloseReason.UserDetached);
         ActivateThreadSurface();
         await PersistViewStateAsync();
         _frontendEvents.Publish(new SelectionChangedEvent());

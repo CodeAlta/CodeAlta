@@ -18,7 +18,7 @@ internal sealed class TestThreadStateFrontendPort : IThreadStateFrontendPort
     private readonly Action<string, string?, AgentReasoningEffort?, bool> _rememberThreadPreference;
     private readonly Func<WorkThreadDescriptor, CancellationToken, Task> _ensureThreadHistoryLoadedAsync;
     private readonly Action _resetPendingThreadTabSelection;
-    private readonly Action<string> _removeThreadTabPage;
+    private readonly Action<string, ShellTabCloseReason> _removeThreadTabPage;
 
     public TestThreadStateFrontendPort(
         Func<Rectangle?>? getTimelineBounds = null,
@@ -29,7 +29,7 @@ internal sealed class TestThreadStateFrontendPort : IThreadStateFrontendPort
         Action<string, string?, AgentReasoningEffort?, bool>? rememberThreadPreference = null,
         Func<WorkThreadDescriptor, CancellationToken, Task>? ensureThreadHistoryLoadedAsync = null,
         Action? resetPendingThreadTabSelection = null,
-        Action<string>? removeThreadTabPage = null)
+        Action<string, ShellTabCloseReason>? removeThreadTabPage = null)
     {
         _getTimelineBounds = getTimelineBounds ?? (static () => null);
         _isModelProviderReady = isModelProviderReady ?? (static _ => true);
@@ -39,7 +39,7 @@ internal sealed class TestThreadStateFrontendPort : IThreadStateFrontendPort
         _rememberThreadPreference = rememberThreadPreference ?? (static (_, _, _, _) => { });
         _ensureThreadHistoryLoadedAsync = ensureThreadHistoryLoadedAsync ?? (static (_, _) => Task.CompletedTask);
         _resetPendingThreadTabSelection = resetPendingThreadTabSelection ?? (static () => { });
-        _removeThreadTabPage = removeThreadTabPage ?? (static _ => { });
+        _removeThreadTabPage = removeThreadTabPage ?? (static (_, _) => { });
     }
 
     public Rectangle? GetTimelineBounds() => _getTimelineBounds();
@@ -60,5 +60,5 @@ internal sealed class TestThreadStateFrontendPort : IThreadStateFrontendPort
 
     public void ResetPendingThreadTabSelection() => _resetPendingThreadTabSelection();
 
-    public void RemoveThreadTabPage(string threadId) => _removeThreadTabPage(threadId);
+    public void RemoveThreadTabPage(string threadId, ShellTabCloseReason reason) => _removeThreadTabPage(threadId, reason);
 }

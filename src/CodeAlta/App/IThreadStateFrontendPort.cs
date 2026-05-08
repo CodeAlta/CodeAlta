@@ -26,7 +26,7 @@ internal interface IThreadStateFrontendPort
 
     void ResetPendingThreadTabSelection();
 
-    void RemoveThreadTabPage(string threadId);
+    void RemoveThreadTabPage(string threadId, ShellTabCloseReason reason);
 }
 
 internal sealed class ThreadStateFrontendPort : IThreadStateFrontendPort
@@ -61,5 +61,5 @@ internal sealed class ThreadStateFrontendPort : IThreadStateFrontendPort
 
     public void ResetPendingThreadTabSelection() => _app.ResetPendingThreadTabSelection();
 
-    public void RemoveThreadTabPage(string threadId) => _app.RemoveThreadTabPage(threadId);
+    public void RemoveThreadTabPage(string threadId, ShellTabCloseReason reason) => _app.RemoveThreadTabPage(threadId, reason);
 }

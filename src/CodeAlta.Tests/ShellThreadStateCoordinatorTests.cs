@@ -127,6 +127,24 @@ public sealed class ShellThreadStateCoordinatorTests
     }
 
     [TestMethod]
+    public async Task CloseThreadTabAsync_DetachesThreadTabWithExplicitCloseReason()
+    {
+        using var temp = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = temp.Path };
+        var closeReasons = new List<(string ThreadId, ShellTabCloseReason Reason)>();
+        var coordinator = CreateCoordinator(options, removeThreadTabPage: (threadId, reason) => closeReasons.Add((threadId, reason)));
+        var project = CreateProject("project-1", "CodeAlta");
+        coordinator.ApplyRecoveredCatalogState([project], [CreateThread("thread-1", project.Id)]);
+        coordinator.OpenThread("thread-1");
+
+        await coordinator.CloseThreadTabAsync("thread-1").ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(
+            new[] { ("thread-1", ShellTabCloseReason.UserDetached) },
+            closeReasons.ToArray());
+    }
+
+    [TestMethod]
     public void EnsureThreadTab_LoadsPersistedPromptDraft()
     {
         using var temp = TempDirectory.Create();
@@ -189,6 +207,30 @@ public sealed class ShellThreadStateCoordinatorTests
         Assert.IsNull(coordinator.SelectedThreadId);
         Assert.AreEqual(ShellSurface.DraftWorkspace, coordinator.Selection.Surface);
         Assert.IsInstanceOfType<WorkspaceTarget.Draft>(coordinator.Selection.Target);
+    }
+
+    [TestMethod]
+    public void DeleteThreadAndProject_CloseTabsWithExplicitReasons()
+    {
+        using var temp = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = temp.Path };
+        var closeReasons = new List<(string ThreadId, ShellTabCloseReason Reason)>();
+        var coordinator = CreateCoordinator(options, removeThreadTabPage: (threadId, reason) => closeReasons.Add((threadId, reason)));
+        var project = CreateProject("project-1", "CodeAlta");
+        coordinator.ApplyRecoveredCatalogState([project], [CreateThread("thread-1", project.Id), CreateThread("thread-2", project.Id)]);
+        coordinator.OpenThread("thread-1");
+        coordinator.OpenThread("thread-2");
+
+        coordinator.RemoveDeletedThread("thread-1", fallbackProjectId: project.Id);
+        coordinator.RemoveDeletedProject(project.Id, ["thread-2"]);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                ("thread-1", ShellTabCloseReason.ThreadDeleted),
+                ("thread-2", ShellTabCloseReason.ProjectClosed),
+            },
+            closeReasons.ToArray());
     }
 
     [TestMethod]
@@ -440,6 +482,7 @@ public sealed class ShellThreadStateCoordinatorTests
         WorkThreadCatalog? threadCatalog = null,
         Func<string, string?>? loadPromptDraft = null,
         Action<string>? deletePromptDraft = null,
+        Action<string, ShellTabCloseReason>? removeThreadTabPage = null,
         ShellStateStore? stateStore = null,
         FrontendEventPublisher? frontendEvents = null)
     {
@@ -451,7 +494,8 @@ public sealed class ShellThreadStateCoordinatorTests
             stateStore ?? new ShellStateStore(new InlineUiDispatcher()),
             new TestThreadStateFrontendPort(
                 loadPromptDraft: loadPromptDraft,
-                deletePromptDraft: deletePromptDraft),
+                deletePromptDraft: deletePromptDraft,
+                removeThreadTabPage: removeThreadTabPage),
             frontendEvents);
     }
 

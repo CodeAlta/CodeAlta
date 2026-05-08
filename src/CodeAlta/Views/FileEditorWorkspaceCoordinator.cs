@@ -163,7 +163,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
                 await fileTab.DisposeAsync();
                 _fileTabsById.Remove(tabId);
                 _fileTabsByPath.Remove(fileTab.FullPath);
-                await _shellTabs.CloseTabAsync(new ShellTabId(tabId), ShellTabCloseReason.User);
+                await _shellTabs.CloseTabAsync(new ShellTabId(tabId), ShellTabCloseReason.FileEditorClosed);
                 _getWorkspaceView()?.RemoveTabPage(tabId);
                 if (wasSelected)
                 {

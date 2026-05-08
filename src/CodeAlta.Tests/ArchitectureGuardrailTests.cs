@@ -607,36 +607,30 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
-    public void ThreadTabCloseSemanticsInventory_ReportsCurrentDetachOnlyClosePath()
+    public void ThreadTabCloseSemantics_AreExplicitlySeparated()
     {
         var codeAltaRoot = GetCodeAltaSourceRoot();
-        var files = new[]
-        {
-            Path.Combine(codeAltaRoot, "App", "ShellThreadStateCoordinator.cs"),
-            Path.Combine(codeAltaRoot, "Presentation", "Tabs", "ThreadTabStripCoordinator.cs"),
-            Path.Combine(codeAltaRoot, "Views", "ThreadWorkspaceView.cs"),
-        };
-        var closeReferences = files
-            .Where(File.Exists)
-            .Select(file => new
-            {
-                RelativePath = Path.GetRelativePath(codeAltaRoot, file).Replace('\\', '/'),
-                Lines = File.ReadLines(file)
-                    .Select((line, index) => new { Number = index + 1, Text = line })
-                    .Where(static line =>
-                        line.Text.Contains("Close", StringComparison.Ordinal) ||
-                        line.Text.Contains("Remove", StringComparison.Ordinal) ||
-                        line.Text.Contains("Detach", StringComparison.Ordinal) ||
-                        line.Text.Contains("Abort", StringComparison.Ordinal))
-                    .Select(line => $"{line.Number}:{line.Text.Trim()}")
-                    .ToArray(),
-            })
-            .Select(file => $"{file.RelativePath} => {string.Join(" | ", file.Lines)}")
-            .OrderBy(static value => value, StringComparer.Ordinal)
-            .ToArray();
+        var shellTabsSource = File.ReadAllText(Path.Combine(codeAltaRoot, "App", "IShellTabService.cs"));
+        var threadStateSource = File.ReadAllText(Path.Combine(codeAltaRoot, "App", "ShellThreadStateCoordinator.cs"));
+        var fileEditorSource = File.ReadAllText(Path.Combine(codeAltaRoot, "Views", "FileEditorWorkspaceCoordinator.cs"));
+        var threadCommandsSource = File.ReadAllText(Path.Combine(codeAltaRoot, "App", "ThreadCommandCoordinator.cs"));
+        var navigatorSource = File.ReadAllText(Path.Combine(codeAltaRoot, "App", "NavigatorActionCoordinator.cs"));
 
-        TestContext.WriteLine("Current thread-tab close/detach/abort references:\n{0}", string.Join(Environment.NewLine, closeReferences));
-        Assert.IsNotNull(closeReferences);
+        StringAssert.Contains(shellTabsSource, "UserDetached");
+        StringAssert.Contains(shellTabsSource, "FileEditorClosed");
+        StringAssert.Contains(shellTabsSource, "ThreadDeleted");
+        StringAssert.Contains(shellTabsSource, "ProjectClosed");
+        Assert.IsFalse(shellTabsSource.Contains("User,", StringComparison.Ordinal));
+
+        StringAssert.Contains(threadStateSource, "ShellTabCloseReason.UserDetached");
+        StringAssert.Contains(threadStateSource, "ShellTabCloseReason.ThreadDeleted");
+        StringAssert.Contains(threadStateSource, "ShellTabCloseReason.ProjectClosed");
+        StringAssert.Contains(fileEditorSource, "ShellTabCloseReason.FileEditorClosed");
+
+        StringAssert.Contains(threadCommandsSource, "AbortSelectedThreadAsync");
+        StringAssert.Contains(threadCommandsSource, "_runtimeService.AbortAsync(thread.ThreadId)");
+        StringAssert.Contains(navigatorSource, "DeleteThreadAsync");
+        StringAssert.Contains(navigatorSource, "DeleteProjectAsync");
     }
 
     [TestMethod]

@@ -30,7 +30,9 @@ internal enum ShellTabKind
 
 internal enum ShellTabCloseReason
 {
-    User,
+    UserDetached,
+    FileEditorClosed,
+    ThreadDeleted,
     ProjectClosed,
     PluginUnloaded,
     Replaced,
