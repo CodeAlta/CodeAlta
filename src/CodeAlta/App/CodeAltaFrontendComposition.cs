@@ -249,7 +249,7 @@ internal sealed class CodeAltaFrontendComposition
             backendDescriptors,
             chatBackendStates,
             frontend.DispatchToUi,
-            frontend.RefreshHeaderAndThreadWorkspace,
+            frontendEvents,
             codexInstallProgress,
             frontend.SetProviderSessionLoadStatus,
             SetBackendSessionLoadingEnabled);

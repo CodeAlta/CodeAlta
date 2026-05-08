@@ -1,7 +1,9 @@
 using CodeAlta.Agent;
 using CodeAlta.App;
+using CodeAlta.App.Events;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Threading;
 
 namespace CodeAlta.Tests;
 
@@ -93,6 +95,7 @@ public sealed class ChatBackendInitializationCoordinatorTests
         var state = new ChatBackendState(backendId, "ChatGPT");
         var queuedUiActions = new Queue<Action>();
         var sessionLoadingUpdates = new List<(AgentBackendId BackendId, bool Enabled)>();
+        var publishedEvents = new List<ShellFrontendEvent>();
         var coordinator = new ChatBackendInitializationCoordinator(
             hub,
             [new AgentBackendDescriptor(backendId, "ChatGPT")],
@@ -101,7 +104,7 @@ public sealed class ChatBackendInitializationCoordinatorTests
                 [backendId.Value] = state,
             },
             action => queuedUiActions.Enqueue(action),
-            static () => { },
+            CreatePublisher(publishedEvents),
             setBackendSessionLoadingEnabled: (id, enabled) => sessionLoadingUpdates.Add((id, enabled)));
 
         await coordinator.RefreshBackendAsync(backendId, CancellationToken.None).ConfigureAwait(false);
@@ -117,6 +120,8 @@ public sealed class ChatBackendInitializationCoordinatorTests
         }
 
         Assert.AreEqual(ChatBackendAvailability.Ready, state.Availability);
+        Assert.IsTrue(publishedEvents.OfType<ModelProviderStateChangedEvent>().Any(evt => evt.ModelProviderId == backendId.Value));
+        Assert.IsTrue(publishedEvents.OfType<HeaderChangedEvent>().Any());
     }
 
     [TestMethod]
@@ -138,7 +143,7 @@ public sealed class ChatBackendInitializationCoordinatorTests
                 [backendId.Value] = state,
             },
             action => queuedUiActions.Add(action),
-            static () => { },
+            CreatePublisher(),
             setProviderInitializationStatus: providerStatuses.Add);
 
         await coordinator.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
@@ -186,7 +191,35 @@ public sealed class ChatBackendInitializationCoordinatorTests
             descriptors,
             states,
             static action => action(),
-            static () => { });
+            CreatePublisher());
+
+    private static FrontendEventPublisher CreatePublisher(List<ShellFrontendEvent>? events = null)
+    {
+        var publisher = new FrontendEventPublisher(new InlineUiDispatcher());
+        if (events is not null)
+        {
+            publisher.Subscribe(events.Add);
+        }
+
+        return publisher;
+    }
+
+    private sealed class InlineUiDispatcher : IUiDispatcher
+    {
+        public bool CheckAccess() => true;
+
+        public void Post(Action action) => action();
+
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        public Task<T> InvokeAsync<T>(Func<T> action)
+            => Task.FromResult(action());
+    }
+
     private sealed class CountingBackend(AgentBackendId backendId) : IAgentBackend
     {
         public AgentBackendId BackendId { get; } = backendId;

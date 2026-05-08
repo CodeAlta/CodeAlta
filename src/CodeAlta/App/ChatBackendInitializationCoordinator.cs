@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using CodeAlta.Agent;
+using CodeAlta.App.Events;
 using CodeAlta.CodexSdk;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
@@ -15,7 +16,7 @@ internal sealed class ChatBackendInitializationCoordinator
     private readonly IReadOnlyList<AgentBackendDescriptor> _backendDescriptors;
     private readonly Dictionary<string, ChatBackendState> _chatBackendStates;
     private readonly Action<Action> _dispatchToUi;
-    private readonly Action _refreshHeaderAndThreadWorkspace;
+    private readonly FrontendEventPublisher _frontendEvents;
     private readonly CodexInstallProgressReporter? _codexInstallProgress;
     private readonly Action<string?>? _setProviderInitializationStatus;
     private readonly Action<AgentBackendId, bool>? _setBackendSessionLoadingEnabled;
@@ -26,7 +27,7 @@ internal sealed class ChatBackendInitializationCoordinator
         IReadOnlyList<AgentBackendDescriptor> backendDescriptors,
         Dictionary<string, ChatBackendState> chatBackendStates,
         Action<Action> dispatchToUi,
-        Action refreshHeaderAndThreadWorkspace,
+        FrontendEventPublisher frontendEvents,
         CodexInstallProgressReporter? codexInstallProgress = null,
         Action<string?>? setProviderInitializationStatus = null,
         Action<AgentBackendId, bool>? setBackendSessionLoadingEnabled = null)
@@ -35,13 +36,13 @@ internal sealed class ChatBackendInitializationCoordinator
         ArgumentNullException.ThrowIfNull(backendDescriptors);
         ArgumentNullException.ThrowIfNull(chatBackendStates);
         ArgumentNullException.ThrowIfNull(dispatchToUi);
-        ArgumentNullException.ThrowIfNull(refreshHeaderAndThreadWorkspace);
+        ArgumentNullException.ThrowIfNull(frontendEvents);
 
         _agentHub = agentHub;
         _backendDescriptors = backendDescriptors;
         _chatBackendStates = chatBackendStates;
         _dispatchToUi = dispatchToUi;
-        _refreshHeaderAndThreadWorkspace = refreshHeaderAndThreadWorkspace;
+        _frontendEvents = frontendEvents;
         _codexInstallProgress = codexInstallProgress;
         _setProviderInitializationStatus = setProviderInitializationStatus;
         _setBackendSessionLoadingEnabled = setBackendSessionLoadingEnabled;
@@ -166,7 +167,7 @@ internal sealed class ChatBackendInitializationCoordinator
             {
                 state.Availability = ChatBackendAvailability.Connecting;
                 state.StatusMessage = "Detecting backend...";
-                _refreshHeaderAndThreadWorkspace();
+                PublishProviderStateChanged(backendId);
             });
 
         using var codexProgressSubscription = SubscribeCodexProgressIfNeeded(backendId, state);
@@ -189,7 +190,7 @@ internal sealed class ChatBackendInitializationCoordinator
                     state.StatusMessage = ChatBackendPresentation.BuildReadyStatusMessage(state);
                     LogInfo(
                         $"Chat backend ready backend={backendId.Value} displayName={state.DisplayName} models={models.Count} status={state.StatusMessage}");
-                    _refreshHeaderAndThreadWorkspace();
+                    PublishProviderStateChanged(backendId);
                 });
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
@@ -208,7 +209,7 @@ internal sealed class ChatBackendInitializationCoordinator
                     state.DraftScopeKey = null;
                     state.Availability = availability;
                     state.StatusMessage = statusMessage;
-                    _refreshHeaderAndThreadWorkspace();
+                    PublishProviderStateChanged(backendId);
                 });
         }
     }
@@ -226,8 +227,14 @@ internal sealed class ChatBackendInitializationCoordinator
                 {
                     state.Availability = ChatBackendAvailability.Connecting;
                     state.StatusMessage = progress.Message;
-                    _refreshHeaderAndThreadWorkspace();
+                    PublishProviderStateChanged(backendId);
                 }));
+    }
+
+    private void PublishProviderStateChanged(AgentBackendId backendId)
+    {
+        _frontendEvents.Publish(new ModelProviderStateChangedEvent(backendId.Value));
+        _frontendEvents.Publish(new HeaderChangedEvent());
     }
 
     private static bool IsProcessBackedProviderBackend(AgentBackendId backendId)
