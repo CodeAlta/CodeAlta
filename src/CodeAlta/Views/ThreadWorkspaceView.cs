@@ -4,7 +4,6 @@ using CodeAlta.Models;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Shell;
-using CodeAlta.Presentation.Styling;
 using CodeAlta.Catalog;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal;
@@ -12,27 +11,19 @@ using XenoAtom.Terminal.Graphics;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
-using XenoAtom.Terminal.UI.Text;
 using ImageControl = XenoAtom.Terminal.UI.Graphics.Image;
 
 namespace CodeAlta.Views;
 
 internal sealed class ThreadWorkspaceView
 {
-    private readonly PromptComposerViewModel _promptComposerViewModel;
-    private readonly Binding<string?> _promptTextBinding;
-    private readonly Action _openHelp;
-    private readonly Action _openCommandPalette;
-    private readonly IProjectFileSearchService _projectFileSearchService;
-    private readonly Func<string?> _getPromptReferenceProjectRoot;
     private readonly ModelProviderSelectorView _modelProviderSelectorView;
     private readonly PromptImageAttachmentStripView _promptImageAttachmentStripView;
+    private readonly PromptComposerView _promptComposerView;
     private readonly ThreadTabHostView _threadTabHostView;
-    private Dialog? _expandedPromptDialog;
 
     internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
     internal static readonly KeySequence ModelProvidersShortcutSequence = ShellCommandCatalog.ModelProvidersShortcutSequence;
@@ -84,12 +75,6 @@ internal sealed class ThreadWorkspaceView
         var onChatReasoningSelectionChanged = actions.OnChatReasoningSelectionChanged;
         var onSelectedTabChanged = actions.OnSelectedTabChanged;
 
-        _promptComposerViewModel = promptComposerViewModel;
-        _promptTextBinding = promptText;
-        _openHelp = openHelp;
-        _openCommandPalette = openCommandPalette;
-        _projectFileSearchService = projectFileSearchService;
-        _getPromptReferenceProjectRoot = getPromptReferenceProjectRoot;
         _promptImageAttachmentStripView = new PromptImageAttachmentStripView(
             promptComposerViewModel,
             promptImageCallbacks,
@@ -103,25 +88,24 @@ internal sealed class ThreadWorkspaceView
         };
 
         Visual? threadInfoButton = null;
-        ThreadInput = CreatePromptEditor(
+        _promptComposerView = new PromptComposerView(
             promptComposerViewModel,
-            openHelp,
-            openCommandPalette,
+            commandBindings,
             projectFileSearchService,
             getPromptReferenceProjectRoot,
+            promptText,
+            _promptImageAttachmentStripView,
+            () => ThreadPaneLayout?.GetAbsoluteBounds(),
             acceptPrompt,
-            commandBindings,
-            promptText)
-            .IsEnabled(promptComposerViewModel.Bind.IsEnabled);
-        _promptImageAttachmentStripView.ConfigurePromptImagePasteHandler(ThreadInput);
-        ThreadInputView = ThreadInput.Scrollable();
+            sendPrompt,
+            abortThread,
+            openHelp,
+            openCommandPalette);
+        ThreadInput = _promptComposerView.Editor;
+        ThreadInputView = _promptComposerView.EditorView;
 
-        SendPromptButton = CreatePromptActionButton(promptComposerViewModel, sendPrompt, abortThread);
-        ExpandPromptButton = CreateIconButton(
-                $"{NerdFont.MdSquareEditOutline}",
-                "Open the current prompt in a large editor window (F6).",
-                () => OpenExpandedPromptDialog(promptComposerViewModel, promptText),
-                button => button.IsEnabled(promptComposerViewModel.Bind.IsEnabled));
+        SendPromptButton = _promptComposerView.SendButton;
+        ExpandPromptButton = _promptComposerView.ExpandButton;
         threadInfoButton = CreateIconButton(
                 $"{NerdFont.MdInformationOutline}",
                 $"Show information about the selected thread ({ThreadInfoShortcutSequence}).",
@@ -270,43 +254,15 @@ internal sealed class ThreadWorkspaceView
 
     public void ActivateThreadTabContent(string? tabId)
         => _threadTabHostView.ActivateThreadTabContent(tabId);
+
     public void OpenExpandedPromptDialog()
-        => OpenExpandedPromptDialog(_promptComposerViewModel, _promptTextBinding);
+        => _promptComposerView.OpenExpandedPromptDialog();
 
     public void SyncChatSelectorItems(ThreadWorkspaceViewModel workspaceViewModel)
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
 
         _modelProviderSelectorView.SyncItems(workspaceViewModel);
-    }
-
-    private static ChatPromptEditor CreatePromptEditor(
-        PromptComposerViewModel promptComposerViewModel,
-        Action openHelp,
-        Action openCommandPalette,
-        IProjectFileSearchService projectFileSearchService,
-        Func<string?> getPromptReferenceProjectRoot,
-        Action<string> acceptPrompt,
-        IReadOnlyList<ThreadWorkspaceCommandBinding> commandBindings,
-        Binding<string?> promptText)
-    {
-        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
-        ArgumentNullException.ThrowIfNull(openHelp);
-        ArgumentNullException.ThrowIfNull(openCommandPalette);
-        ArgumentNullException.ThrowIfNull(projectFileSearchService);
-        ArgumentNullException.ThrowIfNull(getPromptReferenceProjectRoot);
-        ArgumentNullException.ThrowIfNull(acceptPrompt);
-        ArgumentNullException.ThrowIfNull(commandBindings);
-        var editor = CreateStyledPromptEditor(acceptPrompt, openHelp, openCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, placeholder: null)
-            .Placeholder(promptComposerViewModel.Bind.Placeholder)
-            .Text(promptText);
-
-        foreach (var binding in commandBindings)
-        {
-            editor.AddCommand(BuildCommand(binding));
-        }
-
-        return editor;
     }
 
     private static bool IsSharedEditorCommand(string commandId)
@@ -357,71 +313,6 @@ internal sealed class ThreadWorkspaceView
         return presentation;
     }
 
-    private void OpenExpandedPromptDialog(
-        PromptComposerViewModel promptComposerViewModel,
-        Binding<string?> promptText)
-    {
-        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
-
-        if (_expandedPromptDialog is { App: not null })
-        {
-            return;
-        }
-
-        var editor = CreateStyledPromptEditor(_ => CloseExpandedPromptDialog(), _openHelp, _openCommandPalette, _projectFileSearchService, _getPromptReferenceProjectRoot, placeholder: null)
-            .Placeholder(promptComposerViewModel.Bind.Placeholder)
-            .Text(promptText)
-            .MinHeight(12)
-            .IsEnabled(promptComposerViewModel.Bind.IsEnabled);
-        _promptImageAttachmentStripView.ConfigurePromptImagePasteHandler(editor);
-        editor.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Thread.ExpandPrompt.Close", new KeyGesture(TerminalKey.Escape)));
-        editor.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Thread.ExpandPrompt.CloseWithCtrlEnter", new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), CommandPresentation.None));
-
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
-        {
-            HorizontalAlignment = Align.End,
-            VerticalAlignment = Align.Start,
-            Tone = ControlTone.Error,
-        };
-        closeButton.Click(CloseExpandedPromptDialog);
-
-        var dialog = new Dialog()
-            .Title("Edit Prompt")
-            .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc/Ctrl+Enter Close · draft preserved[/]"))
-            .IsModal(true)
-            .Padding(1)
-            .Content(editor.Scrollable());
-        ResponsiveDialogSize.Apply(dialog, ThreadPaneLayout.GetAbsoluteBounds(), minWidth: 60, minHeight: 18);
-        dialog.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Thread.ExpandPrompt.Close", new KeyGesture(TerminalKey.Escape)));
-        dialog.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Thread.ExpandPrompt.CloseWithCtrlEnter", new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), CommandPresentation.None));
-
-        _expandedPromptDialog = dialog;
-        dialog.Show();
-        dialog.App?.Focus(editor);
-
-        Command CreateExpandedPromptDialogCloseCommand(string id, KeyGesture gesture, CommandPresentation presentation = CommandPresentation.CommandBar)
-            => new()
-            {
-                Id = id,
-                LabelMarkup = "Close",
-                DescriptionMarkup = "Close the large prompt editor and keep the current draft.",
-                Gesture = gesture,
-                Importance = CommandImportance.Primary,
-                Presentation = presentation,
-                Execute = _ => CloseExpandedPromptDialog(),
-            };
-    }
-
-    private void CloseExpandedPromptDialog()
-    {
-        var dialog = _expandedPromptDialog;
-        _expandedPromptDialog = null;
-        var app = dialog?.App ?? ThreadPaneLayout.App;
-        dialog?.Close();
-        app?.Focus(ThreadInput);
-    }
-
     private static Visual CreateIconButton(string icon, string tooltipText, Action onClick, Action<Button>? configureButton = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(icon);
@@ -434,42 +325,12 @@ internal sealed class ThreadWorkspaceView
         return button.Tooltip(new TextBlock(tooltipText));
     }
 
-    private static Visual CreatePromptActionButton(
-        PromptComposerViewModel promptComposerViewModel,
-        Action sendPrompt,
-        Action abortThread)
-    {
-        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
-        ArgumentNullException.ThrowIfNull(sendPrompt);
-        ArgumentNullException.ThrowIfNull(abortThread);
-
-        return new ComputedVisual(() =>
-        {
-            var isAbort = promptComposerViewModel.CanAbort;
-            var icon = isAbort ? $"{NerdFont.MdSquare}" : $"{NerdFont.MdSend}";
-            var tooltipText = isAbort ? "Abort the selected thread run." : "Send the current prompt.";
-            var action = isAbort ? abortThread : sendPrompt;
-            var tone = isAbort ? ControlTone.Error : ControlTone.Success;
-            var isEnabled = isAbort ? promptComposerViewModel.CanAbort : promptComposerViewModel.CanSend;
-
-            return CreateIconButton(
-                icon,
-                tooltipText,
-                action,
-                button =>
-                {
-                    button.Tone = tone;
-                    button.IsEnabled = isEnabled;
-                });
-        });
-    }
-
     internal static ChatPromptEditor CreateStyledPromptEditor(
         Action<string> onAccepted,
         Action? onOpenHelp,
         Action? onOpenCommandPalette,
         string? placeholder)
-        => CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, projectFileSearchService: null, getPromptReferenceProjectRoot: null, placeholder);
+        => PromptComposerView.CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, placeholder);
 
     internal static ChatPromptEditor CreateStyledPromptEditor(
         Action<string> onAccepted,
@@ -478,80 +339,5 @@ internal sealed class ThreadWorkspaceView
         IProjectFileSearchService? projectFileSearchService,
         Func<string?>? getPromptReferenceProjectRoot,
         string? placeholder)
-    {
-        ArgumentNullException.ThrowIfNull(onAccepted);
-
-        var converter = new MarkdownMarkupConverter();
-        ITextSnapshot? cachedSnapshot = null;
-        Theme? cachedTheme = null;
-        string? cachedText = null;
-        string? cachedProjectRoot = null;
-        List<StyledRun>? cachedRuns = null;
-        var editor = new ChatPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette)
-            .PromptMarkup("[primary]>[/] ")
-            .ContinuationPromptMarkup("[muted]·[/] ")
-            .Placeholder(placeholder)
-            .EscapeBehavior(PromptEditorEscapeBehavior.CancelCompletionOnly)
-            .EnterMode(PromptEditorEnterMode.EnterInsertsNewLine)
-            .EnableWordHints(true)
-            .Highlighter(HighlightMarkdown)
-            .MinHeight(3)
-            .Style(PromptEditorStyle.Default with
-            {
-                Padding = new Thickness(0, 0, 1, 0),
-                PlaceholderForeground = UiPalette.PromptPlaceholderColor,
-            });
-        if (projectFileSearchService is not null && getPromptReferenceProjectRoot is not null)
-        {
-            editor.EnableProjectFileReferences(
-                projectFileSearchService,
-                ProjectFileAppearanceRegistry.Default,
-                getPromptReferenceProjectRoot);
-        }
-
-        return editor;
-
-        void HighlightMarkdown(in PromptEditorHighlightRequest request, List<StyledRun> runs)
-        {
-            if (cachedRuns is not null &&
-                ReferenceEquals(cachedSnapshot, request.Snapshot) &&
-                Equals(cachedTheme, request.Theme) &&
-                string.Equals(cachedProjectRoot, getPromptReferenceProjectRoot?.Invoke(), StringComparison.Ordinal))
-            {
-                runs.AddRange(cachedRuns);
-                return;
-            }
-
-            var text = SnapshotToString(request.Snapshot);
-            var projectRoot = getPromptReferenceProjectRoot?.Invoke();
-            if (cachedRuns is not null &&
-                string.Equals(cachedText, text, StringComparison.Ordinal) &&
-                Equals(cachedTheme, request.Theme) &&
-                string.Equals(cachedProjectRoot, projectRoot, StringComparison.Ordinal))
-            {
-                cachedSnapshot = request.Snapshot;
-                runs.AddRange(cachedRuns);
-                return;
-            }
-
-            converter.Theme = request.Theme;
-            converter.Highlight(text, runs);
-            ProjectFilePromptHighlighter.AddRuns(text, projectRoot, runs);
-            cachedSnapshot = request.Snapshot;
-            cachedTheme = request.Theme;
-            cachedText = text;
-            cachedProjectRoot = projectRoot;
-            cachedRuns = [.. runs];
-        }
-
-        static string SnapshotToString(ITextSnapshot snapshot)
-        {
-            if (snapshot.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            return string.Create(snapshot.Length, snapshot, static (span, s) => s.CopyTo(0, span));
-        }
-    }
+        => PromptComposerView.CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, placeholder);
 }

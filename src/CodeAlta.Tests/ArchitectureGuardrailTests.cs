@@ -1067,43 +1067,48 @@ public sealed class ArchitectureGuardrailTests
     {
         var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs"));
         var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+        var promptComposerSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "PromptComposerView.cs"));
 
         Assert.IsFalse(appSource.Contains("private ChatPromptEditor CreatePromptEditor(", StringComparison.Ordinal));
         Assert.IsFalse(appSource.Contains("new ChatPromptEditor(", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("private static ChatPromptEditor CreatePromptEditor(", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("new ChatPromptEditor(", StringComparison.Ordinal));
+        Assert.IsFalse(workspaceSource.Contains("new ChatPromptEditor(", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("private static ChatPromptEditor CreatePromptEditor(", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("new ChatPromptEditor(", StringComparison.Ordinal));
     }
 
     [TestMethod]
     public void ThreadWorkspaceView_ExpandedPromptDialog_UsesCloseCommandsWithoutDirectKeyHandler()
     {
         var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+        var promptComposerSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "PromptComposerView.cs"));
 
-        Assert.IsTrue(workspaceSource.Contains("editor.AddCommand(CreateExpandedPromptDialogCloseCommand(\"CodeAlta.Thread.ExpandPrompt.Close\", new KeyGesture(TerminalKey.Escape)))", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("dialog.AddCommand(CreateExpandedPromptDialogCloseCommand(\"CodeAlta.Thread.ExpandPrompt.CloseWithCtrlEnter\", new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), CommandPresentation.None))", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("editor.AddCommand(CreateExpandedPromptDialogCloseCommand(\"CodeAlta.Thread.ExpandPrompt.Close\", new KeyGesture(TerminalKey.Escape)))", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("dialog.AddCommand(CreateExpandedPromptDialogCloseCommand(\"CodeAlta.Thread.ExpandPrompt.CloseWithCtrlEnter\", new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), CommandPresentation.None))", StringComparison.Ordinal));
         Assert.IsFalse(workspaceSource.Contains("dialog.KeyDown(", StringComparison.Ordinal));
+        Assert.IsFalse(promptComposerSource.Contains("dialog.KeyDown(", StringComparison.Ordinal));
     }
 
     [TestMethod]
     public void ThreadWorkspaceView_ExpandedPromptDialog_TransfersFocusOnOpenAndClose()
     {
-        var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+        var promptComposerSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "PromptComposerView.cs"));
 
-        Assert.IsTrue(workspaceSource.Contains("dialog.App?.Focus(editor);", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("app?.Focus(ThreadInput);", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("dialog.App?.Focus(editor);", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("app?.Focus(Editor);", StringComparison.Ordinal));
     }
 
     [TestMethod]
     public void ThreadWorkspaceView_BottomBar_RightAlignsPromptActions_AndSendBecomesAbort()
     {
         var workspaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ThreadWorkspaceView.cs"));
+        var promptComposerSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "PromptComposerView.cs"));
         var normalizedSource = workspaceSource.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.IsTrue(workspaceSource.Contains("SendPromptButton = CreatePromptActionButton(promptComposerViewModel, sendPrompt, abortThread);", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("SendPromptButton = _promptComposerView.SendButton;", StringComparison.Ordinal));
         Assert.IsTrue(normalizedSource.Contains("usageIndicator,\n            threadInfoButton,\n            ExpandPromptButton,\n            SendPromptButton,", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("var icon = isAbort ? $\"{NerdFont.MdSquare}\" : $\"{NerdFont.MdSend}\";", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("var tone = isAbort ? ControlTone.Error : ControlTone.Success;", StringComparison.Ordinal));
-        Assert.IsTrue(workspaceSource.Contains("var tooltipText = isAbort ? \"Abort the selected thread run.\" : \"Send the current prompt.\";", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("var icon = isAbort ? $\"{NerdFont.MdSquare}\" : $\"{NerdFont.MdSend}\";", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("var tone = isAbort ? ControlTone.Error : ControlTone.Success;", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("var tooltipText = isAbort ? \"Abort the selected thread run.\" : \"Send the current prompt.\";", StringComparison.Ordinal));
     }
 
     [TestMethod]

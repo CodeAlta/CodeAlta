@@ -241,7 +241,7 @@ public sealed class ThreadWorkspaceViewTests
         {
             view.OpenExpandedPromptDialog();
 
-            var dialog = GetPrivateField<Dialog>(view, "_expandedPromptDialog");
+            var dialog = GetExpandedPromptDialog(view);
             var scrollViewer = Assert.IsInstanceOfType<ScrollViewer>(dialog.Content);
             var editor = Assert.IsInstanceOfType<ChatPromptEditor>(scrollViewer.Content);
             app.Focus(editor);
@@ -336,7 +336,7 @@ public sealed class ThreadWorkspaceViewTests
             });
             TickTerminalApp(app);
 
-            Assert.IsNull(GetPrivateMemberValue(view, "_expandedPromptDialog"));
+            Assert.IsNull(GetPrivateMemberValue(GetPromptComposerView(view), "_expandedPromptDialog"));
             Assert.AreEqual("draft prompt", promptText.Value);
         }
         finally
@@ -394,10 +394,16 @@ public sealed class ThreadWorkspaceViewTests
 
     private static ChatPromptEditor GetExpandedPromptEditor(ThreadWorkspaceView view)
     {
-        var dialog = GetPrivateField<Dialog>(view, "_expandedPromptDialog");
+        var dialog = GetExpandedPromptDialog(view);
         var scrollViewer = Assert.IsInstanceOfType<ScrollViewer>(dialog.Content);
         return Assert.IsInstanceOfType<ChatPromptEditor>(scrollViewer.Content);
     }
+
+    private static Dialog GetExpandedPromptDialog(ThreadWorkspaceView view)
+        => GetPrivateField<Dialog>(GetPromptComposerView(view), "_expandedPromptDialog");
+
+    private static object GetPromptComposerView(ThreadWorkspaceView view)
+        => GetPrivateField<object>(view, "_promptComposerView");
 
     private static ProjectFileSearchState CreateState(
         string projectRoot,
