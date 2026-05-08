@@ -23,18 +23,16 @@ namespace CodeAlta.Views;
 
 internal sealed class ThreadWorkspaceView
 {
-    private readonly Dictionary<string, TabPage> _tabPages = new(StringComparer.OrdinalIgnoreCase);
     private readonly PromptComposerViewModel _promptComposerViewModel;
     private readonly Binding<string?> _promptTextBinding;
     private readonly Action _openHelp;
     private readonly Action _openCommandPalette;
     private readonly IProjectFileSearchService _projectFileSearchService;
     private readonly Func<string?> _getPromptReferenceProjectRoot;
-    private readonly Dictionary<string, VSplitter> _threadTabContentSplitters = new(StringComparer.OrdinalIgnoreCase);
     private readonly ModelProviderSelectorView _modelProviderSelectorView;
     private readonly PromptImageAttachmentStripView _promptImageAttachmentStripView;
+    private readonly ThreadTabHostView _threadTabHostView;
     private Dialog? _expandedPromptDialog;
-    private string? _activeThreadTabContentId;
 
     internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
     internal static readonly KeySequence ModelProvidersShortcutSequence = ShellCommandCatalog.ModelProvidersShortcutSequence;
@@ -103,10 +101,6 @@ internal sealed class ThreadWorkspaceView
             HorizontalAlignment = Align.Stretch,
             MultiLine = false,
         };
-
-        ThreadTabControl = new TabControl();
-        ThreadTabControl.KeyDown((_, _) => ThreadTabControl.Dispatcher.Post(() => onSelectedTabChanged(ThreadTabControl.SelectedIndex)));
-        ThreadTabControl.PointerReleased((_, _) => ThreadTabControl.Dispatcher.Post(() => onSelectedTabChanged(ThreadTabControl.SelectedIndex)));
 
         Visual? threadInfoButton = null;
         ThreadInput = CreatePromptEditor(
@@ -193,18 +187,8 @@ internal sealed class ThreadWorkspaceView
             VerticalAlignment = Align.Stretch,
         };
 
-        var threadPaneLayout = new Grid
-            {
-                HorizontalAlignment = Align.Stretch,
-                VerticalAlignment = Align.Stretch,
-            }
-            .Rows(
-                new RowDefinition { Height = GridLength.Star(1) })
-            .Columns(
-                new ColumnDefinition { Width = GridLength.Star(1) });
-        threadPaneLayout.Cell(ThreadTabControl.Stretch(), 0, 0);
-
-        ThreadPaneLayout = threadPaneLayout;
+        _threadTabHostView = new ThreadTabHostView(ThreadBottomPanel, onSelectedTabChanged);
+        ThreadPaneLayout = _threadTabHostView.Root;
         Root = ThreadPaneLayout;
         foreach (var binding in commandBindings)
         {
@@ -269,101 +253,23 @@ internal sealed class ThreadWorkspaceView
     public CheckBox AlwaysEnqueueCheckBox
         => _modelProviderSelectorView.AlwaysEnqueueCheckBox;
 
-    public TabControl ThreadTabControl { get; }
+    public TabControl ThreadTabControl
+        => _threadTabHostView.ThreadTabControl;
 
     public bool TryGetTabPage(string tabId, [NotNullWhen(true)] out TabPage? page)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
-        return _tabPages.TryGetValue(tabId, out page);
-    }
+        => _threadTabHostView.TryGetTabPage(tabId, out page);
 
     public void RememberTabPage(string tabId, TabPage page)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
-        ArgumentNullException.ThrowIfNull(page);
-        _tabPages[tabId] = page;
-    }
+        => _threadTabHostView.RememberTabPage(tabId, page);
 
     public bool RemoveTabPage(string tabId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
-        var removed = _tabPages.Remove(tabId);
-        if (_threadTabContentSplitters.Remove(tabId, out var splitter) &&
-            string.Equals(_activeThreadTabContentId, tabId, StringComparison.OrdinalIgnoreCase))
-        {
-            if (ReferenceEquals(splitter.Second, ThreadBottomPanel))
-            {
-                splitter.Second = null;
-            }
-
-            _activeThreadTabContentId = null;
-        }
-
-        return removed;
-    }
+        => _threadTabHostView.RemoveTabPage(tabId);
 
     public Visual CreateThreadTabContent(string tabId, Visual primaryContent)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
-        ArgumentNullException.ThrowIfNull(primaryContent);
-
-        if (_threadTabContentSplitters.TryGetValue(tabId, out var existing))
-        {
-            return existing;
-        }
-
-        if (primaryContent.Parent is VSplitter existingParent && ReferenceEquals(existingParent.First, primaryContent))
-        {
-            _threadTabContentSplitters[tabId] = existingParent;
-            return existingParent;
-        }
-
-        var splitter = new VSplitter
-        {
-            First = primaryContent,
-            Ratio = 0.75,
-            MinFirst = 6,
-            MinSecond = 7,
-        };
-        _threadTabContentSplitters[tabId] = splitter;
-        return splitter;
-    }
+        => _threadTabHostView.CreateThreadTabContent(tabId, primaryContent);
 
     public void ActivateThreadTabContent(string? tabId)
-    {
-        if (string.Equals(_activeThreadTabContentId, tabId, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_activeThreadTabContentId) &&
-            _threadTabContentSplitters.TryGetValue(_activeThreadTabContentId, out var previous) &&
-            ReferenceEquals(previous.Second, ThreadBottomPanel))
-        {
-            previous.Second = null;
-        }
-
-        _activeThreadTabContentId = null;
-        if (string.IsNullOrWhiteSpace(tabId))
-        {
-            return;
-        }
-
-        if (!_threadTabContentSplitters.TryGetValue(tabId, out var current))
-        {
-            if (!_tabPages.TryGetValue(tabId, out var page) || page.Content is not VSplitter splitter)
-            {
-                return;
-            }
-
-            current = splitter;
-            _threadTabContentSplitters[tabId] = current;
-        }
-
-        current.Second = ThreadBottomPanel;
-        _activeThreadTabContentId = tabId;
-    }
-
+        => _threadTabHostView.ActivateThreadTabContent(tabId);
     public void OpenExpandedPromptDialog()
         => OpenExpandedPromptDialog(_promptComposerViewModel, _promptTextBinding);
 
