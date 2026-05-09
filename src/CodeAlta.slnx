@@ -44,6 +44,7 @@
   <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
   <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
   <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
+  <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
   <Project Path="CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
   <Project Path="CodeAlta.Plugins.Abstractions/CodeAlta.Plugins.Abstractions.csproj" />
   <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />

@@ -588,6 +588,31 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Returns whether the thread has an active coordinator session in this runtime process.
+    /// </summary>
+    /// <param name="threadId">The durable thread identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true"/> when this runtime owns a non-terminated coordinator session.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="threadId"/> is empty.</exception>
+    public async Task<bool> HasActiveCoordinatorSessionAsync(string threadId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
+        if (!_threadActors.TryGet(threadId, out var actor))
+        {
+            return false;
+        }
+
+        return await actor.QueryAsync(
+                async actorCancellationToken =>
+                {
+                    await Task.CompletedTask.ConfigureAwait(false);
+                    return _entries.TryGetValue(threadId, out var entry) && !entry.IsTerminated;
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Aborts active work in the thread coordinator session.
     /// </summary>
     public async Task AbortAsync(string threadId, CancellationToken cancellationToken = default)

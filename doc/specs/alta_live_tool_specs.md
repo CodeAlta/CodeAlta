@@ -884,12 +884,12 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 
 ### Phase 1: Shared command registry and catalog-only commands
 
-- [ ] Create `CodeAlta.LiveTool`.
-- [ ] Build an `AltaCommandRegistry` around `XenoAtom.CommandLine`.
+- [x] Create `CodeAlta.LiveTool`.
+- [x] Build an `AltaCommandRegistry` around `XenoAtom.CommandLine`.
 - [ ] Move/extend existing top-level CLI parsing so `alta --help` can show new command groups.
-- [ ] Implement `version` and ensure `--help` works at the root, command-group, and leaf-command levels.
-- [ ] Choose and test the command-graph concurrency strategy: fresh per-invocation trees or serialized dispatch over one tree.
-- [ ] Implement catalog-only `project list/show/resolve/upsert` using `ProjectCatalog`.
+- [ ] Implement `version` and ensure `--help` works at the root, command-group, and leaf-command levels. (Library implementation exists; automated help tests still pending.)
+- [ ] Choose and test the command-graph concurrency strategy: fresh per-invocation trees or serialized dispatch over one tree. (Implementation currently builds fresh command trees per invocation; tests still pending.)
+- [x] Implement catalog-only `project list/show/resolve/upsert` using `ProjectCatalog`.
 - [ ] Add tests for parsing, help availability, JSONL output, invalid usage diagnostics, `CommandOptionException`/validator failures, and exit codes.
 
 ### Phase 2: Coordinator instruction bootstrap
