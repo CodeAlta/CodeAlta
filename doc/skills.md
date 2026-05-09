@@ -55,6 +55,18 @@ The browser also lists related authoring files under the selected skill's `scrip
 
 Use **New skill** to scaffold a new Agent Skills-compatible skill. When a project is selected, CodeAlta creates it under the project CodeAlta-specific root (`<project>/.alta/skills/<name>/`); otherwise it falls back to the user CodeAlta root (`~/.alta/skills/<name>/`). The scaffold includes `SKILL.md` plus empty `scripts/`, `references/`, and `assets/` folders, then opens `SKILL.md` in the editor.
 
+## Live tool commands
+
+When a CodeAlta-managed session has the `alta` live tool, agents and plugins should use the singular `skill` command group for discovery and activation:
+
+```text
+alta skill list [--project <id|slug|path>]
+alta skill show <skill-name> [--project <id|slug|path>]
+alta skill activate <skill-name> --session <thread-id>
+```
+
+`alta skills activate` and `alta skills_activate` are compatibility aliases for older instructions; prefer `alta skill activate` in new guidance. Activation uses the same host-owned runtime path as the UI and records the activation in the local session journal. If the target provider owns a native skill system that CodeAlta cannot inject into, the command returns an unsupported-capability JSONL diagnostic instead of silently succeeding.
+
 ## Validation and collisions
 
 Discovery validates frontmatter, naming, required descriptions, resource paths, and duplicate names. Higher-precedence skills win; lower-precedence duplicates are kept inspectable as shadowed skills but are not advertised to the model.

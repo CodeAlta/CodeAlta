@@ -88,6 +88,72 @@ Current terminal shell capabilities:
   - list discovered projects
   - resolve global/project scopes.
 
+## Alta Live Tool
+
+CodeAlta-managed/local-runtime sessions receive one in-process live tool named `alta`. It uses the same `XenoAtom.CommandLine` command registry as host/test command dispatch, so agents can discover commands progressively with help instead of relying on a large prompt schema:
+
+```text
+alta --help
+alta session --help
+alta session tail --help
+alta tool capability list
+```
+
+Help commands return normal help text. Non-help commands return finite newline-delimited JSON records headed by an `alta.result` record; they do not keep a stream open for future activity. Use small limits when inspecting history so the result stays model-friendly:
+
+```text
+alta project list
+alta project show CodeAlta
+alta session list --project CodeAlta --state all --limit 20
+alta session show <thread-id>
+alta session status <thread-id>
+alta session children <thread-id> --recursive
+alta session model <thread-id>
+alta session tail <thread-id> --last 10
+alta session events <thread-id> --limit 20
+```
+
+Session control commands submit work and return submission/queue metadata instead of waiting for the target agent to finish. `send --queue-if-busy` and explicit `queue` persist durable queue items with caller attribution; the runtime drains at most one queued prompt for a thread when the active run becomes idle.
+
+```text
+alta session create --project CodeAlta --title "Investigate parser" --same-model-as <thread-id> --reasoning low
+alta session send <thread-id> --message "Summarize the latest failing test."
+alta session send <thread-id> --stdin --queue-if-busy
+alta session queue <thread-id> --message "Run this after the current turn."
+alta session steer <thread-id> --message "Focus on the smallest fix."
+alta session abort <thread-id> --reason "Superseded by user request"
+alta session compact <thread-id>
+alta session join <thread-id>
+```
+
+Agents should use the peer-agent wrappers when talking to another session so CodeAlta records provenance and the target sees a non-authoritative delegated-agent header rather than a user/developer/system instruction:
+
+```text
+alta session message <thread-id> --kind handoff --message "Here is the context I collected."
+alta session request <thread-id> --reply-requested --stdin
+```
+
+Model and provider discovery use the same model-ref rules as session creation:
+
+```text
+alta provider list
+alta provider model list --provider codex
+alta model list
+alta model resolve --model-ref codex:gpt-5-codex@high
+```
+
+Skills are available through the singular `skill` group; compatibility aliases exist for older `skills activate`/`skills_activate` guidance. Activation succeeds only when CodeAlta can inject local-runtime skill context; provider-managed native skill systems report an unsupported-capability diagnostic instead of pretending to activate.
+
+```text
+alta skill list --project CodeAlta
+alta skill show codealta-plugin-runtime
+alta skill activate codealta-plugin-runtime --session <thread-id>
+```
+
+Visibility and provenance are enforced by the host. The global coordinator can inspect local projects and sessions, while project-scoped sessions can inspect/control their own project and same-project descendants; denied cross-project reads/mutations return a policy-denied JSONL error. Sessions created or controlled by agents/plugins carry `createdBy`/`submittedBy` metadata so sidebars and timelines can reconstruct parent/child relationships and prompt ownership after restart.
+
+Plugins can add fresh `alta` command roots that appear in `alta --help`, and trusted plugins can invoke built-in `alta` commands through `Services.Alta.InvokeAsync(...)`. Plugin-originated mutating commands include the runtime-owned plugin key in provenance.
+
 ## Provider Configuration
 
 CodeAlta exposes providers as the single user-facing execution concept. Each provider entry owns:
