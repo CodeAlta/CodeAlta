@@ -25,6 +25,10 @@ internal static class ShellCommandCatalog
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlK, TerminalModifiers.Ctrl));
 
+    public static readonly KeySequence PluginsShortcutSequence = new(
+        new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+        new KeyGesture(TerminalChar.CtrlI, TerminalModifiers.Ctrl));
+
     public static readonly KeySequence SessionUsageShortcutSequence = new(
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlU, TerminalModifiers.Ctrl));
@@ -115,6 +119,7 @@ internal static class ShellCommandCatalog
             ShellCommandHelpCategory.General,
             ShellCommandScope.AnyShell,
             ShellCommandAvailability.Always,
+            Sequence: PluginsShortcutSequence,
             CommandName: "plugins",
             Aliases: ["plugin"],
             ShowInCommandBar: true),
