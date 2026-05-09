@@ -373,6 +373,8 @@ Implementation source:
 
 `session create` uses the model selection resolution rules in section 5.5. Its JSONL result record must include the resolved model selection and compact `modelRef`.
 
+The current implementation persists per-thread model/reasoning preferences in `WorkThreadViewState.ThreadPreferences` when `session create` resolves a model selection so later `session model`, caller-session inheritance, and `--same-model-as` reuse the same `modelRef` after restart.
+
 When `session create` is invoked by an agent session and the target session belongs to the same project as the caller, CodeAlta should default `parentThreadId` to the caller's source thread id. If the target session is created in another project, CodeAlta should still record `createdBy` provenance but should not create a sidebar parent/child link by default. `--parent <thread-id>` can request an explicit same-project parent; `--no-parent` suppresses the hierarchy link while keeping provenance.
 
 `send` starts or continues a normal turn. `steer` must only target an active run and should fail with exit code 7 when the backend/runtime does not support steering. `queue` is explicit queueing for busy sessions. `send --queue-if-busy` is a convenience that maps to submit-or-queue behavior.
@@ -387,6 +389,8 @@ alta session request <thread-id> (--message <text> | --stdin) [--reply-requested
 ```
 
 These commands are wrappers over `session send` or `session queue` that add CodeAlta attribution metadata. They are useful when one agent needs to communicate with another without pretending to be the user. `--reply-requested` is metadata for the target session; the command still returns after delivery/queueing and does not wait for a reply.
+
+The current implementation records prompt-like operation provenance in `WorkThreadLocalState.PromptProvenance` for normal sends, steering, and inter-agent message/request wrappers. Queue provenance remains tied to durable/headless queue implementation work.
 
 All inter-agent messages must be rendered to the target session with a visible attribution header similar to:
 
@@ -959,12 +963,15 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 ### Phase 6: Session creation and control
 
 - [x] Implement provider/model/reasoning discovery and model-ref resolution (`provider model list`, `model list`, `model show`, `model resolve`).
-- [ ] Implement `session create`, `send`, `steer`, `queue`, `abort`, `compact`, and non-blocking `join` through `IWorkThreadOrchestrator` where possible.
+- [x] Implement `session create`, `send`, `steer`, `abort`, `compact`, and non-blocking `join` through runtime/orchestration services where possible.
+- [ ] Implement durable/headless `session queue` through `IWorkThreadOrchestrator` or an equivalent real queue service.
 - [x] Add durable caller/plugin attribution and same-project parent-thread assignment for `session create`.
 - [x] Add JSONL caller/plugin attribution for prompt submission, steering, abort, compact, and inter-agent message command results.
-- [ ] Persist prompt/queue/steering provenance durably enough for restart-time timeline reconstruction.
+- [x] Persist prompt/steering/inter-agent message provenance durably enough for restart-time timeline reconstruction.
+- [ ] Persist queued prompt provenance and drain state durably enough for restart-time timeline reconstruction.
 - [x] Handle unsupported backend capabilities with exit code 7 and clear messages.
-- [ ] Add regression tests for model-ref parsing, caller-session model inheritance, `--same-model-as` with reasoning override, child-session provenance, agent/plugin-created prompt provenance, plugin-created session provenance, busy-session queueing, and steering unsupported cases.
+- [x] Add regression tests for model-ref parsing, caller-session model inheritance, `--same-model-as` with reasoning override, child-session provenance, agent-created prompt provenance, inter-agent prompt provenance, visibility denial, and steering unsupported cases.
+- [ ] Add regression tests for plugin-created prompt provenance, plugin-created session provenance, and busy-session queueing.
 
 ### Phase 7: Agent tool exposure
 
@@ -992,9 +999,9 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 
 ### Phase 10: Inter-agent communication and policies
 
-- [ ] Implement `session message` and `session request` wrappers.
-- [ ] Persist/render peer-agent attribution metadata and prompt provenance.
-- [ ] Add enforced coordinator/project visibility policy checks.
+- [x] Implement `session message` and `session request` wrappers.
+- [x] Persist/render peer-agent attribution metadata and prompt provenance.
+- [x] Add enforced coordinator/project visibility policy checks.
 - [ ] Add sidebar/timeline projection updates for agent-created same-project child sessions and agent-created prompts.
 - [ ] Add tests ensuring peer-agent messages cannot be rendered as user/developer/system instructions.
 

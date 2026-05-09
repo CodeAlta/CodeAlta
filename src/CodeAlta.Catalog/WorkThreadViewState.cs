@@ -271,6 +271,12 @@ public sealed class WorkThreadLocalState
     public AltaActorProvenance? CreatedBy { get; set; }
 
     /// <summary>
+    /// Gets or sets durable prompt/queue/steering provenance for restart-time timeline reconstruction.
+    /// </summary>
+    [JsonPropertyName("prompt_provenance")]
+    public List<WorkThreadPromptProvenance> PromptProvenance { get; set; } = [];
+
+    /// <summary>
     /// Validates the thread local state.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the message count is negative.</exception>
@@ -284,6 +290,82 @@ public sealed class WorkThreadLocalState
         if (CreatedBy is not null && string.IsNullOrWhiteSpace(CreatedBy.Kind))
         {
             throw new ArgumentException("CreatedBy kind is required when thread provenance is present.", nameof(CreatedBy));
+        }
+
+        PromptProvenance ??= [];
+        foreach (var provenance in PromptProvenance)
+        {
+            provenance.Validate();
+        }
+    }
+}
+
+/// <summary>
+/// Describes durable attribution for a prompt-like operation targeting a thread.
+/// </summary>
+public sealed class WorkThreadPromptProvenance
+{
+    /// <summary>
+    /// Gets or sets a stable prompt provenance identifier.
+    /// </summary>
+    [JsonPropertyName("prompt_id")]
+    public string PromptId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the prompt dispatch kind, such as <c>send</c>, <c>steer</c>, <c>message</c>, or <c>request</c>.
+    /// </summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the backend run identifier, when one was produced immediately.
+    /// </summary>
+    [JsonPropertyName("run_id")]
+    public string? RunId { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the prompt was queued instead of submitted immediately.
+    /// </summary>
+    [JsonPropertyName("queued")]
+    public bool Queued { get; set; }
+
+    /// <summary>
+    /// Gets or sets the short visible prompt preview stored for diagnostics and timeline reconstruction.
+    /// </summary>
+    [JsonPropertyName("prompt_preview")]
+    public string? PromptPreview { get; set; }
+
+    /// <summary>
+    /// Gets or sets durable attribution for the actor that submitted the prompt-like operation.
+    /// </summary>
+    [JsonPropertyName("submitted_by")]
+    public AltaActorProvenance? SubmittedBy { get; set; }
+
+    /// <summary>
+    /// Gets or sets the creation timestamp.
+    /// </summary>
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Validates the prompt provenance record.
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown when required fields are invalid.</exception>
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(PromptId))
+        {
+            throw new ArgumentException("Prompt provenance id is required.", nameof(PromptId));
+        }
+
+        if (string.IsNullOrWhiteSpace(Kind))
+        {
+            throw new ArgumentException("Prompt provenance kind is required.", nameof(Kind));
+        }
+
+        if (SubmittedBy is not null && string.IsNullOrWhiteSpace(SubmittedBy.Kind))
+        {
+            throw new ArgumentException("SubmittedBy kind is required when prompt provenance attribution is present.", nameof(SubmittedBy));
         }
     }
 }

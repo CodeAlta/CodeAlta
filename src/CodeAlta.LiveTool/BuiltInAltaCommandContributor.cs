@@ -1046,6 +1046,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         thread.ParentThreadId = ResolveParentThreadId(context, thread, project, options);
         thread.CreatedBy = CreateProvenance(context);
         await runtime.PersistThreadLocalStateAsync(thread, context.CancellationToken).ConfigureAwait(false);
+        await PersistThreadPreferenceAsync(context, thread.ThreadId, modelSelection.Selection!).ConfigureAwait(false);
 
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
@@ -1123,6 +1124,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                     executionOptions,
                     new AgentSteerOptions { Input = AgentInput.Text(inputText) },
                     context.CancellationToken).ConfigureAwait(false);
+                await PersistPromptProvenanceAsync(context, info.Thread, runId.Value, queued: false, kind, inputText).ConfigureAwait(false);
                 WritePromptResult(context, "alta.session.steered", info.Thread, runId.Value, queued: false, kind, inputText);
                 return AltaExitCodes.Success;
             }
@@ -1138,10 +1140,11 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 new AgentSendOptions { Input = AgentInput.Text(inputText) },
                 context.CancellationToken).ConfigureAwait(false);
             await runtime.PersistThreadLocalStateAsync(info.Thread, context.CancellationToken).ConfigureAwait(false);
+            await PersistPromptProvenanceAsync(context, info.Thread, submittedRunId.Value, queued: false, kind, inputText).ConfigureAwait(false);
             WritePromptResult(context, kind is PromptDispatchKind.Message or PromptDispatchKind.Request ? "alta.session.message.sent" : "alta.session.submitted", info.Thread, submittedRunId.Value, queued: false, kind, inputText);
             return AltaExitCodes.Success;
         }
-        catch (InvalidOperationException ex) when (kind == PromptDispatchKind.Steer)
+        catch (Exception ex) when (kind == PromptDispatchKind.Steer && ex is InvalidOperationException or NotSupportedException)
         {
             return Unsupported(context, "session.steerUnsupported", ex.Message);
         }
@@ -1838,6 +1841,75 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             PromptDispatchKind.Request => "alta session request",
             _ => "alta session send",
         };
+
+    private static async Task PersistThreadPreferenceAsync(AltaCommandContext context, string threadId, AltaModelSelection selection)
+    {
+        if (context.Services.Get<WorkThreadCatalog>() is not { } threadCatalog)
+        {
+            return;
+        }
+
+        var viewState = await threadCatalog.LoadViewStateAsync(context.CancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(selection.ModelId) && selection.ReasoningEffort is null)
+        {
+            viewState.ThreadPreferences.Remove(threadId);
+        }
+        else
+        {
+            viewState.ThreadPreferences[threadId] = new WorkThreadPreference
+            {
+                ModelId = selection.ModelId,
+                ReasoningEffort = selection.ReasoningEffort,
+            };
+        }
+
+        viewState.UpdatedAt = DateTimeOffset.UtcNow;
+        await threadCatalog.SaveViewStateAsync(viewState, context.CancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task PersistPromptProvenanceAsync(
+        AltaCommandContext context,
+        WorkThreadDescriptor thread,
+        string? runId,
+        bool queued,
+        PromptDispatchKind kind,
+        string prompt)
+    {
+        if (context.Services.Get<WorkThreadCatalog>() is not { } threadCatalog)
+        {
+            return;
+        }
+
+        var viewState = await threadCatalog.LoadViewStateAsync(context.CancellationToken).ConfigureAwait(false);
+        var localState = viewState.ThreadStates.TryGetValue(thread.ThreadId, out var existingState)
+            ? existingState
+            : new WorkThreadLocalState();
+        localState.Archived = thread.Status == WorkThreadStatus.Archived;
+        localState.MessageCount = thread.MessageCount;
+        localState.ParentThreadId = thread.ParentThreadId;
+        localState.CreatedBy = thread.CreatedBy;
+        localState.PromptProvenance ??= [];
+        localState.PromptProvenance.Add(new WorkThreadPromptProvenance
+        {
+            PromptId = "prompt-" + Guid.NewGuid().ToString("N"),
+            Kind = kind.ToString().ToLowerInvariant(),
+            RunId = runId,
+            Queued = queued,
+            PromptPreview = prompt.Length <= 160 ? prompt : prompt[..160],
+            SubmittedBy = CreateProvenance(context),
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+
+        const int MaxPromptProvenanceRecords = 200;
+        if (localState.PromptProvenance.Count > MaxPromptProvenanceRecords)
+        {
+            localState.PromptProvenance.RemoveRange(0, localState.PromptProvenance.Count - MaxPromptProvenanceRecords);
+        }
+
+        viewState.ThreadStates[thread.ThreadId] = localState;
+        viewState.UpdatedAt = DateTimeOffset.UtcNow;
+        await threadCatalog.SaveViewStateAsync(viewState, context.CancellationToken).ConfigureAwait(false);
+    }
 
     private static string BuildPeerAgentMessage(AltaCommandContext context, WorkThreadDescriptor target, PromptOptions options, string body)
     {

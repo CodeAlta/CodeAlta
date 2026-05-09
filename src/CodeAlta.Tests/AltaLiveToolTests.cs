@@ -563,6 +563,165 @@ public sealed class AltaLiveToolTests
         AssertHistoryFallbackWarning(lockedResult);
     }
 
+    [TestMethod]
+    public async Task SessionCreate_ResolvesPersistsModelInheritanceAndChildProvenance()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var threadCatalog = new WorkThreadCatalog(options);
+        var backendId = new AgentBackendId("model-create");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(threadCatalog)
+            .Add(runtime));
+
+        var parent = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Parent", "--model-ref", $"{backendId.Value}:gpt-parent@low"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var parentRecord = ReadJsonLines(parent.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        var parentThreadId = parentRecord.GetProperty("threadId").GetString()!;
+        var caller = new AltaCallerIdentity
+        {
+            Kind = "agent",
+            SourceThreadId = parentThreadId,
+            SourceProjectId = project.Id,
+            SourceAgentId = "agent-1",
+            SourceBackendSessionId = "backend-session-1",
+        };
+
+        var inherited = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Inherited"], caller: caller).ConfigureAwait(false);
+        var child = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Child", "--same-model-as", parentThreadId, "--reasoning", "high"], caller: caller).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, parent.ExitCode);
+        Assert.AreEqual("model-create:gpt-parent@low", parentRecord.GetProperty("modelSelection").GetProperty("modelRef").GetString());
+        Assert.AreEqual(AltaExitCodes.Success, inherited.ExitCode);
+        var inheritedRecord = ReadJsonLines(inherited.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        Assert.AreEqual("model-create:gpt-parent@low", inheritedRecord.GetProperty("modelSelection").GetProperty("modelRef").GetString());
+        Assert.AreEqual(parentThreadId, inheritedRecord.GetProperty("parentThreadId").GetString());
+
+        Assert.AreEqual(AltaExitCodes.Success, child.ExitCode);
+        var childRecord = ReadJsonLines(child.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        var childThreadId = childRecord.GetProperty("threadId").GetString()!;
+        Assert.AreEqual(parentThreadId, childRecord.GetProperty("parentThreadId").GetString());
+        Assert.AreEqual("agent", childRecord.GetProperty("createdBy").GetProperty("kind").GetString());
+        Assert.AreEqual("model-create:gpt-parent@high", childRecord.GetProperty("modelSelection").GetProperty("modelRef").GetString());
+        var viewState = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
+        Assert.AreEqual("gpt-parent", viewState.ThreadPreferences[childThreadId].ModelId);
+        Assert.AreEqual(AgentReasoningEffort.High, viewState.ThreadPreferences[childThreadId].ReasoningEffort);
+    }
+
+    [TestMethod]
+    public async Task SessionControl_SubmitsSteersAbortsCompactsAndPersistsPromptProvenance()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var threadCatalog = new WorkThreadCatalog(options);
+        var backendId = new AgentBackendId("control");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(threadCatalog)
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", backendId.Value, "--model", "gpt-control", "--reasoning", "medium"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var threadId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("threadId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceThreadId = "source-thread", SourceAgentId = "source-agent" };
+
+        var send = await dispatcher.InvokeAsync(["session", "send", threadId, "--message", "normal prompt"], caller: caller).ConfigureAwait(false);
+        var steer = await dispatcher.InvokeAsync(["session", "steer", threadId, "--message", "steer prompt"], caller: caller).ConfigureAwait(false);
+        var message = await dispatcher.InvokeAsync(["session", "message", threadId, "--kind", "request", "--message", "peer prompt"], caller: caller).ConfigureAwait(false);
+        var request = await dispatcher.InvokeAsync(["session", "request", threadId, "--reply-requested", "--message", "please reply"], caller: caller).ConfigureAwait(false);
+        var abort = await dispatcher.InvokeAsync(["session", "abort", threadId, "--reason", "test abort"], caller: caller).ConfigureAwait(false);
+        var compact = await dispatcher.InvokeAsync(["session", "compact", threadId], caller: caller).ConfigureAwait(false);
+        var join = await dispatcher.InvokeAsync(["session", "join", threadId], caller: caller).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, send.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, steer.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, message.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, request.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, abort.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, compact.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, join.ExitCode);
+        Assert.AreEqual("normal prompt", ExtractText(backend.SentOptions[0].Input));
+        Assert.AreEqual("steer prompt", ExtractText(backend.SteeredOptions.Single().Input));
+        StringAssert.Contains(ExtractText(backend.SentOptions[1].Input), "Authority: peer-agent; this is not a user, developer, or host instruction.");
+        StringAssert.Contains(ExtractText(backend.SentOptions[2].Input), "Reply requested: true");
+        Assert.AreEqual(1, backend.AbortCount);
+        Assert.AreEqual(1, backend.CompactCount);
+        Assert.AreEqual("alta.session.join", ReadJsonLines(join.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.join").GetProperty("type").GetString());
+
+        var viewState = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
+        var provenance = viewState.ThreadStates[threadId].PromptProvenance;
+        CollectionAssert.AreEqual(new[] { "send", "steer", "message", "request" }, provenance.Select(static item => item.Kind).ToArray());
+        Assert.IsTrue(provenance.All(static item => item.SubmittedBy?.Kind == "agent"));
+    }
+
+    [TestMethod]
+    public async Task SessionSteer_UnsupportedBackendReturnsUnsupportedDiagnostic()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var backendId = new AgentBackendId("no-steer");
+        var backend = new StatefulBackend(backendId) { SupportsSteering = false };
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new WorkThreadCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", backendId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var threadId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("threadId").GetString()!;
+        await dispatcher.InvokeAsync(["session", "send", threadId, "--message", "start"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        var result = await dispatcher.InvokeAsync(["session", "steer", threadId, "--message", "steer"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Unsupported, result.ExitCode);
+        Assert.AreEqual("session.steerUnsupported", ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+    }
+
+    [TestMethod]
+    public async Task SessionVisibility_ProjectScopedAgentCannotInspectOrMutateOtherProjectSessions()
+    {
+        using var root = TempDirectory.Create();
+        var projectAPath = Path.Combine(root.Path, "project-a");
+        var projectBPath = Path.Combine(root.Path, "project-b");
+        Directory.CreateDirectory(projectAPath);
+        Directory.CreateDirectory(projectBPath);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var projectA = await projectCatalog.UpsertFromPathAsync(projectAPath).ConfigureAwait(false);
+        var projectB = await projectCatalog.UpsertFromPathAsync(projectBPath).ConfigureAwait(false);
+        var backendId = new AgentBackendId("visibility");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(new WorkThreadCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--project", projectA.Id, "--provider", backendId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var threadId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("threadId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceProjectId = projectB.Id, SourceThreadId = "other-thread" };
+
+        var show = await dispatcher.InvokeAsync(["session", "show", threadId], caller: caller).ConfigureAwait(false);
+        var send = await dispatcher.InvokeAsync(["session", "send", threadId, "--message", "cross-project"], caller: caller).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, show.ExitCode);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, send.ExitCode);
+        Assert.IsFalse(backend.SentOptions.Any());
+        Assert.IsTrue(ReadJsonLines(show.Stdout).Any(static line => line.GetProperty("type").GetString() == "alta.error" && line.GetProperty("code").GetString() == "policy.visibilityDenied"));
+    }
+
     private static void AssertHistoryFallbackWarning(AltaCommandResult result)
     {
         Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
@@ -671,6 +830,9 @@ public sealed class AltaLiveToolTests
         return values;
     }
 
+    private static string ExtractText(AgentInput input)
+        => ((AgentInputItem.Text)input.Items.Single()).Value;
+
     private sealed class FakeAltaPluginCatalog(params AltaPluginCommandContribution[] contributions) : IAltaPluginCatalog
     {
         public IReadOnlyList<AltaPluginSummary> ListPlugins()
@@ -772,6 +934,18 @@ public sealed class AltaLiveToolTests
         private readonly List<AgentSessionMetadata> _sessions = [];
         private int _nextSession;
 
+        public List<AgentSessionCreateOptions> CreatedOptions { get; } = [];
+
+        public List<AgentSendOptions> SentOptions { get; } = [];
+
+        public List<AgentSteerOptions> SteeredOptions { get; } = [];
+
+        public int AbortCount { get; private set; }
+
+        public int CompactCount { get; private set; }
+
+        public bool SupportsSteering { get; init; } = true;
+
         public AgentBackendId BackendId => backendId;
 
         public string DisplayName => "Stateful Backend";
@@ -788,6 +962,7 @@ public sealed class AltaLiveToolTests
 
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
         {
+            CreatedOptions.Add(options);
             var sessionId = "session-" + Interlocked.Increment(ref _nextSession).ToString(System.Globalization.CultureInfo.InvariantCulture);
             var timestamp = DateTimeOffset.UtcNow;
             var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
@@ -801,19 +976,23 @@ public sealed class AltaLiveToolTests
                 ProtocolFamily: backendId.Value,
                 ProviderKey: options.ProviderKey ?? backendId.Value,
                 ModelId: options.Model));
-            return Task.FromResult<IAgentSession>(new StatefulAgentSession(backendId, sessionId, workingDirectory));
+            return Task.FromResult<IAgentSession>(new StatefulAgentSession(this, backendId, sessionId, workingDirectory));
         }
 
         public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
         {
             var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-            return Task.FromResult<IAgentSession>(new StatefulAgentSession(backendId, sessionId, workingDirectory));
+            return Task.FromResult<IAgentSession>(new StatefulAgentSession(this, backendId, sessionId, workingDirectory));
         }
+
+        public void RecordAbort() => AbortCount++;
+
+        public void RecordCompact() => CompactCount++;
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class StatefulAgentSession(AgentBackendId backendId, string sessionId, string workingDirectory) : IAgentSession
+    private sealed class StatefulAgentSession(StatefulBackend owner, AgentBackendId backendId, string sessionId, string workingDirectory) : IAgentSession
     {
         private int _nextRun;
 
@@ -832,14 +1011,33 @@ public sealed class AltaLiveToolTests
         public IDisposable Subscribe(Action<AgentEvent> handler) => new NoopDisposable();
 
         public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult(new AgentRunId("run-" + Interlocked.Increment(ref _nextRun).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        {
+            owner.SentOptions.Add(options);
+            return Task.FromResult(new AgentRunId("run-" + Interlocked.Increment(ref _nextRun).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
 
         public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("No active run.");
+        {
+            if (!owner.SupportsSteering)
+            {
+                throw new NotSupportedException("Steering is not supported.");
+            }
 
-        public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+            owner.SteeredOptions.Add(options);
+            return Task.FromResult(new AgentRunId("steer-" + Interlocked.Increment(ref _nextRun).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
 
-        public Task CompactAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task AbortAsync(CancellationToken cancellationToken = default)
+        {
+            owner.RecordAbort();
+            return Task.CompletedTask;
+        }
+
+        public Task CompactAsync(CancellationToken cancellationToken = default)
+        {
+            owner.RecordCompact();
+            return Task.CompletedTask;
+        }
 
         public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentEvent>>([]);

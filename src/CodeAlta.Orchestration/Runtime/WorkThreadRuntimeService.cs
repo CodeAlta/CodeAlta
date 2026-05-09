@@ -1167,13 +1167,14 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     private async Task UpdateThreadLocalStateAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken)
     {
         var viewState = await _threadCatalog.LoadViewStateAsync(cancellationToken).ConfigureAwait(false);
-        viewState.ThreadStates[thread.ThreadId] = new WorkThreadLocalState
-        {
-            Archived = thread.Status == WorkThreadStatus.Archived,
-            MessageCount = thread.MessageCount,
-            ParentThreadId = thread.ParentThreadId,
-            CreatedBy = thread.CreatedBy,
-        };
+        var localState = viewState.ThreadStates.TryGetValue(thread.ThreadId, out var existingState)
+            ? existingState
+            : new WorkThreadLocalState();
+        localState.Archived = thread.Status == WorkThreadStatus.Archived;
+        localState.MessageCount = thread.MessageCount;
+        localState.ParentThreadId = thread.ParentThreadId;
+        localState.CreatedBy = thread.CreatedBy;
+        viewState.ThreadStates[thread.ThreadId] = localState;
 
         viewState.UpdatedAt = DateTimeOffset.UtcNow;
         await _threadCatalog.SaveViewStateAsync(viewState, cancellationToken).ConfigureAwait(false);

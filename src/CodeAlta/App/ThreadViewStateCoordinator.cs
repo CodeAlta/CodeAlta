@@ -76,13 +76,14 @@ internal sealed class ThreadViewStateCoordinator
         ArgumentNullException.ThrowIfNull(viewState);
         ArgumentNullException.ThrowIfNull(thread);
 
-        viewState.ThreadStates[thread.ThreadId] = new WorkThreadLocalState
-        {
-            Archived = thread.Status == WorkThreadStatus.Archived,
-            MessageCount = thread.MessageCount,
-            ParentThreadId = thread.ParentThreadId,
-            CreatedBy = thread.CreatedBy,
-        };
+        var localState = viewState.ThreadStates.TryGetValue(thread.ThreadId, out var existingState)
+            ? existingState
+            : new WorkThreadLocalState();
+        localState.Archived = thread.Status == WorkThreadStatus.Archived;
+        localState.MessageCount = thread.MessageCount;
+        localState.ParentThreadId = thread.ParentThreadId;
+        localState.CreatedBy = thread.CreatedBy;
+        viewState.ThreadStates[thread.ThreadId] = localState;
         viewState.UpdatedAt = DateTimeOffset.UtcNow;
         await PersistViewStateAsync(viewState).ConfigureAwait(false);
     }
