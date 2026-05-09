@@ -918,25 +918,35 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect session '{threadId}'.");
         }
 
-        IReadOnlyList<AgentEvent>? history;
-        Exception? activeHistoryException = null;
-        try
-        {
-            history = await runtime.GetHistoryAsync(info.Thread.ThreadId, context.CancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or IOException or UnauthorizedAccessException)
-        {
-            activeHistoryException = ex;
-            history = await runtime.TryReadStoredHistoryAsync(info.Thread, context.CancellationToken).ConfigureAwait(false);
-        }
-
-        if (activeHistoryException is not null)
+        var storedHistoryUnavailable = false;
+        var history = await runtime.TryReadStoredHistoryAsync(
+                info.Thread,
+                _ => storedHistoryUnavailable = true,
+                context.CancellationToken)
+            .ConfigureAwait(false);
+        if (storedHistoryUnavailable)
         {
             AltaJsonlWriter.WriteWarning(
                 context.Stderr,
                 context.CorrelationId,
-                history is { Count: > 0 } ? "session.activeHistoryUnavailable" : "session.historyUnavailable",
-                activeHistoryException.Message);
+                "session.historyStoreUnavailable",
+                "Stored session history could not be read; backend history fallback will be used when available.");
+        }
+
+        if (history is null || history.Count == 0)
+        {
+            try
+            {
+                var activeHistory = await runtime.GetHistoryAsync(info.Thread.ThreadId, context.CancellationToken).ConfigureAwait(false);
+                if (activeHistory.Count > 0 || history is null)
+                {
+                    history = activeHistory;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or IOException or UnauthorizedAccessException)
+            {
+                AltaJsonlWriter.WriteWarning(context.Stderr, context.CorrelationId, "session.historyUnavailable", ex.Message);
+            }
         }
 
         if (history is null)

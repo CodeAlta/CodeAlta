@@ -1,7 +1,9 @@
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
@@ -121,6 +123,22 @@ public sealed class AltaLiveToolTests
         Assert.IsFalse(result.Success);
         StringAssert.Contains(result.Error, "timeoutSeconds");
         StringAssert.Contains(AssertTextItem(result), "usage.invalidToolArguments");
+    }
+
+    [TestMethod]
+    public async Task SessionTool_CommandTimeout_ReturnsCancellationDiagnostic()
+    {
+        using var arguments = JsonDocument.Parse("""{"args":["delay"]}""");
+        var tool = AltaSessionToolFactory.Create(
+            CreateDispatcher(new DelayingContributor()),
+            new AltaSessionToolOptions { DefaultTimeout = TimeSpan.FromMilliseconds(1) });
+
+        var result = await tool.Handler(CreateInvocation(arguments.RootElement), CancellationToken.None).ConfigureAwait(false);
+
+        Assert.IsFalse(result.Success);
+        var lines = ReadJsonLines(AssertTextItem(result));
+        Assert.AreEqual(AltaExitCodes.TimeoutOrCancellation, lines[0].GetProperty("exitCode").GetInt32());
+        Assert.AreEqual("runtime.cancelled", lines[1].GetProperty("code").GetString());
     }
 
     [TestMethod]
@@ -372,6 +390,188 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual("codex:gpt-test@low", modelRecord.GetProperty("modelRef").GetString());
     }
 
+    [TestMethod]
+    public async Task SessionDiscovery_DistinguishesRunningIdleInactiveAndArchivedStates()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var backendId = new AgentBackendId("stateful");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var executionOptions = new WorkThreadExecutionOptions
+        {
+            BackendId = backendId,
+            ProviderKey = backendId.Value,
+            WorkingDirectory = root.Path,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var idleThread = await runtime.CreateGlobalThreadAsync(executionOptions, "Idle thread").ConfigureAwait(false);
+        var archivedThread = await runtime.CreateGlobalThreadAsync(executionOptions, "Archived thread").ConfigureAwait(false);
+        var runningThread = await runtime.CreateGlobalThreadAsync(executionOptions, "Running thread").ConfigureAwait(false);
+        await runtime.SendAsync(runningThread, executionOptions, new AgentSendOptions { Input = AgentInput.Text("keep running") }).ConfigureAwait(false);
+
+        var threadCatalog = new WorkThreadCatalog(options);
+        await threadCatalog.SaveViewStateAsync(new WorkThreadViewState
+        {
+            ThreadStates =
+            {
+                [archivedThread.ThreadId] = new WorkThreadLocalState { Archived = true },
+            },
+        }).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(threadCatalog)
+            .Add(runtime));
+
+        var running = await dispatcher.InvokeAsync(["session", "list", "--state", "running"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var idle = await dispatcher.InvokeAsync(["session", "list", "--state", "idle"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var archived = await dispatcher.InvokeAsync(["session", "list", "--state", "archived"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(runningThread.ThreadId, ReadJsonLines(running.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.item").GetProperty("threadId").GetString());
+        var idleRecord = ReadJsonLines(idle.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.item");
+        Assert.AreEqual(idleThread.ThreadId, idleRecord.GetProperty("threadId").GetString());
+        Assert.AreEqual("idle", idleRecord.GetProperty("state").GetString());
+        var archivedRecord = ReadJsonLines(archived.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.item");
+        Assert.AreEqual(archivedThread.ThreadId, archivedRecord.GetProperty("threadId").GetString());
+        Assert.AreEqual("archived", archivedRecord.GetProperty("state").GetString());
+    }
+
+    [TestMethod]
+    public async Task SessionEvents_ReadStoredLocalHistoryWithFiltersLimitsAndFallbackWarning()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var backendId = new AgentBackendId("openai");
+        var sessionId = "session-history";
+        var timestamp = new DateTimeOffset(2026, 05, 09, 11, 00, 00, TimeSpan.Zero);
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(root.Path));
+        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        {
+            SessionId = sessionId,
+            BackendId = backendId,
+            ProtocolFamily = "openai",
+            ProviderKey = backendId.Value,
+            ModelId = "gpt-history",
+            WorkingDirectory = root.Path,
+            Title = "History session",
+            Summary = "Stored history",
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp.AddMinutes(4),
+        }).ConfigureAwait(false);
+        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        {
+            SessionId = "session-empty",
+            BackendId = backendId,
+            ProtocolFamily = "openai",
+            ProviderKey = backendId.Value,
+            ModelId = "gpt-history",
+            WorkingDirectory = root.Path,
+            Title = "Empty history session",
+            Summary = "Empty stored history",
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp.AddMinutes(5),
+        }).ConfigureAwait(false);
+        await store.AppendEventsAsync(
+            "openai",
+            backendId.Value,
+            sessionId,
+            [
+                new AgentContentCompletedEvent(backendId, sessionId, timestamp.AddMinutes(1), new AgentRunId("run-1"), AgentContentKind.User, "user-1", null, "user message"),
+                new AgentContentCompletedEvent(backendId, sessionId, timestamp.AddMinutes(2), new AgentRunId("run-1"), AgentContentKind.Assistant, "assistant-1", null, "assistant first"),
+                new AgentContentCompletedEvent(backendId, sessionId, timestamp.AddMinutes(3), new AgentRunId("run-1"), AgentContentKind.ToolOutput, "tool-1", null, "tool output"),
+                new AgentContentCompletedEvent(backendId, sessionId, timestamp.AddMinutes(4), new AgentRunId("run-2"), AgentContentKind.Assistant, "assistant-2", null, "assistant second"),
+            ]).ConfigureAwait(false);
+        var runtime = CreateRuntime(options, backendId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new WorkThreadCatalog(options))
+            .Add(runtime));
+        var threadId = WorkThreadRuntimeService.CreateThreadId(backendId, sessionId);
+
+        var events = await dispatcher.InvokeAsync(["session", "events", threadId, "--since", "1", "--limit", "2", "--include", "assistant,tool"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var tail = await dispatcher.InvokeAsync(["session", "tail", threadId, "--last", "1", "--include", "assistant"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var unavailable = await dispatcher.InvokeAsync(["session", "events", WorkThreadRuntimeService.CreateThreadId(backendId, "session-empty"), "--limit", "1"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, events.ExitCode);
+        var eventLines = ReadJsonLines(events.Stdout);
+        Assert.IsFalse(eventLines.Any(static line => line.GetProperty("type").GetString() == "alta.warning"));
+        var eventRecords = eventLines.Where(static line => line.GetProperty("type").GetString() == "alta.session.event").ToArray();
+        Assert.AreEqual(2, eventRecords.Length);
+        CollectionAssert.AreEqual(new[] { 2L, 3L }, eventRecords.Select(static line => line.GetProperty("sequenceNumber").GetInt64()).ToArray());
+        CollectionAssert.AreEqual(new[] { "assistant", "tool" }, eventRecords.Select(static line => line.GetProperty("role").GetString()).ToArray());
+        Assert.IsFalse(eventRecords.Any(static line => line.GetProperty("role").GetString() == "user"));
+        var eventsSummary = eventLines.Single(static line => line.GetProperty("type").GetString() == "alta.session.events.summary");
+        Assert.IsTrue(eventsSummary.GetProperty("truncated").GetBoolean());
+
+        var tailLines = ReadJsonLines(tail.Stdout);
+        var tailRecord = tailLines.Single(static line => line.GetProperty("type").GetString() == "alta.session.event");
+        Assert.AreEqual(4L, tailRecord.GetProperty("sequenceNumber").GetInt64());
+        Assert.AreEqual("assistant second", tailRecord.GetProperty("content")[0].GetProperty("text").GetString());
+        var tailSummary = tailLines.Single(static line => line.GetProperty("type").GetString() == "alta.session.tail.summary");
+        Assert.IsTrue(tailSummary.GetProperty("truncated").GetBoolean());
+
+        var unavailableLines = ReadJsonLines(unavailable.Stdout);
+        Assert.IsTrue(unavailableLines.Any(static line => line.GetProperty("type").GetString() == "alta.warning" && line.GetProperty("code").GetString() == "session.historyUnavailable"));
+        var unavailableSummary = unavailableLines.Single(static line => line.GetProperty("type").GetString() == "alta.session.events.summary");
+        Assert.AreEqual(0, unavailableSummary.GetProperty("count").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task SessionEvents_CorruptOrLockedStoredHistoryWarnsAndFallsBackWithoutFailing()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var backendId = new AgentBackendId("corrupt-history");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var executionOptions = new WorkThreadExecutionOptions
+        {
+            BackendId = backendId,
+            ProviderKey = backendId.Value,
+            WorkingDirectory = root.Path,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var corruptThread = await runtime.CreateGlobalThreadAsync(executionOptions, "Corrupt history").ConfigureAwait(false);
+        var lockedThread = await runtime.CreateGlobalThreadAsync(executionOptions, "Locked history").ConfigureAwait(false);
+        Assert.IsNotNull(corruptThread.BackendSessionId);
+        Assert.IsNotNull(lockedThread.BackendSessionId);
+        var layout = new LocalAgentRuntimePathLayout(root.Path);
+        var corruptHistoryPath = layout.GetSessionFilePath(corruptThread.BackendSessionId!, DateTimeOffset.UtcNow);
+        Directory.CreateDirectory(Path.GetDirectoryName(corruptHistoryPath)!);
+        await File.WriteAllTextAsync(corruptHistoryPath, "{not-json\n{}\n").ConfigureAwait(false);
+        var lockedHistoryPath = layout.GetSessionFilePath(lockedThread.BackendSessionId!, DateTimeOffset.UtcNow);
+        Directory.CreateDirectory(Path.GetDirectoryName(lockedHistoryPath)!);
+        await File.WriteAllTextAsync(lockedHistoryPath, "{}\n").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new WorkThreadCatalog(options))
+            .Add(runtime));
+
+        var corruptResult = await dispatcher.InvokeAsync(["session", "events", corruptThread.ThreadId, "--limit", "1"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        await using var lockedStream = new FileStream(lockedHistoryPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var lockedResult = await dispatcher.InvokeAsync(["session", "events", lockedThread.ThreadId, "--limit", "1"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        AssertHistoryFallbackWarning(corruptResult);
+        AssertHistoryFallbackWarning(lockedResult);
+    }
+
+    private static void AssertHistoryFallbackWarning(AltaCommandResult result)
+    {
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
+        var lines = ReadJsonLines(result.Stdout);
+        Assert.IsTrue(lines.Any(static line => line.GetProperty("type").GetString() == "alta.warning" && line.GetProperty("code").GetString() == "session.historyStoreUnavailable"));
+        var summary = lines.Single(static line => line.GetProperty("type").GetString() == "alta.session.events.summary");
+        Assert.AreEqual(0, summary.GetProperty("count").GetInt32());
+    }
+
     private static AltaCommandDispatcher CreateDispatcher(params IAltaCommandContributor[] contributors)
     {
         var registry = contributors.Length == 0 ? new AltaCommandRegistry() : new AltaCommandRegistry(contributors);
@@ -433,6 +633,24 @@ public sealed class AltaLiveToolTests
             UpdatedAt = timestamp,
             LastActiveAt = timestamp,
         };
+
+    private static WorkThreadRuntimeService CreateRuntime(CatalogOptions options, AgentBackendId backendId)
+        => CreateRuntime(options, new SharedMetadataBackend(backendId));
+
+    private static WorkThreadRuntimeService CreateRuntime(CatalogOptions options, IAgentBackend backend)
+    {
+        var factory = new AgentBackendFactory();
+        factory.Register(backend.BackendId, () => backend);
+        var hub = new AgentHub(factory);
+        var projectCatalog = new ProjectCatalog(options);
+        var threadCatalog = new WorkThreadCatalog(options);
+        return new WorkThreadRuntimeService(
+            hub,
+            projectCatalog,
+            threadCatalog,
+            new AgentInstructionTemplateProvider(catalogOptions: options),
+            options);
+    }
 
     private static string AssertTextItem(AgentToolResult result)
     {
@@ -502,6 +720,137 @@ public sealed class AltaLiveToolTests
         public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
         {
             yield return new AltaCommandPolicy { Path = "wait", RequiresInProcessRuntime = true };
+        }
+    }
+
+    private sealed class DelayingContributor : IAltaCommandContributor
+    {
+        public IEnumerable<CommandNode> CreateCommandLineNodes(AltaCommandContributionContext context)
+        {
+            var command = new Command("delay", "Delay until cancelled.");
+            command.Add(async (_, _) =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), context.Invocation.CancellationToken).ConfigureAwait(false);
+                return AltaExitCodes.Success;
+            });
+            yield return command;
+        }
+
+        public IEnumerable<AltaCommandPolicy> GetCommandPolicies(AltaCommandContributionContext context)
+        {
+            yield return new AltaCommandPolicy { Path = "delay", RequiresInProcessRuntime = true };
+        }
+    }
+
+    private sealed class SharedMetadataBackend(AgentBackendId backendId) : IAgentBackend, IAgentSharedSessionMetadataBackend
+    {
+        public AgentBackendId BackendId => backendId;
+
+        public string DisplayName => "Shared Metadata Backend";
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]);
+
+        public Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(AgentSessionListFilter? filter = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentSessionMetadata>>([]);
+
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class StatefulBackend(AgentBackendId backendId) : IAgentBackend
+    {
+        private readonly List<AgentSessionMetadata> _sessions = [];
+        private int _nextSession;
+
+        public AgentBackendId BackendId => backendId;
+
+        public string DisplayName => "Stateful Backend";
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]);
+
+        public Task<IReadOnlyList<AgentSessionMetadata>> ListSessionsAsync(AgentSessionListFilter? filter = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentSessionMetadata>>(_sessions.ToArray());
+
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
+        {
+            var sessionId = "session-" + Interlocked.Increment(ref _nextSession).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var timestamp = DateTimeOffset.UtcNow;
+            var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
+            _sessions.Add(new AgentSessionMetadata(
+                sessionId,
+                timestamp,
+                timestamp,
+                Summary: sessionId,
+                Context: new AgentSessionContext(workingDirectory),
+                WorkspacePath: workingDirectory,
+                ProtocolFamily: backendId.Value,
+                ProviderKey: options.ProviderKey ?? backendId.Value,
+                ModelId: options.Model));
+            return Task.FromResult<IAgentSession>(new StatefulAgentSession(backendId, sessionId, workingDirectory));
+        }
+
+        public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+        {
+            var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
+            return Task.FromResult<IAgentSession>(new StatefulAgentSession(backendId, sessionId, workingDirectory));
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class StatefulAgentSession(AgentBackendId backendId, string sessionId, string workingDirectory) : IAgentSession
+    {
+        private int _nextRun;
+
+        public AgentBackendId BackendId => backendId;
+
+        public string SessionId => sessionId;
+
+        public string? WorkspacePath => workingDirectory;
+
+        public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield break;
+        }
+
+        public IDisposable Subscribe(Action<AgentEvent> handler) => new NoopDisposable();
+
+        public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
+            => Task.FromResult(new AgentRunId("run-" + Interlocked.Increment(ref _nextRun).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+        public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("No active run.");
+
+        public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task CompactAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public void Dispose()
+        {
         }
     }
 

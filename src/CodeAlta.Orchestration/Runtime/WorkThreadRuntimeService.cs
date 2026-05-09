@@ -275,6 +275,20 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     public async Task<IReadOnlyList<AgentEvent>?> TryReadStoredHistoryAsync(
         WorkThreadDescriptor thread,
         CancellationToken cancellationToken = default)
+        => await TryReadStoredHistoryAsync(thread, onUnavailable: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Reads persisted CodeAlta-owned local-runtime history for a recoverable thread without resuming the session.
+    /// </summary>
+    /// <param name="thread">The thread descriptor.</param>
+    /// <param name="onUnavailable">Optional callback invoked when a local history file exists but cannot be read.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The stored events when available; otherwise <see langword="null" />.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="thread" /> is <see langword="null" />.</exception>
+    public async Task<IReadOnlyList<AgentEvent>?> TryReadStoredHistoryAsync(
+        WorkThreadDescriptor thread,
+        Action<Exception>? onUnavailable,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(thread);
         if (string.IsNullOrWhiteSpace(thread.BackendSessionId))
@@ -293,6 +307,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
         {
+            onUnavailable?.Invoke(ex);
             return null;
         }
     }

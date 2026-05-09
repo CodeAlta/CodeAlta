@@ -339,7 +339,7 @@ Implementation source:
 
 `session list`, `show`, and `status` should include `providerKey`, `modelId`, `reasoningEffort`, `modelRef`, `parentThreadId`, and `createdBy` when known. `session show` should also include direct child counts/ids when cheap to compute. `session children` should emit child `alta.session.item` records. `session model` should emit one `alta.model.selection` JSONL record so another command can reuse its `modelRef` field easily.
 
-`tail` and `events` return finite snapshots only; they must not wait for future messages. Reads should prefer CodeAlta-owned event projections so they do not race with backend files that another active session may be writing. Backend-history fallback must be best-effort and tolerant of locked/partially written files; it should return available data plus an `alta.warning` record rather than fail the whole command when a transient read conflict occurs. They should expose only sanitized visible content:
+`tail` and `events` return finite snapshots only; they must not wait for future messages. Reads should prefer CodeAlta-owned event projections so they do not race with backend files that another active session may be writing. Backend-history fallback must be best-effort and tolerant of locked/partially written files; it should return available data plus an `alta.warning` record rather than fail the whole command when a transient read conflict occurs. The current implementation reads CodeAlta local-runtime normalized event journals first via `WorkThreadRuntimeService.TryReadStoredHistoryAsync`; transient/corrupt local journal reads emit `session.historyStoreUnavailable`, then the command falls back to the active runtime session history when available. They should expose only sanitized visible content:
 
 - user/delegated-agent messages;
 - assistant messages;
@@ -943,18 +943,18 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 
 - [x] Add a narrow query service that merges live runtime snapshots, recoverable threads, local thread metadata, and backend session metadata.
 - [x] Implement `session list/show/status/children/model` with provider/model/reasoning, `parentThreadId`, and provenance fields when known.
-- [ ] Distinguish `running`, `idle`, `inactive`, and `archived` states.
+- [x] Distinguish `running`, `idle`, `inactive`, and `archived` states.
 - [x] Add same-project parent/child hierarchy reconstruction for durable session metadata.
 - [x] Add JSONL record contract tests and same-project filtering tests for session discovery/status commands.
 - [x] Add hierarchy reconstruction tests for durable sidebar/session metadata.
 
 ### Phase 5: Session content inspection
 
-- [ ] Implement `session tail` from CodeAlta event projections / normalized stored events first, with backend history only as a best-effort fallback.
-- [ ] Implement `session events` as a finite snapshot over currently buffered/stored events, with `--since` and `--limit` filters.
-- [ ] Enforce sanitized visible content only.
-- [ ] Add tests for locked/partially written backend-history fallback returning warnings instead of failing the command.
-- [ ] Add truncation, `--last`, `--since`, `--limit`, `--include`, JSONL record, and timeout tests.
+- [x] Implement `session tail` from CodeAlta event projections / normalized stored events first, with backend history only as a best-effort fallback.
+- [x] Implement `session events` as a finite snapshot over currently buffered/stored events, with `--since` and `--limit` filters.
+- [x] Enforce sanitized visible content only.
+- [x] Add tests for locked/partially written backend-history fallback returning warnings instead of failing the command.
+- [x] Add truncation, `--last`, `--since`, `--limit`, `--include`, JSONL record, and timeout tests.
 
 ### Phase 6: Session creation and control
 
