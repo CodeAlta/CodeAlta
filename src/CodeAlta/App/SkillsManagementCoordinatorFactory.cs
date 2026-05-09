@@ -6,7 +6,7 @@ namespace CodeAlta.App;
 
 internal static class SkillsManagementCoordinatorFactory
 {
-    public static Func<Task> Create(CodeAltaOwnedServices? ownedServices, CatalogOptions catalogOptions, Func<ProjectDescriptor?> getSelectedProject, Func<Visual?> getDialogAnchor, Func<string, Task> openFileAsync, Func<string, Task> activateSkillAsync, Action<string, bool, StatusTone> setStatus)
+    public static Func<Task> Create(CodeAltaOwnedServices? ownedServices, CatalogOptions catalogOptions, Func<ProjectDescriptor?> getSelectedProject, Func<Visual?> getDialogAnchor, Func<string, CancellationToken, Task> openFileAsync, Func<string, CancellationToken, Task> activateSkillAsync, Action<string, bool, StatusTone> setStatus)
     {
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(getSelectedProject);

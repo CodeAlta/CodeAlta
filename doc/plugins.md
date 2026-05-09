@@ -73,7 +73,7 @@ enabled = false
 
 Use `--no-plugins`, `--plugin-safe-mode`, or `CODEALTA_DISABLE_PLUGINS=1` to bypass plugin discovery/build/load when a plugin is broken. These switches are host-owned and are recognized before plugin-contributed command-line options.
 
-Plugin diagnostics are stored and displayed separately from normal conversation history. Runtime status includes config/discovery/build/load/activation/contribution/callback/source-change/unload diagnostics, structured build summaries, contribution summaries, and unknown config entries. Use `/plugins` or `/plugin` (or the command palette entry) to open plugin management for the current scope. Use `--plugins-status` for a headless discovery/config summary suitable for CI troubleshooting.
+Plugin diagnostics are stored and displayed separately from normal conversation history. Runtime status includes config/discovery/build/load/activation/contribution/callback/source-change/unload diagnostics, structured build summaries, contribution summaries, and unknown config entries. Use `/plugins` or `/plugin` (or the command palette entry) to open plugin management for the current scope; the dialog shows a plugin list on the left and selected-plugin enablement, diagnostics, properties, contributions, and source/README open actions on the right. Use `--plugins-status` for a headless discovery/config summary suitable for CI troubleshooting.
 
 ## Contribution areas
 

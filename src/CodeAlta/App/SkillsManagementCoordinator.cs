@@ -7,15 +7,15 @@ namespace CodeAlta.App;
 internal sealed class SkillsManagementCoordinator
 {
     private readonly SkillsManagementService _service;
-    private readonly Func<string, Task> _openFileAsync;
-    private readonly Func<string, Task> _activateSkillAsync;
+    private readonly Func<string, CancellationToken, Task> _openFileAsync;
+    private readonly Func<string, CancellationToken, Task> _activateSkillAsync;
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
 
     public SkillsManagementCoordinator(
         SkillsManagementService service,
-        Func<string, Task> openFileAsync,
-        Func<string, Task> activateSkillAsync,
+        Func<string, CancellationToken, Task> openFileAsync,
+        Func<string, CancellationToken, Task> activateSkillAsync,
         Func<Rectangle?> getBounds,
         Func<Visual?> getFocusTarget)
     {

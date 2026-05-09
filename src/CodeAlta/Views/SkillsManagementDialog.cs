@@ -28,8 +28,8 @@ internal sealed class SkillsManagementDialog
     ];
 
     private readonly SkillsManagementService _service;
-    private readonly Func<string, Task> _openFileAsync;
-    private readonly Func<string, Task> _activateSkillAsync;
+    private readonly Func<string, CancellationToken, Task> _openFileAsync;
+    private readonly Func<string, CancellationToken, Task> _activateSkillAsync;
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
     private readonly Dialog _dialog;
@@ -50,8 +50,8 @@ internal sealed class SkillsManagementDialog
 
     public SkillsManagementDialog(
         SkillsManagementService service,
-        Func<string, Task> openFileAsync,
-        Func<string, Task> activateSkillAsync,
+        Func<string, CancellationToken, Task> openFileAsync,
+        Func<string, CancellationToken, Task> activateSkillAsync,
         Func<Rectangle?> getBounds,
         Func<Visual?> getFocusTarget)
     {
@@ -359,7 +359,7 @@ internal sealed class SkillsManagementDialog
             return;
         }
 
-        await _openFileAsync(descriptor.SkillFilePath);
+        await _openFileAsync(descriptor.SkillFilePath, CancellationToken.None);
     }
 
     private async Task OpenSelectedRelatedFileAsync()
@@ -372,7 +372,7 @@ internal sealed class SkillsManagementDialog
             return;
         }
 
-        await _openFileAsync(_relatedFileItems[index].File.FullPath);
+        await _openFileAsync(_relatedFileItems[index].File.FullPath, CancellationToken.None);
     }
 
     private void ShowNewSkillDialog()
@@ -458,7 +458,7 @@ internal sealed class SkillsManagementDialog
             createDialog?.Close();
             await ReloadAsync();
             _summaryText = $"[success]Created skill '{AnsiMarkup.Escape(result.Name)}' at {AnsiMarkup.Escape(result.SkillRootPath)}.[/]";
-            await _openFileAsync(result.SkillFilePath);
+            await _openFileAsync(result.SkillFilePath, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -490,7 +490,7 @@ internal sealed class SkillsManagementDialog
         try
         {
             _summaryText = $"[primary]Activating skill '{AnsiMarkup.Escape(descriptor.Name)}'...[/]";
-            await _activateSkillAsync(descriptor.Name);
+            await _activateSkillAsync(descriptor.Name, CancellationToken.None);
             _summaryText = $"[success]Activation requested for skill '{AnsiMarkup.Escape(descriptor.Name)}'.[/]";
         }
         catch (Exception ex)

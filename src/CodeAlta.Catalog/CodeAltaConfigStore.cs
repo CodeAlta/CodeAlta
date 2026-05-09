@@ -122,6 +122,33 @@ public sealed class CodeAltaConfigStore
             : LoadDocument(GetProjectConfigPath(projectRoot));
 
     /// <summary>
+    /// Persists a global plugin enablement override.
+    /// </summary>
+    /// <param name="pluginId">The built-in plugin id or source plugin package id.</param>
+    /// <param name="enabled">A value indicating whether the plugin should be enabled.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="pluginId"/> is empty.</exception>
+    public void SaveGlobalPluginEnabled(string pluginId, bool enabled)
+    {
+        var document = LoadGlobal();
+        SavePluginEnabled(_options.ConfigPath, document, pluginId, enabled);
+    }
+
+    /// <summary>
+    /// Persists a project-local plugin enablement override.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory.</param>
+    /// <param name="pluginId">The source plugin package id.</param>
+    /// <param name="enabled">A value indicating whether the plugin should be enabled.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> or <paramref name="pluginId"/> is empty.</exception>
+    public void SaveProjectPluginEnabled(string projectRoot, string pluginId, bool enabled)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        var path = GetProjectConfigPath(projectRoot);
+        var document = LoadDocument(path);
+        SavePluginEnabled(path, document, pluginId, enabled);
+    }
+
+    /// <summary>
     /// Resolves the effective provider preference for a scope.
     /// </summary>
     /// <param name="providerKey">The provider key.</param>
@@ -611,6 +638,15 @@ public sealed class CodeAltaConfigStore
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var content = TomlSerializer.Serialize(document);
         File.WriteAllText(path, content);
+    }
+
+    private static void SavePluginEnabled(string path, CodeAltaConfigDocument document, string pluginId, bool enabled)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        NormalizeDocument(document);
+        document.Plugins ??= new Dictionary<string, CodeAltaPluginSettingsDocument>(StringComparer.OrdinalIgnoreCase);
+        document.Plugins[pluginId.Trim()] = new CodeAltaPluginSettingsDocument { Enabled = enabled };
+        SaveDocument(path, document);
     }
 
     private static void NormalizeDocument(CodeAltaConfigDocument document)

@@ -267,8 +267,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         var dialogs = new DelegatingShellDialogCommandService(
             () => DialogBoundsResolver.ResolveAppBounds(ThreadInput), () => ThreadInput, () => _threadStateCoordinator.Projects,
             OpenFolderAsync, OpenModelProvidersAsync, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
-            SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, path => _fileEditorWorkspaceCoordinator.OpenFilePathAsync(path), skillName => _threadCommandCoordinator.ActivateSelectedSkillAsync(skillName), SetStatus),
-            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, SetStatus),
+            SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, _threadCommandCoordinator.ActivateSelectedSkillAsync, SetStatus),
+            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync),
             () => EnsureSessionUsagePresenter().TogglePopupFromIndicator(),
             () => { if (ThreadInput is not null) EnsureThreadInfoPresenter().TogglePopup(ThreadInput); },
             () => _threadWorkspaceView?.OpenExpandedPromptDialog());
