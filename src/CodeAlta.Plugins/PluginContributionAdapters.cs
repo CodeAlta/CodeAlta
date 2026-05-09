@@ -662,6 +662,10 @@ public sealed class PluginContributionAdapterService
 
     /// <summary>Gets status items from applicable UI status contributions.</summary>
     public IReadOnlyList<PluginStatusItem> GetStatusItems(IReadOnlyList<ActivePluginInstance> activePlugins, PluginAdapterOperationOptions? options = null)
+        => GetStatusItems(activePlugins, region: null, options);
+
+    /// <summary>Gets status items from applicable UI status contributions for a region.</summary>
+    public IReadOnlyList<PluginStatusItem> GetStatusItems(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion? region, PluginAdapterOperationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(activePlugins);
         if (IsHeadlessOrNonInteractive(options))
@@ -673,6 +677,7 @@ public sealed class PluginContributionAdapterService
         foreach (var registration in GetRegistrations(PluginPoint.Ui, options))
         {
             if (registration.Contribution is not PluginStatusContribution status ||
+                (region is not null && status.Region != region.Value) ||
                 !TryGetActivePlugin(activePlugins, registration, out var active))
             {
                 continue;

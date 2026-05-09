@@ -18,34 +18,12 @@ public abstract record PluginUiContribution
 /// <summary>Identifies a plugin UI region.</summary>
 public enum PluginUiRegion
 {
-    /// <summary>Command palette entries or providers.</summary>
-    CommandPalette,
     /// <summary>Command bar controls.</summary>
     CommandBar,
-    /// <summary>Prompt toolbar controls.</summary>
-    PromptToolbar,
-    /// <summary>Prompt autocomplete providers.</summary>
-    PromptAutocomplete,
-    /// <summary>Prompt attachment renderers.</summary>
-    PromptAttachmentRenderer,
-    /// <summary>Thread footer or status area.</summary>
+    /// <summary>Thread footer area above the command bar.</summary>
     ThreadFooter,
-    /// <summary>Thread status area.</summary>
+    /// <summary>Thread status line.</summary>
     ThreadStatus,
-    /// <summary>Thread header area.</summary>
-    ThreadHeader,
-    /// <summary>Sidebar section.</summary>
-    SidebarSection,
-    /// <summary>Timeline message renderer.</summary>
-    TimelineMessageRenderer,
-    /// <summary>Tool-call renderer.</summary>
-    ToolCallRenderer,
-    /// <summary>Settings or management page.</summary>
-    SettingsPage,
-    /// <summary>Modal dialog factory.</summary>
-    ModalDialog,
-    /// <summary>Editor tab provider.</summary>
-    EditorTab,
 }
 
 /// <summary>Describes a visual UI contribution.</summary>

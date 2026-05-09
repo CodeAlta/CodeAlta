@@ -126,7 +126,7 @@ public sealed class PluginAbstractionsTests
             ["hello"]);
         var prompt = Prompt.Developer("Always mention the plugin.");
         var visual = PluginUi.Visual(PluginUiRegion.ThreadFooter, new Markup("hello"));
-        var visualFactory = PluginUi.Visual(PluginUiRegion.SidebarSection, static _ => new Markup("dynamic"));
+        var visualFactory = PluginUi.Visual(PluginUiRegion.CommandBar, static _ => new Markup("dynamic"));
         var status = PluginUi.Status("Plugin", static _ => "ready");
         var inputDialog = PluginUi.InputDialog("Input", "seed");
         var confirmDialog = PluginUi.ConfirmDialog("Confirm", "Continue?");
@@ -349,7 +349,7 @@ public sealed class PluginAbstractionsTests
         {
             Plugin = CreateDescriptor(typeof(EmptyPlugin)),
             Services = services,
-            Region = PluginUiRegion.SidebarSection,
+            Region = PluginUiRegion.CommandBar,
         };
     }
 

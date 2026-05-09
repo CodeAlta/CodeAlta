@@ -36,6 +36,7 @@ public sealed class PluginFrontendContributionFixtureTests
             var command = bridge.GetCommandContributions().Single();
             var commandResult = await bridge.ExecuteCommandAsync("fixture", "one two");
             var status = bridge.GetStatusItems(PluginUiRegion.ThreadStatus).Single();
+            var footerStatus = bridge.GetStatusItems(PluginUiRegion.ThreadFooter).Single();
             var visuals = bridge.CreateVisuals(PluginUiRegion.CommandBar);
 
             Assert.AreEqual("fixture", command.Name);
@@ -44,6 +45,8 @@ public sealed class PluginFrontendContributionFixtureTests
             Assert.AreEqual("Fixture", status.Label);
             Assert.AreEqual("ready", status.Text);
             Assert.AreEqual(PluginStatusTone.Success, status.Tone);
+            Assert.AreEqual("Footer", footerStatus.Label);
+            Assert.AreEqual("visible", footerStatus.Text);
             Assert.AreEqual(1, visuals.Count);
             Assert.IsInstanceOfType<Markup>(visuals[0]);
         }
@@ -80,6 +83,15 @@ public sealed class PluginFrontendContributionFixtureTests
                     Label = "Fixture",
                     Text = "ready",
                     Tone = PluginStatusTone.Success,
+                },
+            };
+            yield return new PluginStatusContribution
+            {
+                Region = PluginUiRegion.ThreadFooter,
+                GetStatus = static _ => new PluginStatusItem
+                {
+                    Label = "Footer",
+                    Text = "visible",
                 },
             };
             yield return new PluginVisualContribution

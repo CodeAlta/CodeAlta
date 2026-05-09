@@ -28,8 +28,8 @@ internal sealed class PluginFrontendBridge
             .ToArray();
 
     public IReadOnlyList<PluginStatusItem> GetStatusItems(PluginUiRegion region)
-        => _runtime.Adapter.GetStatusItems(_runtime.ActivePlugins, CreateOptions())
-            .Where(item => region is PluginUiRegion.ThreadStatus or PluginUiRegion.ThreadFooter || !string.IsNullOrWhiteSpace(item.Text))
+        => _runtime.Adapter.GetStatusItems(_runtime.ActivePlugins, region, CreateOptions())
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Text))
             .ToArray();
 
     public IReadOnlyList<Visual> CreateVisuals(PluginUiRegion region)

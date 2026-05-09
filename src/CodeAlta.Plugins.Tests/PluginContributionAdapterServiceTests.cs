@@ -85,7 +85,7 @@ public sealed class PluginContributionAdapterServiceTests
         var tools = adapter.GetAgentTools(managedOptions);
         var resources = adapter.GetResources([active]);
         var status = adapter.GetStatusItems([active], managedOptions);
-        var (renderResults, renderDiagnostics) = await adapter.RenderAsync([active], PluginUiRegion.ToolCallRenderer, "sample", new { value = 1 }, managedOptions);
+        var (renderResults, renderDiagnostics) = await adapter.RenderAsync([active], PluginUiRegion.ThreadFooter, "sample", new { value = 1 }, managedOptions);
         var compaction = await adapter.RunCompactionAsync(
             before: CreateBeforeCompactionTemplate(active),
             instructions: CreateInstructionTemplate(active),
@@ -127,7 +127,7 @@ public sealed class PluginContributionAdapterServiceTests
 
         var status = adapter.GetStatusItems([active], headlessOptions);
         var visuals = adapter.CreateVisuals([active], PluginUiRegion.CommandBar, headlessOptions);
-        var (renderResults, renderDiagnostics) = await adapter.RenderAsync([active], PluginUiRegion.ToolCallRenderer, "sample", new { value = 1 }, headlessOptions);
+        var (renderResults, renderDiagnostics) = await adapter.RenderAsync([active], PluginUiRegion.ThreadFooter, "sample", new { value = 1 }, headlessOptions);
 
         Assert.AreEqual(0, status.Count);
         Assert.AreEqual(0, visuals.Count);
@@ -423,7 +423,7 @@ public sealed class PluginContributionAdapterServiceTests
             };
             yield return new PluginRendererContribution
             {
-                Region = PluginUiRegion.ToolCallRenderer,
+                Region = PluginUiRegion.ThreadFooter,
                 Target = "sample",
                 Renderer = static (_, _) => ValueTask.FromResult<PluginRenderResult?>(PluginRenderResult.FromMarkdown("rendered")),
             };

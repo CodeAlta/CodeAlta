@@ -12,7 +12,10 @@ internal sealed class ThreadStatusLineView
 {
     private Markup? _statusIconVisual;
 
-    public ThreadStatusLineView(CodeAltaShellViewModel shellViewModel, State<float> thinkingAnimationPhase01)
+    public ThreadStatusLineView(
+        CodeAltaShellViewModel shellViewModel,
+        State<float> thinkingAnimationPhase01,
+        Func<Visual?>? buildPluginStatusVisual = null)
     {
         ArgumentNullException.ThrowIfNull(shellViewModel);
         ArgumentNullException.ThrowIfNull(thinkingAnimationPhase01);
@@ -56,9 +59,19 @@ internal sealed class ThreadStatusLineView
                 IsSelectable = false,
             }.Text(() => shellViewModel.ProviderSessionLoadStatusText)
             .Style(TextBlockStyle.Default with { Foreground = UiPalette.WelcomeGuidanceColor });
+        Visual statusLineRight = buildPluginStatusVisual is null
+            ? providerSessionLoadStatus
+            : new HStack(
+            [
+                new ComputedVisual(() => buildPluginStatusVisual() ?? new Placeholder { IsVisible = false }),
+                providerSessionLoadStatus,
+            ])
+            {
+                Spacing = 2,
+            };
         Root = new StatusBar()
             .LeftText(statusLineLeft)
-            .RightText(providerSessionLoadStatus);
+            .RightText(statusLineRight);
     }
 
     public StatusBar Root { get; }

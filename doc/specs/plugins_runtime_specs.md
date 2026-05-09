@@ -928,7 +928,7 @@ Recommended initial samples:
 - `hello-command`: one-file command plugin with a visible status result;
 - `prompt-guidance`: system/developer prompt contribution plugin;
 - `ui-status`: terminal UI status/visual contribution plugin;
-- `ui-all-regions`: terminal UI sample contributing markers/status/renderers for every `PluginUiRegion` so live wiring can be inspected;
+- `ui-all-regions`: terminal UI sample contributing markers and status items for every supported `PluginUiRegion` so live wiring can be inspected;
 - `skill-root`: plugin-contributed skill root;
 - `package-reference`: plugin with a direct `#:package` dependency to verify `EnableDynamicLoading`, private dependency resolution, and visible command execution;
 - `background-task`: plugin using `IPluginTaskService`, visible task status, and unload cancellation;

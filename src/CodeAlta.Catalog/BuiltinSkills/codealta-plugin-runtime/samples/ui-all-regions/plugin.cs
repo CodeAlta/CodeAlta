@@ -50,14 +50,5 @@ public sealed class UiAllRegionsPlugin : PluginBase
             },
         };
 
-        yield return PluginUi.Renderer(PluginUiRegion.PromptAttachmentRenderer, "ui-all-regions", RenderMarkdownAsync);
-        yield return PluginUi.Renderer(PluginUiRegion.TimelineMessageRenderer, "ui-all-regions", RenderMarkdownAsync);
-        yield return PluginUi.Renderer(PluginUiRegion.ToolCallRenderer, "ui-all-regions", RenderMarkdownAsync);
-    }
-
-    private static ValueTask<PluginRenderResult?> RenderMarkdownAsync(PluginRendererContext context, CancellationToken cancellationToken)
-    {
-        var payload = context.Payload?.ToString() ?? "no payload";
-        return ValueTask.FromResult<PluginRenderResult?>(PluginRenderResult.FromMarkdown($"**plugin-ui renderer** `{context.Target ?? "default"}` payload: `{payload}`"));
     }
 }

@@ -604,7 +604,7 @@ yield return Command.Prompt("hello", "Say hello", async ctx => { ... });
 yield return Command.Thread("compact-hard", "Run aggressive compaction", async ctx => { ... });
 yield return Prompt.Developer("Always mention the current plugin is active.");
 yield return Resources.SkillRoot("skills");
-yield return PluginUi.Visual(PluginUiRegion.SidebarSection, () => new Markup("[bold]Plugin[/]"));
+yield return PluginUi.Visual(PluginUiRegion.ThreadFooter, () => new Markup("[bold]Plugin[/]"));
 yield return PluginUi.Status("Plugin", ctx => "ready");
 ```
 

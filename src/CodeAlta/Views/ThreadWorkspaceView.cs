@@ -109,7 +109,7 @@ internal sealed class ThreadWorkspaceView
             .Tooltip(new TextBlock($"Configure model providers ({ModelProvidersShortcutSequence})."));
 
         var usageIndicator = chromeController.BuildSessionUsageIndicatorVisual();
-        var statusLine = new ThreadStatusLineView(shellViewModel, thinkingAnimationPhase01).Root;
+        var statusLine = new ThreadStatusLineView(shellViewModel, thinkingAnimationPhase01, chromeController.BuildPluginThreadStatusVisual).Root;
 
         var queuedPromptList = new QueuedPromptStripView(
             workspaceViewModel,
