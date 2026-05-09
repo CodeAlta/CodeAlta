@@ -778,6 +778,47 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionCreate_ExplicitParentMustExistAndShareTargetScope()
+    {
+        using var root = TempDirectory.Create();
+        var projectAPath = Path.Combine(root.Path, "project-a");
+        var projectBPath = Path.Combine(root.Path, "project-b");
+        Directory.CreateDirectory(projectAPath);
+        Directory.CreateDirectory(projectBPath);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var projectA = await projectCatalog.UpsertFromPathAsync(projectAPath).ConfigureAwait(false);
+        var projectB = await projectCatalog.UpsertFromPathAsync(projectBPath).ConfigureAwait(false);
+        var backendId = new AgentBackendId("explicit-parent");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(new WorkThreadCatalog(options))
+            .Add(runtime));
+
+        var parent = await dispatcher.InvokeAsync(["session", "create", "--project", projectA.Id, "--provider", backendId.Value, "--title", "Parent"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var parentThreadId = ReadJsonLines(parent.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("threadId").GetString()!;
+
+        var child = await dispatcher.InvokeAsync(["session", "create", "--project", projectA.Id, "--provider", backendId.Value, "--parent", parentThreadId, "--title", "Child"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var crossScope = await dispatcher.InvokeAsync(["session", "create", "--project", projectB.Id, "--provider", backendId.Value, "--parent", parentThreadId, "--title", "Cross"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var missingParent = await dispatcher.InvokeAsync(["session", "create", "--project", projectA.Id, "--provider", backendId.Value, "--parent", "missing-parent", "--title", "Missing"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, parent.ExitCode);
+        Assert.AreEqual(AltaExitCodes.Success, child.ExitCode);
+        var childRecord = ReadJsonLines(child.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        Assert.AreEqual(parentThreadId, childRecord.GetProperty("parentThreadId").GetString());
+
+        Assert.AreEqual(AltaExitCodes.Usage, crossScope.ExitCode);
+        Assert.AreEqual("usage.parentScopeMismatch", ReadJsonLines(crossScope.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+        Assert.AreEqual(AltaExitCodes.NotFound, missingParent.ExitCode);
+        Assert.AreEqual("session.parentNotFound", ReadJsonLines(missingParent.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+        Assert.AreEqual(2, backend.CreatedOptions.Count);
+    }
+
+    [TestMethod]
     public async Task SessionControl_SubmitsSteersAbortsCompactsAndPersistsPromptProvenance()
     {
         using var root = TempDirectory.Create();

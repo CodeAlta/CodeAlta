@@ -1016,6 +1016,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             }
         }
 
+        var parentResolution = await ResolveParentThreadIdAsync(context, project, options).ConfigureAwait(false);
+        if (parentResolution.ExitCode != AltaExitCodes.Success)
+        {
+            return parentResolution.ExitCode;
+        }
+
         var modelSelection = await ResolveModelSelectionAsync(context, options.Model).ConfigureAwait(false);
         if (modelSelection.ExitCode != AltaExitCodes.Success)
         {
@@ -1043,7 +1049,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         createdThreadId = thread.ThreadId;
-        thread.ParentThreadId = ResolveParentThreadId(context, thread, project, options);
+        thread.ParentThreadId = parentResolution.ParentThreadId;
         thread.CreatedBy = CreateProvenance(context);
         await runtime.PersistThreadLocalStateAsync(thread, context.CancellationToken).ConfigureAwait(false);
         await PersistThreadPreferenceAsync(context, thread.ThreadId, modelSelection.Selection!).ConfigureAwait(false);
@@ -1944,24 +1950,53 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         """;
     }
 
-    private static string? ResolveParentThreadId(AltaCommandContext context, WorkThreadDescriptor thread, ProjectDescriptor? project, SessionCreateOptions options)
+    private static async ValueTask<ParentThreadResolutionResult> ResolveParentThreadIdAsync(AltaCommandContext context, ProjectDescriptor? project, SessionCreateOptions options)
     {
         if (options.NoParent)
         {
-            return null;
+            return ParentThreadResolutionResult.Success(null);
         }
 
         if (!string.IsNullOrWhiteSpace(options.ParentThreadId))
         {
-            return options.ParentThreadId;
+            var parentThreadId = options.ParentThreadId.Trim();
+            var infos = await LoadSessionInfosAsync(context).ConfigureAwait(false);
+            if (infos is null)
+            {
+                return ParentThreadResolutionResult.Fail(AltaExitCodes.ServiceUnavailable);
+            }
+
+            var parent = FindThread(infos, parentThreadId);
+            if (parent is null)
+            {
+                return ParentThreadResolutionResult.Fail(NotFound(context, "session.parentNotFound", $"Parent session '{parentThreadId}' was not found."));
+            }
+
+            if (!CanAccessThread(context, parent.Thread))
+            {
+                return ParentThreadResolutionResult.Fail(PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to use session '{parentThreadId}' as a parent."));
+            }
+
+            if (!HasSameParentScope(parent.Thread, project))
+            {
+                return ParentThreadResolutionResult.Fail(UsageError(context, "usage.parentScopeMismatch", "Parent session must be in the same project or global scope as the session being created.", "alta session create"));
+            }
+
+            return ParentThreadResolutionResult.Success(parent.Thread.ThreadId);
         }
 
-        return project is not null &&
-               !string.IsNullOrWhiteSpace(context.Caller.SourceThreadId) &&
-               string.Equals(context.Caller.SourceProjectId, project.Id, StringComparison.OrdinalIgnoreCase)
+        var automaticParentThreadId = project is not null &&
+                                      !string.IsNullOrWhiteSpace(context.Caller.SourceThreadId) &&
+                                      string.Equals(context.Caller.SourceProjectId, project.Id, StringComparison.OrdinalIgnoreCase)
             ? context.Caller.SourceThreadId
             : null;
+        return ParentThreadResolutionResult.Success(automaticParentThreadId);
     }
+
+    private static bool HasSameParentScope(WorkThreadDescriptor parent, ProjectDescriptor? project)
+        => project is null
+            ? parent.Kind == WorkThreadKind.GlobalThread && string.IsNullOrWhiteSpace(parent.ProjectRef)
+            : string.Equals(parent.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase);
 
     private static bool CanAccessThread(AltaCommandContext context, WorkThreadDescriptor thread)
     {
@@ -2393,6 +2428,13 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         public static PromptReadResult Success(string prompt) => new(AltaExitCodes.Success, prompt);
 
         public static PromptReadResult Fail(int exitCode) => new(exitCode, null);
+    }
+
+    private sealed record ParentThreadResolutionResult(int ExitCode, string? ParentThreadId)
+    {
+        public static ParentThreadResolutionResult Success(string? parentThreadId) => new(AltaExitCodes.Success, parentThreadId);
+
+        public static ParentThreadResolutionResult Fail(int exitCode) => new(exitCode, null);
     }
 
     private enum PromptDispatchKind
