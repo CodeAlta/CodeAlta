@@ -16,6 +16,7 @@ public sealed class ShellCommandHelpTests
         var exitCommand = ShellCommandCatalog.Get("CodeAlta.Shell.Exit");
         var openFolderCommand = ShellCommandCatalog.Get("CodeAlta.Project.OpenFolder");
         var editFileCommand = ShellCommandCatalog.Get("CodeAlta.File.Edit");
+        var acpCommand = ShellCommandCatalog.Get("CodeAlta.Acp.Manage");
         var skillsCommand = ShellCommandCatalog.Get("CodeAlta.Skills.Manage");
         var pluginsCommand = ShellCommandCatalog.Get("CodeAlta.Plugins.Manage");
         var goToSidebarCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusSidebar");
@@ -23,6 +24,8 @@ public sealed class ShellCommandHelpTests
         var modelCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusModelProvider");
         var fullPromptCommand = ShellCommandCatalog.Get("CodeAlta.Thread.ExpandPrompt");
         var sendCommand = ShellCommandCatalog.Get("CodeAlta.Thread.Send");
+        var queueCommand = ShellCommandCatalog.Get("CodeAlta.Thread.Queue");
+        var compactCommand = ShellCommandCatalog.Get("CodeAlta.Thread.Compact");
 
         var sections = ShellHelpContentBuilder.BuildSections();
         var entry = sections
@@ -37,6 +40,9 @@ public sealed class ShellCommandHelpTests
         var editFileEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, editFileCommand.Label, StringComparison.Ordinal));
+        var acpEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, acpCommand.Label, StringComparison.Ordinal));
         var skillsEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, skillsCommand.Label, StringComparison.Ordinal));
@@ -61,6 +67,12 @@ public sealed class ShellCommandHelpTests
         var sendEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, sendCommand.Label, StringComparison.Ordinal));
+        var queueEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, queueCommand.Label, StringComparison.Ordinal));
+        var compactEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, compactCommand.Label, StringComparison.Ordinal));
 
         CollectionAssert.Contains(entry.Bindings.ToArray(), "/help");
         CollectionAssert.Contains(entry.Bindings.ToArray(), "?");
@@ -69,6 +81,9 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(openFolderEntry.Bindings.ToArray(), "/open_folder");
         CollectionAssert.Contains(openFolderEntry.Bindings.ToArray(), "/open");
         CollectionAssert.Contains(editFileEntry.Bindings.ToArray(), "/edit");
+        CollectionAssert.Contains(acpEntry.Bindings.ToArray(), ShellCommandCatalog.AcpAgentsShortcutSequence.ToString()!);
+        CollectionAssert.Contains(acpEntry.Bindings.ToArray(), "/acp_agents");
+        CollectionAssert.Contains(acpEntry.Bindings.ToArray(), "/acp");
         CollectionAssert.Contains(skillsEntry.Bindings.ToArray(), "/skills");
         CollectionAssert.Contains(skillsEntry.Bindings.ToArray(), "/skill");
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), ShellCommandCatalog.PluginsShortcutSequence.ToString()!);
@@ -80,7 +95,11 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(goToPromptEntry.Bindings.ToArray(), "/prompt");
         CollectionAssert.Contains(modelEntry.Bindings.ToArray(), "/model");
         CollectionAssert.Contains(fullPromptEntry.Bindings.ToArray(), "/full_prompt");
+        CollectionAssert.Contains(sendEntry.Bindings.ToArray(), new KeyGesture(TerminalKey.F5, TerminalModifiers.Ctrl).ToString()!);
         CollectionAssert.Contains(sendEntry.Bindings.ToArray(), "/send");
+        CollectionAssert.Contains(queueEntry.Bindings.ToArray(), new KeyGesture(TerminalKey.F5, TerminalModifiers.Ctrl | TerminalModifiers.Shift).ToString()!);
+        CollectionAssert.Contains(queueEntry.Bindings.ToArray(), "/queue");
+        CollectionAssert.Contains(compactEntry.Bindings.ToArray(), new KeyGesture(TerminalKey.F11, TerminalModifiers.Ctrl).ToString()!);
     }
 
     [TestMethod]

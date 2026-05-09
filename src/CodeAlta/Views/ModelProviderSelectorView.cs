@@ -42,7 +42,7 @@ internal sealed class ModelProviderSelectorView
         var compactThreadButton = new Button(new TextBlock($"{NerdFont.MdSelectCompare}"))
             .Click(controller.CompactThread)
             .IsEnabled(promptComposerViewModel.Bind.CanCompact)
-            .Tooltip(new TextBlock("Compact the selected thread session when it is idle (F11)."));
+            .Tooltip(new TextBlock("Compact the selected thread session when it is idle (Ctrl+F11)."));
 
         Root = new HStack(
         [

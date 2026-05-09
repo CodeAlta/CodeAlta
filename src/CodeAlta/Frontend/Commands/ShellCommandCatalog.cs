@@ -17,6 +17,10 @@ internal static class ShellCommandCatalog
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlO, TerminalModifiers.Ctrl));
 
+    public static readonly KeySequence AcpAgentsShortcutSequence = new(
+        new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+        new KeyGesture(TerminalChar.CtrlA, TerminalModifiers.Ctrl));
+
     public static readonly KeySequence ModelProvidersShortcutSequence = new(
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlM, TerminalModifiers.Ctrl));
@@ -98,6 +102,7 @@ internal static class ShellCommandCatalog
             ShellCommandHelpCategory.General,
             ShellCommandScope.AnyShell,
             ShellCommandAvailability.Always,
+            Sequence: AcpAgentsShortcutSequence,
             CommandName: "acp_agents",
             Aliases: ["acp"],
             ShowInCommandBar: true),
@@ -247,6 +252,7 @@ internal static class ShellCommandCatalog
             ShellCommandHelpCategory.Prompt,
             ShellCommandScope.DraftOrThread,
             ShellCommandAvailability.CanSend,
+            Gesture: new KeyGesture(TerminalKey.F5, TerminalModifiers.Ctrl),
             ShowInCommandBar: false),
         new(
             "CodeAlta.Thread.Steer",
@@ -309,7 +315,7 @@ internal static class ShellCommandCatalog
             ShellCommandHelpCategory.Thread,
             ShellCommandScope.ThreadOnly,
             ShellCommandAvailability.CanCompact,
-            Gesture: new KeyGesture(TerminalKey.F11),
+            Gesture: new KeyGesture(TerminalKey.F11, TerminalModifiers.Ctrl),
             Aliases: ["compact"]),
         new(
             "CodeAlta.Thread.Queue",
@@ -318,6 +324,7 @@ internal static class ShellCommandCatalog
             ShellCommandHelpCategory.Thread,
             ShellCommandScope.ThreadOnly,
             ShellCommandAvailability.CanCloseTab,
+            Gesture: new KeyGesture(TerminalKey.F5, TerminalModifiers.Ctrl | TerminalModifiers.Shift),
             Aliases: ["queue"],
             ShowInCommandBar: false)
     ];
