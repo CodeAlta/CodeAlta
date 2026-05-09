@@ -107,6 +107,44 @@ public sealed class CodeAltaAppSidebarTests
 
         var otherProjectNode = projection.Roots[1].Children.Single(node => node.SelectionTarget == SidebarSelectionTarget.Project("project-2"));
         Assert.AreEqual(SidebarSelectionTarget.Thread(crossProjectChild.ThreadId), otherProjectNode.Children[0].SelectionTarget);
+        StringAssert.Contains(otherProjectNode.Children[0].Row.StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(otherProjectNode.Children[0].Row.StateTooltip, "another scope");
+    }
+
+    [TestMethod]
+    public void Build_LineageAnomaliesRenderAtProjectRootWithDiagnosticMarkers()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-29T10:00:00+00:00");
+        var project = CreateProject("project-1", "CodeAlta", @"C:\repo");
+        var missingParent = CreateThread("thread-missing", "Missing parent", WorkThreadKind.ProjectThread, project.Id, AgentBackendIds.Codex.Value, project.ProjectPath, timestamp.AddMinutes(1));
+        var cycleParent = CreateThread("thread-cycle-parent", "Cycle parent", WorkThreadKind.ProjectThread, project.Id, AgentBackendIds.Codex.Value, project.ProjectPath, timestamp.AddMinutes(2));
+        var cycleChild = CreateThread("thread-cycle-child", "Cycle child", WorkThreadKind.ProjectThread, project.Id, AgentBackendIds.Codex.Value, project.ProjectPath, timestamp.AddMinutes(3));
+        missingParent.ParentThreadId = "thread-no-longer-present";
+        cycleParent.ParentThreadId = cycleChild.ThreadId;
+        cycleChild.ParentThreadId = cycleParent.ThreadId;
+        var rows = new Dictionary<string, SidebarNodeViewModel>(StringComparer.OrdinalIgnoreCase);
+
+        var projection = SidebarTreeProjectionBuilder.Build(
+            [project],
+            [missingParent, cycleParent, cycleChild],
+            @"C:\global",
+            [project.Id],
+            new NavigatorSettings { RecentThreadsPerProject = 10 },
+            static _ => default,
+            (nodeId, kind, selectionTarget) => GetOrCreateRow(rows, nodeId, kind, selectionTarget),
+            timestamp.AddMinutes(4));
+
+        var projectNode = projection.Roots[1].Children.Single(node => node.SelectionTarget == SidebarSelectionTarget.Project(project.Id));
+        CollectionAssert.AreEquivalent(
+            new[] { missingParent.ThreadId, cycleParent.ThreadId, cycleChild.ThreadId },
+            projectNode.Children.Select(static node => node.SelectionTarget!.Value.ThreadId).ToArray());
+        Assert.IsTrue(projectNode.Children.All(static node => node.Children.Count == 0));
+        StringAssert.Contains(rows[$"thread:{missingParent.ThreadId}"].StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(rows[$"thread:{missingParent.ThreadId}"].StateTooltip, "missing");
+        StringAssert.Contains(rows[$"thread:{cycleParent.ThreadId}"].StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(rows[$"thread:{cycleParent.ThreadId}"].StateTooltip, "cycle");
+        StringAssert.Contains(rows[$"thread:{cycleChild.ThreadId}"].StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(rows[$"thread:{cycleChild.ThreadId}"].StateTooltip, "cycle");
     }
 
     [TestMethod]

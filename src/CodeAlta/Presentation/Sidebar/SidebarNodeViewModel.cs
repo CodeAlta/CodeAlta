@@ -53,6 +53,9 @@ internal sealed partial class SidebarNodeViewModel
     [Bindable]
     public partial string? StateIconMarkup { get; set; }
 
+    [Bindable]
+    public partial string? StateTooltip { get; set; }
+
     public void UpdateTitle(string title)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
@@ -107,7 +110,7 @@ internal sealed partial class SidebarNodeViewModel
         NextRelativeRefreshAtUtc = display.NextRefreshAtUtc;
     }
 
-    public void UpdateStateIndicator(string? iconMarkup, bool showSpinner)
+    public void UpdateStateIndicator(string? iconMarkup, bool showSpinner, string? tooltip = null)
     {
         if (ShowStateSpinner != showSpinner)
         {
@@ -117,6 +120,11 @@ internal sealed partial class SidebarNodeViewModel
         if (!string.Equals(StateIconMarkup, iconMarkup, StringComparison.Ordinal))
         {
             StateIconMarkup = iconMarkup;
+        }
+
+        if (!string.Equals(StateTooltip, tooltip, StringComparison.Ordinal))
+        {
+            StateTooltip = tooltip;
         }
     }
 

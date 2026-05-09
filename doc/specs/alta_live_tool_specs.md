@@ -860,7 +860,7 @@ Rules:
 - collapsed/expanded state belongs to the UI view state, while lineage/provenance belongs to durable thread metadata;
 - cycles or missing parents should be tolerated by rendering the affected session at the project root with a diagnostic/provenance marker.
 
-Implementation note: the sidebar projection currently expands thread nodes that have children and orders root sessions by the most recent activity in their subtree. It does not yet add a visible diagnostic/provenance marker for cycles or missing parents.
+Implementation note: the sidebar projection expands thread nodes that have children, orders root sessions by the most recent activity in their subtree, and renders threads with missing, cross-scope, or cyclic parent lineage at the project/global root with a warning provenance marker and tooltip explaining why the durable parent link was not nested.
 
 ### 10.2 Timeline provenance
 

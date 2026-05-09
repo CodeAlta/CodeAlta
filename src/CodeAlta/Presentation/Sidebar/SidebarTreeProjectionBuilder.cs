@@ -51,7 +51,9 @@ internal static class SidebarTreeProjectionBuilder
         row.UpdateStateIndicator(iconMarkup: null, visibleThreads.Any(thread => getThreadVisualState(thread.ThreadId).IsRunning));
 
         var children = visibleThreads
-            .CreateThreadHierarchy(settings.RecentThreadsPerProject)
+            .CreateThreadHierarchy(
+                settings.RecentThreadsPerProject,
+                threads.Where(static thread => thread.Status != WorkThreadStatus.Archived).ToArray())
             .Select(node => CreateThreadNode(node, getThreadVisualState, getOrCreateRow, nowUtc))
             .ToArray();
 
@@ -121,7 +123,9 @@ internal static class SidebarTreeProjectionBuilder
         row.UpdateStateIndicator(iconMarkup: null, projectThreads.Any(thread => getThreadVisualState(thread.ThreadId).IsRunning));
 
         var children = projectThreads
-            .CreateThreadHierarchy(settings.RecentThreadsPerProject)
+            .CreateThreadHierarchy(
+                settings.RecentThreadsPerProject,
+                threads.Where(static thread => thread.Status != WorkThreadStatus.Archived).ToArray())
             .Select(node => CreateThreadNode(node, getThreadVisualState, getOrCreateRow, nowUtc))
             .ToArray();
 
@@ -159,13 +163,14 @@ internal static class SidebarTreeProjectionBuilder
         row.UpdateTitle(thread.Title);
         row.UpdateActivity(thread.LastActiveAt, nowUtc);
         var visualState = getThreadVisualState(thread.ThreadId);
+        var accent = SidebarThreadPresentation.ResolveThreadAccent(thread.BackendId, thread.Kind);
+        var stateTooltip = ResolveLineageDiagnosticTooltip(node.LineageDiagnostic, thread);
         row.UpdateStateIndicator(
             visualState.IsRunning
                 ? null
-                : visualState.HasPromptDraft
-                    ? SidebarThreadPresentation.BuildEditedPromptIconMarkup(SidebarThreadPresentation.ResolveThreadAccent(thread.BackendId, thread.Kind))
-                    : null,
-            visualState.IsRunning);
+                : BuildThreadStateIconMarkup(visualState, accent, node.LineageDiagnostic),
+            visualState.IsRunning,
+            visualState.IsRunning ? null : stateTooltip);
 
         var childNodes = node.Children
             .Select(child => CreateThreadNode(child, getThreadVisualState, getOrCreateRow, nowUtc))
@@ -176,7 +181,7 @@ internal static class SidebarTreeProjectionBuilder
             SidebarNodeKind.Thread,
             row,
             icon,
-            SidebarThreadPresentation.ResolveThreadAccent(thread.BackendId, thread.Kind),
+            accent,
             SidebarSelectionTarget.Thread(thread.ThreadId),
             childNodes.Length > 0,
             CreateThreadActions(),
@@ -185,63 +190,90 @@ internal static class SidebarTreeProjectionBuilder
 
     private static IReadOnlyList<ThreadHierarchyNode> CreateThreadHierarchy(
         this IReadOnlyList<WorkThreadDescriptor> threads,
-        int rootLimit)
+        int rootLimit,
+        IReadOnlyList<WorkThreadDescriptor> lineageThreads)
     {
+        ArgumentNullException.ThrowIfNull(lineageThreads);
+
         var byId = threads
             .Where(static thread => !string.IsNullOrWhiteSpace(thread.ThreadId))
             .GroupBy(static thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var lineageById = lineageThreads
+            .Where(static thread => !string.IsNullOrWhiteSpace(thread.ThreadId))
+            .GroupBy(static thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var diagnosticsById = byId.ToDictionary(
+            static pair => pair.Key,
+            pair => GetLineageDiagnostic(pair.Value, lineageById),
+            StringComparer.OrdinalIgnoreCase);
         var children = threads
-            .Where(thread => IsValidChild(thread, byId))
+            .Where(thread => IsHierarchyChild(thread, diagnosticsById))
             .GroupBy(static thread => thread.ParentThreadId!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 static group => group.Key,
                 group => group
-                    .OrderByDescending(child => GetSubtreeLastActiveAt(child, byId))
+                    .OrderByDescending(child => GetSubtreeLastActiveAt(child, byId, diagnosticsById))
                     .ThenBy(static child => child.Title, StringComparer.OrdinalIgnoreCase)
                     .ToArray(),
                 StringComparer.OrdinalIgnoreCase);
 
         return threads
-            .Where(thread => !IsValidChild(thread, byId))
-            .OrderByDescending(thread => GetSubtreeLastActiveAt(thread, byId))
+            .Where(thread => !IsHierarchyChild(thread, diagnosticsById))
+            .OrderByDescending(thread => GetSubtreeLastActiveAt(thread, byId, diagnosticsById))
             .ThenBy(static thread => thread.Title, StringComparer.OrdinalIgnoreCase)
             .Take(rootLimit)
-            .Select(thread => BuildHierarchyNode(thread, children, new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+            .Select(thread => BuildHierarchyNode(thread, children, diagnosticsById, new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
             .ToArray();
     }
 
     private static ThreadHierarchyNode BuildHierarchyNode(
         WorkThreadDescriptor thread,
         IReadOnlyDictionary<string, WorkThreadDescriptor[]> children,
+        IReadOnlyDictionary<string, ThreadLineageDiagnostic> diagnosticsById,
         HashSet<string> visiting)
     {
         if (!visiting.Add(thread.ThreadId))
         {
-            return new ThreadHierarchyNode(thread, []);
+            return new ThreadHierarchyNode(thread, [], ThreadLineageDiagnostic.Cycle);
         }
 
         var childNodes = children.TryGetValue(thread.ThreadId, out var directChildren)
             ? directChildren
-                .Select(child => BuildHierarchyNode(child, children, visiting))
+                .Select(child => BuildHierarchyNode(child, children, diagnosticsById, visiting))
                 .ToArray()
             : [];
         visiting.Remove(thread.ThreadId);
-        return new ThreadHierarchyNode(thread, childNodes);
+        return new ThreadHierarchyNode(thread, childNodes, diagnosticsById.GetValueOrDefault(thread.ThreadId));
     }
 
-    private static bool IsValidChild(
+    private static bool IsHierarchyChild(
+        WorkThreadDescriptor thread,
+        IReadOnlyDictionary<string, ThreadLineageDiagnostic> diagnosticsById)
+        => !string.IsNullOrWhiteSpace(thread.ParentThreadId) &&
+           diagnosticsById.TryGetValue(thread.ThreadId, out var diagnostic) &&
+           diagnostic == ThreadLineageDiagnostic.None;
+
+    private static ThreadLineageDiagnostic GetLineageDiagnostic(
         WorkThreadDescriptor thread,
         IReadOnlyDictionary<string, WorkThreadDescriptor> byId)
     {
-        if (string.IsNullOrWhiteSpace(thread.ParentThreadId) ||
-            !byId.TryGetValue(thread.ParentThreadId, out var parent) ||
-            !string.Equals(parent.ProjectRef, thread.ProjectRef, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(thread.ParentThreadId))
         {
-            return false;
+            return ThreadLineageDiagnostic.None;
         }
 
-        return !HasLineageCycle(thread, byId);
+        if (!byId.TryGetValue(thread.ParentThreadId, out var parent))
+        {
+            return ThreadLineageDiagnostic.MissingParent;
+        }
+
+        if (!string.Equals(parent.ProjectRef, thread.ProjectRef, StringComparison.OrdinalIgnoreCase))
+        {
+            return ThreadLineageDiagnostic.CrossProjectParent;
+        }
+
+        return HasLineageCycle(thread, byId) ? ThreadLineageDiagnostic.Cycle : ThreadLineageDiagnostic.None;
     }
 
     private static bool HasLineageCycle(
@@ -265,15 +297,15 @@ internal static class SidebarTreeProjectionBuilder
 
     private static DateTimeOffset GetSubtreeLastActiveAt(
         WorkThreadDescriptor thread,
-        IReadOnlyDictionary<string, WorkThreadDescriptor> byId)
+        IReadOnlyDictionary<string, WorkThreadDescriptor> byId,
+        IReadOnlyDictionary<string, ThreadLineageDiagnostic> diagnosticsById)
     {
         var latest = thread.LastActiveAt;
         foreach (var child in byId.Values.Where(candidate =>
                      string.Equals(candidate.ParentThreadId, thread.ThreadId, StringComparison.OrdinalIgnoreCase) &&
-                     string.Equals(candidate.ProjectRef, thread.ProjectRef, StringComparison.OrdinalIgnoreCase) &&
-                     !HasLineageCycle(candidate, byId)))
+                     IsHierarchyChild(candidate, diagnosticsById)))
         {
-            var childLatest = GetSubtreeLastActiveAt(child, byId);
+            var childLatest = GetSubtreeLastActiveAt(child, byId, diagnosticsById);
             if (childLatest > latest)
             {
                 latest = childLatest;
@@ -283,7 +315,44 @@ internal static class SidebarTreeProjectionBuilder
         return latest;
     }
 
-    private sealed record ThreadHierarchyNode(WorkThreadDescriptor Thread, IReadOnlyList<ThreadHierarchyNode> Children);
+    private static string? BuildThreadStateIconMarkup(
+        ThreadVisualState visualState,
+        SidebarAccent accent,
+        ThreadLineageDiagnostic lineageDiagnostic)
+    {
+        if (lineageDiagnostic != ThreadLineageDiagnostic.None)
+        {
+            return BuildLineageDiagnosticIconMarkup();
+        }
+
+        return visualState.HasPromptDraft
+            ? SidebarThreadPresentation.BuildEditedPromptIconMarkup(accent)
+            : null;
+    }
+
+    private static string BuildLineageDiagnosticIconMarkup()
+        => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Warning)}]{NerdFont.MdAlertCircleOutline}[/]";
+
+    private static string? ResolveLineageDiagnosticTooltip(ThreadLineageDiagnostic diagnostic, WorkThreadDescriptor thread)
+    {
+        return diagnostic switch
+        {
+            ThreadLineageDiagnostic.MissingParent => $"Parent session '{thread.ParentThreadId}' is missing; rendering this session at the project root.",
+            ThreadLineageDiagnostic.CrossProjectParent => $"Parent session '{thread.ParentThreadId}' belongs to another scope; rendering this session at the project root while preserving provenance.",
+            ThreadLineageDiagnostic.Cycle => "Session parent lineage contains a cycle; rendering this session at the project root.",
+            _ => null,
+        };
+    }
+
+    private enum ThreadLineageDiagnostic
+    {
+        None,
+        MissingParent,
+        CrossProjectParent,
+        Cycle,
+    }
+
+    private sealed record ThreadHierarchyNode(WorkThreadDescriptor Thread, IReadOnlyList<ThreadHierarchyNode> Children, ThreadLineageDiagnostic LineageDiagnostic);
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateProjectActions()
         =>

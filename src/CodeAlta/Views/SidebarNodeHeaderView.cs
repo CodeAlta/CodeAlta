@@ -85,12 +85,18 @@ internal sealed class SidebarNodeHeaderView : Visual
                     return _stateSpinner;
                 }
 
-                return string.IsNullOrWhiteSpace(_row.StateIconMarkup)
-                    ? null
-                    : new Markup(() => _row.StateIconMarkup!)
-                    {
-                        Wrap = false,
-                    };
+                if (string.IsNullOrWhiteSpace(_row.StateIconMarkup))
+                {
+                    return null;
+                }
+
+                var stateIcon = new Markup(() => _row.StateIconMarkup!)
+                {
+                    Wrap = false,
+                };
+                return string.IsNullOrWhiteSpace(_row.StateTooltip)
+                    ? stateIcon
+                    : stateIcon.Tooltip(new TextBlock(() => _row.StateTooltip!));
             })
         {
             VerticalAlignment = Align.Center,
