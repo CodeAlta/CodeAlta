@@ -247,7 +247,7 @@ internal sealed class PluginManagementDialog
             CreateSection("Contributions", new Markup(BuildContributionsMarkup(entry)) { Wrap = true }))
         {
             HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Start,
             Spacing = 1,
         };
     }
