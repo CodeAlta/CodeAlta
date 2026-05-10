@@ -354,7 +354,7 @@ public sealed class CodeAltaAppTabStripTests
     }
 
     [TestMethod]
-    public void ThreadTabSelection_AttachesPromptPanelImmediatelyAfterFileEditorTab()
+    public void ThreadTabSelection_KeepsPromptPanelAttachedAfterFileEditorTab()
     {
         using var temp = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = temp.Path };
@@ -380,7 +380,8 @@ public sealed class CodeAltaAppTabStripTests
 
         Assert.IsTrue(workspaceView.TryGetTabPage("thread-1", out var threadPage));
         var threadContent = Assert.IsInstanceOfType<VSplitter>(threadPage.Content);
-        Assert.IsNull(threadContent.Second, "The thread prompt panel should be detached while the file editor tab is active.");
+        Assert.IsNotNull(threadContent.Second, "The thread prompt panel should stay attached to its thread tab content while a file editor tab is active.");
+        var stablePromptPanel = threadContent.Second;
         var threadIndex = Array.FindIndex(
             workspaceView.ThreadTabControl.Tabs.Select(GetTabPageId).ToArray(),
             static tabId => string.Equals(tabId, "thread-1", StringComparison.Ordinal));
@@ -391,7 +392,8 @@ public sealed class CodeAltaAppTabStripTests
         Assert.AreSame(
             workspaceView.ThreadBottomPanel,
             threadContent.Second,
-            "Selecting the already-open thread tab should restore the prompt panel on the first switch.");
+            "Selecting the already-open thread tab should activate its existing prompt panel on the first switch.");
+        Assert.AreSame(stablePromptPanel, threadContent.Second);
         Assert.IsTrue(tabs.TryGetTab(new ShellTabId("thread-1"), out var selectedThreadTab));
         Assert.IsTrue(selectedThreadTab.IsSelected);
     }
@@ -528,7 +530,7 @@ public sealed class CodeAltaAppTabStripTests
             ThreadTabHostController.Create(selectTab ?? (static _ => { })),
             NullProjectFileSearchService.Instance,
             static () => null,
-            new State<string?>(string.Empty),
+            static (_, _) => new PromptComposerSessionBinding(new State<string?>(string.Empty)),
             new State<float>(0));
 
     private static string GetTabPageId(TabPage page)

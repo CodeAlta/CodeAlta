@@ -2553,16 +2553,18 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void PromptDraftUiCoordinator_PreservesPromptTextPerSelection()
     {
+        var selectedThreadId = "thread-1";
         var coordinator = new PromptDraftUiCoordinator(
             new PromptDraftCoordinator(),
             new CatalogOptions { GlobalRoot = Path.GetTempPath() },
-            static () => ShellSelection.Thread("thread-1", "project-1"),
+            () => ShellSelection.Thread(selectedThreadId, "project-1"),
             new FrontendEventPublisher(new InlineUiDispatcher()));
         var first = new ThreadSessionState();
         var second = new ThreadSessionState();
 
         coordinator.SyncPromptText(first);
         coordinator.PromptText = "first prompt";
+        selectedThreadId = "thread-2";
         coordinator.SyncPromptText(second);
         Assert.AreEqual(string.Empty, coordinator.PromptText);
 
@@ -2571,9 +2573,11 @@ public sealed class CodeAltaAppTests
         Assert.AreEqual(string.Empty, coordinator.PromptText);
 
         coordinator.PromptText = "draft prompt";
+        selectedThreadId = "thread-1";
         coordinator.SyncPromptText(first);
         Assert.AreEqual("first prompt", coordinator.PromptText);
 
+        selectedThreadId = "thread-2";
         coordinator.SyncPromptText(second);
         Assert.AreEqual("second prompt", coordinator.PromptText);
 

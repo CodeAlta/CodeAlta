@@ -23,6 +23,7 @@ internal static class CodeAltaShellViewFactory
         ArgumentNullException.ThrowIfNull(options.ThreadTabHostController);
         ArgumentNullException.ThrowIfNull(options.ProjectFileSearchService);
         ArgumentNullException.ThrowIfNull(options.GetPromptReferenceProjectRoot);
+        ArgumentNullException.ThrowIfNull(options.GetPromptComposerSession);
         ArgumentNullException.ThrowIfNull(options.ThinkingAnimationPhase01);
         ArgumentNullException.ThrowIfNull(options.Sidebar);
         ArgumentNullException.ThrowIfNull(options.ShellCommandSurfaceCoordinator);
@@ -42,7 +43,7 @@ internal static class CodeAltaShellViewFactory
             options.ThreadTabHostController,
             options.ProjectFileSearchService,
             options.GetPromptReferenceProjectRoot,
-            options.PromptText,
+            options.GetPromptComposerSession,
             options.ThinkingAnimationPhase01,
             options.PromptImageCallbacks);
         workspaceView.ThreadCommandBar.MultiLine = options.CommandBarMultiLine;

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using CodeAlta.Presentation.Chat;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -9,15 +10,13 @@ internal sealed class ThreadTabHostView
 {
     private readonly Dictionary<string, TabPage> _tabPages = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, VSplitter> _threadTabContentSplitters = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Visual _threadBottomPanel;
+    private readonly Dictionary<string, ThreadPromptPanel> _threadPromptPanels = new(StringComparer.OrdinalIgnoreCase);
     private string? _activeThreadTabContentId;
 
-    public ThreadTabHostView(Visual threadBottomPanel, ThreadTabHostController controller)
+    public ThreadTabHostView(ThreadTabHostController controller)
     {
-        ArgumentNullException.ThrowIfNull(threadBottomPanel);
         ArgumentNullException.ThrowIfNull(controller);
 
-        _threadBottomPanel = threadBottomPanel;
         ThreadTabControl = new TabControl();
         ThreadTabControl.SelectionChanged((_, e) => controller.SelectTab(e.NewIndex));
 
@@ -37,6 +36,12 @@ internal sealed class ThreadTabHostView
     public Visual Root { get; }
 
     public TabControl ThreadTabControl { get; }
+
+    public ThreadPromptPanel? ActivePromptPanel
+        => !string.IsNullOrWhiteSpace(_activeThreadTabContentId) &&
+           _threadPromptPanels.TryGetValue(_activeThreadTabContentId, out var panel)
+            ? panel
+            : null;
 
     public bool TryGetTabPage(string tabId, [NotNullWhen(true)] out TabPage? page)
     {
@@ -60,24 +65,21 @@ internal sealed class ThreadTabHostView
             ThreadTabControl.TryCloseTab(page);
         }
 
-        if (_threadTabContentSplitters.Remove(tabId, out var splitter) &&
-            string.Equals(_activeThreadTabContentId, tabId, StringComparison.OrdinalIgnoreCase))
+        _threadTabContentSplitters.Remove(tabId);
+        _threadPromptPanels.Remove(tabId);
+        if (string.Equals(_activeThreadTabContentId, tabId, StringComparison.OrdinalIgnoreCase))
         {
-            if (ReferenceEquals(splitter.Second, _threadBottomPanel))
-            {
-                splitter.Second = null;
-            }
-
             _activeThreadTabContentId = null;
         }
 
         return removed;
     }
 
-    public Visual CreateThreadTabContent(string tabId, Visual primaryContent)
+    public Visual CreateThreadTabContent(string tabId, Visual primaryContent, Func<ThreadPromptPanel> promptPanelFactory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
         ArgumentNullException.ThrowIfNull(primaryContent);
+        ArgumentNullException.ThrowIfNull(promptPanelFactory);
 
         if (_threadTabContentSplitters.TryGetValue(tabId, out var existing))
         {
@@ -87,29 +89,32 @@ internal sealed class ThreadTabHostView
         if (primaryContent.Parent is VSplitter existingParent && ReferenceEquals(existingParent.First, primaryContent))
         {
             _threadTabContentSplitters[tabId] = existingParent;
+            if (!_threadPromptPanels.ContainsKey(tabId))
+            {
+                var recoveredPromptPanel = promptPanelFactory();
+                existingParent.Second = recoveredPromptPanel.Root;
+                _threadPromptPanels[tabId] = recoveredPromptPanel;
+            }
+
             return existingParent;
         }
 
+        var promptPanel = promptPanelFactory();
         var splitter = new VSplitter
         {
             First = primaryContent,
+            Second = promptPanel.Root,
             Ratio = 0.75,
             MinFirst = 6,
             MinSecond = 7,
         };
+        _threadPromptPanels[tabId] = promptPanel;
         _threadTabContentSplitters[tabId] = splitter;
         return splitter;
     }
 
     public void ActivateThreadTabContent(string? tabId)
     {
-        if (!string.IsNullOrWhiteSpace(_activeThreadTabContentId) &&
-            _threadTabContentSplitters.TryGetValue(_activeThreadTabContentId, out var previous) &&
-            ReferenceEquals(previous.Second, _threadBottomPanel))
-        {
-            previous.Second = null;
-        }
-
         _activeThreadTabContentId = null;
         if (string.IsNullOrWhiteSpace(tabId))
         {
@@ -127,7 +132,49 @@ internal sealed class ThreadTabHostView
             _threadTabContentSplitters[tabId] = current;
         }
 
-        current.Second = _threadBottomPanel;
         _activeThreadTabContentId = tabId;
     }
+}
+
+internal sealed class ThreadPromptPanel
+{
+    public ThreadPromptPanel(
+        Visual root,
+        ChatPromptEditor editor,
+        Visual editorView,
+        Visual sendPromptButton,
+        Visual expandPromptButton,
+        PromptComposerView composer,
+        ModelProviderSelectorView modelProviderSelectorView)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(editor);
+        ArgumentNullException.ThrowIfNull(editorView);
+        ArgumentNullException.ThrowIfNull(sendPromptButton);
+        ArgumentNullException.ThrowIfNull(expandPromptButton);
+        ArgumentNullException.ThrowIfNull(composer);
+        ArgumentNullException.ThrowIfNull(modelProviderSelectorView);
+
+        Root = root;
+        Editor = editor;
+        EditorView = editorView;
+        SendPromptButton = sendPromptButton;
+        ExpandPromptButton = expandPromptButton;
+        Composer = composer;
+        ModelProviderSelectorView = modelProviderSelectorView;
+    }
+
+    public Visual Root { get; }
+
+    public ChatPromptEditor Editor { get; }
+
+    public Visual EditorView { get; }
+
+    public Visual SendPromptButton { get; }
+
+    public Visual ExpandPromptButton { get; }
+
+    public PromptComposerView Composer { get; }
+
+    public ModelProviderSelectorView ModelProviderSelectorView { get; }
 }

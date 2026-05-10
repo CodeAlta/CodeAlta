@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Frontend.Commands;
+using CodeAlta.Models;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI;
@@ -31,7 +32,7 @@ internal sealed class CodeAltaShellSurfaceOptions
 
     public required Func<string?> GetPromptReferenceProjectRoot { get; init; }
 
-    public required Binding<string?> PromptText { get; init; }
+    public required Func<string, ThreadSessionState?, PromptComposerSessionBinding> GetPromptComposerSession { get; init; }
 
     public required State<float> ThinkingAnimationPhase01 { get; init; }
 

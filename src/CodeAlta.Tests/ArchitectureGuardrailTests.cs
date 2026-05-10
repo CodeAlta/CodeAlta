@@ -510,9 +510,9 @@ public sealed class ArchitectureGuardrailTests
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:377:_ = CloseAsync();",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:378:_ = RecordUsageAsync(selected);",
             "Presentation/Tabs/ThreadTabStripCoordinator.cs:469:_ = CloseTabFromViewAsync(currentThreadId, ShellTabCloseReason.UserDetached);",
-            "Presentation/Tabs/ThreadTabStripCoordinator.cs:674:_ = CloseTabFromViewAsync(CodeAltaApp.DraftTabId, ShellTabCloseReason.UserDetached);",
-            "Presentation/Tabs/ThreadTabStripCoordinator.cs:709:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.FileEditorClosed);",
-            "Presentation/Tabs/ThreadTabStripCoordinator.cs:750:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.UserDetached);",
+            "Presentation/Tabs/ThreadTabStripCoordinator.cs:675:_ = CloseTabFromViewAsync(CodeAltaApp.DraftTabId, ShellTabCloseReason.UserDetached);",
+            "Presentation/Tabs/ThreadTabStripCoordinator.cs:710:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.FileEditorClosed);",
+            "Presentation/Tabs/ThreadTabStripCoordinator.cs:751:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.UserDetached);",
             "Presentation/Threads/ThreadInfoPresenter.cs:96:_ = LoadAsync(cancellationTokenSource.Token);",
         };
         var violations = new[]
@@ -1475,8 +1475,8 @@ public sealed class ArchitectureGuardrailTests
         var promptComposerSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "PromptComposerView.cs"));
         var normalizedSource = workspaceSource.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.IsTrue(workspaceSource.Contains("SendPromptButton = _promptComposerView.SendButton;", StringComparison.Ordinal));
-        Assert.IsTrue(normalizedSource.Contains("usageIndicator,\n            threadInfoButton,\n            ExpandPromptButton,\n            SendPromptButton,", StringComparison.Ordinal));
+        Assert.IsTrue(workspaceSource.Contains("promptComposerView.SendButton", StringComparison.Ordinal));
+        Assert.IsTrue(normalizedSource.Contains("usageIndicator,\n            threadInfoButton,\n            promptComposerView.ExpandButton,\n            promptComposerView.SendButton,", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var icon = isAbort ? $\"{NerdFont.MdSquare}\" : $\"{NerdFont.MdSend}\";", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var tone = isAbort ? ControlTone.Error : ControlTone.Success;", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var tooltipText = isAbort ? \"Abort the selected thread run.\" : \"Send the current prompt.\";", StringComparison.Ordinal));

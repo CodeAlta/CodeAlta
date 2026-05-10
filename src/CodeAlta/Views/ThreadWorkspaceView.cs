@@ -20,10 +20,22 @@ namespace CodeAlta.Views;
 
 internal sealed class ThreadWorkspaceView
 {
-    private readonly ModelProviderSelectorView _modelProviderSelectorView;
-    private readonly PromptImageAttachmentStripView _promptImageAttachmentStripView;
-    private readonly PromptComposerView _promptComposerView;
+    private readonly CodeAltaShellViewModel _shellViewModel;
+    private readonly ThreadWorkspaceViewModel _workspaceViewModel;
+    private readonly PromptComposerViewModel _promptComposerViewModel;
+    private readonly IReadOnlyList<ThreadWorkspaceCommandBinding> _commandBindings;
+    private readonly ThreadWorkspaceChromeController _chromeController;
+    private readonly PromptComposerViewController _promptComposerController;
+    private readonly QueuedPromptStripController _queuedPromptController;
+    private readonly ModelProviderSelectorController _modelProviderController;
+    private readonly IProjectFileSearchService _projectFileSearchService;
+    private readonly Func<string?> _getPromptReferenceProjectRoot;
+    private readonly Func<string, ThreadSessionState?, PromptComposerSessionBinding> _getPromptComposerSession;
+    private readonly State<float> _thinkingAnimationPhase01;
+    private readonly PromptImageWorkspaceCallbacks? _fallbackPromptImageCallbacks;
+    private readonly List<ModelProviderSelectorView> _modelProviderSelectorViews = [];
     private readonly ThreadTabHostView _threadTabHostView;
+    private ThreadPromptPanel? _fallbackPromptPanel;
 
     internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
     internal static readonly KeySequence ModelProvidersShortcutSequence = ShellCommandCatalog.ModelProvidersShortcutSequence;
@@ -43,7 +55,7 @@ internal sealed class ThreadWorkspaceView
         ThreadTabHostController tabHostController,
         IProjectFileSearchService projectFileSearchService,
         Func<string?> getPromptReferenceProjectRoot,
-        Binding<string?> promptText,
+        Func<string, ThreadSessionState?, PromptComposerSessionBinding> getPromptComposerSession,
         State<float> thinkingAnimationPhase01,
         PromptImageWorkspaceCallbacks? promptImageCallbacks = null)
     {
@@ -58,13 +70,22 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(tabHostController);
         ArgumentNullException.ThrowIfNull(projectFileSearchService);
         ArgumentNullException.ThrowIfNull(getPromptReferenceProjectRoot);
+        ArgumentNullException.ThrowIfNull(getPromptComposerSession);
         ArgumentNullException.ThrowIfNull(thinkingAnimationPhase01);
 
-        _promptImageAttachmentStripView = new PromptImageAttachmentStripView(
-            promptComposerViewModel,
-            promptImageCallbacks,
-            () => ThreadPaneLayout?.GetAbsoluteBounds(),
-            () => ThreadInput);
+        _shellViewModel = shellViewModel;
+        _workspaceViewModel = workspaceViewModel;
+        _promptComposerViewModel = promptComposerViewModel;
+        _commandBindings = commandBindings;
+        _chromeController = chromeController;
+        _promptComposerController = promptComposerController;
+        _queuedPromptController = queuedPromptController;
+        _modelProviderController = modelProviderController;
+        _projectFileSearchService = projectFileSearchService;
+        _getPromptReferenceProjectRoot = getPromptReferenceProjectRoot;
+        _getPromptComposerSession = getPromptComposerSession;
+        _thinkingAnimationPhase01 = thinkingAnimationPhase01;
+        _fallbackPromptImageCallbacks = promptImageCallbacks;
 
         ThreadCommandBar = new CommandBar
         {
@@ -72,78 +93,7 @@ internal sealed class ThreadWorkspaceView
             MultiLine = false,
         };
 
-        Visual? threadInfoButton = null;
-        _promptComposerView = new PromptComposerView(
-            promptComposerViewModel,
-            commandBindings,
-            projectFileSearchService,
-            getPromptReferenceProjectRoot,
-            promptText,
-            _promptImageAttachmentStripView,
-            () => ThreadPaneLayout?.GetAbsoluteBounds(),
-            promptComposerController);
-        ThreadInput = _promptComposerView.Editor;
-        ThreadInputView = _promptComposerView.EditorView;
-
-        SendPromptButton = _promptComposerView.SendButton;
-        ExpandPromptButton = _promptComposerView.ExpandButton;
-        threadInfoButton = CreateIconButton(
-                $"{NerdFont.MdInformationOutline}",
-                $"Show information about the selected thread ({ThreadInfoShortcutSequence}).",
-                () => chromeController.ToggleThreadInfoPopup(threadInfoButton!),
-                button => button.IsEnabled(workspaceViewModel.Bind.CanShowThreadInfo));
-        _modelProviderSelectorView = new ModelProviderSelectorView(
-            workspaceViewModel,
-            promptComposerViewModel,
-            modelProviderController);
-        var providerSummaryButton = new Button(
-            new Markup(() => workspaceViewModel.ProviderSummaryMarkup)
-            {
-                Wrap = false,
-            })
-            .Style(ButtonStyle.Default with
-            {
-                Normal = Style.None,
-                Padding = Thickness.Zero,
-            })
-            .Click(chromeController.OpenModelProviders)
-            .Tooltip(new TextBlock($"Configure model providers ({ModelProvidersShortcutSequence})."));
-
-        var usageIndicator = chromeController.BuildSessionUsageIndicatorVisual();
-        var statusLine = new ThreadStatusLineView(shellViewModel, thinkingAnimationPhase01, chromeController.BuildPluginThreadStatusVisual).Root;
-
-        var queuedPromptList = new QueuedPromptStripView(
-            workspaceViewModel,
-            queuedPromptController).Root;
-
-        var promptImageStrip = _promptImageAttachmentStripView.Root;
-
-        var selectionRight = new HStack(
-        [
-            providerSummaryButton,
-            usageIndicator,
-            threadInfoButton,
-            ExpandPromptButton,
-            SendPromptButton,
-        ])
-        {
-            Spacing = 2,
-        };
-
-        var selectionLine = new StatusBar()
-            .LeftText(_modelProviderSelectorView.Root)
-            .RightText(selectionRight);
-
-        ThreadBottomPanel = new DockLayout(
-            top: new VStack([queuedPromptList, promptImageStrip, statusLine]) { Spacing = 0 },
-            content: ThreadInputView,
-            bottom: selectionLine)
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-        };
-
-        _threadTabHostView = new ThreadTabHostView(ThreadBottomPanel, tabHostController);
+        _threadTabHostView = new ThreadTabHostView(tabHostController);
         ThreadPaneLayout = _threadTabHostView.Root;
         Root = ThreadPaneLayout;
         foreach (var binding in commandBindings)
@@ -159,29 +109,34 @@ internal sealed class ThreadWorkspaceView
 
     public Visual ThreadPaneLayout { get; }
 
-    public Visual ThreadBottomPanel { get; }
+    public Visual ThreadBottomPanel => ActivePromptPanel.Root;
 
-    public ChatPromptEditor ThreadInput { get; }
+    public ChatPromptEditor ThreadInput => ActivePromptPanel.Editor;
 
-    public Visual ThreadInputView { get; }
+    public Visual ThreadInputView => ActivePromptPanel.EditorView;
 
-    public Visual SendPromptButton { get; }
+    public Visual SendPromptButton => ActivePromptPanel.SendPromptButton;
 
-    public Visual ExpandPromptButton { get; }
+    public Visual ExpandPromptButton => ActivePromptPanel.ExpandPromptButton;
 
     public CommandBar ThreadCommandBar { get; }
 
+    private ThreadPromptPanel ActivePromptPanel
+        => _threadTabHostView.ActivePromptPanel ?? (_fallbackPromptPanel ??= CreatePromptPanel(CodeAltaApp.DraftTabId, null, _fallbackPromptImageCallbacks));
+
+    private PromptComposerView _promptComposerView => ActivePromptPanel.Composer;
+
     private Select<ChatBackendOption> ChatBackendSelect
-        => _modelProviderSelectorView.ChatBackendSelect;
+        => ActivePromptPanel.ModelProviderSelectorView.ChatBackendSelect;
 
     private Select<ChatModelOption> ChatModelSelect
-        => _modelProviderSelectorView.ChatModelSelect;
+        => ActivePromptPanel.ModelProviderSelectorView.ChatModelSelect;
 
     private Select<ChatReasoningOption> ChatReasoningSelect
-        => _modelProviderSelectorView.ChatReasoningSelect;
+        => ActivePromptPanel.ModelProviderSelectorView.ChatReasoningSelect;
 
     public CheckBox AlwaysEnqueueCheckBox
-        => _modelProviderSelectorView.AlwaysEnqueueCheckBox;
+        => ActivePromptPanel.ModelProviderSelectorView.AlwaysEnqueueCheckBox;
 
     public TabControl ThreadTabControl
         => _threadTabHostView.ThreadTabControl;
@@ -195,14 +150,14 @@ internal sealed class ThreadWorkspaceView
     public bool RemoveTabPage(string tabId)
         => _threadTabHostView.RemoveTabPage(tabId);
 
-    public Visual CreateThreadTabContent(string tabId, Visual primaryContent)
-        => _threadTabHostView.CreateThreadTabContent(tabId, primaryContent);
+    public Visual CreateThreadTabContent(string tabId, Visual primaryContent, ThreadSessionState? session = null)
+        => _threadTabHostView.CreateThreadTabContent(tabId, primaryContent, () => CreatePromptPanel(tabId, session, promptImageCallbacks: null));
 
     public void ActivateThreadTabContent(string? tabId)
         => _threadTabHostView.ActivateThreadTabContent(tabId);
 
     public void OpenExpandedPromptDialog()
-        => _promptComposerView.OpenExpandedPromptDialog();
+        => ActivePromptPanel.Composer.OpenExpandedPromptDialog();
 
     public void FocusModelProviderSelector()
         => ThreadPaneLayout.App?.Focus(ChatBackendSelect);
@@ -211,7 +166,85 @@ internal sealed class ThreadWorkspaceView
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
 
-        _modelProviderSelectorView.SyncItems(workspaceViewModel);
+        _ = ActivePromptPanel;
+        foreach (var selectorView in _modelProviderSelectorViews)
+        {
+            selectorView.SyncItems(workspaceViewModel);
+        }
+    }
+
+    private ThreadPromptPanel CreatePromptPanel(string tabId, ThreadSessionState? session, PromptImageWorkspaceCallbacks? promptImageCallbacks)
+    {
+        var promptSession = _getPromptComposerSession(tabId, session);
+        var imageStripView = new PromptImageAttachmentStripView(
+            _promptComposerViewModel,
+            promptImageCallbacks ?? promptSession.PromptImageCallbacks,
+            () => ThreadPaneLayout?.GetAbsoluteBounds(),
+            () => ThreadInput);
+        var promptComposerView = new PromptComposerView(
+            _promptComposerViewModel,
+            _commandBindings,
+            _projectFileSearchService,
+            _getPromptReferenceProjectRoot,
+            promptSession.PromptText,
+            imageStripView,
+            () => ThreadPaneLayout?.GetAbsoluteBounds(),
+            _promptComposerController);
+
+        Visual? threadInfoButton = null;
+        threadInfoButton = CreateIconButton(
+                $"{NerdFont.MdInformationOutline}",
+                $"Show information about the selected thread ({ThreadInfoShortcutSequence}).",
+                () => _chromeController.ToggleThreadInfoPopup(threadInfoButton!),
+                button => button.IsEnabled(_workspaceViewModel.Bind.CanShowThreadInfo));
+        var modelProviderSelectorView = new ModelProviderSelectorView(
+            _workspaceViewModel,
+            _promptComposerViewModel,
+            _modelProviderController);
+        _modelProviderSelectorViews.Add(modelProviderSelectorView);
+        var providerSummaryButton = new Button(
+            new Markup(() => _workspaceViewModel.ProviderSummaryMarkup)
+            {
+                Wrap = false,
+            })
+            .Style(ButtonStyle.Default with
+            {
+                Normal = Style.None,
+                Padding = Thickness.Zero,
+            })
+            .Click(_chromeController.OpenModelProviders)
+            .Tooltip(new TextBlock($"Configure model providers ({ModelProvidersShortcutSequence})."));
+
+        var usageIndicator = _chromeController.BuildSessionUsageIndicatorVisual();
+        var statusLine = new ThreadStatusLineView(_shellViewModel, _thinkingAnimationPhase01, _chromeController.BuildPluginThreadStatusVisual).Root;
+        var queuedPromptList = new QueuedPromptStripView(
+            _workspaceViewModel,
+            _queuedPromptController).Root;
+        var promptImageStrip = imageStripView.Root;
+        var selectionRight = new HStack(
+        [
+            providerSummaryButton,
+            usageIndicator,
+            threadInfoButton,
+            promptComposerView.ExpandButton,
+            promptComposerView.SendButton,
+        ])
+        {
+            Spacing = 2,
+        };
+        var selectionLine = new StatusBar()
+            .LeftText(modelProviderSelectorView.Root)
+            .RightText(selectionRight);
+        var root = new DockLayout(
+            top: new VStack([queuedPromptList, promptImageStrip, statusLine]) { Spacing = 0 },
+            content: promptComposerView.EditorView,
+            bottom: selectionLine)
+        {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
+        };
+
+        return new ThreadPromptPanel(root, promptComposerView.Editor, promptComposerView.EditorView, promptComposerView.SendButton, promptComposerView.ExpandButton, promptComposerView, modelProviderSelectorView);
     }
 
     private static bool IsSharedEditorCommand(string commandId)

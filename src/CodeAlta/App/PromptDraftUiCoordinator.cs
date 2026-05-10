@@ -9,15 +9,15 @@ namespace CodeAlta.App;
 
 internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
 {
+    private const string DraftPromptSessionId = "__draft__";
+
     private readonly PromptDraftCoordinator _promptDrafts;
     private readonly ThreadPromptDraftPersistenceCoordinator _promptDraftPersistence;
     private readonly Func<ShellSelection> _getSelection;
     private readonly FrontendEventPublisher _frontendEvents;
     private readonly Action _onPromptImageAttachmentsChanged;
-    private readonly PromptDraftViewModel _viewModel;
-    private readonly List<PromptImageAttachment> _draftPromptImages = [];
-    private ThreadSessionState? _selectedSession;
-    private bool _syncingPromptText;
+    private readonly Dictionary<string, PromptDraftSessionState> _promptSessions = new(StringComparer.OrdinalIgnoreCase);
+    private string _activePromptSessionId = DraftPromptSessionId;
 
     public PromptDraftUiCoordinator(
         PromptDraftCoordinator promptDrafts,
@@ -36,37 +36,27 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
         _getSelection = getSelection;
         _frontendEvents = frontendEvents;
         _onPromptImageAttachmentsChanged = onPromptImageAttachmentsChanged ?? (static () => { });
-        _viewModel = new PromptDraftViewModel(OnPromptTextChanged);
     }
 
-    public Binding<string?> PromptTextBinding => _viewModel.Bind.PromptText;
+    public Binding<string?> PromptTextBinding => GetActivePromptState().ViewModel.Bind.PromptText;
 
     public string? PromptText
     {
-        get => _viewModel.PromptText;
-        set => _viewModel.PromptText = value ?? string.Empty;
+        get => GetActivePromptState().ViewModel.PromptText;
+        set => GetActivePromptState().ViewModel.PromptText = value ?? string.Empty;
     }
+
+    public Binding<string?> GetPromptTextBinding(string promptSessionId, ThreadSessionState? session)
+        => GetOrCreatePromptState(promptSessionId, session).ViewModel.Bind.PromptText;
 
     public void SyncPromptText(ThreadSessionState? session)
     {
-        var previousImageList = GetCurrentImageList();
-        _selectedSession = session;
+        var previousImageList = GetCurrentImageList(GetActivePromptState());
+        _activePromptSessionId = session is null ? DraftPromptSessionId : ResolveCurrentPromptSessionId();
+        var activeState = GetOrCreatePromptState(_activePromptSessionId, session);
+        SyncPromptTextFromSession(activeState);
 
-        var promptText = _promptDrafts.GetPrompt(session);
-        if (!string.Equals(PromptText, promptText, StringComparison.Ordinal))
-        {
-            _syncingPromptText = true;
-            try
-            {
-                PromptText = promptText;
-            }
-            finally
-            {
-                _syncingPromptText = false;
-            }
-        }
-
-        if (!ReferenceEquals(previousImageList, GetCurrentImageList()))
+        if (!ReferenceEquals(previousImageList, GetCurrentImageList(activeState)))
         {
             _onPromptImageAttachmentsChanged();
         }
@@ -77,119 +67,59 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
 
     public void ClearPrompt()
     {
-        ClearPromptText();
-        ClearPromptImages();
+        var state = GetActivePromptState();
+        ClearPromptText(state);
+        ClearPromptImages(state);
     }
 
     public void ClearDraftPromptText()
     {
+        var state = GetOrCreatePromptState(DraftPromptSessionId, session: null);
         _promptDrafts.RememberPrompt(null, string.Empty);
-        _draftPromptImages.Clear();
-        if (_selectedSession is null)
-        {
-            PromptText = string.Empty;
-            _onPromptImageAttachmentsChanged();
-        }
+        ClearPromptText(state);
+        ClearPromptImages(state);
     }
 
     public IReadOnlyList<PromptImageAttachment> CurrentPromptImages
-        => GetCurrentImageList();
+        => GetCurrentImageList(GetActivePromptState());
 
-    public bool HasCurrentPromptImages => GetCurrentImageList().Count > 0;
+    public bool HasCurrentPromptImages => GetCurrentImageList(GetActivePromptState()).Count > 0;
+
+    public IReadOnlyList<PromptImageAttachment> GetPromptImages(string promptSessionId, ThreadSessionState? session)
+        => GetCurrentImageList(GetOrCreatePromptState(promptSessionId, session));
 
     public string GetNextImageTitle()
-    {
-        var existingTitles = new HashSet<string>(GetCurrentImageList().Select(static image => image.Title), StringComparer.OrdinalIgnoreCase);
-        for (var index = 1; ; index++)
-        {
-            var candidate = $"Image-{index}";
-            if (!existingTitles.Contains(candidate))
-            {
-                return candidate;
-            }
-        }
-    }
+        => GetNextImageTitle(GetActivePromptState());
+
+    public string GetNextImageTitle(string promptSessionId, ThreadSessionState? session)
+        => GetNextImageTitle(GetOrCreatePromptState(promptSessionId, session));
 
     public void AddPromptImage(PromptImageAttachment image)
-    {
-        ArgumentNullException.ThrowIfNull(image);
+        => AddPromptImage(GetActivePromptState(), image);
 
-        var list = GetCurrentImageList();
-        var wasEmpty = list.Count == 0;
-        list.Add(image.Copy());
-        NotifyPromptImagesChanged(editedStateChanged: wasEmpty);
-    }
+    public void AddPromptImage(string promptSessionId, ThreadSessionState? session, PromptImageAttachment image)
+        => AddPromptImage(GetOrCreatePromptState(promptSessionId, session), image);
 
     public bool RenamePromptImage(string imageId, string title)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(imageId);
+        => RenamePromptImage(GetActivePromptState(), imageId, title);
 
-        var normalizedTitle = PromptImageAttachment.NormalizeTitle(title);
-        var list = GetCurrentImageList();
-        for (var index = 0; index < list.Count; index++)
-        {
-            if (!string.Equals(list[index].Id, imageId, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (string.Equals(list[index].Title, normalizedTitle, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            list[index] = list[index].WithTitle(normalizedTitle);
-            NotifyPromptImagesChanged(editedStateChanged: false);
-            return true;
-        }
-
-        return false;
-    }
+    public bool RenamePromptImage(string promptSessionId, ThreadSessionState? session, string imageId, string title)
+        => RenamePromptImage(GetOrCreatePromptState(promptSessionId, session), imageId, title);
 
     public bool DeletePromptImage(string imageId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(imageId);
+        => DeletePromptImage(GetActivePromptState(), imageId);
 
-        var list = GetCurrentImageList();
-        var wasEmpty = list.Count == 0;
-        var removed = list.RemoveAll(image => string.Equals(image.Id, imageId, StringComparison.Ordinal)) > 0;
-        if (removed)
-        {
-            NotifyPromptImagesChanged(editedStateChanged: wasEmpty != (list.Count == 0));
-        }
-
-        return removed;
-    }
+    public bool DeletePromptImage(string promptSessionId, ThreadSessionState? session, string imageId)
+        => DeletePromptImage(GetOrCreatePromptState(promptSessionId, session), imageId);
 
     public IReadOnlyList<PromptImageAttachment> SnapshotPromptImages()
-        => GetCurrentImageList().Select(static image => image.Copy()).ToArray();
+        => SnapshotPromptImages(GetActivePromptState());
 
     public void RestorePromptImages(IReadOnlyList<PromptImageAttachment> images)
-    {
-        ArgumentNullException.ThrowIfNull(images);
-
-        var list = GetCurrentImageList();
-        var wasEmpty = list.Count == 0;
-        list.Clear();
-        foreach (var image in images)
-        {
-            list.Add(image.Copy());
-        }
-
-        NotifyPromptImagesChanged(editedStateChanged: wasEmpty != (list.Count == 0));
-    }
+        => RestorePromptImages(GetActivePromptState(), images);
 
     public void ClearPromptImages()
-    {
-        var list = GetCurrentImageList();
-        if (list.Count == 0)
-        {
-            return;
-        }
-
-        list.Clear();
-        NotifyPromptImagesChanged(editedStateChanged: true);
-    }
+        => ClearPromptImages(GetActivePromptState());
 
     public string? LoadPromptDraft(string threadId)
         => _promptDraftPersistence.LoadPromptDraft(threadId);
@@ -203,42 +133,222 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
     public ValueTask DisposeAsync()
         => _promptDraftPersistence.DisposeAsync();
 
-    private List<PromptImageAttachment> GetCurrentImageList()
-        => _selectedSession?.PromptImageAttachments ?? _draftPromptImages;
+    private PromptDraftSessionState GetActivePromptState()
+        => GetOrCreatePromptState(
+            _activePromptSessionId,
+            string.Equals(_activePromptSessionId, DraftPromptSessionId, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : ResolveActiveThreadSession());
 
-    private void NotifyPromptImagesChanged(bool editedStateChanged)
+    private PromptDraftSessionState GetOrCreatePromptState(string promptSessionId, ThreadSessionState? session)
     {
-        _onPromptImageAttachmentsChanged();
-        if (_selectedSession is not null && editedStateChanged)
+        ArgumentException.ThrowIfNullOrWhiteSpace(promptSessionId);
+
+        if (!_promptSessions.TryGetValue(promptSessionId, out var state))
         {
-            PublishThreadPromptEditedStateChanged();
+            state = new PromptDraftSessionState(promptSessionId);
+            state.ViewModel = new PromptDraftViewModel(value => OnPromptTextChanged(state, value));
+            _promptSessions.Add(promptSessionId, state);
         }
+
+        if (session is not null && !ReferenceEquals(state.ThreadSession, session))
+        {
+            state.ThreadSession = session;
+        }
+
+        SyncPromptTextFromSession(state);
+        return state;
     }
 
-    private void OnPromptTextChanged(string? value)
+    private ThreadSessionState? ResolveActiveThreadSession()
     {
-        if (_syncingPromptText)
+        if (_getSelection().Target is not WorkspaceTarget.Thread { ThreadId: { Length: > 0 } selectedThreadId })
+        {
+            return null;
+        }
+
+        if (!_promptSessions.TryGetValue(selectedThreadId, out var state))
+        {
+            return null;
+        }
+
+        return state.ThreadSession;
+    }
+
+    private string ResolveCurrentPromptSessionId()
+        => _getSelection().Target is WorkspaceTarget.Thread { ThreadId: { Length: > 0 } selectedThreadId }
+            ? selectedThreadId
+            : DraftPromptSessionId;
+
+    private void SyncPromptTextFromSession(PromptDraftSessionState state)
+    {
+        var promptText = _promptDrafts.GetPrompt(state.ThreadSession);
+        if (string.Equals(state.ViewModel.PromptText, promptText, StringComparison.Ordinal))
         {
             return;
         }
 
-        var change = _promptDrafts.RememberPrompt(_selectedSession, value);
-        if (_selectedSession is not null &&
-            _getSelection().Target is WorkspaceTarget.Thread { ThreadId: { Length: > 0 } selectedThreadId })
+        state.SyncingPromptText = true;
+        try
         {
-            _promptDraftPersistence.ObservePromptDraft(selectedThreadId, _selectedSession.PromptDraftText);
-            if (change.EditedStateChanged)
+            state.ViewModel.PromptText = promptText;
+        }
+        finally
+        {
+            state.SyncingPromptText = false;
+        }
+    }
+
+    private List<PromptImageAttachment> GetCurrentImageList(PromptDraftSessionState state)
+        => state.ThreadSession?.PromptImageAttachments ?? state.DraftPromptImages;
+
+    private string GetNextImageTitle(PromptDraftSessionState state)
+    {
+        var existingTitles = new HashSet<string>(GetCurrentImageList(state).Select(static image => image.Title), StringComparer.OrdinalIgnoreCase);
+        for (var index = 1; ; index++)
+        {
+            var candidate = $"Image-{index}";
+            if (!existingTitles.Contains(candidate))
             {
-                PublishThreadPromptEditedStateChanged();
+                return candidate;
             }
         }
     }
 
-    private void PublishThreadPromptEditedStateChanged()
+    private void AddPromptImage(PromptDraftSessionState state, PromptImageAttachment image)
     {
-        if (_getSelection().Target is WorkspaceTarget.Thread { ThreadId: { Length: > 0 } selectedThreadId })
+        ArgumentNullException.ThrowIfNull(image);
+
+        var list = GetCurrentImageList(state);
+        var wasEmpty = list.Count == 0;
+        list.Add(image.Copy());
+        NotifyPromptImagesChanged(state, editedStateChanged: wasEmpty);
+    }
+
+    private bool RenamePromptImage(PromptDraftSessionState state, string imageId, string title)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(imageId);
+
+        var normalizedTitle = PromptImageAttachment.NormalizeTitle(title);
+        var list = GetCurrentImageList(state);
+        for (var index = 0; index < list.Count; index++)
         {
-            _frontendEvents.Publish(new PromptDraftChangedEvent(selectedThreadId));
+            if (!string.Equals(list[index].Id, imageId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(list[index].Title, normalizedTitle, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            list[index] = list[index].WithTitle(normalizedTitle);
+            NotifyPromptImagesChanged(state, editedStateChanged: false);
+            return true;
         }
+
+        return false;
+    }
+
+    private bool DeletePromptImage(PromptDraftSessionState state, string imageId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(imageId);
+
+        var list = GetCurrentImageList(state);
+        var wasEmpty = list.Count == 0;
+        var removed = list.RemoveAll(image => string.Equals(image.Id, imageId, StringComparison.Ordinal)) > 0;
+        if (removed)
+        {
+            NotifyPromptImagesChanged(state, editedStateChanged: wasEmpty != (list.Count == 0));
+        }
+
+        return removed;
+    }
+
+    private IReadOnlyList<PromptImageAttachment> SnapshotPromptImages(PromptDraftSessionState state)
+        => GetCurrentImageList(state).Select(static image => image.Copy()).ToArray();
+
+    private void RestorePromptImages(PromptDraftSessionState state, IReadOnlyList<PromptImageAttachment> images)
+    {
+        ArgumentNullException.ThrowIfNull(images);
+
+        var list = GetCurrentImageList(state);
+        var wasEmpty = list.Count == 0;
+        list.Clear();
+        foreach (var image in images)
+        {
+            list.Add(image.Copy());
+        }
+
+        NotifyPromptImagesChanged(state, editedStateChanged: wasEmpty != (list.Count == 0));
+    }
+
+    private void ClearPromptText(PromptDraftSessionState state)
+        => state.ViewModel.PromptText = string.Empty;
+
+    private void ClearPromptImages(PromptDraftSessionState state)
+    {
+        var list = GetCurrentImageList(state);
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        list.Clear();
+        NotifyPromptImagesChanged(state, editedStateChanged: true);
+    }
+
+    private void NotifyPromptImagesChanged(PromptDraftSessionState state, bool editedStateChanged)
+    {
+        _onPromptImageAttachmentsChanged();
+        if (state.ThreadSession is not null && editedStateChanged)
+        {
+            PublishThreadPromptEditedStateChanged(state.PromptSessionId);
+        }
+    }
+
+    private void OnPromptTextChanged(PromptDraftSessionState state, string? value)
+    {
+        if (state.SyncingPromptText)
+        {
+            return;
+        }
+
+        var change = _promptDrafts.RememberPrompt(state.ThreadSession, value);
+        if (state.ThreadSession is not null)
+        {
+            _promptDraftPersistence.ObservePromptDraft(state.PromptSessionId, state.ThreadSession.PromptDraftText);
+            if (change.EditedStateChanged)
+            {
+                PublishThreadPromptEditedStateChanged(state.PromptSessionId);
+            }
+        }
+    }
+
+    private void PublishThreadPromptEditedStateChanged(string threadId)
+    {
+        if (!string.IsNullOrWhiteSpace(threadId))
+        {
+            _frontendEvents.Publish(new PromptDraftChangedEvent(threadId));
+        }
+    }
+
+    private sealed class PromptDraftSessionState
+    {
+        public PromptDraftSessionState(string promptSessionId)
+        {
+            PromptSessionId = promptSessionId;
+        }
+
+        public string PromptSessionId { get; }
+
+        public PromptDraftViewModel ViewModel { get; set; } = null!;
+
+        public ThreadSessionState? ThreadSession { get; set; }
+
+        public List<PromptImageAttachment> DraftPromptImages { get; } = [];
+
+        public bool SyncingPromptText { get; set; }
     }
 }

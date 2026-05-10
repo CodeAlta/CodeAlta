@@ -20,7 +20,7 @@ namespace CodeAlta.Tests;
 public sealed class ThreadWorkspaceViewTests
 {
     [TestMethod]
-    public void ActivateThreadTabContent_MovesSharedBottomPanelBetweenStableTabContents()
+    public void ActivateThreadTabContent_KeepsPromptPanelsWithStableTabContents()
     {
         var view = CreateThreadWorkspaceView();
         var firstContent = (VSplitter)view.CreateThreadTabContent("thread-1", new TextBlock("First"));
@@ -28,14 +28,18 @@ public sealed class ThreadWorkspaceViewTests
 
         view.ActivateThreadTabContent("thread-1");
 
-        Assert.AreSame(view.ThreadBottomPanel, firstContent.Second);
-        Assert.AreSame(firstContent, view.ThreadBottomPanel.Parent);
+        var firstPromptPanel = firstContent.Second;
+        Assert.IsNotNull(firstPromptPanel);
+        Assert.AreSame(firstPromptPanel, view.ThreadBottomPanel);
+        Assert.AreSame(firstContent, firstPromptPanel.Parent);
 
         view.ActivateThreadTabContent("thread-2");
 
-        Assert.IsNull(firstContent.Second);
+        Assert.AreSame(firstPromptPanel, firstContent.Second);
+        Assert.IsNotNull(secondContent.Second);
+        Assert.AreNotSame(firstPromptPanel, secondContent.Second);
         Assert.AreSame(view.ThreadBottomPanel, secondContent.Second);
-        Assert.AreSame(secondContent, view.ThreadBottomPanel.Parent);
+        Assert.AreSame(secondContent, secondContent.Second.Parent);
     }
 
     [TestMethod]
@@ -71,11 +75,15 @@ public sealed class ThreadWorkspaceViewTests
         var view = CreateThreadWorkspaceView();
         var content = (VSplitter)view.CreateThreadTabContent("thread-1", new TextBlock("Thread"));
 
+        var promptPanel = content.Second;
+
         view.RemoveTabPage("thread-1");
+        content = (VSplitter)view.CreateThreadTabContent("thread-1", new TextBlock("Thread"));
         view.RememberTabPage("thread-1", new TabPage(new TextBlock("Thread header"), content));
         view.ActivateThreadTabContent("thread-1");
 
         Assert.AreSame(view.ThreadBottomPanel, content.Second);
+        Assert.AreNotSame(promptPanel, content.Second);
         Assert.AreSame(content, view.ThreadBottomPanel.Parent);
     }
 
@@ -420,7 +428,7 @@ public sealed class ThreadWorkspaceViewTests
             threadTabHostController ?? ThreadTabHostController.Create(static _ => { }),
             projectFileSearchService ?? NullProjectFileSearchService.Instance,
             getPromptReferenceProjectRoot ?? (static () => null),
-            promptText ?? new State<string?>(string.Empty),
+            (_, _) => new PromptComposerSessionBinding(promptText ?? new State<string?>(string.Empty)),
             new State<float>(0));
 
     private static object? GetPrivateMemberValue(object instance, string fieldName)

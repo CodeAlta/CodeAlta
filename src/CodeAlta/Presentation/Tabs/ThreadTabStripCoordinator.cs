@@ -583,7 +583,8 @@ internal sealed class ThreadTabStripCoordinator
                     () => WelcomePaneFactory.Build(
                         _threadSelection.GetSelectedProject(),
                         _threadSelection.IsGlobalDraftSelected(),
-                        new State<float>(0)))),
+                        new State<float>(0))),
+                session: null),
             ViewModel = new DraftTabProjectionHandle(CodeAltaApp.DraftTabId),
         });
     }
@@ -872,7 +873,7 @@ internal sealed class ThreadTabStripCoordinator
                 projectId,
                 new ModelProviderId(thread.ProviderKey ?? thread.BackendId)),
             Header = header,
-            Content = workspaceView.CreateThreadTabContent(thread.ThreadId, tab.Timeline.Flow),
+            Content = workspaceView.CreateThreadTabContent(thread.ThreadId, tab.Timeline.Flow, tab.Session),
             ViewModel = tab.ViewModel,
         });
     }

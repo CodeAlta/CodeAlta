@@ -462,9 +462,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
         var projectFileSearch = _ownedServices?.ProjectFileSearchService ?? NullProjectFileSearchService.Instance;
         Func<string?> promptRoot = ResolvePromptRoot;
-        var imageCallbacks = PromptImageWorkspaceCallbackFactory.Create(
+        var getPromptComposerSession = PromptComposerSessionBindingFactory.Create(
             _promptDraftUiCoordinator,
-            new PromptImageCapabilityContext(GetSelectedThread, threadId => _threadStateCoordinator.FindOpenThread(threadId), GetPreferredModelProviderId, _chatBackendStates),
+            new PromptImageCapabilityContext(GetSelectedThread, _threadStateCoordinator.FindOpenThread, GetPreferredModelProviderId, _chatBackendStates),
             (message, tone) => SetStatus(message, tone: tone));
         var openHelp = () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.ShowHelpAsync(), "show help");
         var showPalette = () => _shellCommandSurfaceCoordinator.ShowCommandPalette();
@@ -481,9 +481,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             ThreadTabHostController = ThreadTabHostController.Create(selectedIndex => _threadTabStripCoordinator.ObserveBoundSelection(selectedIndex)),
             ProjectFileSearchService = projectFileSearch,
             GetPromptReferenceProjectRoot = promptRoot,
-            PromptText = _promptDraftUiCoordinator.PromptTextBinding,
+            GetPromptComposerSession = getPromptComposerSession,
             ThinkingAnimationPhase01 = _shellAnimationRuntime.ThinkingPhase01,
-            PromptImageCallbacks = imageCallbacks,
             Sidebar = _sidebarCoordinator.View.Root,
             ShellCommandSurfaceCoordinator = _shellCommandSurfaceCoordinator,
             OpenAcpManager = OpenAcp,
