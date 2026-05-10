@@ -1004,7 +1004,7 @@ Plugins can project transient, plugin-owned timeline/status details from normali
 
 The implemented abstraction is `PluginThreadEventProjectionContribution`, returned from `PluginBase.GetThreadEventProjections()`. Runtime behavior:
 
-- projections carry the plugin id, event id, project/thread/run scope, compact Markdown, timestamp, optional collapsed Markdown detail sections, optional severity, optional details payload, and optional dynamic Markdown content for cards that refresh after asynchronous background computation;
+- projections carry the plugin id, event id, project/thread/run scope, compact Markdown for fallback/copy, timestamp, optional collapsed Markdown detail sections, optional card/detail/header visual factories, optional severity, optional details payload, and optional dynamic Markdown/visual content for cards that refresh after asynchronous background computation;
 - `WorkThreadPluginDerivedEventProjector` maps projections to `PluginDerivedThreadEvent` orchestration events;
 - replayed agent events and live agent events use the same projector path so renderers see parity between restored and newly observed derived events;
 - projection failures are diagnosed and isolated per plugin;

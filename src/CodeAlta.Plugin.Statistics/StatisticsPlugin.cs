@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
+using XenoAtom.Ansi;
 using XenoAtom.CommandLine;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -482,6 +483,7 @@ public sealed class StatisticsPlugin : PluginBase
         private readonly PendingTurn _turn;
         private string _markdown;
         private IReadOnlyList<PluginDerivedThreadEventDetailSection> _detailSections = [];
+        private PluginThreadEventVisualFactory? _visualFactory;
         private object? _payload;
         private bool _started;
 
@@ -504,6 +506,7 @@ public sealed class StatisticsPlugin : PluginBase
                     Markdown = "Computing detailed statistics...",
                 },
             ];
+            _visualFactory = _ => StatisticsVisualRenderer.RenderComputingTurnCard();
         }
 
         public override string Markdown
@@ -524,6 +527,17 @@ public sealed class StatisticsPlugin : PluginBase
                 lock (_gate)
                 {
                     return _detailSections;
+                }
+            }
+        }
+
+        public override PluginThreadEventVisualFactory? VisualFactory
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _visualFactory;
                 }
             }
         }
@@ -581,6 +595,7 @@ public sealed class StatisticsPlugin : PluginBase
                         VisualFactory = _ => StatisticsVisualRenderer.RenderTurnDetails(turn),
                     },
                 ];
+                _visualFactory = _ => StatisticsVisualRenderer.RenderTurnCard(turn);
                 _payload = new
                 {
                     turn.Key,
@@ -609,6 +624,7 @@ public sealed class StatisticsPlugin : PluginBase
             {
                 _markdown = $"**Turn statistics** · failed: {ex.Message}";
                 _detailSections = [];
+                _visualFactory = null;
                 _payload = new
                 {
                     _turn.Key,
@@ -1523,6 +1539,22 @@ public sealed class StatisticsPlugin : PluginBase
 
     private static class StatisticsVisualRenderer
     {
+        public static Visual RenderComputingTurnCard()
+            => new Collapsible(
+                CreateHeaderMarkup("[bold]Turn statistics[/] · computing..."),
+                new Markup("[dim]Computing detailed statistics...[/]") { Wrap = false })
+            {
+                IsExpanded = false,
+            };
+
+        public static Visual RenderTurnCard(TurnStatistics turn)
+            => new Collapsible(
+                CreateHeaderMarkup(StatisticsMarkdownRenderer.RenderTurnSummaryMarkup(turn)),
+                RenderTurnDetails(turn))
+            {
+                IsExpanded = false,
+            };
+
         public static Visual RenderTurnDetails(TurnStatistics turn)
         {
             var tables = new List<Visual>
@@ -1549,6 +1581,14 @@ public sealed class StatisticsPlugin : PluginBase
                 .HorizontalAlignment(Align.Stretch);
         }
 
+        private static Markup CreateHeaderMarkup(string markup)
+            => new(markup)
+            {
+                Wrap = false,
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Start,
+            };
+
         private static Visual CreateTable(string markdown)
             => new MarkdownControl(markdown.Trim())
             {
@@ -1565,11 +1605,26 @@ public sealed class StatisticsPlugin : PluginBase
 
     private static class StatisticsMarkdownRenderer
     {
+        private const string TurnStatisticsTitle = "Turn statistics";
+
         public static string RenderTurnSummary(TurnStatistics turn)
+        {
+            var builder = new StringBuilder();
+            builder.Append("**")
+                .Append(TurnStatisticsTitle)
+                .Append("**")
+                .Append(RenderTurnSummarySuffix(turn));
+            return builder.ToString();
+        }
+
+        public static string RenderTurnSummaryMarkup(TurnStatistics turn)
+            => $"[bold]{TurnStatisticsTitle}[/]{AnsiMarkup.Escape(RenderTurnSummarySuffix(turn))}";
+
+        private static string RenderTurnSummarySuffix(TurnStatistics turn)
         {
             var inputTokenSource = turn.ReportedInputTokens is not null ? "reported" : "estimated ≈ chars/4";
             var builder = new StringBuilder();
-            builder.Append("**Turn statistics** · ")
+            builder.Append(" · ")
                 .Append(FormatDuration(turn.Duration))
                 .Append(" · tokens ")
                 .Append(FormatNumber(turn.DisplayInputTokens))

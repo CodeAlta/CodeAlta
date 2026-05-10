@@ -60,7 +60,11 @@ namespace CodeAlta.Models
         public IReadOnlyList<ChatCollapsibleMarkdownSection>? DetailSections { get; set; }
     }
 
-    internal sealed record ChatCollapsibleMarkdownSection(string Header, string Markdown, Func<Visual>? VisualFactory = null);
+    internal sealed record ChatCollapsibleMarkdownSection(
+        string Header,
+        string Markdown,
+        Func<Visual>? VisualFactory = null,
+        Func<Visual>? HeaderVisualFactory = null);
 
     internal sealed class ChatBackendState(AgentBackendId backendId, string displayName)
     {

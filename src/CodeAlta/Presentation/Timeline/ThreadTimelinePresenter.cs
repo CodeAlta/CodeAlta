@@ -757,8 +757,10 @@ internal sealed class ThreadTimelinePresenter
         IReadOnlyList<ChatCollapsibleMarkdownSection>? detailSections = null,
         Func<Visual>? visualFactory = null)
     {
-        var entry = detailSections is { Count: > 0 } || visualFactory is not null
-            ? ChatTimelineVisualFactory.CreateCollapsibleMarkdownItem(markdown, detailSections ?? [], tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath, contentVisualFactory: visualFactory)
+        var entry = visualFactory is not null
+            ? ChatTimelineVisualFactory.CreateVisualItem(markdown, visualFactory, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath, copyDetailSections: detailSections)
+            : detailSections is { Count: > 0 }
+                ? ChatTimelineVisualFactory.CreateCollapsibleMarkdownItem(markdown, detailSections, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath)
             : ChatTimelineVisualFactory.CreateMarkdownItem(markdown, tone, headerOverride, headerSecondary, localFileRootPath: _localFileRootPath);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         return new ChatStatusState(entry.Item, entry.Markdown, entry.TimestampText, entry.DetailMarkdownControls, entry.DetailMarkdownSectionIndexes, entry.CopyState)
@@ -792,7 +794,10 @@ internal sealed class ThreadTimelinePresenter
                 return true;
             }
 
-            if (existing[index].VisualFactory is not null || updated[index].VisualFactory is not null)
+            if (existing[index].VisualFactory is not null ||
+                updated[index].VisualFactory is not null ||
+                existing[index].HeaderVisualFactory is not null ||
+                updated[index].HeaderVisualFactory is not null)
             {
                 return true;
             }

@@ -116,7 +116,7 @@ public sealed record PluginDerivedThreadEvent
     public IReadOnlyList<PluginDerivedThreadEventDetailSection> DetailSections { get; init; } = [];
 
     /// <summary>
-    /// Gets an optional visual factory for advanced frontend rendering. <see cref="Markdown"/> remains the clipboard and fallback representation.
+    /// Gets an optional visual factory for advanced frontend rendering that replaces the default Markdown card content. <see cref="Markdown"/> remains the clipboard and fallback representation.
     /// </summary>
     public PluginThreadEventVisualFactory? VisualFactory { get; init; }
 
@@ -148,7 +148,7 @@ public abstract class PluginDynamicDerivedThreadEventContent
     public virtual IReadOnlyList<PluginDerivedThreadEventDetailSection> DetailSections => [];
 
     /// <summary>
-    /// Gets an optional visual factory for advanced frontend rendering. <see cref="Markdown"/> remains the clipboard and fallback representation.
+    /// Gets an optional visual factory for advanced frontend rendering that replaces the default Markdown card content. <see cref="Markdown"/> remains the clipboard and fallback representation.
     /// </summary>
     public virtual PluginThreadEventVisualFactory? VisualFactory => null;
 
@@ -171,4 +171,9 @@ public sealed record PluginDerivedThreadEventDetailSection
     /// Gets an optional visual factory for advanced frontend rendering. <see cref="Markdown"/> remains the clipboard and fallback representation.
     /// </summary>
     public PluginThreadEventVisualFactory? VisualFactory { get; init; }
+
+    /// <summary>
+    /// Gets an optional visual factory for rendering the collapsible detail header. <see cref="Header"/> remains the fallback header text.
+    /// </summary>
+    public PluginThreadEventVisualFactory? HeaderVisualFactory { get; init; }
 }

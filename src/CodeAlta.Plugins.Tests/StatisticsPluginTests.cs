@@ -79,6 +79,17 @@ public sealed class StatisticsPluginTests
         Assert.AreEqual(1, completed.DetailSections.Count);
         StringAssert.Contains(completed.DetailSections[0].Markdown, "shell");
         StringAssert.Contains(completed.DetailSections[0].Markdown, "Assistant | 11 chars");
+        var cardVisualFactory = result[0].DynamicContent?.VisualFactory;
+        Assert.IsNotNull(cardVisualFactory);
+        var cardVisual = cardVisualFactory(new PluginThreadEventVisualContext
+        {
+            EventId = result[0].EventId,
+            Markdown = completed.Markdown,
+        });
+        var card = Assert.IsInstanceOfType<Collapsible>(cardVisual);
+        var cardHeader = Assert.IsInstanceOfType<Markup>(card.Header);
+        StringAssert.Contains(cardHeader.Text, "[bold]Turn statistics[/]");
+        Assert.IsInstanceOfType<WrapHStack>(card.Content);
         var visualFactory = completed.DetailSections[0].VisualFactory;
         Assert.IsNotNull(visualFactory);
         var detailVisual = visualFactory(new PluginThreadEventVisualContext

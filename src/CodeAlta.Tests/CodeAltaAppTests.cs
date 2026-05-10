@@ -133,10 +133,61 @@ public sealed class CodeAltaAppTests
         var group = Assert.IsInstanceOfType<Group>(block.CreateVisual());
         var stack = Assert.IsInstanceOfType<VStack>(group.Content);
 
+        Assert.AreEqual(0, stack.Spacing);
         Assert.AreEqual(3, stack.Children.Count);
         Assert.IsInstanceOfType<MarkdownControl>(stack.Children[0]);
         Assert.IsInstanceOfType<Collapsible>(stack.Children[1]);
         Assert.IsInstanceOfType<Collapsible>(stack.Children[2]);
+    }
+
+    [TestMethod]
+    public void CreateCollapsibleMarkdownItem_UsesCustomHeaderVisual()
+    {
+        var entry = ChatTimelineVisualFactory.CreateCollapsibleMarkdownItem(
+            "summary",
+            [
+                new ChatCollapsibleMarkdownSection(
+                    "Detailed statistics",
+                    "details",
+                    HeaderVisualFactory: () => new Markup("[bold]Turn statistics[/] · compact") { Wrap = false }),
+            ],
+            ChatTimelineTone.Notice);
+
+        var document = Assert.IsInstanceOfType<FlowDocument>(entry.Item.Content);
+        Assert.AreEqual(1, document.BlockCount);
+        var block = Assert.IsInstanceOfType<VisualDocumentFlowBlock>(document.GetBlock(0));
+        var group = Assert.IsInstanceOfType<Group>(block.CreateVisual());
+        var stack = Assert.IsInstanceOfType<VStack>(group.Content);
+        var collapsible = Assert.IsInstanceOfType<Collapsible>(stack.Children[1]);
+        var header = Assert.IsInstanceOfType<Markup>(collapsible.Header);
+
+        Assert.IsFalse(header.Wrap);
+        Assert.AreEqual("[bold]Turn statistics[/] · compact", header.Text);
+    }
+
+    [TestMethod]
+    public void CreateVisualItem_RendersCustomVisualAsCardContentAndKeepsCopyMarkdown()
+    {
+        var entry = ChatTimelineVisualFactory.CreateVisualItem(
+            "**Turn statistics** · compact summary",
+            () => new Collapsible(
+                new Markup("[bold]Turn statistics[/] · compact summary") { Wrap = false },
+                new WrapHStack(new TextBlock("details"))),
+            ChatTimelineTone.Notice,
+            copyDetailSections: [new ChatCollapsibleMarkdownSection("Detailed statistics", "details")]);
+
+        var document = Assert.IsInstanceOfType<FlowDocument>(entry.Item.Content);
+        Assert.AreEqual(1, document.BlockCount);
+        var block = Assert.IsInstanceOfType<VisualDocumentFlowBlock>(document.GetBlock(0));
+        var group = Assert.IsInstanceOfType<Group>(block.CreateVisual());
+        var collapsible = Assert.IsInstanceOfType<Collapsible>(group.Content);
+        var header = Assert.IsInstanceOfType<Markup>(collapsible.Header);
+
+        Assert.AreEqual("[bold]Turn statistics[/] · compact summary", header.Text);
+        Assert.AreEqual("**Turn statistics** · compact summary", entry.Markdown.Markdown);
+        Assert.AreEqual(
+            "**Turn statistics** · compact summary\r\n\r\n## Detailed statistics\r\n\r\ndetails".Replace("\r\n", Environment.NewLine, StringComparison.Ordinal),
+            ChatTimelineVisualFactory.BuildCopyMarkdown(entry.Markdown.Markdown ?? string.Empty, entry.CopyState.DetailSections));
     }
 
     [TestMethod]

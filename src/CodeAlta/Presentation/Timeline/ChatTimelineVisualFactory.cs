@@ -116,8 +116,7 @@ internal static class ChatTimelineVisualFactory
         string? headerOverride = null,
         string? headerSecondary = null,
         int maxCodeBlockHeight = 14,
-        string? localFileRootPath = null,
-        Func<Visual>? contentVisualFactory = null)
+        string? localFileRootPath = null)
         => UiDispatch.InvokeCurrent(
             static state => CreateChatMarkdownItemCore(
                 state.markdown,
@@ -126,9 +125,33 @@ internal static class ChatTimelineVisualFactory
                 state.headerSecondary,
                 state.maxCodeBlockHeight,
                 state.localFileRootPath,
-                state.collapsibleSections,
-                contentVisualFactory: state.contentVisualFactory),
-            (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight, localFileRootPath, collapsibleSections, contentVisualFactory));
+                state.collapsibleSections),
+            (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight, localFileRootPath, collapsibleSections));
+
+    public static ChatMarkdownEntry CreateVisualItem(
+        string markdown,
+        Func<Visual> contentVisualFactory,
+        ChatTimelineTone tone,
+        string? headerOverride = null,
+        string? headerSecondary = null,
+        int maxCodeBlockHeight = 14,
+        string? localFileRootPath = null,
+        IReadOnlyList<ChatCollapsibleMarkdownSection>? copyDetailSections = null)
+    {
+        ArgumentNullException.ThrowIfNull(contentVisualFactory);
+        return UiDispatch.InvokeCurrent(
+            static state => CreateChatMarkdownItemCore(
+                state.markdown,
+                state.tone,
+                state.headerOverride,
+                state.headerSecondary,
+                state.maxCodeBlockHeight,
+                state.localFileRootPath,
+                state.copyDetailSections,
+                contentVisualFactory: state.contentVisualFactory,
+                useContentVisualOnly: true),
+            (markdown, tone, headerOverride, headerSecondary, maxCodeBlockHeight, localFileRootPath, copyDetailSections, contentVisualFactory));
+    }
 
     public static MarkdownRenderOptions CreateThreadMarkdownOptions(int maxCodeBlockHeight, string? localFileRootPath = null)
         => MarkdownRenderOptions.Default with
@@ -256,6 +279,7 @@ internal static class ChatTimelineVisualFactory
         string? localFileRootPath,
         IReadOnlyList<ChatCollapsibleMarkdownSection>? collapsibleSections = null,
         Func<Visual>? contentVisualFactory = null,
+        bool useContentVisualOnly = false,
         IReadOnlyList<PromptImageAttachmentReference>? imageAttachments = null,
         Func<Rectangle?>? getDialogBounds = null)
     {
@@ -270,21 +294,29 @@ internal static class ChatTimelineVisualFactory
 
         var timestampText = new Markup(string.Empty);
 
-        var contentItems = new List<Visual> { markdownControl };
+        var contentItems = new List<Visual>();
+        if (useContentVisualOnly)
+        {
+            if (contentVisualFactory is null)
+            {
+                throw new ArgumentException("A content visual factory is required when visual-only rendering is requested.", nameof(contentVisualFactory));
+            }
+
+            contentItems.Add(contentVisualFactory());
+        }
+        else
+        {
+            contentItems.Add(markdownControl);
+        }
         var detailMarkdownControls = new List<MarkdownControl>();
         var detailMarkdownSectionIndexes = new List<int>();
         var copyDetailMarkdownControls = new List<MarkdownControl?>();
-        if (imageAttachments is { Count: > 0 })
+        if (!useContentVisualOnly && imageAttachments is { Count: > 0 })
         {
             contentItems.Add(CreateImageAttachmentStrip(imageAttachments, getDialogBounds));
         }
 
-        if (contentVisualFactory is not null)
-        {
-            contentItems.Add(contentVisualFactory());
-        }
-
-        if (collapsibleSections is { Count: > 0 })
+        if (!useContentVisualOnly && collapsibleSections is { Count: > 0 })
         {
             for (var sectionIndex = 0; sectionIndex < collapsibleSections.Count; sectionIndex++)
             {
@@ -317,19 +349,19 @@ internal static class ChatTimelineVisualFactory
                 }
 
                 contentItems.Add(new Collapsible()
-                    .Header(section.Header)
+                    .Header(CreateCollapsibleHeader(section))
                     .Content(sectionContent)
                     .IsExpanded(false));
             }
         }
 
         var copyState = new ChatMarkdownCopyState { DetailSections = collapsibleSections };
-        var copyButton = new Button(new TextBlock($"{NerdFont.MdContentCopy}"))
-            .Click(() => markdownControl.App?.Terminal.Clipboard.TrySetText(BuildCopyMarkdown(markdownControl.Markdown ?? string.Empty, ResolveCurrentCopySections(copyState.DetailSections, copyDetailMarkdownControls))));
+        var copyButton = new Button(new TextBlock($"{NerdFont.MdContentCopy}"));
+        copyButton.Click(() => copyButton.App?.Terminal.Clipboard.TrySetText(BuildCopyMarkdown(markdownControl.Markdown ?? string.Empty, ResolveCurrentCopySections(copyState.DetailSections, copyDetailMarkdownControls))));
 
         Visual groupContent = contentItems.Count == 1
             ? contentItems[0]
-            : new VStack(contentItems.ToArray()).Spacing(1);
+            : new VStack(contentItems.ToArray()).Spacing(GetContentStackSpacing(contentItems));
 
         var group = new Group(headerText, groupContent)
             .TopRightText(copyButton)
@@ -353,6 +385,24 @@ internal static class ChatTimelineVisualFactory
             CopyState = copyState,
         };
     }
+
+    private static int GetContentStackSpacing(IReadOnlyList<Visual> contentItems)
+    {
+        if (contentItems.Count > 1 && contentItems.Skip(1).All(static item => item is Collapsible))
+        {
+            return 0;
+        }
+
+        return 1;
+    }
+
+    private static Visual CreateCollapsibleHeader(ChatCollapsibleMarkdownSection section)
+        => section.HeaderVisualFactory?.Invoke() ?? new Markup(AnsiMarkup.Escape(section.Header.Trim()))
+        {
+            Wrap = false,
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Start,
+        };
 
     internal static string BuildCopyMarkdown(string markdown, IReadOnlyList<ChatCollapsibleMarkdownSection>? collapsibleSections = null)
     {

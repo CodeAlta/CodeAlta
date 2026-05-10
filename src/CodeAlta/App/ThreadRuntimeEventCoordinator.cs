@@ -312,7 +312,8 @@ internal sealed class ThreadRuntimeEventCoordinator
                     .Select(section => new ChatCollapsibleMarkdownSection(
                         section.Header,
                         section.Markdown,
-                        CreatePluginDetailVisualFactory(projection, section)))
+                        CreatePluginDetailVisualFactory(projection, section),
+                        CreatePluginDetailHeaderVisualFactory(projection, section)))
                     .ToArray(),
                 CreatePluginVisualFactory(projection)),
             "plugin projection");
@@ -334,6 +335,20 @@ internal sealed class ThreadRuntimeEventCoordinator
         => section.VisualFactory is null
             ? null
             : () => section.VisualFactory(new PluginThreadEventVisualContext
+            {
+                EventId = projection.EventId,
+                RenderTarget = projection.RenderTarget,
+                Markdown = section.Markdown,
+                Payload = projection.Payload,
+                DetailHeader = section.Header,
+            });
+
+    private static Func<Visual>? CreatePluginDetailHeaderVisualFactory(
+        PluginTransientEventProjection projection,
+        PluginDerivedThreadEventDetailSection section)
+        => section.HeaderVisualFactory is null
+            ? null
+            : () => section.HeaderVisualFactory(new PluginThreadEventVisualContext
             {
                 EventId = projection.EventId,
                 RenderTarget = projection.RenderTarget,
