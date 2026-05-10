@@ -11,4 +11,10 @@ public sealed class CopilotAgentBackendOptions
     /// Gets or initializes options used to create the underlying <see cref="CopilotClient"/>.
     /// </summary>
     public CopilotClientOptions ClientOptions { get; init; } = new();
+
+    /// <summary>
+    /// Gets or initializes options used when CodeAlta installs the pinned Copilot CLI on demand.
+    /// This is ignored when <see cref="CopilotClientOptions.CliPath"/> or <see cref="CopilotClientOptions.CliUrl"/> is set.
+    /// </summary>
+    public CopilotCliInstallOptions? CliInstallOptions { get; init; }
 }

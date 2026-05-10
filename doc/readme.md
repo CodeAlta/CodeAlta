@@ -54,7 +54,7 @@ Current terminal shell capabilities:
 
 - Chat (global and project thread) operations:
   - Chat screen powered by `PromptEditor` (input) and `DocumentFlow` + `MarkdownControl` (rendered conversation history).
-  - Automatically probes and initializes enabled provider backends. Codex is pinned to the SDK-generated release tag and is downloaded on demand into `~/.alta/cache/bin/codex/<tag>/` when missing. The built-in Copilot backend is temporarily forced disabled until the upstream `GitHub.Copilot.SDK` process cleanup issue is fixed.
+  - Automatically probes and initializes enabled provider backends. Codex is pinned to the SDK-generated release tag and is downloaded on demand into `~/.alta/cache/bin/codex/<tag>/` when missing. Copilot CLI is also downloaded only on demand into `~/.alta/cache/bin/copilot/<version>/<platform>/` when the Copilot backend starts. The built-in Copilot backend is temporarily forced disabled until the upstream `GitHub.Copilot.SDK` process cleanup issue is fixed.
   - Codex backend sessions default to `danger-full-access` (no sandbox) in CodeAlta so prompts can inspect sibling projects outside the current working directory without first switching the session root.
   - Provider, model, and reasoning-effort selectors are shown under the prompt, while the footer now shows a compact provider summary button with enabled-provider and error counts.
   - In a thread tab, `F3` / `F4` jump to previous / next user or assistant messages, while `Ctrl+F3` jumps to the first message and `Ctrl+F4` returns to the bottom of the latest message. The same actions are available as `/msg_prev`, `/msg_next`, `/msg_first`, and `/msg_last`.

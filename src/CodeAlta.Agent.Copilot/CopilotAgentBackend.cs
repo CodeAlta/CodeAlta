@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.Copilot;
 /// <summary>
 /// Copilot implementation of <see cref="IAgentBackend"/>.
 /// </summary>
-public sealed class CopilotAgentBackend : ICopilotAgentBackend
+public sealed partial class CopilotAgentBackend : ICopilotAgentBackend
 {
     private readonly ConcurrentDictionary<string, CopilotAgentSession> _sessions = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
@@ -45,7 +45,16 @@ public sealed class CopilotAgentBackend : ICopilotAgentBackend
             if (_client is not null)
                 return;
 
-            _client = new CopilotClient(_options.ClientOptions.Clone());
+            var clientOptions = _options.ClientOptions.Clone();
+            if (ShouldInstallManagedCli(clientOptions))
+            {
+                var cliInstallation = await CopilotCliInstaller
+                    .EnsureInstalledAsync(_options.CliInstallOptions, cancellationToken)
+                    .ConfigureAwait(false);
+                clientOptions.CliPath = cliInstallation.ExecutablePath;
+            }
+
+            _client = new CopilotClient(clientOptions);
             await _client.StartAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -171,6 +180,12 @@ public sealed class CopilotAgentBackend : ICopilotAgentBackend
         {
             _sessions.TryRemove(sessionId, out _);
         }
+    }
+
+    private static bool ShouldInstallManagedCli(CopilotClientOptions clientOptions)
+    {
+        return string.IsNullOrWhiteSpace(clientOptions.CliPath) &&
+               string.IsNullOrWhiteSpace(clientOptions.CliUrl);
     }
 
     private async Task<CopilotAgentSession> RegisterSessionAsync(

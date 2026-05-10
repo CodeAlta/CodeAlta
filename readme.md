@@ -31,7 +31,7 @@ An agentic AI coding CLI assistant developed in .NET.
 - Use the `Show Logs` button in the navigator footer to open an in-app log viewer that replays diagnostic output from startup, supports Ctrl+F search, wraps by default, and can clear the retained session log buffer (`CodeAlta`)
 - A temporary `AlwaysQueue` checkbox in the prompt bar lets you enqueue prompts on an idle selected thread to exercise the waiting-list UI without sending immediately (`CodeAlta`)
 - Idle started threads can be compacted manually from the footer bar or with `F11`, using the thread's current provider/model/reasoning configuration; reopening an existing thread now re-resumes a dead provider session before compacting, and the timeline surfaces explicit manual compaction notices instead of dropping back to a generic busy state (`CodeAlta`)
-- Codex is now pinned to the SDK-generated release tag and auto-installed under `~/.alta/cache/bin/codex/<tag>/`, so CodeAlta no longer depends on a user-managed `codex` binary on `PATH`
+- Codex is pinned to the SDK-generated release tag and auto-installed under `~/.alta/cache/bin/codex/<tag>/`; Copilot CLI is likewise downloaded on demand under `~/.alta/cache/bin/copilot/<version>/<platform>/` when the Copilot backend starts, so CodeAlta no longer needs to ship those large binaries
 - Codex backend sessions default to no sandbox in CodeAlta, so prompts can inspect sibling projects outside the current working directory without requiring the session cwd to be moved first
 - CodeAlta writes rolling diagnostic logs under `~/.alta/logs/` for chat/provider troubleshooting
 - `CodeAlta --test` runs the real terminal app for a short smoke-test window and exits automatically after 10 seconds by default
