@@ -10,8 +10,6 @@ namespace CodeAlta.Views;
 
 internal sealed class ThreadStatusLineView
 {
-    private Markup? _statusIconVisual;
-
     public ThreadStatusLineView(
         CodeAltaShellViewModel shellViewModel,
         State<float> thinkingAnimationPhase01,
@@ -23,15 +21,17 @@ internal sealed class ThreadStatusLineView
         var statusSpinner = new Spinner().Style(SpinnerStyles.Dots);
         statusSpinner.IsActive(() => shellViewModel.StatusBusy);
         statusSpinner.IsVisible(() => shellViewModel.StatusBusy);
+        var statusIcon = new Markup(() => shellViewModel.StatusIconMarkup)
+        {
+            Wrap = false,
+        };
+        statusIcon.IsVisible(() => !shellViewModel.StatusBusy);
 
         var statusPrefix = new Center(
-            new ComputedVisual(
-                () => shellViewModel.StatusBusy
-                    ? statusSpinner
-                    : _statusIconVisual ??= new Markup(() => shellViewModel.StatusIconMarkup)
-                    {
-                        Wrap = false,
-                    }))
+            new HStack([statusSpinner, statusIcon])
+            {
+                Spacing = 0,
+            })
         {
             MinWidth = 2,
             MaxWidth = 2,

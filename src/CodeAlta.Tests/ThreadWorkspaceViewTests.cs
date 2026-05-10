@@ -96,7 +96,11 @@ public sealed class ThreadWorkspaceViewTests
         var topStack = Assert.IsInstanceOfType<VStack>(bottomPanel.Top);
         var statusLine = Assert.IsInstanceOfType<StatusBar>(topStack.Children[2]);
         var leftStatus = Assert.IsInstanceOfType<HStack>(statusLine.LeftText);
+        var statusPrefix = Assert.IsInstanceOfType<Center>(leftStatus.Children[0]);
+        var statusPrefixContent = Assert.IsInstanceOfType<HStack>(statusPrefix.Content);
 
+        Assert.IsInstanceOfType<Spinner>(statusPrefixContent.Children[0]);
+        Assert.IsInstanceOfType<Markup>(statusPrefixContent.Children[1]);
         Assert.IsInstanceOfType<TextBlock>(leftStatus.Children[1]);
         Assert.IsInstanceOfType<TextBlock>(statusLine.RightText);
     }
