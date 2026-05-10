@@ -230,6 +230,36 @@ public sealed class CodeAltaProviderDocument
     public string? ApiUrl { get; set; }
 
     /// <summary>
+    /// Gets or sets the GitHub Enterprise URL or domain for the GitHub Copilot direct provider.
+    /// </summary>
+    [JsonPropertyName("github_enterprise_url")]
+    public string? GitHubEnterpriseUrl { get; set; }
+
+    /// <summary>
+    /// Gets or sets the environment variable containing a GitHub OAuth token for the GitHub Copilot direct provider.
+    /// </summary>
+    [JsonPropertyName("github_token_env")]
+    public string? GitHubTokenEnv { get; set; }
+
+    /// <summary>
+    /// Gets or sets the environment variable containing a pre-exchanged Copilot API token for the GitHub Copilot direct provider.
+    /// </summary>
+    [JsonPropertyName("copilot_token_env")]
+    public string? CopilotTokenEnv { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether Copilot model policies may be enabled on demand by the GitHub Copilot direct provider.
+    /// </summary>
+    [JsonPropertyName("enable_model_policies")]
+    public bool? EnableModelPolicies { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether preview Copilot models should be included by the GitHub Copilot direct provider.
+    /// </summary>
+    [JsonPropertyName("include_preview_models")]
+    public bool? IncludePreviewModels { get; set; }
+
+    /// <summary>
     /// Gets or sets the Copilot CLI executable path for the Copilot provider.
     /// </summary>
     [JsonPropertyName("cli_path")]

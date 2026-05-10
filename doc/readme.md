@@ -179,11 +179,12 @@ Additional local providers can target raw provider SDKs such as:
 - `OpenAI Responses`
 - `OpenAI Chat`
 - `Codex (ChatGPT subscription)` experimental Responses access
+- `GitHub Copilot Direct` experimental local-runtime HTTP access
 - `Anthropic`
 - `Google GenAI`
 - `Vertex AI`
 
-These providers are configured from `~/.alta/config.toml` under `providers.<provider-key>`. Each entry represents one provider registration and uses a single canonical `type` field such as `openai-chat`, `openai-responses`, `openai-codex-subscription`, `anthropic`, `google-genai`, or `vertex-ai`. OpenAI-compatible and Anthropic-compatible endpoints may set `api_url`; Vertex uses `project` and `location` instead. Each provider can optionally map to a models.dev provider id and override individual model limits so context usage stays consistent even when the upstream SDK does not expose context-window metadata.
+These providers are configured from `~/.alta/config.toml` under `providers.<provider-key>`. Each entry represents one provider registration and uses a single canonical `type` field such as `openai-chat`, `openai-responses`, `openai-codex-subscription`, `github-copilot-direct`, `anthropic`, `google-genai`, or `vertex-ai`. OpenAI-compatible and Anthropic-compatible endpoints may set `api_url`; Vertex uses `project` and `location` instead. Each provider can optionally map to a models.dev provider id and override individual model limits so context usage stays consistent even when the upstream SDK does not expose context-window metadata.
 
 The preferred workflow is now the in-app model providers dialog (`Ctrl+G Ctrl+M`), which edits the same file. The dialog:
 
@@ -254,6 +255,22 @@ reasoning_effort = "high"
 # response_transport = "http"
 experimental = true
 
+[providers.github_copilot_direct]
+display_name = "GitHub Copilot Direct"
+type = "github-copilot-direct"
+experimental = true
+# Default: start a GitHub OAuth device flow, cache the GitHub token and exchanged
+# Copilot API token under CodeAlta state, and refresh the Copilot token before expiry.
+auth_source = "github_device_flow"
+model_discovery = "copilot_endpoint_with_static_fallback"
+# Non-interactive alternatives:
+# auth_source = "github_token_env"
+# github_token_env = "GITHUB_COPILOT_GITHUB_TOKEN"
+# auth_source = "copilot_token_env"
+# copilot_token_env = "GITHUB_COPILOT_TOKEN"
+# Optional: enable only after accepting that traces contain prompts/outputs.
+# protocol_trace = true
+
 [providers.minimax]
 display_name = "MiniMax 2.7"
 type = "anthropic"
@@ -295,6 +312,8 @@ The `openai-codex-subscription` provider is experimental and intentionally disti
 - `send_installation_id` defaults to `false`; when explicitly enabled, CodeAlta sends a stable CodeAlta-owned UUID in `client_metadata.x-codex-installation-id`.
 
 Supported Codex subscription auth sources are `codealta_oauth`, `codex_auth_import`, and `codex_auth_file_readonly`. `codex_auth_import` is a one-time read-only copy from Codex's `auth.json` into CodeAlta state; `codex_auth_file_readonly` is intended for development/test scenarios and never writes Codex-owned files.
+
+The `github-copilot-direct` provider is experimental and intentionally distinct from the reserved native `[providers.copilot]` backend. It requires a non-reserved provider key plus `experimental = true`, fetches Copilot `/models`, filters disabled/unsupported models, and dispatches turns per model to Copilot `/responses`, `/chat/completions`, or `/v1/messages`. Supported auth sources are `github_device_flow`, `github_token_env`, and `copilot_token_env`; device flow and GitHub-token auth exchange a GitHub OAuth token through `https://api.github.com/copilot_internal/v2/token` (or the configured Enterprise domain) and never log bearer tokens. `github_enterprise_url`, `model_discovery`, `enable_model_policies`, and `include_preview_models` provide Copilot-specific controls.
 
 CodeAlta also applies known provider defaults through a small defaults catalog before config overrides are applied. For example, MiniMax Chat registrations automatically disable the `developer` message role and merge developer instructions into the system prompt instead. DeepSeek Chat registrations replay assistant reasoning through `reasoning_content` so thinking-mode tool calls can continue across tool-result turns. An explicit `profile` section in `config.toml` can still override those defaults, including `reasoning_input_field_name` for OpenAI-compatible providers that require a different assistant reasoning replay field.
 

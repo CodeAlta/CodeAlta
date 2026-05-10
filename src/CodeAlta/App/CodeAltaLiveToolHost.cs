@@ -203,5 +203,6 @@ internal sealed class CodeAltaLiveToolHost : IAsyncDisposable
     private static bool SupportsHostInjectedTools(string? providerType)
         => string.Equals(providerType, "openai-chat", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(providerType, "openai-responses", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(providerType, "openai-codex-subscription", StringComparison.OrdinalIgnoreCase);
+           string.Equals(providerType, "openai-codex-subscription", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(providerType, "github-copilot-direct", StringComparison.OrdinalIgnoreCase);
 }

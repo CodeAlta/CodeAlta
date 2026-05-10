@@ -23,6 +23,7 @@ internal sealed class ModelProvidersDialog
         new("openai-chat", "OpenAI Chat"),
         new("openai-responses", "OpenAI Responses"),
         new("openai-codex-subscription", "Codex (ChatGPT subscription)"),
+        new("github-copilot-direct", "GitHub Copilot Direct"),
         new("anthropic", "Anthropic"),
         new("google-genai", "Google GenAI"),
         new("vertex-ai", "Vertex AI"),
@@ -485,7 +486,7 @@ internal sealed class ModelProvidersDialog
         AddTextRow(form, ref row, "Provider Key", CreateKeyField(item), CreateSpacer());
         AddSelectRow(form, ref row, "Type", CreateTypeSelect(item), CreateSpacer());
         AddCheckRow(form, ref row, "Enabled", CreateEnabledCheckBox(item), CreateSpacer());
-        if (item.ProviderType == "openai-codex-subscription")
+        if (item.ProviderType is "openai-codex-subscription" or "github-copilot-direct")
         {
             AddCheckRow(form, ref row, "Experimental", CreateExperimentalCheckBox(item), CreateSpacer());
         }
@@ -500,7 +501,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "API Key Env", CreateApiKeyEnvField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "github-copilot-direct" or "anthropic" or "google-genai" or "vertex-ai")
         {
             AddTextRow(form, ref row, "API URL", CreateApiUrlField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiUrl));
         }
@@ -517,7 +518,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "Location", CreateVertexLocationField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "github-copilot-direct" or "anthropic" or "google-genai" or "vertex-ai")
         {
             AddTextRow(form, ref row, "Models.dev Id", CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox("Default", bindings.UseDefaultModelsDevProviderId));
             AddTextRow(form, ref row, "Single Model Id", CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox("Default", bindings.UseDefaultSingleModelId));
@@ -529,6 +530,11 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "Account/Workspace Id", CreateDefaultTextField(bindings.AccountId, () => item.UseDefaultAccountId), CreateDefaultCheckBox("Default", bindings.UseDefaultAccountId));
             AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
             AddTextRow(form, ref row, "Response Transport", CreateDefaultTextField(bindings.ResponseTransport, () => item.UseDefaultResponseTransport), CreateDefaultCheckBox("Default", bindings.UseDefaultResponseTransport));
+        }
+        else if (item.ProviderType == "github-copilot-direct")
+        {
+            AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
+            AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
         }
 
         var advancedNotice = new Markup("[dim]Advanced provider TOML sections such as profile, compaction, extra_body, and model_overrides are preserved unchanged when you save from this dialog.[/]")

@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
+using CodeAlta.Agent.CopilotDirect;
 using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.LocalRuntime.Compaction;
@@ -100,6 +101,8 @@ internal static class RawApiBackendRegistrar
                 return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
             case "openai-codex-subscription":
                 return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createBackend);
+            case "github-copilot-direct":
+                return TryCreateCopilotDirectProvider(definition, stateRootPath, out descriptor, out createBackend);
             case "anthropic":
                 return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
             case "google-genai":
@@ -295,6 +298,82 @@ internal static class RawApiBackendRegistrar
         createBackend = () => new OpenAIResponsesAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.CodexSubscription.AuthSource}");
+        return true;
+    }
+
+    private static bool TryCreateCopilotDirectProvider(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        out AgentBackendDescriptor descriptor,
+        out Func<IAgentBackend> createBackend)
+    {
+        if (definition.Experimental != true)
+        {
+            throw new InvalidOperationException(
+                $"Provider '{definition.ProviderKey}' requires experimental = true for type 'github-copilot-direct'.");
+        }
+
+        var authSource = NormalizeText(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;
+        var githubTokenEnv = NormalizeText(definition.GitHubTokenEnv);
+        var copilotTokenEnv = NormalizeText(definition.CopilotTokenEnv);
+        if (authSource == CopilotDirectAuthSources.GitHubTokenEnvironment &&
+            (githubTokenEnv is null || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(githubTokenEnv))))
+        {
+            LogInfo(
+                $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-github-token-env");
+            descriptor = null!;
+            createBackend = null!;
+            return false;
+        }
+
+        if (authSource == CopilotDirectAuthSources.CopilotTokenEnvironment &&
+            (copilotTokenEnv is null || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(copilotTokenEnv))))
+        {
+            LogInfo(
+                $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-copilot-token-env");
+            descriptor = null!;
+            createBackend = null!;
+            return false;
+        }
+
+        var backendId = new AgentBackendId(definition.ProviderKey);
+        var displayName = ResolveProviderDisplayName(definition);
+        var baseUri = ParseUri(definition.ApiUrl);
+        var providerOptions = new CopilotDirectProviderOptions
+        {
+            ProviderKey = definition.ProviderKey,
+            DisplayName = displayName,
+            BaseUri = baseUri,
+            IsDefault = true,
+            Profile = CreateCopilotDirectProfile(definition.Profile),
+            Compaction = CreateCompactionSettings(definition.Compaction),
+            Auth = new CopilotDirectAuthOptions
+            {
+                AuthSource = authSource,
+                EnterpriseDomain = NormalizeDomain(definition.GitHubEnterpriseUrl),
+                GitHubTokenEnvironmentVariable = githubTokenEnv,
+                CopilotTokenEnvironmentVariable = copilotTokenEnv,
+            },
+            ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? CopilotDirectModelDiscoveryModes.EndpointWithStaticFallback,
+            EnableModelPolicies = definition.EnableModelPolicies == true,
+            IncludePreviewModels = definition.IncludePreviewModels == true,
+            SingleModelId = NormalizeText(definition.SingleModelId),
+            ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+            ProtocolTraceEnabled = definition.ProtocolTrace == true,
+        };
+
+        var options = new CopilotDirectAgentBackendOptions
+        {
+            BackendIdOverride = backendId,
+            DisplayNameOverride = displayName,
+            StateRootPath = stateRootPath,
+            Providers = { providerOptions },
+        };
+
+        descriptor = new AgentBackendDescriptor(backendId, displayName);
+        createBackend = () => new CopilotDirectAgentBackend(options);
+        LogInfo(
+            $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.Auth.AuthSource} modelDiscovery={providerOptions.ModelDiscovery}");
         return true;
     }
 
@@ -548,6 +627,22 @@ internal static class RawApiBackendRegistrar
         return document is null ? profile : ApplyProfileOverrides(profile, document);
     }
 
+    private static LocalAgentProviderProfile CreateCopilotDirectProfile(CodeAltaProviderProfileDocument? document)
+    {
+        var profile = new LocalAgentProviderProfile
+        {
+            SupportsDeveloperRole = true,
+            SupportsStore = false,
+            SupportsReasoningEffort = true,
+            StreamsUsage = true,
+            MaxTokensFieldName = "max_completion_tokens",
+            ReasoningFieldNames = ["reasoning_text", "reasoning_content", "reasoning"],
+            ReasoningInputFieldName = "reasoning_opaque",
+        };
+
+        return document is null ? profile : ApplyProfileOverrides(profile, document);
+    }
+
     private static LocalAgentProviderProfile? CreateAnthropicProfile(CodeAltaProviderProfileDocument? document)
     {
         if (document is null)
@@ -623,6 +718,24 @@ internal static class RawApiBackendRegistrar
 
     private static string? NormalizeText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeDomain(string? value)
+    {
+        var normalized = NormalizeText(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (!normalized.Contains("://", StringComparison.Ordinal))
+        {
+            normalized = "https://" + normalized;
+        }
+
+        return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host)
+            ? uri.Host
+            : null;
+    }
 
     private static string ResolveModelsDevProviderId(
         string? configuredProviderId,

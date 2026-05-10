@@ -205,11 +205,12 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.Location = UseDefaultLocation ? null : NormalizeText(Location);
         definition.ModelsDevProviderId = UseDefaultModelsDevProviderId ? null : NormalizeText(ModelsDevProviderId);
         definition.SingleModelId = UseDefaultSingleModelId ? null : NormalizeText(SingleModelId);
-        definition.AuthSource = ProviderType == "openai-codex-subscription" && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
+        var usesSubscriptionStyleFields = ProviderType is "openai-codex-subscription" or "github-copilot-direct";
+        definition.AuthSource = usesSubscriptionStyleFields && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
         definition.AccountId = ProviderType == "openai-codex-subscription" && !UseDefaultAccountId ? NormalizeText(AccountId) : null;
-        definition.ModelDiscovery = ProviderType == "openai-codex-subscription" && !UseDefaultModelDiscovery ? NormalizeText(ModelDiscovery) : null;
+        definition.ModelDiscovery = usesSubscriptionStyleFields && !UseDefaultModelDiscovery ? NormalizeText(ModelDiscovery) : null;
         definition.ResponseTransport = ProviderType == "openai-codex-subscription" && !UseDefaultResponseTransport ? NormalizeText(ResponseTransport) : null;
-        definition.Experimental = ProviderType == "openai-codex-subscription" ? Experimental : null;
+        definition.Experimental = usesSubscriptionStyleFields ? Experimental : null;
         return definition;
     }
 
@@ -281,6 +282,11 @@ internal sealed partial class ModelProviderEditorItemViewModel
             ApiKey = definition.ApiKey,
             ApiKeyEnv = definition.ApiKeyEnv,
             ApiUrl = definition.ApiUrl,
+            GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
+            GitHubTokenEnv = definition.GitHubTokenEnv,
+            CopilotTokenEnv = definition.CopilotTokenEnv,
+            EnableModelPolicies = definition.EnableModelPolicies,
+            IncludePreviewModels = definition.IncludePreviewModels,
             CliPath = definition.CliPath,
             NpmRegistry = definition.NpmRegistry,
             ProtocolTrace = definition.ProtocolTrace,

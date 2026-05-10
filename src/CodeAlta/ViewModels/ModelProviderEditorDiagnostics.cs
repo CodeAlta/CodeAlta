@@ -70,6 +70,15 @@ internal static class ModelProviderEditorDiagnostics
                     : "Enable the experimental opt-in before saving this ChatGPT/Codex subscription provider."));
         }
 
+        if (item.ProviderType == "github-copilot-direct" && item.Enabled)
+        {
+            entries.Add(new ModelProviderDiagnosticEntry(
+                item.Experimental ? ValidationSeverity.Warning : ValidationSeverity.Error,
+                item.Experimental
+                    ? "Experimental GitHub Copilot direct access uses Copilot HTTP endpoints directly and may be affected by account or organization policy."
+                    : "Enable the experimental opt-in before saving this GitHub Copilot direct provider."));
+        }
+
         if (ShouldShowCustomApiUrlGuidance(item))
         {
             entries.Add(new ModelProviderDiagnosticEntry(
