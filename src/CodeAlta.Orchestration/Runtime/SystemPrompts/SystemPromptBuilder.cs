@@ -505,6 +505,11 @@ public sealed class SystemPromptBuilder
             lines.Add($"- Project root: {projectRoot}");
         }
 
+        if (!string.IsNullOrWhiteSpace(request.Thread.ParentThreadId))
+        {
+            lines.Add($"- Parent thread: {request.Thread.ParentThreadId}");
+        }
+
         lines.Add($"- Thread kind: {request.Thread.Kind.ToString().ToLowerInvariant()}");
         return string.Join(Environment.NewLine, lines);
     }

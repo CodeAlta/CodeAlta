@@ -396,6 +396,10 @@ alta session request <thread-id> (--message <text> | --stdin) [--reply-requested
 
 These commands are wrappers over `session send` or `session queue` that add CodeAlta attribution metadata. They are useful when one agent needs to communicate with another without pretending to be the user. `--reply-requested` is metadata for the target session; the command still returns after delivery/queueing and does not wait for a reply.
 
+For same-scope parent/child sessions, explicit `alta session message` calls are not required for routine child-to-parent completion reporting. When a child session has a durable `parentThreadId`, the runtime automatically forwards the child's last visible assistant message for each completed turn to the parent as a peer-agent notification. The parent delivery path is fail-soft: if the parent has an active run, CodeAlta sends the notification as steering input; otherwise, or if steering is unavailable/races with idle, CodeAlta persists it as a queued prompt so child completion reporting does not fail the child turn.
+
+Child-session prompts include concise injected guidance that the final assistant reply is forwarded automatically. A child that wants to report progress or intermediate results before the final turn result can include one or more visible `<notify-parent>update text</notify-parent>` blocks in an assistant reply. CodeAlta forwards those marked blocks as peer-agent progress notifications and strips the marker block from the later automatic final-result notification.
+
 The current implementation records prompt-like operation provenance in `WorkThreadLocalState.PromptProvenance` for normal sends, steering, inter-agent message/request wrappers, and queued prompts. Queue records share the queue item id as their prompt provenance id so restart-time timeline reconstruction can correlate prompt attribution with drain state.
 
 All inter-agent messages must be rendered to the target session with a visible attribution header similar to:
@@ -1012,6 +1016,7 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 
 - [x] Implement `session message` and `session request` wrappers.
 - [x] Persist/render peer-agent attribution metadata and prompt provenance.
+- [x] Automatically forward child-session final assistant replies and marked progress updates to parent sessions through steer-or-queue peer-agent delivery.
 - [x] Add enforced coordinator/project visibility policy checks.
 - [x] Add sidebar/timeline projection updates for agent-created same-project child sessions and agent-created prompts.
 - [x] Add tests ensuring peer-agent messages cannot be rendered as user/developer/system instructions.
@@ -1033,7 +1038,7 @@ Before considering the feature complete:
 - add sidebar/timeline projection tests for parent/child sessions and agent-created prompts;
 - document unsupported backend behavior explicitly.
 
-Current completion evidence: user-facing examples are documented in `readme.md`, `doc/readme.md#alta-live-tool`, `doc/skills.md#live-tool-commands`, and `doc/plugins.md#alta-live-tool-integration`; coordinator/skill instruction templates advertise `alta` only when it is available; regression coverage lives in `AltaLiveToolTests`, `ThreadRuntimeEventCoordinatorTests`, `ArchitectureGuardrailTests`, and catalog/plugin infrastructure tests for the command registry, JSONL transcripts, invalid usage diagnostics (unknown options, bad values, missing arguments, mutually exclusive flags, plugin validation), visibility (global coordinator access, same-project access, scoped project catalog/skill access, scoped plugin alta invocation, coordinator reply path, denied cross-project access), capability discovery, unsupported backend diagnostics, provenance, explicit parent validation, queue draining, plugin contributions/invocation, and timeline/sidebar projections.
+Current completion evidence: user-facing examples are documented in `readme.md`, `doc/readme.md#alta-live-tool`, `doc/skills.md#live-tool-commands`, and `doc/plugins.md#alta-live-tool-integration`; coordinator/skill instruction templates advertise `alta` only when it is available; regression coverage lives in `AltaLiveToolTests`, `ThreadRuntimeEventCoordinatorTests`, `ArchitectureGuardrailTests`, and catalog/plugin infrastructure tests for the command registry, JSONL transcripts, invalid usage diagnostics (unknown options, bad values, missing arguments, mutually exclusive flags, plugin validation), visibility (global coordinator access, same-project access, scoped project catalog/skill access, scoped plugin alta invocation, coordinator reply path, denied cross-project access), capability discovery, unsupported backend diagnostics, provenance, explicit parent validation, automatic child-to-parent final/progress notifications, queue draining, plugin contributions/invocation, and timeline/sidebar projections.
 
 ## 13. Resolved v1 decisions
 

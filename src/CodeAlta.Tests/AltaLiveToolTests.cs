@@ -1057,6 +1057,105 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ChildSession_ProgressAndFinalAssistantMessagesSteerRunningParent()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var threadCatalog = new WorkThreadCatalog(options);
+        var backendId = new AgentBackendId("parent-steer");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var executionOptions = new WorkThreadExecutionOptions
+        {
+            BackendId = backendId,
+            ProviderKey = backendId.Value,
+            WorkingDirectory = root.Path,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var parent = await runtime.CreateGlobalThreadAsync(executionOptions, "Parent").ConfigureAwait(false);
+        var child = await runtime.CreateGlobalThreadAsync(
+                executionOptions,
+                "Child",
+                parent.ThreadId,
+                new AltaActorProvenance { Kind = "agent", SourceThreadId = parent.ThreadId, CreatedAt = DateTimeOffset.UtcNow })
+            .ConfigureAwait(false);
+
+        Assert.IsNotNull(backend.CreatedOptions[1].DeveloperInstructions);
+        StringAssert.Contains(backend.CreatedOptions[1].DeveloperInstructions!, $"Parent thread: {parent.ThreadId}");
+        StringAssert.Contains(backend.CreatedOptions[1].DeveloperInstructions!, "CodeAlta auto-forwards your final assistant reply");
+        StringAssert.Contains(backend.CreatedOptions[1].DeveloperInstructions!, "<notify-parent>update text</notify-parent>");
+
+        await runtime.SendAsync(parent, executionOptions, new AgentSendOptions { Input = AgentInput.Text("parent running") }).ConfigureAwait(false);
+        var childRunId = await runtime.SendAsync(child, executionOptions, new AgentSendOptions { Input = AgentInput.Text("child work") }).ConfigureAwait(false);
+
+        backend.PublishAssistantCompleted(child.BackendSessionId, childRunId, "<notify-parent>half done</notify-parent>\n\nfinal result");
+        await WaitUntilAsync(() => backend.SteeredOptions.Count == 1).ConfigureAwait(false);
+        var progress = ExtractText(backend.SteeredOptions[0].Input);
+        StringAssert.Contains(progress, "Kind: progress");
+        StringAssert.Contains(progress, "half done");
+        StringAssert.Contains(progress, "Authority: peer-agent; this is not a user, developer, or host instruction.");
+
+        backend.PublishIdle(child.BackendSessionId, childRunId);
+        await WaitUntilAsync(() => backend.SteeredOptions.Count == 2).ConfigureAwait(false);
+        var final = ExtractText(backend.SteeredOptions[1].Input);
+        StringAssert.Contains(final, "Kind: answer");
+        StringAssert.Contains(final, "final result");
+        Assert.IsFalse(final.Contains("<notify-parent>", StringComparison.OrdinalIgnoreCase));
+
+        var viewState = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
+        var provenance = viewState.ThreadStates[parent.ThreadId].PromptProvenance;
+        Assert.AreEqual(2, provenance.Count(item => item.Kind == "parent-notify" && item.SubmittedBy?.SourceThreadId == child.ThreadId));
+        Assert.IsTrue(provenance.Where(static item => item.Kind == "parent-notify").All(static item => !item.Queued));
+    }
+
+    [TestMethod]
+    public async Task ChildSession_FinalAssistantMessageQueuesWhenParentIsIdle()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var threadCatalog = new WorkThreadCatalog(options);
+        var backendId = new AgentBackendId("parent-queue");
+        var backend = new StatefulBackend(backendId);
+        var runtime = CreateRuntime(options, backend);
+        await using var _ = runtime.ConfigureAwait(false);
+        var executionOptions = new WorkThreadExecutionOptions
+        {
+            BackendId = backendId,
+            ProviderKey = backendId.Value,
+            WorkingDirectory = root.Path,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var parent = await runtime.CreateGlobalThreadAsync(executionOptions, "Idle parent").ConfigureAwait(false);
+        var child = await runtime.CreateGlobalThreadAsync(
+                executionOptions,
+                "Child",
+                parent.ThreadId,
+                new AltaActorProvenance { Kind = "agent", SourceThreadId = parent.ThreadId, CreatedAt = DateTimeOffset.UtcNow })
+            .ConfigureAwait(false);
+        var childRunId = await runtime.SendAsync(child, executionOptions, new AgentSendOptions { Input = AgentInput.Text("child work") }).ConfigureAwait(false);
+
+        backend.PublishAssistantCompleted(child.BackendSessionId, childRunId, "queued final result");
+        backend.PublishIdle(child.BackendSessionId, childRunId);
+
+        await WaitUntilAsync(() =>
+        {
+            var viewState = threadCatalog.LoadViewStateAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            return viewState.ThreadStates.TryGetValue(parent.ThreadId, out var state) && state.QueuedPrompts.Count == 1;
+        }).ConfigureAwait(false);
+        Assert.AreEqual(0, backend.SteeredOptions.Count);
+        var queuedState = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
+        var queued = queuedState.ThreadStates[parent.ThreadId].QueuedPrompts.Single();
+        Assert.AreEqual("parent-notify", queued.Kind);
+        Assert.AreEqual("queued", queued.State);
+        StringAssert.Contains(queued.Prompt, "Kind: answer");
+        StringAssert.Contains(queued.Prompt, "queued final result");
+        Assert.AreEqual(child.ThreadId, queued.SubmittedBy?.SourceThreadId);
+    }
+
+    [TestMethod]
     public async Task SessionSend_QueueIfBusyPersistsQueuedPromptAndReportsQueuedCount()
     {
         using var root = TempDirectory.Create();
@@ -1777,6 +1876,23 @@ public sealed class AltaLiveToolTests
         public void PublishIdle(string sessionId, AgentRunId runId)
         {
             var @event = new AgentSessionUpdateEvent(backendId, sessionId, DateTimeOffset.UtcNow, runId, AgentSessionUpdateKind.Idle, "Idle");
+            foreach (var handler in _subscriptions.TryGetValue(sessionId, out var handlers) ? handlers.ToArray() : [])
+            {
+                handler(@event);
+            }
+        }
+
+        public void PublishAssistantCompleted(string sessionId, AgentRunId runId, string content)
+        {
+            var @event = new AgentContentCompletedEvent(
+                backendId,
+                sessionId,
+                DateTimeOffset.UtcNow,
+                runId,
+                AgentContentKind.Assistant,
+                "assistant-" + Guid.NewGuid().ToString("N"),
+                null,
+                content);
             foreach (var handler in _subscriptions.TryGetValue(sessionId, out var handlers) ? handlers.ToArray() : [])
             {
                 handler(@event);

@@ -1143,6 +1143,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
         var workingDirectory = project?.ProjectPath ?? GetGlobalRootOrCwd(context);
         string? createdThreadId = null;
+        var createdBy = CreateProvenance(context);
         var executionOptions = BuildExecutionOptions(
             context,
             modelSelection.Selection!,
@@ -1154,16 +1155,16 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         WorkThreadDescriptor thread;
         if (project is null)
         {
-            thread = await runtime.CreateGlobalThreadAsync(executionOptions, options.Title, context.CancellationToken).ConfigureAwait(false);
+            thread = await runtime.CreateGlobalThreadAsync(executionOptions, options.Title, parentResolution.ParentThreadId, createdBy, context.CancellationToken).ConfigureAwait(false);
         }
         else
         {
-            thread = await runtime.CreateProjectThreadAsync(project, executionOptions, options.Title, context.CancellationToken).ConfigureAwait(false);
+            thread = await runtime.CreateProjectThreadAsync(project, executionOptions, options.Title, parentResolution.ParentThreadId, createdBy, context.CancellationToken).ConfigureAwait(false);
         }
 
         createdThreadId = thread.ThreadId;
         thread.ParentThreadId = parentResolution.ParentThreadId;
-        thread.CreatedBy = CreateProvenance(context);
+        thread.CreatedBy = createdBy;
         await runtime.PersistThreadLocalStateAsync(thread, context.CancellationToken).ConfigureAwait(false);
         await PersistThreadPreferenceAsync(context, thread.ThreadId, modelSelection.Selection!).ConfigureAwait(false);
 

@@ -19,6 +19,10 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         @"```codealta_schedule\s*\n.*?```",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
 
+    private static readonly Regex ParentNotificationBlockRegex = new(
+        @"<notify-parent(?:\s+kind=""(?<kind>[^""]+)"")?\s*>(?<body>.*?)</notify-parent>",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
+
     private readonly AgentHub _agentHub;
     private readonly ProjectCatalog _projectCatalog;
     private readonly WorkThreadCatalog _threadCatalog;
@@ -319,6 +323,17 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         WorkThreadExecutionOptions options,
         string? title,
         CancellationToken cancellationToken = default)
+        => await CreateGlobalThreadAsync(options, title, parentThreadId: null, createdBy: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new global thread session with optional durable lineage and returns its descriptor.
+    /// </summary>
+    public async Task<WorkThreadDescriptor> CreateGlobalThreadAsync(
+        WorkThreadExecutionOptions options,
+        string? title,
+        string? parentThreadId,
+        AltaActorProvenance? createdBy,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -333,6 +348,8 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             WorkingDirectory = options.WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(title) ? "Global Thread" : title.Trim(),
             Status = WorkThreadStatus.Draft,
+            ParentThreadId = NormalizeOptionalText(parentThreadId),
+            CreatedBy = createdBy,
             CreatedAt = now,
             UpdatedAt = now,
             LastActiveAt = now,
@@ -351,6 +368,18 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         WorkThreadExecutionOptions options,
         string? title,
         CancellationToken cancellationToken = default)
+        => await CreateProjectThreadAsync(project, options, title, parentThreadId: null, createdBy: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new project thread session with optional durable lineage and returns its descriptor.
+    /// </summary>
+    public async Task<WorkThreadDescriptor> CreateProjectThreadAsync(
+        ProjectDescriptor project,
+        WorkThreadExecutionOptions options,
+        string? title,
+        string? parentThreadId,
+        AltaActorProvenance? createdBy,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
@@ -367,6 +396,8 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             WorkingDirectory = options.WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(title) ? project.DisplayName : title.Trim(),
             Status = WorkThreadStatus.Draft,
+            ParentThreadId = NormalizeOptionalText(parentThreadId),
+            CreatedBy = createdBy,
             CreatedAt = now,
             UpdatedAt = now,
             LastActiveAt = now,
@@ -410,6 +441,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         var project = await ResolveProjectAsync(thread, cancellationToken).ConfigureAwait(false);
         var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(thread, project);
         var developerInstructions = UsesProviderManagedSkills(options.BackendId) ? null : instructions.DeveloperInstructions;
+        var additionalDeveloperInstructions = AppendPromptPart(BuildParentNotificationGuidance(thread), options.AdditionalDeveloperInstructions);
         var tools = CreateSessionTools(options, project);
 
         ThreadSessionEntry? previousEntry = null;
@@ -447,7 +479,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             WorkingDirectory = options.WorkingDirectory,
             ProjectRoots = options.ProjectRoots,
             SystemMessage = AppendPromptPart(instructions.SystemMessage, options.AdditionalSystemMessage),
-            DeveloperInstructions = AppendPromptPart(developerInstructions, options.AdditionalDeveloperInstructions),
+            DeveloperInstructions = AppendPromptPart(developerInstructions, additionalDeveloperInstructions),
             Tools = tools,
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
@@ -485,10 +517,13 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             .ConfigureAwait(false);
 
         entry = new ThreadSessionEntry(
+            thread.ThreadId,
             agentId,
             options.BackendId,
             options.ProviderKey ?? thread.ResolvedProviderKey,
             backendSessionId,
+            thread.ProjectRef,
+            thread.ParentThreadId,
             options.WorkingDirectory,
             options.Model,
             options.ReasoningEffort,
@@ -788,6 +823,11 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
     private static bool UsesProviderManagedSkills(AgentBackendId backendId)
         => backendId == AgentBackendIds.Codex || backendId == AgentBackendIds.Copilot;
+
+    private static string? BuildParentNotificationGuidance(WorkThreadDescriptor thread)
+        => string.IsNullOrWhiteSpace(thread.ParentThreadId)
+            ? null
+            : $"Parent thread: `{thread.ParentThreadId}`. CodeAlta auto-forwards your final assistant reply. For progress/intermediate parent updates, include `<notify-parent>update text</notify-parent>` in an assistant reply.";
 
     private static string? AppendPromptPart(string? baseText, string? additionalText)
     {
@@ -1106,12 +1146,20 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     {
         try
         {
-            await actor.PostAsync(_ =>
+            var parentNotifications = await actor.QueryAsync(_ =>
                 {
-                    projector.Project(@event);
-                    return ValueTask.CompletedTask;
+                    var sanitized = projector.Project(@event);
+                    var notifications = _entries.TryGetValue(threadId, out var entry)
+                        ? entry.TakeParentNotifications(sanitized)
+                        : Array.Empty<ParentNotificationWork>();
+                    return ValueTask.FromResult(notifications);
                 })
                 .ConfigureAwait(false);
+
+            foreach (var notification in parentNotifications)
+            {
+                await DeliverParentNotificationAsync(notification).ConfigureAwait(false);
+            }
 
             if (IsQueueDrainTrigger(@event))
             {
@@ -1329,6 +1377,258 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             LastError = item.LastError,
         };
 
+    private static IReadOnlyList<ParentNotificationPayload> ExtractParentNotificationBlocks(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        var matches = ParentNotificationBlockRegex.Matches(content);
+        if (matches.Count == 0)
+        {
+            return [];
+        }
+
+        var results = new List<ParentNotificationPayload>(matches.Count);
+        foreach (Match match in matches)
+        {
+            var body = match.Groups["body"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                continue;
+            }
+
+            results.Add(new ParentNotificationPayload(NormalizeParentNotificationKind(match.Groups["kind"].Value), body));
+        }
+
+        return results;
+    }
+
+    private static string StripParentNotificationBlocks(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        return ParentNotificationBlockRegex.Replace(content, string.Empty).Trim();
+    }
+
+    private static string NormalizeParentNotificationKind(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "note" or "progress" or "result" or "handoff" => normalized,
+            _ => "progress",
+        };
+    }
+
+    private async Task DeliverParentNotificationAsync(ParentNotificationWork notification)
+    {
+        try
+        {
+            var parent = await TryResolveThreadForParentDeliveryAsync(notification.ParentThreadId, CancellationToken.None).ConfigureAwait(false);
+            if (parent is null)
+            {
+                PublishParentNotificationWarning(notification.SourceThreadId, $"Parent session '{notification.ParentThreadId}' was not found for automatic child-session notification.");
+                return;
+            }
+
+            var prompt = BuildParentPeerAgentMessage(parent, notification);
+            var submittedBy = new AltaActorProvenance
+            {
+                Kind = "agent",
+                SourceThreadId = notification.SourceThreadId,
+                SourceBackendSessionId = notification.SourceBackendSessionId,
+                SourceProjectId = notification.SourceProjectId,
+                SourceAgentId = notification.SourceAgentId,
+                CorrelationId = notification.CorrelationId,
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+
+            if (await HasActiveRunAsync(parent, CancellationToken.None).ConfigureAwait(false))
+            {
+                try
+                {
+                    var runId = await SteerAsync(
+                            parent,
+                            CreateParentDeliveryExecutionOptions(parent),
+                            new AgentSteerOptions { Input = AgentInput.Text(prompt) },
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, "parent-notify", prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    PublishParentNotificationWarning(notification.SourceThreadId, $"Parent session '{notification.ParentThreadId}' could not be steered; queued the child-session notification instead. {ex.Message}");
+                }
+            }
+
+            await QueuePromptAsync(parent, prompt, "parent-notify", submittedBy, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || _disposed)
+        {
+            PublishParentNotificationWarning(notification.SourceThreadId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
+        }
+    }
+
+    private async Task<WorkThreadDescriptor?> TryResolveThreadForParentDeliveryAsync(string threadId, CancellationToken cancellationToken)
+    {
+        WorkThreadDescriptor? thread = null;
+        try
+        {
+            var threads = await ListRecoverableThreadsAsync(cancellationToken).ConfigureAwait(false);
+            thread = threads.FirstOrDefault(candidate => string.Equals(candidate.ThreadId, threadId, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+        }
+
+        if (thread is null && _entries.TryGetValue(threadId, out var entry))
+        {
+            var now = DateTimeOffset.UtcNow;
+            thread = new WorkThreadDescriptor
+            {
+                ThreadId = threadId,
+                Kind = WorkThreadKind.ProjectThread,
+                BackendId = entry.BackendId.Value,
+                ProviderKey = entry.ProviderKey,
+                BackendSessionId = entry.BackendSessionId,
+                ProjectRef = entry.ProjectId,
+                ParentThreadId = entry.ParentThreadId,
+                WorkingDirectory = entry.WorkingDirectory,
+                Title = threadId,
+                Status = WorkThreadStatus.Active,
+                CreatedAt = now,
+                UpdatedAt = now,
+                LastActiveAt = now,
+                StartedAt = now,
+            };
+        }
+
+        if (thread is not null)
+        {
+            await ApplyLocalThreadStateAsync(thread, cancellationToken).ConfigureAwait(false);
+        }
+
+        return thread;
+    }
+
+    private async Task ApplyLocalThreadStateAsync(WorkThreadDescriptor thread, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var viewState = await _threadCatalog.LoadViewStateAsync(cancellationToken).ConfigureAwait(false);
+            if (!viewState.ThreadStates.TryGetValue(thread.ThreadId, out var localState))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(localState.ParentThreadId))
+            {
+                thread.ParentThreadId = localState.ParentThreadId;
+            }
+
+            if (localState.CreatedBy is not null)
+            {
+                thread.CreatedBy = localState.CreatedBy;
+            }
+
+            if (localState.Archived)
+            {
+                thread.Status = WorkThreadStatus.Archived;
+            }
+
+            if (localState.MessageCount is not null)
+            {
+                thread.MessageCount = localState.MessageCount;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+    }
+
+    private static WorkThreadExecutionOptions CreateParentDeliveryExecutionOptions(WorkThreadDescriptor parent)
+        => new()
+        {
+            BackendId = new AgentBackendId(parent.BackendId),
+            ProviderKey = parent.ResolvedProviderKey,
+            WorkingDirectory = parent.WorkingDirectory,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            OnUserInputRequest = static (_, _) => Task.FromResult(new AgentUserInputResponse(new Dictionary<string, string>(StringComparer.Ordinal))),
+        };
+
+    private async Task PersistPromptProvenanceAsync(
+        WorkThreadDescriptor thread,
+        string? runId,
+        bool queued,
+        string kind,
+        string prompt,
+        AltaActorProvenance submittedBy,
+        CancellationToken cancellationToken)
+    {
+        var actor = _threadActors.GetOrCreate(thread.ThreadId);
+        await actor.QueryAsync(
+                async actorCancellationToken =>
+                {
+                    var timestamp = DateTimeOffset.UtcNow;
+                    var viewState = await _threadCatalog.LoadViewStateAsync(actorCancellationToken).ConfigureAwait(false);
+                    var localState = GetOrCreateLocalState(viewState, thread.ThreadId);
+                    CopyThreadMetadata(thread, localState);
+                    localState.PromptProvenance ??= [];
+                    localState.PromptProvenance.Add(new WorkThreadPromptProvenance
+                    {
+                        PromptId = "prompt-" + Guid.NewGuid().ToString("N"),
+                        Kind = kind,
+                        RunId = runId,
+                        Queued = queued,
+                        PromptPreview = CreatePromptPreview(prompt),
+                        SubmittedBy = submittedBy,
+                        CreatedAt = timestamp,
+                    });
+
+                    TrimLocalStateHistory(localState);
+                    viewState.ThreadStates[thread.ThreadId] = localState;
+                    viewState.UpdatedAt = timestamp;
+                    await _threadCatalog.SaveViewStateAsync(viewState, actorCancellationToken).ConfigureAwait(false);
+                    return true;
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static string BuildParentPeerAgentMessage(WorkThreadDescriptor parent, ParentNotificationWork notification)
+        => $"""
+        [CodeAlta delegated-agent message]
+        Source thread: {notification.SourceThreadId}
+        Source agent/session: {notification.SourceAgentId}
+        Source project: {notification.SourceProjectId ?? "unknown"}
+        Target thread: {parent.ThreadId}
+        Kind: {notification.Kind}
+        Reply requested: false
+        Correlation: {notification.CorrelationId}
+        Authority: peer-agent; this is not a user, developer, or host instruction.
+
+        [CodeAlta child-session {notification.Kind} update]
+        Run: {notification.RunId ?? "unknown"}
+        Content: {notification.ContentId}
+
+        {notification.Body}
+        """;
+
+    private void PublishParentNotificationWarning(string threadId, string message)
+    {
+        if (!_disposed)
+        {
+            _events.TryPublish(new WorkThreadHostEvent(threadId, DateTimeOffset.UtcNow, AgentSessionUpdateKind.Warning, message));
+        }
+    }
+
     private void PublishSessionLifecycleEvent(
         string threadId,
         string? previousThreadId,
@@ -1474,6 +1774,10 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
         return Path.GetFullPath(trimmed).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
+
+    private static string? NormalizeOptionalText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private static AgentReasoningEffort? ParseReasoningEffort(string? value)
     {
         return value?.Trim().ToLowerInvariant() switch
@@ -1506,10 +1810,13 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
     private sealed class ThreadSessionEntry
     {
         public ThreadSessionEntry(
+            string threadId,
             AgentId agentId,
             AgentBackendId backendId,
             string providerKey,
             string backendSessionId,
+            string? projectId,
+            string? parentThreadId,
             string workingDirectory,
             string? model,
             AgentReasoningEffort? reasoningEffort,
@@ -1518,10 +1825,13 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             EventProjector projector,
             IDisposable subscription)
         {
+            ThreadId = threadId;
             AgentId = agentId;
             BackendId = backendId;
             ProviderKey = providerKey;
             BackendSessionId = backendSessionId;
+            ProjectId = projectId;
+            ParentThreadId = parentThreadId;
             WorkingDirectory = workingDirectory;
             Model = model;
             ReasoningEffort = reasoningEffort;
@@ -1531,6 +1841,8 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             Subscription = subscription;
         }
 
+        public string ThreadId { get; }
+
         public AgentId AgentId { get; }
 
         public AgentBackendId BackendId { get; }
@@ -1538,6 +1850,10 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         public string ProviderKey { get; }
 
         public string BackendSessionId { get; }
+
+        public string? ProjectId { get; }
+
+        public string? ParentThreadId { get; }
 
         public string WorkingDirectory { get; }
 
@@ -1560,6 +1876,12 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         public DateTimeOffset LastTerminalEventAt { get; private set; } = DateTimeOffset.MinValue;
 
         public bool QueueDrainInProgress { get; private set; }
+
+        private ParentFinalNotificationCandidate? _lastParentFinalCandidate;
+
+        private readonly HashSet<string> _sentParentProgressKeys = new(StringComparer.Ordinal);
+
+        private readonly HashSet<string> _sentParentFinalKeys = new(StringComparer.Ordinal);
 
         public bool HasActiveRun => ActiveRunId is not null;
 
@@ -1594,6 +1916,73 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
                 IsTerminated = true;
             }
         }
+
+        public IReadOnlyList<ParentNotificationWork> TakeParentNotifications(AgentEvent? @event)
+        {
+            if (string.IsNullOrWhiteSpace(ParentThreadId) || @event is null)
+            {
+                return [];
+            }
+
+            if (@event is AgentContentCompletedEvent { Kind: AgentContentKind.Assistant } completed)
+            {
+                var notifications = new List<ParentNotificationWork>();
+                var strippedContent = StripParentNotificationBlocks(completed.Content);
+                _lastParentFinalCandidate = new ParentFinalNotificationCandidate(
+                    completed.RunId?.Value,
+                    completed.ContentId,
+                    strippedContent);
+
+                var explicitUpdates = ExtractParentNotificationBlocks(completed.Content);
+                for (var index = 0; index < explicitUpdates.Count; index++)
+                {
+                    var update = explicitUpdates[index];
+                    var key = string.Concat(completed.ContentId, ":", index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    if (_sentParentProgressKeys.Add(key))
+                    {
+                        notifications.Add(CreateParentNotification(update.Kind, update.Body, completed.RunId?.Value, completed.ContentId));
+                    }
+                }
+
+                return notifications;
+            }
+
+            if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } idle && _lastParentFinalCandidate is { } candidate)
+            {
+                if (idle.RunId is not null && candidate.RunId is not null && !string.Equals(idle.RunId?.Value, candidate.RunId, StringComparison.Ordinal))
+                {
+                    return [];
+                }
+
+                if (string.IsNullOrWhiteSpace(candidate.Content))
+                {
+                    return [];
+                }
+
+                var key = candidate.RunId ?? candidate.ContentId;
+                if (!_sentParentFinalKeys.Add(key))
+                {
+                    return [];
+                }
+
+                return [CreateParentNotification("answer", candidate.Content, candidate.RunId, candidate.ContentId)];
+            }
+
+            return [];
+        }
+
+        private ParentNotificationWork CreateParentNotification(string kind, string body, string? runId, string contentId)
+            => new(
+                SourceThreadId: ThreadId,
+                SourceBackendSessionId: BackendSessionId,
+                SourceProjectId: ProjectId,
+                SourceAgentId: AgentId.ToString(),
+                ParentThreadId: ParentThreadId!,
+                Kind: kind,
+                Body: body,
+                RunId: runId,
+                ContentId: contentId,
+                CorrelationId: "auto-parent-" + Guid.NewGuid().ToString("N"));
 
         private static bool ShouldTrackRunId(AgentEvent @event)
         {
@@ -1633,6 +2022,22 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
 
     private sealed record QueuedPromptDrainWork(AgentId AgentId, WorkThreadQueuedPrompt Prompt);
 
+    private sealed record ParentNotificationPayload(string Kind, string Body);
+
+    private sealed record ParentFinalNotificationCandidate(string? RunId, string ContentId, string Content);
+
+    private sealed record ParentNotificationWork(
+        string SourceThreadId,
+        string SourceBackendSessionId,
+        string? SourceProjectId,
+        string SourceAgentId,
+        string ParentThreadId,
+        string Kind,
+        string Body,
+        string? RunId,
+        string ContentId,
+        string CorrelationId);
+
     private sealed class EventProjector
     {
         private readonly string _threadId;
@@ -1651,14 +2056,17 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             _observeThreadSessionEvent = observeThreadSessionEvent;
         }
 
-        public void Project(AgentEvent @event)
+        public AgentEvent? Project(AgentEvent @event)
         {
             _observeThreadSessionEvent(@event);
 
             if (TrySanitize(@event, out var sanitized) && sanitized is not null)
             {
                 _publish(new WorkThreadAgentEvent(_threadId, sanitized));
+                return sanitized;
             }
+
+            return null;
         }
 
         public IReadOnlyList<AgentEvent> ProjectHistory(IReadOnlyList<AgentEvent> history)
