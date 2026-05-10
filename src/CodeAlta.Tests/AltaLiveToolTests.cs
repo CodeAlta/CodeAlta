@@ -255,6 +255,22 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ModelResolve_ModelRefHasPrecedenceOverLongOptionOverrides()
+    {
+        var result = await CreateDispatcher().InvokeAsync(
+                ["model", "resolve", "--model-ref", "codex:gpt-main@low", "--provider", "other", "--model", "override", "--reasoning", "high"],
+                caller: AltaCallerIdentity.Cli)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
+        var selection = ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.model.selection");
+        Assert.AreEqual("codex", selection.GetProperty("providerKey").GetString());
+        Assert.AreEqual("gpt-main", selection.GetProperty("modelId").GetString());
+        Assert.AreEqual("low", selection.GetProperty("reasoningEffort").GetString());
+        Assert.AreEqual("codex:gpt-main@low", selection.GetProperty("modelRef").GetString());
+    }
+
+    [TestMethod]
     public async Task Dispatcher_MissingRuntimeService_ReturnsServiceUnavailableDiagnostic()
     {
         var result = await CreateDispatcher().InvokeAsync(["session", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);

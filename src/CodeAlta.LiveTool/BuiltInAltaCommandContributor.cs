@@ -1766,7 +1766,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 return ModelResolutionResult.Fail(UsageError(context, "usage.invalidModelRef", error!, "alta model resolve"));
             }
 
-            return ModelResolutionResult.Success(ApplyModelOverrides(parsed, request));
+            return ModelResolutionResult.Success(parsed);
         }
 
         AltaModelSelection? inherited = null;
@@ -1809,20 +1809,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             ModelRef = AltaModelRef.Format(providerKey, modelId, reasoning),
         };
         return ModelResolutionResult.Success(selection);
-    }
-
-    private static AltaModelSelection ApplyModelOverrides(AltaModelSelection parsed, AltaModelSelectionOptions request)
-    {
-        var providerKey = FirstNonEmpty(request.ProviderKey, parsed.ProviderKey)!;
-        var modelId = FirstNonEmpty(request.ModelId, parsed.ModelId);
-        var reasoning = request.ReasoningEffort ?? parsed.ReasoningEffort;
-        return new AltaModelSelection
-        {
-            ProviderKey = providerKey,
-            ModelId = modelId,
-            ReasoningEffort = reasoning,
-            ModelRef = AltaModelRef.Format(providerKey, modelId, reasoning),
-        };
     }
 
     private static async Task<ThreadModelSelectionResult> ResolveThreadModelSelectionAsync(AltaCommandContext context, string threadId)

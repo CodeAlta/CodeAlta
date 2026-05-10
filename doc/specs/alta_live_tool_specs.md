@@ -236,6 +236,8 @@ Resolution precedence for session creation and model-sensitive commands:
 5. the host's current/default provider preference for external CLI calls without a source session;
 6. the provider/backend default.
 
+The implemented resolver treats `--model-ref` as an atomic highest-precedence selection: when it is present, long-form provider/model/reasoning options do not override its parsed values. Use long-form options with `--same-model-as` or without `--model-ref` when field-level overrides are needed.
+
 This means an agent creating another session normally inherits its own provider/model/reasoning without specifying any flags. To use the same model as another session but lower reasoning, it can use `--same-model-as <thread-id> --reasoning low`, for example:
 
 ```text
