@@ -25,6 +25,7 @@ internal sealed class ThreadCommandCoordinator
     private readonly ThreadCommandContext _commandContext;
     private readonly ThreadPromptQueueCoordinator _queueCoordinator;
     private readonly PromptComposerViewModel _promptComposerViewModel;
+    private readonly Func<bool> _getAlwaysEnqueue;
     private readonly ThreadExecutionOptionsFactory _executionOptionsFactory;
     private readonly ThreadPromptDispatchCoordinator _promptDispatchCoordinator;
     private readonly PluginHostBridge? _pluginHostBridge;
@@ -41,7 +42,8 @@ internal sealed class ThreadCommandCoordinator
         IProjectFileSearchService? projectFileSearchService = null,
         PluginHostBridge? pluginHostBridge = null,
         IServiceProvider? altaServices = null,
-        IReadOnlySet<string>? altaToolBackendIds = null)
+        IReadOnlySet<string>? altaToolBackendIds = null,
+        Func<bool>? getAlwaysEnqueue = null)
         : this(
             runtimeService,
             catalogOptions,
@@ -57,7 +59,8 @@ internal sealed class ThreadCommandCoordinator
             projectFileSearchService,
             pluginHostBridge,
             altaServices,
-            altaToolBackendIds)
+            altaToolBackendIds,
+            getAlwaysEnqueue)
     {
     }
 
@@ -74,7 +77,8 @@ internal sealed class ThreadCommandCoordinator
         IProjectFileSearchService? projectFileSearchService = null,
         PluginHostBridge? pluginHostBridge = null,
         IServiceProvider? altaServices = null,
-        IReadOnlySet<string>? altaToolBackendIds = null)
+        IReadOnlySet<string>? altaToolBackendIds = null,
+        Func<bool>? getAlwaysEnqueue = null)
     {
         ArgumentNullException.ThrowIfNull(runtimeService);
         ArgumentNullException.ThrowIfNull(backendDescriptors);
@@ -93,6 +97,7 @@ internal sealed class ThreadCommandCoordinator
         _commandContext = commandContext;
         _queueCoordinator = queueCoordinator;
         _promptComposerViewModel = promptComposerViewModel;
+        _getAlwaysEnqueue = getAlwaysEnqueue ?? (() => _promptComposerViewModel.AlwaysEnqueue);
         _pluginHostBridge = pluginHostBridge;
         var permissionRequests = new ThreadPermissionRequestCoordinator(threadSelection, commandContext);
         var userInputRequests = new ThreadUserInputRequestCoordinator(threadSelection, commandContext);
@@ -178,7 +183,7 @@ internal sealed class ThreadCommandCoordinator
         tab.Timeline.ReplaceTruncatedHistoryLoadButton();
 
         var alwaysEnqueue = hadExistingThread &&
-            UiDispatch.Invoke(_selectorState.GetUiDispatcher(), () => _promptComposerViewModel.AlwaysEnqueue);
+            UiDispatch.Invoke(_selectorState.GetUiDispatcher(), _getAlwaysEnqueue);
         if (!steer && (tab.StatusBusy || alwaysEnqueue))
         {
             _queueCoordinator.EnqueuePrompt(tab, prompt);

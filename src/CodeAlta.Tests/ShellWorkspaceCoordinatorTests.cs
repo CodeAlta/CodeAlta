@@ -53,6 +53,7 @@ public sealed class ShellWorkspaceCoordinatorTests
                 static _ => { },
                 static _ => { },
                 static () => { },
+                static () => { },
                 static () => { }),
             uiDispatcher);
         var workspace = new ShellWorkspaceCoordinator(
@@ -185,6 +186,7 @@ public sealed class ShellWorkspaceCoordinatorTests
                 static _ => { },
                 static _ => { },
                 static () => { },
+                static () => { },
                 static () => { }),
             new InlineUiDispatcher());
         var sessionUsage = new SessionUsageViewModel();
@@ -221,6 +223,7 @@ public sealed class ShellWorkspaceCoordinatorTests
                 static () => { },
                 static _ => { },
                 static _ => { },
+                static () => { },
                 static () => { },
                 static () => { }),
             uiDispatcher);

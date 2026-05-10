@@ -29,6 +29,8 @@ internal interface IShellWorkspaceProjectionPort
 
     void ApplyPromptAvailabilityProjection();
 
+    void SyncActivePromptPanelProjection();
+
     void SyncThreadTabControl();
 }
 
@@ -65,6 +67,7 @@ internal sealed class DelegatingShellWorkspaceProjectionPort : IShellWorkspacePr
     private readonly Action<OpenThreadState> _refreshModelProviderSelectorsForThread;
     private readonly Action<ThreadSessionState?> _syncPromptDraftText;
     private readonly Action _updatePromptAvailabilityUi;
+    private readonly Action _syncActivePromptPanelProjection;
     private readonly Action _syncThreadTabControl;
 
     public DelegatingShellWorkspaceProjectionPort(
@@ -76,6 +79,7 @@ internal sealed class DelegatingShellWorkspaceProjectionPort : IShellWorkspacePr
         Action<OpenThreadState> refreshModelProviderSelectorsForThread,
         Action<ThreadSessionState?> syncPromptDraftText,
         Action updatePromptAvailabilityUi,
+        Action syncActivePromptPanelProjection,
         Action syncThreadTabControl)
     {
         ArgumentNullException.ThrowIfNull(ensureSelectionDefaults);
@@ -86,6 +90,7 @@ internal sealed class DelegatingShellWorkspaceProjectionPort : IShellWorkspacePr
         ArgumentNullException.ThrowIfNull(refreshModelProviderSelectorsForThread);
         ArgumentNullException.ThrowIfNull(syncPromptDraftText);
         ArgumentNullException.ThrowIfNull(updatePromptAvailabilityUi);
+        ArgumentNullException.ThrowIfNull(syncActivePromptPanelProjection);
         ArgumentNullException.ThrowIfNull(syncThreadTabControl);
 
         _ensureSelectionDefaults = ensureSelectionDefaults;
@@ -96,6 +101,7 @@ internal sealed class DelegatingShellWorkspaceProjectionPort : IShellWorkspacePr
         _refreshModelProviderSelectorsForThread = refreshModelProviderSelectorsForThread;
         _syncPromptDraftText = syncPromptDraftText;
         _updatePromptAvailabilityUi = updatePromptAvailabilityUi;
+        _syncActivePromptPanelProjection = syncActivePromptPanelProjection;
         _syncThreadTabControl = syncThreadTabControl;
     }
 
@@ -109,22 +115,35 @@ internal sealed class DelegatingShellWorkspaceProjectionPort : IShellWorkspacePr
         => _syncSidebarSelectionToCurrentState();
 
     public void ApplyQueuedPromptProjection()
-        => _refreshQueuedPromptList();
+    {
+        _refreshQueuedPromptList();
+        _syncActivePromptPanelProjection();
+    }
 
     public void RefreshModelProviderSelectorsForDraftScope()
-        => _refreshModelProviderSelectorsForDraftScope();
+    {
+        _refreshModelProviderSelectorsForDraftScope();
+        _syncActivePromptPanelProjection();
+    }
 
     public void RefreshModelProviderSelectorsForThread(OpenThreadState tab)
     {
         ArgumentNullException.ThrowIfNull(tab);
         _refreshModelProviderSelectorsForThread(tab);
+        _syncActivePromptPanelProjection();
     }
 
     public void SyncPromptDraftText(ThreadSessionState? session)
         => _syncPromptDraftText(session);
 
     public void ApplyPromptAvailabilityProjection()
-        => _updatePromptAvailabilityUi();
+    {
+        _updatePromptAvailabilityUi();
+        _syncActivePromptPanelProjection();
+    }
+
+    public void SyncActivePromptPanelProjection()
+        => _syncActivePromptPanelProjection();
 
     public void SyncThreadTabControl()
         => _syncThreadTabControl();

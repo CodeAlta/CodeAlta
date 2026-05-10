@@ -66,6 +66,9 @@ internal sealed class ShellWorkspaceContext
     public void ApplyPromptAvailabilityProjection()
         => _projection.ApplyPromptAvailabilityProjection();
 
+    public void SyncActivePromptPanelProjection()
+        => _projection.SyncActivePromptPanelProjection();
+
     public void SyncThreadTabControl()
         => _projection.SyncThreadTabControl();
 

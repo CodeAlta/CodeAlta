@@ -256,6 +256,7 @@ internal sealed class CodeAltaFrontendComposition
                 frontend.RefreshModelProviderSelectorsForThread,
                 frontend.SyncPromptText,
                 frontend.ApplyPromptAvailabilityProjection,
+                frontend.SyncActivePromptPanelProjection,
                 frontend.SyncThreadTabControl),
             uiDispatcher);
         var workspaceCoordinator = new ShellWorkspaceCoordinator(
@@ -341,7 +342,8 @@ internal sealed class CodeAltaFrontendComposition
             projectFileSearchService,
             pluginHostBridge,
             altaServices,
-            altaToolBackendIds);
+            altaToolBackendIds,
+            frontend.GetAlwaysEnqueue);
 
         return new CodeAltaFrontendComposition
         {

@@ -422,39 +422,28 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private string? ResolvePromptRoot()
         => PromptReferenceProjectRootResolver.Resolve(GetSelectedThread(), GetProjectById, GetSelectedProject, _catalogOptions.GlobalRoot);
 
-    internal void RefreshModelProviderSelectorsForDraftScope(AgentBackendId? preferredBackendId = null)
-        => _modelProviderSelectorCoordinator.RefreshForDraftScope(preferredBackendId);
-
-    internal void RefreshModelProviderSelectorsForThread(OpenThreadState tab)
-        => _modelProviderSelectorCoordinator.RefreshForThread(tab);
-    internal void SyncModelProviderSelectorItems()
-        => _threadWorkspaceView?.SyncModelProviderSelectorItems(_threadWorkspaceViewModel);
-    private void OnModelProviderSelectionChanged(int newIndex)
-        => ObserveUiTask(() => _modelProviderSelectorCoordinator.OnModelProviderSelectionChangedAsync(newIndex), "change the selected provider");
-    private void OnModelSelectionChanged(int newIndex)
-        => _modelProviderSelectorCoordinator.OnModelSelectionChanged(newIndex);
-    private void OnReasoningSelectionChanged(int newIndex)
-        => _modelProviderSelectorCoordinator.OnReasoningSelectionChanged(newIndex);
-    private AgentBackendId GetPreferredModelProviderId()
-        => _modelProviderSelectorCoordinator.GetPreferredModelProviderId();
-    internal bool IsModelProviderReady(AgentBackendId backendId)
-        => _modelProviderSelectorCoordinator.IsModelProviderReady(backendId);
+    internal void RefreshModelProviderSelectorsForDraftScope(AgentBackendId? preferredBackendId = null) => _modelProviderSelectorCoordinator.RefreshForDraftScope(preferredBackendId);
+    internal void RefreshModelProviderSelectorsForThread(OpenThreadState tab) => _modelProviderSelectorCoordinator.RefreshForThread(tab);
+    internal void SyncModelProviderSelectorItems() => _threadWorkspaceView?.SyncModelProviderSelectorItems(_threadWorkspaceViewModel);
+    private void OnModelProviderSelectionChanged(int newIndex) => ObserveUiTask(() => _modelProviderSelectorCoordinator.OnModelProviderSelectionChangedAsync(newIndex), "change the selected provider");
+    private void OnModelSelectionChanged(int newIndex) => _modelProviderSelectorCoordinator.OnModelSelectionChanged(newIndex);
+    private void OnReasoningSelectionChanged(int newIndex) => _modelProviderSelectorCoordinator.OnReasoningSelectionChanged(newIndex);
+    private AgentBackendId GetPreferredModelProviderId() => _modelProviderSelectorCoordinator.GetPreferredModelProviderId();
+    internal bool IsModelProviderReady(AgentBackendId backendId) => _modelProviderSelectorCoordinator.IsModelProviderReady(backendId);
 
     private bool TryGetPromptUnavailableStatus(out string message, out StatusTone tone)
         => _modelProviderSelectorCoordinator.TryGetPromptUnavailableStatus(out message, out tone);
     internal bool TrySetPromptUnavailableStatus() { if (!TryGetPromptUnavailableStatus(out var message, out var tone)) return false; SetStatus(message, tone: tone); return true; }
-    internal void ApplyPromptAvailabilityProjection()
-        => _modelProviderSelectorCoordinator.ApplyPromptAvailabilityProjection();
+    internal void ApplyPromptAvailabilityProjection() => _modelProviderSelectorCoordinator.ApplyPromptAvailabilityProjection();
 
     internal void ApplyQueuedPromptProjection() => _threadPromptQueueCoordinator.RefreshSelectedThreadQueueUi();
 
-    internal void UpdatePromptImageAttachmentsUi() { _promptComposerViewModel.PromptImageAttachmentVersion++; RefreshSidebarProjection(); }
-    internal void SyncThreadTabControl()
-        => _threadTabStripCoordinator.SyncControl();
-    private void OnThreadTabControlSelectionChanged(int selectedIndex)
-        => _threadTabStripCoordinator.OnSelectionChanged(selectedIndex);
-    internal void ResetPendingThreadTabSelection()
-        => _threadTabStripCoordinator.ResetPendingSelection();
+    internal void UpdatePromptImageAttachmentsUi() { _promptComposerViewModel.PromptImageAttachmentVersion++; _threadWorkspaceView?.RefreshActivePromptImages(); RefreshSidebarProjection(); }
+    internal void SyncActivePromptPanelProjection() => _threadWorkspaceView?.SyncActivePromptPanelProjection();
+    internal bool GetAlwaysEnqueue() => _threadWorkspaceView?.AlwaysEnqueue ?? _promptComposerViewModel.AlwaysEnqueue;
+    internal void SyncThreadTabControl() => _threadTabStripCoordinator.SyncControl();
+    private void OnThreadTabControlSelectionChanged(int selectedIndex) => _threadTabStripCoordinator.OnSelectionChanged(selectedIndex);
+    internal void ResetPendingThreadTabSelection() => _threadTabStripCoordinator.ResetPendingSelection();
 
     private CodeAltaShellView EnsureShellView()
     {
@@ -462,10 +451,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
         var projectFileSearch = _ownedServices?.ProjectFileSearchService ?? NullProjectFileSearchService.Instance;
         Func<string?> promptRoot = ResolvePromptRoot;
-        var getPromptComposerSession = PromptComposerSessionBindingFactory.Create(
-            _promptDraftUiCoordinator,
-            new PromptImageCapabilityContext(GetSelectedThread, _threadStateCoordinator.FindOpenThread, GetPreferredModelProviderId, _chatBackendStates),
-            (message, tone) => SetStatus(message, tone: tone));
+        var getPromptComposerSession = PromptComposerSessionBindingFactory.Create(_promptDraftUiCoordinator, new PromptImageCapabilityContext(GetSelectedThread, _threadStateCoordinator.FindOpenThread, GetPreferredModelProviderId, _chatBackendStates), (message, tone) => SetStatus(message, tone: tone));
         var openHelp = () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.ShowHelpAsync(), "show help");
         var showPalette = () => _shellCommandSurfaceCoordinator.ShowCommandPalette();
         var shellSurface = CodeAltaShellViewFactory.CreateSurface(new CodeAltaShellSurfaceOptions
@@ -514,15 +500,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void EnsureSelectionDefaults() => _threadStateCoordinator.EnsureSelectionDefaults();
     internal void SetStatus(string message, bool showSpinner = false, StatusTone tone = StatusTone.Info) => _workspaceCoordinator.SetStatus(message, showSpinner, tone);
     internal void SetProviderSessionLoadStatus(string? message) => _workspaceCoordinator.SetProviderSessionLoadStatus(message);
-    internal void SetThreadStatus(
-        OpenThreadState tab,
-        string message,
-        bool showSpinner = false,
-        StatusTone tone = StatusTone.Info,
-        bool hasCustomStatus = true)
-        => _workspaceCoordinator.SetThreadStatus(tab, message, showSpinner, tone, hasCustomStatus);
-    internal void ClearThreadStatus(OpenThreadState tab)
-        => _workspaceCoordinator.ClearThreadStatus(tab);
+    internal void SetThreadStatus(OpenThreadState tab, string message, bool showSpinner = false, StatusTone tone = StatusTone.Info, bool hasCustomStatus = true) => _workspaceCoordinator.SetThreadStatus(tab, message, showSpinner, tone, hasCustomStatus);
+    internal void ClearThreadStatus(OpenThreadState tab) => _workspaceCoordinator.ClearThreadStatus(tab);
     internal void ApplySessionUsageProjection() => _workspaceCoordinator.ApplySessionUsageProjection();
     internal void ApplyThreadChromeProjection() => _workspaceCoordinator.ApplyThreadChromeProjection();
 

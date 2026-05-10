@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using CodeAlta.Presentation.Chat;
+using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -145,7 +146,10 @@ internal sealed class ThreadPromptPanel
         Visual sendPromptButton,
         Visual expandPromptButton,
         PromptComposerView composer,
-        ModelProviderSelectorView modelProviderSelectorView)
+        ModelProviderSelectorView modelProviderSelectorView,
+        CodeAltaShellViewModel shellViewModel,
+        ThreadWorkspaceViewModel workspaceViewModel,
+        PromptComposerViewModel promptComposerViewModel)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(editor);
@@ -154,6 +158,9 @@ internal sealed class ThreadPromptPanel
         ArgumentNullException.ThrowIfNull(expandPromptButton);
         ArgumentNullException.ThrowIfNull(composer);
         ArgumentNullException.ThrowIfNull(modelProviderSelectorView);
+        ArgumentNullException.ThrowIfNull(shellViewModel);
+        ArgumentNullException.ThrowIfNull(workspaceViewModel);
+        ArgumentNullException.ThrowIfNull(promptComposerViewModel);
 
         Root = root;
         Editor = editor;
@@ -162,6 +169,9 @@ internal sealed class ThreadPromptPanel
         ExpandPromptButton = expandPromptButton;
         Composer = composer;
         ModelProviderSelectorView = modelProviderSelectorView;
+        ShellViewModel = shellViewModel;
+        WorkspaceViewModel = workspaceViewModel;
+        PromptComposerViewModel = promptComposerViewModel;
     }
 
     public Visual Root { get; }
@@ -177,4 +187,10 @@ internal sealed class ThreadPromptPanel
     public PromptComposerView Composer { get; }
 
     public ModelProviderSelectorView ModelProviderSelectorView { get; }
+
+    public CodeAltaShellViewModel ShellViewModel { get; }
+
+    public ThreadWorkspaceViewModel WorkspaceViewModel { get; }
+
+    public PromptComposerViewModel PromptComposerViewModel { get; }
 }

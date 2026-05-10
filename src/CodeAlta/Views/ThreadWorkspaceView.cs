@@ -138,6 +138,8 @@ internal sealed class ThreadWorkspaceView
     public CheckBox AlwaysEnqueueCheckBox
         => ActivePromptPanel.ModelProviderSelectorView.AlwaysEnqueueCheckBox;
 
+    public bool AlwaysEnqueue => ActivePromptPanel.PromptComposerViewModel.AlwaysEnqueue;
+
     public TabControl ThreadTabControl
         => _threadTabHostView.ThreadTabControl;
 
@@ -166,23 +168,38 @@ internal sealed class ThreadWorkspaceView
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
 
-        _ = ActivePromptPanel;
+        SyncActivePromptPanelProjection();
         foreach (var selectorView in _modelProviderSelectorViews)
         {
             selectorView.SyncItems(workspaceViewModel);
         }
     }
 
+    public void SyncActivePromptPanelProjection()
+    {
+        var panel = ActivePromptPanel;
+        CopyShellViewModel(_shellViewModel, panel.ShellViewModel);
+        CopyWorkspaceViewModel(_workspaceViewModel, panel.WorkspaceViewModel);
+        CopyPromptComposerViewModel(_promptComposerViewModel, panel.PromptComposerViewModel, preserveAlwaysEnqueue: true);
+        panel.ModelProviderSelectorView.SyncItems(panel.WorkspaceViewModel);
+    }
+
+    public void RefreshActivePromptImages()
+        => ActivePromptPanel.PromptComposerViewModel.PromptImageAttachmentVersion++;
+
     private ThreadPromptPanel CreatePromptPanel(string tabId, ThreadSessionState? session, PromptImageWorkspaceCallbacks? promptImageCallbacks)
     {
         var promptSession = _getPromptComposerSession(tabId, session);
+        var shellViewModel = CloneShellViewModel(_shellViewModel);
+        var workspaceViewModel = CloneWorkspaceViewModel(_workspaceViewModel);
+        var promptComposerViewModel = ClonePromptComposerViewModel(_promptComposerViewModel);
         var imageStripView = new PromptImageAttachmentStripView(
-            _promptComposerViewModel,
+            promptComposerViewModel,
             promptImageCallbacks ?? promptSession.PromptImageCallbacks,
             () => ThreadPaneLayout?.GetAbsoluteBounds(),
             () => ThreadInput);
         var promptComposerView = new PromptComposerView(
-            _promptComposerViewModel,
+            promptComposerViewModel,
             _commandBindings,
             _projectFileSearchService,
             _getPromptReferenceProjectRoot,
@@ -196,14 +213,14 @@ internal sealed class ThreadWorkspaceView
                 $"{NerdFont.MdInformationOutline}",
                 $"Show information about the selected thread ({ThreadInfoShortcutSequence}).",
                 () => _chromeController.ToggleThreadInfoPopup(threadInfoButton!),
-                button => button.IsEnabled(_workspaceViewModel.Bind.CanShowThreadInfo));
+                button => button.IsEnabled(workspaceViewModel.Bind.CanShowThreadInfo));
         var modelProviderSelectorView = new ModelProviderSelectorView(
-            _workspaceViewModel,
-            _promptComposerViewModel,
+            workspaceViewModel,
+            promptComposerViewModel,
             _modelProviderController);
         _modelProviderSelectorViews.Add(modelProviderSelectorView);
         var providerSummaryButton = new Button(
-            new Markup(() => _workspaceViewModel.ProviderSummaryMarkup)
+            new Markup(() => workspaceViewModel.ProviderSummaryMarkup)
             {
                 Wrap = false,
             })
@@ -216,9 +233,9 @@ internal sealed class ThreadWorkspaceView
             .Tooltip(new TextBlock($"Configure model providers ({ModelProvidersShortcutSequence})."));
 
         var usageIndicator = _chromeController.BuildSessionUsageIndicatorVisual();
-        var statusLine = new ThreadStatusLineView(_shellViewModel, _thinkingAnimationPhase01, _chromeController.BuildPluginThreadStatusVisual).Root;
+        var statusLine = new ThreadStatusLineView(shellViewModel, _thinkingAnimationPhase01, _chromeController.BuildPluginThreadStatusVisual).Root;
         var queuedPromptList = new QueuedPromptStripView(
-            _workspaceViewModel,
+            workspaceViewModel,
             _queuedPromptController).Root;
         var promptImageStrip = imageStripView.Root;
         var selectionRight = new HStack(
@@ -244,7 +261,84 @@ internal sealed class ThreadWorkspaceView
             VerticalAlignment = Align.Stretch,
         };
 
-        return new ThreadPromptPanel(root, promptComposerView.Editor, promptComposerView.EditorView, promptComposerView.SendButton, promptComposerView.ExpandButton, promptComposerView, modelProviderSelectorView);
+        return new ThreadPromptPanel(
+            root,
+            promptComposerView.Editor,
+            promptComposerView.EditorView,
+            promptComposerView.SendButton,
+            promptComposerView.ExpandButton,
+            promptComposerView,
+            modelProviderSelectorView,
+            shellViewModel,
+            workspaceViewModel,
+            promptComposerViewModel);
+    }
+
+    private static CodeAltaShellViewModel CloneShellViewModel(CodeAltaShellViewModel source)
+    {
+        var target = new CodeAltaShellViewModel();
+        CopyShellViewModel(source, target);
+        return target;
+    }
+
+    private static ThreadWorkspaceViewModel CloneWorkspaceViewModel(ThreadWorkspaceViewModel source)
+    {
+        var target = new ThreadWorkspaceViewModel();
+        CopyWorkspaceViewModel(source, target);
+        return target;
+    }
+
+    private static PromptComposerViewModel ClonePromptComposerViewModel(PromptComposerViewModel source)
+    {
+        var target = new PromptComposerViewModel();
+        CopyPromptComposerViewModel(source, target, preserveAlwaysEnqueue: false);
+        return target;
+    }
+
+    private static void CopyShellViewModel(CodeAltaShellViewModel source, CodeAltaShellViewModel target)
+    {
+        target.StatusText = source.StatusText;
+        target.StatusIconMarkup = source.StatusIconMarkup;
+        target.ProviderSessionLoadStatusText = source.ProviderSessionLoadStatusText;
+        target.StatusBusy = source.StatusBusy;
+        target.StatusTone = source.StatusTone;
+        target.IsInitialized = source.IsInitialized;
+    }
+
+    private static void CopyWorkspaceViewModel(ThreadWorkspaceViewModel source, ThreadWorkspaceViewModel target)
+    {
+        target.ModelProviderStatusMarkup = source.ModelProviderStatusMarkup;
+        target.ProviderSummaryMarkup = source.ProviderSummaryMarkup;
+        target.CanSelectModelProvider = source.CanSelectModelProvider;
+        target.CanSelectModel = source.CanSelectModel;
+        target.CanSelectReasoning = source.CanSelectReasoning;
+        target.ModelProviderOptions = source.ModelProviderOptions;
+        target.SelectedModelProviderIndex = source.SelectedModelProviderIndex;
+        target.ModelOptions = source.ModelOptions;
+        target.SelectedModelIndex = source.SelectedModelIndex;
+        target.ReasoningOptions = source.ReasoningOptions;
+        target.SelectedReasoningIndex = source.SelectedReasoningIndex;
+        target.CanShowThreadInfo = source.CanShowThreadInfo;
+        target.SetPromptStripItems(source.PromptStripItems, source.HasQueuedPrompts);
+    }
+
+    private static void CopyPromptComposerViewModel(PromptComposerViewModel source, PromptComposerViewModel target, bool preserveAlwaysEnqueue)
+    {
+        target.Placeholder = source.Placeholder;
+        target.IsEnabled = source.IsEnabled;
+        target.CanSend = source.CanSend;
+        target.CanSteer = source.CanSteer;
+        target.CanAbort = source.CanAbort;
+        target.CanCompact = source.CanCompact;
+        target.CanCloseTab = source.CanCloseTab;
+        target.CanClearQueue = source.CanClearQueue;
+        target.CanAlwaysEnqueue = source.CanAlwaysEnqueue;
+        if (!preserveAlwaysEnqueue)
+        {
+            target.AlwaysEnqueue = source.AlwaysEnqueue;
+        }
+
+        target.PromptImageAttachmentVersion = source.PromptImageAttachmentVersion;
     }
 
     private static bool IsSharedEditorCommand(string commandId)

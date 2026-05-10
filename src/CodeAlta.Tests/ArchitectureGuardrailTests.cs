@@ -664,7 +664,7 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/IModelProviderPreferencePort.cs:DelegatingModelProviderPreferencePort:9",
             "App/IShellSelectionPort.cs:DelegatingShellSelectionPort:6",
-            "App/ShellWorkspacePorts.cs:DelegatingShellWorkspaceProjectionPort:9",
+            "App/ShellWorkspacePorts.cs:DelegatingShellWorkspaceProjectionPort:10",
             "App/ThreadCommandPorts.cs:DelegatingThreadLifecycleCommandPort:4",
             "App/ThreadTabPorts.cs:DelegatingThreadTabLifecyclePort:5",
         };

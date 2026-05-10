@@ -39,6 +39,7 @@ internal sealed class ShellStatusProjectionController
             {
                 _workspaceContext.VerifyBindableAccess();
                 ShellViewModelProjection.ApplyProviderSessionLoadStatus(_shellViewModel, message);
+                _workspaceContext.SyncActivePromptPanelProjection();
             });
     }
 
@@ -56,6 +57,7 @@ internal sealed class ShellStatusProjectionController
                 ShellViewModelProjection.ApplyStatus(
                     _shellViewModel,
                     new ShellStatusSnapshot(message, showSpinner, tone, iconMarkup));
+                _workspaceContext.SyncActivePromptPanelProjection();
             });
     }
 
