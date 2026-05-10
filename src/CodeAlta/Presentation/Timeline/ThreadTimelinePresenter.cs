@@ -505,7 +505,7 @@ internal sealed class ThreadTimelinePresenter
             _uiDispatcher,
             static state =>
             {
-                state.flow.Items.Add(state.entry.Item);
+                AddFlowItemIfAbsent(state.flow, state.entry.Item);
                 return 0;
             },
             (flow: Flow, entry));
@@ -534,7 +534,7 @@ internal sealed class ThreadTimelinePresenter
             _uiDispatcher,
             static state =>
             {
-                state.flow.Items.Add(state.entry.Item);
+                AddFlowItemIfAbsent(state.flow, state.entry.Item);
                 return 0;
             },
             (flow: Flow, entry));
@@ -561,15 +561,23 @@ internal sealed class ThreadTimelinePresenter
 
     public void FlushBufferedHistoryItems()
     {
-        if (_bufferedHistoryItems is not { Count: > 0 } items)
+        if (_bufferedHistoryItems is not { } items)
         {
             return;
         }
 
+        _bufferedHistoryItems = null;
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var itemsToFlush = items.ToArray();
+
         _uiDispatcher.Post(
             () =>
             {
-                Flow.Items.AddRange(items);
+                AddFlowItemsIfAbsent(Flow, itemsToFlush);
             });
     }
 
@@ -804,7 +812,7 @@ internal sealed class ThreadTimelinePresenter
             {
                 _bufferedHistoryItems[index] = newItem;
             }
-            else
+            else if (!ContainsItemByContent(_bufferedHistoryItems, newItem))
             {
                 _bufferedHistoryItems.Add(newItem);
             }
@@ -819,7 +827,7 @@ internal sealed class ThreadTimelinePresenter
             {
                 Flow.Items[index] = newItem;
             }
-            else
+            else if (IndexOfFlowItemByContent(Flow, newItem) < 0)
             {
                 Flow.Items.Add(newItem);
             }
@@ -835,14 +843,37 @@ internal sealed class ThreadTimelinePresenter
 
         if (_bufferedHistoryItems is not null)
         {
+            if (ContainsItemByContent(_bufferedHistoryItems, item))
+            {
+                return;
+            }
+
             _bufferedHistoryItems.Add(item);
             return;
         }
 
         UiDispatch.Post(_uiDispatcher, () =>
         {
-            Flow.Items.Add(item);
+            AddFlowItemIfAbsent(Flow, item);
         });
+    }
+
+    private static void AddFlowItemsIfAbsent(DocumentFlow flow, IReadOnlyList<DocumentFlowItem> items)
+    {
+        for (var index = 0; index < items.Count; index++)
+        {
+            AddFlowItemIfAbsent(flow, items[index]);
+        }
+    }
+
+    private static void AddFlowItemIfAbsent(DocumentFlow flow, DocumentFlowItem item)
+    {
+        if (IndexOfFlowItemByContent(flow, item) >= 0)
+        {
+            return;
+        }
+
+        flow.Items.Add(item);
     }
 
     private static IReadOnlyList<PromptImageAttachmentReference> ExtractUserImageAttachments(System.Text.Json.JsonElement? details)

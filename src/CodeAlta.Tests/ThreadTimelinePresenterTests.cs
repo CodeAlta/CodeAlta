@@ -286,6 +286,33 @@ public sealed class ThreadTimelinePresenterTests
     }
 
     [TestMethod]
+    public void BufferedHistoryFlush_IsIdempotent()
+    {
+        var presenter = CreatePresenter();
+
+        presenter.BeginBufferedHistoryLoad();
+        presenter.AddStatus(DateTimeOffset.UtcNow, "Notice", ChatTimelineTone.Notice, headerOverride: "Notice");
+
+        presenter.FlushBufferedHistoryItems();
+        presenter.FlushBufferedHistoryItems();
+
+        Assert.AreEqual(1, presenter.Flow.Items.Count);
+    }
+
+    [TestMethod]
+    public void BufferedHistoryFlush_CompletesBufferedMode()
+    {
+        var presenter = CreatePresenter();
+
+        presenter.BeginBufferedHistoryLoad();
+        presenter.AddStatus(DateTimeOffset.UtcNow, "First", ChatTimelineTone.Notice, headerOverride: "Notice");
+        presenter.FlushBufferedHistoryItems();
+        presenter.AddStatus(DateTimeOffset.UtcNow, "Second", ChatTimelineTone.Notice, headerOverride: "Notice");
+
+        Assert.AreEqual(2, presenter.Flow.Items.Count);
+    }
+
+    [TestMethod]
     public void RevealTail_EnablesFollowTailMode()
     {
         var presenter = CreatePresenter();
