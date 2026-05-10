@@ -356,7 +356,16 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             LatestSummary = "Global overview and coordination thread.",
         };
 
-        await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            PublishRuntimeFailureEvent(thread, ex);
+            throw;
+        }
+
         return thread;
     }
 
@@ -404,7 +413,16 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
             LatestSummary = $"Project thread for {project.DisplayName}.",
         };
 
-        await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureCoordinatorSessionAsync(thread, options, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            PublishRuntimeFailureEvent(thread, ex);
+            throw;
+        }
+
         return thread;
     }
 
@@ -551,28 +569,36 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sendOptions);
 
-        var agentId = await _threadActors.GetOrCreate(thread.ThreadId).QueryAsync(
-                async actorCancellationToken =>
-                {
-                    var ensuredAgentId = await EnsureCoordinatorSessionCoreAsync(thread, options, actorCancellationToken).ConfigureAwait(false);
-                    if (thread.StartedAt is null)
-                    {
-                        thread.MarkStarted(DateTimeOffset.UtcNow);
-                    }
-
-                    return ensuredAgentId;
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        var runStartedAt = DateTimeOffset.UtcNow;
-        var runId = await _agentHub.RunAsync(agentId, sendOptions, cancellationToken).ConfigureAwait(false);
-        if (await MarkActiveRunIfStillInFlightAsync(thread.ThreadId, runId, runStartedAt, cancellationToken).ConfigureAwait(false))
+        try
         {
-            PublishRunSubmittedEvent(thread.ThreadId, runId, runStartedAt);
-        }
+            var agentId = await _threadActors.GetOrCreate(thread.ThreadId).QueryAsync(
+                    async actorCancellationToken =>
+                    {
+                        var ensuredAgentId = await EnsureCoordinatorSessionCoreAsync(thread, options, actorCancellationToken).ConfigureAwait(false);
+                        if (thread.StartedAt is null)
+                        {
+                            thread.MarkStarted(DateTimeOffset.UtcNow);
+                        }
 
-        return runId;
+                        return ensuredAgentId;
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            var runStartedAt = DateTimeOffset.UtcNow;
+            var runId = await _agentHub.RunAsync(agentId, sendOptions, cancellationToken).ConfigureAwait(false);
+            if (await MarkActiveRunIfStillInFlightAsync(thread.ThreadId, runId, runStartedAt, cancellationToken).ConfigureAwait(false))
+            {
+                PublishRunSubmittedEvent(thread.ThreadId, runId, runStartedAt);
+            }
+
+            return runId;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            PublishRuntimeFailureEvent(thread, ex);
+            throw;
+        }
     }
 
     /// <summary>
@@ -1659,6 +1685,37 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
                     Message = "Runtime run submitted.",
                 }));
         }
+    }
+
+    private void PublishRuntimeFailureEvent(WorkThreadDescriptor thread, Exception exception)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(thread.ThreadId))
+        {
+            return;
+        }
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var message = string.IsNullOrWhiteSpace(exception.Message)
+            ? "Runtime request failed."
+            : exception.Message;
+        var backendId = string.IsNullOrWhiteSpace(thread.BackendId)
+            ? AgentBackendIds.Codex
+            : new AgentBackendId(thread.BackendId);
+        var sessionId = string.IsNullOrWhiteSpace(thread.BackendSessionId)
+            ? thread.ThreadId
+            : thread.BackendSessionId;
+        _events.TryPublish(new WorkThreadAgentEvent(
+            thread.ThreadId,
+            new AgentErrorEvent(backendId, sessionId, timestamp, message, exception)));
+        _events.TryPublish(new WorkThreadLifecycleRuntimeEvent(
+            thread.ThreadId,
+            timestamp,
+            new WorkThreadLifecycleEvent
+            {
+                ThreadId = thread.ThreadId,
+                Kind = WorkThreadLifecycleEventKind.RunFailed,
+                Message = message,
+            }));
     }
 
     private void PublishSessionLifecycleEvent(

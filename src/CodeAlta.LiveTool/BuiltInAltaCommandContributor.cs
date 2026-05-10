@@ -305,7 +305,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         command.Add("project=", "Target project id, slug, or path.", value => options.Project = value);
         command.Add("global", "Create a global coordinator session.", value => options.Global = value is not null);
         command.Add("title=", "Session title.", value => options.Title = value);
-        command.Add("parent=", "Explicit parent thread id for same-project lineage.", value => options.ParentThreadId = value);
+        command.Add("parent=", "Explicit parent thread id for lineage.", value => options.ParentThreadId = value);
         command.Add("no-parent", "Suppress automatic parent assignment.", value => options.NoParent = value is not null);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
@@ -774,7 +774,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         var projects = await catalog.LoadAsync(context.CancellationToken).ConfigureAwait(false);
         var filtered = projects
             .Where(project => includeArchived || !project.Archived)
-            .Where(project => CanAccessProject(context, project.Id))
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         foreach (var project in filtered)
@@ -804,11 +803,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return NotFound(context, "project.notFound", $"Project '{reference}' was not found.");
         }
 
-        if (!CanAccessProject(context, project.Id))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect project '{project.Id}'.");
-        }
-
         WriteProject(context, "alta.project.detail", project);
         return AltaExitCodes.Success;
     }
@@ -825,11 +819,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         if (project is null)
         {
             return NotFound(context, "project.notFound", $"No catalog project matches path '{resolvedPath}'.");
-        }
-
-        if (!CanAccessProject(context, project.Id))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect project '{project.Id}'.");
         }
 
         WriteProject(context, "alta.project.resolution", project);
@@ -852,15 +841,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         if (!Directory.Exists(resolvedPath))
         {
             return NotFound(context, "project.pathNotFound", $"Project path '{resolvedPath}' does not exist.");
-        }
-
-        if (CallerHasProjectScope(context))
-        {
-            var existingProject = await catalog.GetByPathAsync(resolvedPath, context.CancellationToken).ConfigureAwait(false);
-            if (existingProject is null || !CanAccessProject(context, existingProject.Id))
-            {
-                return PermissionDenied(context, "policy.visibilityDenied", "Project-scoped callers can only update their own existing project catalog entry.");
-            }
         }
 
         var project = await catalog.UpsertFromPathAsync(resolvedPath, context.CancellationToken).ConfigureAwait(false);
@@ -899,17 +879,11 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             {
                 return NotFound(context, "project.notFound", $"Project '{projectFilter}' was not found.");
             }
-
-            if (!CanAccessProject(context, project.Id))
-            {
-                return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect sessions in project '{project.Id}'.");
-            }
         }
 
         var includeArchived = string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase) ||
                               string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase);
         var filtered = infos
-            .Where(info => CanAccessThread(context, info.Thread))
             .Where(info => project is null || string.Equals(info.Thread.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase))
             .Where(info => string.IsNullOrWhiteSpace(backendFilter) || string.Equals(info.Thread.BackendId, backendFilter, StringComparison.OrdinalIgnoreCase))
             .Where(info => includeArchived || !string.Equals(info.State, "archived", StringComparison.OrdinalIgnoreCase))
@@ -949,11 +923,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
         }
 
-        if (!CanAccessThread(context, info.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect session '{threadId}'.");
-        }
-
         WriteSession(context, recordType, info, includeChildren: true, infos);
         return AltaExitCodes.Success;
     }
@@ -977,13 +946,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
         }
 
-        if (!CanAccessThread(context, parent.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect session '{threadId}'.");
-        }
-
         var children = GetChildren(infos, parent, recursive)
-            .Where(child => CanAccessThread(context, child.Thread))
             .ToArray();
         foreach (var child in children)
         {
@@ -1011,11 +974,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         if (info is null)
         {
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
-        }
-
-        if (!CanAccessThread(context, info.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect session '{threadId}'.");
         }
 
         WriteModelSelection(context, "alta.model.selection", CreateModelSelection(info.Thread, info.Preference), info.Thread.ThreadId);
@@ -1055,11 +1013,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         if (info is null)
         {
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
-        }
-
-        if (!CanAccessThread(context, info.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect session '{threadId}'.");
         }
 
         var storedHistoryUnavailable = false;
@@ -1154,14 +1107,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 return NotFound(context, "project.notFound", $"Project '{options.Project}' was not found.");
             }
 
-            if (!CanAccessProject(context, project.Id))
-            {
-                return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to create sessions in project '{project.Id}'.");
-            }
-        }
-        else if (CallerHasProjectScope(context))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", "Project-scoped callers are not allowed to create global sessions.");
         }
 
         var parentResolution = await ResolveParentThreadIdAsync(context, project, options).ConfigureAwait(false);
@@ -1255,11 +1200,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
         }
 
-        if (!CanAccessThread(context, info.Thread) && !CanSendPeerMessageToGlobalCoordinator(context, info.Thread, kind))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to mutate session '{threadId}'.");
-        }
-
         var inputText = kind is PromptDispatchKind.Message or PromptDispatchKind.Request
             ? BuildPeerAgentMessage(context, info.Thread, options, promptResult.Prompt!)
             : promptResult.Prompt!;
@@ -1343,11 +1283,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
         }
 
-        if (!CanAccessThread(context, info.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to abort session '{threadId}'.");
-        }
-
         try
         {
             await runtime.AbortAsync(threadId, context.CancellationToken).ConfigureAwait(false);
@@ -1396,11 +1331,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         if (info is null)
         {
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
-        }
-
-        if (!CanAccessThread(context, info.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to compact session '{threadId}'.");
         }
 
         var executionOptions = await BuildExecutionOptionsForThreadAsync(context, info).ConfigureAwait(false);
@@ -1494,11 +1424,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         if (info is null)
         {
             return NotFound(context, "session.notFound", $"Session '{threadId}' was not found.");
-        }
-
-        if (!CanAccessThread(context, info.Thread))
-        {
-            return PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to activate skills in session '{threadId}'.");
         }
 
         var executionOptions = await BuildExecutionOptionsForThreadAsync(context, info).ConfigureAwait(false);
@@ -1690,13 +1615,14 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     }
 
     private static AltaSessionInfo? FindThread(IReadOnlyList<AltaSessionInfo> infos, string threadId)
-        => infos.FirstOrDefault(info => string.Equals(info.Thread.ThreadId, threadId, StringComparison.OrdinalIgnoreCase));
+        => infos.FirstOrDefault(info =>
+            string.Equals(info.Thread.ThreadId, threadId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(info.Thread.BackendSessionId, threadId, StringComparison.OrdinalIgnoreCase));
 
     private static IEnumerable<AltaSessionInfo> GetChildren(IReadOnlyList<AltaSessionInfo> infos, AltaSessionInfo parent, bool recursive)
     {
         var directChildren = infos
             .Where(info => string.Equals(info.Thread.ParentThreadId, parent.Thread.ThreadId, StringComparison.OrdinalIgnoreCase))
-            .Where(info => string.Equals(info.Thread.ProjectRef, parent.Thread.ProjectRef, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(static info => info.Thread.LastActiveAt)
             .ToArray();
         foreach (var child in directChildren)
@@ -1828,6 +1754,14 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 inherited = inheritedResult.Selection;
             }
         }
+        else if (!string.IsNullOrWhiteSpace(context.Caller.SourceBackendSessionId))
+        {
+            var inheritedResult = await ResolveBackendSessionModelSelectionAsync(context, context.Caller.SourceBackendSessionId).ConfigureAwait(false);
+            if (inheritedResult.ExitCode == AltaExitCodes.Success)
+            {
+                inherited = inheritedResult.Selection;
+            }
+        }
 
         var providerKey = FirstNonEmpty(request.ProviderKey, inherited?.ProviderKey, GetDefaultProviderKey(context));
         if (string.IsNullOrWhiteSpace(providerKey))
@@ -1861,12 +1795,40 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return ThreadModelSelectionResult.NotFound();
         }
 
-        if (!CanAccessThread(context, info.Thread))
+        return ThreadModelSelectionResult.Success(CreateModelSelection(info.Thread, info.Preference));
+    }
+
+    private static async Task<ThreadModelSelectionResult> ResolveBackendSessionModelSelectionAsync(AltaCommandContext context, string backendSessionId)
+    {
+        var infos = await LoadSessionInfosAsync(context).ConfigureAwait(false);
+        if (infos is null)
         {
-            return ThreadModelSelectionResult.Fail(PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect session '{threadId}'."));
+            return ThreadModelSelectionResult.Fail(AltaExitCodes.ServiceUnavailable);
         }
 
-        return ThreadModelSelectionResult.Success(CreateModelSelection(info.Thread, info.Preference));
+        var info = infos.FirstOrDefault(candidate =>
+            string.Equals(candidate.Thread.BackendSessionId, backendSessionId, StringComparison.OrdinalIgnoreCase));
+        if (info is not null)
+        {
+            return ThreadModelSelectionResult.Success(CreateModelSelection(info.Thread, info.Preference));
+        }
+
+        if (context.Services.Get<WorkThreadCatalog>() is not { } threadCatalog)
+        {
+            return ThreadModelSelectionResult.NotFound();
+        }
+
+        var catalogThreads = await threadCatalog.LoadInternalAsync(context.CancellationToken).ConfigureAwait(false);
+        var thread = catalogThreads.FirstOrDefault(candidate =>
+            string.Equals(candidate.BackendSessionId, backendSessionId, StringComparison.OrdinalIgnoreCase));
+        if (thread is null)
+        {
+            return ThreadModelSelectionResult.NotFound();
+        }
+
+        var viewState = await threadCatalog.LoadViewStateAsync(context.CancellationToken).ConfigureAwait(false);
+        viewState.ThreadPreferences.TryGetValue(thread.ThreadId, out var preference);
+        return ThreadModelSelectionResult.Success(CreateModelSelection(thread, preference));
     }
 
     private static string? GetDefaultProviderKey(AltaCommandContext context)
@@ -1911,11 +1873,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             if (project is null)
             {
                 return SkillQueryResult.Fail(NotFound(context, "project.notFound", $"Project '{projectRef}' was not found."));
-            }
-
-            if (!CanAccessProject(context, project.Id))
-            {
-                return SkillQueryResult.Fail(PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to inspect project '{project.Id}'."));
             }
         }
         else if (!string.IsNullOrWhiteSpace(sourceProjectId))
@@ -2151,68 +2108,14 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 return ParentThreadResolutionResult.Fail(NotFound(context, "session.parentNotFound", $"Parent session '{parentThreadId}' was not found."));
             }
 
-            if (!CanAccessThread(context, parent.Thread))
-            {
-                return ParentThreadResolutionResult.Fail(PermissionDenied(context, "policy.visibilityDenied", $"The caller is not allowed to use session '{parentThreadId}' as a parent."));
-            }
-
-            if (!HasSameParentScope(parent.Thread, project))
-            {
-                return ParentThreadResolutionResult.Fail(UsageError(context, "usage.parentScopeMismatch", "Parent session must be in the same project or global scope as the session being created.", "alta session create"));
-            }
-
             return ParentThreadResolutionResult.Success(parent.Thread.ThreadId);
         }
 
-        var automaticParentThreadId = project is not null &&
-                                      !string.IsNullOrWhiteSpace(context.Caller.SourceThreadId) &&
-                                      string.Equals(context.Caller.SourceProjectId, project.Id, StringComparison.OrdinalIgnoreCase)
+        var automaticParentThreadId = !string.IsNullOrWhiteSpace(context.Caller.SourceThreadId)
             ? context.Caller.SourceThreadId
             : null;
         return ParentThreadResolutionResult.Success(automaticParentThreadId);
     }
-
-    private static bool HasSameParentScope(WorkThreadDescriptor parent, ProjectDescriptor? project)
-        => project is null
-            ? parent.Kind == WorkThreadKind.GlobalThread && string.IsNullOrWhiteSpace(parent.ProjectRef)
-            : string.Equals(parent.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase);
-
-    private static bool CanAccessThread(AltaCommandContext context, WorkThreadDescriptor thread)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(thread);
-        if (!string.IsNullOrWhiteSpace(context.Caller.SourceThreadId) &&
-            string.Equals(context.Caller.SourceThreadId, thread.ThreadId, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return CanAccessProject(context, thread.ProjectRef);
-    }
-
-    private static bool CanAccessProject(AltaCommandContext context, string? projectId)
-    {
-        if (!CallerHasProjectScope(context))
-        {
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(projectId) &&
-               string.Equals(context.Caller.SourceProjectId, projectId, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool CallerHasProjectScope(AltaCommandContext context)
-        => (string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.Caller.Kind, "plugin", StringComparison.OrdinalIgnoreCase)) &&
-           !string.IsNullOrWhiteSpace(context.Caller.SourceProjectId);
-
-    private static bool CanSendPeerMessageToGlobalCoordinator(AltaCommandContext context, WorkThreadDescriptor thread, PromptDispatchKind kind)
-        => kind is PromptDispatchKind.Message or PromptDispatchKind.Request &&
-           string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase) &&
-           !string.IsNullOrWhiteSpace(context.Caller.SourceProjectId) &&
-           !string.IsNullOrWhiteSpace(context.Caller.SourceThreadId) &&
-           thread.Kind == WorkThreadKind.GlobalThread &&
-           string.IsNullOrWhiteSpace(thread.ProjectRef);
 
     private static string GetGlobalRootOrCwd(AltaCommandContext context)
         => context.Services.Get<CatalogOptions>()?.GlobalRoot ?? context.Cwd ?? Environment.CurrentDirectory;

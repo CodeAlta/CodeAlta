@@ -50,7 +50,7 @@ The tool should be:
 - **Backend session id**: provider-owned session id from Codex, Copilot, or a CodeAlta local runtime provider.
 - **Model selection**: the provider/model/reasoning tuple used to create or resume a session. It is represented by `providerKey`, `modelId`, and optional `reasoningEffort`.
 - **Model ref**: a compact string form of a model selection, `providerKey:modelId[@reasoning]`, for command-line use and agent-to-agent handoff.
-- **Session lineage**: durable parent/child relationship recorded when one session creates another session in the same project scope.
+- **Session lineage**: durable parent/child relationship recorded when one session creates another session, including cross-project lineage.
 - **Provenance**: durable attribution for who created a session, submitted/queued a prompt, steered a run, or sent an inter-agent message.
 - **Plugin caller**: a trusted CodeAlta plugin invoking the in-process `alta` dispatcher to query runtime state or perform actions such as creating sessions.
 - **Coordinator instructions file**: the managed `~/.alta/AGENTS.md` file that defines the global coordinator role and compact `alta` usage guidance.
@@ -232,7 +232,7 @@ Resolution precedence for session creation and model-sensitive commands:
 1. explicit `--model-ref`;
 2. explicit `--same-model-as <thread-id>` plus any `--provider`, `--model`, or `--reasoning` overrides;
 3. explicit `--provider`, `--model`, and/or `--reasoning`, merged with the caller-session default where possible;
-4. the controller session's provider/model/reasoning when the live tool caller has `AltaCallerIdentity.SourceThreadId`;
+4. the controller session's provider/model/reasoning when the live tool caller has `AltaCallerIdentity.SourceThreadId`, or when only `SourceBackendSessionId` is available and it can be resolved to a known CodeAlta thread;
 5. the host's current/default provider preference for external CLI calls without a source session;
 6. the provider/backend default.
 
@@ -383,7 +383,7 @@ The current live tool dispatch path uses `WorkThreadRuntimeService` directly for
 
 The current implementation persists per-thread model/reasoning preferences in `WorkThreadViewState.ThreadPreferences` when `session create` resolves a model selection so later `session model`, caller-session inheritance, and `--same-model-as` reuse the same `modelRef` after restart.
 
-When `session create` is invoked by an agent session and the target session belongs to the same project as the caller, CodeAlta should default `parentThreadId` to the caller's source thread id. If the target session is created in another project, CodeAlta should still record `createdBy` provenance but should not create a sidebar parent/child link by default. `--parent <thread-id>` can request an explicit same-project parent; `--no-parent` suppresses the hierarchy link while keeping provenance. The current implementation validates explicit `--parent` before creating the session: the parent must exist, be visible to the caller, and be in the same target project scope or the same global scope.
+When `session create` is invoked by an agent session and the caller source thread is known, CodeAlta defaults `parentThreadId` to that caller thread id regardless of project. `--parent <thread-id>` can request any existing session as an explicit parent; `--no-parent` suppresses the hierarchy link while keeping provenance. The current implementation validates explicit `--parent` before creating the session by requiring only that the parent exists.
 
 `send` starts or continues a normal turn. `steer` must only target an active run and should fail with exit code 7 when the backend/runtime does not support steering. `queue` is explicit queueing for busy sessions. `send --queue-if-busy` is a convenience that maps to submit-or-queue behavior. Queued prompts are persisted in `WorkThreadLocalState.QueuedPrompts` with `queued`/`submitting`/`submitted`/`failed`-ready state fields, `queueItemId`, prompt preview, attribution, and eventual run/drain fields; `session list/show/status` expose the pending queued/submitting count, and runtime queue events project queue changes into open-session timelines. Runtime draining reserves at most one queued item per thread through the per-thread actor before calling the backend, so duplicate idle/error notifications cannot drain multiple queued prompts concurrently.
 
@@ -398,7 +398,7 @@ alta session request <thread-id> (--message <text> | --stdin) [--reply-requested
 
 These commands are wrappers over `session send` or `session queue` that add CodeAlta attribution metadata. They are useful when one agent needs to communicate with another without pretending to be the user. `--reply-requested` is metadata for the target session; the command still returns after delivery/queueing and does not wait for a reply.
 
-For same-scope parent/child sessions, explicit `alta session message` calls are not required for routine child-to-parent completion reporting. When a child session has a durable `parentThreadId`, the runtime automatically forwards the child's last visible assistant message for each completed turn to the parent as a peer-agent notification. The parent delivery path is fail-soft: if the parent has an active run, CodeAlta sends the notification as steering input; otherwise, or if steering is unavailable/races with idle, CodeAlta persists it as a queued prompt so child completion reporting does not fail the child turn.
+For parent/child sessions, explicit `alta session message` calls are not required for routine child-to-parent completion reporting. When a child session has a durable `parentThreadId`, the runtime automatically forwards the child's last visible assistant message for each completed turn to the parent as a peer-agent notification. The parent delivery path is fail-soft: if the parent has an active run, CodeAlta sends the notification as steering input; otherwise, or if steering is unavailable/races with idle, CodeAlta persists it as a queued prompt so child completion reporting does not fail the child turn.
 
 Child-session prompts include concise injected guidance that the final assistant reply is forwarded automatically. A child that wants to report progress or intermediate results before the final turn result can include one or more visible `<notify-parent>update text</notify-parent>` blocks in an assistant reply. CodeAlta forwards those marked blocks as peer-agent progress notifications and strips the marker block from the later automatic final-result notification.
 
@@ -554,7 +554,7 @@ Model selection parsing/resolution should live behind a small reusable service, 
 
 ### 7.3 Durable lineage and provenance model
 
-The existing `WorkThreadDescriptor.ParentThreadId` should be generalized from legacy internal-thread metadata to same-project child-session lineage. New durable metadata should be added without making the TUI the source of truth:
+The existing `WorkThreadDescriptor.ParentThreadId` should be generalized from legacy internal-thread metadata to child-session lineage across projects. New durable metadata should be added without making the TUI the source of truth:
 
 ```csharp
 public sealed record AltaActorProvenance
@@ -587,7 +587,7 @@ public sealed record AltaPromptProvenance
 
 Implementation can choose whether these are embedded directly in catalog descriptors/view state or persisted as sidecar metadata, but they must be durable enough to restore sidebar hierarchy and timeline attribution after restart. Backend transcripts are not sufficient because provider history may not preserve CodeAlta-specific provenance.
 
-The current implementation stores `ParentThreadId` and `CreatedBy` on `WorkThreadDescriptor` YAML and mirrors both fields in `WorkThreadLocalState` for recoverable/live thread view-state restoration. Sidebar projections rebuild same-project parent/child trees from those durable fields, tolerate missing/cross-project parents by rendering the affected thread as a project/global root, and keep expanded/collapsed UI state separate from lineage metadata.
+The current implementation stores `ParentThreadId` and `CreatedBy` on `WorkThreadDescriptor` YAML and mirrors both fields in `WorkThreadLocalState` for recoverable/live thread view-state restoration. Sidebar/session projections rebuild parent/child relationships from those durable fields, tolerate missing parents by rendering the affected thread as a project/global root, and keep expanded/collapsed UI state separate from lineage metadata.
 
 ### 7.4 In-process dispatch
 
@@ -774,25 +774,23 @@ Minimum durable provenance shape:
 }
 ```
 
-For same-project child sessions, the durable thread descriptor should include both `parentThreadId` and `createdBy`. For cross-project child creation, the descriptor should include `createdBy` but leave `parentThreadId` empty unless a future cross-project UI explicitly supports such links.
+For child sessions, including cross-project child sessions, the durable thread descriptor should include both `parentThreadId` and `createdBy` when a parent is known or explicitly supplied.
 
 Prompt submissions, queued prompts, steering prompts, and inter-agent messages should include equivalent `createdBy` / `submittedBy` metadata so the timeline can distinguish user prompts from agent-created and plugin-created prompts after restart.
 
 ### 9.3 Visibility policy
 
-`tail`, `events`, and `show` can expose session content to another session. Visibility must be enforced by the host/runtime, not left to model instructions.
+`tail`, `events`, and `show` can expose session content to another session. The host/runtime must make the visibility policy explicit rather than leaving scope assumptions to model instructions.
 
 Default v1 policy:
 
-- The global `~/.alta` agent is the coordinator and has full local visibility across all known projects, sessions, and subsessions.
-- A project-scoped session can see its own session, same-project sessions, and same-project subsessions/children allowed by project policy.
-- A project-scoped session can receive and respond to messages from the global coordinator even when the coordinator originated outside the project scope.
-- Project-to-project visibility is not enabled by default. Future cross-project collaboration can be added through explicit host policy and provenance rules.
-- Plugin invocations inherit the plugin scope plus any explicit source thread/project supplied by the host plugin context; they do not bypass visibility policy by fabricating source ids.
+- All CodeAlta sessions may inspect known projects and sessions across the local CodeAlta catalog.
+- Any session may create, message/request, steer, abort, compact, or activate skills in sessions for any known project or global session, subject to the normal command classification and backend/runtime capability checks.
+- Plugin invocations inherit runtime-owned plugin identity/provenance for audit, but project plugin scope does not restrict inspection or mutation of other CodeAlta projects.
 
-Commands denied by visibility policy should return exit code 4 and an `alta.error` JSONL record.
+Commands denied by future visibility policy should return exit code 4 and an `alta.error` JSONL record.
 
-The current implementation treats callers without a project scope, including the global coordinator agent, as having full local visibility. Global coordinator threads must invoke the `alta` agent tool without a source project id even when a project is selected elsewhere in the UI; project selection state must not accidentally restrict global coordinator visibility. Project-scoped agents can inspect/mutate only their own session and same-project sessions by default; explicit `session list --project`, `session create --project`, and `model resolve --same-model-as` targets are denied outside that scope, and project-scoped callers cannot create new global sessions. Project catalog listing/show/resolve is filtered to the caller's project, and project-scoped `project upsert` can only update that already-known project entry. Project-scoped `skill list/show` defaults to the caller's project roots and denies explicit `--project` references outside that scope. Project-scoped agents cannot inspect global coordinator transcripts, but `session message` and `session request` may target global coordinator threads so project sessions can reply with peer-agent attribution.
+The current implementation no longer applies project-scope visibility restrictions. Project-scoped agents can list/show/resolve/upsert projects, inspect/mutate sessions, create project or global sessions, resolve model selections, and list/show skills across projects. `skill list` without `--project` may still default discovery to the caller's project roots for relevance, but explicit `--project` references are allowed.
 
 ### 9.4 Coordinator `~/.alta/AGENTS.md`
 
@@ -864,7 +862,7 @@ Avoid relying only on tags embedded in assistant text. Prefer structured runtime
 
 ### 10.1 Sidebar lineage
 
-The sidebar should be able to render same-project child sessions underneath the parent session that created them:
+The sidebar should be able to render child sessions underneath the parent session that created them when the UI can represent that relationship:
 
 ```text
 Project: CodeAlta
@@ -876,15 +874,15 @@ Project: CodeAlta
 
 Rules:
 
-- only same-project `parentThreadId` relationships are rendered as nested sessions in v1;
-- cross-project session creation remains traceable through `createdBy` metadata but is not rendered as a child under the source session;
+- `parentThreadId` relationships may cross project/global boundaries and should remain traceable in session detail/children commands;
+- UI projections may render cross-project children in the most appropriate project/global scope while preserving the durable parent link;
 - restored sessions must rebuild the hierarchy from durable thread metadata, not from only in-memory runtime state;
 - collapsed/expanded state belongs to the UI view state, while lineage/provenance belongs to durable thread metadata;
 - cycles or missing parents should be tolerated by rendering the affected session at the project root with a diagnostic/provenance marker.
 
-Implementation note: the sidebar projection expands thread nodes that have children, orders root sessions by the most recent activity in their subtree, and renders threads with missing, cross-scope, or cyclic parent lineage at the project/global root with a warning provenance marker and tooltip explaining why the durable parent link was not nested.
+Implementation note: the sidebar projection expands thread nodes that have children, orders root sessions by the most recent activity in their subtree, and renders threads with missing or cyclic parent lineage at the project/global root with a warning provenance marker and tooltip explaining why the durable parent link was not nested.
 
-Runtime-created sessions must appear in the sidebar without requiring a manual catalog refresh. When an agent uses the live tool to create or send work to a project session from a global or parent session, the runtime emits a thread materialization/catalog event that the shell uses to upsert the descriptor into the appropriate global/project sidebar scope without opening a tab. Sidebar running indicators merge open-tab busy state with runtime run state events, so non-open child/sub-sessions can still show as running while their turns are in flight.
+Runtime-created sessions must appear in the sidebar without requiring a manual catalog refresh. When an agent uses the live tool to create or send work to a project session from a global or parent session, the runtime emits a thread materialization/catalog event that the shell uses to upsert the descriptor into the appropriate global/project sidebar scope without opening a tab. Sidebar running indicators merge open-tab busy state with runtime run state events, so non-open child/sub-sessions can still show as running while their turns are in flight. If a runtime request fails before a backend run id is available, the runtime must emit a visible error event and a `RunFailed` lifecycle event for the target thread so open timelines show the failure and sidebar running state is cleared.
 
 ### 10.2 Timeline provenance
 
@@ -898,7 +896,7 @@ Timeline items should visually distinguish at least:
 - session-created events that link to the child session;
 - session-created events in another project, shown as trace/provenance rather than nested sidebar children.
 
-A parent session timeline should receive a host event when it creates a same-project child session, containing the child `threadId`, title, project id, model selection, and correlation id. A child session timeline should receive a host event showing its creator. These host events are durable projections or reconstructable from durable metadata; they should be visible after restart.
+A parent session timeline should receive a host event when it creates a child session, containing the child `threadId`, title, project id, model selection, and correlation id. A child session timeline should receive a host event showing its creator. These host events are durable projections or reconstructable from durable metadata; they should be visible after restart.
 
 ### 10.3 Event records
 
@@ -975,9 +973,9 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 - [x] Add a narrow query service that merges live runtime snapshots, recoverable threads, local thread metadata, and backend session metadata.
 - [x] Implement `session list/show/status/children/model` with provider/model/reasoning, `parentThreadId`, and provenance fields when known.
 - [x] Distinguish `running`, `idle`, `inactive`, and `archived` states.
-- [x] Add same-project parent/child hierarchy reconstruction for durable session metadata.
+- [x] Add parent/child hierarchy reconstruction for durable session metadata.
 - [x] Project live runtime-created project/global sessions into the sidebar and show non-open running sessions from runtime run-state events.
-- [x] Add JSONL record contract tests and same-project filtering tests for session discovery/status commands.
+- [x] Add JSONL record contract tests and project filtering tests for session discovery/status commands.
 - [x] Add hierarchy reconstruction tests for durable sidebar/session metadata.
 
 ### Phase 5: Session content inspection
@@ -993,12 +991,12 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 - [x] Implement provider/model/reasoning discovery and model-ref resolution (`provider model list`, `model list`, `model show`, `model resolve`).
 - [x] Implement `session create`, `send`, `steer`, `abort`, `compact`, and non-blocking `join` through runtime/orchestration services where possible.
 - [x] Implement durable/headless `session queue` through `IWorkThreadOrchestrator` or an equivalent real queue service.
-- [x] Add durable caller/plugin attribution and same-project parent-thread assignment for `session create`.
+- [x] Add durable caller/plugin attribution and parent-thread assignment for `session create`.
 - [x] Add JSONL caller/plugin attribution for prompt submission, steering, abort, compact, and inter-agent message command results.
 - [x] Persist prompt/steering/inter-agent message provenance durably enough for restart-time timeline reconstruction.
 - [x] Persist queued prompt provenance and drain state durably enough for restart-time timeline reconstruction.
 - [x] Handle unsupported backend capabilities with exit code 7 and clear messages.
-- [x] Add regression tests for model-ref parsing, caller-session model inheritance, `--same-model-as` with reasoning override, child-session provenance, agent-created prompt provenance, inter-agent prompt provenance, visibility denial, and steering unsupported cases.
+- [x] Add regression tests for model-ref parsing, caller-session model inheritance, `--same-model-as` with reasoning override, child-session provenance, agent-created prompt provenance, inter-agent prompt provenance, cross-project visibility, runtime failure projection, and steering unsupported cases.
 - [x] Add regression tests for plugin-created prompt provenance, plugin-created session provenance, and busy-session queueing.
 
 ### Phase 7: Agent tool exposure
@@ -1031,7 +1029,7 @@ If a backend cannot store metadata, CodeAlta should render a visible header and 
 - [x] Persist/render peer-agent attribution metadata and prompt provenance.
 - [x] Automatically forward child-session final assistant replies and marked progress updates to parent sessions through steer-or-queue peer-agent delivery.
 - [x] Add enforced coordinator/project visibility policy checks.
-- [x] Add sidebar/timeline projection updates for agent-created same-project child sessions and agent-created prompts.
+- [x] Add sidebar/timeline projection updates for agent-created child sessions and agent-created prompts.
 - [x] Add live sidebar projection updates for global-agent-created project sub-sessions and non-open running sub-session indicators.
 - [x] Add tests ensuring peer-agent messages cannot be rendered as user/developer/system instructions.
 
@@ -1046,13 +1044,13 @@ Before considering the feature complete:
 - add invalid-usage diagnostic snapshots for unknown options, bad enum values, missing required arguments, mutually exclusive options, and plugin-contributed command validation;
 - add JSONL record contract tests for major command outputs and flat live-tool transcript/result-header formatting;
 - add in-process command dispatch tests that do not require the terminal UI, including the chosen command-graph concurrency behavior;
-- add visibility-policy tests for global coordinator access, project-scoped access, coordinator replies, and denied cross-project access;
-- add orchestration tests for session list/send/steer/abort behavior and same-project child-session provenance;
+- add visibility-policy tests for global coordinator access, project-scoped access, coordinator replies, and allowed cross-project access;
+- add orchestration tests for session list/send/steer/abort behavior and child-session provenance;
 - add plugin tests for in-process command contribution discovery, collision handling, plugin invocation of built-in commands, and plugin provenance;
 - add sidebar/timeline projection tests for parent/child sessions and agent-created prompts;
 - document unsupported backend behavior explicitly.
 
-Current completion evidence: user-facing examples are documented in `readme.md`, `doc/readme.md#alta-live-tool`, `doc/skills.md#live-tool-commands`, and `doc/plugins.md#alta-live-tool-integration`; coordinator/skill instruction templates advertise `alta` only when it is available; regression coverage lives in `AltaLiveToolTests`, `ThreadRuntimeEventCoordinatorTests`, `ShellThreadStateCoordinatorTests`, `ArchitectureGuardrailTests`, and catalog/plugin infrastructure tests for the command registry, JSONL transcripts, invalid usage diagnostics (unknown options, bad values, missing arguments, mutually exclusive flags, plugin validation), visibility (global coordinator access, same-project access, scoped project catalog/skill access, scoped plugin alta invocation, coordinator reply path, denied cross-project access), capability discovery, unsupported backend diagnostics, provenance, explicit parent validation, automatic child-to-parent final/progress notifications, queue draining, plugin contributions/invocation, live runtime sidebar projection, and timeline/sidebar projections.
+Current completion evidence: user-facing examples are documented in `readme.md`, `doc/readme.md#alta-live-tool`, `doc/skills.md#live-tool-commands`, and `doc/plugins.md#alta-live-tool-integration`; coordinator/skill instruction templates advertise `alta` only when it is available; regression coverage lives in `AltaLiveToolTests`, `ThreadRuntimeEventCoordinatorTests`, `ShellThreadStateCoordinatorTests`, `ArchitectureGuardrailTests`, and catalog/plugin infrastructure tests for the command registry, JSONL transcripts, invalid usage diagnostics (unknown options, bad values, missing arguments, mutually exclusive flags, plugin validation), visibility (global coordinator access, project-scoped cross-project access, scoped plugin alta invocation, coordinator reply path), capability discovery, unsupported backend diagnostics, provenance, explicit parent validation, automatic child-to-parent final/progress notifications, queue draining, plugin contributions/invocation, live runtime sidebar projection, and timeline/sidebar projections.
 
 ## 13. Resolved v1 decisions
 
