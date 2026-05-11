@@ -6,6 +6,11 @@ namespace CodeAlta.ViewModels;
 
 public sealed partial class ThreadWorkspaceViewModel
 {
+    private Action<int>? _modelProviderSelectionChanged;
+    private Action<int>? _modelSelectionChanged;
+    private Action<int>? _reasoningSelectionChanged;
+    private int _suppressSelectionChangedNotifications;
+
     public ThreadWorkspaceViewModel()
     {
         ModelProviderStatusMarkup = string.Empty;
@@ -67,5 +72,61 @@ public sealed partial class ThreadWorkspaceViewModel
 
         PromptStripItems = promptStripItems;
         HasQueuedPrompts = hasQueuedPrompts;
+    }
+
+    internal void SetModelProviderSelectionChangedHandlers(
+        Action<int>? modelProviderSelectionChanged,
+        Action<int>? modelSelectionChanged,
+        Action<int>? reasoningSelectionChanged)
+    {
+        _modelProviderSelectionChanged = modelProviderSelectionChanged;
+        _modelSelectionChanged = modelSelectionChanged;
+        _reasoningSelectionChanged = reasoningSelectionChanged;
+    }
+
+    internal IDisposable SuppressSelectionChangedNotifications()
+    {
+        _suppressSelectionChangedNotifications++;
+        return new SelectionChangedNotificationSuppression(this);
+    }
+
+    partial void OnSelectedModelProviderIndexChanged(int value)
+        => NotifySelectionChanged(_modelProviderSelectionChanged, value);
+
+    partial void OnSelectedModelIndexChanged(int value)
+        => NotifySelectionChanged(_modelSelectionChanged, value);
+
+    partial void OnSelectedReasoningIndexChanged(int value)
+        => NotifySelectionChanged(_reasoningSelectionChanged, value);
+
+    private void NotifySelectionChanged(Action<int>? handler, int value)
+    {
+        if (_suppressSelectionChangedNotifications != 0)
+        {
+            return;
+        }
+
+        handler?.Invoke(value);
+    }
+
+    private sealed class SelectionChangedNotificationSuppression : IDisposable
+    {
+        private ThreadWorkspaceViewModel? _owner;
+
+        public SelectionChangedNotificationSuppression(ThreadWorkspaceViewModel owner)
+        {
+            _owner = owner;
+        }
+
+        public void Dispose()
+        {
+            if (_owner is not { } owner)
+            {
+                return;
+            }
+
+            _owner = null;
+            owner._suppressSelectionChangedNotifications--;
+        }
     }
 }

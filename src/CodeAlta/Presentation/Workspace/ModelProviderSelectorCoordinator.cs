@@ -247,6 +247,8 @@ internal sealed class ModelProviderSelectorCoordinator : IPromptAvailabilityProj
             return;
         }
 
+        _selectorState.SetSelectedModelProviderIndex(newIndex);
+
         var thread = _threadSelection.GetSelectedThread();
         if (thread is null)
         {
@@ -343,6 +345,7 @@ internal sealed class ModelProviderSelectorCoordinator : IPromptAvailabilityProj
             }
 
             draftBackendState.SelectedReasoningEffort = draftOptions[newIndex].Effort;
+            UpdateReasoningSelectorState(draftOptions, newIndex);
             _preferences.RememberGlobalPreference(CreatePreference(backendId, draftBackendState.SelectedModelId, draftBackendState.SelectedReasoningEffort));
             _workspaceRefresh.ApplySessionUsageProjection();
             return;
@@ -358,6 +361,7 @@ internal sealed class ModelProviderSelectorCoordinator : IPromptAvailabilityProj
         }
 
         tab.ReasoningEffort = options[newIndex].Effort;
+        UpdateReasoningSelectorState(options, newIndex);
         _preferences.RememberThreadPreference(tab.Thread.ThreadId, CreatePreference(tab.BackendId, tab.ModelId, tab.ReasoningEffort), true);
         backendState.SelectedModelId = tab.ModelId;
         backendState.SelectedReasoningEffort = tab.ReasoningEffort;
@@ -502,6 +506,25 @@ internal sealed class ModelProviderSelectorCoordinator : IPromptAvailabilityProj
         try
         {
             _selectorState.SetModelSelection(modelOptions, selectedModelIndex);
+            _selectorState.SetReasoningSelection(reasoningOptions, selectedReasoningIndex);
+            _syncModelProviderSelectorItems();
+        }
+        finally
+        {
+            _selectorsRefreshing = wasRefreshing;
+        }
+    }
+
+    private void UpdateReasoningSelectorState(
+        IReadOnlyList<ChatReasoningOption> reasoningOptions,
+        int selectedReasoningIndex)
+    {
+        ArgumentNullException.ThrowIfNull(reasoningOptions);
+
+        var wasRefreshing = _selectorsRefreshing;
+        _selectorsRefreshing = true;
+        try
+        {
             _selectorState.SetReasoningSelection(reasoningOptions, selectedReasoningIndex);
             _syncModelProviderSelectorItems();
         }

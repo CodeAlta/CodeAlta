@@ -196,8 +196,6 @@ internal sealed class CodeAltaFrontendComposition
             frontend.SetStatus,
             frontend.SetReadyStatusForCurrentSelection);
         var threadProviderSwitchCoordinator = new ThreadProviderSwitchCoordinator(
-            catalogOptions,
-            threadCatalog,
             configStore,
             chatBackendStates,
             tab =>
@@ -206,9 +204,8 @@ internal sealed class CodeAltaFrontendComposition
                 return Task.CompletedTask;
             },
             threadId => runtimeService.DetachThreadSessionAsync(threadId),
-            threadStateCoordinator.RekeyThreadIdentity,
-            frontend.PersistViewStateAsync,
-            runtimeService.GetHistoryAsync);
+            threadStateCoordinator.UpsertRuntimeThread,
+            frontend.PersistViewStateAsync);
         var modelProviderSelectorCoordinator = new ModelProviderSelectorCoordinator(
             backendDescriptors,
             threadWorkspaceViewModel,

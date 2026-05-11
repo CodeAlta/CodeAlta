@@ -64,6 +64,7 @@ internal sealed class ThreadPromptChromeState
 
     private static void CopyWorkspaceViewModel(ThreadWorkspaceViewModel source, ThreadWorkspaceViewModel target)
     {
+        using var _ = target.SuppressSelectionChangedNotifications();
         target.ModelProviderStatusMarkup = source.ModelProviderStatusMarkup;
         target.ProviderSummaryMarkup = source.ProviderSummaryMarkup;
         target.CanSelectModelProvider = source.CanSelectModelProvider;

@@ -36,6 +36,9 @@ internal sealed class ModelProviderSelectorStateStore
         _workspaceViewModel.SelectedModelProviderIndex = selectedIndex;
     }
 
+    public void SetSelectedModelProviderIndex(int selectedIndex)
+        => _workspaceViewModel.SelectedModelProviderIndex = selectedIndex;
+
     public void SetModelSelection(IReadOnlyList<ChatModelOption> items, int selectedIndex)
     {
         ArgumentNullException.ThrowIfNull(items);

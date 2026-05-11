@@ -519,7 +519,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         thread.ProviderKey = options.ProviderKey ?? options.BackendId.Value;
         thread.BackendSessionId = backendSessionId;
         thread.WorkingDirectory = options.WorkingDirectory;
-        thread.ThreadId = CreateThreadId(options.BackendId, backendSessionId);
+        thread.ThreadId = previousThreadId ?? CreateThreadId(options.BackendId, backendSessionId);
         PublishThreadCatalogEvent(thread);
         PublishSessionLifecycleEvent(thread.ThreadId, previousThreadId, previousBackendSessionId, backendSessionId);
 

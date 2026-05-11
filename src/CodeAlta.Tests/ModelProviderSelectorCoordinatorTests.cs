@@ -332,6 +332,93 @@ public sealed class ModelProviderSelectorCoordinatorTests
     }
 
     [TestMethod]
+    public async Task OnModelProviderSelectionChangedAsync_UpdatesSelectedIndexBeforeSwitchCompletes()
+    {
+        using var temp = TempDirectory.Create();
+        var threadStateCoordinator = CreateThreadStateCoordinator(temp.Path, out var thread);
+        var threadSelection = new ThreadSelectionContext(
+            threadStateCoordinator,
+            static (_, _) => Task.CompletedTask,
+            static _ => true);
+        var tab = threadStateCoordinator.EnsureThreadTab(thread);
+
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var promptComposerViewModel = new PromptComposerViewModel();
+        AgentBackendDescriptor[] backendDescriptors =
+        [
+            new(new AgentBackendId("openai"), "OpenAI"),
+            new(new AgentBackendId("anthropic"), "Anthropic"),
+        ];
+        var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        backendStates["openai"].Availability = ChatBackendAvailability.Ready;
+        backendStates["anthropic"].Availability = ChatBackendAvailability.Ready;
+
+        var selectorState = new ModelProviderSelectorStateStore(workspaceViewModel, new InlineUiDispatcher());
+        var preferences = new FrontendModelProviderPreferencePort(
+            ApplyDraftModelProviderPreference,
+            static _ => { },
+            static (_, _, _) => { },
+            static (_, _, _, _) => { });
+        var workspaceRefresh = new WorkspaceRefreshContext(static _ => { });
+        var switchCompletion = new TaskCompletionSource<bool>();
+        var coordinator = new ModelProviderSelectorCoordinator(
+            backendDescriptors,
+            workspaceViewModel,
+            promptComposerViewModel,
+            backendStates,
+            selectorState,
+            threadSelection,
+            preferences,
+            workspaceRefresh,
+            static _ => null,
+            static () => { },
+            static (_, _) => true,
+            (_, selectedTab, targetBackendId) =>
+            {
+                thread.BackendId = targetBackendId.Value;
+                selectedTab.BackendId = targetBackendId;
+                return switchCompletion.Task;
+            });
+
+        coordinator.RefreshForThread(tab);
+
+        var selectionChanged = coordinator.OnModelProviderSelectionChangedAsync(newIndex: 1);
+
+        Assert.AreEqual(1, workspaceViewModel.SelectedModelProviderIndex);
+        Assert.IsFalse(selectionChanged.IsCompleted);
+
+        switchCompletion.SetResult(true);
+        await selectionChanged;
+    }
+
+    [TestMethod]
+    public void ThreadWorkspaceViewModel_SelectedIndexChangesNotifyConfiguredHandlers()
+    {
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var providerChanges = new List<int>();
+        var modelChanges = new List<int>();
+        var reasoningChanges = new List<int>();
+        workspaceViewModel.SetModelProviderSelectionChangedHandlers(
+            providerChanges.Add,
+            modelChanges.Add,
+            reasoningChanges.Add);
+
+        workspaceViewModel.SelectedModelProviderIndex = 1;
+        workspaceViewModel.SelectedModelIndex = 2;
+        workspaceViewModel.SelectedReasoningIndex = 3;
+        using (workspaceViewModel.SuppressSelectionChangedNotifications())
+        {
+            workspaceViewModel.SelectedModelProviderIndex = 4;
+            workspaceViewModel.SelectedModelIndex = 5;
+            workspaceViewModel.SelectedReasoningIndex = 6;
+        }
+
+        CollectionAssert.AreEqual(new[] { 1 }, providerChanges);
+        CollectionAssert.AreEqual(new[] { 2 }, modelChanges);
+        CollectionAssert.AreEqual(new[] { 3 }, reasoningChanges);
+    }
+
+    [TestMethod]
     public void OnModelSelectionChanged_ImmediatelyUpdatesSelectedIndexForOpenThread()
     {
         using var temp = TempDirectory.Create();
@@ -428,6 +515,58 @@ public sealed class ModelProviderSelectorCoordinatorTests
         Assert.AreEqual(1, workspaceViewModel.SelectedModelIndex);
         Assert.AreEqual("gpt-5.4-mini", backendState.SelectedModelId);
         Assert.AreEqual(1, draftPreferenceApplyCount);
+    }
+
+    [TestMethod]
+    public void OnReasoningSelectionChanged_ImmediatelyUpdatesSelectedIndexForOpenThread()
+    {
+        using var temp = TempDirectory.Create();
+        var threadStateCoordinator = CreateThreadStateCoordinator(temp.Path, out var thread);
+        var threadSelection = new ThreadSelectionContext(
+            threadStateCoordinator,
+            static (_, _) => Task.CompletedTask,
+            static _ => true);
+        var tab = threadStateCoordinator.EnsureThreadTab(thread);
+
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var promptComposerViewModel = new PromptComposerViewModel();
+        AgentBackendDescriptor[] backendDescriptors =
+        [
+            new(new AgentBackendId("openai"), "OpenAI"),
+        ];
+        var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        backendStates["openai"].Availability = ChatBackendAvailability.Ready;
+        backendStates["openai"].Models.Add(new AgentModelInfo(
+            "gpt-5.4",
+            DisplayName: "GPT-5.4",
+            SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High]));
+        tab.ModelId = "gpt-5.4";
+
+        var selectorState = new ModelProviderSelectorStateStore(workspaceViewModel, new InlineUiDispatcher());
+        var preferences = new FrontendModelProviderPreferencePort(
+            ApplyDraftModelProviderPreference,
+            static _ => { },
+            static (_, _, _) => { },
+            static (_, _, _, _) => { });
+        var workspaceRefresh = new WorkspaceRefreshContext(static _ => { });
+        var coordinator = new ModelProviderSelectorCoordinator(
+            backendDescriptors,
+            workspaceViewModel,
+            promptComposerViewModel,
+            backendStates,
+            selectorState,
+            threadSelection,
+            preferences,
+            workspaceRefresh,
+            static _ => null,
+            static () => { },
+            static (_, _) => true);
+
+        coordinator.RefreshForThread(tab);
+        coordinator.OnReasoningSelectionChanged(newIndex: 1);
+
+        Assert.AreEqual(1, workspaceViewModel.SelectedReasoningIndex);
+        Assert.AreEqual(AgentReasoningEffort.High, tab.ReasoningEffort);
     }
 
     private static ModelProviderSelectorCoordinator CreateCoordinator(

@@ -190,6 +190,10 @@ internal sealed class ThreadWorkspaceView
         var shellViewModel = chromeState.ShellViewModel;
         var workspaceViewModel = chromeState.WorkspaceViewModel;
         var promptComposerViewModel = chromeState.PromptComposerViewModel;
+        workspaceViewModel.SetModelProviderSelectionChangedHandlers(
+            _modelProviderController.SelectProvider,
+            _modelProviderController.SelectModel,
+            _modelProviderController.SelectReasoning);
         var imageStripView = new PromptImageAttachmentStripView(
             promptComposerViewModel,
             promptImageCallbacks ?? promptSession.PromptImageCallbacks,
