@@ -646,6 +646,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         string? developerInstructions,
         AgentModelInfo? modelInfo,
         IReadOnlyList<LocalAgentConversationMessage> conversation,
+        AgentSessionUsage? previousUsage,
         AgentSessionUsage? usage)
     {
         if (usage is null)
@@ -653,11 +654,12 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             return null;
         }
 
+        var usageForEstimate = SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
         var estimate = LocalAgentTokenEstimator.EstimatePromptTokens(
             systemMessage,
             developerInstructions,
             conversation,
-            usage);
+            usageForEstimate);
         var label = estimate.IsEstimated
             ? "Estimated active context"
             : "Active context window";
@@ -669,6 +671,31 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             DateTimeOffset.UtcNow,
             label);
         return LocalAgentUsageFactory.AttachMessageCount(usageWithWindow, conversation.Count);
+    }
+
+    private static AgentSessionUsage SelectUsageForConversationEstimate(
+        AgentSessionUsage? previousUsage,
+        AgentSessionUsage usage,
+        int conversationMessageCount)
+    {
+        if (previousUsage?.Window is not { CurrentTokens: > 0, MessageCount: >= 0 } previousWindow ||
+            previousWindow.MessageCount.Value > conversationMessageCount ||
+            usage.Window?.CurrentTokens is not { } currentTokens ||
+            currentTokens >= previousWindow.CurrentTokens.Value)
+        {
+            return usage;
+        }
+
+        // Provider-native continuation can report usage for only the incremental request tail.
+        // Keep the provider operation breakdown from the latest response, but base the active
+        // window estimate on the last non-smaller window snapshot plus locally-added messages.
+        return previousUsage with
+        {
+            LastOperation = usage.LastOperation ?? previousUsage.LastOperation,
+            RateLimits = usage.RateLimits ?? previousUsage.RateLimits,
+            Details = usage.Details ?? previousUsage.Details,
+            UpdatedAt = usage.UpdatedAt == default ? previousUsage.UpdatedAt : usage.UpdatedAt,
+        };
     }
 
     private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, CancellationToken cancellationToken)
@@ -875,6 +902,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             developerInstructions,
             modelInfo,
             providerConversation.Messages,
+            _state.Usage,
             response.Usage);
 
         _state = _state with

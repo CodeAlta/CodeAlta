@@ -925,6 +925,83 @@ public sealed class LocalAgentSessionTests
     }
 
     [TestMethod]
+    public async Task LocalAgentSession_SendAsync_DoesNotResetWindowWhenProviderReportsContinuationDeltaUsage()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-continuation-usage");
+        var state = CreateState("session-continuation-usage");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var models = new[]
+        {
+            new AgentModelInfo(
+                "gpt-5.4",
+                "GPT-5.4",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["contextWindow"] = 272000L,
+                }),
+        };
+        await using var session = new LocalAgentSession(
+            AgentBackendIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                models,
+                summaryHandler: null,
+                (request, _, _) =>
+                {
+                    Assert.AreEqual(1, request.Conversation.Count);
+                    return Task.FromResult(new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("First answer.")]),
+                        Usage = CreateWindowUsageSnapshot(50_000, 272_000, 49_700, 300),
+                    });
+                },
+                (request, _, _) =>
+                {
+                    Assert.AreEqual(3, request.Conversation.Count);
+                    return Task.FromResult(new LocalAgentTurnResponse
+                    {
+                        AssistantMessage = new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.Assistant,
+                            [new LocalAgentMessagePart.Text("Second answer.")]),
+                        Usage = CreateWindowUsageSnapshot(1_200, 272_000, 1_100, 100),
+                    });
+                }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+            },
+            allowProviderContinuation: true);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") }).ConfigureAwait(false);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt") }).ConfigureAwait(false);
+
+        var usageEvents = (await session.GetHistoryAsync().ConfigureAwait(false))
+            .OfType<AgentSessionUpdateEvent>()
+            .Where(static evt => evt.Kind == AgentSessionUpdateKind.UsageUpdated && evt.Usage?.LastOperation is not null)
+            .ToArray();
+        Assert.AreEqual(2, usageEvents.Length);
+        Assert.AreEqual(50_000L, usageEvents[0].Usage?.CurrentTokens);
+        Assert.IsTrue(usageEvents[1].Usage?.CurrentTokens > 50_000L, $"Expected continuation usage to build on the previous active window, got {usageEvents[1].Usage?.CurrentTokens}.");
+        Assert.AreEqual("Estimated active context", usageEvents[1].Usage?.Window?.Label);
+        Assert.AreEqual(1_100L, usageEvents[1].Usage?.LastOperation?.InputTokens);
+        Assert.AreEqual(100L, usageEvents[1].Usage?.LastOperation?.OutputTokens);
+    }
+
+    [TestMethod]
     public async Task LocalAgentSession_SteerAsync_QueuesPendingInputIntoSameRun()
     {
         using var temp = TestTempDirectory.Create();
