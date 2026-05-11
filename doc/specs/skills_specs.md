@@ -486,7 +486,7 @@ Recommended shared model:
 
 - skills are discovered and resolved by CodeAlta before or during a run
 - the session sees a compact available-skills catalog in composed instructions
-- activation happens through a CodeAlta-owned local tool surface
+- activation happens through the CodeAlta-owned `alta skill activate <skill-name> --session <thread-id>` live-tool command or an equivalent UI action
 - activated skill content is returned as ordinary transcript content/tool output
 
 `AgentInputItem.Skill` may remain as a compatibility type, but it should not be the primary implementation path for CodeAlta-managed skills.
@@ -495,7 +495,7 @@ Recommended shared model:
 
 Recommended mapping:
 
-- Codex manages its own native skills, so CodeAlta should not register the CodeAlta `codealta.skills.activate` tool or inject CodeAlta skill advertisements into Codex sessions
+- Codex manages its own native skills, so CodeAlta should not inject CodeAlta skill advertisements into Codex sessions
 - keep `AgentInputItem.Skill` only as compatibility plumbing for explicit native Codex skill references
 - do not treat Codex-native skills as CodeAlta catalog state
 
@@ -503,7 +503,7 @@ Recommended mapping:
 
 Recommended mapping:
 
-- Copilot manages its own native skills, so CodeAlta should not register the CodeAlta `codealta.skills.activate` tool or inject CodeAlta skill advertisements into Copilot sessions
+- Copilot manages its own native skills, so CodeAlta should not inject CodeAlta skill advertisements into Copilot sessions
 - normalize observed native Copilot skill events only for compatibility/telemetry
 - do not treat Copilot-native skills as CodeAlta catalog state
 
@@ -514,7 +514,7 @@ Local runtimes and raw-API backend adapters should use the host-owned skill flow
 This is the reference behavior for CodeAlta-managed skills:
 
 - advertise available skills in composed instructions
-- expose skill activation through CodeAlta local tools
+- expose skill activation through `alta skill activate <skill-name> --session <thread-id>` and equivalent UI actions
 - inject the canonical activated-skill payload into the conversation history
 
 Codex and Copilot are intentionally excluded from CodeAlta-managed skill registration because those providers own their native skill systems.
@@ -534,7 +534,7 @@ For CodeAlta, this MCP/tool surface is not an optional add-on. It is the mechani
 
 - `codealta.skills.get_resource`
 - `codealta.skills.validate`
-- `codealta.skills.activate`
+- `alta skill activate <skill-name> --session <thread-id>` host/runtime command
 
 Recommended responsibilities:
 
@@ -542,9 +542,9 @@ Recommended responsibilities:
 - `get`: raw `SKILL.md` and metadata for inspection/editing
 - `get_resource`: bounded safe file access under the skill root
 - `validate`: diagnostics for one skill or a scope
-- `activate`: return the canonical activated-skill payload plus metadata used for timeline/UI state
+- `activate`: inject the canonical activated-skill payload plus metadata used for timeline/UI state through the host-owned runtime path
 
-`activate` should be the primary tool described to models. `get` remains the lower-level inspection tool.
+`alta skill activate` should be the primary activation path described to models. `get` remains the lower-level inspection tool.
 
 ## 10. Orchestration integration
 
@@ -744,7 +744,7 @@ This makes the feature inspectable and testable before prompt/runtime work.
 Implement next:
 
 - TUI skills browser or `Use Skill` command
-- `codealta.skills.activate`
+- `alta skill activate <skill-name> --session <thread-id>`
 - timeline skill activity rendering
 - thread info/report integration
 
@@ -775,7 +775,7 @@ Add tests for:
 - duplicate-name diagnostics
 - missing-description rejection
 - safe resource path enforcement
-- `codealta.skills.activate` payload shape
+- activated-skill payload shape
 - instruction composition including `<available_skills>`
 - normalized skill activity events for host-owned activation flows and compatibility edge cases
 - durable local-runtime skill activation events

@@ -15,7 +15,7 @@ public sealed class CopilotLiveIntegrationTests
 
     [TestMethod]
     [TestCategory("LiveCopilot")]
-    public async Task CopilotAgentBackend_LivePrompt_WithDottedTool_ProducesAssistantContent()
+    public async Task CopilotAgentBackend_LivePrompt_WithCustomTool_ProducesAssistantContent()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable(LiveCopilotTestsEnvironmentVariable), "1", StringComparison.Ordinal))
         {
@@ -36,7 +36,7 @@ public sealed class CopilotLiveIntegrationTests
                         Tools =
                         [
                             new AgentToolDefinition(
-                                new AgentToolSpec("codealta.tasks.create", "Creates a task", toolSchema),
+                                new AgentToolSpec("codealta_tasks_create", "Creates a task", toolSchema),
                                 static (_, _) => Task.FromResult<AgentToolResult>(
                                     new(
                                         true,

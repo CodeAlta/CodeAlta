@@ -460,7 +460,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(thread, project);
         var developerInstructions = UsesProviderManagedSkills(options.BackendId) ? null : instructions.DeveloperInstructions;
         var additionalDeveloperInstructions = AppendPromptPart(BuildParentNotificationGuidance(thread), options.AdditionalDeveloperInstructions);
-        var tools = CreateSessionTools(options, project);
+        var tools = options.Tools;
 
         ThreadSessionEntry? previousEntry = null;
         AgentId agentId;
@@ -852,20 +852,6 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
                 result.Message ?? $"Failed to abort thread '{threadId}'.",
                 result.Exception);
         }
-    }
-
-    private IReadOnlyList<AgentToolDefinition>? CreateSessionTools(
-        WorkThreadExecutionOptions options,
-        ProjectDescriptor? project)
-    {
-        if (UsesProviderManagedSkills(options.BackendId))
-        {
-            return options.Tools;
-        }
-
-        var skillQuery = BuildSkillCatalogQuery(project, options.ProjectRoots);
-        var skillActivationTool = SkillSessionToolFactory.CreateActivateTool(_skillCatalog, skillQuery);
-        return SkillSessionToolFactory.MergeWithActivationTool(options.Tools, skillActivationTool);
     }
 
     private static bool UsesProviderManagedSkills(AgentBackendId backendId)

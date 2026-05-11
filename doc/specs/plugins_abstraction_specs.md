@@ -856,7 +856,7 @@ Runtime behavior:
 
 - The runtime registers tools for sessions where the plugin is active and the backend supports CodeAlta-managed tools.
 - Deactivation removes tools from future requests and active tool registries.
-- Tool names are natural identifiers because provider protocols require tool names.
+- Tool names are provider-neutral identifiers and must match `^[a-zA-Z0-9_-]+$`.
 - Duplicate tool names and built-in overrides are allowed but diagnosed.
 - Tool handlers receive cancellation and progress callbacks and should not assume UI availability.
 - If a tool mutates files, the runtime should eventually expose shared file-mutation coordination so plugin tools do not race built-in edit/write tools.

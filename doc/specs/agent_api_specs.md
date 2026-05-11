@@ -352,6 +352,7 @@ public abstract record AgentToolResultItem
 ```
 
 Notes:
+- Tool names use one provider-neutral policy across backends and must match `^[a-zA-Z0-9_-]+$`.
 - This is intentionally narrower than Copilot’s full tool-result surface. Adapters can:
   - down-convert richer results to `Text`,
   - or expose backend-native tool result via escape hatch (see §8).

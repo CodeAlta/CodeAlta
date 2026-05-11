@@ -13,10 +13,87 @@ public sealed record AgentToolDefinition(AgentToolSpec Spec, AgentToolHandler Ha
 /// <summary>
 /// Defines tool metadata required for registration with an agent backend.
 /// </summary>
-/// <param name="Name">The tool name.</param>
-/// <param name="Description">The tool description.</param>
-/// <param name="InputSchema">The JSON schema for tool arguments.</param>
-public sealed record AgentToolSpec(string Name, string Description, JsonElement InputSchema);
+public sealed record AgentToolSpec
+{
+    private const string NamePattern = "^[a-zA-Z0-9_-]+$";
+    private string _name = string.Empty;
+    private string _description = string.Empty;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AgentToolSpec"/> record.
+    /// </summary>
+    /// <param name="name">The tool name. Tool names must match <c>^[a-zA-Z0-9_-]+$</c>.</param>
+    /// <param name="description">The tool description.</param>
+    /// <param name="inputSchema">The JSON schema for tool arguments.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="name" /> is empty or contains unsupported characters.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="description" /> is <see langword="null" />.</exception>
+    public AgentToolSpec(string name, string description, JsonElement inputSchema)
+    {
+        Name = name;
+        Description = description;
+        InputSchema = inputSchema;
+    }
+
+    /// <summary>
+    /// Gets the tool name.
+    /// </summary>
+    public string Name
+    {
+        get => _name;
+        init => _name = ValidateName(value);
+    }
+
+    /// <summary>
+    /// Gets the tool description.
+    /// </summary>
+    public string Description
+    {
+        get => _description;
+        init => _description = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
+    /// <summary>
+    /// Gets the JSON schema for tool arguments.
+    /// </summary>
+    public JsonElement InputSchema { get; init; }
+
+    /// <summary>
+    /// Deconstructs this tool specification into its components.
+    /// </summary>
+    /// <param name="name">The tool name.</param>
+    /// <param name="description">The tool description.</param>
+    /// <param name="inputSchema">The JSON schema for tool arguments.</param>
+    public void Deconstruct(out string name, out string description, out JsonElement inputSchema)
+    {
+        name = Name;
+        description = Description;
+        inputSchema = InputSchema;
+    }
+
+    private static string ValidateName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (!IsValidName(name))
+        {
+            throw new ArgumentException($"Tool name '{name}' is invalid. Tool names must match {NamePattern}.", nameof(name));
+        }
+
+        return name;
+    }
+
+    private static bool IsValidName(string name)
+    {
+        foreach (var ch in name)
+        {
+            if (!char.IsAsciiLetterOrDigit(ch) && ch is not '_' and not '-')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
 
 /// <summary>
 /// Represents a tool invocation.

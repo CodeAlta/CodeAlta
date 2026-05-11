@@ -814,7 +814,7 @@ public sealed class LocalAgentToolsTests
                 new AgentToolSpec("read_file", "Read a file", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
                 (_, _) => Task.FromResult(new AgentToolResult(true, []))),
             new(
-                new AgentToolSpec("read file", "Read another file", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
+                new AgentToolSpec("read_file", "Read another file", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
                 (_, _) => Task.FromResult(new AgentToolResult(true, []))),
         ];
 
@@ -824,6 +824,18 @@ public sealed class LocalAgentToolsTests
         Assert.AreEqual(2, declarations.Count);
         CollectionAssert.AreEquivalent(new[] { "read_file", "read_file_2" }, map.Keys.ToArray());
         Assert.IsTrue(declarations.All(static declaration => declaration is not null));
+    }
+
+    [TestMethod]
+    public void AgentToolSpec_RejectsInvalidToolNames()
+    {
+        using var schema = JsonDocument.Parse("""{"type":"object"}""");
+
+        var dotted = Assert.ThrowsExactly<ArgumentException>(() => new AgentToolSpec("bad.tool", "Bad", schema.RootElement.Clone()));
+        var spaced = Assert.ThrowsExactly<ArgumentException>(() => new AgentToolSpec("bad tool", "Bad", schema.RootElement.Clone()));
+
+        StringAssert.Contains(dotted.Message, "^[a-zA-Z0-9_-]+$");
+        StringAssert.Contains(spaced.Message, "^[a-zA-Z0-9_-]+$");
     }
 
     [TestMethod]

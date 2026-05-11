@@ -35,11 +35,11 @@ Skill names must be lowercase alphanumeric text plus hyphens, with no leading/tr
 
 ## Runtime behavior
 
-For local/raw backends, CodeAlta advertises only compact skill metadata in instructions and exposes `codealta.skills.activate` so the full skill body is loaded only when needed. Activation reads content; it never executes scripts automatically.
+For local/raw backends, CodeAlta advertises only compact skill metadata in instructions. Agents should activate a matching skill through the `alta skill activate <skill-name> --session <thread-id>` live-tool command so the full skill body is loaded only when needed. Activation reads content; it never executes scripts automatically.
 
 Agent role profiles can list associated skills with `skills:` or `codealta.skills:` frontmatter. CodeAlta treats those entries as ranking hints in the advertised catalog, not as automatic full prompt preloads.
 
-Codex and Copilot backends manage their own native skills. CodeAlta therefore does not inject CodeAlta-managed skill advertisements or the `codealta.skills.activate` tool into Codex/Copilot sessions.
+Codex and Copilot backends manage their own native skills. CodeAlta therefore does not inject CodeAlta-managed skill advertisements into Codex/Copilot sessions.
 
 Activated local-runtime skills are recorded in the session journal so thread info can show loaded skills after resume. Before compaction, the activated payload remains ordinary replayed conversation context; after compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions keep skill guidance without duplicating current context. If a compacted prompt-integrated skill is missing on disk, CodeAlta preserves the history and reports the missing path.
 

@@ -720,7 +720,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                 AgentActivityPhase.Completed,
                 activatedSkill.ActivationId,
                 null,
-                "codealta.skills.activate",
+                "alta skill activate",
                 $"Activated skill '{activatedSkill.Name}' from the UI.",
                 JsonSerializer.SerializeToElement(activatedSkill, AgentJsonSerializerContext.Default.LocalAgentLoadedSkillState)));
         }
@@ -2286,8 +2286,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             "apply_patch";
 
     private static bool IsSkillActivationTool(string toolName)
-        => string.Equals(toolName, "codealta.skills.activate", StringComparison.Ordinal) ||
-           string.Equals(toolName, "codealta_skills_activate", StringComparison.Ordinal);
+        => string.Equals(toolName, "codealta_skills_activate", StringComparison.Ordinal);
 
     private static LocalAgentLoadedSkillState? TryCreateLoadedSkillState(
         LocalAgentMessagePart.ToolCall toolCall,

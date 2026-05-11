@@ -196,7 +196,7 @@ public sealed class CopilotAgentMapperTests
     }
 
     [TestMethod]
-    public void ToSessionConfig_SanitizesCopilotToolNames()
+    public void ToSessionConfig_DeduplicatesCopilotToolNames()
     {
         var toolSchema = JsonDocument.Parse("""{"type":"object","properties":{"value":{"type":"string"}}}""").RootElement;
         var options = new AgentSessionCreateOptions
@@ -205,7 +205,7 @@ public sealed class CopilotAgentMapperTests
             Tools =
             [
                 new AgentToolDefinition(
-                    new AgentToolSpec("codealta.tasks.create", "Creates a task", toolSchema),
+                    new AgentToolSpec("codealta_tasks_create", "Creates a task", toolSchema),
                     static (_, _) => Task.FromResult<AgentToolResult>(
                         new(
                             true,

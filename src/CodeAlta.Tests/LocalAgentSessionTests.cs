@@ -371,7 +371,7 @@ public sealed class LocalAgentSessionTests
                 Tools =
                 [
                     new AgentToolDefinition(
-                        new AgentToolSpec("codealta.skills.activate", "Activate a skill", schema.RootElement.Clone()),
+                        new AgentToolSpec("codealta_skills_activate", "Activate a skill", schema.RootElement.Clone()),
                         (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(payload)]))),
                 ],
             });
@@ -566,7 +566,7 @@ public sealed class LocalAgentSessionTests
                 Tools =
                 [
                     new AgentToolDefinition(
-                        new AgentToolSpec("codealta.skills.activate", "Activate a skill", schema.RootElement.Clone()),
+                        new AgentToolSpec("codealta_skills_activate", "Activate a skill", schema.RootElement.Clone()),
                         (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(payload)]))),
                 ],
             }))
@@ -707,7 +707,7 @@ public sealed class LocalAgentSessionTests
                 Tools =
                 [
                     new AgentToolDefinition(
-                        new AgentToolSpec("codealta.skills.activate", "Activate a skill", schema.RootElement.Clone()),
+                        new AgentToolSpec("codealta_skills_activate", "Activate a skill", schema.RootElement.Clone()),
                         (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(payload)]))),
                 ],
             }))
