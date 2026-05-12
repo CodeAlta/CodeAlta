@@ -18,7 +18,10 @@ public static class GoogleGenAIAgentBackendFactoryExtensions
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(options);
 
-        factory.Register(options.BackendIdOverride ?? AgentBackendIds.GoogleGenAI, () => new GoogleGenAIAgentBackend(options));
+        factory.Register(
+            options.BackendIdOverride ?? AgentBackendIds.GoogleGenAI,
+            () => new GoogleGenAIAgentBackend(options),
+            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
         return factory;
     }
 }

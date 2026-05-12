@@ -54,6 +54,23 @@ public sealed class AgentHubTests
         Assert.AreEqual(1, backend.ListModelsCallCount);
     }
 
+    [TestMethod]
+    public async Task UsesSharedSessionMetadataStoreAsync_UsesRegistrationMetadataWithoutStartingBackend()
+    {
+        var backend = new BlockingBackend("local");
+        var factory = new AgentBackendFactory();
+        factory.Register(
+            "local",
+            () => backend,
+            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+        await using var hub = new AgentHub(factory);
+
+        var usesSharedStore = await hub.UsesSharedSessionMetadataStoreAsync(new AgentBackendId("local"));
+
+        Assert.IsTrue(usesSharedStore);
+        Assert.AreEqual(0, backend.StartCallCount);
+    }
+
     private sealed class BlockingBackend(string backendId) : IAgentBackend
     {
         public TaskCompletionSource StartEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

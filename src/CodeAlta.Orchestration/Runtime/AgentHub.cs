@@ -379,6 +379,11 @@ public sealed class AgentHub : IAsyncDisposable
         AgentBackendId backendId,
         CancellationToken cancellationToken = default)
     {
+        if (_backendFactory.UsesSharedSessionMetadataStore(backendId))
+        {
+            return true;
+        }
+
         var backend = await GetOrCreateBackendAsync(backendId, cancellationToken).ConfigureAwait(false);
         return backend is IAgentSharedSessionMetadataBackend;
     }

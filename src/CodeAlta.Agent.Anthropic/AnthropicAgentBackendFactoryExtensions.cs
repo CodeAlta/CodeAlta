@@ -18,7 +18,10 @@ public static class AnthropicAgentBackendFactoryExtensions
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(options);
 
-        factory.Register(options.BackendIdOverride ?? AgentBackendIds.AnthropicMessages, () => new AnthropicAgentBackend(options));
+        factory.Register(
+            options.BackendIdOverride ?? AgentBackendIds.AnthropicMessages,
+            () => new AnthropicAgentBackend(options),
+            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
         return factory;
     }
 }

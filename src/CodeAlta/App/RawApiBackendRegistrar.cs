@@ -33,7 +33,10 @@ internal static class RawApiBackendRegistrar
         {
             if (TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend))
             {
-                backendFactory.RegisterOrReplace(descriptor.BackendId, createBackend);
+                backendFactory.RegisterOrReplace(
+                    descriptor.BackendId,
+                    createBackend,
+                    AgentBackendRegistrationOptions.SharedSessionMetadataStore);
                 descriptors.Add(descriptor);
             }
         }
@@ -60,7 +63,10 @@ internal static class RawApiBackendRegistrar
                 continue;
             }
 
-            backendFactory.RegisterOrReplace(descriptor.BackendId, createBackend);
+            backendFactory.RegisterOrReplace(
+                descriptor.BackendId,
+                createBackend,
+                AgentBackendRegistrationOptions.SharedSessionMetadataStore);
             descriptors.Add(descriptor);
         }
 

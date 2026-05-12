@@ -59,6 +59,20 @@ public sealed class AgentBackendFactoryTests
     }
 
     [TestMethod]
+    public void UsesSharedSessionMetadataStore_ReturnsRegistrationMetadata()
+    {
+        var factory = new AgentBackendFactory();
+        factory.Register(
+            "shared",
+            () => new TestBackend("shared"),
+            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+        factory.Register("default", () => new TestBackend("default"));
+
+        Assert.IsTrue(factory.UsesSharedSessionMetadataStore(new AgentBackendId("shared")));
+        Assert.IsFalse(factory.UsesSharedSessionMetadataStore(new AgentBackendId("default")));
+    }
+
+    [TestMethod]
     public void Create_ThrowsForUnknownId()
     {
         var factory = new AgentBackendFactory();
