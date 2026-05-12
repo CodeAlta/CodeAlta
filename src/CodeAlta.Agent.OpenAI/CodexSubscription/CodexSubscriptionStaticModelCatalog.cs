@@ -5,10 +5,10 @@ namespace CodeAlta.Agent.OpenAI.CodexSubscription;
 
 internal static class CodexSubscriptionStaticModelCatalog
 {
-    // Codex exposes `context_window` as the model context/input window. Keep the 128k
-    // generation cap in the separate output-token capabilities instead of adding it here.
-    private const long DefaultContextWindow = 272_000;
-    private const long DefaultInputTokenLimit = DefaultContextWindow;
+    // Codex exposes a 400k model context window with a lower 272k prompt/input cap.
+    // Keep the 128k generation cap in the separate output-token capabilities.
+    private const long DefaultContextWindow = 400_000;
+    private const long DefaultInputTokenLimit = 272_000;
     private const long DefaultOutputTokenLimit = 128_000;
 
     // User-visible Codex subscription picker entries, following the curated Codex/pi-mono catalog.
@@ -65,7 +65,6 @@ internal static class CodexSubscriptionStaticModelCatalog
                 ["inputTokenLimit"] = DefaultInputTokenLimit,
                 ["maxInputTokens"] = DefaultInputTokenLimit,
                 ["outputTokenLimit"] = DefaultOutputTokenLimit,
-                ["maxOutputTokens"] = DefaultOutputTokenLimit,
                 ["maxTokens"] = DefaultOutputTokenLimit,
             });
 

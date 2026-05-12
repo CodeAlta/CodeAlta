@@ -404,9 +404,13 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             "gpt-5.5|gpt-5.4|gpt-5.4-mini|gpt-5.3-codex|gpt-5.2",
             string.Join('|', visibleModels.Select(static model => model.Id)));
         Assert.IsFalse(visibleModels.Any(static model => model.Id == "codex-auto-review"));
-        Assert.IsTrue(visibleModels.All(static model => Equals(272000L, model.Capabilities?["contextWindow"])));
+        Assert.IsTrue(visibleModels.All(static model => Equals(400000L, model.Capabilities?["contextWindow"])));
+        Assert.IsTrue(visibleModels.All(static model => Equals(400000L, model.Capabilities?["contextWindowTokens"])));
         Assert.IsTrue(visibleModels.All(static model => Equals(272000L, model.Capabilities?["inputTokenLimit"])));
+        Assert.IsTrue(visibleModels.All(static model => Equals(272000L, model.Capabilities?["maxInputTokens"])));
         Assert.IsTrue(visibleModels.All(static model => Equals(128000L, model.Capabilities?["outputTokenLimit"])));
+        Assert.IsTrue(visibleModels.All(static model => Equals(128000L, model.Capabilities?["maxTokens"])));
+        Assert.IsTrue(visibleModels.All(static model => model.Capabilities?.ContainsKey("maxOutputTokens") == false));
         Assert.IsTrue(visibleModels.All(static model => Equals(true, model.Capabilities?["listable"])));
         Assert.IsTrue(visibleModels.All(static model => Equals(false, model.Capabilities?["hidden"])));
     }
