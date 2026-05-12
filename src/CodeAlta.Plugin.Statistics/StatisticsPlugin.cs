@@ -23,7 +23,7 @@ public sealed class StatisticsPlugin : PluginBase
 {
     private const string ProjectionName = "statistics";
     private const string RenderTarget = "codealta.statistics.turn.v1";
-    private static readonly ConcurrentDictionary<string, AsyncTurnStatisticsProjection> s_turnProjections = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, AsyncTurnStatisticsProjection> _turnProjections = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
     public override IEnumerable<PluginThreadEventProjectionContribution> GetThreadEventProjections()
@@ -91,7 +91,7 @@ public sealed class StatisticsPlugin : PluginBase
         return command;
     }
 
-    private static ValueTask<IReadOnlyList<PluginDerivedThreadEvent>> ProjectAsync(
+    private ValueTask<IReadOnlyList<PluginDerivedThreadEvent>> ProjectAsync(
         PluginThreadEventProjectionContext context,
         CancellationToken cancellationToken)
     {
@@ -128,10 +128,10 @@ public sealed class StatisticsPlugin : PluginBase
         return ValueTask.FromResult<IReadOnlyList<PluginDerivedThreadEvent>>(projected);
     }
 
-    private static AsyncTurnStatisticsProjection GetOrCreateProjectionState(string threadId, PendingTurn turn)
+    private AsyncTurnStatisticsProjection GetOrCreateProjectionState(string threadId, PendingTurn turn)
     {
         var cacheKey = FormattableString.Invariant($"{threadId}:{turn.Key}:{turn.Fingerprint}");
-        return s_turnProjections.GetOrAdd(cacheKey, _ =>
+        return _turnProjections.GetOrAdd(cacheKey, _ =>
         {
             var state = new AsyncTurnStatisticsProjection(turn);
             state.Start();
