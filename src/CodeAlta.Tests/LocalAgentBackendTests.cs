@@ -19,6 +19,7 @@ public sealed class LocalAgentBackendTests
                 new AgentSessionCreateOptions
                 {
                     ProviderKey = "openai",
+                    Title = "Initial thread title",
                     Model = "gpt-5.4",
                     WorkingDirectory = "C:\\repo\\sample",
                     OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
@@ -39,6 +40,7 @@ public sealed class LocalAgentBackendTests
         Assert.AreEqual("C:\\repo\\sample", sessions[0].WorkspacePath);
         var details = Assert.IsInstanceOfType<RawApiSessionMetadataDetails>(sessions[0].Details);
         Assert.AreEqual("OpenAI", details.ProviderDisplayName);
+        Assert.AreEqual("Initial thread title", details.Title);
 
         await using var resumedSession = await backend.ResumeSessionAsync(
                 createdSession.SessionId,

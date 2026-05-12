@@ -54,6 +54,9 @@ internal sealed class WorkspaceProjectionController
     public void ApplyShellChromeProjection()
         => _workspaceContext.DispatchToUi(ApplyShellChromeProjectionCore);
 
+    public void ApplyRuntimeTimelineProjection()
+        => ApplyThreadChromeProjection();
+
     public void ApplyCatalogProjection()
         => _workspaceContext.DispatchToUi(ApplyCatalogProjectionCore);
 

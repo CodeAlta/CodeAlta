@@ -110,17 +110,17 @@ internal sealed class ThreadRuntimeEventCoordinator
                     tab.RenderedHistoryEvents.Add(agentEvent.Event);
                     TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, agentEvent.Event), "agent event");
                     ProjectPluginThreadEvents(thread, tab, tab.RenderedHistoryEvents, isReplay: false);
-                    _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+                    PublishRuntimeTimelineChanged(thread, tab);
                     break;
 
                 case WorkThreadHostEvent hostEvent:
                     TryRenderInteraction(tab, () => _timelineRenderer.RenderHostEvent(tab, hostEvent), "host event");
-                    _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+                    PublishRuntimeTimelineChanged(thread, tab);
                     break;
 
                 case WorkThreadQueueRuntimeEvent queueEvent:
                     TryRenderInteraction(tab, () => _timelineRenderer.RenderQueueEvent(tab, queueEvent), "queue event");
-                    _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+                    PublishRuntimeTimelineChanged(thread, tab);
                     break;
             }
         }
@@ -161,7 +161,7 @@ internal sealed class ThreadRuntimeEventCoordinator
             ProjectPluginThreadEvents(thread, tab, projectionEvents, isReplay: false);
         }
 
-        _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+        PublishRuntimeTimelineChanged(thread, tab);
         InvalidateProjectFileSearchIfNeeded(thread, @event);
         ObservePluginAgentEvent(thread, @event);
         ApplyReduction(tab, reduction);
@@ -194,7 +194,7 @@ internal sealed class ThreadRuntimeEventCoordinator
             ProjectPluginThreadEvents(thread, tab, projectionEvents, isReplay: false);
         }
 
-        _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+        PublishRuntimeTimelineChanged(thread, tab);
         InvalidateProjectFileSearchIfNeeded(thread, @event);
         ObservePluginAgentEvent(thread, @event);
         ApplyReduction(tab, reduction);
@@ -208,6 +208,15 @@ internal sealed class ThreadRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(events);
 
         ProjectPluginThreadEvents(thread, tab, events, isReplay: true);
+        _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+    }
+
+    private void PublishRuntimeTimelineChanged(WorkThreadDescriptor thread, OpenThreadState tab)
+    {
+        if (!tab.HistoryLoading)
+        {
+            _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(thread.ThreadId));
+        }
     }
 
     public void TryRenderInteraction(OpenThreadState tab, Action action, string context)

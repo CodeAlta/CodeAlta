@@ -24,6 +24,7 @@ internal sealed class ProviderFrontendCoordinator
     private readonly Action<Action> _dispatchToUi;
     private readonly FrontendEventPublisher _frontendEvents;
     private readonly Action<string, bool, StatusTone> _setStatus;
+    private bool? _hasAnyEnabledProviders;
 
     public ProviderFrontendCoordinator(
         CodeAltaOwnedServices? ownedServices,
@@ -51,10 +52,23 @@ internal sealed class ProviderFrontendCoordinator
     }
 
     public IReadOnlyList<CodeAltaProviderDocument> LoadProviderDefinitions()
-        => _configStore.LoadGlobalProviderDefinitions(includeDisabled: true);
+    {
+        var definitions = _configStore.LoadGlobalProviderDefinitions(includeDisabled: true);
+        _hasAnyEnabledProviders = definitions.Any(static definition => definition.Enabled != false);
+        return definitions;
+    }
 
     public bool HasAnyEnabledProviders()
-        => LoadProviderDefinitions().Any(static definition => definition.Enabled != false);
+    {
+        if (_hasAnyEnabledProviders is { } cached)
+        {
+            return cached;
+        }
+
+        var hasEnabledProviders = LoadProviderDefinitions().Any(static definition => definition.Enabled != false);
+        _hasAnyEnabledProviders = hasEnabledProviders;
+        return hasEnabledProviders;
+    }
 
     public async Task SaveProviderDefinitionsAsync(
         IReadOnlyList<CodeAltaProviderDocument> definitions,
@@ -63,6 +77,7 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definitions);
 
         _configStore.SaveGlobalProviderDefinitions(definitions);
+        _hasAnyEnabledProviders = null;
         if (_ownedServices is null)
         {
             _setStatus("Provider configuration saved.", false, StatusTone.Info);

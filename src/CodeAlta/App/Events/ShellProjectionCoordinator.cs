@@ -10,6 +10,8 @@ internal interface IWorkspaceProjectionController
 
     void ApplyShellChromeProjection();
 
+    void ApplyRuntimeTimelineProjection();
+
     void ApplyTabProjection();
 
     void ApplyThreadStatusProjection();
@@ -77,8 +79,10 @@ internal sealed class ShellProjectionCoordinator : IDisposable
                 _workspaceProjections.ApplyHeaderProjection();
                 break;
             case ShellChromeChangedEvent:
-            case RuntimeTimelineChangedEvent:
                 _workspaceProjections.ApplyShellChromeProjection();
+                break;
+            case RuntimeTimelineChangedEvent:
+                _workspaceProjections.ApplyRuntimeTimelineProjection();
                 break;
             case ThreadStatusChangedEvent:
                 _workspaceProjections.ApplyThreadStatusProjection();

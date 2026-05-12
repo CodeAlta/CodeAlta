@@ -139,6 +139,18 @@ public sealed class ShellProjectionCoordinatorTests
         CollectionAssert.AreEqual(new[] { "usage" }, projections.Calls);
     }
 
+    [TestMethod]
+    public void Publish_RuntimeTimelineChanged_InvalidatesTimelineWithoutRefreshingShellChrome()
+    {
+        var projections = new CapturingProjectionControllers();
+        var publisher = new FrontendEventPublisher(new InlineUiDispatcher());
+        using var coordinator = new ShellProjectionCoordinator(publisher, projections, projections, projections);
+
+        publisher.Publish(new RuntimeTimelineChangedEvent("thread-1"));
+
+        CollectionAssert.AreEqual(new[] { "timeline" }, projections.Calls);
+    }
+
     private sealed class CapturingProjectionControllers :
         IWorkspaceProjectionController,
         IPromptAvailabilityProjectionController,
@@ -153,6 +165,8 @@ public sealed class ShellProjectionCoordinatorTests
         public void ApplyHeaderProjection() => Calls.Add("header");
 
         public void ApplyShellChromeProjection() => Calls.Add("chrome");
+
+        public void ApplyRuntimeTimelineProjection() => Calls.Add("timeline");
 
         public void ApplyTabProjection() => Calls.Add("tabs");
 

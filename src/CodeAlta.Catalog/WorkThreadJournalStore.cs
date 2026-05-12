@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -26,6 +27,7 @@ public sealed class WorkThreadJournalStore
 
     private readonly LocalAgentRuntimePathLayout _layout;
     private readonly LocalAgentSessionJournalFile _journalFile;
+    private readonly ConcurrentDictionary<string, CachedLatestState> _latestStateCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="WorkThreadJournalStore" /> class.
@@ -76,14 +78,16 @@ public sealed class WorkThreadJournalStore
             return;
         }
 
+        var path = GetPath(thread.ThreadId, thread.CreatedAt);
         await _journalFile.AppendLinesWithRequiredFirstLineAsync(
-                GetPath(thread.ThreadId, thread.CreatedAt),
+                path,
                 CreateHeaderEvent(thread).ToJson(),
                 [CreateStateEvent(thread, state).ToJson()],
                 Utf8WithoutBom,
                 IsThreadHeaderLine,
                 cancellationToken)
             .ConfigureAwait(false);
+        InvalidateLatestStateCache(path);
     }
 
     /// <summary>
@@ -146,11 +150,72 @@ public sealed class WorkThreadJournalStore
         }
 
         var path = GetPath(threadId, createdAt);
-        if (!File.Exists(path))
+        var before = GetFileStamp(path);
+        if (before is null)
         {
             return null;
         }
 
+        var cacheKey = Path.GetFullPath(path);
+        if (_latestStateCache.TryGetValue(cacheKey, out var cached) && cached.Stamp == before)
+        {
+            return CloneLocalState(cached.State);
+        }
+
+        var latestState = await ReadLatestStateUncachedAsync(path, cancellationToken).ConfigureAwait(false);
+        var after = GetFileStamp(path);
+        if (before == after)
+        {
+            _latestStateCache[cacheKey] = new CachedLatestState(before.Value, CloneLocalState(latestState));
+        }
+
+        return latestState;
+    }
+
+    private static WorkThreadLocalState? CloneLocalState(WorkThreadLocalState? state)
+    {
+        if (state is null)
+        {
+            return null;
+        }
+
+        return new WorkThreadLocalState
+        {
+            ProviderKey = state.ProviderKey,
+            ModelId = state.ModelId,
+            ReasoningEffort = state.ReasoningEffort,
+            Archived = state.Archived,
+            MessageCount = state.MessageCount,
+            ParentThreadId = state.ParentThreadId,
+            CreatedBy = state.CreatedBy,
+            PromptProvenance = state.PromptProvenance?.Select(static provenance => new WorkThreadPromptProvenance
+            {
+                PromptId = provenance.PromptId,
+                Kind = provenance.Kind,
+                RunId = provenance.RunId,
+                Queued = provenance.Queued,
+                PromptPreview = provenance.PromptPreview,
+                SubmittedBy = provenance.SubmittedBy,
+                CreatedAt = provenance.CreatedAt,
+            }).ToList() ?? [],
+            QueuedPrompts = state.QueuedPrompts?.Select(static prompt => new WorkThreadQueuedPrompt
+            {
+                QueueItemId = prompt.QueueItemId,
+                Kind = prompt.Kind,
+                Prompt = prompt.Prompt,
+                PromptPreview = prompt.PromptPreview,
+                State = prompt.State,
+                RunId = prompt.RunId,
+                SubmittedBy = prompt.SubmittedBy,
+                CreatedAt = prompt.CreatedAt,
+                DrainedAt = prompt.DrainedAt,
+                LastError = prompt.LastError,
+            }).ToList() ?? [],
+        };
+    }
+
+    private static async Task<WorkThreadLocalState?> ReadLatestStateUncachedAsync(string path, CancellationToken cancellationToken)
+    {
         await foreach (var line in ReadLinesFromEndAsync(path, 64 * 1024, cancellationToken).ConfigureAwait(false))
         {
             if (!TryDeserializeRawEvent(line, out var rawEvent) || rawEvent.BackendEventType != ThreadStateEventType)
@@ -209,17 +274,18 @@ public sealed class WorkThreadJournalStore
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, useAsync: true);
         var length = stream.Length;
         var position = length;
-        var carry = string.Empty;
-        var skipTrailingEmptyLine = true;
-        while (position > 0)
+        var buffer = ArrayPool<byte>.Shared.Rent(chunkSize);
+        var lineBuffer = ArrayPool<byte>.Shared.Rent(4096);
+        var lineLength = 0;
+        var previousByteWasLineFeed = false;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var count = (int)Math.Min(chunkSize, position);
-            position -= count;
-            var buffer = ArrayPool<byte>.Shared.Rent(count);
-            var read = 0;
-            try
+            while (position > 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                var count = (int)Math.Min(chunkSize, position);
+                position -= count;
+                var read = 0;
                 stream.Seek(position, SeekOrigin.Begin);
                 while (read < count)
                 {
@@ -232,38 +298,80 @@ public sealed class WorkThreadJournalStore
                     read += current;
                 }
 
-                var text = Utf8WithoutBom.GetString(buffer, 0, read) + carry;
-                var lines = text.Split('\n');
-                var firstLineIsPartial = position > 0;
-                carry = firstLineIsPartial ? lines[0] : string.Empty;
-                var startIndex = firstLineIsPartial ? 1 : 0;
-                for (var index = lines.Length - 1; index >= startIndex; index--)
+                for (var index = read - 1; index >= 0; index--)
                 {
-                    var line = lines[index].TrimEnd('\r');
-                    if (skipTrailingEmptyLine && line.Length == 0)
+                    var value = buffer[index];
+                    if (value == (byte)'\n')
                     {
-                        skipTrailingEmptyLine = false;
+                        if (lineLength > 0)
+                        {
+                            yield return DecodeReversedLine(lineBuffer, lineLength).TrimEnd('\r');
+                            lineLength = 0;
+                        }
+
+                        previousByteWasLineFeed = true;
                         continue;
                     }
 
-                    skipTrailingEmptyLine = false;
-                    if (line.Length > 0)
+                    if (previousByteWasLineFeed && value == (byte)'\r')
                     {
-                        yield return line;
+                        previousByteWasLineFeed = false;
+                        continue;
                     }
+
+                    previousByteWasLineFeed = false;
+                    if (lineLength == lineBuffer.Length)
+                    {
+                        var replacement = ArrayPool<byte>.Shared.Rent(lineBuffer.Length * 2);
+                        Array.Copy(lineBuffer, replacement, lineLength);
+                        ArrayPool<byte>.Shared.Return(lineBuffer);
+                        lineBuffer = replacement;
+                    }
+
+                    lineBuffer[lineLength++] = value;
                 }
             }
-            finally
+
+            if (lineLength > 0)
             {
-                ArrayPool<byte>.Shared.Return(buffer);
+                yield return DecodeReversedLine(lineBuffer, lineLength).TrimEnd('\r');
             }
         }
-
-        if (carry.Length > 0)
+        finally
         {
-            yield return carry.TrimEnd('\r');
+            ArrayPool<byte>.Shared.Return(buffer);
+            ArrayPool<byte>.Shared.Return(lineBuffer);
         }
     }
+
+    private static string DecodeReversedLine(byte[] reversedLine, int length)
+    {
+        var rented = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            for (var index = 0; index < length; index++)
+            {
+                rented[index] = reversedLine[length - index - 1];
+            }
+
+            return Utf8WithoutBom.GetString(rented, 0, length);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static FileStamp? GetFileStamp(string path)
+    {
+        var fileInfo = new FileInfo(path);
+        return fileInfo.Exists
+            ? new FileStamp(fileInfo.LastWriteTimeUtc, fileInfo.Length)
+            : null;
+    }
+
+    private void InvalidateLatestStateCache(string path)
+        => _latestStateCache.TryRemove(Path.GetFullPath(path), out _);
 
     private static bool TryDeserializeRawEvent(string? line, out RawJournalEvent rawEvent)
     {
@@ -298,6 +406,10 @@ public sealed class WorkThreadJournalStore
         => TryDeserializeRawEvent(line, out var rawEvent) && rawEvent.BackendEventType == ThreadHeaderEventType;
 
     private readonly record struct RawJournalEvent(string BackendEventType, JsonElement Raw);
+
+    private readonly record struct FileStamp(DateTime LastWriteTimeUtc, long Length);
+
+    private sealed record CachedLatestState(FileStamp Stamp, WorkThreadLocalState? State);
 }
 
 /// <summary>
@@ -332,6 +444,9 @@ public sealed class WorkThreadJournalHeader
     [JsonPropertyName("working_directory")]
     public string WorkingDirectory { get; set; } = string.Empty;
 
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
 
@@ -348,6 +463,7 @@ public sealed class WorkThreadJournalHeader
             ParentThreadId = descriptor.ParentThreadId,
             CreatedBy = descriptor.CreatedBy,
             WorkingDirectory = descriptor.WorkingDirectory,
+            Title = string.IsNullOrWhiteSpace(descriptor.Title) ? null : descriptor.Title,
             CreatedAt = descriptor.CreatedAt,
         };
     }
@@ -363,7 +479,7 @@ public sealed class WorkThreadJournalHeader
             ParentThreadId = ParentThreadId,
             CreatedBy = CreatedBy,
             WorkingDirectory = WorkingDirectory,
-            Title = ThreadId,
+            Title = string.IsNullOrWhiteSpace(Title) ? ThreadId : Title,
             Status = WorkThreadStatus.Active,
             CreatedAt = CreatedAt,
             UpdatedAt = CreatedAt,

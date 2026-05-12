@@ -11,6 +11,11 @@ public class AgentSessionCreateOptions
     public string? ThreadId { get; init; }
 
     /// <summary>
+    /// Gets or initializes the user-facing session title when known at creation time.
+    /// </summary>
+    public string? Title { get; init; }
+
+    /// <summary>
     /// Gets or initializes the configured provider key.
     /// </summary>
     public string? ProviderKey { get; init; }

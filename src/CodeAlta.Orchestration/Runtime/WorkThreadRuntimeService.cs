@@ -592,6 +592,7 @@ public sealed class WorkThreadRuntimeService : IAsyncDisposable
         var sessionOptions = new AgentSessionResumeOptions
         {
             ThreadId = requestedThreadId,
+            Title = NormalizeOptionalText(thread.Title),
             ProviderKey = options.ProviderKey ?? thread.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,

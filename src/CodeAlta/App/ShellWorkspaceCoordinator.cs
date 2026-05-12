@@ -54,6 +54,9 @@ internal sealed class ShellWorkspaceCoordinator : IWorkspaceProjectionController
     public void ApplyShellChromeProjection()
         => _workspaceProjection.ApplyShellChromeProjection();
 
+    public void ApplyRuntimeTimelineProjection()
+        => _workspaceProjection.ApplyRuntimeTimelineProjection();
+
     public void ApplyCatalogProjection()
         => _workspaceProjection.ApplyCatalogProjection();
 

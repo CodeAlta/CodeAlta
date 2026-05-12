@@ -201,7 +201,7 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
             ProviderKey = registration.Provider.ProviderKey,
             ModelId = options.Model,
             WorkingDirectory = options.WorkingDirectory,
-            Title = null,
+            Title = NormalizeOptionalText(options.Title),
             Summary = null,
             CreatedAt = now,
             UpdatedAt = now,
@@ -335,8 +335,12 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         {
             ModelId = string.IsNullOrWhiteSpace(options.Model) ? summary.ModelId : options.Model,
             WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory) ? summary.WorkingDirectory : options.WorkingDirectory,
+            Title = string.IsNullOrWhiteSpace(options.Title) ? summary.Title : options.Title.Trim(),
         };
     }
+
+    private static string? NormalizeOptionalText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool MatchesFilter(LocalAgentSessionSummary summary, AgentSessionListFilter? filter)
     {

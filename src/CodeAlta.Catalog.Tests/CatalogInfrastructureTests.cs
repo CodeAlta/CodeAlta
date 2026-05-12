@@ -514,6 +514,7 @@ public sealed class CatalogInfrastructureTests
         Assert.IsFalse(raw.TryGetProperty("message_count", out _));
         Assert.IsFalse(raw.TryGetProperty("model_id", out _));
         Assert.IsFalse(raw.TryGetProperty("reasoning_effort", out _));
+        Assert.AreEqual("Header test", raw.GetProperty("title").GetString());
         Assert.AreEqual("thread-parent", raw.GetProperty("parent_thread_id").GetString());
     }
 
