@@ -68,8 +68,15 @@ internal sealed class ModelProviderSelectorView
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
 
-        ChatBackendPresentation.ReplaceSelectItems(ChatBackendSelect, workspaceViewModel.ModelProviderOptions);
-        ChatBackendPresentation.ReplaceSelectItems(ChatModelSelect, workspaceViewModel.ModelOptions);
-        ChatBackendPresentation.ReplaceSelectItems(ChatReasoningSelect, workspaceViewModel.ReasoningOptions);
+        using var _ = workspaceViewModel.SuppressSelectionChangedNotifications();
+        SyncSelect(ChatBackendSelect, workspaceViewModel.ModelProviderOptions, workspaceViewModel.SelectedModelProviderIndex);
+        SyncSelect(ChatModelSelect, workspaceViewModel.ModelOptions, workspaceViewModel.SelectedModelIndex);
+        SyncSelect(ChatReasoningSelect, workspaceViewModel.ReasoningOptions, workspaceViewModel.SelectedReasoningIndex);
+    }
+
+    private static void SyncSelect<T>(Select<T> select, IReadOnlyList<T> items, int selectedIndex)
+    {
+        ChatBackendPresentation.ReplaceSelectItems(select, items);
+        select.SelectedIndex = selectedIndex;
     }
 }

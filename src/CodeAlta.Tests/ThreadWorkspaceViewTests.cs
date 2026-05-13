@@ -209,6 +209,54 @@ public sealed class ThreadWorkspaceViewTests
     }
 
     [TestMethod]
+    public void SyncModelProviderSelectorItems_AppliesSelectedIndexesToSelectControls()
+    {
+        var workspaceViewModel = new ThreadWorkspaceViewModel
+        {
+            ModelProviderOptions =
+            [
+                new ChatBackendOption(new("codex"), "Codex"),
+                new ChatBackendOption(new("copilot"), "Copilot"),
+            ],
+            SelectedModelProviderIndex = 1,
+            ModelOptions =
+            [
+                new ChatModelOption("gpt-5", "GPT-5"),
+                new ChatModelOption("gpt-5.1", "GPT-5.1"),
+            ],
+            SelectedModelIndex = 1,
+            ReasoningOptions =
+            [
+                new ChatReasoningOption(Agent.AgentReasoningEffort.Low, "Low"),
+                new ChatReasoningOption(Agent.AgentReasoningEffort.High, "High"),
+            ],
+            SelectedReasoningIndex = 1,
+        };
+        var providerChangeCount = 0;
+        var modelChangeCount = 0;
+        var reasoningChangeCount = 0;
+        var view = CreateThreadWorkspaceView(
+            workspaceViewModel: workspaceViewModel,
+            modelProviderSelectorController: ModelProviderSelectorController.Create(
+                _ => providerChangeCount++,
+                _ => modelChangeCount++,
+                _ => reasoningChangeCount++,
+                static () => { }));
+
+        view.SyncModelProviderSelectorItems(workspaceViewModel);
+
+        var backendSelect = GetPrivateField<Select<ChatBackendOption>>(view, "ChatBackendSelect");
+        var modelSelect = GetPrivateField<Select<ChatModelOption>>(view, "ChatModelSelect");
+        var reasoningSelect = GetPrivateField<Select<ChatReasoningOption>>(view, "ChatReasoningSelect");
+        Assert.AreEqual(1, GetSelectSelectedIndexField(backendSelect));
+        Assert.AreEqual(1, GetSelectSelectedIndexField(modelSelect));
+        Assert.AreEqual(1, GetSelectSelectedIndexField(reasoningSelect));
+        Assert.AreEqual(0, providerChangeCount);
+        Assert.AreEqual(0, modelChangeCount);
+        Assert.AreEqual(0, reasoningChangeCount);
+    }
+
+    [TestMethod]
     public void ThreadInput_UsesHumanLabelsAndSlashCommandSearchText()
     {
         var shellViewModel = new CodeAltaShellViewModel();
@@ -465,6 +513,13 @@ public sealed class ThreadWorkspaceViewTests
     {
         Assert.IsTrue(view.TryGetPromptPanel(tabId, out var panel));
         return panel;
+    }
+
+    private static int GetSelectSelectedIndexField<T>(Select<T> select)
+    {
+        var field = typeof(Select<T>).GetField("_selectedIndex", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.IsNotNull(field);
+        return (int)field.GetValue(select)!;
     }
 
     private static PromptStripItem CreatePromptStripItem(string id)
