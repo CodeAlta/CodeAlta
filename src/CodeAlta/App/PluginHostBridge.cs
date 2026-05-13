@@ -83,12 +83,83 @@ internal sealed class PluginHostBridge
             return null;
         }
 
-        if (result.Result.ReplacementText is null && result.Result.ReplacementAttachments.Count == 0)
+        return ApplyPromptProcessingResult(prompt, result.Result);
+    }
+
+    internal static PromptSubmission ApplyPromptProcessingResult(PromptSubmission prompt, PluginPromptResult result)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(result);
+
+        if (result.Disposition == PluginPromptDisposition.Continue)
         {
             return prompt;
         }
 
-        return PromptSubmission.TextOnly(result.Result.ReplacementText ?? prompt.Text);
+        var replacementText = result.ReplacementText ?? prompt.Text;
+        var replacementImages = ResolveReplacementPromptImages(prompt.Images, result.ReplacementAttachments, out var imagesChanged);
+        if (!imagesChanged && string.Equals(replacementText, prompt.Text, StringComparison.Ordinal))
+        {
+            return prompt;
+        }
+
+        return PromptSubmission.Create(replacementText, replacementImages);
+    }
+
+    private static IReadOnlyList<PromptImageAttachment> ResolveReplacementPromptImages(
+        IReadOnlyList<PromptImageAttachment> currentImages,
+        IReadOnlyList<PluginPromptAttachment> replacementAttachments,
+        out bool imagesChanged)
+    {
+        imagesChanged = false;
+        if (currentImages.Count == 0 || replacementAttachments.Count == 0)
+        {
+            return currentImages;
+        }
+
+        var imagesById = currentImages.ToDictionary(static image => image.Id, StringComparer.Ordinal);
+        var mappedImages = new List<PromptImageAttachment>(replacementAttachments.Count);
+        foreach (var attachment in replacementAttachments)
+        {
+            if (attachment.Kind != PluginPromptAttachmentKind.Image ||
+                string.IsNullOrWhiteSpace(attachment.Path) ||
+                !imagesById.TryGetValue(attachment.Path, out var image))
+            {
+                // Prompt submissions currently only carry pasted image bytes. If a plugin returns
+                // another attachment shape, keep the pasted images instead of silently dropping them.
+                imagesChanged = false;
+                return currentImages;
+            }
+
+            if (!string.IsNullOrWhiteSpace(attachment.DisplayName))
+            {
+                image = image.WithTitle(attachment.DisplayName);
+            }
+
+            if (!string.IsNullOrWhiteSpace(attachment.MediaType))
+            {
+                image = image with { MediaType = attachment.MediaType.Trim() };
+            }
+
+            mappedImages.Add(image);
+        }
+
+        imagesChanged = mappedImages.Count != currentImages.Count;
+        if (!imagesChanged)
+        {
+            for (var index = 0; index < currentImages.Count; index++)
+            {
+                if (!string.Equals(mappedImages[index].Id, currentImages[index].Id, StringComparison.Ordinal) ||
+                    !string.Equals(mappedImages[index].Title, currentImages[index].Title, StringComparison.Ordinal) ||
+                    !string.Equals(mappedImages[index].MediaType, currentImages[index].MediaType, StringComparison.Ordinal))
+                {
+                    imagesChanged = true;
+                    break;
+                }
+            }
+        }
+
+        return mappedImages;
     }
 
     public async Task<PluginAgentRunAugmentation> BuildAgentRunAugmentationAsync(
