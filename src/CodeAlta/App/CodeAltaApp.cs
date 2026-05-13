@@ -27,13 +27,11 @@ using XenoAtom.Terminal.UI.Threading;
 
 namespace CodeAlta.Views;
 
-// CodeAltaApp intentionally remains the TUI shell composition root.
-// Add behavior to named owners first; keep methods here only to wire composition or adapt terminal controls.
+// CodeAltaApp intentionally remains the TUI shell composition root; Add behavior to named owners first
 internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycle
 {
     internal static readonly Logger UiLogger = LogManager.GetLogger("CodeAlta.UI");
     internal const string DraftTabId = "__draft__";
-    private const bool DefaultAutoApproveEnabled = true;
     private readonly ModelProviderPreferenceCoordinator _modelProviderPreferences;
     private readonly WorkThreadRuntimeService _runtimeService;
     private readonly CatalogOptions _catalogOptions;
@@ -265,7 +263,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         var threadSvc = new DelegatingShellThreadCommandService(GetSelectedThread, EnsureThreadTab);
         var dialogs = new DelegatingShellDialogCommandService(
             () => DialogBoundsResolver.ResolveAppBounds(ThreadInput), () => ThreadInput, () => _threadStateCoordinator.Projects,
-            OpenFolderAsync, OpenAcp, OpenModelProvidersAsync, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
+            OpenFolderAsync, OpenAcp, OpenModelProvidersAsync, composition.ModelCatalogCoordinator.Open, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
             SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, _threadCommandCoordinator.ActivateSelectedSkillAsync, SetStatus),
             PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync),
             () => EnsureSessionUsagePresenter().TogglePopupFromIndicator(),
@@ -689,7 +687,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private Task OpenFolderAsync(string folderPath, bool includeHidden)
         => _shellController.OpenFolderAsync(folderPath, includeHidden, CancellationToken.None);
 
-    internal bool GetAutoApproveEnabled() => DefaultAutoApproveEnabled;
     internal async Task PersistViewStateAsync()
         => await _threadStateCoordinator.PersistViewStateAsync();
     internal Task InitializeChatBackendsAsync(CancellationToken cancellationToken)
@@ -729,6 +726,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void FocusPromptTarget() => ThreadPaneLayout?.App?.Focus(ThreadInput);
     internal void FocusModelProviderSelector() { ActivateThreadSurface(); DispatchToUiDeferred(() => _threadWorkspaceView?.FocusModelProviderSelector()); }
 
+    internal void FocusReasoningSelector() { ActivateThreadSurface(); DispatchToUiDeferred(() => _threadWorkspaceView?.FocusReasoningSelector()); }
+
     private Task ScrollSelectedThreadMessageAsync(Action<OpenThreadState> scroll)
     {
         ArgumentNullException.ThrowIfNull(scroll);
@@ -754,6 +753,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     internal void OpenAcp() { if (_acpManagementCoordinator is null) { SetStatus("ACP management is unavailable in this app instance.", tone: StatusTone.Warning); return; } _acpManagementCoordinator.Open(); }
     internal Task OpenModelProvidersAsync() => _providerDialogCoordinator.OpenAsync();
+
     internal void FocusSidebar() { SyncSidebarSelectionToCurrentState(); ApplyPendingSidebarSelection(); _sidebarCoordinator.View.Tree.App?.Focus(_sidebarCoordinator.View.Tree); }
     private async Task CloseThreadTabAsync(string threadId)
         => await _threadStateCoordinator.CloseThreadTabAsync(threadId);

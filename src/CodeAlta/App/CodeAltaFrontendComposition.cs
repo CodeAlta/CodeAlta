@@ -40,6 +40,7 @@ internal sealed class CodeAltaFrontendComposition
     public required SidebarCoordinator SidebarCoordinator { get; init; }
     public required NavigatorActionCoordinator NavigatorActionCoordinator { get; init; }
     public required ModelProviderSelectorCoordinator ModelProviderSelectorCoordinator { get; init; }
+    public required ModelCatalogCoordinator ModelCatalogCoordinator { get; init; }
     public required IModelProviderPreferencePort ModelProviderPreferencePort { get; init; }
     public required ModelProviderSelectorStateStore ModelProviderSelectorStateStore { get; init; }
     public required ShellStateStore ShellStateStore { get; init; }
@@ -229,6 +230,17 @@ internal sealed class CodeAltaFrontendComposition
                 threadStateCoordinator.Selection.Target is WorkspaceTarget.Draft { IsGlobal: true }
                     ? null
                     : threadStateCoordinator.GetSelectedProject()?.Id));
+        var modelCatalogCoordinator = new ModelCatalogCoordinator(
+            chatBackendStates,
+            modelProviderSelectorCoordinator,
+            threadStateCoordinator.GetSelectedThread,
+            threadStateCoordinator.FindOpenThread,
+            modelProviderSelectorCoordinator.GetPreferredModelProviderId,
+            () => DialogBoundsResolver.ResolveAppBounds(frontend.ThreadInput),
+            () => frontend.ThreadInput,
+            frontend.FocusPromptEditor,
+            frontend.FocusReasoningSelector,
+            (message, tone) => frontend.SetStatus(message, tone: tone));
 
         ThreadPromptQueueCoordinator? threadPromptQueueCoordinator = null;
         ThreadCommandCoordinator? threadCommandCoordinator = null;
@@ -295,7 +307,7 @@ internal sealed class CodeAltaFrontendComposition
         var threadRuntimeEventCoordinator = new ThreadRuntimeEventCoordinator(
             shellStateStore,
             threadId => threadStateCoordinator.FindOpenThread(threadId),
-            frontend.GetAutoApproveEnabled,
+            static () => true,
             frontend.IsSelectedThread,
             shellStatusPort,
             (tab, cancellationToken) => threadCommandCoordinator!.DrainQueuedPromptAsync(tab, cancellationToken),
@@ -331,7 +343,7 @@ internal sealed class CodeAltaFrontendComposition
                 new ThreadCommandUiPort(
                     uiDispatcher,
                     frontend.TrySetPromptUnavailableStatus,
-                    frontend.GetAutoApproveEnabled,
+                    static () => true,
                     frontend.ClearDraftPromptText,
                     frontend.SetReadyStatusForCurrentSelection,
                     () => frontendEvents.Publish(new HeaderChangedEvent()),
@@ -372,6 +384,7 @@ internal sealed class CodeAltaFrontendComposition
             SidebarCoordinator = sidebarCoordinator,
             NavigatorActionCoordinator = navigatorActionCoordinator,
             ModelProviderSelectorCoordinator = modelProviderSelectorCoordinator,
+            ModelCatalogCoordinator = modelCatalogCoordinator,
             ModelProviderPreferencePort = modelProviderPreferencePort,
             ModelProviderSelectorStateStore = modelProviderSelectorStateContext,
             ShellStateStore = shellStateStore,

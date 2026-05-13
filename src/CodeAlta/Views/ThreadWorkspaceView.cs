@@ -166,6 +166,9 @@ internal sealed class ThreadWorkspaceView
     public void FocusModelProviderSelector()
         => ThreadPaneLayout.App?.Focus(ChatBackendSelect);
 
+    public void FocusReasoningSelector()
+        => ThreadPaneLayout.App?.Focus(ChatReasoningSelect);
+
     public void SyncModelProviderSelectorItems(ThreadWorkspaceViewModel workspaceViewModel)
     {
         ArgumentNullException.ThrowIfNull(workspaceViewModel);

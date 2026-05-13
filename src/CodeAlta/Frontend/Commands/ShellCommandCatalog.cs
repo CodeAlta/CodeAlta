@@ -25,6 +25,10 @@ internal static class ShellCommandCatalog
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlM, TerminalModifiers.Ctrl));
 
+    public static readonly KeySequence ModelsShortcutSequence = new(
+        new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+        new KeyGesture(TerminalChar.CtrlL, TerminalModifiers.Ctrl));
+
     public static readonly KeySequence SkillsShortcutSequence = new(
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlK, TerminalModifiers.Ctrl));
@@ -168,7 +172,18 @@ internal static class ShellCommandCatalog
             ShellCommandAvailability.Always,
             Sequence: ModelProvidersShortcutSequence,
             CommandName: "model_providers",
-            Aliases: ["providers", "models"],
+            Aliases: ["providers"],
+            ShowInCommandBar: true),
+        new(
+            "CodeAlta.Models.Browse",
+            "Models",
+            "Browse provider models and enriched model metadata, then select one for the current prompt or thread.",
+            ShellCommandHelpCategory.Inspection,
+            ShellCommandScope.DraftOrThread,
+            ShellCommandAvailability.Always,
+            Sequence: ModelsShortcutSequence,
+            CommandName: "models",
+            Aliases: ["model_list"],
             ShowInCommandBar: true),
         new(
             "CodeAlta.Shell.ToggleCommandBarMultiLine",

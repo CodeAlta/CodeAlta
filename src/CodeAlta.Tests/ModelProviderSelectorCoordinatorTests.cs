@@ -804,6 +804,73 @@ public sealed class ModelProviderSelectorCoordinatorTests
         Assert.AreEqual(AgentReasoningEffort.High, tab.ReasoningEffort);
     }
 
+    [TestMethod]
+    public async Task SelectProviderModelAsync_DraftScope_SelectsRequestedModel()
+    {
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var promptComposerViewModel = new PromptComposerViewModel();
+        AgentBackendDescriptor[] backendDescriptors =
+        [
+            new(new AgentBackendId("openai"), "OpenAI"),
+        ];
+        var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        var backendState = backendStates["openai"];
+        backendState.Availability = ChatBackendAvailability.Ready;
+        backendState.Models.Add(new AgentModelInfo("gpt-5.4", DisplayName: "GPT-5.4"));
+        backendState.Models.Add(new AgentModelInfo("gpt-5.4-mini", DisplayName: "GPT-5.4 Mini"));
+
+        var coordinator = CreateCoordinator(
+            backendDescriptors,
+            workspaceViewModel,
+            promptComposerViewModel,
+            backendStates,
+            static _ => null);
+
+        var selected = await coordinator.SelectProviderModelAsync(new AgentBackendId("openai"), "gpt-5.4-mini");
+
+        Assert.IsTrue(selected);
+        Assert.AreEqual("gpt-5.4-mini", backendState.SelectedModelId);
+        Assert.AreEqual(1, workspaceViewModel.SelectedModelIndex);
+    }
+
+    [TestMethod]
+    public async Task SelectProviderModelAsync_OpenThread_SelectsRequestedModel()
+    {
+        using var temp = TempDirectory.Create();
+        var threadStateCoordinator = CreateThreadStateCoordinator(temp.Path, out var thread);
+        var threadSelection = new ThreadSelectionContext(
+            threadStateCoordinator,
+            static (_, _) => Task.CompletedTask,
+            static _ => true);
+        var tab = threadStateCoordinator.EnsureThreadTab(thread);
+
+        var workspaceViewModel = new ThreadWorkspaceViewModel();
+        var promptComposerViewModel = new PromptComposerViewModel();
+        AgentBackendDescriptor[] backendDescriptors =
+        [
+            new(new AgentBackendId("openai"), "OpenAI"),
+        ];
+        var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
+        backendStates["openai"].Availability = ChatBackendAvailability.Ready;
+        backendStates["openai"].Models.Add(new AgentModelInfo("gpt-5.4", DisplayName: "GPT-5.4"));
+        backendStates["openai"].Models.Add(new AgentModelInfo("gpt-5.4-mini", DisplayName: "GPT-5.4 Mini"));
+
+        var coordinator = CreateCoordinator(
+            backendDescriptors,
+            workspaceViewModel,
+            promptComposerViewModel,
+            backendStates,
+            static _ => null,
+            threadSelection: threadSelection,
+            applyThreadModelProviderPreference: static _ => { });
+
+        var selected = await coordinator.SelectProviderModelAsync(new AgentBackendId("openai"), "gpt-5.4-mini");
+
+        Assert.IsTrue(selected);
+        Assert.AreEqual("gpt-5.4-mini", tab.ModelId);
+        Assert.AreEqual(1, workspaceViewModel.SelectedModelIndex);
+    }
+
     private static ModelProviderSelectorCoordinator CreateCoordinator(
         IReadOnlyList<AgentBackendDescriptor> backendDescriptors,
         ThreadWorkspaceViewModel workspaceViewModel,

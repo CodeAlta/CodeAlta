@@ -385,6 +385,68 @@ internal sealed class ModelProviderSelectorCoordinator : IPromptAvailabilityProj
         _preferences.RememberGlobalPreference(CreatePreference(tab.BackendId, tab.ModelId, tab.ReasoningEffort));
     }
 
+    public async Task<bool> SelectProviderModelAsync(AgentBackendId backendId, string modelId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+
+        if (!_chatBackendStates.TryGetValue(backendId.Value, out var backendState) ||
+            backendState.Models.All(model => !string.Equals(model.Id, modelId, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        var thread = _threadSelection.GetSelectedThread();
+        if (thread is null)
+        {
+            SelectDraftProviderModel(backendId, backendState, modelId);
+            return true;
+        }
+
+        var tab = _threadSelection.EnsureThreadTab(thread);
+        if (!string.Equals(tab.BackendId.Value, backendId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!_canSelectThreadBackend(thread, tab) ||
+                !await _trySwitchThreadBackendAsync(thread, tab, backendId))
+            {
+                RefreshForThread(tab);
+                return false;
+            }
+
+            _refreshSelectionAndThreadWorkspace();
+        }
+
+        if (!_chatBackendStates.TryGetValue(tab.BackendId.Value, out backendState))
+        {
+            return false;
+        }
+
+        SelectThreadProviderModel(tab, backendState, modelId);
+        return true;
+    }
+
+    private void SelectDraftProviderModel(AgentBackendId backendId, ChatBackendState backendState, string modelId)
+    {
+        _draftBackendId = backendId;
+        RememberDraftBackendForCurrentScope(backendId);
+        backendState.SelectedModelId = modelId.Trim();
+        var selectedModel = ModelProviderPreferenceCoordinator.FindModel(backendState.Models, backendState.SelectedModelId);
+        backendState.SelectedReasoningEffort = ChatBackendPresentation.ResolvePreferredReasoningEffort(selectedModel, preferredReasoningEffort: null);
+        _preferences.RememberGlobalPreference(CreatePreference(backendId, backendState.SelectedModelId, backendState.SelectedReasoningEffort));
+        RefreshForDraftScope(backendId);
+        _workspaceRefresh.ApplySessionUsageProjection();
+    }
+
+    private void SelectThreadProviderModel(OpenThreadState tab, ChatBackendState backendState, string modelId)
+    {
+        tab.ModelId = modelId.Trim();
+        var selectedModel = ModelProviderPreferenceCoordinator.FindModel(backendState.Models, tab.ModelId);
+        tab.ReasoningEffort = ChatBackendPresentation.ResolvePreferredReasoningEffort(selectedModel, preferredReasoningEffort: null);
+        _preferences.RememberThreadPreference(tab.Thread.ThreadId, CreatePreference(tab.BackendId, tab.ModelId, tab.ReasoningEffort), true);
+        _preferences.RememberGlobalPreference(CreatePreference(tab.BackendId, tab.ModelId, tab.ReasoningEffort));
+        RefreshForThread(tab);
+        _workspaceRefresh.ApplyHeaderProjection();
+    }
+
     public AgentBackendId GetPreferredModelProviderId()
     {
         return UiDispatch.Invoke(

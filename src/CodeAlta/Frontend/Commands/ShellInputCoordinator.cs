@@ -84,6 +84,7 @@ internal sealed class ShellInputCoordinator
             OpenFolderIntent openFolder => new OpenFolderCommand(openFolder.InitialPath),
             OpenAcpManagementIntent => new OpenAcpManagementCommand(),
             OpenModelProvidersIntent => new OpenModelProvidersCommand(),
+            OpenModelsIntent => new OpenModelsCommand(),
             OpenFileEditorIntent => new OpenFileEditorCommand(),
             OpenSkillsIntent => new OpenSkillsCommand(),
             OpenPluginsIntent => new OpenPluginsCommand(),
