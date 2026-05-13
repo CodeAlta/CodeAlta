@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Agent;
 
 /// <summary>
-/// Represents normalized context-window and token-usage information for a session.
+/// Represents normalized active-context and token-usage information for a session.
 /// </summary>
-/// <param name="Window">The current known context-window usage snapshot when available.</param>
+/// <param name="Window">The current known active input-context usage snapshot when available.</param>
 /// <param name="LastOperation">The most recent meaningful operation usage snapshot when available.</param>
 /// <param name="RateLimits">The normalized rate-limit summary when available.</param>
 /// <param name="Scope">The scope represented by this usage snapshot.</param>
@@ -22,22 +22,22 @@ public sealed record AgentSessionUsage(
     AgentSessionUsageDetails? Details = null)
 {
     /// <summary>
-    /// Gets the current number of tokens in the active context window when known.
+    /// Gets the current number of tokens in the active input context when known.
     /// </summary>
     public long? CurrentTokens => Window?.CurrentTokens;
 
     /// <summary>
-    /// Gets the total context-window limit for the active model when known.
+    /// Gets the active input-context limit for the active model when known.
     /// </summary>
     public long? TokenLimit => Window?.TokenLimit;
 
     /// <summary>
-    /// Gets the number of messages currently contributing to the active context window when known.
+    /// Gets the number of messages currently contributing to the active input context when known.
     /// </summary>
     public int? MessageCount => Window?.MessageCount;
 
     /// <summary>
-    /// Gets the percentage of the context window currently in use when both values are available.
+    /// Gets the percentage of the active input context currently in use when both values are available.
     /// </summary>
     public double? WindowUsagePercentage =>
         Window?.TokenLimit is > 0 && Window.CurrentTokens is >= 0
@@ -46,11 +46,11 @@ public sealed record AgentSessionUsage(
 }
 
 /// <summary>
-/// Represents a normalized context-window usage snapshot.
+/// Represents a normalized active input-context usage snapshot.
 /// </summary>
-/// <param name="CurrentTokens">The current number of tokens in the window when known.</param>
+/// <param name="CurrentTokens">The current number of tokens in the active input context when known.</param>
 /// <param name="TokenLimit">The active input-context limit when known.</param>
-/// <param name="MessageCount">The number of messages currently contributing to the window when known.</param>
+/// <param name="MessageCount">The number of messages currently contributing to the active input context when known.</param>
 /// <param name="Label">The UI label describing the window snapshot.</param>
 /// <param name="TotalContextEnvelope">The optional advertised input-plus-output model envelope.</param>
 /// <param name="MaxOutputTokens">The optional maximum output-token limit.</param>

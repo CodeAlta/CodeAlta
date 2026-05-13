@@ -2200,7 +2200,7 @@ public sealed class CodeAltaAppTests
         var markdown = SessionUsageAggregator.BuildMarkdown(usage, "Codex", "gpt-5.4");
 
         Assert.AreEqual("[dim]Context[/] [warning]78%[/]", indicator);
-        StringAssert.Contains(markdown, "Active context: 200,535 / 258,400 input tokens (77.6%)");
+        StringAssert.Contains(markdown, "Compaction pressure: 200,535 / 258,400 input tokens (77.6%)");
         StringAssert.Contains(markdown, "Thread total: total 33,641,433");
     }
 
@@ -2374,11 +2374,11 @@ public sealed class CodeAltaAppTests
                 "gpt-5-codex");
 
             StringAssert.Contains(markdown, "# Codex context usage");
-            StringAssert.Contains(markdown, "## Usage breakdown: 12 messages");
+            StringAssert.Contains(markdown, "## Context usage: 12 messages");
             StringAssert.Contains(markdown, "## Limits");
             StringAssert.Contains(markdown, "## Backend-specific details");
             StringAssert.Contains(markdown, "50,000 / 120,000 input tokens (41.7%)");
-            StringAssert.Contains(markdown, "Model envelope: 400,000 total tokens; max output 128,000 tokens");
+            StringAssert.Contains(markdown, "Indicative model limits: context window 400,000 tokens; max output 128,000 tokens");
             StringAssert.Contains(markdown, "Last turn: input 1,000");
             StringAssert.Contains(markdown, "42% used");
             Assert.IsFalse(markdown.Contains("## Summary", StringComparison.Ordinal));

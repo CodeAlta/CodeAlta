@@ -335,7 +335,7 @@ Rationale:
 - Copilot exposes both model-call usage and session window usage.
 - Codex exposes thread/turn token usage.
 - The UI can show live token pressure and post-run usage summaries.
-- The footer can stay a simple `ctx --` / `ctx N tok` / `ctx NN%` view while the popup renders explicit Summary, Usage breakdown, Limits and quotas, and Backend-specific detail sections.
+- The footer can stay a simple `ctx --` / `ctx N tok` / `ctx NN%` view while the popup renders compaction pressure against the active input-token limit, with context-window/max-output limits as indicative metadata plus limits, quotas, and backend-specific detail sections.
 
 ### 6. Action-required events
 

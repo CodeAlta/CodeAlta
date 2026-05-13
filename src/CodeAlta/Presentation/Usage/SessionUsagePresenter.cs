@@ -159,39 +159,47 @@ internal sealed class SessionUsagePresenter
         };
     }
 
-    private static Visual? BuildContextWindowChart(AgentSessionUsage usage)
+    private static Visual? BuildInputContextPressureChart(AgentSessionUsage usage)
     {
-        if (usage.Window is not { CurrentTokens: { } current, TokenLimit: { } limit } || limit <= 0)
+        if (usage.Window is not { CurrentTokens: { } current, TokenLimit: { } inputLimit } || inputLimit <= 0)
         {
             return null;
         }
 
-        var used = Math.Clamp(current, 0, limit);
-        var remaining = Math.Max(0, limit - used);
+        var used = Math.Clamp(current, 0, inputLimit);
+        var remaining = Math.Max(0, inputLimit - used);
 
         return new BreakdownChart()
             .ShowValues(true)
             .ShowPercentages(true)
-            .Segment(used, new TextBlock("Used"), Colors.DodgerBlue)
-            .Segment(remaining, new TextBlock("Free"), Colors.LimeGreen)
+            .Segment(used, new TextBlock("Active context"), Colors.DodgerBlue)
+            .Segment(remaining, new TextBlock("Input headroom"), Colors.LimeGreen)
             .Style(new BreakdownStyle { SegmentGap = 1 });
     }
 
     private static void AddUsageBreakdownContent(VStack stack, AgentSessionUsage usage)
     {
-        var hasWindowChart = BuildContextWindowChart(usage) is not null;
-        if (!hasWindowChart && usage.LastOperation is null)
+        if (usage.Window is null && usage.LastOperation is null)
         {
             return;
         }
 
         var sectionTitle = usage.MessageCount is { } messageCount
-            ? FormattableString.Invariant($"Usage breakdown: {messageCount} messages")
-            : "Usage breakdown";
+            ? FormattableString.Invariant($"Context usage: {messageCount} messages")
+            : "Context usage";
         AddSectionHeader(stack, sectionTitle);
-        if (BuildContextWindowChart(usage) is { } contextChart)
+        if (usage.Window is not null)
         {
-            stack.Add(contextChart);
+            stack.Add(new Markup($"[bold]Compaction pressure[/] [dim]{AnsiMarkup.Escape(SessionUsageFormatter.FormatSummary(usage))}[/]"));
+            if (BuildInputContextPressureChart(usage) is { } pressureChart)
+            {
+                stack.Add(pressureChart);
+            }
+
+            if (SessionUsageFormatter.TryFormatModelEnvelope(usage.Window, out var modelEnvelope))
+            {
+                stack.Add(new Markup($"[dim]Indicative model limits: {AnsiMarkup.Escape(modelEnvelope)}[/]"));
+            }
         }
 
         if (usage.LastOperation is { } operation)

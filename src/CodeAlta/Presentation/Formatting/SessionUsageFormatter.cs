@@ -379,15 +379,15 @@ internal static class SessionUsageFormatter
 
         builder.AppendLine()
             .Append(usage.MessageCount is { } messageCount
-                ? FormattableString.Invariant($"## Usage breakdown: {messageCount} messages")
-                : "## Usage breakdown")
+                ? FormattableString.Invariant($"## Context usage: {messageCount} messages")
+                : "## Context usage")
             .AppendLine();
         if (usage.Window is not null)
         {
-            builder.Append("- Active context: ").AppendLine(FormatSummary(usage));
+            builder.Append("- Compaction pressure: ").AppendLine(FormatSummary(usage));
             if (TryFormatModelEnvelope(usage.Window, out var modelEnvelope))
             {
-                builder.Append("- Model envelope: ").AppendLine(modelEnvelope);
+                builder.Append("- Indicative model limits: ").AppendLine(modelEnvelope);
             }
         }
 
@@ -531,12 +531,12 @@ internal static class SessionUsageFormatter
         }
     }
 
-    private static bool TryFormatModelEnvelope(AgentWindowUsageSnapshot window, out string modelEnvelope)
+    public static bool TryFormatModelEnvelope(AgentWindowUsageSnapshot window, out string modelEnvelope)
     {
         var parts = new List<string>();
         if (window.TotalContextEnvelope is { } totalContextEnvelope)
         {
-            parts.Add($"{FormatNumber(totalContextEnvelope)} total tokens");
+            parts.Add($"context window {FormatNumber(totalContextEnvelope)} tokens");
         }
 
         if (window.MaxOutputTokens is { } maxOutputTokens)
