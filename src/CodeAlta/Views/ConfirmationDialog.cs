@@ -65,24 +65,27 @@ internal sealed class ConfirmationDialog
             HorizontalAlignment = Align.Stretch,
         };
 
-        var items = new List<Visual> { body };
-        if (CreateNote(noteText) is { } note)
-        {
-            items.Add(note);
-        }
-
-        items.Add(new HStack(cancelButton, confirmButton)
+        var buttonRow = new HStack(cancelButton, confirmButton)
         {
             HorizontalAlignment = Align.End,
             Spacing = 2,
-        });
-
-        var content = new VStack(items.ToArray())
-        {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-            Spacing = 1,
         };
+
+        Visual bottom = buttonRow;
+        if (CreateNote(noteText) is { } note)
+        {
+            bottom = new VStack(note, buttonRow)
+            {
+                HorizontalAlignment = Align.Stretch,
+                Spacing = 1,
+            };
+        }
+
+        var content = new DockLayout()
+            .Content(new ScrollViewer(body, focusable: false).Stretch())
+            .Bottom(bottom)
+            .HorizontalAlignment(Align.Stretch)
+            .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
             .Title(title)
@@ -90,7 +93,7 @@ internal sealed class ConfirmationDialog
             .IsModal(true)
             .Padding(1)
             .Content(content);
-        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 52, minHeight: 10, widthFactor: 0.65, heightFactor: 0.4);
+        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 48, minHeight: 9, widthFactor: 0.30, heightFactor: 0.30);
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ConfirmationDialog.Close",

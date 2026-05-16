@@ -52,6 +52,7 @@ internal sealed class ProjectDetailsDialog
         var form = new Grid
             {
                 HorizontalAlignment = Align.Stretch,
+                RowGap = 1,
             }
             .Rows(
                 new RowDefinition { Height = GridLength.Auto },
@@ -125,18 +126,17 @@ internal sealed class ProjectDetailsDialog
         };
         saveButton.Click(() => _ = SaveAsync());
 
-        var content = new VStack(
-            form,
-            new HStack(cancelButton, saveButton)
-            {
-                HorizontalAlignment = Align.End,
-                Spacing = 2,
-            })
+        var buttonRow = new HStack(cancelButton, saveButton)
         {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-            Spacing = 1,
+            HorizontalAlignment = Align.End,
+            Spacing = 2,
         };
+
+        var content = new DockLayout()
+            .Content(new ScrollViewer(form, focusable: false).Stretch())
+            .Bottom(buttonRow)
+            .HorizontalAlignment(Align.Stretch)
+            .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
             .Title($"Project Details · {project.DisplayName}")
@@ -145,7 +145,7 @@ internal sealed class ProjectDetailsDialog
             .IsModal(true)
             .Padding(1)
             .Content(content);
-        ResponsiveDialogSize.Apply(_dialog, _dialogService.GetDialogBounds(), minWidth: 70, minHeight: 16, widthFactor: 0.8, heightFactor: 0.75);
+        ResponsiveDialogSize.Apply(_dialog, _dialogService.GetDialogBounds(), minWidth: 70, minHeight: 16, widthFactor: 0.55, heightFactor: 0.55);
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ProjectDetails.Close",

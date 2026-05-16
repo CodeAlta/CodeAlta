@@ -58,6 +58,7 @@ internal sealed class NavigatorSettingsDialog
         var form = new Grid
             {
                 HorizontalAlignment = Align.Stretch,
+                RowGap = 1,
             }
             .Rows(
                 new RowDefinition { Height = GridLength.Auto },
@@ -82,22 +83,22 @@ internal sealed class NavigatorSettingsDialog
         };
         saveButton.Click(() => _ = SaveAsync());
 
-        var content = new VStack(
-            new TextBlock("Configure the navigator sort mode and how many recent threads each project shows.")
-            {
-                Wrap = true,
-            },
-            form,
-            new HStack(cancelButton, saveButton)
-            {
-                HorizontalAlignment = Align.End,
-                Spacing = 2,
-            })
+        var description = new TextBlock("Configure the navigator sort mode and how many recent threads each project shows.")
         {
-            HorizontalAlignment = Align.Stretch,
-            VerticalAlignment = Align.Stretch,
-            Spacing = 1,
+            Wrap = true,
         };
+        var buttonRow = new HStack(cancelButton, saveButton)
+        {
+            HorizontalAlignment = Align.End,
+            Spacing = 2,
+        };
+
+        var content = new DockLayout()
+            .Top(description)
+            .Content(form)
+            .Bottom(buttonRow)
+            .HorizontalAlignment(Align.Stretch)
+            .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
             .Title("Navigator Settings")
@@ -106,7 +107,7 @@ internal sealed class NavigatorSettingsDialog
             .IsModal(true)
             .Padding(1)
             .Content(content);
-        ResponsiveDialogSize.Apply(_dialog, _dialogService.GetDialogBounds(), minWidth: 54, minHeight: 12, widthFactor: 0.65, heightFactor: 0.45);
+        ResponsiveDialogSize.Apply(_dialog, _dialogService.GetDialogBounds(), minWidth: 54, minHeight: 12, widthFactor: 0.34, heightFactor: 0.30);
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.NavigatorSettings.Close",
