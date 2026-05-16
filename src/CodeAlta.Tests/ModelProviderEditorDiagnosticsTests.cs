@@ -166,6 +166,50 @@ public sealed class ModelProviderEditorDiagnosticsTests
     }
 
     [TestMethod]
+    public void Analyze_ReservedCliProviders_CanUseBuiltInCliProviderTypes()
+    {
+        var codex = ModelProviderEditorItemViewModel.FromDocument(new CodeAlta.Catalog.CodeAltaProviderDocument
+        {
+            ProviderKey = "codex_cli",
+            Enabled = true,
+            ProviderType = "codex_cli",
+        });
+        var copilot = ModelProviderEditorItemViewModel.FromDocument(new CodeAlta.Catalog.CodeAltaProviderDocument
+        {
+            ProviderKey = "copilot_cli",
+            Enabled = true,
+            ProviderType = "copilot_cli",
+        });
+
+        var codexSnapshot = ModelProviderEditorDiagnostics.Analyze(codex, [codex, copilot]);
+        var copilotSnapshot = ModelProviderEditorDiagnostics.Analyze(copilot, [codex, copilot]);
+
+        Assert.IsTrue(codex.IsReserved);
+        Assert.IsTrue(copilot.IsReserved);
+        Assert.IsFalse(codexSnapshot.Entries.Any(static entry => entry.Message.Contains("built-in CLI provider types", StringComparison.Ordinal)));
+        Assert.IsFalse(copilotSnapshot.Entries.Any(static entry => entry.Message.Contains("built-in CLI provider types", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Analyze_CustomProvider_CannotUseBuiltInCliProviderType()
+    {
+        var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAlta.Catalog.CodeAltaProviderDocument
+        {
+            ProviderKey = "custom-codex",
+            Enabled = true,
+            ProviderType = "codex_cli",
+        });
+
+        var snapshot = ModelProviderEditorDiagnostics.Analyze(item, [item]);
+
+        Assert.IsFalse(item.IsReserved);
+        Assert.AreEqual(ModelProviderUiStatusKind.Error, snapshot.StatusKind);
+        Assert.IsTrue(snapshot.Entries.Any(static entry =>
+            entry.Severity == ValidationSeverity.Error &&
+            entry.Message.Contains("reserved codex_cli/copilot_cli entries", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public void CodexSubscriptionEditor_RoundTripsAccountAuthAndModelDiscoveryFields()
     {
         var item = CreateCodexSubscriptionItem(enabled: true, experimental: true);
@@ -195,9 +239,9 @@ public sealed class ModelProviderEditorDiagnosticsTests
     private static ModelProviderEditorItemViewModel CreateCodexSubscriptionItem(bool enabled, bool experimental)
         => ModelProviderEditorItemViewModel.FromDocument(new CodeAlta.Catalog.CodeAltaProviderDocument
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             Enabled = enabled,
-            ProviderType = "openai-codex-subscription",
+            ProviderType = "codex",
             Experimental = experimental,
         });
 }

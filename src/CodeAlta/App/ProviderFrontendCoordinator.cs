@@ -247,12 +247,12 @@ internal sealed class ProviderFrontendCoordinator
             CreateCopilotDirectLoginOptions(definition),
             (deviceCode, _) =>
             {
-                reportStatus($"Opening GitHub Copilot login in your browser. Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri}. Waiting for authorization...");
+                reportStatus($"Opening Copilot login in your browser. Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri}. Waiting for authorization...");
                 TryOpenBrowser(deviceCode.VerificationUri);
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
-        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage("GitHub Copilot login completed", result), 0);
+        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Copilot login completed", result), 0);
     }
 
     public async Task<ProviderTestResult> LoginCopilotDirectWithDeviceCodeAsync(
@@ -268,11 +268,11 @@ internal sealed class ProviderFrontendCoordinator
             CreateCopilotDirectLoginOptions(definition),
             (deviceCode, _) =>
             {
-                reportStatus($"Open {deviceCode.VerificationUri} and enter code {deviceCode.UserCode}. Waiting for GitHub Copilot authorization...");
+                reportStatus($"Open {deviceCode.VerificationUri} and enter code {deviceCode.UserCode}. Waiting for Copilot authorization...");
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
-        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage("GitHub Copilot device login completed", result), 0);
+        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Copilot device login completed", result), 0);
     }
 
     public async Task<ProviderTestResult> LogoutCopilotDirectAsync(
@@ -283,7 +283,7 @@ internal sealed class ProviderFrontendCoordinator
 
         await CreateCopilotDirectLoginManager(definition)
             .DeleteCredentialAsync(CreateCopilotDirectLoginOptions(definition), cancellationToken);
-        return new ProviderTestResult(true, "Deleted CodeAlta-owned GitHub Copilot direct credentials for this provider.", 0);
+        return new ProviderTestResult(true, "Deleted CodeAlta-owned Copilot credentials for this provider.", 0);
     }
 
     public async Task<ProviderTestResult> TestCopilotDirectAuthenticationAsync(
@@ -295,8 +295,8 @@ internal sealed class ProviderFrontendCoordinator
         var status = await CreateCopilotDirectLoginManager(definition)
             .GetCredentialStatusAsync(CreateCopilotDirectLoginOptions(definition), cancellationToken);
         return status is null
-            ? new ProviderTestResult(false, "Login required before cached GitHub Copilot credentials can be used.", 0)
-            : new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Authenticated with cached GitHub Copilot credentials", status), 0);
+            ? new ProviderTestResult(false, "Login required before cached Copilot credentials can be used.", 0)
+            : new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Authenticated with cached Copilot credentials", status), 0);
     }
 
     public async Task<ProviderTestResult> ListCopilotDirectModelsAsync(
@@ -323,8 +323,8 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(chatBackendStates);
 
         result = default;
-        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal) &&
-            !string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
+        if (!string.Equals(definition.ProviderType, "codex_cli", StringComparison.Ordinal) &&
+            !string.Equals(definition.ProviderType, "copilot_cli", StringComparison.Ordinal))
         {
             return false;
         }
@@ -361,7 +361,7 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
-        if (string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+        if (string.Equals(definition.ProviderType, "codex_cli", StringComparison.Ordinal))
         {
             var codexPath = CodeAltaOwnedServices.ResolveCodexExecutablePath(Environment.GetEnvironmentVariable("CODEALTA_CODEX_PATH"));
             backend = new CodexAgentBackend(
@@ -377,7 +377,7 @@ internal sealed class ProviderFrontendCoordinator
             return true;
         }
 
-        if (string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
+        if (string.Equals(definition.ProviderType, "copilot_cli", StringComparison.Ordinal))
         {
             backend = new CopilotAgentBackend(
                 CodeAltaOwnedServices.CreateCopilotBackendOptions(definition, Path.Combine(stateRootPath, "cache")));
@@ -394,19 +394,19 @@ internal sealed class ProviderFrontendCoordinator
         return true;
     }
 
-    private static bool IsTemporarilyDisabledCopilotProvider(CodeAltaProviderDocument definition)
+    internal static bool IsTemporarilyDisabledCopilotProvider(CodeAltaProviderDocument definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        return string.Equals(definition.ProviderKey, "copilot", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(definition.ProviderType, "copilot", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(definition.ProviderKey, "copilot_cli", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(definition.ProviderType, "copilot_cli", StringComparison.OrdinalIgnoreCase);
     }
 
     private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)
     {
-        if (!string.Equals(definition.ProviderType, "openai-codex-subscription", StringComparison.Ordinal))
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select a Codex (ChatGPT subscription) provider first.");
+            throw new InvalidOperationException("Select a Codex provider first.");
         }
 
         return new OpenAICodexSubscriptionLoginManager(
@@ -417,9 +417,9 @@ internal sealed class ProviderFrontendCoordinator
 
     private OpenAICodexSubscriptionAuthManager CreateCodexSubscriptionAuthManager(CodeAltaProviderDocument definition)
     {
-        if (!string.Equals(definition.ProviderType, "openai-codex-subscription", StringComparison.Ordinal))
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select a Codex (ChatGPT subscription) provider first.");
+            throw new InvalidOperationException("Select a Codex provider first.");
         }
 
         return new OpenAICodexSubscriptionAuthManager(
@@ -433,9 +433,9 @@ internal sealed class ProviderFrontendCoordinator
 
     private static CopilotDirectLoginManager CreateCopilotDirectLoginManager(CodeAltaProviderDocument definition)
     {
-        if (!string.Equals(definition.ProviderType, "github-copilot-direct", StringComparison.Ordinal))
+        if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select a GitHub Copilot Direct provider first.");
+            throw new InvalidOperationException("Select a Copilot provider first.");
         }
 
         return new CopilotDirectLoginManager(new HttpClient());

@@ -26,15 +26,18 @@ public sealed record CodeAltaConfigValidationResult(bool IsValid, string? Messag
 /// </summary>
 public sealed class CodeAltaConfigStore
 {
-    private const string CodexProviderKey = "codex";
-    private const string CopilotProviderKey = "copilot";
+    private const string DefaultGlobalConfigResourceName = "CodeAlta.Catalog.DefaultConfig.config.toml";
+    private const string CodexProviderKey = "codex_cli";
+    private const string CopilotProviderKey = "copilot_cli";
     private const bool IsCopilotTemporarilyDisabled = true;
-    private const string CodexSubscriptionProviderType = "openai-codex-subscription";
-    private const string CopilotDirectProviderType = "github-copilot-direct";
-    private const string CopilotDirectDefaultDisplayName = "GitHub Copilot Direct";
+    private const string CodexCliProviderType = "codex_cli";
+    private const string CopilotCliProviderType = "copilot_cli";
+    private const string CodexSubscriptionProviderType = "codex";
+    private const string CopilotDirectProviderType = "copilot";
+    private const string CopilotDirectDefaultDisplayName = "Copilot";
     private const string CopilotDirectDefaultAuthSource = "github_device_flow";
     private const string CopilotDirectDefaultModelDiscovery = "copilot_endpoint_with_static_fallback";
-    private const string CodexSubscriptionDefaultDisplayName = "Codex (ChatGPT subscription)";
+    private const string CodexSubscriptionDefaultDisplayName = "Codex";
     private const string CodexSubscriptionDefaultApiUrl = "https://chatgpt.com/backend-api/codex";
     private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
     private const string CodexSubscriptionDefaultTextVerbosity = "medium";
@@ -75,6 +78,34 @@ public sealed class CodeAltaConfigStore
     /// <returns>The parsed configuration document.</returns>
     public CodeAltaConfigDocument LoadGlobal()
         => LoadDocument(_options.ConfigPath);
+
+    /// <summary>
+    /// Creates the global user configuration from the bundled first-run template when it is missing.
+    /// </summary>
+    /// <returns><see langword="true"/> when a new config file was written.</returns>
+    public bool EnsureGlobalConfigExists()
+    {
+        if (File.Exists(_options.ConfigPath))
+        {
+            return false;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_options.ConfigPath)!);
+        File.WriteAllText(_options.ConfigPath, GetDefaultGlobalConfigContent());
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the bundled first-run global configuration template.
+    /// </summary>
+    /// <returns>The default global config TOML content.</returns>
+    public static string GetDefaultGlobalConfigContent()
+    {
+        using var stream = typeof(CodeAltaConfigStore).Assembly.GetManifestResourceStream(DefaultGlobalConfigResourceName)
+            ?? throw new InvalidOperationException($"Embedded resource '{DefaultGlobalConfigResourceName}' was not found.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 
     /// <summary>
     /// Validates global CodeAlta TOML configuration content without starting backends or sessions.
@@ -710,7 +741,7 @@ public sealed class CodeAltaConfigStore
     private static CodeAltaProviderDocument NormalizeProviderEntry(string key, CodeAltaProviderDocument? value)
     {
         var definition = value ?? new CodeAltaProviderDocument();
-        definition.ProviderKey = NormalizeProviderKey(key) ?? string.Empty;
+        definition.ProviderKey = NormalizeProviderEntryKey(key, definition) ?? string.Empty;
         definition.DisplayName = NormalizeText(definition.DisplayName);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType);
         definition.Model = NormalizeModel(definition.Model);
@@ -913,6 +944,42 @@ public sealed class CodeAltaConfigStore
         return normalized?.ToLowerInvariant();
     }
 
+    private static string? NormalizeProviderEntryKey(string key, CodeAltaProviderDocument definition)
+    {
+        var normalizedKey = NormalizeProviderKey(key);
+        if (normalizedKey is null)
+        {
+            return null;
+        }
+
+        var normalizedType = NormalizeText(definition.ProviderType)?.ToLowerInvariant();
+        if (normalizedKey is "openai-codex-subscription" or "codex-subscription" or "codex_subscription")
+        {
+            return "codex";
+        }
+
+        if (normalizedKey is "github-copilot-direct" or "github_copilot_direct" or "copilot-direct")
+        {
+            return "copilot";
+        }
+
+        if (normalizedKey == "codex" &&
+            (normalizedType is null or "codex-cli" or "codex_cli" ||
+             (normalizedType == "codex" && definition.Experimental != true)))
+        {
+            return CodexProviderKey;
+        }
+
+        if (normalizedKey == "copilot" &&
+            (normalizedType is null or "copilot-cli" or "copilot_cli" ||
+             (normalizedType == "copilot" && definition.Experimental != true)))
+        {
+            return CopilotProviderKey;
+        }
+
+        return normalizedKey;
+    }
+
     private static string? NormalizeProviderType(string providerKey, string? value)
     {
         var normalized = NormalizeText(value)?.ToLowerInvariant();
@@ -921,19 +988,33 @@ public sealed class CodeAltaConfigStore
             null => null,
             "openai" or "openai-chat" or "openai-chat-completions" or "chat" or "chat-completions" or "chat_completions" => "openai-chat",
             "openai-responses" or "responses" or "response" => "openai-responses",
-            "openai-codex-subscription" => CodexSubscriptionProviderType,
+            "openai-codex-subscription" or "codex-subscription" or "codex_subscription" => CodexSubscriptionProviderType,
             "github-copilot-direct" or "copilot-direct" or "github-copilot" or "github-copilot-local" => CopilotDirectProviderType,
             "anthropic" or "anthropic-messages" or "messages" or "message" => "anthropic",
             "google" or "google-genai" or "google_genai" or "gemini" or "genai" => "google-genai",
             "vertex" or "vertex-ai" or "google-vertex" or "google_vertex" => "vertex-ai",
-            "copilot" => "copilot",
-            "codex" => "codex",
+            "codex-cli" or "codex_cli" => CodexCliProviderType,
+            "copilot-cli" or "copilot_cli" => CopilotCliProviderType,
+            "codex" when string.Equals(providerKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase) => CodexCliProviderType,
+            "copilot" when string.Equals(providerKey, CopilotProviderKey, StringComparison.OrdinalIgnoreCase) => CopilotCliProviderType,
+            "codex" => CodexSubscriptionProviderType,
+            "copilot" => CopilotDirectProviderType,
             _ => null,
         };
 
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            return IsReservedProviderKey(providerKey) ? providerKey : null;
+            if (string.Equals(providerKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return CodexCliProviderType;
+            }
+
+            if (string.Equals(providerKey, CopilotProviderKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return CopilotCliProviderType;
+            }
+
+            return null;
         }
 
         return normalized;
@@ -944,15 +1025,15 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(definition);
 
         if (string.Equals(definition.ProviderKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(definition.ProviderType, CodexProviderKey, StringComparison.Ordinal))
+            !string.Equals(definition.ProviderType, CodexCliProviderType, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("providers.codex type must be 'codex'.");
+            throw new InvalidOperationException("providers.codex_cli type must be 'codex_cli'.");
         }
 
         if (string.Equals(definition.ProviderKey, CopilotProviderKey, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(definition.ProviderType, CopilotProviderKey, StringComparison.Ordinal))
+            !string.Equals(definition.ProviderType, CopilotCliProviderType, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("providers.copilot type must be 'copilot'.");
+            throw new InvalidOperationException("providers.copilot_cli type must be 'copilot_cli'.");
         }
     }
 
@@ -963,7 +1044,7 @@ public sealed class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, openai-codex-subscription, github-copilot-direct, anthropic, google-genai, vertex-ai.");
+                $"providers.{definition.ProviderKey} type must be one of: codex_cli, codex, copilot_cli, copilot, openai-chat, openai-responses, anthropic, google-genai, vertex-ai.");
         ApplyTemporaryProviderDisable(definition);
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyReservedProviderDefaults(definition);
@@ -1017,7 +1098,7 @@ public sealed class CodeAltaConfigStore
             RejectCodexSubscriptionOnlyFields(definition);
         }
 
-        if (!string.Equals(definition.ProviderType, CopilotProviderKey, StringComparison.Ordinal))
+        if (!string.Equals(definition.ProviderType, CopilotCliProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "cli_path", definition.CliPath);
             RejectUnsupportedField(definition, "npm_registry", definition.NpmRegistry);
@@ -1030,7 +1111,7 @@ public sealed class CodeAltaConfigStore
 
         switch (definition.ProviderType)
         {
-            case "codex":
+            case CodexCliProviderType:
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
                 RejectUnsupportedField(definition, "api_url", definition.ApiUrl);
@@ -1044,7 +1125,7 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
                 break;
 
-            case "copilot":
+            case CopilotCliProviderType:
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
                 RejectUnsupportedField(definition, "api_url", definition.ApiUrl);
@@ -1335,7 +1416,7 @@ public sealed class CodeAltaConfigStore
         // https://github.com/github/copilot-sdk/pull/1136 or equivalent ships.
         if (IsCopilotTemporarilyDisabled &&
             (string.Equals(definition.ProviderKey, CopilotProviderKey, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(definition.ProviderType, CopilotProviderKey, StringComparison.Ordinal)))
+             string.Equals(definition.ProviderType, CopilotCliProviderType, StringComparison.Ordinal)))
         {
             definition.Enabled = false;
         }
@@ -1345,14 +1426,14 @@ public sealed class CodeAltaConfigStore
     {
         if (string.Equals(definition.ProviderKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase))
         {
-            definition.ProviderType ??= CodexProviderKey;
+            definition.ProviderType ??= CodexCliProviderType;
             definition.DisplayName ??= GetReservedProviderDisplayName(CodexProviderKey);
             return;
         }
 
         if (string.Equals(definition.ProviderKey, CopilotProviderKey, StringComparison.OrdinalIgnoreCase))
         {
-            definition.ProviderType ??= CopilotProviderKey;
+            definition.ProviderType ??= CopilotCliProviderType;
             definition.DisplayName ??= GetReservedProviderDisplayName(CopilotProviderKey);
         }
     }
@@ -1377,7 +1458,9 @@ public sealed class CodeAltaConfigStore
         {
             ProviderKey = normalizedProviderKey,
             Enabled = GetDefaultProviderEnabled(normalizedProviderKey),
-            ProviderType = normalizedProviderKey,
+            ProviderType = string.Equals(normalizedProviderKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase)
+                ? CodexCliProviderType
+                : CopilotCliProviderType,
             DisplayName = GetReservedProviderDisplayName(normalizedProviderKey),
             Compaction = NormalizeAndCompleteCompactionSettings(null, DefaultCompaction),
         };
@@ -1396,8 +1479,8 @@ public sealed class CodeAltaConfigStore
 
     private static string GetReservedProviderDisplayName(string providerKey)
         => string.Equals(providerKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase)
-            ? "Codex"
-            : "GitHub Copilot";
+            ? "Codex CLI"
+            : "Copilot CLI";
 
     private static CodeAltaProviderProfileDocument? NormalizeProfile(CodeAltaProviderProfileDocument? profile)
     {
@@ -1449,7 +1532,10 @@ public sealed class CodeAltaConfigStore
 
         if (IsReservedProviderKey(definition.ProviderKey))
         {
-            if (string.Equals(definition.ProviderType, definition.ProviderKey, StringComparison.Ordinal))
+            var reservedProviderType = string.Equals(definition.ProviderKey, CodexProviderKey, StringComparison.OrdinalIgnoreCase)
+                ? CodexCliProviderType
+                : CopilotCliProviderType;
+            if (string.Equals(definition.ProviderType, reservedProviderType, StringComparison.Ordinal))
             {
                 definition.ProviderType = null;
             }

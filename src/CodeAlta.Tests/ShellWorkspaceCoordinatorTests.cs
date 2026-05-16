@@ -167,7 +167,7 @@ public sealed class ShellWorkspaceCoordinatorTests
 
         workspace.ApplySelectionProjection();
 
-        Assert.AreEqual("Codex", sessionUsage.BackendName);
+        Assert.AreEqual("Codex CLI", sessionUsage.BackendName);
         Assert.IsNull(sessionUsage.ModelName);
         Assert.IsNull(sessionUsage.Usage);
     }
@@ -194,7 +194,7 @@ public sealed class ShellWorkspaceCoordinatorTests
 
         workspace.ApplySelectionProjection();
 
-        Assert.AreEqual("Codex", sessionUsage.BackendName);
+        Assert.AreEqual("Codex CLI", sessionUsage.BackendName);
         Assert.IsNull(sessionUsage.ModelName);
         Assert.IsNull(sessionUsage.Usage);
     }

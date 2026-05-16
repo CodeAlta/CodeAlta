@@ -18,7 +18,7 @@ internal static class OpenAIBackendFactory
             provider => new OpenAIResponsesTurnExecutor(provider, codexSubscriptionConcurrencyLimiter),
             static provider => provider.CodexSubscription is null
                 ? "openai-responses"
-                : "openai-codex-subscription");
+                : "codex");
     }
 
     public static IAgentBackend CreateChatBackend(OpenAIChatAgentBackendOptions options)

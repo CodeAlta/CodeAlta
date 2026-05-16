@@ -13,7 +13,7 @@ public sealed class CopilotProviderConfigurationTests
         File.WriteAllText(
             Path.Combine(temp.Path, "config.toml"),
             """
-            [providers.copilot]
+            [providers.copilot_cli]
             enabled = true
             cli_path = " C:/tools/copilot.exe "
             npm_registry = " https://registry.example.test/npm/ "
@@ -24,7 +24,7 @@ public sealed class CopilotProviderConfigurationTests
         var providers = store.LoadGlobalProviderDefinitions(includeDisabled: true)
             .ToDictionary(static provider => provider.ProviderKey, StringComparer.OrdinalIgnoreCase);
 
-        var copilot = providers["copilot"];
+        var copilot = providers["copilot_cli"];
         Assert.IsFalse(copilot.Enabled);
         Assert.AreEqual("C:/tools/copilot.exe", copilot.CliPath);
         Assert.AreEqual("https://registry.example.test/npm/", copilot.NpmRegistry);
@@ -38,7 +38,7 @@ public sealed class CopilotProviderConfigurationTests
         File.WriteAllText(
             Path.Combine(temp.Path, "config.toml"),
             """
-            [providers.copilot]
+            [providers.copilot_cli]
             npm_registry = "file:///tmp/npm"
             """);
 
@@ -79,9 +79,9 @@ public sealed class CopilotProviderConfigurationTests
         [
             new CodeAltaProviderDocument
             {
-                ProviderKey = "copilot",
+                ProviderKey = "copilot_cli",
                 Enabled = true,
-                ProviderType = "copilot",
+                ProviderType = "copilot_cli",
                 CliPath = "C:/tools/copilot.exe",
                 NpmRegistry = "https://registry.example.test/npm/",
             },
@@ -93,8 +93,8 @@ public sealed class CopilotProviderConfigurationTests
 
         var providers = store.LoadGlobalProviderDefinitions(includeDisabled: true)
             .ToDictionary(static provider => provider.ProviderKey, StringComparer.OrdinalIgnoreCase);
-        Assert.AreEqual("C:/tools/copilot.exe", providers["copilot"].CliPath);
-        Assert.AreEqual("https://registry.example.test/npm/", providers["copilot"].NpmRegistry);
+        Assert.AreEqual("C:/tools/copilot.exe", providers["copilot_cli"].CliPath);
+        Assert.AreEqual("https://registry.example.test/npm/", providers["copilot_cli"].NpmRegistry);
     }
 
     [TestMethod]
@@ -105,8 +105,8 @@ public sealed class CopilotProviderConfigurationTests
         var options = CodeAltaOwnedServices.CreateCopilotBackendOptions(
             new CodeAltaProviderDocument
             {
-                ProviderKey = "copilot",
-                ProviderType = "copilot",
+                ProviderKey = "copilot_cli",
+                ProviderType = "copilot_cli",
                 CliPath = " C:/tools/copilot.exe ",
                 NpmRegistry = " https://registry.example.test/npm/ ",
             },

@@ -87,7 +87,7 @@ public sealed class ChatBackendInitializationCoordinatorTests
     public async Task RefreshBackendAsync_EnablesSessionLoadingBeforeUiStateIsApplied()
     {
         using var temp = TempDirectory.Create();
-        var backendId = new AgentBackendId("codex_subscription");
+        var backendId = new AgentBackendId("codex");
         var backendFactory = new AgentBackendFactory();
         backendFactory.Register(backendId, () => new CountingBackend(backendId));
 

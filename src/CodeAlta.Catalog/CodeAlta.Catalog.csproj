@@ -22,6 +22,7 @@
   <ItemGroup>
     <Compile Remove="BuiltinSkills\**\*.cs" />
     <Content Include="BuiltinSkills\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="DefaultConfig\config.toml" LogicalName="CodeAlta.Catalog.DefaultConfig.config.toml" />
   </ItemGroup>
 
 </Project>

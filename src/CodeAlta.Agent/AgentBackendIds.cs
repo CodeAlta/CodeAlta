@@ -8,12 +8,12 @@ public static class AgentBackendIds
     /// <summary>
     /// GitHub Copilot CLI runtime backend.
     /// </summary>
-    public static readonly AgentBackendId Copilot = new("copilot");
+    public static readonly AgentBackendId Copilot = new("copilot_cli");
 
     /// <summary>
     /// Codex app-server runtime backend.
     /// </summary>
-    public static readonly AgentBackendId Codex = new("codex");
+    public static readonly AgentBackendId Codex = new("codex_cli");
 
     /// <summary>
     /// OpenAI-compatible chat/completions runtime backend.

@@ -968,7 +968,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
                             reasoning,
                             redactProtectedData: string.Equals(
                                 _summary.ProtocolFamily,
-                                "openai-codex-subscription",
+                                "codex",
                                 StringComparison.OrdinalIgnoreCase))));
                     break;
                 case LocalAgentMessagePart.ToolCall toolCall:

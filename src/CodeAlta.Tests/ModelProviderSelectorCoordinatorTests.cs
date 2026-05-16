@@ -162,10 +162,10 @@ public sealed class ModelProviderSelectorCoordinatorTests
         var promptComposerViewModel = new PromptComposerViewModel();
         AgentBackendDescriptor[] backendDescriptors =
         [
-            new(new AgentBackendId("codex_subscription"), "Codex subscription"),
+            new(new AgentBackendId("codex"), "Codex subscription"),
         ];
         var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
-        var backendState = backendStates["codex_subscription"];
+        var backendState = backendStates["codex"];
         backendState.Availability = ChatBackendAvailability.Ready;
         backendState.Models.Add(new AgentModelInfo("gpt-5.2", DisplayName: "GPT-5.2"));
 
@@ -191,7 +191,7 @@ public sealed class ModelProviderSelectorCoordinatorTests
             static _ => null,
             static () => { },
             getDraftModelProviderPreference: static () => new ModelProviderPreference(
-                new ModelProviderId("codex_subscription"),
+                new ModelProviderId("codex"),
                 "gpt-5.5",
                 AgentReasoningEffort.High));
 
@@ -237,8 +237,8 @@ public sealed class ModelProviderSelectorCoordinatorTests
         var promptComposerViewModel = new PromptComposerViewModel();
         AgentBackendDescriptor[] backendDescriptors =
         [
-            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex"),
-            new AgentBackendDescriptor(AgentBackendIds.Copilot, "Copilot"),
+            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex CLI"),
+            new AgentBackendDescriptor(AgentBackendIds.Copilot, "Copilot CLI"),
         ];
         var backendStates = ChatBackendPresentation.CreateBackendStates(backendDescriptors);
         backendStates[AgentBackendIds.Codex.Value].Availability = ChatBackendAvailability.Ready;
@@ -250,7 +250,7 @@ public sealed class ModelProviderSelectorCoordinatorTests
             promptComposerViewModel,
             backendStates,
             static _ => null,
-            static () => ["codex", "copilot", "openai", "anthropic", "google", "vertex"]);
+            static () => ["codex_cli", "copilot_cli", "openai", "anthropic", "google", "vertex"]);
 
         coordinator.RefreshForDraftScope(AgentBackendIds.Codex);
 

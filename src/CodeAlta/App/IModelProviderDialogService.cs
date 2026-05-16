@@ -43,27 +43,27 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
         => _providerUi.TestProviderAsync(definition, CancellationToken.None);
 
     public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
-        => string.Equals(definition.ProviderType, "github-copilot-direct", StringComparison.Ordinal)
+        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
             ? _providerUi.LoginCopilotDirectWithBrowserAsync(definition, reportStatus, CancellationToken.None)
             : _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, reportStatus, CancellationToken.None);
 
     public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
-        => string.Equals(definition.ProviderType, "github-copilot-direct", StringComparison.Ordinal)
+        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
             ? _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, CancellationToken.None)
             : _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, CancellationToken.None);
 
     public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition)
-        => string.Equals(definition.ProviderType, "github-copilot-direct", StringComparison.Ordinal)
+        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
             ? _providerUi.LogoutCopilotDirectAsync(definition, CancellationToken.None)
             : _providerUi.LogoutCodexSubscriptionAsync(definition, CancellationToken.None);
 
     public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition)
-        => string.Equals(definition.ProviderType, "github-copilot-direct", StringComparison.Ordinal)
+        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
             ? _providerUi.TestCopilotDirectAuthenticationAsync(definition, CancellationToken.None)
             : _providerUi.TestCodexSubscriptionAuthenticationAsync(definition, CancellationToken.None);
 
     public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition)
-        => string.Equals(definition.ProviderType, "github-copilot-direct", StringComparison.Ordinal)
+        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
             ? _providerUi.ListCopilotDirectModelsAsync(definition, CancellationToken.None)
             : _providerUi.ListCodexSubscriptionModelsAsync(definition, CancellationToken.None);
 

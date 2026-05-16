@@ -121,7 +121,7 @@ internal sealed class CodeAltaLiveToolHost : IAsyncDisposable
 
         void RegisterLiveToolBackends(AgentBackendFactory backendFactory)
         {
-            if (providerDefinitions.TryGetValue("codex", out var codexProvider) && codexProvider.Enabled != false)
+            if (providerDefinitions.TryGetValue("codex_cli", out var codexProvider) && codexProvider.Enabled != false)
             {
                 var codexPath = CodeAltaOwnedServices.ResolveCodexExecutablePath(
                     Environment.GetEnvironmentVariable("CODEALTA_CODEX_PATH"));
@@ -135,13 +135,13 @@ internal sealed class CodeAltaLiveToolHost : IAsyncDisposable
                             ReleaseTag = codexPath is null ? CodexClient.CompiledAgainstReleaseTag : null,
                         },
                     });
-                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex"));
+                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex CLI"));
             }
 
-            if (providerDefinitions.TryGetValue("copilot", out var copilotProvider) && copilotProvider.Enabled != false)
+            if (providerDefinitions.TryGetValue("copilot_cli", out var copilotProvider) && copilotProvider.Enabled != false)
             {
                 backendFactory.RegisterCopilot(CodeAltaOwnedServices.CreateCopilotBackendOptions(copilotProvider, cacheRoot));
-                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "GitHub Copilot"));
+                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "Copilot CLI"));
             }
 
             backendDescriptors.AddRange(
@@ -203,6 +203,6 @@ internal sealed class CodeAltaLiveToolHost : IAsyncDisposable
     private static bool SupportsHostInjectedTools(string? providerType)
         => string.Equals(providerType, "openai-chat", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(providerType, "openai-responses", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(providerType, "openai-codex-subscription", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(providerType, "github-copilot-direct", StringComparison.OrdinalIgnoreCase);
+           string.Equals(providerType, "codex", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(providerType, "copilot", StringComparison.OrdinalIgnoreCase);
 }

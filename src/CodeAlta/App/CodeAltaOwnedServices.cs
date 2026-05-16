@@ -172,7 +172,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
         void RegisterFrontendBackends(AgentBackendFactory backendFactory)
         {
-            if (providerDefinitions.TryGetValue("codex", out var codexProvider) && codexProvider.Enabled != false)
+            if (providerDefinitions.TryGetValue("codex_cli", out var codexProvider) && codexProvider.Enabled != false)
             {
                 backendFactory.RegisterCodex(
                     new CodexAgentBackendOptions
@@ -185,13 +185,13 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                             Progress = codexPath is null ? codexInstallProgress : null,
                         },
                     });
-                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex"));
+                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex CLI"));
             }
 
-            if (providerDefinitions.TryGetValue("copilot", out var copilotProvider) && copilotProvider.Enabled != false)
+            if (providerDefinitions.TryGetValue("copilot_cli", out var copilotProvider) && copilotProvider.Enabled != false)
             {
                 backendFactory.RegisterCopilot(CreateCopilotBackendOptions(copilotProvider, cacheRoot));
-                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "GitHub Copilot"));
+                backendDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "Copilot CLI"));
             }
 
             backendDescriptors.AddRange(
@@ -279,8 +279,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     {
         return
         [
-            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex"),
-            new AgentBackendDescriptor(AgentBackendIds.Copilot, "GitHub Copilot"),
+            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex CLI"),
+            new AgentBackendDescriptor(AgentBackendIds.Copilot, "Copilot CLI"),
         ];
     }
 
@@ -292,7 +292,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         var expectedBackendIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var providerDescriptors = new List<AgentBackendDescriptor>();
 
-        if (providerDefinitions.TryGetValue("codex", out var codexProvider) && codexProvider.Enabled != false)
+        if (providerDefinitions.TryGetValue("codex_cli", out var codexProvider) && codexProvider.Enabled != false)
         {
             var codexPath = ResolveCodexExecutablePath(Environment.GetEnvironmentVariable(CodexPathOverrideEnvironmentVariable));
             // Codex is a process-backed runtime. Replacing the factory is enough for the
@@ -308,17 +308,17 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         Progress = codexPath is null ? _codexInstallProgress : null,
                     },
                 });
-            providerDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex"));
+            providerDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Codex, codexProvider.DisplayName ?? "Codex CLI"));
             expectedBackendIds.Add(AgentBackendIds.Codex.Value);
         }
 
-        if (providerDefinitions.TryGetValue("copilot", out var copilotProvider) && copilotProvider.Enabled != false)
+        if (providerDefinitions.TryGetValue("copilot_cli", out var copilotProvider) && copilotProvider.Enabled != false)
         {
             // Copilot is a process-backed runtime. Replacing the factory is enough for the
             // next cold start; keep an already loaded backend alive across provider saves.
             _backendFactory.RegisterOrReplaceCopilot(
                 CreateCopilotBackendOptions(copilotProvider, Path.Combine(CatalogOptions.GlobalRoot, "cache")));
-            providerDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "GitHub Copilot"));
+            providerDescriptors.Add(new AgentBackendDescriptor(AgentBackendIds.Copilot, copilotProvider.DisplayName ?? "Copilot CLI"));
             expectedBackendIds.Add(AgentBackendIds.Copilot.Value);
         }
 

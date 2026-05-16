@@ -943,10 +943,10 @@ public sealed class AltaLiveToolTests
             childRecords.Select(static line => line.GetProperty("threadId").GetString()).ToArray());
 
         var modelRecord = ReadJsonLines(model.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.model.selection");
-        Assert.AreEqual("codex", modelRecord.GetProperty("providerKey").GetString());
+        Assert.AreEqual("codex_cli", modelRecord.GetProperty("providerKey").GetString());
         Assert.AreEqual("gpt-test", modelRecord.GetProperty("modelId").GetString());
         Assert.AreEqual("low", modelRecord.GetProperty("reasoningEffort").GetString());
-        Assert.AreEqual("codex:gpt-test@low", modelRecord.GetProperty("modelRef").GetString());
+        Assert.AreEqual("codex_cli:gpt-test@low", modelRecord.GetProperty("modelRef").GetString());
     }
 
     [TestMethod]

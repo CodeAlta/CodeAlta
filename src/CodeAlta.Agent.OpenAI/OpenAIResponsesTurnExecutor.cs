@@ -2152,7 +2152,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString("provider", "codex_subscription");
+            writer.WriteString("provider", "codex");
             writer.WriteString("transport", transport.ToString().ToLowerInvariant());
             writer.WriteNumber("attempt", retryAttempt);
             writer.WriteNumber("nextAttempt", retryAttempt + 1);

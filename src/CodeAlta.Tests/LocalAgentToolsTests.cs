@@ -940,7 +940,7 @@ public sealed class LocalAgentToolsTests
             provider: CreateProviderDescriptor(
                 LocalAgentTransportKind.OpenAIResponses,
                 new Uri("https://chatgpt.com/backend-api/codex"),
-                protocolFamily: "openai-codex-subscription")));
+                protocolFamily: "codex")));
         var anthropicTools = LocalAgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(
             temp.Path,
             provider: CreateProviderDescriptor(

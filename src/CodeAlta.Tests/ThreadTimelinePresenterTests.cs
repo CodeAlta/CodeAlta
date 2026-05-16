@@ -161,7 +161,7 @@ public sealed class ThreadTimelinePresenterTests
             null,
             AgentSessionUpdateKind.Reconnecting,
             "Reconnecting to ChatGPT/Codex... 1/5",
-            Details: CreateJsonDetails("""{"provider":"codex_subscription","discardDraft":true,"draftAttemptId":"run-1:1"}"""));
+            Details: CreateJsonDetails("""{"provider":"codex","discardDraft":true,"draftAttemptId":"run-1:1"}"""));
 
         presenter.AppendContent(delta);
 

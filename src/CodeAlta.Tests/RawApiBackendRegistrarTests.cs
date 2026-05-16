@@ -162,8 +162,8 @@ public sealed class RawApiBackendRegistrarTests
         File.WriteAllText(
             Path.Combine(temp.Path, "config.toml"),
             """
-            [providers.codex_subscription]
-            type = "openai-codex-subscription"
+            [providers.codex]
+            type = "codex"
             model = "gpt-5.3-codex"
             experimental = true
             """);
@@ -177,18 +177,18 @@ public sealed class RawApiBackendRegistrarTests
             Path.Combine(temp.Path, "machine", "agents"));
 
         Assert.AreEqual(1, descriptors.Count);
-        Assert.AreEqual("codex_subscription", descriptors[0].BackendId.Value);
-        Assert.AreEqual("Codex (ChatGPT subscription)", descriptors[0].DisplayName);
-        Assert.IsTrue(factory.IsRegistered("codex_subscription"));
+        Assert.AreEqual("codex", descriptors[0].BackendId.Value);
+        Assert.AreEqual("Codex", descriptors[0].DisplayName);
+        Assert.IsTrue(factory.IsRegistered("codex"));
 
-        await using var backend = factory.Create("codex_subscription");
+        await using var backend = factory.Create("codex");
         Assert.IsInstanceOfType<OpenAIResponsesAgentBackend>(backend);
 
         var models = await backend.ListModelsAsync().ConfigureAwait(false);
         Assert.AreEqual(
             "gpt-5.2|gpt-5.3-codex|gpt-5.4|gpt-5.4-mini|gpt-5.5",
             string.Join('|', models.Select(static model => model.Id)));
-        Assert.IsTrue(models.All(static model => model.Provider == "codex_subscription"));
+        Assert.IsTrue(models.All(static model => model.Provider == "codex"));
     }
 
     [TestMethod]
@@ -197,9 +197,9 @@ public sealed class RawApiBackendRegistrarTests
         using var temp = TempDirectory.Create();
         var definition = new CodeAltaProviderDocument
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             Enabled = true,
-            ProviderType = "openai-codex-subscription",
+            ProviderType = "codex",
             DisplayName = "Codex Sub",
             Model = "gpt-5.3-codex",
             ApiUrl = "https://chatgpt.com/backend-api/codex",

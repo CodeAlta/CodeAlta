@@ -25,7 +25,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
         };
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
-        await store.SaveAsync("codex_subscription", credential).ConfigureAwait(false);
+        await store.SaveAsync("codex", credential).ConfigureAwait(false);
         var handler = new RecordingHttpMessageHandler(
             new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -35,7 +35,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var authManager = new OpenAICodexSubscriptionAuthManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(new HttpClient(new RecordingHttpMessageHandler())),
-            "codex_subscription");
+            "codex");
         var turnState = new CodexTurnState();
         var pipeline = CreatePipeline(
             authManager,
@@ -77,7 +77,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         using var temp = TempDirectory.Create();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         await store.SaveAsync(
-                "codex_subscription",
+                "codex",
                 new OpenAICodexSubscriptionCredential
                 {
                     AccessToken = "access-secret",
@@ -92,7 +92,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var authManager = new OpenAICodexSubscriptionAuthManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(new HttpClient(new RecordingHttpMessageHandler())),
-            "codex_subscription");
+            "codex");
         var turnState = new CodexTurnState();
         var pipeline = CreatePipeline(
             authManager,
@@ -120,7 +120,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         using var temp = TempDirectory.Create();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         await store.SaveAsync(
-                "codex_subscription",
+                "codex",
                 new OpenAICodexSubscriptionCredential
                 {
                     AccessToken = "access-secret",
@@ -134,7 +134,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var authManager = new OpenAICodexSubscriptionAuthManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(new HttpClient(new RecordingHttpMessageHandler())),
-            "codex_subscription");
+            "codex");
         var pipeline = CreatePipeline(
             authManager,
             new CodexSubscriptionHeaderContext(
@@ -157,7 +157,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     {
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
             StateRootPath = AppContext.BaseDirectory,
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -173,10 +173,10 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                 new AgentRunId("run_789"),
                 new LocalAgentProviderDescriptor
                 {
-                    ProtocolFamily = "openai-codex-subscription",
-                    ProviderKey = "codex_subscription",
-                    DisplayName = "Codex (ChatGPT subscription)",
-                    BackendId = new AgentBackendId("codex_subscription"),
+                    ProtocolFamily = "codex",
+                    ProviderKey = "codex",
+                    DisplayName = "Codex",
+                    BackendId = new AgentBackendId("codex"),
                     TransportKind = LocalAgentTransportKind.OpenAIResponses,
                 }));
 
@@ -192,7 +192,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         });
         var codexOptions = CreateClientOptions(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
@@ -392,10 +392,10 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     {
         var provider = new LocalAgentProviderDescriptor
         {
-            ProtocolFamily = "openai-codex-subscription",
-            ProviderKey = "codex_subscription",
-            DisplayName = "Codex (ChatGPT subscription)",
-            BackendId = new AgentBackendId("codex_subscription"),
+            ProtocolFamily = "codex",
+            ProviderKey = "codex",
+            DisplayName = "Codex",
+            BackendId = new AgentBackendId("codex"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
         };
 
@@ -423,7 +423,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var handler = new RecordingHttpMessageHandler(CreateModelsResponse());
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(handler),
@@ -468,7 +468,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(CreateModelsResponse())),
@@ -496,7 +496,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
             StateRootPath = temp.Path,
             SingleModelId = "hidden-codex",
@@ -526,7 +526,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
@@ -571,7 +571,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
             StateRootPath = temp.Path,
             CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(
@@ -600,14 +600,14 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var limiter = new CodexSubscriptionConcurrencyLimiter();
         var accountId = "acct_" + Guid.NewGuid().ToString("N");
         var first = await limiter.AcquireAsync(
-            "codex_subscription",
+            "codex",
             "session-one",
             accountId,
             maxConcurrentRequests: 16,
             CancellationToken.None).ConfigureAwait(false);
 
         var sameSession = limiter.AcquireAsync(
-            "codex_subscription",
+            "codex",
             "session-one",
             accountId,
             maxConcurrentRequests: 16,
@@ -625,7 +625,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             for (var i = 0; i < 16; i++)
             {
                 accountLeases.Add(await limiter.AcquireAsync(
-                    "codex_subscription",
+                    "codex",
                     "account-session-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     accountId,
                     maxConcurrentRequests: 16,
@@ -633,7 +633,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             }
 
             var sameAccount = limiter.AcquireAsync(
-                "codex_subscription",
+                "codex",
                 "blocked-account-session",
                 accountId,
                 maxConcurrentRequests: 16,
@@ -661,7 +661,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var limiter = new CodexSubscriptionConcurrencyLimiter();
         var accountId = "acct_" + Guid.NewGuid().ToString("N");
         var first = await limiter.AcquireAsync(
-            "codex_subscription",
+            "codex",
             "session-one",
             accountId,
             maxConcurrentRequests: 1,
@@ -669,7 +669,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var waitNotifications = new List<CodexSubscriptionConcurrencyWaitInfo>();
 
         var waiting = limiter.AcquireAsync(
-            "codex_subscription",
+            "codex",
             "session-two",
             accountId,
             maxConcurrentRequests: 1,
@@ -697,14 +697,14 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var limiter = new CodexSubscriptionConcurrencyLimiter();
         var accountId = "acct_" + Guid.NewGuid().ToString("N");
         var first = await limiter.AcquireAsync(
-            "codex_subscription_primary",
+            "codex_primary",
             "session-one",
             accountId,
             maxConcurrentRequests: 1,
             CancellationToken.None).ConfigureAwait(false);
 
         var sameAccountDifferentProvider = limiter.AcquireAsync(
-            "codex_subscription_secondary",
+            "codex_secondary",
             "session-two",
             accountId,
             maxConcurrentRequests: 1,
@@ -804,7 +804,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     {
         var store = new FileOpenAICodexSubscriptionCredentialStore(stateRootPath);
         await store.SaveAsync(
-            "codex_subscription",
+            "codex",
             new OpenAICodexSubscriptionCredential
             {
                 AccessToken = "access-token",
@@ -817,10 +817,10 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     private static LocalAgentProviderDescriptor CreateProviderDescriptor()
         => new()
         {
-            ProtocolFamily = "openai-codex-subscription",
-            ProviderKey = "codex_subscription",
-            DisplayName = "Codex (ChatGPT subscription)",
-            BackendId = new AgentBackendId("codex_subscription"),
+            ProtocolFamily = "codex",
+            ProviderKey = "codex",
+            DisplayName = "Codex",
+            BackendId = new AgentBackendId("codex"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
         };
 
@@ -977,7 +977,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         {
             var path = System.IO.Path.Combine(
                 AppContext.BaseDirectory,
-                "openai-codex-subscription-pipeline-tests",
+                "codex-pipeline-tests",
                 Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
             return new TempDirectory(path);

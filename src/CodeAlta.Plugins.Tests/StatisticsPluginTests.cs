@@ -256,8 +256,8 @@ public sealed class StatisticsPluginTests
         var card = await WaitForDynamicProjectionAsync(result.Single());
         StringAssert.Contains(card.Markdown, "2 in (estimated heuristic) / ≈8 out (estimated generated)");
         var detailsMarkdown = card.DetailSections.Single().Markdown;
-        StringAssert.Contains(detailsMarkdown, "Tool input (observed model generated) | 14 chars");
-        StringAssert.Contains(detailsMarkdown, "Observed generated output | 23 chars");
+        StringAssert.Contains(detailsMarkdown, "Tool input (observed model generated) | 16 chars");
+        StringAssert.Contains(detailsMarkdown, "Observed generated output | 25 chars");
         StringAssert.Contains(detailsMarkdown, "Tool output | 31 chars");
     }
 

@@ -194,9 +194,9 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var imported = await CodexAuthFileReader.ImportAuthJsonAsync(
                 codexHome.Path,
                 store,
-                "codex_subscription")
+                "codex")
             .ConfigureAwait(false);
-        var stored = await store.LoadAsync("codex_subscription").ConfigureAwait(false);
+        var stored = await store.LoadAsync("codex").ConfigureAwait(false);
 
         Assert.IsNotNull(imported);
         Assert.IsNotNull(stored);
@@ -297,7 +297,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var manager = new OpenAICodexSubscriptionLoginManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(httpClient),
-            "codex_subscription");
+            "codex");
         var login = new OpenAICodexSubscriptionBrowserLogin(
             new Uri("https://auth.openai.com/oauth/authorize"),
             new OpenAICodexSubscriptionPkce("verifier", "challenge"),
@@ -307,7 +307,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
                 login,
                 new Uri("http://localhost:1455/auth/callback?code=auth-code&state=expected-state"))
             .ConfigureAwait(false);
-        var stored = await store.LoadAsync("codex_subscription").ConfigureAwait(false);
+        var stored = await store.LoadAsync("codex").ConfigureAwait(false);
 
         Assert.AreEqual("acct_from_login", credential.AccountId);
         Assert.AreEqual("acct_from_login", stored?.AccountId);
@@ -381,7 +381,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var manager = new OpenAICodexSubscriptionLoginManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(httpClient),
-            "codex_subscription");
+            "codex");
         OpenAICodexSubscriptionDeviceCode? displayed = null;
 
         _ = await manager.CompleteDeviceLoginAsync(
@@ -391,7 +391,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
                     return ValueTask.CompletedTask;
                 })
             .ConfigureAwait(false);
-        var stored = await store.LoadAsync("codex_subscription").ConfigureAwait(false);
+        var stored = await store.LoadAsync("codex").ConfigureAwait(false);
 
         Assert.IsNotNull(displayed);
         Assert.AreEqual("ABCD-EFGH", displayed!.UserCode);
@@ -517,7 +517,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         using var temp = TempDirectory.Create();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         await store.SaveAsync(
-                "codex_subscription",
+                "codex",
                 new OpenAICodexSubscriptionCredential
                 {
                     AccessToken = "old-token",
@@ -546,7 +546,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var manager = new OpenAICodexSubscriptionAuthManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(httpClient),
-            "codex_subscription");
+            "codex");
 
         var tokens = await Task.WhenAll(
                 manager.GetAccessTokenAsync().AsTask(),
@@ -571,7 +571,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var before = File.GetLastWriteTimeUtc(codexAuthPath);
         var store = new FileOpenAICodexSubscriptionCredentialStore(state.Path);
         await store.SaveAsync(
-                "codex_subscription",
+                "codex",
                 new OpenAICodexSubscriptionCredential
                 {
                     AccessToken = "old-token",
@@ -587,13 +587,13 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var manager = new OpenAICodexSubscriptionAuthManager(
             store,
             new OpenAICodexSubscriptionOAuthClient(httpClient),
-            "codex_subscription",
+            "codex",
             codexHome: codexHome.Path);
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => manager.GetAccessTokenAsync().AsTask()).ConfigureAwait(false);
 
-        Assert.IsNull(await store.LoadAsync("codex_subscription").ConfigureAwait(false));
+        Assert.IsNull(await store.LoadAsync("codex").ConfigureAwait(false));
         Assert.IsTrue(File.Exists(codexAuthPath));
         Assert.AreEqual(before, File.GetLastWriteTimeUtc(codexAuthPath));
     }
@@ -690,7 +690,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         {
             var path = System.IO.Path.Combine(
                 AppContext.BaseDirectory,
-                "openai-codex-subscription-auth-tests",
+                "codex-auth-tests",
                 Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
             return new TempDirectory(path);

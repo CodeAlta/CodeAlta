@@ -1917,7 +1917,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void BuildModelOptions_PreservesSelectedModelMissingFromCatalog()
     {
-        var backendState = new ChatBackendState(new AgentBackendId("codex_subscription"), "Codex subscription")
+        var backendState = new ChatBackendState(new AgentBackendId("codex"), "Codex subscription")
         {
             SelectedModelId = "gpt-5.5",
         };
@@ -1933,7 +1933,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void BuildModelOptions_UsesSelectedModelWhenCatalogIsEmpty()
     {
-        var backendState = new ChatBackendState(new AgentBackendId("codex_subscription"), "Codex subscription")
+        var backendState = new ChatBackendState(new AgentBackendId("codex"), "Codex subscription")
         {
             SelectedModelId = "gpt-5.5",
         };
@@ -1997,12 +1997,12 @@ public sealed class CodeAltaAppTests
     {
         var states = new[]
         {
-            new ChatBackendState(AgentBackendIds.Codex, "Codex")
+            new ChatBackendState(AgentBackendIds.Codex, "Codex CLI")
             {
                 Availability = ChatBackendAvailability.Ready,
                 StatusMessage = "Connected · 2 models",
             },
-            new ChatBackendState(AgentBackendIds.Copilot, "Copilot")
+            new ChatBackendState(AgentBackendIds.Copilot, "Copilot CLI")
             {
                 Availability = ChatBackendAvailability.Unsupported,
                 StatusMessage = "Copilot is unavailable: CLI not found.",
@@ -2081,7 +2081,7 @@ public sealed class CodeAltaAppTests
         var markup = ChatBackendPresentation.BuildProviderSummaryMarkup(
             states,
             isInitializing: false,
-            configuredProviderKeys: ["codex", "copilot", "openai", "anthropic", "google", "vertex"]);
+            configuredProviderKeys: ["codex_cli", "copilot_cli", "openai", "anthropic", "google", "vertex"]);
 
         StringAssert.Contains(markup, "1 active provider");
         StringAssert.Contains(markup, "6 configured");
@@ -2647,7 +2647,7 @@ public sealed class CodeAltaAppTests
         var markup = SidebarThreadPresentation.BuildProviderMarkup(AgentBackendIds.Copilot.Value, displayName: null, WorkThreadKind.ProjectThread);
 
         StringAssert.Contains(markup, UiPalette.GetSidebarAccentMarkup(SidebarAccent.CopilotThread));
-        StringAssert.Contains(markup, "GitHub Copilot");
+        StringAssert.Contains(markup, "Copilot CLI");
         StringAssert.Contains(markup, NerdFont.MdCircleSmall.ToString());
     }
 

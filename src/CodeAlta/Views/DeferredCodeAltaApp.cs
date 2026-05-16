@@ -153,6 +153,8 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         var configPath = GetGlobalConfigPath();
         if (!File.Exists(configPath))
         {
+            var configStore = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = GetGlobalRoot() });
+            configStore.EnsureGlobalConfigExists();
             _openProvidersAfterStartup = true;
             return true;
         }
@@ -208,10 +210,12 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     }
 
     private static string GetGlobalConfigPath()
+        => Path.Combine(GetGlobalRoot(), "config.toml");
+
+    private static string GetGlobalRoot()
         => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".alta",
-            "config.toml");
+            ".alta");
 
     private static Padder CreateStretchHost(Visual content)
         => new(content)

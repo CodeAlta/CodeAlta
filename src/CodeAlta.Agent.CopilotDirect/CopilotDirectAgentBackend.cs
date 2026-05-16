@@ -12,7 +12,7 @@ public sealed class CopilotDirectAgentBackend : IAgentBackend, IAgentSharedSessi
     /// <summary>
     /// The canonical provider type and protocol family for direct Copilot access.
     /// </summary>
-    public const string ProtocolFamily = "github-copilot-direct";
+    public const string ProtocolFamily = "copilot";
 
     private readonly IAgentBackend _inner;
 
@@ -36,7 +36,7 @@ public sealed class CopilotDirectAgentBackend : IAgentBackend, IAgentSharedSessi
 
         var backendId = options.BackendIdOverride ?? new AgentBackendId(options.Providers[0].ProviderKey.Trim());
         var displayName = string.IsNullOrWhiteSpace(options.DisplayNameOverride)
-            ? "GitHub Copilot Direct"
+            ? "Copilot"
             : options.DisplayNameOverride.Trim();
 
         _inner = new LocalAgentBackend(

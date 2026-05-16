@@ -246,9 +246,9 @@ public sealed class ModelProvidersDialogInteractionTests
             },
             new CodeAltaProviderDocument
             {
-                ProviderKey = "codex_subscription",
+                ProviderKey = "codex",
                 Enabled = false,
-                ProviderType = "openai-codex-subscription",
+                ProviderType = "codex",
                 Experimental = false,
             },
         ];

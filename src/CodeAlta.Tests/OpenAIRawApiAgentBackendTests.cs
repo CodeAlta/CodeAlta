@@ -760,7 +760,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "github-copilot-direct",
+            ProviderKey = "copilot",
             ResponsesClientFactory = _ => responsesClient,
         });
         var deltas = new List<LocalAgentTurnDelta>();
@@ -771,7 +771,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             {
                 Provider = request.Provider with
                 {
-                    ProtocolFamily = "github-copilot-direct",
+                    ProtocolFamily = "copilot",
                 },
             },
             (delta, _) =>
@@ -1055,7 +1055,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         var contexts = new List<OpenAIResponsesClientFactoryContext>();
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientContextFactory = context =>
             {
                 contexts.Add(context);
@@ -1179,7 +1179,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             StateRootPath = temp.Path,
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1195,9 +1195,9 @@ public sealed class OpenAIRawApiAgentBackendTests
         {
             Provider = CreateTurnRequest().Provider with
             {
-                ProtocolFamily = "openai-codex-subscription",
-                ProviderKey = "codex_subscription",
-                DisplayName = "Codex (ChatGPT subscription)",
+                ProtocolFamily = "codex",
+                ProviderKey = "codex",
+                DisplayName = "Codex",
                 Profile = new LocalAgentProviderProfile
                 {
                     SupportsStore = false,
@@ -1248,7 +1248,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         using var temp = TestTempDirectory.Create();
         var credentialStore = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         await credentialStore.SaveAsync(
-            "codex_subscription",
+            "codex",
             new OpenAICodexSubscriptionCredential
             {
                 AccessToken = "access-token",
@@ -1266,7 +1266,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             {
                 new OpenAIProviderOptions
                 {
-                    ProviderKey = "codex_subscription",
+                    ProviderKey = "codex",
                     IsDefault = true,
                     BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
                     CodexSubscriptionHttpClient = new HttpClient(handler),
@@ -1306,7 +1306,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -1357,7 +1357,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -1370,9 +1370,9 @@ public sealed class OpenAIRawApiAgentBackendTests
         {
             Provider = CreateTurnRequest().Provider with
             {
-                ProtocolFamily = "openai-codex-subscription",
-                ProviderKey = "codex_subscription",
-                DisplayName = "Codex (ChatGPT subscription)",
+                ProtocolFamily = "codex",
+                ProviderKey = "codex",
+                DisplayName = "Codex",
                 Profile = new LocalAgentProviderProfile
                 {
                     SupportsStore = false,
@@ -1431,7 +1431,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             {
                 new OpenAIProviderOptions
                 {
-                    ProviderKey = "codex_subscription",
+                    ProviderKey = "codex",
                     IsDefault = true,
                     ResponsesClientFactory = _ => responsesClient,
                     CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1542,7 +1542,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             {
                 new OpenAIProviderOptions
                 {
-                    ProviderKey = "codex_subscription",
+                    ProviderKey = "codex",
                     IsDefault = true,
                     ResponsesClientFactory = _ => responsesClient,
                     CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1629,7 +1629,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             {
                 new OpenAIProviderOptions
                 {
-                    ProviderKey = "codex_subscription",
+                    ProviderKey = "codex",
                     IsDefault = true,
                     ResponsesClientFactory = _ => responsesClient,
                     CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1695,7 +1695,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1740,7 +1740,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1787,7 +1787,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1828,7 +1828,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1866,7 +1866,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1900,7 +1900,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -1945,7 +1945,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -1984,7 +1984,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         var responsesClient = new RecordingOpenAIResponseClient([]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2019,7 +2019,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2066,7 +2066,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         var sessions = new Queue<RecordingOpenAIResponsesWebSocketSession>([firstWebSocketSession, secondWebSocketSession]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(sessions.Dequeue()),
             ResponsesWebSocketIdleTimeout = TimeSpan.Zero,
@@ -2155,7 +2155,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2212,7 +2212,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2281,7 +2281,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2350,7 +2350,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2403,7 +2403,7 @@ public sealed class OpenAIRawApiAgentBackendTests
     {
         var provider = new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             BaseUri = new Uri("https://chatgpt.com/backend-api/codex?access_token=secret"),
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2430,7 +2430,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             httpStatus: HttpStatusCode.TooManyRequests,
             errorType: "HttpRequestException");
 
-        StringAssert.Contains(message, "provider=codex_subscription");
+        StringAssert.Contains(message, "provider=codex");
         StringAssert.Contains(message, "endpoint=chatgpt.com/backend-api/codex");
         StringAssert.Contains(message, "session=session-1");
         StringAssert.Contains(message, "run=run-1");
@@ -2449,7 +2449,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         using var temp = TestTempDirectory.Create();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         await store.SaveAsync(
-                "codex_subscription",
+                "codex",
                 new OpenAICodexSubscriptionCredential
                 {
                     AccessToken = "access-token-should-not-appear",
@@ -2478,7 +2478,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             {
                 new OpenAIProviderOptions
                 {
-                    ProviderKey = "codex_subscription",
+                    ProviderKey = "codex",
                     IsDefault = true,
                     ResponsesClientFactory = _ => responsesClient,
                     CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2521,7 +2521,7 @@ public sealed class OpenAIRawApiAgentBackendTests
     {
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new ThrowingOpenAIResponseClient(
                 new HttpRequestException("Too many requests.", null, HttpStatusCode.TooManyRequests)),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2534,9 +2534,9 @@ public sealed class OpenAIRawApiAgentBackendTests
         {
             Provider = CreateTurnRequest().Provider with
             {
-                ProtocolFamily = "openai-codex-subscription",
-                ProviderKey = "codex_subscription",
-                DisplayName = "Codex (ChatGPT subscription)",
+                ProtocolFamily = "codex",
+                ProviderKey = "codex",
+                DisplayName = "Codex",
             },
             ModelId = "gpt-5.3-codex",
         };
@@ -2554,7 +2554,7 @@ public sealed class OpenAIRawApiAgentBackendTests
     {
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new ThrowingOpenAIResponseClient(
                 new HttpRequestException("Unauthorized.", null, HttpStatusCode.Unauthorized)),
             CodexSubscription = new OpenAICodexSubscriptionOptions
@@ -2567,9 +2567,9 @@ public sealed class OpenAIRawApiAgentBackendTests
         {
             Provider = CreateTurnRequest().Provider with
             {
-                ProtocolFamily = "openai-codex-subscription",
-                ProviderKey = "codex_subscription",
-                DisplayName = "Codex (ChatGPT subscription)",
+                ProtocolFamily = "codex",
+                ProviderKey = "codex",
+                DisplayName = "Codex",
             },
             ModelId = "gpt-5.3-codex",
         };
@@ -2601,7 +2601,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             exceptionToThrow.Data["Retry-After"] = TimeSpan.Zero;
             var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
             {
-                ProviderKey = "codex_subscription",
+                ProviderKey = "codex",
                 ResponsesClientFactory = _ => new ThrowingOpenAIResponseClient(exceptionToThrow),
                 CodexSubscription = new OpenAICodexSubscriptionOptions
                 {
@@ -2625,7 +2625,7 @@ public sealed class OpenAIRawApiAgentBackendTests
     {
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([[]]),
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2661,7 +2661,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         var refreshCount = 0;
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscriptionCredentialRefreshAsync = _ =>
             {
@@ -2697,7 +2697,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         var refreshCount = 0;
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscriptionCredentialRefreshAsync = _ =>
             {
@@ -2739,7 +2739,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2774,7 +2774,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2802,7 +2802,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2836,7 +2836,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2865,7 +2865,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2900,7 +2900,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2930,7 +2930,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         var responsesClient = new FlakyOpenAIResponseClient([usageLimit], []);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2959,7 +2959,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -2986,7 +2986,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             []);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -3024,7 +3024,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -3075,7 +3075,7 @@ public sealed class OpenAIRawApiAgentBackendTests
             ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "codex_subscription",
+            ProviderKey = "codex",
             ResponsesClientFactory = _ => responsesClient,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
@@ -3470,9 +3470,9 @@ public sealed class OpenAIRawApiAgentBackendTests
         {
             Provider = CreateTurnRequest().Provider with
             {
-                ProtocolFamily = "openai-codex-subscription",
-                ProviderKey = "codex_subscription",
-                DisplayName = "Codex (ChatGPT subscription)",
+                ProtocolFamily = "codex",
+                ProviderKey = "codex",
+                DisplayName = "Codex",
             },
             ModelId = "gpt-5.3-codex",
         };

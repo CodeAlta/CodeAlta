@@ -105,9 +105,9 @@ internal static class RawApiBackendRegistrar
                 return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
             case "openai-responses":
                 return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
-            case "openai-codex-subscription":
+            case "codex":
                 return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createBackend);
-            case "github-copilot-direct":
+            case "copilot":
                 return TryCreateCopilotDirectProvider(definition, stateRootPath, out descriptor, out createBackend);
             case "anthropic":
                 return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
@@ -259,7 +259,7 @@ internal static class RawApiBackendRegistrar
         if (definition.Experimental != true)
         {
             throw new InvalidOperationException(
-                $"Provider '{definition.ProviderKey}' requires experimental = true for type 'openai-codex-subscription'.");
+                $"Provider '{definition.ProviderKey}' requires experimental = true for type 'codex'.");
         }
 
         var backendId = new AgentBackendId(definition.ProviderKey);
@@ -316,7 +316,7 @@ internal static class RawApiBackendRegistrar
         if (definition.Experimental != true)
         {
             throw new InvalidOperationException(
-                $"Provider '{definition.ProviderKey}' requires experimental = true for type 'github-copilot-direct'.");
+                $"Provider '{definition.ProviderKey}' requires experimental = true for type 'copilot'.");
         }
 
         var authSource = NormalizeText(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;

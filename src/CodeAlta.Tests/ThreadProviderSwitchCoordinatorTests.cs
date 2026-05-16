@@ -41,8 +41,8 @@ public sealed class ThreadProviderSwitchCoordinatorTests
                 return Task.CompletedTask;
             });
         var createdAt = DateTimeOffset.Parse("2026-04-19T10:00:00+00:00");
-        var thread = CreateThread("019e1584", "codex_subscription", createdAt);
-        var tabState = CreateTabState(thread, "codex_subscription", "gpt-5.5");
+        var thread = CreateThread("019e1584", "codex", createdAt);
+        var tabState = CreateTabState(thread, "codex", "gpt-5.5");
 
         var switched = await coordinator.SwitchThreadProviderAsync(
             thread,
@@ -155,8 +155,8 @@ public sealed class ThreadProviderSwitchCoordinatorTests
             type = "openai-chat"
             api_key_env = "OPENAI_API_KEY"
 
-            [providers.codex_subscription]
-            type = "openai-codex-subscription"
+            [providers.codex]
+            type = "codex"
             model = "gpt-5.5"
             experimental = true
 
@@ -171,7 +171,7 @@ public sealed class ThreadProviderSwitchCoordinatorTests
         var states = new Dictionary<string, ChatBackendState>(StringComparer.OrdinalIgnoreCase)
         {
             ["openai"] = ReadyState("openai", "OpenAI"),
-            ["codex_subscription"] = ReadyState("codex_subscription", "Codex ChatGPT subscription"),
+            ["codex"] = ReadyState("codex", "Codex ChatGPT subscription"),
             ["anthropic"] = ReadyState("anthropic", "Anthropic"),
         };
         if (includeNative)

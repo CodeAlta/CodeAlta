@@ -15,8 +15,8 @@ internal sealed partial class ModelProviderEditorItemViewModel
 
         _source = source;
         ProviderKey = source.ProviderKey;
-        IsReserved = string.Equals(source.ProviderKey, "codex", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(source.ProviderKey, "copilot", StringComparison.OrdinalIgnoreCase);
+        IsReserved = string.Equals(source.ProviderKey, "codex_cli", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(source.ProviderKey, "copilot_cli", StringComparison.OrdinalIgnoreCase);
         Enabled = source.Enabled != false;
         ProviderType = source.ProviderType ?? "openai-chat";
         DisplayName = source.DisplayName;
@@ -207,18 +207,18 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ApiKey = UseDefaultApiKey ? null : NormalizeText(ApiKey);
         definition.ApiKeyEnv = UseDefaultApiKeyEnv ? null : NormalizeText(ApiKeyEnv);
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
-        definition.GitHubEnterpriseUrl = ProviderType == "github-copilot-direct" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
+        definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
         definition.OrganizationId = UseDefaultOrganizationId ? null : NormalizeText(OrganizationId);
         definition.ProjectId = UseDefaultProjectId ? null : NormalizeText(ProjectId);
         definition.Project = UseDefaultProject ? null : NormalizeText(Project);
         definition.Location = UseDefaultLocation ? null : NormalizeText(Location);
         definition.ModelsDevProviderId = UseDefaultModelsDevProviderId ? null : NormalizeText(ModelsDevProviderId);
         definition.SingleModelId = UseDefaultSingleModelId ? null : NormalizeText(SingleModelId);
-        var usesSubscriptionStyleFields = ProviderType is "openai-codex-subscription" or "github-copilot-direct";
+        var usesSubscriptionStyleFields = ProviderType is "codex" or "copilot";
         definition.AuthSource = usesSubscriptionStyleFields && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
-        definition.AccountId = ProviderType == "openai-codex-subscription" && !UseDefaultAccountId ? NormalizeText(AccountId) : null;
+        definition.AccountId = ProviderType == "codex" && !UseDefaultAccountId ? NormalizeText(AccountId) : null;
         definition.ModelDiscovery = usesSubscriptionStyleFields && !UseDefaultModelDiscovery ? NormalizeText(ModelDiscovery) : null;
-        definition.ResponseTransport = ProviderType == "openai-codex-subscription" && !UseDefaultResponseTransport ? NormalizeText(ResponseTransport) : null;
+        definition.ResponseTransport = ProviderType == "codex" && !UseDefaultResponseTransport ? NormalizeText(ResponseTransport) : null;
         definition.Experimental = usesSubscriptionStyleFields ? Experimental : null;
         return definition;
     }

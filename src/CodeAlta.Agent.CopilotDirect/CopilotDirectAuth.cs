@@ -150,7 +150,7 @@ internal sealed class CopilotDirectAuthManager
 
         if (LogManager.IsInitialized && Logger.IsEnabled(LogLevel.Info))
         {
-            Logger.Info($"GitHub Copilot Direct login required. Open {device.VerificationUri} and enter code {device.UserCode}. Waiting for authorization; cancel the operation to stop polling.");
+            Logger.Info($"Copilot login required. Open {device.VerificationUri} and enter code {device.UserCode}. Waiting for authorization; cancel the operation to stop polling.");
         }
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, device.ExpiresIn)).Subtract(TimeSpan.FromSeconds(3));

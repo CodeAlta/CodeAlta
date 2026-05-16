@@ -12,8 +12,8 @@ internal static class ChatBackendPresentation
     {
         return CreateBackendStates(
         [
-            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex"),
-            new AgentBackendDescriptor(AgentBackendIds.Copilot, "GitHub Copilot"),
+            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex CLI"),
+            new AgentBackendDescriptor(AgentBackendIds.Copilot, "Copilot CLI"),
         ]);
     }
 
@@ -32,8 +32,8 @@ internal static class ChatBackendPresentation
     {
         return BuildBackendOptions(
         [
-            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex"),
-            new AgentBackendDescriptor(AgentBackendIds.Copilot, "GitHub Copilot"),
+            new AgentBackendDescriptor(AgentBackendIds.Codex, "Codex CLI"),
+            new AgentBackendDescriptor(AgentBackendIds.Copilot, "Copilot CLI"),
         ]);
     }
 

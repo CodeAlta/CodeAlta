@@ -47,11 +47,11 @@ internal static class ModelProviderEditorDiagnostics
         Add(entries, ValidateVertexProject(item));
         Add(entries, ValidateVertexLocation(item));
 
-        if (!item.IsReserved && item.ProviderType is "codex" or "copilot")
+        if (!item.IsReserved && item.ProviderType is "codex_cli" or "copilot_cli")
         {
             entries.Add(new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Error,
-                "Only the reserved codex/copilot entries can use built-in provider types."));
+                "Only the reserved codex_cli/copilot_cli entries can use built-in CLI provider types."));
         }
 
         if (item.ProviderType == "vertex-ai" && item.Enabled)
@@ -61,7 +61,7 @@ internal static class ModelProviderEditorDiagnostics
                 "Vertex AI uses Google application-default credentials from the current environment."));
         }
 
-        if (item.ProviderType == "openai-codex-subscription" && item.Enabled)
+        if (item.ProviderType == "codex" && item.Enabled)
         {
             entries.Add(new ModelProviderDiagnosticEntry(
                 item.Experimental ? ValidationSeverity.Warning : ValidationSeverity.Error,
@@ -70,13 +70,13 @@ internal static class ModelProviderEditorDiagnostics
                     : "Enable the experimental opt-in before saving this ChatGPT/Codex subscription provider."));
         }
 
-        if (item.ProviderType == "github-copilot-direct" && item.Enabled)
+        if (item.ProviderType == "copilot" && item.Enabled)
         {
             entries.Add(new ModelProviderDiagnosticEntry(
                 item.Experimental ? ValidationSeverity.Warning : ValidationSeverity.Error,
                 item.Experimental
-                    ? "Experimental GitHub Copilot direct access uses Copilot HTTP endpoints directly and may be affected by account or organization policy."
-                    : "Enable the experimental opt-in before saving this GitHub Copilot direct provider."));
+                    ? "Experimental Copilot access uses Copilot HTTP endpoints directly and may be affected by account or organization policy."
+                    : "Enable the experimental opt-in before saving this Copilot provider."));
         }
 
         if (ShouldShowCustomApiUrlGuidance(item))
@@ -300,7 +300,7 @@ internal static class ModelProviderEditorDiagnostics
             return "Tested successfully";
         }
 
-        if (item.ProviderType == "openai-codex-subscription" &&
+        if (item.ProviderType == "codex" &&
             TryResolveCodexSubscriptionStatusText(item, entries, out var codexStatusText))
         {
             return codexStatusText;
@@ -421,7 +421,7 @@ internal static class ModelProviderEditorDiagnostics
     }
 
     private static bool IsCodexSubscription(ModelProviderEditorItemViewModel item)
-        => string.Equals(item.ProviderType, "openai-codex-subscription", StringComparison.Ordinal);
+        => string.Equals(item.ProviderType, "codex", StringComparison.Ordinal);
 
     private static bool IsStatusNeutralDiagnostic(ModelProviderEditorItemViewModel item, ModelProviderDiagnosticEntry entry)
         => IsCodexSubscription(item) &&

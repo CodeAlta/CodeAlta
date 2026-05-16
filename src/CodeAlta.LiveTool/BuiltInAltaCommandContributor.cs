@@ -805,7 +805,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         command.Add("detailed", "Emit one detailed metadata record per model instead of the compact modelRefs array.", value => options.Detailed = value is not null);
         command.Add("refs", "Compatibility alias for the default compact modelRefs array.", _ => { });
         command.Add(async (_, _) => await HandleModelListAsync(context, options).ConfigureAwait(false));
-        AddHelpText(command, "Examples: `alta model list --provider anthropic --contains sonnet`; `alta model list --provider codex_subscription --reasoning low`; `alta model list --provider anthropic --detailed`.");
+        AddHelpText(command, "Examples: `alta model list --provider anthropic --contains sonnet`; `alta model list --provider codex --reasoning low`; `alta model list --provider anthropic --detailed`.");
         return command;
     }
 
@@ -822,7 +822,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         });
         command.Add("model-ref=", "Model ref: provider:model[@reasoning].", value => modelRef = value);
         command.Add(async (_, _) => await HandleModelShowAsync(context, modelRef).ConfigureAwait(false));
-        AddHelpText(command, "Example: `alta model show --model-ref github-copilot-direct:claude-sonnet-4.6@low`.");
+        AddHelpText(command, "Example: `alta model show --model-ref copilot:claude-sonnet-4.6@low`.");
         return command;
     }
 

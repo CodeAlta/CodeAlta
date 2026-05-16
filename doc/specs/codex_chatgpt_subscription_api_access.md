@@ -72,18 +72,18 @@ Public references:
 Add a first-class provider type:
 
 ```toml
-[providers.codex_subscription]
-type = "openai-codex-subscription"
-display_name = "Codex (ChatGPT subscription)"
+[providers.codex]
+type = "codex"
+display_name = "Codex"
 model = "gpt-5.3-codex"
 experimental = true
 ```
 
 Provider identity rules:
 
-- The configured provider `type` must be `openai-codex-subscription`.
+- The configured provider `type` must be `codex`.
 - Do not register this as `openai-responses` with a custom URL.
-- The default backend id should be distinct from the public OpenAI Responses backend, for example `openai-codex-subscription`.
+- The default backend id should be distinct from the public OpenAI Responses backend, for example `codex`.
 - The protocol family may reuse the OpenAI Responses executor internally, but user-facing provider/backend labels must make the subscription-backed nature explicit.
 - The user agent and originator must be truthful: use CodeAlta identity, not another product's identity.
 
@@ -101,14 +101,14 @@ https://chatgpt.com/backend-api/codex/responses
 
 ## 5. Configuration schema
 
-Extend the provider config model parsed by `RawApiBackendRegistrar` with the following fields for `openai-codex-subscription`.
+Extend the provider config model parsed by `RawApiBackendRegistrar` with the following fields for `codex`.
 
 Required or defaulted fields:
 
 | Field | Type | Required | Default | Notes |
 |---|---:|---:|---|---|
-| `type` | string | yes | | Must be `openai-codex-subscription`. |
-| `display_name` | string | no | `Codex (ChatGPT subscription)` | UI label. |
+| `type` | string | yes | | Must be `codex`. |
+| `display_name` | string | no | `Codex` | UI label. |
 | `model` | string | no | first visible picker entry | Optional preferred default model. It must not narrow the model picker/catalog. |
 | `base_url` / `api_url` | URI | no | `https://chatgpt.com/backend-api/codex` | Advanced/debug only. Reject non-HTTPS except localhost test transports. |
 | `auth_source` | enum | no | `codealta_oauth` | See auth sources below. |
@@ -158,11 +158,11 @@ Codex installation-id inference:
 
 Update `RawApiBackendRegistrar`:
 
-1. Add a case for `type = "openai-codex-subscription"`.
+1. Add a case for `type = "codex"`.
 2. Require `experimental = true` or an equivalent feature flag.
 3. Reject API-key fields.
 4. Create an OpenAI Responses-compatible LocalRuntime backend with Codex-specific provider options.
-5. Set the descriptor display name to make usage explicit, for example `Codex (ChatGPT subscription)`.
+5. Set the descriptor display name to make usage explicit, for example `Codex`.
 6. Set provider profile defaults:
    - `SupportsStore = false`.
    - reasoning effort supported for known Codex reasoning models.
@@ -695,7 +695,7 @@ Add focused tests for CodeAlta-owned behavior. Do not duplicate OpenAI SDK seria
 
 ### 18.1 Registration/config tests
 
-- `openai-codex-subscription` registers only when experimental flag is enabled.
+- `codex` registers only when experimental flag is enabled.
 - API-key fields are rejected.
 - Default endpoint is `https://chatgpt.com/backend-api/codex`.
 - Generic `extra_body` is rejected or ignored for this provider.
@@ -775,7 +775,7 @@ Capture serialized request body and assert:
 
 Implement in small, reviewable steps:
 
-1. Add config/registration shell for `openai-codex-subscription`, feature-flagged and disabled without auth.
+1. Add config/registration shell for `codex`, feature-flagged and disabled without auth.
 2. Add CodeAlta-owned OAuth credential model, secure storage abstraction, redaction helpers, and auth manager tests.
 3. Implement browser OAuth flow and device-code OAuth flow.
 4. Add optional CodeAlta installation-id generation/storage under CodeAlta-owned state, plus explicit Codex installation-id import/read-only modes.
@@ -794,7 +794,7 @@ Implement in small, reviewable steps:
 
 The feature is complete when:
 
-- A user can configure `openai-codex-subscription` distinctly from public OpenAI providers.
+- A user can configure `codex` distinctly from public OpenAI providers.
 - A user can authenticate with ChatGPT browser OAuth or device-code OAuth into CodeAlta-owned secure storage.
 - A LocalRuntime turn reaches `https://chatgpt.com/backend-api/codex/responses` through WebSocket by default or through `ResponsesClient` HTTP/SSE when configured or after safe fallback, with OAuth auth and Codex headers.
 - The request body contains Codex-required defaults and no arbitrary user `extra_body`.

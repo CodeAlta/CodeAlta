@@ -1,0 +1,94 @@
+[providers]
+[providers.anthropic]
+enabled = false
+display_name = "Anthropic"
+type = "anthropic"
+model = "claude-sonnet-4-6"
+api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
+
+[providers.codex_cli]
+enabled = false
+display_name = "Codex CLI"
+type = "codex_cli"
+model = "gpt-5.5"
+reasoning_effort = "high"
+
+[providers.codex]
+enabled = false
+display_name = "Codex"
+type = "codex"
+model = "gpt-5.5"
+reasoning_effort = "high"
+experimental = true
+
+[providers.copilot_cli]
+enabled = false
+display_name = "Copilot CLI"
+type = "copilot_cli"
+model = "claude-opus-4.6"
+reasoning_effort = "high"
+
+[providers.copilot]
+enabled = false
+display_name = "Copilot"
+type = "copilot"
+model = "claude-sonnet-4.6"
+reasoning_effort = "high"
+experimental = true
+
+[providers.deepseek]
+enabled = false
+display_name = "DeepSeek"
+type = "openai-chat"
+model = "deepseek-v4-pro"
+api_key_env = "CODEALTA_DEEPSEEK_API_KEY"
+api_url = "https://api.deepseek.com"
+
+[providers.deepseek.profile]
+supports_developer_role = false
+reasoning_input_field_name = "reasoning_content"
+
+[providers.gemini]
+enabled = false
+display_name = "Gemini"
+type = "google-genai"
+api_key_env = "CODEALTA_GEMINI_API_KEY"
+
+[providers.kimi-for-coding]
+enabled = false
+display_name = "Kimi for Coding"
+type = "anthropic"
+model = "K2P6"
+reasoning_effort = "high"
+api_key_env = "CODEALTA_KIMI_API_KEY"
+api_url = "https://api.kimi.com/coding/"
+
+[providers.minimax]
+enabled = false
+display_name = "MiniMax"
+type = "anthropic"
+model = "MiniMax-M2.7"
+reasoning_effort = "low"
+api_key_env = "CODEALTA_MINIMAX_API_KEY"
+api_url = "https://api.minimax.io/anthropic"
+single_model_id = "MiniMax-M2.7"
+
+[providers.minimax.profile]
+supports_developer_role = false
+
+[providers.openai]
+enabled = false
+display_name = "OpenAI"
+type = "openai-responses"
+model = "gpt-5.5"
+reasoning_effort = "high"
+api_key_env = "CODEALTA_OPENAI_API_KEY"
+api_url = "https://api.openai.com/v1"
+
+[providers.zai]
+enabled = false
+display_name = "Z.ai"
+type = "openai-chat"
+model = "glm-5.1"
+api_key_env = "CODEALTA_ZAI_API_KEY"
+api_url = "https://api.z.ai/api/coding/paas/v4"

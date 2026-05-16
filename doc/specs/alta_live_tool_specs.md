@@ -613,7 +613,7 @@ Frontend/TUI integrations, such as future command-palette actions or sidebar aff
 
 For CodeAlta-managed backends, the runtime should add an `alta` tool definition to sessions when enabled by policy. The handler dispatches in-process directly to the command registry.
 
-The implemented v1 policy is explicit allow-list based: `IAltaSessionToolBackendPolicy` enables the tool for CodeAlta-managed OpenAI chat/responses transports, including configured `openai-chat`, `openai-responses`, and `openai-codex-subscription` providers. It does not inject the tool into Codex app-server, generic ACP, Anthropic, Google GenAI, or other backends unless they are later added to that policy after adapter support exists.
+The implemented v1 policy is explicit allow-list based: `IAltaSessionToolBackendPolicy` enables the tool for CodeAlta-managed OpenAI chat/responses transports, including configured `openai-chat`, `openai-responses`, and `codex` providers. It does not inject the tool into Codex app-server, generic ACP, Anthropic, Google GenAI, or other backends unless they are later added to that policy after adapter support exists.
 
 Provider-managed backends may not accept host-injected tools. For those sessions, the model-visible `alta` live tool is only guaranteed when the host controls tool injection. V1 should not advertise an external shell command as an equivalent live-control path.
 

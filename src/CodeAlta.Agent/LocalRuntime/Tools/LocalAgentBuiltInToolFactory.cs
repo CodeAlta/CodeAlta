@@ -1028,7 +1028,7 @@ public static class LocalAgentBuiltInToolFactory
             return false;
         }
 
-        if (string.Equals(provider.ProtocolFamily, "openai-codex-subscription", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(provider.ProtocolFamily, "codex", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

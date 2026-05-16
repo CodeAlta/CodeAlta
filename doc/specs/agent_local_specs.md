@@ -397,7 +397,7 @@ Deterministic edit tools for all providers
 - text-oriented tools such as `read_file`, `replace_in_file`, `grep`, and `apply_patch` should reject or skip likely-binary files instead of dumping binary content into the conversation
 
 `apply_patch` for official OpenAI/Codex providers
-- keep `apply_patch` available only when the provider is actually targeting `https://api.openai.com/` or using the `openai-codex-subscription` protocol family
+- keep `apply_patch` available only when the provider is actually targeting `https://api.openai.com/` or using the `codex` protocol family
 - add/update/delete/move in one tool
 - better auditability and diff rendering
 - better fit for approvals and coding workflows

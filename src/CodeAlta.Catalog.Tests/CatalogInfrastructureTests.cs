@@ -778,13 +778,13 @@ public sealed class CatalogInfrastructureTests
         var content = File.ReadAllText(configPath);
         var preference = store.GetEffectiveProviderPreference(AgentBackendIds.Codex.Value);
 
-        StringAssert.Contains(content, "[providers.codex]");
+        StringAssert.Contains(content, "[providers.codex_cli]");
         StringAssert.Contains(content, "gpt-5.4");
         StringAssert.Contains(content, "reasoning_effort = \"high\"");
         Assert.IsFalse(content.Contains("enabled = true", StringComparison.Ordinal));
-        Assert.IsFalse(content.Contains("display_name = \"Codex\"", StringComparison.Ordinal));
-        Assert.IsFalse(content.Contains("type = \"codex\"", StringComparison.Ordinal));
-        Assert.IsFalse(content.Contains("[providers.codex.compaction]", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("display_name = \"Codex CLI\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("type = \"codex_cli\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("[providers.codex_cli.compaction]", StringComparison.Ordinal));
         Assert.AreEqual("gpt-5.4", preference.Model);
         Assert.AreEqual(AgentReasoningEffort.High, preference.ReasoningEffort);
     }
@@ -797,14 +797,14 @@ public sealed class CatalogInfrastructureTests
         File.WriteAllText(
             configPath,
             """
-            [providers.codex]
+            [providers.codex_cli]
             enabled = true
-            display_name = "Codex"
-            type = "codex"
+            display_name = "Codex CLI"
+            type = "codex_cli"
             model = "gpt-5.4"
             reasoning_effort = "high"
 
-            [providers.codex.compaction]
+            [providers.codex_cli.compaction]
             enabled = true
             ratio = 0.95
             """);
@@ -813,13 +813,13 @@ public sealed class CatalogInfrastructureTests
         store.SaveGlobalProviderPreference(AgentBackendIds.Codex.Value, "gpt-5.4", AgentReasoningEffort.High);
 
         var content = File.ReadAllText(configPath);
-        StringAssert.Contains(content, "[providers.codex]");
+        StringAssert.Contains(content, "[providers.codex_cli]");
         StringAssert.Contains(content, "model = \"gpt-5.4\"");
         StringAssert.Contains(content, "reasoning_effort = \"high\"");
         Assert.IsFalse(content.Contains("enabled = true", StringComparison.Ordinal));
-        Assert.IsFalse(content.Contains("display_name = \"Codex\"", StringComparison.Ordinal));
-        Assert.IsFalse(content.Contains("type = \"codex\"", StringComparison.Ordinal));
-        Assert.IsFalse(content.Contains("[providers.codex.compaction]", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("display_name = \"Codex CLI\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("type = \"codex_cli\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("[providers.codex_cli.compaction]", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -835,7 +835,7 @@ public sealed class CatalogInfrastructureTests
         File.WriteAllText(
             Path.Combine(projectRoot, ".alta", "config.toml"),
             """
-            [providers.codex]
+            [providers.codex_cli]
             reasoning_effort = "medium"
             """);
 

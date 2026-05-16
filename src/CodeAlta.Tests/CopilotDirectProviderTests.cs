@@ -17,7 +17,7 @@ public sealed class CopilotDirectProviderTests
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent(
             """
             [providers.github-copilot]
-            type = "github-copilot-direct"
+            type = "copilot"
             experimental = true
             auth_source = "github_token_env"
             github_token_env = "GITHUB_TOKEN"
@@ -28,19 +28,15 @@ public sealed class CopilotDirectProviderTests
     }
 
     [TestMethod]
-    public void ValidateGlobalConfigContent_RejectsReservedCopilotDirectProviderKey()
+    public void ValidateGlobalConfigContent_MapsLegacyReservedCopilotTypeToCli()
     {
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent(
             """
             [providers.copilot]
-            type = "github-copilot-direct"
-            experimental = true
-            auth_source = "copilot_token_env"
-            copilot_token_env = "COPILOT_TOKEN"
+            type = "copilot"
             """);
 
-        Assert.IsFalse(result.IsValid);
-        StringAssert.Contains(result.Message, "providers.copilot type must be 'copilot'");
+        Assert.IsTrue(result.IsValid, result.Message);
     }
 
     [TestMethod]
@@ -533,7 +529,7 @@ public sealed class CopilotDirectProviderTests
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
-            DisplayName = "GitHub Copilot",
+            DisplayName = "Copilot",
             BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.AnthropicMessages,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
@@ -631,7 +627,7 @@ public sealed class CopilotDirectProviderTests
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
-            DisplayName = "GitHub Copilot",
+            DisplayName = "Copilot",
             BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
@@ -741,7 +737,7 @@ public sealed class CopilotDirectProviderTests
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
-            DisplayName = "GitHub Copilot",
+            DisplayName = "Copilot",
             BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),

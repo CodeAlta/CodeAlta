@@ -18,12 +18,12 @@ internal sealed class ModelProvidersDialog
 {
     private static readonly ProviderTypeOption[] ProviderTypes =
     [
-        new("codex", "Codex"),
-        new("copilot", "GitHub Copilot"),
+        new("codex_cli", "Codex CLI"),
+        new("copilot_cli", "Copilot CLI"),
         new("openai-chat", "OpenAI Chat"),
         new("openai-responses", "OpenAI Responses"),
-        new("openai-codex-subscription", "Codex (ChatGPT subscription)"),
-        new("github-copilot-direct", "GitHub Copilot Direct"),
+        new("codex", "Codex"),
+        new("copilot", "Copilot"),
         new("anthropic", "Anthropic"),
         new("google-genai", "Google GenAI"),
         new("vertex-ai", "Vertex AI"),
@@ -467,10 +467,10 @@ internal sealed class ModelProvidersDialog
         var testButton = new Button("Test Provider")
             .Tone(ControlTone.Primary)
             .Click(() => StartTest(item));
-        var codexActions = item.ProviderType == "openai-codex-subscription"
+        var codexActions = item.ProviderType == "codex"
             ? CreateCodexSubscriptionActions(item)
             : null;
-        var copilotDirectActions = item.ProviderType == "github-copilot-direct"
+        var copilotDirectActions = item.ProviderType == "copilot"
             ? CreateCopilotDirectActions(item)
             : null;
 
@@ -489,7 +489,7 @@ internal sealed class ModelProvidersDialog
         AddTextRow(form, ref row, "Provider Key", CreateKeyField(item), CreateSpacer());
         AddSelectRow(form, ref row, "Type", CreateTypeSelect(item), CreateSpacer());
         AddCheckRow(form, ref row, "Enabled", CreateEnabledCheckBox(item), CreateSpacer());
-        if (item.ProviderType is "openai-codex-subscription" or "github-copilot-direct")
+        if (item.ProviderType is "codex" or "copilot")
         {
             AddCheckRow(form, ref row, "Experimental", CreateExperimentalCheckBox(item), CreateSpacer());
         }
@@ -504,7 +504,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "API Key Env", CreateApiKeyEnvField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "github-copilot-direct" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai")
         {
             AddTextRow(form, ref row, "API URL", CreateApiUrlField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiUrl));
         }
@@ -521,20 +521,20 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "Location", CreateVertexLocationField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "openai-codex-subscription" or "github-copilot-direct" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai")
         {
             AddTextRow(form, ref row, "Models.dev Id", CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox("Default", bindings.UseDefaultModelsDevProviderId));
             AddTextRow(form, ref row, "Single Model Id", CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox("Default", bindings.UseDefaultSingleModelId));
         }
 
-        if (item.ProviderType == "openai-codex-subscription")
+        if (item.ProviderType == "codex")
         {
             AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
             AddTextRow(form, ref row, "Account/Workspace Id", CreateDefaultTextField(bindings.AccountId, () => item.UseDefaultAccountId), CreateDefaultCheckBox("Default", bindings.UseDefaultAccountId));
             AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
             AddTextRow(form, ref row, "Response Transport", CreateDefaultTextField(bindings.ResponseTransport, () => item.UseDefaultResponseTransport), CreateDefaultCheckBox("Default", bindings.UseDefaultResponseTransport));
         }
-        else if (item.ProviderType == "github-copilot-direct")
+        else if (item.ProviderType == "copilot")
         {
             AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
             AddTextRow(form, ref row, "GitHub Enterprise", CreateDefaultTextField(bindings.GitHubEnterpriseUrl, () => item.UseDefaultGitHubEnterpriseUrl), CreateDefaultCheckBox("Default", bindings.UseDefaultGitHubEnterpriseUrl));
@@ -638,42 +638,42 @@ internal sealed class ModelProvidersDialog
 
     private Visual CreateCopilotDirectActions(ModelProviderEditorItemViewModel item)
         => new VStack(
-            new Markup("[dim]GitHub Copilot Direct login opens GitHub's device authorization page, then stores CodeAlta-owned GitHub/Copilot tokens for this provider. No model turn is sent.[/]") { Wrap = true },
+            new Markup("[dim]Copilot login opens GitHub's device authorization page, then stores CodeAlta-owned GitHub/Copilot tokens for this provider. No model turn is sent.[/]") { Wrap = true },
             new HStack(
                 new Button("Browser Login")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
-                        "start GitHub Copilot browser login",
-                        "Requesting GitHub Copilot login code...",
+                        "start Copilot browser login",
+                        "Requesting Copilot login code...",
                         _modelProviders.LoginWithBrowserAsync)),
                 new Button("Device Login")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
-                        "start GitHub Copilot device-code login",
-                        "Requesting GitHub Copilot device code...",
+                        "start Copilot device-code login",
+                        "Requesting Copilot device code...",
                         _modelProviders.LoginWithDeviceCodeAsync)),
                 new Button("Test Auth")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
-                        "test GitHub Copilot authentication",
-                        "Checking cached GitHub Copilot credentials...",
+                        "test Copilot authentication",
+                        "Checking cached Copilot credentials...",
                         _modelProviders.TestAuthenticationAsync)),
                 new Button("List Models")
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
-                        "list GitHub Copilot models",
-                        "Listing GitHub Copilot models without sending a model turn...",
+                        "list Copilot models",
+                        "Listing Copilot models without sending a model turn...",
                         _modelProviders.ListModelsAsync)),
                 new Button("Logout")
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
-                        "logout GitHub Copilot credentials",
-                        "Deleting CodeAlta-owned GitHub Copilot credentials...",
+                        "logout Copilot credentials",
+                        "Deleting CodeAlta-owned Copilot credentials...",
                         _modelProviders.LogoutAsync)))
             {
                 Spacing = 1,
@@ -711,8 +711,8 @@ internal sealed class ModelProvidersDialog
         => new CheckBox("Enabled").IsChecked(GetBindings(item).Enabled);
 
     private CheckBox CreateExperimentalCheckBox(ModelProviderEditorItemViewModel item)
-        => new CheckBox(item.ProviderType == "github-copilot-direct"
-                ? "I understand this GitHub Copilot Direct provider is experimental"
+        => new CheckBox(item.ProviderType == "copilot"
+                ? "I understand this Copilot provider is experimental"
                 : "I understand this ChatGPT/Codex subscription provider is experimental")
             .IsChecked(GetBindings(item).Experimental);
 

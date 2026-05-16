@@ -79,8 +79,8 @@ This section defines the **target API surface** to implement in `CodeAlta.Agent`
 
 Backends are identified by a stable string id to allow plugins/third-parties.
 
-- `copilot` → GitHub Copilot CLI runtime
-- `codex` → codex app-server runtime
+- `copilot_cli` → GitHub Copilot CLI runtime
+- `codex_cli` → codex app-server runtime
 
 ### 5.2 Backend interface
 

@@ -13,10 +13,10 @@ public sealed class ProviderFrontendCoordinatorTests
     {
         var definition = new CodeAltaProviderDocument
         {
-            ProviderKey = "copilot",
-            ProviderType = "copilot",
+            ProviderKey = "copilot_cli",
+            ProviderType = "copilot_cli",
         };
-        var backendState = new ChatBackendState(AgentBackendIds.Copilot, "GitHub Copilot")
+        var backendState = new ChatBackendState(AgentBackendIds.Copilot, "Copilot CLI")
         {
             Availability = ChatBackendAvailability.Ready,
             StatusMessage = "Ready",
@@ -43,8 +43,8 @@ public sealed class ProviderFrontendCoordinatorTests
     {
         var definition = new CodeAltaProviderDocument
         {
-            ProviderKey = "codex",
-            ProviderType = "codex",
+            ProviderKey = "codex_cli",
+            ProviderType = "codex_cli",
         };
         var backendState = new ChatBackendState(AgentBackendIds.Codex, "Codex")
         {
@@ -91,5 +91,20 @@ public sealed class ProviderFrontendCoordinatorTests
 
         Assert.IsFalse(reused);
         Assert.AreEqual(default, result);
+    }
+
+    [TestMethod]
+    public void IsTemporarilyDisabledCopilotProvider_AppliesOnlyToCliProvider()
+    {
+        Assert.IsTrue(ProviderFrontendCoordinator.IsTemporarilyDisabledCopilotProvider(new CodeAltaProviderDocument
+        {
+            ProviderKey = "copilot_cli",
+            ProviderType = "copilot_cli",
+        }));
+        Assert.IsFalse(ProviderFrontendCoordinator.IsTemporarilyDisabledCopilotProvider(new CodeAltaProviderDocument
+        {
+            ProviderKey = "copilot",
+            ProviderType = "copilot",
+        }));
     }
 }
