@@ -235,10 +235,11 @@ internal sealed class FileChangePresenter
                 var summaryText = new Markup("[dim]Waiting for file changes...[/]");
                 var timestampText = new Markup(string.Empty);
                 var itemsHost = new WrapHStack { Spacing = 1, RunSpacing = 0 };
-                var card = new Group(headerText, itemsHost)
+                Group? card = null;
+                card = new Group(headerText, itemsHost)
                     .TopRightText(summaryText)
                     .BottomRightText(timestampText)
-                    .Style(UiPalette.GetToolCallGroupStyle())
+                    .Style(() => UiPalette.GetToolCallGroupStyle(card!.GetTheme()))
                     .HorizontalAlignment(Align.Stretch)
                     .VerticalAlignment(Align.Start);
                 var item = new DocumentFlowItem { Content = new FlowDocument().Add(card), Alignment = DocumentFlowAlignment.Stretch };
@@ -281,7 +282,7 @@ internal sealed class FileChangePresenter
                     HorizontalAlignment = Align.Start,
                     VerticalAlignment = Align.Start,
                 };
-                button.SetStyle(ButtonStyle.Key, UiPalette.GetToolChipButtonStyle(ToolCallDisplayStatus.Completed));
+                button.SetStyle(ButtonStyle.Key, () => UiPalette.GetToolChipButtonStyle(button.GetTheme(), ToolCallDisplayStatus.Completed));
                 return new FileChangeEntryState(state.pending.FilePath, button, fileNameText, directoryText, countsText)
                 {
                     Group = state.group,
@@ -307,7 +308,7 @@ internal sealed class FileChangePresenter
             entry.DirectoryText.Text = FileChangeSummaryFormatter.BuildDirectoryMarkup(entry);
             entry.CountsText.Text = FileChangeSummaryFormatter.BuildCountsMarkup(entry);
             entry.Button.Tone = ControlTone.Default;
-            entry.Button.SetStyle(ButtonStyle.Key, UiPalette.GetToolChipButtonStyle(ToolCallDisplayStatus.Completed));
+            entry.Button.SetStyle(ButtonStyle.Key, () => UiPalette.GetToolChipButtonStyle(entry.Button.GetTheme(), ToolCallDisplayStatus.Completed));
         });
     }
 

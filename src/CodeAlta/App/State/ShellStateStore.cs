@@ -191,6 +191,7 @@ internal sealed record ShellFrontendStateSnapshot(
         {
             SortMode = settings.SortMode,
             RecentThreadsPerProject = settings.RecentThreadsPerProject,
+            ThemeSchemeName = settings.ThemeSchemeName,
         };
 }
 

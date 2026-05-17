@@ -709,6 +709,7 @@ public sealed class CatalogInfrastructureTests
             {
                 SortMode = NavigatorProjectSortMode.Date,
                 RecentThreadsPerProject = 8,
+                ThemeSchemeName = "Elderberry Dark Soft",
             },
             ThreadStates = new Dictionary<string, WorkThreadLocalState>(StringComparer.OrdinalIgnoreCase)
             {
@@ -743,6 +744,7 @@ public sealed class CatalogInfrastructureTests
         Assert.AreEqual(AgentReasoningEffort.High, reloaded.ProjectPreferences["project-1"].ReasoningEffort);
         Assert.AreEqual(NavigatorProjectSortMode.Date, reloaded.Navigator.SortMode);
         Assert.AreEqual(8, reloaded.Navigator.RecentThreadsPerProject);
+        Assert.AreEqual("Elderberry Dark Soft", reloaded.Navigator.ThemeSchemeName);
         Assert.AreEqual(0, reloaded.ThreadPreferences.Count);
         Assert.AreEqual(0, reloaded.ThreadStates.Count);
     }

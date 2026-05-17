@@ -28,12 +28,100 @@ using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Figlet;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Hosting;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Tests;
 
 [TestClass]
 public sealed class CodeAltaAppTests
 {
+    [TestMethod]
+    public void CodeAltaThemeResolver_UsesNamedPredefinedSchemeOrDefault()
+    {
+        var selected = CodeAltaThemeResolver.Resolve("Elderberry Dark Soft");
+        var fallback = CodeAltaThemeResolver.Resolve("missing scheme");
+
+        Assert.AreEqual(ColorScheme.ElderberryDarkSoft.Name, selected.Scheme?.Name);
+        Assert.AreEqual(ColorScheme.RootLoopsDark.Name, fallback.Scheme?.Name);
+        Assert.IsNotNull(fallback.Surface);
+        Assert.IsNotNull(fallback.InputFill);
+    }
+
+    [TestMethod]
+    public void CodeAltaThemeResolver_DerivesDirectionalOpaqueSurfaces()
+    {
+        var light = CodeAltaThemeResolver.Resolve(ColorScheme.RootLoopsLight.Name);
+        var dark = CodeAltaThemeResolver.Resolve(ColorScheme.RootLoopsDark.Name);
+
+        Assert.IsNotNull(light.Background);
+        Assert.IsNotNull(light.Surface);
+        Assert.IsNotNull(light.InputFill);
+        Assert.IsNotNull(dark.Background);
+        Assert.IsNotNull(dark.Surface);
+        Assert.IsNotNull(dark.InputFill);
+        Assert.IsTrue(light.Surface.Value.GetRelativeLuminance() < light.Background.Value.GetRelativeLuminance());
+        Assert.IsTrue(light.InputFill.Value.GetRelativeLuminance() < light.Background.Value.GetRelativeLuminance());
+        Assert.IsTrue(dark.Surface.Value.GetRelativeLuminance() > dark.Background.Value.GetRelativeLuminance());
+        Assert.IsTrue(dark.InputFill.Value.GetRelativeLuminance() > dark.Background.Value.GetRelativeLuminance());
+    }
+
+    [TestMethod]
+    public void CodeAltaThemeResolver_HidesTerminalAndRootLoopsSchemesFromSelectableList()
+    {
+        var selectableSchemeNames = CodeAltaThemeResolver.GetSelectableSchemes()
+            .Select(static scheme => scheme.Name)
+            .ToArray();
+
+        Assert.IsFalse(selectableSchemeNames.Contains(ColorScheme.Terminal.Name, StringComparer.OrdinalIgnoreCase));
+        Assert.IsFalse(selectableSchemeNames.Contains(ColorScheme.RootLoopsDark.Name, StringComparer.OrdinalIgnoreCase));
+        Assert.IsFalse(selectableSchemeNames.Contains(ColorScheme.RootLoopsLight.Name, StringComparer.OrdinalIgnoreCase));
+        Assert.IsTrue(selectableSchemeNames.Contains(ColorScheme.ElderberryDarkSoft.Name, StringComparer.OrdinalIgnoreCase));
+        Assert.AreEqual(ColorScheme.Terminal.Name, CodeAltaThemeResolver.Resolve(ColorScheme.Terminal.Name).Scheme?.Name);
+    }
+
+    [TestMethod]
+    public void UiPalette_UsesVisibleOpaqueTimelineBackgroundsForLightThemes()
+    {
+        var lightTheme = CodeAltaThemeResolver.Resolve(ColorScheme.BlueberryLight.Name);
+        var userBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(lightTheme, ChatTimelineTone.User));
+        var assistantBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(lightTheme, ChatTimelineTone.Assistant));
+        var reasoningBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(lightTheme, ChatTimelineTone.Reasoning));
+        var noticeBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(lightTheme, ChatTimelineTone.Notice));
+        var warningBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(lightTheme, ChatTimelineTone.Interaction));
+        var fileChangeBackground = GetGroupBackground(UiPalette.GetToolCallGroupStyle(lightTheme));
+        var themeBackground = lightTheme.Background.GetValueOrDefault().ToRgb();
+
+        Assert.AreEqual(ColorKind.Rgb, userBackground.Kind);
+        Assert.AreEqual(ColorKind.Rgb, assistantBackground.Kind);
+        Assert.AreEqual(ColorKind.Rgb, reasoningBackground.Kind);
+        Assert.AreEqual(ColorKind.Rgb, noticeBackground.Kind);
+        Assert.AreEqual(ColorKind.Rgb, fileChangeBackground.Kind);
+        Assert.AreNotEqual(userBackground, reasoningBackground);
+        Assert.AreNotEqual(userBackground, noticeBackground);
+        var assistantReasoningDistance = GetRgbDistance(assistantBackground, reasoningBackground);
+        var reasoningWarningDistance = GetRgbDistance(reasoningBackground, warningBackground);
+        Assert.IsTrue(assistantReasoningDistance >= 0.020d, $"Assistant/reasoning light background distance was {assistantReasoningDistance}.");
+        Assert.IsTrue(assistantReasoningDistance < reasoningWarningDistance, $"Assistant/reasoning light background distance was {assistantReasoningDistance}; reasoning/warning was {reasoningWarningDistance}.");
+        Assert.IsTrue(GetRgbDistance(themeBackground, userBackground) >= 0.06d);
+        Assert.IsTrue(GetRgbDistance(themeBackground, fileChangeBackground) >= 0.06d);
+    }
+
+    [TestMethod]
+    public void UiPalette_KeepsAssistantAndReasoningDistinctForDarkThemes()
+    {
+        var darkTheme = CodeAltaThemeResolver.Resolve(ColorScheme.ElderberryDarkSoft.Name);
+        var assistantBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(darkTheme, ChatTimelineTone.Assistant));
+        var reasoningBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(darkTheme, ChatTimelineTone.Reasoning));
+        var warningBackground = GetGroupBackground(UiPalette.GetChatGroupStyle(darkTheme, ChatTimelineTone.Interaction));
+        var assistantReasoningDistance = GetRgbDistance(assistantBackground, reasoningBackground);
+        var reasoningWarningDistance = GetRgbDistance(reasoningBackground, warningBackground);
+
+        Assert.AreEqual(ColorKind.RgbA, assistantBackground.Kind);
+        Assert.AreEqual(ColorKind.RgbA, reasoningBackground.Kind);
+        Assert.IsTrue(assistantReasoningDistance >= 0.020d, $"Assistant/reasoning dark background distance was {assistantReasoningDistance}.");
+        Assert.IsTrue(assistantReasoningDistance < reasoningWarningDistance, $"Assistant/reasoning dark background distance was {assistantReasoningDistance}; reasoning/warning was {reasoningWarningDistance}.");
+    }
+
     [TestMethod]
     public void CreatePendingChatMessage_CreatesStreamingMarkdownSynchronously()
     {
@@ -444,7 +532,8 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void BuildWelcomeAltaGradientStops_UseMatchingEdgeColors()
     {
-        var stops = UiPalette.BuildWelcomeAltaGradientStops();
+        var stops = UiPalette.BuildWelcomeAltaGradientStops(Theme.Default);
+        var lightStops = UiPalette.BuildWelcomeAltaGradientStops(Theme.DefaultLight);
 
         Assert.AreEqual(11, stops.Length);
         Assert.AreEqual(0.00f, stops[0].Offset);
@@ -452,6 +541,7 @@ public sealed class CodeAltaAppTests
         Assert.AreEqual(1.00f, stops[^1].Offset);
         Assert.AreEqual(stops[0].Color, stops[^1].Color);
         Assert.AreEqual(stops[2].Color, stops[8].Color);
+        CollectionAssert.AreEqual(stops, lightStops);
     }
 
     [TestMethod]
@@ -482,7 +572,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void BuildThinkingGradientStops_UseMultipleHighlightsAndLoopableEdges()
     {
-        var stops = StatusVisualFormatter.BuildThinkingGradientStops();
+        var stops = StatusVisualFormatter.BuildThinkingGradientStops(Theme.Default);
 
         Assert.AreEqual(9, stops.Length);
         Assert.AreEqual(0.00f, stops[0].Offset);
@@ -2874,11 +2964,21 @@ public sealed class CodeAltaAppTests
     public void CreateStyledPromptEditor_PreservesMarkdownHighlighting()
     {
         var editor = ThreadWorkspaceView.CreateStyledPromptEditor(_ => { }, onOpenHelp: null, onOpenCommandPalette: null, placeholder: "Prompt");
+        var style = editor.GetStyle<PromptEditorStyle>();
 
         Assert.IsFalse(editor.Highlighter.IsEmpty);
         Assert.IsTrue(editor.EnableWordHints);
         Assert.AreEqual(PromptEditorEscapeBehavior.CancelCompletionOnly, editor.EscapeBehavior);
         Assert.AreEqual(PromptEditorEnterMode.EnterAccepts, editor.EnterMode);
+        Assert.AreEqual(new Thickness(0, 0, 1, 0), style.Padding);
+        Assert.IsNull(style.PromptForeground);
+        Assert.IsNull(style.ContinuationPromptForeground);
+        Assert.IsNull(style.GhostForeground);
+        Assert.IsNull(style.Background);
+        Assert.IsNull(style.PromptSidebarBackground);
+        Assert.IsNull(style.PromptSeparatorForeground);
+        Assert.IsNull(style.PlaceholderForeground);
+        Assert.IsNull(style.Selection);
     }
 
     [TestMethod]
@@ -2989,6 +3089,23 @@ public sealed class CodeAltaAppTests
         var method = typeof(TerminalApp).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.IsNotNull(method);
         method.Invoke(app, null);
+    }
+
+    private static Color GetGroupBackground(GroupStyle groupStyle)
+    {
+        Assert.IsNotNull(groupStyle.BackgroundStyle);
+        Assert.IsTrue(groupStyle.BackgroundStyle.Value.TryGetBackground(out var background));
+        return background;
+    }
+
+    private static double GetRgbDistance(Color first, Color second)
+    {
+        var firstRgb = first.ToRgb();
+        var secondRgb = second.ToRgb();
+        var redDelta = firstRgb.R - secondRgb.R;
+        var greenDelta = firstRgb.G - secondRgb.G;
+        var blueDelta = firstRgb.B - secondRgb.B;
+        return Math.Sqrt((redDelta * redDelta) + (greenDelta * greenDelta) + (blueDelta * blueDelta)) / (255d * Math.Sqrt(3d));
     }
 
     private sealed class InlineUiDispatcher : IUiDispatcher

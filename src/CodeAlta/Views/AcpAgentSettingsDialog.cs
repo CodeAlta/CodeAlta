@@ -75,10 +75,12 @@ internal sealed class AcpAgentSettingsDialog
         _filesystemBox = new CheckBox("Enable filesystem bridge") { IsChecked = definition.EnableFilesystem ?? AcpBackendDefinition.DefaultEnableFilesystem };
         _terminalBox = new CheckBox("Enable terminal bridge") { IsChecked = definition.EnableTerminal ?? AcpBackendDefinition.DefaultEnableTerminal };
         _elicitationBox = new CheckBox("Enable elicitation") { IsChecked = definition.EnableElicitation ?? AcpBackendDefinition.DefaultEnableElicitation };
-        _validationText = new TextBlock(string.Empty)
+        TextBlock? validationText = null;
+        validationText = new TextBlock(string.Empty)
         {
             Wrap = true,
-        }.Style(TextBlockStyle.Default with { Foreground = Colors.OrangeRed });
+        }.Style(() => TextBlockStyle.Default with { Foreground = validationText!.GetTheme().Error ?? validationText!.GetTheme().Foreground ?? Color.Default });
+        _validationText = validationText;
 
         var form = new Grid
             {

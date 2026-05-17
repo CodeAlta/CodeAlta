@@ -51,7 +51,7 @@ internal sealed class NavigatorSettingsCoordinator : INavigatorSettingsDialogSer
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to save navigator settings: {ex.Message}", false, StatusTone.Error);
+            _setStatus($"Failed to save workspace settings: {ex.Message}", false, StatusTone.Error);
         }
     }
 
@@ -60,6 +60,12 @@ internal sealed class NavigatorSettingsCoordinator : INavigatorSettingsDialogSer
 
     Visual? INavigatorSettingsDialogService.GetDialogFocusTarget()
         => _getFocusTarget();
+
+    void INavigatorSettingsDialogService.PreviewNavigatorTheme(string? themeSchemeName)
+        => _threadStateCoordinator.PreviewNavigatorTheme(themeSchemeName);
+
+    void INavigatorSettingsDialogService.ClearNavigatorThemePreview()
+        => _threadStateCoordinator.ClearNavigatorThemePreview();
 
     Task INavigatorSettingsDialogService.SaveNavigatorSettingsAsync(NavigatorSettings settings)
         => SaveAsync(settings);

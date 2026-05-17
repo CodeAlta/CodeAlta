@@ -9,8 +9,6 @@ internal static class StatusVisualFormatter
 {
     private const string ThinkingStatusMessage = "Thinking...";
     private const string PromptEditedStatusMessage = "Draft edited...";
-    private static readonly GradientStop[] ThinkingGradientStops = CreateThinkingGradientStops();
-
     public static string BuildThinkingStatusText() => ThinkingStatusMessage;
 
     public static string BuildThinkingStatusText(TimeSpan elapsed)
@@ -44,8 +42,9 @@ internal static class StatusVisualFormatter
     public static string BuildPromptEditedIconMarkup()
         => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Info)}]{NerdFont.MdSquareEditOutline}[/]";
 
-    public static TextBlockStyle BuildStatusTextStyle(string message, bool busy, StatusTone tone, float thinkingAnimationPhase01)
+    public static TextBlockStyle BuildStatusTextStyle(Theme theme, string message, bool busy, StatusTone tone, float thinkingAnimationPhase01)
     {
+        ArgumentNullException.ThrowIfNull(theme);
         ArgumentNullException.ThrowIfNull(message);
 
         if (busy && IsThinkingStatusText(message))
@@ -53,23 +52,23 @@ internal static class StatusVisualFormatter
             var sweepBrush = Brush.LinearGradient(
                 new GradientPoint(-0.55f + (0.75f * thinkingAnimationPhase01), 0f),
                 new GradientPoint(0.20f + (0.75f * thinkingAnimationPhase01), 0f),
-                ThinkingGradientStops,
+                BuildThinkingGradientStops(theme),
                 tileMode: BrushTileMode.Repeat,
-                mixSpaceOverride: ColorMixSpace.Oklab);
+                mixSpaceOverride: theme.GradientMixSpace);
             return TextBlockStyle.Default with { ForegroundBrush = sweepBrush };
         }
 
-        return TextBlockStyle.Default with { Foreground = UiPalette.GetStatusToneColor(tone) };
+        return TextBlockStyle.Default with { Foreground = UiPalette.GetStatusToneColor(theme, tone) };
     }
 
-    public static GradientStop[] BuildThinkingGradientStops()
-        => ThinkingGradientStops;
-
-    private static GradientStop[] CreateThinkingGradientStops()
+    public static GradientStop[] BuildThinkingGradientStops(Theme theme)
     {
-        var baseColor = UiPalette.GetStatusToneColor(StatusTone.Info);
-        var glowColor = Color.Mix(baseColor, Colors.White, 0.26f, ColorMixSpace.Oklab);
-        var highlightColor = Color.Mix(baseColor, Colors.White, 0.52f, ColorMixSpace.Oklab);
+        ArgumentNullException.ThrowIfNull(theme);
+
+        var baseColor = UiPalette.GetStatusToneColor(theme, StatusTone.Info);
+        var foreground = theme.Foreground?.ToRgb() ?? baseColor;
+        var glowColor = Color.Mix(baseColor, foreground, 0.26f, ColorMixSpace.Oklab);
+        var highlightColor = Color.Mix(baseColor, foreground, 0.52f, ColorMixSpace.Oklab);
         return
         [
             new GradientStop(0.00f, baseColor.WithOpacity(0.50f)),
@@ -78,7 +77,7 @@ internal static class StatusVisualFormatter
             new GradientStop(0.34f, glowColor.WithOpacity(0.66f)),
             new GradientStop(0.48f, baseColor.WithOpacity(0.56f)),
             new GradientStop(0.62f, glowColor.WithOpacity(0.64f)),
-            new GradientStop(0.74f, Colors.White),
+            new GradientStop(0.74f, foreground),
             new GradientStop(0.86f, glowColor.WithOpacity(0.68f)),
             new GradientStop(1.00f, baseColor.WithOpacity(0.50f)),
         ];

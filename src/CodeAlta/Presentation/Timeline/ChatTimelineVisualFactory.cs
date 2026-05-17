@@ -242,8 +242,8 @@ internal static class ChatTimelineVisualFactory
             : new Markup($"[{toneName}]{icon}[/] [bold]{AnsiMarkup.Escape(title)}[/] [dim]- {AnsiMarkup.Escape(headerSecondary)}[/]");
     }
 
-    private static GroupStyle CreateChatGroupStyle(ChatTimelineTone tone)
-        => UiPalette.GetChatGroupStyle(tone);
+    private static GroupStyle CreateChatGroupStyle(Theme theme, ChatTimelineTone tone)
+        => UiPalette.GetChatGroupStyle(theme, tone);
 
     private static (string Icon, string Title, string ToneName) GetChatCardHeaderParts(ChatTimelineTone tone, string? headerOverride)
     {
@@ -363,10 +363,11 @@ internal static class ChatTimelineVisualFactory
             ? contentItems[0]
             : new VStack(contentItems.ToArray()).Spacing(GetContentStackSpacing(contentItems));
 
-        var group = new Group(headerText, groupContent)
+        Group? group = null;
+        group = new Group(headerText, groupContent)
             .TopRightText(copyButton)
             .BottomRightText(timestampText)
-            .Style(CreateChatGroupStyle(tone))
+            .Style(() => CreateChatGroupStyle(group!.GetTheme(), tone))
             .HorizontalAlignment(Align.Stretch)
             .VerticalAlignment(Align.Start);
 

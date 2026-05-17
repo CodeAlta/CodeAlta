@@ -9,49 +9,49 @@ internal sealed class ProjectFileAppearanceRegistry : IProjectFileAppearanceRegi
 {
     private static readonly ProjectFileAppearanceDescriptor DefaultDirectory = new(
         $"{NerdFont.MdFolderOutline}",
-        Color.FromOklch(0.82f, 0.09f, 85f),
+        Color.Default,
         "directory");
 
     private static readonly ProjectFileAppearanceDescriptor DefaultFile = new(
         $"{NerdFont.MdFileDocumentOutline}",
-        Color.FromOklch(0.77f, 0.02f, 255f),
+        Color.Default,
         "file");
 
     private static readonly IReadOnlyDictionary<string, ProjectFileAppearanceDescriptor> BuiltInExtensions =
         new Dictionary<string, ProjectFileAppearanceDescriptor>(StringComparer.OrdinalIgnoreCase)
         {
-            [".cs"] = new($"{NerdFont.MdLanguageCsharp}", Color.FromOklch(0.79f, 0.09f, 245f), "csharp"),
-            [".csproj"] = new($"{NerdFont.MdLanguageCsharp}", Color.FromOklch(0.74f, 0.10f, 220f), "dotnet"),
-            [".sln"] = new($"{NerdFont.MdCodeBracesBox}", Color.FromOklch(0.70f, 0.16f, 300f), "dotnet"),
-            [".json"] = new($"{NerdFont.MdCodeJson}", Color.FromOklch(0.82f, 0.11f, 85f), "json"),
-            [".yml"] = new($"{NerdFont.MdFileCodeOutline}", Color.FromOklch(0.78f, 0.07f, 165f), "yaml"),
-            [".yaml"] = new($"{NerdFont.MdFileCodeOutline}", Color.FromOklch(0.78f, 0.07f, 165f), "yaml"),
-            [".md"] = new($"{NerdFont.MdLanguageMarkdown}", Color.FromOklch(0.83f, 0.04f, 225f), "markdown"),
-            [".ts"] = new($"{NerdFont.MdLanguageTypescript}", Color.FromOklch(0.77f, 0.09f, 245f), "typescript"),
-            [".tsx"] = new($"{NerdFont.MdLanguageTypescript}", Color.FromOklch(0.73f, 0.10f, 205f), "typescript"),
-            [".js"] = new($"{NerdFont.MdLanguageJavascript}", Color.FromOklch(0.87f, 0.12f, 100f), "javascript"),
-            [".jsx"] = new($"{NerdFont.MdLanguageJavascript}", Color.FromOklch(0.79f, 0.10f, 205f), "javascript"),
-            [".py"] = new($"{NerdFont.MdLanguagePython}", Color.FromOklch(0.79f, 0.08f, 235f), "python"),
-            [".go"] = new($"{NerdFont.MdLanguageGo}", Color.FromOklch(0.81f, 0.08f, 220f), "go"),
-            [".rs"] = new($"{NerdFont.MdLanguageRust}", Color.FromOklch(0.73f, 0.13f, 45f), "rust"),
-            [".java"] = new($"{NerdFont.MdLanguageJava}", Color.FromOklch(0.72f, 0.13f, 35f), "java"),
-            [".kt"] = new($"{NerdFont.MdLanguageKotlin}", Color.FromOklch(0.74f, 0.16f, 310f), "kotlin"),
-            [".cpp"] = new($"{NerdFont.MdLanguageCpp}", Color.FromOklch(0.76f, 0.10f, 235f), "cpp"),
-            [".h"] = new($"{NerdFont.MdLanguageCpp}", Color.FromOklch(0.70f, 0.05f, 235f), "cpp"),
-            [".html"] = new($"{NerdFont.MdLanguageHtml5}", Color.FromOklch(0.76f, 0.13f, 35f), "html"),
-            [".css"] = new($"{NerdFont.MdLanguageCss3}", Color.FromOklch(0.76f, 0.09f, 245f), "css"),
-            [".scss"] = new($"{NerdFont.MdLanguageCss3}", Color.FromOklch(0.78f, 0.10f, 350f), "scss"),
-            [".toml"] = new($"{NerdFont.MdCodeBraces}", Color.FromOklch(0.80f, 0.05f, 210f), "toml"),
-            [".xml"] = new($"{NerdFont.MdXml}", Color.FromOklch(0.79f, 0.05f, 210f), "xml"),
-            [".sh"] = new($"{NerdFont.MdBash}", Color.FromOklch(0.78f, 0.07f, 145f), "shell"),
-            [".ps1"] = new($"{NerdFont.MdPowershell}", Color.FromOklch(0.75f, 0.07f, 235f), "powershell"),
-            [".sql"] = new($"{NerdFont.MdDatabase}", Color.FromOklch(0.77f, 0.07f, 170f), "sql"),
+            [".cs"] = new($"{NerdFont.MdLanguageCsharp}", Color.Default, "csharp"),
+            [".csproj"] = new($"{NerdFont.MdLanguageCsharp}", Color.Default, "dotnet"),
+            [".sln"] = new($"{NerdFont.MdCodeBracesBox}", Color.Default, "dotnet"),
+            [".json"] = new($"{NerdFont.MdCodeJson}", Color.Default, "json"),
+            [".yml"] = new($"{NerdFont.MdFileCodeOutline}", Color.Default, "yaml"),
+            [".yaml"] = new($"{NerdFont.MdFileCodeOutline}", Color.Default, "yaml"),
+            [".md"] = new($"{NerdFont.MdLanguageMarkdown}", Color.Default, "markdown"),
+            [".ts"] = new($"{NerdFont.MdLanguageTypescript}", Color.Default, "typescript"),
+            [".tsx"] = new($"{NerdFont.MdLanguageTypescript}", Color.Default, "typescript"),
+            [".js"] = new($"{NerdFont.MdLanguageJavascript}", Color.Default, "javascript"),
+            [".jsx"] = new($"{NerdFont.MdLanguageJavascript}", Color.Default, "javascript"),
+            [".py"] = new($"{NerdFont.MdLanguagePython}", Color.Default, "python"),
+            [".go"] = new($"{NerdFont.MdLanguageGo}", Color.Default, "go"),
+            [".rs"] = new($"{NerdFont.MdLanguageRust}", Color.Default, "rust"),
+            [".java"] = new($"{NerdFont.MdLanguageJava}", Color.Default, "java"),
+            [".kt"] = new($"{NerdFont.MdLanguageKotlin}", Color.Default, "kotlin"),
+            [".cpp"] = new($"{NerdFont.MdLanguageCpp}", Color.Default, "cpp"),
+            [".h"] = new($"{NerdFont.MdLanguageCpp}", Color.Default, "cpp"),
+            [".html"] = new($"{NerdFont.MdLanguageHtml5}", Color.Default, "html"),
+            [".css"] = new($"{NerdFont.MdLanguageCss3}", Color.Default, "css"),
+            [".scss"] = new($"{NerdFont.MdLanguageCss3}", Color.Default, "scss"),
+            [".toml"] = new($"{NerdFont.MdCodeBraces}", Color.Default, "toml"),
+            [".xml"] = new($"{NerdFont.MdXml}", Color.Default, "xml"),
+            [".sh"] = new($"{NerdFont.MdBash}", Color.Default, "shell"),
+            [".ps1"] = new($"{NerdFont.MdPowershell}", Color.Default, "powershell"),
+            [".sql"] = new($"{NerdFont.MdDatabase}", Color.Default, "sql"),
         };
 
     private static readonly IReadOnlyDictionary<string, ProjectFileAppearanceDescriptor> BuiltInFiles =
         new Dictionary<string, ProjectFileAppearanceDescriptor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["dockerfile"] = new($"{NerdFont.MdDocker}", Color.FromOklch(0.77f, 0.09f, 225f), "docker"),
+            ["dockerfile"] = new($"{NerdFont.MdDocker}", Color.Default, "docker"),
         };
 
     public static ProjectFileAppearanceRegistry Default { get; } = new();

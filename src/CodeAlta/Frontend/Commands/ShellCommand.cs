@@ -46,6 +46,8 @@ internal sealed record OpenSkillsCommand : ShellCommand;
 
 internal sealed record OpenPluginsCommand : ShellCommand;
 
+internal sealed record OpenWorkspaceSettingsCommand : ShellCommand;
+
 internal sealed record FocusSidebarCommand : ShellCommand;
 
 internal sealed record FocusPromptCommand : ShellCommand;

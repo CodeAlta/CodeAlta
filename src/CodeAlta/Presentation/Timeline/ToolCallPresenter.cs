@@ -193,7 +193,7 @@ internal sealed class ToolCallPresenter
                     HorizontalAlignment = Align.Start,
                     VerticalAlignment = Align.Start,
                 };
-                button.SetStyle(ButtonStyle.Key, UiPalette.GetToolChipButtonStyle(ToolCallDisplayStatus.Pending));
+                button.SetStyle(ButtonStyle.Key, () => UiPalette.GetToolChipButtonStyle(button.GetTheme(), ToolCallDisplayStatus.Pending));
                 return new ToolCallEntryState(state.toolCallId, button, summaryText)
                 {
                     Group = state.group,
@@ -232,10 +232,11 @@ internal sealed class ToolCallPresenter
                 var summaryText = new Markup("[dim]Waiting for tool activity...[/]");
                 var timestampText = new Markup(string.Empty);
                 var itemsHost = new WrapHStack { Spacing = 1, RunSpacing = 0 };
-                var card = new Group(headerText, itemsHost)
+                Group? card = null;
+                card = new Group(headerText, itemsHost)
                     .TopRightText(summaryText)
                     .BottomRightText(timestampText)
-                    .Style(UiPalette.GetToolCallGroupStyle())
+                    .Style(() => UiPalette.GetToolCallGroupStyle(card!.GetTheme()))
                     .HorizontalAlignment(Align.Stretch)
                     .VerticalAlignment(Align.Start);
                 var item = new DocumentFlowItem { Content = new FlowDocument().Add(card), Alignment = DocumentFlowAlignment.Stretch };
@@ -274,7 +275,7 @@ internal sealed class ToolCallPresenter
         {
             entry.SummaryText.Text = ToolCallSummaryFormatter.BuildSummaryMarkup(entry);
             entry.Button.Tone = ControlTone.Default;
-            entry.Button.SetStyle(ButtonStyle.Key, UiPalette.GetToolChipButtonStyle(entry.Status));
+            entry.Button.SetStyle(ButtonStyle.Key, () => UiPalette.GetToolChipButtonStyle(entry.Button.GetTheme(), entry.Status));
         });
     }
 

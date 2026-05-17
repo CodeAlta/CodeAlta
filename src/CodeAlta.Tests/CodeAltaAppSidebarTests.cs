@@ -350,6 +350,9 @@ public sealed class CodeAltaAppSidebarTests
         var projectsRoot = view.Tree.Roots[1];
         var projectNode = view.Tree.Roots[1].Children[0];
         var threadNode = projectNode.Children[0];
+        AssertSidebarIconStyle(projectsRoot, expectedBasic16Index: 12);
+        AssertSidebarIconStyle(projectNode, expectedBasic16Index: 12);
+        AssertSidebarIconStyle(threadNode, expectedBasic16Index: 10);
         Assert.AreEqual(1, projectsRoot.RightVisuals.Count);
         Assert.AreEqual(TreeNodeRightVisualVisibility.Always, projectsRoot.RightVisuals[0].Visibility);
         Assert.AreEqual(SidebarSelectionTarget.Project(project.Id), projectNode.Data);
@@ -380,6 +383,9 @@ public sealed class CodeAltaAppSidebarTests
 
         Assert.AreEqual(2, view.Tree.Roots.Count);
         var globalNode = view.Tree.Roots[0];
+        var globalThreadNode = globalNode.Children[0];
+        AssertSidebarIconStyle(globalNode, expectedBasic16Index: 3);
+        AssertSidebarIconStyle(globalThreadNode, expectedBasic16Index: 3);
         Assert.AreEqual(SidebarSelectionTarget.Global(), globalNode.Data);
         Assert.AreEqual(2, globalNode.RightVisuals.Count);
         Assert.AreEqual(TreeNodeRightVisualVisibility.Always, globalNode.RightVisuals[0].Visibility);
@@ -589,6 +595,14 @@ public sealed class CodeAltaAppSidebarTests
             static (_, _) => false,
             (nodeId, kind, selectionTarget) => GetOrCreateRow(rows, nodeId, kind, selectionTarget),
             nowUtc);
+    }
+
+    private static void AssertSidebarIconStyle(TreeNode node, byte expectedBasic16Index)
+    {
+        Assert.IsNotNull(node.IconStyle);
+        Assert.IsTrue(node.IconStyle.Value.TryGetForeground(out var foreground));
+        Assert.AreEqual(ColorKind.Basic16, foreground.Kind);
+        Assert.AreEqual(expectedBasic16Index, foreground.Index);
     }
 
     private static SidebarNodeViewModel GetOrCreateRow(

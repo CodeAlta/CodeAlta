@@ -7,7 +7,7 @@ using CodeAlta.Presentation.Shell;
 
 namespace CodeAlta.App;
 
-internal sealed class ShellThreadStateCoordinator
+internal sealed partial class ShellThreadStateCoordinator
 {
     internal sealed record InitialCatalogState(
         IReadOnlyList<ProjectDescriptor> Projects,

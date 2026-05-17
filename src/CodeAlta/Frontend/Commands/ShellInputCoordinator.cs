@@ -88,6 +88,7 @@ internal sealed class ShellInputCoordinator
             OpenFileEditorIntent => new OpenFileEditorCommand(),
             OpenSkillsIntent => new OpenSkillsCommand(),
             OpenPluginsIntent => new OpenPluginsCommand(),
+            OpenWorkspaceSettingsIntent => new OpenWorkspaceSettingsCommand(),
             FocusSidebarIntent => new FocusSidebarCommand(),
             FocusPromptIntent => new FocusPromptCommand(),
             FocusModelProviderIntent => new FocusModelProviderCommand(),

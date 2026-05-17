@@ -123,7 +123,7 @@ internal static partial class QueuedPromptListView
         row.Cell(copyButton, 0, 2);
         row.Cell(deleteButton, 0, 3);
         row.Cell(status, 0, 4);
-        return BuildStripRow(row, UiPalette.PendingSteerBackgroundColor);
+        return BuildStripRow(row, UiPalette.GetPendingSteerBackgroundColor);
     }
 
     private static Visual BuildQueuedPromptRow(
@@ -197,7 +197,7 @@ internal static partial class QueuedPromptListView
         row.Cell(counter, 0, 4);
         row.Cell(steerButton, 0, 5);
         row.Cell(deleteButton, 0, 6);
-        return BuildStripRow(row, UiPalette.QueuedPromptBackgroundColor);
+        return BuildStripRow(row, UiPalette.GetQueuedPromptBackgroundColor);
     }
 
     private static Visual CreateCounter(
@@ -300,15 +300,18 @@ internal static partial class QueuedPromptListView
         }
     }
 
-    private static Visual BuildStripRow(Visual content, Color background)
+    private static Visual BuildStripRow(Visual content, Func<Theme, Color> getBackground)
     {
         ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(getBackground);
 
+        Placeholder? background = null;
+        background = new Placeholder()
+            .HorizontalAlignment(Align.Stretch)
+            .VerticalAlignment(Align.Stretch)
+            .Style(() => PlaceholderStyle.Default with { Background = getBackground(background!.GetTheme()) });
         return new ZStack(
-            new Placeholder()
-                .HorizontalAlignment(Align.Stretch)
-                .VerticalAlignment(Align.Stretch)
-                .Style(PlaceholderStyle.Default with { Background = background }),
+            background,
             new Padder(content)
             {
                 Padding = new Thickness(1, 0, 1, 0),

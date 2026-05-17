@@ -34,6 +34,8 @@ internal sealed record OpenSkillsIntent : ShellInputIntent;
 
 internal sealed record OpenPluginsIntent : ShellInputIntent;
 
+internal sealed record OpenWorkspaceSettingsIntent : ShellInputIntent;
+
 internal sealed record OpenSessionUsageIntent : ShellInputIntent;
 
 internal sealed record OpenThreadInfoIntent : ShellInputIntent;

@@ -526,11 +526,39 @@ public sealed class ShellThreadStateCoordinatorTests
         {
             SortMode = NavigatorProjectSortMode.Date,
             RecentThreadsPerProject = 7,
+            ThemeSchemeName = "Elderberry Dark Soft",
         }).ConfigureAwait(false);
 
         var viewState = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
         Assert.AreEqual(NavigatorProjectSortMode.Date, viewState.Navigator.SortMode);
         Assert.AreEqual(7, viewState.Navigator.RecentThreadsPerProject);
+        Assert.AreEqual("Elderberry Dark Soft", viewState.Navigator.ThemeSchemeName);
+    }
+
+    [TestMethod]
+    public async Task NavigatorThemePreview_ChangesEffectiveThemeWithoutPersisting()
+    {
+        using var temp = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = temp.Path };
+        var threadCatalog = new WorkThreadCatalog(options);
+        var coordinator = CreateCoordinator(options, threadCatalog);
+
+        await coordinator.SaveNavigatorSettingsAsync(new NavigatorSettings
+        {
+            SortMode = NavigatorProjectSortMode.Date,
+            RecentThreadsPerProject = 7,
+            ThemeSchemeName = "Elderberry Dark Soft",
+        }).ConfigureAwait(false);
+
+        coordinator.PreviewNavigatorTheme("Blueberry Light");
+
+        Assert.AreEqual("Blueberry Light", coordinator.EffectiveThemeSchemeName);
+        var viewState = await threadCatalog.LoadViewStateAsync().ConfigureAwait(false);
+        Assert.AreEqual("Elderberry Dark Soft", viewState.Navigator.ThemeSchemeName);
+
+        coordinator.ClearNavigatorThemePreview();
+
+        Assert.AreEqual("Elderberry Dark Soft", coordinator.EffectiveThemeSchemeName);
     }
 
     [TestMethod]
@@ -549,6 +577,7 @@ public sealed class ShellThreadStateCoordinatorTests
         {
             SortMode = NavigatorProjectSortMode.Date,
             RecentThreadsPerProject = 5,
+            ThemeSchemeName = "Blueberry Light",
         }).GetAwaiter().GetResult();
 
         var snapshot = stateStore.Snapshot;
@@ -558,6 +587,7 @@ public sealed class ShellThreadStateCoordinatorTests
         CollectionAssert.AreEqual(new[] { "thread-1" }, snapshot.OpenThreadIds.ToArray());
         Assert.AreEqual(NavigatorProjectSortMode.Date, snapshot.NavigatorSettings.SortMode);
         Assert.AreEqual(5, snapshot.NavigatorSettings.RecentThreadsPerProject);
+        Assert.AreEqual("Blueberry Light", snapshot.NavigatorSettings.ThemeSchemeName);
     }
 
     [TestMethod]

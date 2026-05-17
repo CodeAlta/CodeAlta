@@ -37,6 +37,10 @@ internal static class ShellCommandCatalog
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl));
 
+    public static readonly KeySequence WorkspaceSettingsShortcutSequence = new(
+        new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+        new KeyGesture(TerminalChar.CtrlW, TerminalModifiers.Ctrl));
+
     public static readonly KeySequence SessionUsageShortcutSequence = new(
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlU, TerminalModifiers.Ctrl));
@@ -131,6 +135,17 @@ internal static class ShellCommandCatalog
             Sequence: PluginsShortcutSequence,
             CommandName: "plugins",
             Aliases: ["plugin"],
+            ShowInCommandBar: true),
+        new(
+            "CodeAlta.Workspace.Settings",
+            "Workspace Settings",
+            "Open workspace settings for the navigator and UI theme.",
+            ShellCommandHelpCategory.General,
+            ShellCommandScope.AnyShell,
+            ShellCommandAvailability.Always,
+            Sequence: WorkspaceSettingsShortcutSequence,
+            CommandName: "settings",
+            Aliases: ["workspace_settings"],
             ShowInCommandBar: true),
         new(
             "CodeAlta.Shell.FocusSidebar",

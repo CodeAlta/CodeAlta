@@ -184,7 +184,8 @@ internal sealed class PromptComposerView
         string? cachedText = null;
         string? cachedProjectRoot = null;
         List<StyledRun>? cachedRuns = null;
-        var editor = new ChatPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette)
+        ChatPromptEditor? editor = null;
+        editor = new ChatPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette)
             .PromptMarkup("[primary]>[/] ")
             .ContinuationPromptMarkup("[muted]·[/] ")
             .Placeholder(placeholder)
@@ -195,7 +196,6 @@ internal sealed class PromptComposerView
             .Style(PromptEditorStyle.Default with
             {
                 Padding = new Thickness(0, 0, 1, 0),
-                PlaceholderForeground = UiPalette.PromptPlaceholderColor,
             });
         if (projectFileSearchService is not null && getPromptReferenceProjectRoot is not null)
         {
@@ -232,7 +232,7 @@ internal sealed class PromptComposerView
 
             converter.Theme = request.Theme;
             converter.Highlight(text, runs);
-            ProjectFilePromptHighlighter.AddRuns(text, projectRoot, runs);
+            ProjectFilePromptHighlighter.AddRuns(text, projectRoot, request.Theme, runs);
             cachedSnapshot = request.Snapshot;
             cachedTheme = request.Theme;
             cachedText = text;

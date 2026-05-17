@@ -91,7 +91,7 @@ internal sealed class SidebarView
                 cycleSortMode),
             CreateToolbarButton(
                 () => NerdFont.MdCogOutline,
-                "Navigator settings",
+                "Workspace settings",
                 openNavigatorSettings),
         ])
         {
@@ -120,14 +120,15 @@ internal sealed class SidebarView
         contentGrid.Cell(treeHost, 0, 0);
         contentGrid.Cell(footer, 1, 0);
 
-        var group = new Group(
+        Group? group = null;
+        group = new Group(
             new Markup($"[bold]{AnsiMarkup.Escape($"{NerdFont.FaFolderTree} Navigator")}[/]"),
             contentGrid)
         {
             HorizontalAlignment = Align.Stretch,
             VerticalAlignment = Align.Stretch,
         }
-        .Style(GroupStyle.Rounded);
+        .Style(() => UiPalette.GetSidebarGroupStyle(group!.GetTheme()));
 
         Root = group;
     }

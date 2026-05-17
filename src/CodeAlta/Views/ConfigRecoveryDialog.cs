@@ -44,8 +44,7 @@ internal sealed class ConfigRecoveryDialog
         var diagnosticMargin = CodeEditor.CreateDiffIndicatorMargin(
             lineIndex => !_validation.IsValid && _validation.Line is { } line && lineIndex == line - 1
                 ? new Rune('●')
-                : null,
-            _ => Style.None.WithForeground(Colors.OrangeRed) | TextStyle.Bold);
+                : null);
         _editor.LeftMargins.Insert(0, diagnosticMargin);
 
         _saveButton = new Button($"{NerdFont.MdContentSaveCheckOutline} Save and Continue") { Tone = ControlTone.Success };

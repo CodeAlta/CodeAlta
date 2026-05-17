@@ -37,12 +37,13 @@ internal sealed class ThreadStatusLineView
             MaxWidth = 2,
         };
 
-        var statusText = new TextBlock
+        TextBlock? statusText = null;
+        statusText = new TextBlock
             {
                 Wrap = true,
                 IsSelectable = false,
             }.Text(() => shellViewModel.StatusText)
-            .Style(() => StatusVisualFormatter.BuildStatusTextStyle(shellViewModel.StatusText, shellViewModel.StatusBusy, shellViewModel.StatusTone, thinkingAnimationPhase01.Value));
+            .Style(() => StatusVisualFormatter.BuildStatusTextStyle(statusText!.GetTheme(), shellViewModel.StatusText, shellViewModel.StatusBusy, shellViewModel.StatusTone, thinkingAnimationPhase01.Value));
         var statusLineLeft = new HStack(
             new Visual[]
             {
@@ -53,12 +54,13 @@ internal sealed class ThreadStatusLineView
                 Spacing = 1,
                 HorizontalAlignment = Align.Stretch,
             };
-        var providerSessionLoadStatus = new TextBlock
+        TextBlock? providerSessionLoadStatus = null;
+        providerSessionLoadStatus = new TextBlock
             {
                 Wrap = false,
                 IsSelectable = false,
             }.Text(() => shellViewModel.ProviderSessionLoadStatusText)
-            .Style(TextBlockStyle.Default with { Foreground = UiPalette.WelcomeGuidanceColor });
+            .Style(() => TextBlockStyle.Default with { Foreground = UiPalette.GetWelcomeGuidanceColor(providerSessionLoadStatus!.GetTheme()) });
         Visual statusLineRight = buildPluginStatusVisual is null
             ? providerSessionLoadStatus
             : new HStack(

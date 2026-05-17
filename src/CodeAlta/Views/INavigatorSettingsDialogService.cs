@@ -10,5 +10,9 @@ internal interface INavigatorSettingsDialogService
 
     Visual? GetDialogFocusTarget();
 
+    void PreviewNavigatorTheme(string? themeSchemeName);
+
+    void ClearNavigatorThemePreview();
+
     Task SaveNavigatorSettingsAsync(NavigatorSettings settings);
 }

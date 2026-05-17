@@ -25,6 +25,12 @@ public sealed class NavigatorSettings
     public int RecentThreadsPerProject { get; set; } = DefaultRecentThreadsPerProject;
 
     /// <summary>
+    /// Gets or sets the preferred UI color scheme name. When empty or unknown, the default theme is used.
+    /// </summary>
+    [JsonPropertyName("theme_scheme_name")]
+    public string? ThemeSchemeName { get; set; }
+
+    /// <summary>
     /// Validates the settings.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when a value is out of range.</exception>
@@ -41,6 +47,14 @@ public sealed class NavigatorSettings
                 nameof(RecentThreadsPerProject),
                 RecentThreadsPerProject,
                 "Navigator recent thread count must be between 1 and 50.");
+        }
+
+        if (ThemeSchemeName is { Length: > 256 })
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ThemeSchemeName),
+                ThemeSchemeName,
+                "Navigator theme scheme name must be 256 characters or fewer.");
         }
     }
 }

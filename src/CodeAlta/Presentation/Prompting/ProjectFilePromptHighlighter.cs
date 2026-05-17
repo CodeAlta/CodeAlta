@@ -9,11 +9,9 @@ namespace CodeAlta.Presentation.Prompting;
 
 internal static class ProjectFilePromptHighlighter
 {
-    private static readonly Style ResolvedReferenceStyle = Style.None.WithForeground(Colors.DeepSkyBlue);
-    private static readonly Style UnresolvedReferenceStyle = Style.None.WithForeground(Colors.OrangeRed);
-
-    public static void AddRuns(string? text, string? projectRoot, List<StyledRun> runs)
+    public static void AddRuns(string? text, string? projectRoot, Theme theme, List<StyledRun> runs)
     {
+        ArgumentNullException.ThrowIfNull(theme);
         ArgumentNullException.ThrowIfNull(runs);
         if (string.IsNullOrEmpty(text))
         {
@@ -27,7 +25,9 @@ internal static class ProjectFilePromptHighlighter
                 continue;
             }
 
-            var style = IsResolved(projectRoot, token) ? ResolvedReferenceStyle : UnresolvedReferenceStyle;
+            var style = IsResolved(projectRoot, token)
+                ? Style.None.WithForeground(theme.Primary ?? theme.Accent ?? theme.Foreground ?? Color.Default)
+                : Style.None.WithForeground(theme.Error ?? theme.Warning ?? theme.Foreground ?? Color.Default);
             runs.Add(new StyledRun(token.StartIndex, token.Length, style));
         }
     }

@@ -382,10 +382,11 @@ internal sealed class SkillsManagementDialog
         var descriptionBox = new TextBox()
             .Placeholder("Describe when this skill should be used")
             .HorizontalAlignment(Align.Stretch);
-        var validationText = new TextBlock(string.Empty)
+        TextBlock? validationText = null;
+        validationText = new TextBlock(string.Empty)
         {
             Wrap = true,
-        }.Style(TextBlockStyle.Default with { Foreground = Colors.OrangeRed });
+        }.Style(() => TextBlockStyle.Default with { Foreground = validationText!.GetTheme().Error ?? validationText!.GetTheme().Foreground ?? Color.Default });
 
         var form = new Grid
             {

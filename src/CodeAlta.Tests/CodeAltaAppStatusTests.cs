@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Shell;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Tests;
 
@@ -88,9 +89,10 @@ public sealed class CodeAltaAppStatusTests
     public void BuildStatusTextStyle_UsesGradientBrushForThinking()
     {
         var style = StatusVisualFormatter.BuildStatusTextStyle(
+            Theme.Default,
             StatusVisualFormatter.BuildThinkingStatusText(TimeSpan.FromSeconds(5)),
             busy: true,
-            StatusTone.Info,
+            tone: StatusTone.Info,
             thinkingAnimationPhase01: 0.25f);
 
         Assert.IsNotNull(style.ForegroundBrush);
@@ -101,9 +103,10 @@ public sealed class CodeAltaAppStatusTests
     public void BuildStatusTextStyle_UsesSolidToneColorWhenIdle()
     {
         var style = StatusVisualFormatter.BuildStatusTextStyle(
+            Theme.Default,
             "Prompt ready",
             busy: false,
-            StatusTone.Ready,
+            tone: StatusTone.Ready,
             thinkingAnimationPhase01: 0f);
 
         Assert.IsNull(style.ForegroundBrush);

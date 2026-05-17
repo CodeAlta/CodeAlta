@@ -148,6 +148,7 @@ internal sealed class ThreadViewStateCoordinator
         {
             SortMode = viewState.Navigator.SortMode,
             RecentThreadsPerProject = viewState.Navigator.RecentThreadsPerProject,
+            ThemeSchemeName = viewState.Navigator.ThemeSchemeName,
         };
     }
 
@@ -161,6 +162,7 @@ internal sealed class ThreadViewStateCoordinator
         {
             SortMode = settings.SortMode,
             RecentThreadsPerProject = settings.RecentThreadsPerProject,
+            ThemeSchemeName = NormalizeThemeSchemeName(settings.ThemeSchemeName),
         };
         viewState.UpdatedAt = DateTimeOffset.UtcNow;
         await PersistViewStateAsync(viewState).ConfigureAwait(false);
@@ -177,6 +179,9 @@ internal sealed class ThreadViewStateCoordinator
             ParentThreadId = thread.ParentThreadId,
             CreatedBy = thread.CreatedBy,
         };
+
+    private static string? NormalizeThemeSchemeName(string? themeSchemeName)
+        => string.IsNullOrWhiteSpace(themeSchemeName) ? null : themeSchemeName.Trim();
 
     private static void ApplyLocalState(WorkThreadDescriptor thread, WorkThreadLocalState localState)
     {

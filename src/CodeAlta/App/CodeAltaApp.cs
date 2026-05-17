@@ -265,7 +265,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             () => DialogBoundsResolver.ResolveAppBounds(ThreadInput), () => ThreadInput, () => _threadStateCoordinator.Projects,
             OpenFolderAsync, OpenAcp, OpenModelProvidersAsync, composition.ModelCatalogCoordinator.Open, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
             SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, _threadCommandCoordinator.ActivateSelectedSkillAsync, SetStatus),
-            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync),
+            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync), _sidebarCoordinator.OpenNavigatorSettings,
             () => EnsureSessionUsagePresenter().TogglePopupFromIndicator(),
             () => { if (ThreadInput is not null) EnsureThreadInfoPresenter().TogglePopup(ThreadInput); },
             () => _threadWorkspaceView?.OpenExpandedPromptDialog(), ToggleCommandBarMultiLine);
@@ -389,7 +389,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void ApplyPendingSidebarSelection()
         => _sidebarCoordinator.ApplyPendingSelection();
 
-    public void PrepareForRun() => SetStatus("Connecting to available providers...", showSpinner: true);
+    public void PrepareForRun() => SetStatus("Connecting providers...", showSpinner: true);
     public Visual GetRoot() => EnsureShellView().Root;
 
     public TerminalLoopResult Tick(CancellationToken cancellationToken)
@@ -514,7 +514,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             CommandBarMultiLine = _commandBarMultiLine,
         });
         _threadWorkspaceView = shellSurface.WorkspaceView;
-        _shellView = shellSurface.ShellView;
+        _shellView = UiTheme.Set(shellSurface.ShellView, _threadStateCoordinator);
         _frontendEvents.Publish(new CatalogChangedEvent());
         return _shellView;
     }
@@ -591,7 +591,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             return;
         }
 
-        throw new InvalidOperationException("Bindable view-model state must be accessed on the UI thread.");
+        throw new InvalidOperationException("Bindable state must be accessed on the UI thread.");
     }
 
     internal static bool ShouldRunInlineOnCurrentThread(bool dispatcherHasAccess, bool terminalLoopStarted)

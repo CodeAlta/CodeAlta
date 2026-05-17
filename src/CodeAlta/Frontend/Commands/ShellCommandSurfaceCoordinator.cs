@@ -89,6 +89,9 @@ internal sealed class ShellCommandSurfaceCoordinator
     public Task OpenPluginsAsync()
         => DispatchShellCommandAsync(new OpenPluginsCommand());
 
+    public Task OpenWorkspaceSettingsAsync()
+        => DispatchShellCommandAsync(new OpenWorkspaceSettingsCommand());
+
     private async Task DispatchShellCommandAsync(ShellCommand command, CancellationToken cancellationToken = default)
         => await _shellCommandDispatcher.DispatchAsync(command, cancellationToken);
 

@@ -49,13 +49,15 @@ internal sealed class DirectoryPathDialog
             projects: () => _dialogService.GetProjects() ?? []);
 
         var placeholderText = placeholder ?? "Project name from the sidebar or C:\\code\\SomeFolder";
-        _editor = new TextBox()
+        TextBox? editor = null;
+        editor = new TextBox()
             .Placeholder(placeholderText)
             .HorizontalAlignment(Align.Stretch)
-            .Style(TextBoxStyle.Default with
+            .Style(() => TextBoxStyle.Default with
             {
-                Placeholder = UiPalette.PromptPlaceholderColor,
+                Placeholder = UiPalette.GetPromptPlaceholderColor(editor!.GetTheme()),
             });
+        _editor = editor;
         _editor.TextDocument.Changed += OnEditorTextChanged;
         _editor.KeyDown((_, e) => HandleEditorKeyDown(e));
         if (!string.IsNullOrEmpty(initialPath))
@@ -481,16 +483,8 @@ internal sealed class DirectoryPathDialog
     {
         var icon = suggestion.Kind switch
         {
-            OpenProjectSuggestionKind.Project => new TextBlock(NerdFont.MdFolderOutline.ToString())
-                .Style(TextBlockStyle.Default with
-                {
-                    Foreground = UiPalette.GetSidebarAccentColor(SidebarAccent.Projects),
-                }),
-            _ => new TextBlock(ProjectFileAppearanceRegistry.Default.GetDirectoryAppearance().Icon)
-                .Style(TextBlockStyle.Default with
-                {
-                    Foreground = ProjectFileAppearanceRegistry.Default.GetDirectoryAppearance().IconForeground,
-                }),
+            OpenProjectSuggestionKind.Project => CreateThemedSuggestionIcon(NerdFont.MdFolderOutline.ToString(), SidebarAccent.Projects),
+            _ => CreateThemedSuggestionIcon(ProjectFileAppearanceRegistry.Default.GetDirectoryAppearance().Icon, SidebarAccent.Fallback),
         };
 
         var label = new HStack(
@@ -509,17 +503,30 @@ internal sealed class DirectoryPathDialog
         Visual? shortcut = null;
         if (!string.IsNullOrWhiteSpace(suggestion.SecondaryText))
         {
-            shortcut = new TextBlock(ShortenProjectPath(suggestion.SecondaryText))
+            TextBlock? shortcutText = null;
+            shortcutText = new TextBlock(ShortenProjectPath(suggestion.SecondaryText))
             {
                 Wrap = false,
                 IsSelectable = false,
-            }.Style(TextBlockStyle.Default with
+            }.Style(() => TextBlockStyle.Default with
             {
-                Foreground = UiPalette.PromptPlaceholderColor,
+                Foreground = UiPalette.GetPromptPlaceholderColor(shortcutText!.GetTheme()),
             });
+            shortcut = shortcutText;
         }
 
         return new OptionListItem(label, shortcut);
+    }
+
+    private static TextBlock CreateThemedSuggestionIcon(string text, SidebarAccent accent)
+    {
+        TextBlock? icon = null;
+        icon = new TextBlock(text)
+                .Style(() => TextBlockStyle.Default with
+                {
+                    Foreground = UiPalette.GetSidebarAccentColor(accent),
+                });
+        return icon;
     }
 
     private static string ShortenProjectPath(string path)

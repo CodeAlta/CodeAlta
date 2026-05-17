@@ -17,116 +17,131 @@ namespace CodeAlta.Presentation.Styling
 
     internal static class UiPalette
     {
-        private static readonly Color UserBorder = Color.FromOklch(0.74f, 0.16f, 315f);
-        private static readonly Color AssistantBorder = Color.FromOklch(0.82f, 0.08f, 245f);
-        private static readonly Color ReasoningBorder = Color.FromOklch(0.56f, 0.10f, 255f);
-        private static readonly Color ActivityBorder = Color.FromOklch(0.68f, 0.02f, 255f);
-        private static readonly Color NoticeBorder = Color.FromOklch(0.80f, 0.08f, 155f);
-        private static readonly Color InteractionBorder = Color.FromOklch(0.84f, 0.10f, 85f);
+        private static readonly Color WelcomeAltaAccent0 = Color.Rgb(0x00, 0xD1, 0xFF);
+        private static readonly Color WelcomeAltaAccent1 = Color.Rgb(0x4F, 0x46, 0xE5);
+        private static readonly Color WelcomeAltaAccent2 = Color.Rgb(0xA8, 0x55, 0xF7);
+        private static readonly Color WelcomeAltaAccentBright0 = Color.Rgb(0x7A, 0xE8, 0xFF);
+        private static readonly Color WelcomeAltaHighlight = Color.Rgb(0xFF, 0xFF, 0xFF);
 
-        private static readonly Color StatusReady = Color.FromOklch(0.78f, 0.09f, 152f);
-        private static readonly Color StatusWarning = Color.FromOklch(0.82f, 0.10f, 85f);
-        private static readonly Color StatusError = Color.FromOklch(0.70f, 0.15f, 28f);
-        private static readonly Color StatusInfo = Color.FromOklch(0.77f, 0.09f, 245f);
-        private static readonly Color StatusMuted = Color.FromOklch(0.72f, 0.02f, 255f);
-        internal static readonly Color WelcomeAccent0 = Color.Rgb(0x00, 0xD1, 0xFF);
-        internal static readonly Color WelcomeAccent1 = Color.Rgb(0x4F, 0x46, 0xE5);
-        internal static readonly Color WelcomeAccent2 = Color.Rgb(0xA8, 0x55, 0xF7);
-        internal static readonly Color WelcomeAccentBright0 = Color.Rgb(0x7A, 0xE8, 0xFF);
-        private static readonly Color SidebarGlobal = Color.FromOklch(0.82f, 0.10f, 85f);
-        private static readonly Color SidebarProjects = Color.FromOklch(0.79f, 0.08f, 245f);
-        private static readonly Color SidebarProjectThread = Color.FromOklch(0.78f, 0.08f, 152f);
-        private static readonly Color SidebarInternalThread = Color.FromOklch(0.73f, 0.10f, 310f);
-        private static readonly Color SidebarCopilotThread = Color.FromOklch(0.76f, 0.14f, 300f);
-        private static readonly Color SidebarFallback = Color.FromOklch(0.90f, 0.01f, 255f);
-        private static readonly Color PromptPlaceholder = Color.FromOklch(0.65f, 0.02f, 255f);
-
-        private static readonly Color ToolChipText = Color.FromOklch(0.90f, 0.01f, 255f);
-        private static readonly Color ToolChipNeutral = Color.FromOklch(0.56f, 0.02f, 255f);
-        private static readonly Color ToolGroupBorder = Color.Mix(ActivityBorder, AssistantBorder, 0.30f, ColorMixSpace.Oklch);
-        private static readonly Color ToolGroupBackground = Color.Mix(Colors.Black, ToolGroupBorder, 0.48f, ColorMixSpace.Oklch).WithOpacity(0.28f);
-        private static readonly Color QueuedPromptBackground = Color.Mix(Colors.Black, UserBorder, 0.34f, ColorMixSpace.Oklch).WithOpacity(0.36f);
-        private static readonly Color PendingSteerBackground = Color.Mix(Colors.Black, StatusInfo, 0.36f, ColorMixSpace.Oklch).WithOpacity(0.40f);
-
-        internal static GroupStyle GetChatGroupStyle(ChatTimelineTone tone)
+        internal static GroupStyle GetChatGroupStyle(Theme theme, ChatTimelineTone tone)
         {
-            var border = tone switch
-            {
-                ChatTimelineTone.User => UserBorder,
-                ChatTimelineTone.Assistant => AssistantBorder,
-                ChatTimelineTone.Reasoning => ReasoningBorder,
-                ChatTimelineTone.Activity => ActivityBorder,
-                ChatTimelineTone.Notice => NoticeBorder,
-                ChatTimelineTone.Interaction => InteractionBorder,
-                _ => AssistantBorder,
-            };
+            ArgumentNullException.ThrowIfNull(theme);
 
-            var background = tone switch
-            {
-                ChatTimelineTone.User => border.WithOpacity(0.08f),
-                ChatTimelineTone.Assistant => border.WithOpacity(0.06f),
-                ChatTimelineTone.Reasoning => border.WithOpacity(0.04f),
-                ChatTimelineTone.Activity => border.WithOpacity(0.06f),
-                ChatTimelineTone.Notice => border.WithOpacity(0.08f),
-                ChatTimelineTone.Interaction => border.WithOpacity(0.10f),
-                _ => border.WithOpacity(0.06f),
-            };
+            var border = GetChatToneColor(theme, tone);
+            var focusBorder = MixTowardForeground(theme, border, 0.12f);
+            var isEmphasizedTone = tone is ChatTimelineTone.Interaction or ChatTimelineTone.Notice;
+            var background = GetToneOverlay(
+                theme,
+                border,
+                IsLightTheme(theme) ? (isEmphasizedTone ? 0.245f : 0.225f) : (isEmphasizedTone ? 0.034f : 0.024f));
 
             return GroupStyle.Rounded with
             {
                 BorderCellStyle = Style.None.WithForeground(border),
-                FocusedBorderCellStyle = Style.None.WithForeground(border.Lighten(0.06f)) | TextStyle.Bold,
+                FocusedBorderCellStyle = Style.None.WithForeground(focusBorder) | TextStyle.Bold,
                 BackgroundStyle = Style.None.WithBackground(background),
             };
         }
 
-        internal static GroupStyle GetToolCallGroupStyle()
+        internal static GroupStyle GetToolCallGroupStyle(Theme theme)
         {
+            ArgumentNullException.ThrowIfNull(theme);
+
+            var muted = GetThemeColor(theme.Muted, GetThemeColor(theme.Border, GetThemeColor(theme.Foreground, Color.Default)));
+            var border = Color.Mix(muted, GetThemeColor(theme.Foreground, muted), IsLightTheme(theme) ? 0.08f : 0.12f, ColorMixSpace.Oklab);
+            var focusedBorder = MixTowardForeground(theme, border, 0.18f);
+            var background = GetNeutralOverlay(theme, IsLightTheme(theme) ? 0.105f : 0.032f);
+
             return GroupStyle.Rounded with
             {
-                BorderCellStyle = Style.None.WithForeground(ToolGroupBorder),
-                FocusedBorderCellStyle = Style.None.WithForeground(ToolGroupBorder.Lighten(0.08f)) | TextStyle.Bold,
-                BackgroundStyle = Style.None.WithBackground(ToolGroupBackground),
+                BorderCellStyle = Style.None.WithForeground(border),
+                FocusedBorderCellStyle = Style.None.WithForeground(focusedBorder) | TextStyle.Bold,
+                BackgroundStyle = Style.None.WithBackground(background),
             };
         }
 
-        internal static ButtonStyle GetToolChipButtonStyle(ToolCallDisplayStatus status)
+        internal static GroupStyle GetSidebarGroupStyle(Theme theme)
         {
-            var accent = GetToolStatusColor(status);
-            var background = Color.Mix(Colors.Black, accent, 0.12f, ColorMixSpace.Oklch).WithOpacity(0.28f);
-            var hover = Color.Mix(Colors.Black, accent, 0.18f, ColorMixSpace.Oklch).WithOpacity(0.34f);
-            var pressed = Color.Mix(Colors.Black, accent, 0.24f, ColorMixSpace.Oklch).WithOpacity(0.40f);
+            ArgumentNullException.ThrowIfNull(theme);
+
+            var border = GetThemeColor(theme.Border, GetThemeColor(theme.Muted, Color.Default));
+            var focusedBorder = MixTowardForeground(theme, border, 0.10f);
+            var surface = GetThemeColor(theme.Surface, GetThemeColor(theme.Background, Color.Default));
+            return GroupStyle.Rounded with
+            {
+                BorderCellStyle = Style.None.WithForeground(border),
+                FocusedBorderCellStyle = Style.None.WithForeground(focusedBorder) | TextStyle.Bold,
+                BackgroundStyle = Style.None.WithBackground(surface),
+            };
+        }
+
+        internal static ButtonStyle GetToolChipButtonStyle(Theme theme, ToolCallDisplayStatus status)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+
+            var foreground = GetThemeColor(theme.Foreground, Color.Default);
+            var accent = GetToolStatusColor(theme, status);
+            var background = GetNeutralOverlay(theme, IsLightTheme(theme) ? 0.115f : 0.048f);
+            var hover = Color.Mix(background, accent, 0.16f, ColorMixSpace.Oklab);
+            var pressed = Color.Mix(background, accent, 0.24f, ColorMixSpace.Oklab);
 
             return new ButtonStyle
             {
                 Padding = new Thickness(1, 0, 1, 0),
                 ShowBorder = false,
-                Normal = Style.None.WithForeground(ToolChipText).WithBackground(background),
-                Hovered = Style.None.WithForeground(ToolChipText).WithBackground(hover),
-                Pressed = Style.None.WithForeground(ToolChipText).WithBackground(pressed) | TextStyle.Bold,
-                Focused = Style.None.WithForeground(ToolChipText).WithBackground(hover) | TextStyle.Underline,
+                Normal = Style.None.WithForeground(foreground).WithBackground(background),
+                Hovered = Style.None.WithForeground(foreground).WithBackground(hover),
+                Pressed = Style.None.WithForeground(foreground).WithBackground(pressed) | TextStyle.Bold,
+                Focused = Style.None.WithForeground(foreground).WithBackground(hover) | TextStyle.Underline,
             };
         }
 
         internal static string GetToolStatusMarkup(ToolCallDisplayStatus status)
-            => GetMarkupColor(GetToolStatusColor(status));
+        {
+            return status switch
+            {
+                ToolCallDisplayStatus.Running => "primary",
+                ToolCallDisplayStatus.Completed => "success",
+                ToolCallDisplayStatus.Failed => "error",
+                ToolCallDisplayStatus.Canceled => "warning",
+                _ => "muted",
+            };
+        }
 
         internal static string GetStatusToneMarkup(StatusTone tone)
         {
-            return GetMarkupColor(GetStatusToneColor(tone));
+            return tone switch
+            {
+                StatusTone.Ready => "success",
+                StatusTone.Warning => "warning",
+                StatusTone.Error => "error",
+                _ => "primary",
+            };
         }
 
         internal static string GetSidebarAccentMarkup(SidebarAccent accent)
-            => GetMarkupColor(GetSidebarAccentColor(accent));
-
-        internal static Color GetStatusToneColor(StatusTone tone)
         {
+            return accent switch
+            {
+                SidebarAccent.Global => "warning",
+                SidebarAccent.Projects => "primary",
+                SidebarAccent.ProjectThread => "success",
+                SidebarAccent.InternalThread => "accent",
+                SidebarAccent.CopilotThread => "accent",
+                _ => "muted",
+            };
+        }
+
+        internal static Color GetStatusToneColor(Theme theme, StatusTone tone)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+
             return tone switch
             {
-                StatusTone.Ready => StatusReady,
-                StatusTone.Warning => StatusWarning,
-                StatusTone.Error => StatusError,
-                _ => StatusInfo,
+                StatusTone.Ready => GetSchemeAccent(theme, static scheme => scheme.Green, GetThemeColor(theme.Success, Color.Default)),
+                StatusTone.Warning => GetSchemeAccent(theme, static scheme => scheme.Yellow, GetThemeColor(theme.Warning, Color.Default)),
+                StatusTone.Error => GetSchemeAccent(theme, static scheme => scheme.Red, GetThemeColor(theme.Error, Color.Default)),
+                _ => GetSchemeAccent(theme, static scheme => scheme.Blue, GetThemeColor(theme.Primary, GetThemeColor(theme.Accent, GetThemeColor(theme.Foreground, Color.Default)))),
             };
         }
 
@@ -135,26 +150,66 @@ namespace CodeAlta.Presentation.Styling
             return Style.None.WithForeground(GetSidebarAccentColor(accent));
         }
 
-        internal static Color QueuedPromptBackgroundColor => QueuedPromptBackground;
-
-        internal static Color PendingSteerBackgroundColor => PendingSteerBackground;
-
-        internal static string MutedMarkup => GetMarkupColor(StatusMuted);
-
-        internal static Color PromptPlaceholderColor => PromptPlaceholder;
-
-        internal static Color WelcomeSubtitleColor => Color.Mix(StatusMuted, Colors.White, 0.28f, ColorMixSpace.Oklab);
-
-        internal static Color WelcomeGuidanceColor => Color.Mix(StatusMuted, Colors.White, 0.14f, ColorMixSpace.Oklab);
-
-        internal static GradientStop[] BuildWelcomeAltaGradientStops()
+        internal static Color GetQueuedPromptBackgroundColor(Theme theme)
         {
-            var edgeColor = Color.Mix(WelcomeAccent0, WelcomeAccentBright0, 0.34f, ColorMixSpace.Oklab)
+            ArgumentNullException.ThrowIfNull(theme);
+            return GetToneOverlay(
+                theme,
+                GetSchemeAccent(theme, static scheme => scheme.Purple, GetThemeColor(theme.Accent, GetThemeColor(theme.Primary, Color.Default))),
+                IsLightTheme(theme) ? 0.145f : 0.028f);
+        }
+
+        internal static Color GetPendingSteerBackgroundColor(Theme theme)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            return GetToneOverlay(theme, GetStatusToneColor(theme, StatusTone.Info), IsLightTheme(theme) ? 0.155f : 0.032f);
+        }
+
+        internal static string MutedMarkup => "muted";
+
+        internal static Color GetPromptPlaceholderColor(Theme theme)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            return GetThemeColor(theme.Muted, GetThemeColor(theme.Foreground, Color.Default));
+        }
+
+        internal static Color GetWelcomeSubtitleColor(Theme theme)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            return MixTowardForeground(theme, GetThemeColor(theme.Muted, GetThemeColor(theme.Foreground, Color.Default)), 0.18f);
+        }
+
+        internal static Color GetWelcomeGuidanceColor(Theme theme)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            return GetThemeColor(theme.Muted, GetThemeColor(theme.Foreground, Color.Default));
+        }
+
+        internal static Brush BuildWelcomeAltaBrush(Theme theme, float phase)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+
+            var start = new GradientPoint(-0.55f + phase, -0.08f + phase);
+            var end = new GradientPoint(0.45f + phase, 0.92f + phase);
+            return Brush.LinearGradient(
+                start,
+                end,
+                BuildWelcomeAltaGradientStops(theme),
+                tileMode: BrushTileMode.Repeat,
+                mixSpaceOverride: ColorMixSpace.Oklab);
+        }
+
+        internal static GradientStop[] BuildWelcomeAltaGradientStops(Theme theme)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            _ = theme;
+
+            var edgeColor = Color.Mix(WelcomeAltaAccent0, WelcomeAltaAccentBright0, 0.34f, ColorMixSpace.Oklab)
                 .WithOpacity(0.82f);
-            var targetColor = Color.Mix(WelcomeAccent1, WelcomeAccent2, 0.54f, ColorMixSpace.Oklab);
+            var targetColor = Color.Mix(WelcomeAltaAccent1, WelcomeAltaAccent2, 0.54f, ColorMixSpace.Oklab);
             var shoulderColor = Color.Mix(edgeColor, targetColor, 0.58f, ColorMixSpace.Oklab);
-            var centerColor = Color.Mix(targetColor, Colors.White, 0.18f, ColorMixSpace.Oklab);
-            var pulseColor = Color.Mix(centerColor, Colors.White, 0.30f, ColorMixSpace.Oklab);
+            var centerColor = Color.Mix(targetColor, WelcomeAltaHighlight, 0.18f, ColorMixSpace.Oklab);
+            var pulseColor = Color.Mix(centerColor, WelcomeAltaHighlight, 0.30f, ColorMixSpace.Oklab);
             return
             [
                 new GradientStop(0.00f, edgeColor),
@@ -171,27 +226,15 @@ namespace CodeAlta.Presentation.Styling
             ];
         }
 
-        internal static Brush BuildWelcomeAltaBrush(float phase)
-        {
-            var start = new GradientPoint(-0.55f + phase, -0.08f + phase);
-            var end = new GradientPoint(0.45f + phase, 0.92f + phase);
-            return Brush.LinearGradient(
-                start,
-                end,
-                BuildWelcomeAltaGradientStops(),
-                tileMode: BrushTileMode.Repeat,
-                mixSpaceOverride: ColorMixSpace.Oklab);
-        }
-
-        private static Color GetToolStatusColor(ToolCallDisplayStatus status)
+        private static Color GetToolStatusColor(Theme theme, ToolCallDisplayStatus status)
         {
             return status switch
             {
-                ToolCallDisplayStatus.Running => StatusInfo,
-                ToolCallDisplayStatus.Completed => StatusReady,
-                ToolCallDisplayStatus.Failed => StatusError,
-                ToolCallDisplayStatus.Canceled => StatusWarning,
-                _ => ToolChipNeutral,
+                ToolCallDisplayStatus.Running => GetStatusToneColor(theme, StatusTone.Info),
+                ToolCallDisplayStatus.Completed => GetStatusToneColor(theme, StatusTone.Ready),
+                ToolCallDisplayStatus.Failed => GetStatusToneColor(theme, StatusTone.Error),
+                ToolCallDisplayStatus.Canceled => GetStatusToneColor(theme, StatusTone.Warning),
+                _ => GetThemeColor(theme.Muted, GetThemeColor(theme.Foreground, Color.Default)),
             };
         }
 
@@ -199,16 +242,75 @@ namespace CodeAlta.Presentation.Styling
         {
             return accent switch
             {
-                SidebarAccent.Global => SidebarGlobal,
-                SidebarAccent.Projects => SidebarProjects,
-                SidebarAccent.ProjectThread => SidebarProjectThread,
-                SidebarAccent.InternalThread => SidebarInternalThread,
-                SidebarAccent.CopilotThread => SidebarCopilotThread,
-                _ => SidebarFallback,
+                SidebarAccent.Global => ConsoleColor.DarkYellow,
+                SidebarAccent.Projects => ConsoleColor.Blue,
+                SidebarAccent.ProjectThread => ConsoleColor.Green,
+                SidebarAccent.InternalThread => ConsoleColor.Magenta,
+                SidebarAccent.CopilotThread => ConsoleColor.Magenta,
+                _ => ConsoleColor.DarkGray,
             };
         }
 
-        private static string GetMarkupColor(Color color)
-            => color.ToRgb().ToHexString();
+        private static Color GetChatToneColor(Theme theme, ChatTimelineTone tone)
+        {
+            return tone switch
+            {
+                ChatTimelineTone.User => GetSchemeAccent(theme, static scheme => scheme.Purple, GetThemeColor(theme.Accent, Color.Default)),
+                ChatTimelineTone.Assistant => GetSchemeAccent(theme, static scheme => scheme.Blue, GetThemeColor(theme.Primary, Color.Default)),
+                ChatTimelineTone.Reasoning => GetSchemeAccent(theme, static scheme => Color.Mix(scheme.Blue, scheme.BrightBlack, 0.78f, ColorMixSpace.Oklab), GetThemeColor(theme.Border, Color.Default)),
+                ChatTimelineTone.Activity => GetSchemeAccent(theme, static scheme => scheme.BrightBlack, GetThemeColor(theme.Muted, Color.Default)),
+                ChatTimelineTone.Notice => GetSchemeAccent(theme, static scheme => scheme.Green, GetThemeColor(theme.Success, Color.Default)),
+                ChatTimelineTone.Interaction => GetSchemeAccent(theme, static scheme => scheme.Yellow, GetThemeColor(theme.Warning, Color.Default)),
+                _ => GetSchemeAccent(theme, static scheme => scheme.Blue, GetThemeColor(theme.Primary, Color.Default)),
+            };
+        }
+
+        private static Color GetSchemeAccent(Theme theme, Func<ColorScheme, Color> selector, Color fallback)
+        {
+            if (theme.Scheme is not { } scheme)
+            {
+                return fallback;
+            }
+
+            var foreground = GetThemeColor(theme.Foreground, fallback);
+            return Color.Mix(selector(scheme).ToRgb(), foreground, IsLightTheme(theme) ? 0.22f : 0.12f, ColorMixSpace.Oklab);
+        }
+
+        private static Color GetNeutralOverlay(Theme theme, float amount)
+        {
+            var background = GetThemeColor(theme.Background, Color.Default);
+            var foreground = GetThemeColor(theme.Foreground, background);
+            return Color.Mix(background, foreground, amount, ColorMixSpace.Oklab);
+        }
+
+        private static Color GetToneOverlay(Theme theme, Color color, float amount)
+        {
+            if (IsLightTheme(theme) && theme.Background is { } themeBackground)
+            {
+                var background = themeBackground.ToRgb();
+                if (background.Kind is ColorKind.Rgb or ColorKind.RgbA)
+                {
+                    return Color.Mix(background, color.ToRgb(), amount, ColorMixSpace.Oklab);
+                }
+            }
+
+            return color.WithOpacity(amount);
+        }
+
+        private static bool IsLightTheme(Theme theme)
+        {
+            if (theme.Background is not { } background || theme.Foreground is not { } foreground)
+            {
+                return false;
+            }
+
+            return background.GetRelativeLuminance() > foreground.GetRelativeLuminance();
+        }
+
+        private static Color MixTowardForeground(Theme theme, Color color, float amount)
+            => Color.Mix(color, GetThemeColor(theme.Foreground, color), amount, ColorMixSpace.Oklab);
+
+        private static Color GetThemeColor(Color? color, Color fallback)
+            => color?.ToRgb() ?? fallback;
     }
 }

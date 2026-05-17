@@ -19,6 +19,7 @@ public sealed class ShellCommandHelpTests
         var acpCommand = ShellCommandCatalog.Get("CodeAlta.Acp.Manage");
         var skillsCommand = ShellCommandCatalog.Get("CodeAlta.Skills.Manage");
         var pluginsCommand = ShellCommandCatalog.Get("CodeAlta.Plugins.Manage");
+        var workspaceSettingsCommand = ShellCommandCatalog.Get("CodeAlta.Workspace.Settings");
         var goToSidebarCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusSidebar");
         var goToPromptCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusPrompt");
         var modelCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusModelProvider");
@@ -49,6 +50,9 @@ public sealed class ShellCommandHelpTests
         var pluginsEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, pluginsCommand.Label, StringComparison.Ordinal));
+        var workspaceSettingsEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, workspaceSettingsCommand.Label, StringComparison.Ordinal));
         var exitEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, exitCommand.Label, StringComparison.Ordinal));
@@ -89,6 +93,8 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), ShellCommandCatalog.PluginsShortcutSequence.ToString()!);
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), "/plugins");
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), "/plugin");
+        CollectionAssert.Contains(workspaceSettingsEntry.Bindings.ToArray(), ShellCommandCatalog.WorkspaceSettingsShortcutSequence.ToString()!);
+        CollectionAssert.Contains(workspaceSettingsEntry.Bindings.ToArray(), "/settings");
         CollectionAssert.Contains(goToSidebarEntry.Bindings.ToArray(), "/go_to_sidebar");
         CollectionAssert.Contains(goToSidebarEntry.Bindings.ToArray(), "/sidebar");
         CollectionAssert.Contains(goToPromptEntry.Bindings.ToArray(), "/go_to_prompt");

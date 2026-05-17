@@ -172,8 +172,8 @@ internal sealed class SessionUsagePresenter
         return new BreakdownChart()
             .ShowValues(true)
             .ShowPercentages(true)
-            .Segment(used, new TextBlock("Active context"), Colors.DodgerBlue)
-            .Segment(remaining, new TextBlock("Input headroom"), Colors.LimeGreen)
+            .Segment(used, new TextBlock("Active context"))
+            .Segment(remaining, new TextBlock("Input headroom"))
             .Style(new BreakdownStyle { SegmentGap = 1 });
     }
 
@@ -416,12 +416,12 @@ internal sealed class SessionUsagePresenter
         var chart = new BreakdownChart().ShowValues(true).ShowPercentages(true);
         var added = 0;
 
-        added += AddSegment(chart, usage.InputTokens, "Input", Colors.DodgerBlue);
-        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningTokens), "Output", Colors.Orange);
-        added += AddSegment(chart, usage.CacheReadTokens, "Cache Read", Colors.LimeGreen);
-        added += AddSegment(chart, usage.CacheWriteTokens, "Cache Write", Colors.MediumPurple);
-        added += AddSegment(chart, usage.CachedInputTokens, "Cache", Colors.LimeGreen);
-        added += AddSegment(chart, usage.ReasoningTokens, "Reasoning", Colors.Goldenrod);
+        added += AddSegment(chart, usage.InputTokens, "Input");
+        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningTokens), "Output");
+        added += AddSegment(chart, usage.CacheReadTokens, "Cache Read");
+        added += AddSegment(chart, usage.CacheWriteTokens, "Cache Write");
+        added += AddSegment(chart, usage.CachedInputTokens, "Cache");
+        added += AddSegment(chart, usage.ReasoningTokens, "Reasoning");
 
         return added > 0
             ? chart.Style(new BreakdownStyle { SegmentGap = 1 })
@@ -433,10 +433,10 @@ internal sealed class SessionUsagePresenter
         var chart = new BreakdownChart().ShowValues(true).ShowPercentages(true);
         var added = 0;
 
-        added += AddSegment(chart, usage.InputTokens, "Input", Colors.DodgerBlue);
-        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningOutputTokens), "Output", Colors.Orange);
-        added += AddSegment(chart, usage.CachedInputTokens, "Cache", Colors.LimeGreen);
-        added += AddSegment(chart, usage.ReasoningOutputTokens, "Reasoning", Colors.MediumPurple);
+        added += AddSegment(chart, usage.InputTokens, "Input");
+        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningOutputTokens), "Output");
+        added += AddSegment(chart, usage.CachedInputTokens, "Cache");
+        added += AddSegment(chart, usage.ReasoningOutputTokens, "Reasoning");
 
         return added > 0
             ? chart.Style(new BreakdownStyle { SegmentGap = 1 })
@@ -455,9 +455,9 @@ internal sealed class SessionUsagePresenter
             .ShowPercentages(true);
 
         var added = 0;
-        added += AddSegment(chart, tokens.InputTokens, "Input", Colors.DodgerBlue);
-        added += AddSegment(chart, tokens.OutputTokens, "Output", Colors.Orange);
-        added += AddSegment(chart, tokens.CachedInputTokens, "Cache", Colors.LimeGreen);
+        added += AddSegment(chart, tokens.InputTokens, "Input");
+        added += AddSegment(chart, tokens.OutputTokens, "Output");
+        added += AddSegment(chart, tokens.CachedInputTokens, "Cache");
 
         return added > 0
             ? chart.Style(new BreakdownStyle { SegmentGap = 1 })
@@ -469,14 +469,14 @@ internal sealed class SessionUsagePresenter
             ? Math.Max(0, output - (reasoningTokens ?? 0))
             : null;
 
-    private static int AddSegment(BreakdownChart chart, long? value, string label, Color color)
+    private static int AddSegment(BreakdownChart chart, long? value, string label)
     {
         if (value is not > 0)
         {
             return 0;
         }
 
-        chart.Segment(value.Value, new TextBlock(label), color);
+        chart.Segment(value.Value, new TextBlock(label));
         return 1;
     }
 }

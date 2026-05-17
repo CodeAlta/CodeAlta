@@ -65,6 +65,7 @@ public sealed class ShellStateStoreTests
         {
             SortMode = NavigatorProjectSortMode.Date,
             RecentThreadsPerProject = 7,
+            ThemeSchemeName = "Elderberry Dark Soft",
         };
 
         var updated = ShellFrontendStateSnapshot.Empty
@@ -76,6 +77,7 @@ public sealed class ShellStateStoreTests
         Assert.AreEqual("thread-1", updated.Selection.SelectedThreadId);
         Assert.AreEqual(1, updated.OpenThreadIds.Count);
         Assert.AreEqual(NavigatorProjectSortMode.Date, updated.NavigatorSettings.SortMode);
+        Assert.AreEqual("Elderberry Dark Soft", updated.NavigatorSettings.ThemeSchemeName);
         Assert.AreNotSame(navigatorSettings, updated.NavigatorSettings);
     }
 

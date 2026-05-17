@@ -56,7 +56,7 @@ internal sealed class SidebarNodeHeaderView : Visual
         _editor.KeyDown((_, e) => OnEditorKeyDown(e));
 
         _validationIcon = new TextBlock(NerdFont.MdAlertCircleOutline.ToString());
-        _validationIcon.Style(TextBlockStyle.Default with { Foreground = Colors.OrangeRed });
+        _validationIcon.Style(() => TextBlockStyle.Default with { Foreground = _validationIcon.GetTheme().Error ?? _validationIcon.GetTheme().Foreground ?? Color.Default });
         _validationIndicator = new ComputedVisual(() => _row.InlineEditValidationMessage is null ? null : _validationIcon)
         {
             Margin = new Thickness(1, 0, 0, 0),

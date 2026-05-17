@@ -31,10 +31,10 @@ internal sealed class ProjectFilePickerDialog
 
     public ProjectFilePickerDialog(string hintText = "Arrows move · Enter insert link · Esc close")
     {
-        _headerTextBlock = CreateLabel(string.Empty, Colors.White);
-        _statisticsTextBlock = CreateLabel(string.Empty, UiPalette.PromptPlaceholderColor);
-        _statusTextBlock = CreateLabel(string.Empty, UiPalette.PromptPlaceholderColor);
-        _hintTextBlock = CreateLabel(hintText, UiPalette.PromptPlaceholderColor);
+        _headerTextBlock = CreateLabel(string.Empty, static theme => theme.Foreground?.ToRgb() ?? Color.Default);
+        _statisticsTextBlock = CreateLabel(string.Empty, UiPalette.GetPromptPlaceholderColor);
+        _statusTextBlock = CreateLabel(string.Empty, UiPalette.GetPromptPlaceholderColor);
+        _hintTextBlock = CreateLabel(hintText, UiPalette.GetPromptPlaceholderColor);
 
         _queryBox = new TextBox()
             .Placeholder("Search files and folders…")
@@ -311,13 +311,17 @@ internal sealed class ProjectFilePickerDialog
         return Math.Clamp(Math.Max(minimum, scaled), minimum, Math.Min(maximum, available));
     }
 
-    private static TextBlock CreateLabel(string text, Color foreground)
+    private static TextBlock CreateLabel(string text, Func<Theme, Color> getForeground)
     {
-        return new TextBlock(text)
+        ArgumentNullException.ThrowIfNull(getForeground);
+
+        TextBlock? label = null;
+        label = new TextBlock(text)
         {
             Wrap = false,
             IsSelectable = false,
-        }.Style(TextBlockStyle.Default with { Foreground = foreground });
+        }.Style(() => TextBlockStyle.Default with { Foreground = getForeground(label!.GetTheme()) });
+        return label;
     }
 
     private static Visual BuildRow(ProjectFileReferencePopupItem item)

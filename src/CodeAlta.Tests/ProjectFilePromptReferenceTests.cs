@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Catalog;
 using XenoAtom.Terminal.UI.Text;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Tests;
 
@@ -116,7 +117,7 @@ public sealed class ProjectFilePromptReferenceTests
         File.WriteAllText(Path.Combine(projectRoot, "src", "app.cs"), string.Empty);
 
         var runs = new List<StyledRun>();
-        ProjectFilePromptHighlighter.AddRuns("See [app.cs](src/app.cs) and @missing.cs", projectRoot, runs);
+        ProjectFilePromptHighlighter.AddRuns("See [app.cs](src/app.cs) and @missing.cs", projectRoot, Theme.Default, runs);
 
         Assert.AreEqual(2, runs.Count);
         Assert.AreEqual("[app.cs](src/app.cs)".Length, runs[0].Length);
