@@ -43,6 +43,19 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
+    public void ConfigRecoveryDialog_UsesTerminalSizeWhenRootBoundsAreInitialMinimum()
+    {
+        var bounds = ConfigRecoveryDialog.ResolveDialogBounds(
+            new Rectangle(0, 0, 80, 24),
+            new TerminalSize(200, 60));
+
+        var size = ResponsiveDialogSize.Resolve(bounds, minWidth: 80, minHeight: 24, widthFactor: 0.8, heightFactor: 0.8);
+
+        Assert.AreEqual(160, size.Width);
+        Assert.AreEqual(48, size.Height);
+    }
+
+    [TestMethod]
     public void ThreadWorkspaceView_UsesF6ForExpandedPromptShortcut()
         => Assert.AreEqual("F6", ThreadWorkspaceView.ExpandPromptShortcutKey.ToString());
 

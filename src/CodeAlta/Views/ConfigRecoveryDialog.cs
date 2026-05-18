@@ -5,6 +5,7 @@ using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Text;
@@ -65,7 +66,14 @@ internal sealed class ConfigRecoveryDialog
         }
 
         _dialog = BuildDialog();
-        ResponsiveDialogSize.Apply(_dialog, app.Root.Bounds, minWidth: 80, minHeight: 24, widthFactor: 0.8, heightFactor: 0.8);
+        var terminalSize = Terminal.Instance.IsInitialized ? Terminal.Instance.Size : default;
+        ResponsiveDialogSize.Apply(
+            _dialog,
+            ResolveDialogBounds(app.Root.GetAbsoluteBounds(), terminalSize),
+            minWidth: 80,
+            minHeight: 24,
+            widthFactor: 0.8,
+            heightFactor: 0.8);
         _dialog.Show();
         if (_validation.Line is { } line)
         {
@@ -73,6 +81,18 @@ internal sealed class ConfigRecoveryDialog
         }
 
         app.Focus(_editor);
+    }
+
+    internal static Rectangle? ResolveDialogBounds(Rectangle? rootBounds, TerminalSize terminalSize)
+    {
+        var width = Math.Max(rootBounds?.Width ?? 0, terminalSize.Columns);
+        var height = Math.Max(rootBounds?.Height ?? 0, terminalSize.Rows);
+        if (width <= 0 || height <= 0)
+        {
+            return rootBounds;
+        }
+
+        return new Rectangle(rootBounds?.X ?? 0, rootBounds?.Y ?? 0, width, height);
     }
 
     private Dialog BuildDialog()
