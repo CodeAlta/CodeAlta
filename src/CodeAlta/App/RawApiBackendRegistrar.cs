@@ -1,6 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
-using CodeAlta.Agent.CopilotDirect;
+using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.LocalRuntime.Compaction;

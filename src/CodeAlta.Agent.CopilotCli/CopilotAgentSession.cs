@@ -3,7 +3,7 @@ using System.Threading.Channels;
 using GitHub.Copilot.SDK;
 using XenoAtom.Logging;
 
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 /// <summary>
 /// Copilot session-backed implementation of <see cref="IAgentSession"/>.

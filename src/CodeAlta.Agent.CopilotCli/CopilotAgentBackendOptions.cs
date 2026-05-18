@@ -1,6 +1,6 @@
 using GitHub.Copilot.SDK;
 
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 /// <summary>
 /// Options used to create a <see cref="CopilotAgentBackend"/>.

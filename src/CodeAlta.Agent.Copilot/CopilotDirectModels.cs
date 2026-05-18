@@ -5,11 +5,11 @@ using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.ModelCatalog;
 using XenoAtom.Logging;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 internal sealed class CopilotModelDiscoveryClient
 {
-    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.CopilotDirect");
+    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Copilot");
     private readonly CopilotDirectProviderOptions _provider;
     private readonly CopilotDirectAuthManager _authManager;
     private readonly HttpClient _httpClient;

@@ -7,6 +7,7 @@ using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Acp;
+using CodeAlta.Agent.CopilotCli;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.CodexSdk;

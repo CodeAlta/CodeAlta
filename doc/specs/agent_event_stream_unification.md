@@ -472,8 +472,8 @@ That tradeoff is worth it. The current model is too lossy.
 - `src/CodeAlta.Agent/AgentEvent.cs`
 - `src/CodeAlta.Agent.Codex/CodexAgentMapper.cs`
 - `src/CodeAlta.Agent.Codex/CodexAgentSession.cs`
-- `src/CodeAlta.Agent.Copilot/CopilotAgentMapper.cs`
-- `src/CodeAlta.Agent.Copilot/CopilotAgentSession.cs`
+- `src/CodeAlta.Agent.CopilotCli/CopilotAgentMapper.cs`
+- `src/CodeAlta.Agent.CopilotCli/CopilotAgentSession.cs`
 - `src/CodeAlta/TerminalUi/CodeAltaTerminalUi.cs`
 - `src/CodeAlta.Tests/CodexAgentMapperTests.cs`
 - `src/CodeAlta.Tests/CopilotAgentMapperTests.cs`
@@ -557,14 +557,14 @@ Add or update:
    - usage
    - state transitions
 4. Update `src/CodeAlta.Agent.Codex/CodexAgentSession.cs` to emit synthetic `AgentActionRequiredEvent` values around approval and user-input request handling.
-5. Update `src/CodeAlta.Agent.Copilot/CopilotAgentMapper.cs` to emit normalized events for:
+5. Update `src/CodeAlta.Agent.CopilotCli/CopilotAgentMapper.cs` to emit normalized events for:
    - assistant
    - reasoning
    - tool lifecycle
    - notices/state
    - usage
    - subagent/skill/hook activity
-6. Update `src/CodeAlta.Agent.Copilot/CopilotAgentSession.cs` to emit synthetic `AgentActionRequiredEvent` values around permission and user-input callbacks.
+6. Update `src/CodeAlta.Agent.CopilotCli/CopilotAgentSession.cs` to emit synthetic `AgentActionRequiredEvent` values around permission and user-input callbacks.
 7. Rewrite `src/CodeAlta/TerminalUi/CodeAltaTerminalUi.cs` event handling so it no longer assumes only assistant/error/idle.
 8. Update mapper tests before UI polish.
 9. Only after both adapters are emitting the richer events, update `doc/specs/agent_api_specs.md` so the spec matches the new contract.

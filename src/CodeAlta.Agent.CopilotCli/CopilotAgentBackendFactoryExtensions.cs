@@ -1,4 +1,4 @@
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 /// <summary>
 /// Extension methods for registering Copilot backends in <see cref="AgentBackendFactory"/>.

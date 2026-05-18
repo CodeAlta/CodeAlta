@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 /// <summary>
 /// Provides GitHub OAuth device-code login helpers for the GitHub Copilot direct provider.

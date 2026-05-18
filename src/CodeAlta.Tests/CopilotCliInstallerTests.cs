@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.CopilotCli;
 
 namespace CodeAlta.Tests;
 

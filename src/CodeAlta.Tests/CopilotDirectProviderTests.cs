@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
-using CodeAlta.Agent.CopilotDirect;
+using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Catalog;
 

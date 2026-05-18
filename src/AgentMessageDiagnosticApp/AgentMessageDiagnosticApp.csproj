@@ -15,8 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.CopilotCli\CodeAlta.Agent.CopilotCli.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Codex\CodeAlta.Agent.Codex.csproj" />
-    <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />
   </ItemGroup>
 
   <ItemGroup>

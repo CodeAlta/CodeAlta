@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.CopilotCli;
 using GitHub.Copilot.SDK;
 using GitHub.Copilot.SDK.Rpc;
 

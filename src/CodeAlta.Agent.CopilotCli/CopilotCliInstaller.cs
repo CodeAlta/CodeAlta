@@ -3,7 +3,7 @@ using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 /// <summary>
 /// Describes installation progress while downloading or extracting a pinned Copilot CLI package.
@@ -114,7 +114,7 @@ public static class CopilotCliInstaller
     /// <summary>
     /// Gets the Copilot CLI version pinned into this assembly at build time.
     /// </summary>
-    public static string DefaultVersion => CopilotAgentBackend.CopilotCliVersion;
+    public static string DefaultVersion => Copilot.CopilotAgentBackend.CopilotCliVersion;
 
     /// <summary>
     /// Ensures the pinned Copilot CLI is installed for the current runtime.

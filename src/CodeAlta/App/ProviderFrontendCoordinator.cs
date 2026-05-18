@@ -2,7 +2,7 @@ using System.Diagnostics;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Codex;
 using CodeAlta.Agent.Copilot;
-using CodeAlta.Agent.CopilotDirect;
+using CodeAlta.Agent.CopilotCli;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.CodexSubscription;
 using CodeAlta.App.Events;
@@ -10,6 +10,7 @@ using CodeAlta.Catalog;
 using CodeAlta.CodexSdk;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Chat;
+using CopilotAgentBackend = CodeAlta.Agent.CopilotCli.CopilotAgentBackend;
 
 namespace CodeAlta.App;
 

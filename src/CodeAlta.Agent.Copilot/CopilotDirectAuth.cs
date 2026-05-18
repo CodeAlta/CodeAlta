@@ -3,11 +3,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using XenoAtom.Logging;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 internal sealed class CopilotDirectAuthManager
 {
-    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.CopilotDirect");
+    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Copilot");
     private readonly CopilotDirectProviderOptions _provider;
     private readonly HttpClient _httpClient;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -310,7 +310,7 @@ internal sealed class CopilotDirectCredentialStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            LogManager.GetLogger("CodeAlta.Agent.CopilotDirect").Warn(ex, "Unable to read GitHub Copilot direct credential cache.");
+            LogManager.GetLogger("CodeAlta.Agent.Copilot").Warn(ex, "Unable to read GitHub Copilot direct credential cache.");
 
             return null;
         }

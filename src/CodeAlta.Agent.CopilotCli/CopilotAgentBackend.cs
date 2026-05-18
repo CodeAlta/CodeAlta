@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using GitHub.Copilot.SDK;
 
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 /// <summary>
 /// Copilot implementation of <see cref="IAgentBackend"/>.

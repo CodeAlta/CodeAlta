@@ -1,6 +1,6 @@
 using System.Net.Http.Headers;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 internal static class CopilotDirectHeaders
 {

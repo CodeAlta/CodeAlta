@@ -1,6 +1,8 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Codex;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.CopilotCli;
+using CopilotAgentBackend = CodeAlta.Agent.CopilotCli.CopilotAgentBackend;
 
 namespace CodeAlta.Tests;
 

@@ -2,7 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.LocalRuntime.Compaction;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 /// <summary>
 /// Local-runtime backend for direct GitHub Copilot HTTP API access.

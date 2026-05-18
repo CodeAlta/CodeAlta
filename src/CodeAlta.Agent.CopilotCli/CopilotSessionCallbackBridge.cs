@@ -1,6 +1,4 @@
-using CodeAlta.Agent;
-
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 internal sealed class CopilotSessionCallbackBridge
 {

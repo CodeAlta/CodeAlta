@@ -6,7 +6,7 @@ using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.OpenAI;
 using OpenAI.Responses;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 internal sealed class CopilotDirectTurnExecutor : ILocalAgentTurnExecutor
 {

@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 [JsonSerializable(typeof(CopilotTokenResponse))]
 [JsonSerializable(typeof(CopilotDeviceCodeResponse))]

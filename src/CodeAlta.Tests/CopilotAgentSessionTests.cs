@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.CopilotCli;
 using GitHub.Copilot.SDK;
 
 namespace CodeAlta.Tests;

@@ -44,7 +44,7 @@ This is the limiting factor today.
 
 ### 2.2 Current Copilot mapping
 
-`src/CodeAlta.Agent.Copilot/CopilotAgentMapper.cs` currently normalizes only:
+`src/CodeAlta.Agent.CopilotCli/CopilotAgentMapper.cs` currently normalizes only:
 
 - `AssistantMessageDeltaEvent`
 - `AssistantMessageEvent`

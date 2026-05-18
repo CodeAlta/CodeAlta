@@ -1,15 +1,14 @@
-using System.Collections;
 using System.Buffers;
-using System.IO;
+using System.Collections;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Globalization;
 using GitHub.Copilot.SDK;
 using GitHub.Copilot.SDK.Rpc;
 using Microsoft.Extensions.AI;
 using XenoAtom.Logging;
 
-namespace CodeAlta.Agent.Copilot;
+namespace CodeAlta.Agent.CopilotCli;
 
 internal static class CopilotAgentMapper
 {

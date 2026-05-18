@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="alta" />
-    <InternalsVisibleTo Include="CodeAlta.Agent.CopilotDirect" />
+    <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 

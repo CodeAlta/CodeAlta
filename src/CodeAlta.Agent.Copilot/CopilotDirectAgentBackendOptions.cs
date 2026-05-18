@@ -3,7 +3,7 @@ using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.LocalRuntime.Compaction;
 
-namespace CodeAlta.Agent.CopilotDirect;
+namespace CodeAlta.Agent.Copilot;
 
 /// <summary>
 /// Options used to create a GitHub Copilot direct local-runtime backend.
