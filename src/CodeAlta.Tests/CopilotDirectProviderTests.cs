@@ -693,7 +693,9 @@ public sealed class CopilotDirectProviderTests
             {
                 Assert.IsTrue(requestDocument.RootElement.TryGetProperty("reasoning", out var reasoning));
                 Assert.AreEqual("high", reasoning.GetProperty("effort").GetString());
-                Assert.IsFalse(reasoning.TryGetProperty("summary", out _));
+                Assert.AreEqual("auto", reasoning.GetProperty("summary").GetString());
+                Assert.IsTrue(requestDocument.RootElement.TryGetProperty("include", out var include));
+                Assert.IsTrue(include.EnumerateArray().Any(static item => item.GetString() == "reasoning.encrypted_content"));
             }
 
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -785,6 +787,120 @@ public sealed class CopilotDirectProviderTests
             Assert.AreEqual("list_dir", toolCall.Name);
             Assert.AreEqual(@"C:\code\CodeAlta", toolCall.Arguments.GetProperty("path").GetString());
             Assert.IsFalse(response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Any());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+        }
+    }
+
+    [TestMethod]
+    public async Task CopilotDirect_Responses_RequestsAndStreamsReasoningSummary()
+    {
+        var handler = new StubHandler(request =>
+        {
+            using (var requestDocument = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()))
+            {
+                Assert.IsTrue(requestDocument.RootElement.TryGetProperty("reasoning", out var reasoning));
+                Assert.AreEqual("high", reasoning.GetProperty("effort").GetString());
+                Assert.AreEqual("auto", reasoning.GetProperty("summary").GetString());
+                Assert.IsTrue(requestDocument.RootElement.TryGetProperty("include", out var include));
+                Assert.IsTrue(include.EnumerateArray().Any(static item => item.GetString() == "reasoning.encrypted_content"));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    event: response.created
+                    data: {"type":"response.created","response":{"id":"resp_reasoning","object":"response","created_at":1762845696,"status":"in_progress","model":"gpt-5.5","output":[]}}
+
+                    event: response.output_item.added
+                    data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_test","type":"reasoning","status":"in_progress","summary":[]}}
+
+                    event: response.reasoning_summary_text.delta
+                    data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_test","output_index":0,"summary_index":0,"delta":"Thinking visible."}
+
+                    event: response.output_item.done
+                    data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_test","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"Thinking visible."}],"encrypted_content":"encrypted-reasoning"}}
+
+                    event: response.output_item.done
+                    data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_test","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Done.","annotations":[]}]}}
+
+                    event: response.completed
+                    data: {"type":"response.completed","response":{"id":"resp_reasoning","object":"response","created_at":1762845696,"status":"completed","model":"gpt-5.5","output":[{"id":"rs_test","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"Thinking visible."}],"encrypted_content":"encrypted-reasoning"},{"id":"msg_test","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Done.","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream"),
+            };
+        });
+        var executor = new CopilotDirectTurnExecutor(new CopilotDirectProviderOptions
+        {
+            ProviderKey = "github-copilot",
+            Auth = new CopilotDirectAuthOptions
+            {
+                AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+            },
+            HttpClient = new HttpClient(handler),
+        });
+        var provider = new LocalAgentProviderDescriptor
+        {
+            ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
+            ProviderKey = "github-copilot",
+            DisplayName = "Copilot",
+            BackendId = new AgentBackendId("github-copilot"),
+            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            BaseUri = new Uri("https://api.individual.githubcopilot.com"),
+        };
+        var deltas = new List<LocalAgentTurnDelta>();
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var response = await executor.ExecuteTurnAsync(
+                new LocalAgentTurnRequest
+                {
+                    Provider = provider,
+                    BackendId = provider.BackendId,
+                    SessionId = "session-test",
+                    RunId = new AgentRunId("run-test"),
+                    ModelId = "gpt-5.5",
+                    ReasoningEffort = AgentReasoningEffort.High,
+                    ModelInfo = new AgentModelInfo(
+                        "gpt-5.5",
+                        Provider: "github-copilot",
+                        Capabilities: new Dictionary<string, object?>
+                        {
+                            ["copilotEndpointKind"] = "Responses",
+                        }),
+                    Conversation =
+                    [
+                        new LocalAgentConversationMessage(
+                            LocalAgentConversationRole.User,
+                            [new LocalAgentMessagePart.Text("test")]),
+                    ],
+                    Tools = [],
+                    State = new LocalAgentSessionState
+                    {
+                        SessionId = "session-test",
+                        ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
+                        ProviderKey = "github-copilot",
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    },
+                },
+                (delta, _) =>
+                {
+                    deltas.Add(delta);
+                    return ValueTask.CompletedTask;
+                }).ConfigureAwait(false);
+
+            var reasoningDelta = deltas.Single(static delta => delta.Kind == AgentContentKind.Reasoning);
+            Assert.AreEqual("Thinking visible.", reasoningDelta.Text);
+            var reasoningPart = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Reasoning>().Single();
+            Assert.AreEqual("Thinking visible.", reasoningPart.Value);
+            Assert.AreEqual("encrypted-reasoning", reasoningPart.ProtectedData);
         }
         finally
         {

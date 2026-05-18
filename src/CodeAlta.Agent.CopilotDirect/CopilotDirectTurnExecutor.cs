@@ -1,7 +1,10 @@
+#pragma warning disable OPENAI001
+
 using System.ClientModel;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.OpenAI;
+using OpenAI.Responses;
 
 namespace CodeAlta.Agent.CopilotDirect;
 
@@ -184,11 +187,11 @@ internal sealed class CopilotDirectTurnExecutor : ILocalAgentTurnExecutor
             ProtocolTracing = _provider.ProtocolTraceEnabled
                 ? new OpenAIProtocolTraceOptions { Enabled = true, StateRootPath = _provider.StateRootPath }
                 : null,
-            ResponsesRequestCustomizer = SuppressOpenAIResponsesReasoningSummary,
+            ResponsesRequestCustomizer = ConfigureOpenAIResponsesReasoning,
             ExtraHeaders = CreateCopilotTurnHeaders(IsAgentInitiated(request), HasVisionInput(request), anthropicMessages: false),
         };
 
-    private static void SuppressOpenAIResponsesReasoningSummary(OpenAIResponsesRequestCustomizationContext context)
+    private static void ConfigureOpenAIResponsesReasoning(OpenAIResponsesRequestCustomizationContext context)
     {
         var reasoningOptions = context.Options.ReasoningOptions;
         if (reasoningOptions is null)
@@ -196,11 +199,18 @@ internal sealed class CopilotDirectTurnExecutor : ILocalAgentTurnExecutor
             return;
         }
 
-        // Copilot's Responses endpoint accepts OpenAI-style reasoning effort, but requesting
-        // an explicit summary makes Copilot stream visible reasoning summaries as separate
-        // reasoning items. Leave reasoning effort intact without opting into summaries.
-        reasoningOptions.ReasoningSummaryVerbosity = null;
-        if (reasoningOptions.ReasoningEffortLevel is null)
+        if (reasoningOptions.ReasoningEffortLevel is not null)
+        {
+            // Copilot's Responses endpoint only streams user-visible reasoning when the
+            // request opts into summaries. Use the same conservative summary setting as
+            // other Copilot API clients and request encrypted reasoning for local replay.
+            reasoningOptions.ReasoningSummaryVerbosity = ResponseReasoningSummaryVerbosity.Auto;
+            if (!context.Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent))
+            {
+                context.Options.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
+            }
+        }
+        else
         {
             context.Options.ReasoningOptions = null;
         }
