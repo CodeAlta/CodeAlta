@@ -124,6 +124,29 @@ public sealed class ModelProviderPreferenceCoordinatorTests
     }
 
     [TestMethod]
+    public void RememberGlobalModelProviderPreference_PersistsThreadScopedProjectPreference()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var coordinator = new ModelProviderPreferenceCoordinator(store, Views.CodeAltaApp.UiLogger);
+        var viewState = new WorkThreadViewState();
+
+        coordinator.RememberGlobalModelProviderPreference(
+            viewState,
+            new AgentBackendId("zai"),
+            "glm-5.1",
+            AgentReasoningEffort.Medium,
+            draftProjectRoot: Path.Combine(temp.Path, "project-a"),
+            draftProjectId: "project-a",
+            rememberDraftScope: false);
+
+        Assert.IsTrue(viewState.ProjectPreferences.TryGetValue("project-a", out var preference));
+        Assert.AreEqual("zai", preference.ProviderKey);
+        Assert.AreEqual("glm-5.1", preference.ModelId);
+        Assert.AreEqual(AgentReasoningEffort.Medium, preference.ReasoningEffort);
+    }
+
+    [TestMethod]
     public void ApplyThreadPreference_PrefersPersistedThreadPreferenceOverProviderDefaults()
     {
         using var temp = TempDirectory.Create();

@@ -123,12 +123,17 @@ internal sealed class ModelProviderPreferenceCoordinator
     {
         ArgumentNullException.ThrowIfNull(viewState);
         var normalizedModelId = string.IsNullOrWhiteSpace(modelId) ? null : modelId.Trim();
+        var rememberProjectPreference = rememberDraftScope || !string.IsNullOrWhiteSpace(draftProjectId);
         if (rememberDraftScope)
         {
             _draftPreferencesByScope[BuildDraftScopeKey(draftProjectRoot)] = new DraftModelProviderPreference(
                 backendId,
                 normalizedModelId,
                 reasoningEffort);
+        }
+
+        if (rememberProjectPreference)
+        {
             viewState.ProjectPreferences[BuildProjectPreferenceKey(draftProjectId)] = new WorkThreadPreference
             {
                 ProviderKey = backendId.Value,
