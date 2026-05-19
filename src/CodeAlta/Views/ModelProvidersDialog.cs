@@ -51,8 +51,13 @@ internal sealed class ModelProvidersDialog
     private readonly Visual _detailHost;
     private IReadOnlyList<ProviderDraftSnapshot> _loadedSnapshot = [];
     private readonly State<int> _activeOperationCount = new(0);
+    private readonly State<ProviderDialogOperationKind> _activeOperationKind = new(ProviderDialogOperationKind.None);
+    private readonly State<string?> _activeOperationNoticeText = new(null);
+    private readonly State<string?> _activeLoginUrl = new(null);
+    private readonly State<string?> _activeLoginDeviceCode = new(null);
     private readonly State<bool> _hasLoadedDefinitions = new(false);
     private readonly State<string> _statusText = new("[dim]Configure model providers and save to refresh the runtime.[/]");
+    private CancellationTokenSource? _activeOperationCancellation;
 
     public ModelProvidersDialog(
         IModelProviderDialogService modelProviders,
@@ -188,7 +193,7 @@ internal sealed class ModelProvidersDialog
         _dialog = new Dialog()
             .Title("Model Providers")
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Ctrl+G Ctrl+R reopen · Esc close[/]"))
+            .BottomRightText(new Markup(BuildBottomRightHintMarkup))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -201,6 +206,48 @@ internal sealed class ModelProvidersDialog
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => RequestClose(),
+        });
+        _dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Manage.CancelOperation",
+            LabelMarkup = "Cancel Provider Operation",
+            DescriptionMarkup = "Cancel the current cancelable provider operation.",
+            Sequence = new KeySequence(
+                new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+                new KeyGesture(TerminalChar.CtrlC, TerminalModifiers.Ctrl)),
+            Importance = CommandImportance.Primary,
+            CanExecute = _ => IsCancelableOperationActive(),
+            IsVisible = _ => IsDialogOperationActive(),
+            ConsumesGestureWhenUnavailable = false,
+            Execute = _ => CancelActiveOperation(),
+        });
+        _dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Manage.CopyLoginUrl",
+            LabelMarkup = "Copy Login URL",
+            DescriptionMarkup = "Copy the current login URL to the clipboard.",
+            Sequence = new KeySequence(
+                new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+                new KeyGesture(TerminalChar.CtrlU, TerminalModifiers.Ctrl)),
+            Importance = CommandImportance.Secondary,
+            CanExecute = _ => !string.IsNullOrWhiteSpace(_activeLoginUrl.Value),
+            IsVisible = _ => IsDialogOperationActive(),
+            ConsumesGestureWhenUnavailable = false,
+            Execute = _ => CopyActiveLoginUrl(),
+        });
+        _dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Manage.CopyDeviceCode",
+            LabelMarkup = "Copy Device Code",
+            DescriptionMarkup = "Copy the current device login code to the clipboard.",
+            Sequence = new KeySequence(
+                new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+                new KeyGesture(TerminalChar.CtrlD, TerminalModifiers.Ctrl)),
+            Importance = CommandImportance.Secondary,
+            CanExecute = _ => !string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value),
+            IsVisible = _ => IsDialogOperationActive(),
+            ConsumesGestureWhenUnavailable = false,
+            Execute = _ => CopyActiveLoginDeviceCode(),
         });
     }
 
@@ -220,6 +267,12 @@ internal sealed class ModelProvidersDialog
 
     private void StartReload(bool confirmWhenDirty)
     {
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock("reload provider configuration");
+            return;
+        }
+
         if (confirmWhenDirty && HasUnsavedChanges())
         {
             new ConfirmationDialog(
@@ -263,6 +316,12 @@ internal sealed class ModelProvidersDialog
 
     private void AddProvider()
     {
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock("add a provider");
+            return;
+        }
+
         var nextIndex = 1;
         string providerKey;
         do
@@ -280,6 +339,12 @@ internal sealed class ModelProvidersDialog
 
     private void DeleteSelectedProvider()
     {
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock("delete a provider");
+            return;
+        }
+
         var item = GetSelectedItem();
         if (item is null)
         {
@@ -301,6 +366,12 @@ internal sealed class ModelProvidersDialog
 
     private void StartSave()
     {
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock("save provider changes");
+            return;
+        }
+
         if (!TryBuildDefinitions(out var definitions, out var errorMessage))
         {
             SetStatus($"[warning]{AnsiMarkup.Escape(errorMessage)}[/]");
@@ -337,9 +408,9 @@ internal sealed class ModelProvidersDialog
 
     private void OpenAdvancedEditor()
     {
-        if (_activeOperationCount.Value > 0)
+        if (IsDialogOperationActive())
         {
-            SetStatus("[warning]Please wait for the current provider operation to complete before opening Advanced TOML.[/]");
+            ReportActiveOperationBlock("open Advanced TOML");
             return;
         }
 
@@ -385,6 +456,12 @@ internal sealed class ModelProvidersDialog
     {
         ArgumentNullException.ThrowIfNull(item);
 
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock("test a provider");
+            return;
+        }
+
         if (!_providers.Contains(item))
         {
             SetStatus("[warning]Select a provider to test.[/]");
@@ -404,7 +481,7 @@ internal sealed class ModelProvidersDialog
 
         SetStatus($"[primary]Testing {AnsiMarkup.Escape(item.Label)}...[/]");
         QueueBackgroundOperation(
-            () => _modelProviders.TestProviderAsync(definition),
+            cancellationToken => _modelProviders.TestProviderAsync(definition, cancellationToken),
             result =>
             {
                 if (_providers.Contains(item))
@@ -418,6 +495,12 @@ internal sealed class ModelProvidersDialog
             },
             ex =>
             {
+                if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
+                {
+                    SetStatus("[warning]Provider test canceled.[/]");
+                    return;
+                }
+
                 var message = ex.GetBaseException().Message;
                 if (_providers.Contains(item))
                 {
@@ -438,7 +521,9 @@ internal sealed class ModelProvidersDialog
             item,
             operationDescription,
             progressMessage,
-            (definition, _) => actionAsync(definition));
+            ProviderDialogOperationKind.None,
+            canCancel: false,
+            (definition, _, _) => actionAsync(definition));
     }
 
     private void StartProviderAction(
@@ -447,10 +532,33 @@ internal sealed class ModelProvidersDialog
         string progressMessage,
         Func<CodeAltaProviderDocument, Action<string>, Task<ProviderTestResult>> actionAsync)
     {
+        StartProviderAction(
+            item,
+            operationDescription,
+            progressMessage,
+            ProviderDialogOperationKind.None,
+            canCancel: false,
+            (definition, reportStatus, _) => actionAsync(definition, reportStatus));
+    }
+
+    private void StartProviderAction(
+        ModelProviderEditorItemViewModel item,
+        string operationDescription,
+        string progressMessage,
+        ProviderDialogOperationKind operationKind,
+        bool canCancel,
+        Func<CodeAltaProviderDocument, Action<string>, CancellationToken, Task<ProviderTestResult>> actionAsync)
+    {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationDescription);
         ArgumentException.ThrowIfNullOrWhiteSpace(progressMessage);
         ArgumentNullException.ThrowIfNull(actionAsync);
+
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock(operationDescription);
+            return;
+        }
 
         if (!_providers.Contains(item))
         {
@@ -464,17 +572,22 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        if (!TryBeginDialogOperation(operationDescription))
+        if (!TryBeginDialogOperation(operationDescription, operationKind, canCancel))
         {
             return;
         }
 
         SetStatus($"[primary]{AnsiMarkup.Escape(progressMessage)}[/]");
         QueueBackgroundOperation(
-            () => actionAsync(
+            cancellationToken => actionAsync(
                 definition,
                 message => _ = _dialog.Dispatcher.InvokeAsync(
-                    () => SetStatus($"[primary]{AnsiMarkup.Escape(message)}[/]"))),
+                    () =>
+                    {
+                        CaptureActiveLoginDetails(message);
+                        SetStatus($"[primary]{AnsiMarkup.Escape(message)}[/]");
+                    }),
+                cancellationToken),
             result =>
             {
                 if (_providers.Contains(item))
@@ -488,6 +601,12 @@ internal sealed class ModelProvidersDialog
             },
             ex =>
             {
+                if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
+                {
+                    SetStatus("[warning]Provider operation canceled.[/]");
+                    return;
+                }
+
                 var message = ex.GetBaseException().Message;
                 if (_providers.Contains(item))
                 {
@@ -623,52 +742,91 @@ internal sealed class ModelProvidersDialog
             () => ModelProviderEditorDiagnostics.ValidateProviderKey(item, _providers));
     }
 
+    private Button CreateCancelableProviderActionButton(
+        ModelProviderEditorItemViewModel item,
+        string label,
+        string cancelLabel,
+        ProviderDialogOperationKind operationKind,
+        string operationDescription,
+        string progressMessage,
+        Func<CodeAltaProviderDocument, Action<string>, CancellationToken, Task<ProviderTestResult>> actionAsync)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cancelLabel);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationDescription);
+        ArgumentException.ThrowIfNullOrWhiteSpace(progressMessage);
+        ArgumentNullException.ThrowIfNull(actionAsync);
+
+        return new Button(() => new TextBlock(IsActiveOperation(operationKind) ? cancelLabel : label))
+            .Tone(() => IsActiveOperation(operationKind) ? ControlTone.Warning : ControlTone.Primary)
+            .Click(
+                () =>
+                {
+                    if (IsActiveOperation(operationKind))
+                    {
+                        CancelActiveOperation();
+                        return;
+                    }
+
+                    StartProviderAction(
+                        item,
+                        operationDescription,
+                        progressMessage,
+                        operationKind,
+                        canCancel: true,
+                        actionAsync);
+                });
+    }
+
     private Visual CreateCodexSubscriptionActions(ModelProviderEditorItemViewModel item)
         => new VStack(
             new Markup("[dim]ChatGPT/Codex subscription actions never send a model turn. Use Account/Workspace Id to pin a specific account when required.[/]") { Wrap = true },
             new HStack(
-                new Button("Browser Login")
-                    .Tone(ControlTone.Primary)
-                    .Click(() => StartProviderAction(
-                        item,
-                        "start ChatGPT browser login",
-                        "Starting ChatGPT browser login...",
-                        _modelProviders.LoginWithBrowserAsync)),
-                new Button("Device Login")
-                    .Tone(ControlTone.Primary)
-                    .Click(() => StartProviderAction(
-                        item,
-                        "start ChatGPT device-code login",
-                        "Requesting ChatGPT device code...",
-                        _modelProviders.LoginWithDeviceCodeAsync)),
+                CreateCancelableProviderActionButton(
+                    item,
+                    "Browser Login",
+                    "Cancel Browser Login",
+                    ProviderDialogOperationKind.CodexBrowserLogin,
+                    "start ChatGPT browser login",
+                    "Starting ChatGPT browser login...",
+                    _modelProviders.LoginWithBrowserAsync),
+                CreateCancelableProviderActionButton(
+                    item,
+                    "Device Login",
+                    "Cancel Device Login",
+                    ProviderDialogOperationKind.CodexDeviceLogin,
+                    "start ChatGPT device-code login",
+                    "Requesting ChatGPT device code...",
+                    _modelProviders.LoginWithDeviceCodeAsync),
                 new Button("Test Auth")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
                         "test ChatGPT authentication",
                         "Testing ChatGPT authentication without sending a model turn...",
-                        _modelProviders.TestAuthenticationAsync)),
+                        definition => _modelProviders.TestAuthenticationAsync(definition))),
                 new Button("List Models")
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
                         "list Codex subscription models",
                         "Listing Codex subscription models without sending a model turn...",
-                        _modelProviders.ListModelsAsync)),
+                        definition => _modelProviders.ListModelsAsync(definition))),
                 new Button("List Accounts")
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
                         "list ChatGPT accounts/workspaces",
                         "Reading ChatGPT account/workspace metadata...",
-                        _modelProviders.ListAccountsAsync)),
+                        definition => _modelProviders.ListAccountsAsync(definition))),
                 new Button("Logout")
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
                         "logout ChatGPT credentials",
                         "Deleting CodeAlta-owned ChatGPT/Codex credentials...",
-                        _modelProviders.LogoutAsync)))
+                        definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
             })
@@ -681,41 +839,43 @@ internal sealed class ModelProvidersDialog
         => new VStack(
             new Markup("[dim]Copilot login opens GitHub's device authorization page, then stores CodeAlta-owned GitHub/Copilot tokens for this provider. No model turn is sent.[/]") { Wrap = true },
             new HStack(
-                new Button("Browser Login")
-                    .Tone(ControlTone.Primary)
-                    .Click(() => StartProviderAction(
-                        item,
-                        "start Copilot browser login",
-                        "Requesting Copilot login code...",
-                        _modelProviders.LoginWithBrowserAsync)),
-                new Button("Device Login")
-                    .Tone(ControlTone.Primary)
-                    .Click(() => StartProviderAction(
-                        item,
-                        "start Copilot device-code login",
-                        "Requesting Copilot device code...",
-                        _modelProviders.LoginWithDeviceCodeAsync)),
+                CreateCancelableProviderActionButton(
+                    item,
+                    "Browser Login",
+                    "Cancel Browser Login",
+                    ProviderDialogOperationKind.CopilotBrowserLogin,
+                    "start Copilot browser login",
+                    "Requesting Copilot login code...",
+                    _modelProviders.LoginWithBrowserAsync),
+                CreateCancelableProviderActionButton(
+                    item,
+                    "Device Login",
+                    "Cancel Device Login",
+                    ProviderDialogOperationKind.CopilotDeviceLogin,
+                    "start Copilot device-code login",
+                    "Requesting Copilot device code...",
+                    _modelProviders.LoginWithDeviceCodeAsync),
                 new Button("Test Auth")
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
                         "test Copilot authentication",
                         "Checking cached Copilot credentials...",
-                        _modelProviders.TestAuthenticationAsync)),
+                        definition => _modelProviders.TestAuthenticationAsync(definition))),
                 new Button("List Models")
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
                         "list Copilot models",
                         "Listing Copilot models without sending a model turn...",
-                        _modelProviders.ListModelsAsync)),
+                        definition => _modelProviders.ListModelsAsync(definition))),
                 new Button("Logout")
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
                         "logout Copilot credentials",
                         "Deleting CodeAlta-owned Copilot credentials...",
-                        _modelProviders.LogoutAsync)))
+                        definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
             })
@@ -1002,7 +1162,9 @@ internal sealed class ModelProvidersDialog
         var statusText = _statusText.Value;
         if (_activeOperationCount.Value > 0)
         {
-            return statusText;
+            return _activeOperationNoticeText.Value is { } noticeText
+                ? $"{statusText}{Environment.NewLine}{noticeText}"
+                : statusText;
         }
 
         if (!HasUnsavedChanges())
@@ -1014,6 +1176,35 @@ internal sealed class ModelProvidersDialog
         return IsPersistentStatusText(statusText)
             ? unsavedStatus
             : $"{statusText}{Environment.NewLine}{unsavedStatus}";
+    }
+
+    private string BuildBottomRightHintMarkup()
+    {
+        if (IsDialogOperationActive())
+        {
+            var hints = new List<string>();
+            if (IsCancelableOperationActive())
+            {
+                hints.Add("Ctrl+G Ctrl+C cancel");
+            }
+
+            if (!string.IsNullOrWhiteSpace(_activeLoginUrl.Value))
+            {
+                hints.Add("Ctrl+G Ctrl+U copy URL");
+            }
+
+            if (!string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value))
+            {
+                hints.Add("Ctrl+G Ctrl+D copy code");
+            }
+
+            if (hints.Count > 0)
+            {
+                return $"[dim]{string.Join(" · ", hints)}[/]";
+            }
+        }
+
+        return "[dim]Ctrl+G Ctrl+R reopen · Esc close[/]";
     }
 
     private string BuildChangeSummaryMarkup()
@@ -1076,12 +1267,26 @@ internal sealed class ModelProvidersDialog
         ArgumentNullException.ThrowIfNull(onCompleted);
         ArgumentNullException.ThrowIfNull(onFailed);
 
+        QueueBackgroundOperation(_ => workAsync(), onCompleted, onFailed);
+    }
+
+    private void QueueBackgroundOperation<TResult>(
+        Func<CancellationToken, Task<TResult>> workAsync,
+        Action<TResult> onCompleted,
+        Action<Exception> onFailed)
+    {
+        ArgumentNullException.ThrowIfNull(workAsync);
+        ArgumentNullException.ThrowIfNull(onCompleted);
+        ArgumentNullException.ThrowIfNull(onFailed);
+
+        var cancellationToken = _activeOperationCancellation?.Token ?? CancellationToken.None;
+
         _ = Task.Run(
             async () =>
             {
                 try
                 {
-                    var result = await workAsync();
+                    var result = await workAsync(cancellationToken);
                     await PublishBackgroundResultAsync(() => onCompleted(result));
                 }
                 catch (Exception ex)
@@ -1111,9 +1316,9 @@ internal sealed class ModelProvidersDialog
 
     private void RequestClose()
     {
-        if (_activeOperationCount.Value > 0)
+        if (IsDialogOperationActive())
         {
-            SetStatus("[warning]Please wait for the current provider operation to complete before closing this dialog.[/]");
+            ReportActiveOperationBlock("close this dialog");
             return;
         }
 
@@ -1213,26 +1418,197 @@ internal sealed class ModelProvidersDialog
         SetSelectedProviderIndex(selectedIndex);
     }
 
-    private bool TryBeginDialogOperation(string operationDescription)
+    private bool TryBeginDialogOperation(
+        string operationDescription,
+        ProviderDialogOperationKind operationKind = ProviderDialogOperationKind.None,
+        bool canCancel = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operationDescription);
 
-        if (_activeOperationCount.Value > 0)
+        if (IsDialogOperationActive())
         {
-            SetStatus($"[warning]Please wait for the current provider operation to complete before trying to {AnsiMarkup.Escape(operationDescription)}.[/]");
+            ReportActiveOperationBlock(operationDescription);
             return false;
         }
 
         _activeOperationCount.Value++;
+        _activeOperationKind.Value = operationKind;
+        _activeOperationNoticeText.Value = null;
+        _activeLoginUrl.Value = null;
+        _activeLoginDeviceCode.Value = null;
+        _activeOperationCancellation = canCancel ? new CancellationTokenSource() : null;
         return true;
     }
 
     private void EndDialogOperation()
     {
+        _activeOperationCancellation?.Dispose();
+        _activeOperationCancellation = null;
+        _activeOperationKind.Value = ProviderDialogOperationKind.None;
+        _activeOperationNoticeText.Value = null;
+        _activeLoginUrl.Value = null;
+        _activeLoginDeviceCode.Value = null;
         if (_activeOperationCount.Value > 0)
         {
             _activeOperationCount.Value--;
         }
+    }
+
+    private bool IsDialogOperationActive()
+        => _activeOperationCount.Value > 0;
+
+    private bool IsCancelableOperationActive()
+        => _activeOperationCancellation is not null;
+
+    private bool IsActiveOperation(ProviderDialogOperationKind operationKind)
+        => operationKind != ProviderDialogOperationKind.None && _activeOperationKind.Value == operationKind;
+
+    private void CancelActiveOperation()
+    {
+        var cancellation = _activeOperationCancellation;
+        if (cancellation is null)
+        {
+            ReportActiveOperationBlock("cancel the current operation");
+            return;
+        }
+
+        if (!cancellation.IsCancellationRequested)
+        {
+            cancellation.Cancel();
+        }
+
+        _activeOperationNoticeText.Value = "[warning]Cancel requested. Waiting for the provider operation to stop...[/]";
+    }
+
+    private void CopyActiveLoginUrl()
+        => CopyActiveLoginValue(_activeLoginUrl.Value, "login URL");
+
+    private void CopyActiveLoginDeviceCode()
+        => CopyActiveLoginValue(_activeLoginDeviceCode.Value, "device code");
+
+    private void CopyActiveLoginValue(string? value, string label)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            SetProviderOperationNotice($"[warning]No {AnsiMarkup.Escape(label)} is available to copy yet.[/]");
+            return;
+        }
+
+        if (_dialog.App?.Terminal.Clipboard.TrySetText(value) == true)
+        {
+            SetProviderOperationNotice($"[success]Copied {AnsiMarkup.Escape(label)} to clipboard.[/]");
+            return;
+        }
+
+        SetProviderOperationNotice($"[warning]Could not copy {AnsiMarkup.Escape(label)} to the clipboard.[/]");
+    }
+
+    private void CaptureActiveLoginDetails(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (TryFindFirstAbsoluteHttpUri(message, out var uri))
+        {
+            _activeLoginUrl.Value = uri;
+        }
+
+        if (TryFindDeviceCode(message, out var deviceCode))
+        {
+            _activeLoginDeviceCode.Value = deviceCode;
+        }
+    }
+
+    private static bool TryFindFirstAbsoluteHttpUri(string text, out string uri)
+    {
+        var start = text.IndexOf("http://", StringComparison.OrdinalIgnoreCase);
+        var httpsStart = text.IndexOf("https://", StringComparison.OrdinalIgnoreCase);
+        if (httpsStart >= 0 && (start < 0 || httpsStart < start))
+        {
+            start = httpsStart;
+        }
+
+        if (start < 0)
+        {
+            uri = string.Empty;
+            return false;
+        }
+
+        var end = start;
+        while (end < text.Length && !char.IsWhiteSpace(text[end]))
+        {
+            end++;
+        }
+
+        var candidate = text[start..end].TrimEnd('.', ',', ';', ':', ')', ']');
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var parsed) &&
+            (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps))
+        {
+            uri = parsed.ToString();
+            return true;
+        }
+
+        uri = string.Empty;
+        return false;
+    }
+
+    private static bool TryFindDeviceCode(string text, out string deviceCode)
+    {
+        const string marker = "code";
+        var markerIndex = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        while (markerIndex >= 0)
+        {
+            var cursor = markerIndex + marker.Length;
+            if (cursor < text.Length && !char.IsWhiteSpace(text[cursor]))
+            {
+                markerIndex = text.IndexOf(marker, cursor, StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            while (cursor < text.Length && char.IsWhiteSpace(text[cursor]))
+            {
+                cursor++;
+            }
+
+            var start = cursor;
+            while (cursor < text.Length && !char.IsWhiteSpace(text[cursor]) && text[cursor] is not '.' and not ',' and not ';')
+            {
+                cursor++;
+            }
+
+            if (cursor > start)
+            {
+                deviceCode = text[start..cursor].Trim();
+                return true;
+            }
+
+            markerIndex = text.IndexOf(marker, cursor, StringComparison.OrdinalIgnoreCase);
+        }
+
+        deviceCode = string.Empty;
+        return false;
+    }
+
+    private void SetProviderOperationNotice(string markup)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(markup);
+        if (IsDialogOperationActive())
+        {
+            _activeOperationNoticeText.Value = markup;
+            return;
+        }
+
+        SetStatus(markup);
+    }
+
+    private void ReportActiveOperationBlock(string operationDescription)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationDescription);
+        var nextStep = IsCancelableOperationActive() ? "Cancel it or wait" : "Wait for it to finish";
+        _activeOperationNoticeText.Value = $"[warning]Current provider operation is still running. {nextStep} before trying to {AnsiMarkup.Escape(operationDescription)}.[/]";
     }
 
     private void SetStatus(string statusText)
@@ -1260,6 +1636,15 @@ internal sealed class ModelProvidersDialog
     private readonly record struct ProviderDefinitionsSaveDialogResult(
         IReadOnlyList<CodeAltaProviderDocument> DefinitionsFromDisk,
         ProviderConfigurationSaveResult SaveResult);
+
+    private enum ProviderDialogOperationKind
+    {
+        None,
+        CodexBrowserLogin,
+        CodexDeviceLogin,
+        CopilotBrowserLogin,
+        CopilotDeviceLogin,
+    }
 
 
     private Visual BuildProviderListItem(DataTemplateValue<ModelProviderEditorItemViewModel> value)

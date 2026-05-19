@@ -455,6 +455,85 @@ public sealed class ModelProvidersDialogInteractionTests
         }
     }
 
+    [TestMethod]
+    public void ModelProvidersDialog_CancelableLoginPreservesDeviceCodeStatusWhileBlocked()
+    {
+        using var session = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(120, 40)), new TerminalOptions { ImplicitStartInput = true }, force: true);
+        var root = new TextBlock("Root");
+        var app = new TerminalApp(
+            root,
+            session.Instance,
+            new TerminalAppOptions
+            {
+                HostKind = TerminalHostKind.Fullscreen,
+            });
+
+        var definitions = new[]
+        {
+            new CodeAltaProviderDocument
+            {
+                ProviderKey = "codex",
+                Enabled = true,
+                ProviderType = "codex",
+            },
+        };
+        var dialog = CreateDialog(() => definitions, getFocusTarget: () => root);
+
+        InvokeTerminalApp(app, "BeginRun");
+        try
+        {
+            dialog.Show();
+            WaitUntil(() => GetProviderCount(dialog) == 1, app);
+
+            var provider = GetProviders(dialog)[0];
+            InvokeStartCancelableProviderAction(
+                dialog,
+                provider,
+                "CodexDeviceLogin",
+                async (_, reportStatus, cancellationToken) =>
+                {
+                    reportStatus("Open https://example.test/device and enter code ABCD-EFGH. Waiting for ChatGPT authorization...");
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return new ProviderTestResult(true, "Login completed.", 0);
+                });
+
+            WaitUntil(() => GetStatusMarkupText(dialog).Contains("ABCD-EFGH", StringComparison.Ordinal), app);
+
+            InvokeRequestClose(dialog);
+            TickTerminalApp(app);
+
+            var blockedStatus = GetStatusMarkupText(dialog);
+            Assert.IsTrue(blockedStatus.Contains("ABCD-EFGH", StringComparison.Ordinal), "The device-code instructions should remain visible while a blocked action reports a warning.");
+            Assert.IsTrue(blockedStatus.Contains("Current provider operation is still running", StringComparison.Ordinal));
+            Assert.IsTrue(IsDialogOpen(dialog));
+
+            var backend = (InMemoryTerminalBackend)session.Instance.Backend;
+            backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Unknown, Char = TerminalChar.CtrlG, Modifiers = TerminalModifiers.Ctrl });
+            TickTerminalApp(app);
+            backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Unknown, Char = TerminalChar.CtrlD, Modifiers = TerminalModifiers.Ctrl });
+            TickTerminalApp(app);
+
+            Assert.IsTrue(session.Instance.Clipboard.TryGetText(out var copiedDeviceCode));
+            Assert.AreEqual("ABCD-EFGH", copiedDeviceCode);
+            Assert.IsTrue(GetStatusMarkupText(dialog).Contains("ABCD-EFGH", StringComparison.Ordinal));
+            Assert.IsTrue(GetStatusMarkupText(dialog).Contains("Copied device code", StringComparison.Ordinal));
+
+            backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Unknown, Char = TerminalChar.CtrlG, Modifiers = TerminalModifiers.Ctrl });
+            TickTerminalApp(app);
+            backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Unknown, Char = TerminalChar.CtrlC, Modifiers = TerminalModifiers.Ctrl });
+            WaitUntil(() => GetStatusMarkupText(dialog).Contains("Provider operation canceled", StringComparison.Ordinal), app);
+
+            InvokeRequestClose(dialog);
+            TickTerminalApp(app);
+
+            Assert.IsFalse(IsDialogOpen(dialog), "The dialog should close normally after the login operation is canceled.");
+        }
+        finally
+        {
+            InvokeTerminalApp(app, "EndRun");
+        }
+    }
+
     private static ModelProvidersDialog CreateDialog(
         Func<IReadOnlyList<CodeAltaProviderDocument>> loadDefinitions,
         Func<IReadOnlyList<CodeAltaProviderDocument>, Task<ProviderConfigurationSaveResult>>? saveDefinitionsAsync = null,
@@ -509,6 +588,43 @@ public sealed class ModelProvidersDialogInteractionTests
         => typeof(ModelProvidersDialog)
             .GetMethod("Close", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(dialog, null);
+
+    private static void InvokeRequestClose(ModelProvidersDialog dialog)
+        => typeof(ModelProvidersDialog)
+            .GetMethod("RequestClose", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dialog, null);
+
+    private static void InvokeStartCancelableProviderAction(
+        ModelProvidersDialog dialog,
+        ViewModels.ModelProviderEditorItemViewModel item,
+        string operationKindName,
+        Func<CodeAltaProviderDocument, Action<string>, CancellationToken, Task<ProviderTestResult>> actionAsync)
+    {
+        var operationKindType = typeof(ModelProvidersDialog).GetNestedType("ProviderDialogOperationKind", BindingFlags.NonPublic)!;
+        var operationKind = Enum.Parse(operationKindType, operationKindName);
+        var method = typeof(ModelProvidersDialog)
+            .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(static candidate =>
+            {
+                if (candidate.Name != "StartProviderAction")
+                {
+                    return false;
+                }
+
+                var parameters = candidate.GetParameters();
+                return parameters.Length == 6 && parameters[4].ParameterType == typeof(bool);
+            });
+        method.Invoke(
+            dialog,
+            [
+                item,
+                "start ChatGPT device-code login",
+                "Requesting ChatGPT device code...",
+                operationKind,
+                true,
+                actionAsync,
+            ]);
+    }
 
     private static void InvokeLoadDefinitionsIntoDialog(
         ModelProvidersDialog dialog,
@@ -580,27 +696,27 @@ public sealed class ModelProvidersDialogInteractionTests
         public CodeAltaConfigValidationResult ValidateConfigurationContent(string? content)
             => CodeAltaConfigStore.ValidateGlobalConfigContent(content, ConfigurationPath);
 
-        public Task<ProviderConfigurationSaveResult> SaveConfigurationContentAsync(string? content)
+        public Task<ProviderConfigurationSaveResult> SaveConfigurationContentAsync(string? content, CancellationToken cancellationToken = default)
             => Task.FromResult(ProviderConfigurationSaveResult.Success);
 
-        public Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions) => _saveDefinitionsAsync(definitions);
+        public Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions, CancellationToken cancellationToken = default) => _saveDefinitionsAsync(definitions);
 
-        public Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition) => _testProviderAsync(definition);
+        public Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default) => _testProviderAsync(definition);
 
-        public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
+        public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
             => Task.FromResult(new ProviderTestResult(false, "Browser login is unavailable in this host.", 0));
 
-        public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
+        public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
             => Task.FromResult(new ProviderTestResult(false, "Device-code login is unavailable in this host.", 0));
 
-        public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition)
+        public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
             => Task.FromResult(new ProviderTestResult(false, "Logout is unavailable in this host.", 0));
 
-        public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition) => TestProviderAsync(definition);
+        public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default) => TestProviderAsync(definition, cancellationToken);
 
-        public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition) => TestProviderAsync(definition);
+        public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default) => TestProviderAsync(definition, cancellationToken);
 
-        public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition)
+        public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
             => Task.FromResult(new ProviderTestResult(false, "Account/workspace listing is unavailable in this host.", 0));
     }
 }

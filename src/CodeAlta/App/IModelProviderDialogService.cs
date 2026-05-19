@@ -12,23 +12,23 @@ internal interface IModelProviderDialogService
 
     CodeAltaConfigValidationResult ValidateConfigurationContent(string? content);
 
-    Task<ProviderConfigurationSaveResult> SaveConfigurationContentAsync(string? content);
+    Task<ProviderConfigurationSaveResult> SaveConfigurationContentAsync(string? content, CancellationToken cancellationToken = default);
 
-    Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions);
+    Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition);
+    Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus);
+    Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus);
+    Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition);
+    Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition);
+    Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition);
+    Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
 
-    Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition);
+    Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
 }
 
 internal readonly record struct ProviderConfigurationSaveResult(bool RuntimeRefreshSucceeded, string? RuntimeRefreshErrorMessage)
@@ -63,40 +63,40 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
     public CodeAltaConfigValidationResult ValidateConfigurationContent(string? content)
         => _providerUi.ValidateProviderConfigurationContent(content);
 
-    public Task<ProviderConfigurationSaveResult> SaveConfigurationContentAsync(string? content)
-        => _providerUi.SaveProviderConfigurationContentAsync(content, CancellationToken.None);
+    public Task<ProviderConfigurationSaveResult> SaveConfigurationContentAsync(string? content, CancellationToken cancellationToken = default)
+        => _providerUi.SaveProviderConfigurationContentAsync(content, cancellationToken);
 
-    public Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions)
-        => _providerUi.SaveProviderDefinitionsAsync(definitions, CancellationToken.None);
+    public Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions, CancellationToken cancellationToken = default)
+        => _providerUi.SaveProviderDefinitionsAsync(definitions, cancellationToken);
 
-    public Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition)
-        => _providerUi.TestProviderAsync(definition, CancellationToken.None);
+    public Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
+        => _providerUi.TestProviderAsync(definition, cancellationToken);
 
-    public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
+    public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
         => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.LoginCopilotDirectWithBrowserAsync(definition, reportStatus, CancellationToken.None)
-            : _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, reportStatus, CancellationToken.None);
+            ? _providerUi.LoginCopilotDirectWithBrowserAsync(definition, reportStatus, cancellationToken)
+            : _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, reportStatus, cancellationToken);
 
-    public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus)
+    public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
         => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, CancellationToken.None)
-            : _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, CancellationToken.None);
+            ? _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken)
+            : _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, cancellationToken);
 
-    public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition)
+    public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
         => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.LogoutCopilotDirectAsync(definition, CancellationToken.None)
-            : _providerUi.LogoutCodexSubscriptionAsync(definition, CancellationToken.None);
+            ? _providerUi.LogoutCopilotDirectAsync(definition, cancellationToken)
+            : _providerUi.LogoutCodexSubscriptionAsync(definition, cancellationToken);
 
-    public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition)
+    public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
         => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.TestCopilotDirectAuthenticationAsync(definition, CancellationToken.None)
-            : _providerUi.TestCodexSubscriptionAuthenticationAsync(definition, CancellationToken.None);
+            ? _providerUi.TestCopilotDirectAuthenticationAsync(definition, cancellationToken)
+            : _providerUi.TestCodexSubscriptionAuthenticationAsync(definition, cancellationToken);
 
-    public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition)
+    public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
         => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.ListCopilotDirectModelsAsync(definition, CancellationToken.None)
-            : _providerUi.ListCodexSubscriptionModelsAsync(definition, CancellationToken.None);
+            ? _providerUi.ListCopilotDirectModelsAsync(definition, cancellationToken)
+            : _providerUi.ListCodexSubscriptionModelsAsync(definition, cancellationToken);
 
-    public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition)
-        => _providerUi.ListCodexSubscriptionAccountsAsync(definition, CancellationToken.None);
+    public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
+        => _providerUi.ListCodexSubscriptionAccountsAsync(definition, cancellationToken);
 }
