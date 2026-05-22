@@ -14,6 +14,13 @@ Use `Ctrl+G Ctrl+L`, `/logs`, or the **Show Logs** button in the navigator foote
 
 Logs are the first place to check for provider startup, credential, plugin build, and runtime errors.
 
+## Windows Terminal feels slow after a long session
+
+> [!NOTE]
+> A small known issue can affect Windows Terminal after CodeAlta has been running in the same tab for many hours, such as a full day. The UI may begin to feel sluggish. Restarting `alta` in the same Windows Terminal tab may not restore normal responsiveness, but opening a new tab or window and launching `alta` there usually does.
+
+This appears to be related to how Windows Terminal handles long-running, high-refresh terminal rendering. CodeAlta uses XenoAtom.Terminal.UI for an interactive interface that can render at up to 60 FPS. If you notice slowdown after a long session, move to a fresh Windows Terminal tab or window.
+
 ## Invalid `config.toml`
 
 CodeAlta validates `~/.alta/config.toml` before creating providers or sessions. If the file is invalid at startup, CodeAlta opens a TOML recovery editor with syntax highlighting, an error marker, live parse feedback, `Ctrl+S` Save and Continue when valid, and `Ctrl+Q` Exit.
