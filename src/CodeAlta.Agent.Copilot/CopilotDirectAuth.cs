@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -69,16 +70,16 @@ internal sealed class CopilotDirectAuthManager
         switch (auth.AuthSource)
         {
             case CopilotDirectAuthSources.CopilotTokenEnvironment:
-            {
-                var token = ResolveEnvironmentSecret(auth.CopilotTokenEnvironmentVariable, "Copilot token environment variable");
-                var baseUri = CopilotDirectBaseUriResolver.Resolve(_provider.BaseUri, token, auth.EnterpriseDomain, endpointsApi: null);
-                return new CopilotDirectCredential(token, ExpiresAt: null, baseUri);
-            }
+                {
+                    var token = ResolveEnvironmentSecret(auth.CopilotTokenEnvironmentVariable, "Copilot token environment variable");
+                    var baseUri = CopilotDirectBaseUriResolver.Resolve(_provider.BaseUri, token, auth.EnterpriseDomain, endpointsApi: null);
+                    return new CopilotDirectCredential(token, ExpiresAt: null, baseUri);
+                }
             case CopilotDirectAuthSources.GitHubTokenEnvironment:
-            {
-                var githubToken = ResolveEnvironmentSecret(auth.GitHubTokenEnvironmentVariable, "GitHub token environment variable");
-                return await ExchangeGitHubTokenAsync(githubToken, persistCache: false, cancellationToken).ConfigureAwait(false);
-            }
+                {
+                    var githubToken = ResolveEnvironmentSecret(auth.GitHubTokenEnvironmentVariable, "GitHub token environment variable");
+                    return await ExchangeGitHubTokenAsync(githubToken, persistCache: false, cancellationToken).ConfigureAwait(false);
+                }
             case CopilotDirectAuthSources.GitHubDeviceFlow:
                 return await ResolveDeviceFlowCredentialAsync(forceRefresh, cancellationToken).ConfigureAwait(false);
             default:
@@ -145,7 +146,25 @@ internal sealed class CopilotDirectAuthManager
             throw new InvalidOperationException("GitHub device authorization response was missing required fields.");
         }
 
-        Logger.Info($"Copilot login required. Open {device.VerificationUri} and enter code {device.UserCode}. Waiting for authorization; cancel the operation to stop polling.");
+        bool copied = false;
+        try
+        {
+            // best-effort to copy the device code to the clipboard
+            var clip = Process.Start(new ProcessStartInfo("pwsh",
+                $"""
+                -c "set-clipboard -value '{device.UserCode}'"
+                """)
+            {
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+            clip?.WaitForExit();
+            copied = clip?.ExitCode == 0;
+        }
+        catch (Exception) { }
+
+        Logger.Info($"Copilot login required. Open {device.VerificationUri} and {(copied ? "paste" : "enter")} code {device.UserCode}. Waiting for authorization; cancel the operation to stop polling.");
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, device.ExpiresIn)).Subtract(TimeSpan.FromSeconds(3));
         var interval = TimeSpan.FromSeconds(Math.Max(5, device.Interval ?? 5));
