@@ -34,10 +34,10 @@ A separate `[chat]` section chooses the default enabled provider:
 default_provider = "openai"
 ```
 
-Project-local overrides can live in `<project>/.alta/config.toml`. CodeAlta resolves project settings first, then falls back to the global `~/.alta/config.toml`.
+Project-local overrides can live in `<project>/.alta/config.toml`. Project files currently override `[chat].default_provider` and each provider's selected `model` / `reasoning_effort`; global `~/.alta/config.toml` still defines the provider registrations, credentials, endpoints, and advanced provider metadata.
 
 > [!NOTE]
-> Project-local provider settings are useful for repository-specific defaults, but avoid committing secrets. Prefer `api_key_env` for API-key providers so credentials stay in your user environment.
+> Project-local provider preferences are useful for repository-specific defaults, but avoid committing secrets. Prefer `api_key_env` in the global provider definition so credentials stay in your user environment.
 
 ## Provider dialog
 
@@ -57,6 +57,104 @@ The dialog can:
 - start and monitor Codex/Copilot browser or device login flows;
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
 - open an Advanced TOML editor with live validation.
+
+## Advanced TOML reference
+
+Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `openai-chat`, `openai-responses`, `anthropic`, `google-genai`, and `vertex-ai`.
+
+Common provider fields are:
+
+| Field | Purpose |
+| --- | --- |
+| `enabled` | Enables or disables the provider entry. Missing means enabled after normalization. |
+| `display_name` | Label shown in provider selectors and dialogs. |
+| `type` | Provider type. Common aliases such as `openai`, `responses`, `gemini`, `vertex`, and `github-copilot` are normalized to the canonical types above. |
+| `model` | Default model id for this provider. |
+| `reasoning_effort` | Default reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `api_key` / `api_key_env` | Literal API key or environment variable name for API-key providers. Prefer `api_key_env`. |
+| `api_url` | Absolute endpoint override. Codex and Copilot require HTTPS except localhost test transports. |
+| `protocol_trace` | Enables low-level protocol tracing for OpenAI, Codex, and Copilot transports. |
+| `models_dev_provider_id` | Optional models.dev provider id used to enrich model metadata where supported. |
+| `single_model_id` | Fixed model id for endpoints that do not expose a model list. |
+| `profile` | Compatibility profile block; see below. |
+| `compaction` | Local raw-API compaction settings; see [Context usage and compaction](#context-usage-and-compaction). |
+| `model_overrides` | Per-model metadata overrides; see [Model metadata overrides](#model-metadata-overrides). |
+| `extra_body` | Additional OpenAI-compatible request-body TOML fields; only used by `openai-chat` and `openai-responses`. |
+
+Provider-type-specific fields and restrictions:
+
+| Type | Credential and endpoint fields | Additional fields handled for that type |
+| --- | --- | --- |
+| `openai-chat`, `openai-responses` | `api_key` or `api_key_env`; optional `api_url`, `organization_id`, `project_id` | `models_dev_provider_id`, `single_model_id`, `extra_body`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+| `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
+| `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
+| `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
+| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
+| `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+
+Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"`, `"codex_auth_import"`, `"codex_auth_file_readonly"`, or `"external_token_command"`; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"`, `"codex_endpoint"`, or `"static"`; `response_transport = "websocket_with_http_fallback"` or `"http"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`.
+
+Copilot accepts `auth_source = "github_device_flow"`, `"github_token_env"`, or `"copilot_token_env"`; `model_discovery = "copilot_endpoint_with_static_fallback"`, `"copilot_endpoint"`, or `"static"`. `github_token_env` is required when using GitHub-token auth, and `copilot_token_env` is required when using Copilot-token auth.
+
+### Compatibility profile
+
+Use `[providers.<provider-key>.profile]` only when a provider-compatible endpoint needs behavior different from CodeAlta's default transport profile. The supported profile fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `supports_developer_role` | Whether requests may use a developer-role message. |
+| `supports_store` | Whether the transport may use provider store/session flags where supported. |
+| `supports_reasoning_effort` | Whether `reasoning_effort` can be sent to the provider. |
+| `streams_usage` | Whether streamed responses include usage data. |
+| `supports_thought_signatures` | Whether provider thought-signature continuity is supported. |
+| `max_tokens_field_name` | Request-body field used for maximum output tokens, such as `max_output_tokens` or `max_completion_tokens`. |
+| `reasoning_field_names` | Response fields inspected for reasoning content. |
+| `reasoning_input_field_name` | Assistant-message field used when replaying prior reasoning content. |
+
+The bundled DeepSeek profile is an example of a verified compatibility override:
+
+```toml
+[providers.deepseek.profile]
+supports_developer_role = false
+reasoning_input_field_name = "reasoning_content"
+```
+
+### Single-model endpoints
+
+Use `single_model_id` when a provider-compatible endpoint serves one model or cannot list models. The bundled MiniMax entry uses this pattern:
+
+```toml
+[providers.minimax]
+single_model_id = "MiniMax-M2.7"
+```
+
+### Model metadata overrides
+
+Use `[providers.<provider-key>.model_overrides.<model-id>]` to correct model metadata used by the model browser, selectors, usage denominator, and compaction budget when discovery or models.dev metadata is missing or incomplete.
+
+| Field | Effect |
+| --- | --- |
+| `display_name` | Overrides the model label. |
+| `description` | Overrides the model description. |
+| `context_window` | Total context-window tokens. Also writes `contextWindow` / `contextWindowTokens` capabilities. |
+| `input_token_limit` | Maximum input tokens. Also writes `inputTokenLimit` / `maxInputTokens` capabilities. |
+| `output_token_limit` | Maximum output tokens. Also writes `outputTokenLimit`. |
+| `max_tokens` | Maximum output token field used as `maxTokens`; defaults to `output_token_limit` when omitted. |
+| `supports_reasoning` | Overrides reasoning capability. |
+| `supports_tool_call` | Overrides tool-call capability. |
+| `supports_attachments` | Overrides attachment/image capability. |
+| `supports_structured_output` | Overrides structured-output capability. |
+
+For a model id that contains dots, slashes, or other TOML punctuation, quote the key:
+
+```toml
+[providers.openai.model_overrides."your-model-id"]
+context_window = 200000
+input_token_limit = 180000
+output_token_limit = 20000
+supports_reasoning = true
+supports_tool_call = true
+```
 
 ## Popular providers
 
@@ -177,5 +275,18 @@ file_context_share_of_summary_target = 0.15
 keep_last_user_message = true
 allow_split_turn = true
 ```
+
+Compaction fields are validated before the configuration is saved or accepted at startup:
+
+| Field | Default | Accepted range / meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Enables automatic threshold compaction. |
+| `ratio` | `0.95` | Active-context/input-limit ratio that triggers automatic compaction; must be `> 0` and `<= 1`. |
+| `summary_output_ratio` | `0.10` | Summarizer output budget as a share of the input limit; must be `> 0` and `<= 0.50`. |
+| `post_compaction_target_ratio` | `0.10` | Preferred active-context target after compaction; must be `> 0` and `<= 1`. |
+| `summary_share_of_target` | `0.40` | Share of the post-compaction target offered to summary generation; must be `> 0` and `<= 1`. |
+| `file_context_share_of_summary_target` | `0.15` | Share of the summary target available for model-visible file context; must be `>= 0` and `<= 1`. |
+| `keep_last_user_message` | `true` | Keeps the latest user message as an anchor during compaction. |
+| `allow_split_turn` | `true` | Allows compaction to split a large turn while preserving continuation state. |
 
 Most users should leave these defaults unchanged.
