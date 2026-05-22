@@ -498,6 +498,7 @@ public sealed class ModelProvidersDialogInteractionTests
                 });
 
             WaitUntil(() => GetStatusMarkupText(dialog).Contains("ABCD-EFGH", StringComparison.Ordinal), app);
+            Assert.IsTrue(IsActiveLoginDialogOpen(dialog), "A focused login dialog should appear above the providers dialog.");
 
             InvokeRequestClose(dialog);
             TickTerminalApp(app);
@@ -522,11 +523,67 @@ public sealed class ModelProvidersDialogInteractionTests
             TickTerminalApp(app);
             backend.PushEvent(new TerminalKeyEvent { Key = TerminalKey.Unknown, Char = TerminalChar.CtrlC, Modifiers = TerminalModifiers.Ctrl });
             WaitUntil(() => GetStatusMarkupText(dialog).Contains("Provider operation canceled", StringComparison.Ordinal), app);
+            Assert.IsFalse(IsActiveLoginDialogOpen(dialog), "The login dialog should close when the operation ends.");
 
             InvokeRequestClose(dialog);
             TickTerminalApp(app);
 
             Assert.IsFalse(IsDialogOpen(dialog), "The dialog should close normally after the login operation is canceled.");
+        }
+        finally
+        {
+            InvokeTerminalApp(app, "EndRun");
+        }
+    }
+
+    [TestMethod]
+    public void ModelProvidersDialog_LoginDialogClosesAutomaticallyWhenLoginCompletes()
+    {
+        using var session = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(120, 40)), new TerminalOptions { ImplicitStartInput = true }, force: true);
+        var root = new TextBlock("Root");
+        var app = new TerminalApp(
+            root,
+            session.Instance,
+            new TerminalAppOptions
+            {
+                HostKind = TerminalHostKind.Fullscreen,
+            });
+
+        var definitions = new[]
+        {
+            new CodeAltaProviderDocument
+            {
+                ProviderKey = "copilot",
+                Enabled = true,
+                ProviderType = "copilot",
+            },
+        };
+        var dialog = CreateDialog(() => definitions, getFocusTarget: () => root);
+        var loginComplete = new TaskCompletionSource<ProviderTestResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        InvokeTerminalApp(app, "BeginRun");
+        try
+        {
+            dialog.Show();
+            WaitUntil(() => GetProviderCount(dialog) == 1, app);
+
+            var provider = GetProviders(dialog)[0];
+            InvokeStartCancelableProviderAction(
+                dialog,
+                provider,
+                "CopilotDeviceLogin",
+                (_, reportStatus, cancellationToken) =>
+                {
+                    reportStatus("Open https://github.com/login/device and enter code WXYZ-1234. Waiting for Copilot authorization...");
+                    return loginComplete.Task.WaitAsync(cancellationToken);
+                });
+
+            WaitUntil(() => IsActiveLoginDialogOpen(dialog), app);
+            loginComplete.SetResult(new ProviderTestResult(true, "Login completed.", 0));
+            WaitUntil(() => !IsActiveLoginDialogOpen(dialog), app);
+
+            Assert.AreEqual(ViewModels.ModelProviderLastTestState.Success, provider.LastTestState);
+            Assert.IsTrue(IsDialogOpen(dialog), "The providers dialog should remain open after login completes.");
         }
         finally
         {
@@ -573,6 +630,11 @@ public sealed class ModelProvidersDialogInteractionTests
         => ((Dialog)typeof(ModelProvidersDialog)
             .GetField("_dialog", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(dialog)!).App is not null;
+
+    private static bool IsActiveLoginDialogOpen(ModelProvidersDialog dialog)
+        => ((Dialog?)typeof(ModelProvidersDialog)
+            .GetField("_activeLoginDialog", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(dialog))?.App is not null;
 
     private static void InvokeStartTest(ModelProvidersDialog dialog, ViewModels.ModelProviderEditorItemViewModel item)
         => typeof(ModelProvidersDialog)

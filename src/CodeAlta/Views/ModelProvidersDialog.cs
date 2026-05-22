@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodeAlta.App;
 using CodeAlta.Catalog;
 using CodeAlta.ViewModels;
@@ -56,9 +57,11 @@ internal sealed class ModelProvidersDialog
     private readonly State<string?> _activeOperationNoticeText = new(null);
     private readonly State<string?> _activeLoginUrl = new(null);
     private readonly State<string?> _activeLoginDeviceCode = new(null);
+    private readonly State<int> _activeLoginDialogRefreshVersion = new(0);
     private readonly State<bool> _hasLoadedDefinitions = new(false);
     private readonly State<string> _statusText = new("[dim]Configure model providers and save to refresh the runtime.[/]");
     private CancellationTokenSource? _activeOperationCancellation;
+    private Dialog? _activeLoginDialog;
 
     public ModelProvidersDialog(
         IModelProviderDialogService modelProviders,
@@ -1235,6 +1238,22 @@ internal sealed class ModelProvidersDialog
             ? "[success]Provider configuration saved and runtime refreshed.[/]"
             : $"[warning]Provider configuration saved, but runtime refresh failed: {AnsiMarkup.Escape(saveResult.RuntimeRefreshErrorMessage ?? "unknown error")}[/]";
 
+    private static void TryOpenBrowser(string uri)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = uri,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception)
+        {
+            // The Link still renders as an OSC 8 terminal hyperlink when shell launch is unavailable.
+        }
+    }
+
     private void QueueBackgroundOperation<TResult>(
         Func<TResult> work,
         Action<TResult> onCompleted,
@@ -1438,11 +1457,17 @@ internal sealed class ModelProvidersDialog
         _activeLoginUrl.Value = null;
         _activeLoginDeviceCode.Value = null;
         _activeOperationCancellation = canCancel ? new CancellationTokenSource() : null;
+        if (IsLoginOperation(operationKind))
+        {
+            ShowActiveLoginDialog(operationKind);
+        }
+
         return true;
     }
 
     private void EndDialogOperation()
     {
+        CloseActiveLoginDialog();
         _activeOperationCancellation?.Dispose();
         _activeOperationCancellation = null;
         _activeOperationKind.Value = ProviderDialogOperationKind.None;
@@ -1479,7 +1504,290 @@ internal sealed class ModelProvidersDialog
         }
 
         _activeOperationNoticeText.Value = "[warning]Cancel requested. Waiting for the provider operation to stop...[/]";
+        RefreshActiveLoginDialog();
     }
+
+    private void ShowActiveLoginDialog(ProviderDialogOperationKind operationKind)
+    {
+        if (_dialog.App is null)
+        {
+            return;
+        }
+
+        if (_activeLoginDialog?.App is not null)
+        {
+            return;
+        }
+
+        var labels = GetLoginOperationLabels(operationKind);
+        var cancelButton = new Button(labels.CancelLabel)
+            .Tone(ControlTone.Warning)
+            .Click(CancelActiveOperation);
+        var content = new ComputedVisual(
+            () =>
+            {
+                _ = _activeLoginDialogRefreshVersion.Value;
+                return BuildActiveLoginDialogContent(labels);
+            });
+
+        var dialog = new Dialog()
+            .Title(labels.Title)
+            .TopRightText(cancelButton)
+            .BottomRightText(new Markup("[dim]Esc cancel · Ctrl+G Ctrl+C cancel[/]"))
+            .IsModal(true)
+            .Padding(1)
+            .Content(content)
+            .Style(DialogStyle.Rounded);
+
+        dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Login.Cancel",
+            LabelMarkup = labels.CancelLabel,
+            DescriptionMarkup = "Cancel the active browser or device login.",
+            Gesture = new KeyGesture(TerminalKey.Escape),
+            Importance = CommandImportance.Primary,
+            Execute = _ => CancelActiveOperation(),
+        });
+        dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Login.CancelSequence",
+            LabelMarkup = labels.CancelLabel,
+            DescriptionMarkup = "Cancel the active browser or device login.",
+            Sequence = new KeySequence(
+                new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+                new KeyGesture(TerminalChar.CtrlC, TerminalModifiers.Ctrl)),
+            Importance = CommandImportance.Primary,
+            Execute = _ => CancelActiveOperation(),
+        });
+        dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Login.CopyUrl",
+            LabelMarkup = "Copy Login URL",
+            DescriptionMarkup = "Copy the current login URL to the clipboard.",
+            Sequence = new KeySequence(
+                new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+                new KeyGesture(TerminalChar.CtrlU, TerminalModifiers.Ctrl)),
+            Importance = CommandImportance.Secondary,
+            CanExecute = _ => !string.IsNullOrWhiteSpace(_activeLoginUrl.Value),
+            Execute = _ => CopyActiveLoginUrl(),
+        });
+        dialog.AddCommand(new Command
+        {
+            Id = "CodeAlta.Providers.Login.CopyDeviceCode",
+            LabelMarkup = "Copy Device Code",
+            DescriptionMarkup = "Copy the current device login code to the clipboard.",
+            Sequence = new KeySequence(
+                new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+                new KeyGesture(TerminalChar.CtrlD, TerminalModifiers.Ctrl)),
+            Importance = CommandImportance.Secondary,
+            CanExecute = _ => !string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value),
+            Execute = _ => CopyActiveLoginDeviceCode(),
+        });
+
+        _activeLoginDialog = dialog;
+        ResponsiveDialogSize.Apply(dialog, _getBounds(), minWidth: 72, minHeight: 14, widthFactor: 0.56, heightFactor: 0.36);
+        dialog.Show();
+    }
+
+    private Visual BuildActiveLoginDialogContent(LoginOperationLabels labels)
+    {
+        var instructions = new Markup($"[dim]{AnsiMarkup.Escape(labels.Instruction)} This dialog closes automatically when login completes.[/]")
+        {
+            Wrap = true,
+        };
+
+        var sections = new List<Visual>
+        {
+            instructions,
+            CreateLoginUrlSection(),
+        };
+
+        if (!string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value))
+        {
+            sections.Add(CreateLoginDeviceCodeSection());
+        }
+
+        if (_activeOperationNoticeText.Value is { } noticeText)
+        {
+            sections.Add(new Markup(noticeText) { Wrap = true });
+        }
+
+        sections.Add(new HStack(
+            new Button("Copy URL")
+                .Tone(ControlTone.Default)
+                .IsEnabled(() => !string.IsNullOrWhiteSpace(_activeLoginUrl.Value))
+                .Click(CopyActiveLoginUrl),
+            new Button("Copy Code")
+                .Tone(ControlTone.Default)
+                .IsEnabled(() => !string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value))
+                .Click(CopyActiveLoginDeviceCode),
+            new Button(labels.CancelLabel)
+                .Tone(ControlTone.Warning)
+                .Click(CancelActiveOperation))
+        {
+            HorizontalAlignment = Align.End,
+            Spacing = 1,
+        });
+
+        return new VStack(sections.ToArray())
+        {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
+            Spacing = 1,
+        };
+    }
+
+    private Visual CreateLoginUrlSection()
+    {
+        if (string.IsNullOrWhiteSpace(_activeLoginUrl.Value))
+        {
+            return new VStack(
+                new Markup("[bold]URL[/]"),
+                new Markup("[dim]Waiting for the provider to return the login URL...[/]") { Wrap = true })
+            {
+                HorizontalAlignment = Align.Stretch,
+                Spacing = 0,
+            };
+        }
+
+        return new VStack(
+            new Markup("[bold]URL[/] [dim]Press Enter on any link line to open it.[/]"),
+            CreateWrappedLoginLink(_activeLoginUrl.Value))
+        {
+            HorizontalAlignment = Align.Stretch,
+            Spacing = 0,
+        };
+    }
+
+    private Visual CreateLoginDeviceCodeSection()
+        => new VStack(
+            new Markup("[bold]Code[/] [dim]Copy it, then paste it in the browser.[/]"),
+            new HStack(
+                new TextBox(() => _activeLoginDeviceCode.Value ?? string.Empty)
+                    .IsEnabled(false)
+                    .Stretch(),
+                new Button("Copy Code")
+                    .Tone(ControlTone.Primary)
+                    .Click(CopyActiveLoginDeviceCode))
+            {
+                HorizontalAlignment = Align.Stretch,
+                Spacing = 1,
+            })
+        {
+            HorizontalAlignment = Align.Stretch,
+            Spacing = 0,
+        };
+
+    private static Visual CreateWrappedLoginLink(string uri)
+    {
+        var lines = SplitLoginUriForDisplay(uri).Select(segment =>
+            (Visual)new Link(uri, segment)
+                .Opened((_, e) =>
+                {
+                    TryOpenBrowser(e.Uri);
+                    e.Handled = true;
+                })
+                .Tooltip(new TextBlock($"Open {uri}")));
+        return new VStack(lines.ToArray())
+        {
+            HorizontalAlignment = Align.Stretch,
+            Spacing = 0,
+        };
+    }
+
+    private static IReadOnlyList<string> SplitLoginUriForDisplay(string uri)
+    {
+        const int maxSegmentLength = 64;
+        if (uri.Length <= maxSegmentLength)
+        {
+            return [uri];
+        }
+
+        var segments = new List<string>();
+        var start = 0;
+        while (start < uri.Length)
+        {
+            var remaining = uri.Length - start;
+            if (remaining <= maxSegmentLength)
+            {
+                segments.Add(uri[start..]);
+                break;
+            }
+
+            var length = FindLoginUriWrapLength(uri, start, maxSegmentLength);
+            segments.Add(uri.Substring(start, length));
+            start += length;
+        }
+
+        return segments;
+    }
+
+    private static int FindLoginUriWrapLength(string uri, int start, int maxLength)
+    {
+        var endExclusive = Math.Min(uri.Length, start + maxLength);
+        for (var index = endExclusive - 1; index > start + 16; index--)
+        {
+            if (uri[index] is '/' or '?' or '&' or '=' or '-' or '_' or '.')
+            {
+                return index - start + 1;
+            }
+        }
+
+        return endExclusive - start;
+    }
+
+    private void CloseActiveLoginDialog()
+    {
+        var dialog = _activeLoginDialog;
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var app = dialog.App ?? _dialog.App;
+        dialog.Close();
+        _activeLoginDialog = null;
+        app?.Focus(_dialog);
+    }
+
+    private void RefreshActiveLoginDialog()
+    {
+        if (_activeLoginDialog is not null)
+        {
+            _activeLoginDialogRefreshVersion.Value++;
+        }
+    }
+
+    private static bool IsLoginOperation(ProviderDialogOperationKind operationKind)
+        => operationKind is ProviderDialogOperationKind.CodexBrowserLogin
+            or ProviderDialogOperationKind.CodexDeviceLogin
+            or ProviderDialogOperationKind.CopilotBrowserLogin
+            or ProviderDialogOperationKind.CopilotDeviceLogin;
+
+    private static LoginOperationLabels GetLoginOperationLabels(ProviderDialogOperationKind operationKind)
+        => operationKind switch
+        {
+            ProviderDialogOperationKind.CodexBrowserLogin => new LoginOperationLabels(
+                "ChatGPT Browser Login",
+                "Cancel Browser Login",
+                "Complete ChatGPT browser login in your browser, then return to CodeAlta."),
+            ProviderDialogOperationKind.CodexDeviceLogin => new LoginOperationLabels(
+                "ChatGPT Device Login",
+                "Cancel Device Login",
+                "Open the ChatGPT verification URL and enter the device code shown below."),
+            ProviderDialogOperationKind.CopilotBrowserLogin => new LoginOperationLabels(
+                "Copilot Browser Login",
+                "Cancel Browser Login",
+                "Complete Copilot browser login in your browser, then return to CodeAlta."),
+            ProviderDialogOperationKind.CopilotDeviceLogin => new LoginOperationLabels(
+                "Copilot Device Login",
+                "Cancel Device Login",
+                "Open the Copilot verification URL and enter the device code shown below."),
+            _ => new LoginOperationLabels(
+                "Provider Login",
+                "Cancel Login",
+                "Complete the provider login in your browser, then return to CodeAlta."),
+        };
 
     private void CopyActiveLoginUrl()
         => CopyActiveLoginValue(_activeLoginUrl.Value, "login URL");
@@ -1521,6 +1829,8 @@ internal sealed class ModelProvidersDialog
         {
             _activeLoginDeviceCode.Value = deviceCode;
         }
+
+        RefreshActiveLoginDialog();
     }
 
     private static bool TryFindFirstAbsoluteHttpUri(string text, out string uri)
@@ -1599,6 +1909,7 @@ internal sealed class ModelProvidersDialog
         if (IsDialogOperationActive())
         {
             _activeOperationNoticeText.Value = markup;
+            RefreshActiveLoginDialog();
             return;
         }
 
@@ -1610,6 +1921,7 @@ internal sealed class ModelProvidersDialog
         ArgumentException.ThrowIfNullOrWhiteSpace(operationDescription);
         var nextStep = IsCancelableOperationActive() ? "Cancel it or wait" : "Wait for it to finish";
         _activeOperationNoticeText.Value = $"[warning]Current provider operation is still running. {nextStep} before trying to {AnsiMarkup.Escape(operationDescription)}.[/]";
+        RefreshActiveLoginDialog();
     }
 
     private void SetStatus(string statusText)
@@ -1637,6 +1949,11 @@ internal sealed class ModelProvidersDialog
     private readonly record struct ProviderDefinitionsSaveDialogResult(
         IReadOnlyList<CodeAltaProviderDocument> DefinitionsFromDisk,
         ProviderConfigurationSaveResult SaveResult);
+
+    private readonly record struct LoginOperationLabels(
+        string Title,
+        string CancelLabel,
+        string Instruction);
 
     private enum ProviderDialogOperationKind
     {
