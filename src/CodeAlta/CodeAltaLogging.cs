@@ -68,6 +68,7 @@ internal static class CodeAltaLogging
         return new FileLogWriterOptions(GetLogFilePath(homeRoot))
         {
             AutoFlush = true,
+            Formatter = CodeAltaLocalTimeLogFormatter.Instance,
             FileSizeLimitBytes = LogFileSizeLimitBytes,
             RollingInterval = FileRollingInterval.Daily,
             RetainedFileCountLimit = RetainedLogFileCountLimit,
@@ -85,6 +86,7 @@ internal static class CodeAltaLogging
     {
         var writer = new CodeAltaUiLogWriter(UiLogBufferStorage)
         {
+            Formatter = CodeAltaLocalTimeLogFormatter.Instance,
             EnableRichFormatting = true,
             EnableMarkupMessages = true,
         };

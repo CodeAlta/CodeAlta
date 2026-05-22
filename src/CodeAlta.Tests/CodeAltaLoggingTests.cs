@@ -27,7 +27,30 @@ public sealed class CodeAltaLoggingTests
         Assert.AreEqual(FileRollingInterval.Daily, options.RollingInterval);
         Assert.AreEqual(CodeAltaLogging.RetainedLogFileCountLimit, options.RetainedFileCountLimit);
         Assert.IsTrue(options.AutoFlush);
+        Assert.IsInstanceOfType<CodeAltaLocalTimeLogFormatter>(options.Formatter);
         Assert.AreEqual(FileLogWriterFailureMode.Ignore, options.FailureMode);
+    }
+
+    [TestMethod]
+    public void LocalTimeLogFormatter_ConvertsUtcTimestampToConfiguredTimeZone()
+    {
+        var formatter = new CodeAltaLocalTimeLogFormatter(
+            TimeZoneInfo.CreateCustomTimeZone("CodeAlta test time", TimeSpan.FromHours(2), "CodeAlta test time", "CodeAlta test time"));
+        var writer = new FormattedCaptureLogWriter(formatter);
+        LogManager.Initialize(new LogManagerConfig
+        {
+            TimeProvider = new FixedTimeProvider(new DateTimeOffset(2026, 2, 9, 12, 30, 45, TimeSpan.Zero)),
+            RootLogger =
+            {
+                MinimumLevel = LogLevel.Info,
+                Writers = { writer }
+            }
+        });
+
+        LogManager.GetLogger("CodeAlta.Test").Info("hello");
+
+        Assert.AreEqual(1, writer.Messages.Count);
+        StringAssert.StartsWith(writer.Messages[0], "2026-02-09 14:30:45.0000000 INF CodeAlta.Test hello");
     }
 
     [TestMethod]
@@ -136,6 +159,31 @@ public sealed class CodeAltaLoggingTests
     }
 
     [TestMethod]
+    public void CreateConfig_UsesLocalTimeFormatterForFileAndUiLogWriters()
+    {
+        using var temp = TempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(temp.Path, "logs"));
+
+        var config = CodeAltaLogging.CreateConfig(temp.Path);
+        try
+        {
+            var writers = config.RootLogger.Writers.Select(static writerConfig => writerConfig.Writer).ToArray();
+            var fileWriter = writers.OfType<FileLogWriter>().Single();
+            var uiWriter = writers.OfType<CodeAltaUiLogWriter>().Single();
+
+            Assert.IsInstanceOfType<CodeAltaLocalTimeLogFormatter>(fileWriter.Formatter);
+            Assert.IsInstanceOfType<CodeAltaLocalTimeLogFormatter>(uiWriter.Formatter);
+        }
+        finally
+        {
+            foreach (var writerConfig in config.RootLogger.Writers)
+            {
+                writerConfig.Writer.Dispose();
+            }
+        }
+    }
+
+    [TestMethod]
     public void CreateConfig_BuffersUiLogsForReplay()
     {
         using var temp = TempDirectory.Create();
@@ -193,6 +241,35 @@ public sealed class CodeAltaLoggingTests
                 Messages.Add($"{logMessage.Level}|{logMessage.Logger.Name}|{logMessage.Text.ToString()}");
             }
         }
+    }
+
+    private sealed class FormattedCaptureLogWriter(LogFormatter formatter) : LogWriter
+    {
+        private readonly LogFormatter _formatter = formatter;
+
+        public List<string> Messages { get; } = [];
+
+        protected override void Log(LogMessage logMessage)
+        {
+            var segments = new LogMessageFormatSegments(enabled: false);
+            var bufferLength = 256;
+            while (true)
+            {
+                var buffer = new char[bufferLength];
+                if (_formatter.TryFormat(logMessage, buffer, out var charsWritten, ref segments))
+                {
+                    Messages.Add(new string(buffer, 0, charsWritten));
+                    return;
+                }
+
+                bufferLength *= 2;
+            }
+        }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class TempDirectory(string path) : IDisposable
