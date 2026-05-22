@@ -8,7 +8,7 @@ CodeAlta is a terminal workspace for agentic coding. It brings model-provider se
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>
 
-## Install
+## 🚀 Install
 
 Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install the CodeAlta global tool:
 
@@ -25,7 +25,7 @@ dotnet tool update -g CodeAlta
 
 On first launch, CodeAlta creates `~/.alta/config.toml`. If no provider is enabled yet, the Model Providers dialog opens so you can configure Codex, Copilot, OpenAI-compatible APIs, Anthropic, Gemini/Vertex, or custom endpoints.
 
-## What it gives you
+## ✨ What it gives you
 
 - **Keyboard-first terminal workspace**: tabs, prompt editor, project sidebar, command discovery, model selectors, context status, and inspectable timeline cards stay in one TUI.
 - **Provider-neutral model setup**: configure hosted APIs, subscription-backed Codex/Copilot, cloud providers, and compatible endpoints with the same provider workflow.
@@ -34,7 +34,7 @@ On first launch, CodeAlta creates `~/.alta/config.toml`. If no provider is enabl
 - **Actionable operations**: model/provider tests, startup config recovery, usage details, logs, modified-file summaries, and tool input/output dialogs are built into the workspace.
 - **Trusted local extension points**: source plugins, Agent Skills-compatible skill folders, and the in-session `alta` live tool let you automate local workflows while keeping provenance visible.
 
-## Common shortcuts
+## ⌨️ Common shortcuts
 
 | Action | Shortcut / command |
 | --- | --- |
@@ -47,7 +47,7 @@ On first launch, CodeAlta creates `~/.alta/config.toml`. If no provider is enabl
 | Switch tabs | `Alt+Left` / `Alt+Right` |
 | Focus sidebar / prompt | `Ctrl+G Ctrl+S` / `Ctrl+G Ctrl+P` |
 
-## Documentation
+## 📖 Documentation
 
 - User guide and screenshots: <https://codealta.github.io/>
 - Getting started: <https://codealta.github.io/docs/getting-started/>
@@ -56,10 +56,10 @@ On first launch, CodeAlta creates `~/.alta/config.toml`. If no provider is enabl
 - Skills: [doc/skills.md](doc/skills.md)
 - Maintainer notes: [doc/readme.md](doc/readme.md)
 
-## License
+## 🪪 License
 
 CodeAlta is released under the [BSD-2-Clause license](https://opensource.org/licenses/BSD-2-Clause).
 
-## Author
+## 🤗 Author
 
 Alexandre Mutel aka [xoofx](https://xoofx.github.io).
