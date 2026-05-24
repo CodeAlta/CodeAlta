@@ -180,6 +180,7 @@ internal sealed class ThreadProviderSwitchCoordinator
             "azure-openai" => "openai-chat",
             "codex" => "codex",
             "copilot" => "copilot",
+            "xai" => "xai",
             "anthropic" => "anthropic-messages",
             "google-genai" => "google-genai",
             "vertex-ai" => "google-genai",

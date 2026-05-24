@@ -85,6 +85,15 @@ reasoning_effort = "high"
 api_key_env = "CODEALTA_OPENAI_API_KEY"
 api_url = "https://api.openai.com/v1"
 
+[providers.xai]
+enabled = false
+display_name = "xAI Grok"
+type = "xai"
+model = "grok-4.3"
+reasoning_effort = "high"
+auth_source = "xai_browser_oauth"
+model_discovery = "xai_endpoint_with_static_fallback"
+
 [providers.zai]
 enabled = false
 display_name = "Z.ai"

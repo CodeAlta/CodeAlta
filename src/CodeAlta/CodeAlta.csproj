@@ -58,6 +58,7 @@
 <!--    <ProjectReference Include="..\..\..\XenoAtom\XenoAtom.Terminal.UI\src\XenoAtom.Terminal.UI.Extensions.Markdown\XenoAtom.Terminal.UI.Extensions.Markdown.csproj" />-->
 <!--    <ProjectReference Include="..\..\..\XenoAtom\XenoAtom.Terminal.UI\src\XenoAtom.Terminal.UI.SourceGen\XenoAtom.Terminal.UI.SourceGen.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />-->
     <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Xai\CodeAlta.Agent.Xai.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Acp\CodeAlta.Agent.Acp.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Anthropic\CodeAlta.Agent.Anthropic.csproj" />

@@ -81,29 +81,44 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
         => _providerUi.TestProviderAsync(definition, cancellationToken);
 
     public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
-        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.LoginCopilotDirectWithBrowserAsync(definition, reportStatus, cancellationToken)
-            : _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, reportStatus, cancellationToken);
+        => definition.ProviderType switch
+        {
+            "copilot" => _providerUi.LoginCopilotDirectWithBrowserAsync(definition, reportStatus, cancellationToken),
+            "xai" => _providerUi.LoginXaiDirectWithBrowserAsync(definition, reportStatus, cancellationToken),
+            _ => _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, reportStatus, cancellationToken),
+        };
 
     public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
-        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken)
-            : _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, cancellationToken);
+        => definition.ProviderType switch
+        {
+            "copilot" => _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+            "xai" => _providerUi.LoginXaiDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+            _ => _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+        };
 
     public Task<ProviderTestResult> LogoutAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
-        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.LogoutCopilotDirectAsync(definition, cancellationToken)
-            : _providerUi.LogoutCodexSubscriptionAsync(definition, cancellationToken);
+        => definition.ProviderType switch
+        {
+            "copilot" => _providerUi.LogoutCopilotDirectAsync(definition, cancellationToken),
+            "xai" => _providerUi.LogoutXaiDirectAsync(definition, cancellationToken),
+            _ => _providerUi.LogoutCodexSubscriptionAsync(definition, cancellationToken),
+        };
 
     public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
-        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.TestCopilotDirectAuthenticationAsync(definition, cancellationToken)
-            : _providerUi.TestCodexSubscriptionAuthenticationAsync(definition, cancellationToken);
+        => definition.ProviderType switch
+        {
+            "copilot" => _providerUi.TestCopilotDirectAuthenticationAsync(definition, cancellationToken),
+            "xai" => _providerUi.TestXaiDirectAuthenticationAsync(definition, cancellationToken),
+            _ => _providerUi.TestCodexSubscriptionAuthenticationAsync(definition, cancellationToken),
+        };
 
     public Task<ProviderTestResult> ListModelsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
-        => string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal)
-            ? _providerUi.ListCopilotDirectModelsAsync(definition, cancellationToken)
-            : _providerUi.ListCodexSubscriptionModelsAsync(definition, cancellationToken);
+        => definition.ProviderType switch
+        {
+            "copilot" => _providerUi.ListCopilotDirectModelsAsync(definition, cancellationToken),
+            "xai" => _providerUi.ListXaiDirectModelsAsync(definition, cancellationToken),
+            _ => _providerUi.ListCodexSubscriptionModelsAsync(definition, cancellationToken),
+        };
 
     public Task<ProviderModelListResult> ListSelectableModelsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
         => _providerUi.ListProviderModelsAsync(definition, cancellationToken);

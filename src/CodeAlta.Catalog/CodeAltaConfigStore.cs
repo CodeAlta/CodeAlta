@@ -31,9 +31,13 @@ public sealed class CodeAltaConfigStore
     private const string CopilotProviderKey = "copilot";
     private const string CodexSubscriptionProviderType = "codex";
     private const string CopilotDirectProviderType = "copilot";
+    private const string XaiDirectProviderType = "xai";
     private const string CopilotDirectDefaultDisplayName = "Copilot";
     private const string CopilotDirectDefaultAuthSource = "github_device_flow";
     private const string CopilotDirectDefaultModelDiscovery = "copilot_endpoint_with_static_fallback";
+    private const string XaiDirectDefaultDisplayName = "xAI Grok";
+    private const string XaiDirectDefaultAuthSource = "xai_browser_oauth";
+    private const string XaiDirectDefaultModelDiscovery = "xai_endpoint_with_static_fallback";
     private const string CodexSubscriptionDefaultDisplayName = "Codex";
     private const string CodexSubscriptionDefaultApiUrl = "https://chatgpt.com/backend-api/codex";
     private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
@@ -1008,6 +1012,7 @@ public sealed class CodeAltaConfigStore
             "vertex" or "vertex-ai" or "google-vertex" or "google_vertex" => "vertex-ai",
             "codex" => CodexSubscriptionProviderType,
             "copilot" => CopilotDirectProviderType,
+            "xai" or "xai-grok" or "grok" or "x-ai" => XaiDirectProviderType,
             _ => null,
         };
 
@@ -1030,10 +1035,11 @@ public sealed class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, xai.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyCodexSubscriptionDefaults(definition);
         ApplyCopilotDirectDefaults(definition);
+        ApplyXaiDirectDefaults(definition);
         ValidateProviderFields(definition);
     }
 
@@ -1073,10 +1079,23 @@ public sealed class CodeAltaConfigStore
         definition.Experimental ??= false;
     }
 
+    private static void ApplyXaiDirectDefaults(CodeAltaProviderDocument definition)
+    {
+        if (!string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        definition.DisplayName ??= XaiDirectDefaultDisplayName;
+        definition.AuthSource ??= XaiDirectDefaultAuthSource;
+        definition.ModelDiscovery ??= XaiDirectDefaultModelDiscovery;
+    }
+
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) &&
-            !string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal))
+            !string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal) &&
+            !string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal))
         {
             RejectCodexSubscriptionOnlyFields(definition);
         }
@@ -1177,6 +1196,26 @@ public sealed class CodeAltaConfigStore
                 }
 
                 break;
+
+            case XaiDirectProviderType:
+                RejectUnsupportedField(definition, "account_id", definition.AccountId);
+                RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
+                RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
+                RejectUnsupportedField(definition, "include_encrypted_reasoning", definition.IncludeEncryptedReasoning);
+                RejectUnsupportedField(definition, "response_transport", definition.ResponseTransport);
+                RejectUnsupportedField(definition, "send_responses_beta_header", definition.SendResponsesBetaHeader);
+                RejectUnsupportedField(definition, "send_installation_id", definition.SendInstallationId);
+                RejectUnsupportedField(definition, "installation_id_source", definition.InstallationIdSource);
+                RejectUnsupportedField(definition, "experimental", definition.Experimental);
+                RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
+                RejectUnsupportedField(definition, "project_id", definition.ProjectId);
+                RejectUnsupportedField(definition, "project", definition.Project);
+                RejectUnsupportedField(definition, "location", definition.Location);
+                RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectUnsupportedField(definition, "api_key", definition.ApiKey);
+                RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                ValidateXaiDirectFields(definition);
+                break;
         }
 
         if (!string.IsNullOrWhiteSpace(definition.ApiUrl) &&
@@ -1187,7 +1226,8 @@ public sealed class CodeAltaConfigStore
 
         if ((string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) ||
              string.Equals(definition.ProviderType, "azure-openai", StringComparison.Ordinal) ||
-             string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal)) &&
+             string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal) ||
+             string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal)) &&
             !string.IsNullOrWhiteSpace(definition.ApiUrl) &&
             Uri.TryCreate(definition.ApiUrl, UriKind.Absolute, out var directUri) &&
             !IsHttpsOrLocalhost(directUri))
@@ -1259,6 +1299,19 @@ public sealed class CodeAltaConfigStore
         if (definition.InstallationIdSource is not ("codealta_state" or "codex_home_import" or "codex_home_readonly"))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} installation_id_source must be one of: codealta_state, codex_home_import, codex_home_readonly.");
+        }
+    }
+
+    private static void ValidateXaiDirectFields(CodeAltaProviderDocument definition)
+    {
+        if (definition.AuthSource is not ("xai_browser_oauth" or "xai_device_flow"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} auth_source must be one of: xai_browser_oauth, xai_device_flow.");
+        }
+
+        if (definition.ModelDiscovery is not ("xai_endpoint_with_static_fallback" or "xai_endpoint" or "static"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} model_discovery must be one of: xai_endpoint_with_static_fallback, xai_endpoint, static.");
         }
     }
 
@@ -1472,6 +1525,24 @@ public sealed class CodeAltaConfigStore
             if (definition.IncludePreviewModels == false)
             {
                 definition.IncludePreviewModels = null;
+            }
+        }
+
+        if (string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal))
+        {
+            if (string.Equals(definition.DisplayName, XaiDirectDefaultDisplayName, StringComparison.Ordinal))
+            {
+                definition.DisplayName = null;
+            }
+
+            if (string.Equals(definition.AuthSource, XaiDirectDefaultAuthSource, StringComparison.Ordinal))
+            {
+                definition.AuthSource = null;
+            }
+
+            if (string.Equals(definition.ModelDiscovery, XaiDirectDefaultModelDiscovery, StringComparison.Ordinal))
+            {
+                definition.ModelDiscovery = null;
             }
         }
 

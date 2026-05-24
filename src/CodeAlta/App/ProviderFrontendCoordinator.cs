@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.Xai;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.App.Events;
@@ -362,6 +363,83 @@ internal sealed class ProviderFrontendCoordinator
             : result;
     }
 
+    public async Task<ProviderTestResult> LoginXaiDirectWithBrowserAsync(
+        CodeAltaProviderDocument definition,
+        Action<string> reportStatus,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(reportStatus);
+
+        var manager = CreateXaiDirectLoginManager(definition);
+        var result = await manager.LoginWithBrowserAsync(
+            CreateXaiDirectLoginOptions(definition),
+            (authorization, _) =>
+            {
+                reportStatus($"Opening xAI login in your browser: {authorization.AuthorizeUri}. Waiting for authorization...");
+                TryOpenBrowser(authorization.AuthorizeUri);
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+        return new ProviderTestResult(true, FormatXaiDirectLoginMessage("xAI login completed", result), 0);
+    }
+
+    public async Task<ProviderTestResult> LoginXaiDirectWithDeviceCodeAsync(
+        CodeAltaProviderDocument definition,
+        Action<string> reportStatus,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(reportStatus);
+
+        var manager = CreateXaiDirectLoginManager(definition);
+        var result = await manager.LoginWithDeviceCodeAsync(
+            CreateXaiDirectLoginOptions(definition),
+            (deviceCode, _) =>
+            {
+                reportStatus($"Open {deviceCode.VerificationUri} and enter code {deviceCode.UserCode}. Waiting for xAI authorization...");
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+        return new ProviderTestResult(true, FormatXaiDirectLoginMessage("xAI device login completed", result), 0);
+    }
+
+    public async Task<ProviderTestResult> LogoutXaiDirectAsync(
+        CodeAltaProviderDocument definition,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        await CreateXaiDirectLoginManager(definition)
+            .DeleteCredentialAsync(CreateXaiDirectLoginOptions(definition), cancellationToken);
+        return new ProviderTestResult(true, "Deleted CodeAlta-owned xAI credentials for this provider.", 0);
+    }
+
+    public async Task<ProviderTestResult> TestXaiDirectAuthenticationAsync(
+        CodeAltaProviderDocument definition,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var status = await CreateXaiDirectLoginManager(definition)
+            .GetCredentialStatusAsync(CreateXaiDirectLoginOptions(definition), cancellationToken);
+        return status is null
+            ? new ProviderTestResult(false, "Login required before cached xAI credentials can be used.", 0)
+            : new ProviderTestResult(true, FormatXaiDirectLoginMessage("Authenticated with cached xAI credentials", status), 0);
+    }
+
+    public async Task<ProviderTestResult> ListXaiDirectModelsAsync(
+        CodeAltaProviderDocument definition,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var result = await TestProviderAsync(definition, cancellationToken);
+        return result.Success
+            ? result with { Message = $"xAI model listing completed without sending a model turn · {result.ModelCount} model(s) available." }
+            : result;
+    }
+
     private void PublishModelProviderCatalogChanged()
         => _frontendEvents.Publish(new ModelProviderCatalogChangedEvent());
 
@@ -484,6 +562,22 @@ internal sealed class ProviderFrontendCoordinator
             definition.GitHubEnterpriseUrl,
             TryCreateUri(definition.ApiUrl));
 
+    private static XaiDirectLoginManager CreateXaiDirectLoginManager(CodeAltaProviderDocument definition)
+    {
+        if (!string.Equals(definition.ProviderType, "xai", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Select an xAI provider first.");
+        }
+
+        return new XaiDirectLoginManager(new HttpClient());
+    }
+
+    private XaiDirectLoginOptions CreateXaiDirectLoginOptions(CodeAltaProviderDocument definition)
+        => new(
+            definition.ProviderKey,
+            GetProviderStateRootPath(),
+            TryCreateUri(definition.ApiUrl));
+
     private string GetProviderStateRootPath()
         => _ownedServices?.CatalogOptions.GlobalRoot
            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
@@ -499,6 +593,13 @@ internal sealed class ProviderFrontendCoordinator
         var expiry = result.ExpiresAt is null ? "expiry unknown" : $"expires {result.ExpiresAt.Value.LocalDateTime:g}";
         var enterprise = string.IsNullOrWhiteSpace(result.EnterpriseDomain) ? "GitHub.com" : result.EnterpriseDomain.Trim();
         return $"{prefix} · {enterprise} · API {result.BaseUri} · {expiry}.";
+    }
+
+    private static string FormatXaiDirectLoginMessage(string prefix, XaiDirectLoginResult result)
+    {
+        var expiry = result.ExpiresAt is null ? "expiry unknown" : $"expires {result.ExpiresAt.Value.LocalDateTime:g}";
+        var scope = string.IsNullOrWhiteSpace(result.Scope) ? "scope unknown" : $"scope {result.Scope.Trim()}";
+        return $"{prefix} · API {result.BaseUri} · {expiry} · {scope}.";
     }
 
     private static Uri? TryCreateUri(string? value)

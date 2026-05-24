@@ -24,6 +24,7 @@ internal sealed class ModelProvidersDialog
         new("azure-openai", "Azure OpenAI"),
         new("codex", "Codex"),
         new("copilot", "Copilot"),
+        new("xai", "xAI Grok"),
         new("anthropic", "Anthropic"),
         new("google-genai", "Google GenAI"),
         new("vertex-ai", "Vertex AI"),
@@ -675,6 +676,9 @@ internal sealed class ModelProvidersDialog
         var copilotDirectActions = item.ProviderType == "copilot"
             ? CreateCopilotDirectActions(item)
             : null;
+        var xaiDirectActions = item.ProviderType == "xai"
+            ? CreateXaiDirectActions(item)
+            : null;
 
         var form = new Grid
             {
@@ -701,7 +705,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "API Key Env", CreateApiKeyEnvField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai")
         {
             AddTextRow(form, ref row, "API URL", CreateApiUrlField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiUrl));
         }
@@ -718,7 +722,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, "Location", CreateVertexLocationField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai")
         {
             AddTextRow(form, ref row, "Models.dev Id", CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox("Default", bindings.UseDefaultModelsDevProviderId));
             AddTextRow(form, ref row, "Single Model Id", CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox("Default", bindings.UseDefaultSingleModelId));
@@ -735,6 +739,11 @@ internal sealed class ModelProvidersDialog
         {
             AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
             AddTextRow(form, ref row, "GitHub Enterprise", CreateDefaultTextField(bindings.GitHubEnterpriseUrl, () => item.UseDefaultGitHubEnterpriseUrl), CreateDefaultCheckBox("Default", bindings.UseDefaultGitHubEnterpriseUrl));
+            AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
+        }
+        else if (item.ProviderType == "xai")
+        {
+            AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
             AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
         }
 
@@ -760,6 +769,11 @@ internal sealed class ModelProvidersDialog
         if (copilotDirectActions is not null)
         {
             detailContent.Add(copilotDirectActions);
+        }
+
+        if (xaiDirectActions is not null)
+        {
+            detailContent.Add(xaiDirectActions);
         }
 
         detailContent.Add(form);
@@ -915,6 +929,55 @@ internal sealed class ModelProvidersDialog
                         item,
                         "logout Copilot credentials",
                         "Deleting CodeAlta-owned Copilot credentials...",
+                        definition => _modelProviders.LogoutAsync(definition))))
+            {
+                Spacing = 1,
+            })
+        {
+            HorizontalAlignment = Align.Stretch,
+            Spacing = 1,
+        };
+
+    private Visual CreateXaiDirectActions(ModelProviderEditorItemViewModel item)
+        => new VStack(
+            new Markup("[dim]xAI Grok login uses the public Grok-CLI OAuth client and stores CodeAlta-owned access + refresh tokens for this provider. Browser login opens auth.x.ai for PKCE; device login prints a code for headless hosts. No model turn is sent.[/]") { Wrap = true },
+            new HStack(
+                CreateCancelableProviderActionButton(
+                    item,
+                    "Browser Login",
+                    "Cancel Browser Login",
+                    ProviderDialogOperationKind.XaiBrowserLogin,
+                    "start xAI browser login",
+                    "Starting xAI browser login...",
+                    _modelProviders.LoginWithBrowserAsync),
+                CreateCancelableProviderActionButton(
+                    item,
+                    "Device Login",
+                    "Cancel Device Login",
+                    ProviderDialogOperationKind.XaiDeviceLogin,
+                    "start xAI device-code login",
+                    "Requesting xAI device code...",
+                    _modelProviders.LoginWithDeviceCodeAsync),
+                new Button("Test Auth")
+                    .Tone(ControlTone.Primary)
+                    .Click(() => StartProviderAction(
+                        item,
+                        "test xAI authentication",
+                        "Checking cached xAI credentials...",
+                        definition => _modelProviders.TestAuthenticationAsync(definition))),
+                new Button("List Models")
+                    .Tone(ControlTone.Default)
+                    .Click(() => StartProviderAction(
+                        item,
+                        "list xAI models",
+                        "Listing xAI models without sending a model turn...",
+                        definition => _modelProviders.ListModelsAsync(definition))),
+                new Button("Logout")
+                    .Tone(ControlTone.Error)
+                    .Click(() => StartProviderAction(
+                        item,
+                        "logout xAI credentials",
+                        "Deleting CodeAlta-owned xAI credentials...",
                         definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
@@ -1963,7 +2026,9 @@ internal sealed class ModelProvidersDialog
         => operationKind is ProviderDialogOperationKind.CodexBrowserLogin
             or ProviderDialogOperationKind.CodexDeviceLogin
             or ProviderDialogOperationKind.CopilotBrowserLogin
-            or ProviderDialogOperationKind.CopilotDeviceLogin;
+            or ProviderDialogOperationKind.CopilotDeviceLogin
+            or ProviderDialogOperationKind.XaiBrowserLogin
+            or ProviderDialogOperationKind.XaiDeviceLogin;
 
     private static LoginOperationLabels GetLoginOperationLabels(ProviderDialogOperationKind operationKind)
         => operationKind switch
@@ -1984,6 +2049,14 @@ internal sealed class ModelProvidersDialog
                 "Copilot Device Login",
                 "Cancel Device Login",
                 "Open the Copilot verification URL and enter the device code shown below."),
+            ProviderDialogOperationKind.XaiBrowserLogin => new LoginOperationLabels(
+                "xAI Grok Browser Login",
+                "Cancel Browser Login",
+                "Complete xAI Grok browser login in your browser, then return to CodeAlta."),
+            ProviderDialogOperationKind.XaiDeviceLogin => new LoginOperationLabels(
+                "xAI Grok Device Login",
+                "Cancel Device Login",
+                "Open the xAI verification URL and enter the device code shown below."),
             _ => new LoginOperationLabels(
                 "Provider Login",
                 "Cancel Login",
@@ -2163,6 +2236,8 @@ internal sealed class ModelProvidersDialog
         CodexDeviceLogin,
         CopilotBrowserLogin,
         CopilotDeviceLogin,
+        XaiBrowserLogin,
+        XaiDeviceLogin,
     }
 
 

@@ -450,7 +450,8 @@ internal sealed class CodeAltaFrontendComposition
            string.Equals(providerType, "openai-responses", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(providerType, "azure-openai", StringComparison.OrdinalIgnoreCase) ||
            string.Equals(providerType, "codex", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(providerType, "copilot", StringComparison.OrdinalIgnoreCase);
+           string.Equals(providerType, "copilot", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(providerType, "xai", StringComparison.OrdinalIgnoreCase);
 
     private static Func<string?, string> CreateProviderDisplayNameResolver(
         IReadOnlyList<AgentBackendDescriptor> backendDescriptors)

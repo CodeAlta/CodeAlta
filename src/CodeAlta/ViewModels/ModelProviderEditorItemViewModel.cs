@@ -198,8 +198,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.DisplayName = UseDefaultDisplayName ? null : NormalizeText(DisplayName);
         definition.Model = UseDefaultModel ? null : NormalizeText(Model);
         definition.ReasoningEffort = UseDefaultReasoningEffort ? null : NormalizeText(ReasoningEffort);
-        definition.ApiKey = UseDefaultApiKey ? null : NormalizeText(ApiKey);
-        definition.ApiKeyEnv = UseDefaultApiKeyEnv ? null : NormalizeText(ApiKeyEnv);
+        var supportsApiKeyField = ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai";
+        definition.ApiKey = supportsApiKeyField && !UseDefaultApiKey ? NormalizeText(ApiKey) : null;
+        definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
         definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
         definition.OrganizationId = UseDefaultOrganizationId ? null : NormalizeText(OrganizationId);
@@ -208,10 +209,11 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.Location = UseDefaultLocation ? null : NormalizeText(Location);
         definition.ModelsDevProviderId = UseDefaultModelsDevProviderId ? null : NormalizeText(ModelsDevProviderId);
         definition.SingleModelId = UseDefaultSingleModelId ? null : NormalizeText(SingleModelId);
-        var usesSubscriptionStyleFields = ProviderType is "codex" or "copilot";
-        definition.AuthSource = usesSubscriptionStyleFields && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
+        var usesAuthSourceField = ProviderType is "codex" or "copilot" or "xai";
+        var usesModelDiscoveryField = ProviderType is "codex" or "copilot" or "xai";
+        definition.AuthSource = usesAuthSourceField && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
         definition.AccountId = ProviderType == "codex" && !UseDefaultAccountId ? NormalizeText(AccountId) : null;
-        definition.ModelDiscovery = usesSubscriptionStyleFields && !UseDefaultModelDiscovery ? NormalizeText(ModelDiscovery) : null;
+        definition.ModelDiscovery = usesModelDiscoveryField && !UseDefaultModelDiscovery ? NormalizeText(ModelDiscovery) : null;
         definition.ResponseTransport = ProviderType == "codex" && !UseDefaultResponseTransport ? NormalizeText(ResponseTransport) : null;
         definition.Experimental = null;
         return definition;

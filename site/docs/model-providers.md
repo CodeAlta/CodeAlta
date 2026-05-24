@@ -27,6 +27,7 @@ On first run, CodeAlta creates a default `~/.alta/config.toml` with common provi
 | `kimi-for-coding` | Kimi for Coding | `anthropic` compatible | `K2P6`, high reasoning | `CODEALTA_KIMI_API_KEY` |
 | `minimax` | MiniMax | `anthropic` compatible | `MiniMax-M2.7`, low reasoning | `CODEALTA_MINIMAX_API_KEY` |
 | `openai` | OpenAI | `openai-responses` | `gpt-5.5`, high reasoning | `CODEALTA_OPENAI_API_KEY` |
+| `xai` | xAI Grok | `xai` | `grok-4.3`, high reasoning | xAI Grok OAuth state |
 | `zai` | Z.ai | `openai-chat` | `glm-5.1` | `CODEALTA_ZAI_API_KEY` |
 
 A separate `[chat]` section chooses the default enabled provider:
@@ -63,7 +64,7 @@ The dialog can:
 
 ## Advanced TOML reference
 
-Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
+Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
 
 Common provider fields are:
 
@@ -95,10 +96,13 @@ Provider-type-specific fields and restrictions:
 | `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
 | `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+| `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 
 Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"`, `"codex_auth_import"`, `"codex_auth_file_readonly"`, or `"external_token_command"`; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"`, `"codex_endpoint"`, or `"static"`; `response_transport = "websocket_with_http_fallback"` or `"http"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`.
 
 Copilot accepts `auth_source = "github_device_flow"`, `"github_token_env"`, or `"copilot_token_env"`; `model_discovery = "copilot_endpoint_with_static_fallback"`, `"copilot_endpoint"`, or `"static"`. `github_token_env` is required when using GitHub-token auth, and `copilot_token_env` is required when using Copilot-token auth.
+
+xAI Grok accepts `auth_source = "xai_browser_oauth"` or `"xai_device_flow"`; `model_discovery = "xai_endpoint_with_static_fallback"`, `"xai_endpoint"`, or `"static"`. Both auth sources store CodeAlta-owned access and refresh tokens through the public Grok-CLI OAuth client and unlock SuperGrok / Grok Heavy plan access on accounts that have subscribed.
 
 ### Compatibility profile
 
@@ -281,6 +285,28 @@ model_discovery = "copilot_endpoint_with_static_fallback"
 ```
 
 For non-interactive environments, the dialog and TOML support GitHub-token or Copilot-token environment-variable modes.
+
+### xAI Grok
+
+The `xai` provider type talks to the xAI API at `https://api.x.ai/v1`. Both auth flows persist CodeAlta-owned access and refresh tokens against the public Grok-CLI OAuth client and unlock SuperGrok / Grok Heavy plan access on accounts that have subscribed.
+
+```toml
+[providers.xai]
+enabled = true
+display_name = "xAI Grok"
+type = "xai"
+model = "grok-4.3"
+reasoning_effort = "high"
+auth_source = "xai_browser_oauth"
+model_discovery = "xai_endpoint_with_static_fallback"
+```
+
+Two auth flows are supported:
+
+- `xai_browser_oauth` — PKCE login against `auth.x.ai`; the dialog opens the consent screen and listens on the registered loopback redirect URI before persisting tokens under CodeAlta state.
+- `xai_device_flow` — the same OAuth client over RFC 8628 device authorization for headless / SSH / VPS hosts.
+
+Refresh tokens are rotated automatically by the auth manager. The bundled static catalog ships `grok-4.3`, `grok-4`, and `grok-4-fast`; live discovery uses xAI's `/v1/language-models` endpoint so image / video variants are excluded automatically.
 
 ## Models, reasoning, and metadata
 

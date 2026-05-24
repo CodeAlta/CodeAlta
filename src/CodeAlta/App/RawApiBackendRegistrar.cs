@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.Xai;
 using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.LocalRuntime;
 using CodeAlta.Agent.LocalRuntime.Compaction;
@@ -111,6 +112,8 @@ internal static class RawApiBackendRegistrar
                 return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createBackend);
             case "copilot":
                 return TryCreateCopilotDirectProvider(definition, stateRootPath, out descriptor, out createBackend);
+            case "xai":
+                return TryCreateXaiProvider(definition, stateRootPath, out descriptor, out createBackend);
             case "anthropic":
                 return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
             case "google-genai":
@@ -429,6 +432,73 @@ internal static class RawApiBackendRegistrar
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.Auth.AuthSource} modelDiscovery={providerOptions.ModelDiscovery}");
         return true;
+    }
+
+    private static bool TryCreateXaiProvider(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        out AgentBackendDescriptor descriptor,
+        out Func<IAgentBackend> createBackend)
+    {
+        var authSource = NormalizeText(definition.AuthSource) ?? XaiAuthSources.XaiBrowserOAuth;
+        if (authSource != XaiAuthSources.XaiBrowserOAuth && authSource != XaiAuthSources.XaiDeviceFlow)
+        {
+            LogInfo(
+                $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=unsupported-auth-source authSource={authSource}");
+            descriptor = null!;
+            createBackend = null!;
+            return false;
+        }
+
+        var backendId = new AgentBackendId(definition.ProviderKey);
+        var displayName = ResolveProviderDisplayName(definition);
+        var baseUri = ParseUri(definition.ApiUrl);
+        var providerOptions = new XaiProviderOptions
+        {
+            ProviderKey = definition.ProviderKey,
+            DisplayName = displayName,
+            BaseUri = baseUri,
+            IsDefault = true,
+            Profile = CreateXaiProfile(definition.Profile),
+            Compaction = CreateCompactionSettings(definition.Compaction),
+            Auth = new XaiAuthOptions
+            {
+                AuthSource = authSource,
+            },
+            ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? XaiModelDiscoveryModes.EndpointWithStaticFallback,
+            SingleModelId = NormalizeText(definition.SingleModelId),
+            ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+            ProtocolTraceEnabled = definition.ProtocolTrace == true,
+        };
+
+        var options = new XaiAgentBackendOptions
+        {
+            BackendIdOverride = backendId,
+            DisplayNameOverride = displayName,
+            StateRootPath = stateRootPath,
+            Providers = { providerOptions },
+        };
+
+        descriptor = new AgentBackendDescriptor(backendId, displayName);
+        createBackend = () => new XaiDirectAgentBackend(options);
+        LogInfo(
+            $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.Auth.AuthSource} modelDiscovery={providerOptions.ModelDiscovery}");
+        return true;
+    }
+
+    private static LocalAgentProviderProfile CreateXaiProfile(CodeAltaProviderProfileDocument? document)
+    {
+        var profile = new LocalAgentProviderProfile
+        {
+            SupportsDeveloperRole = true,
+            SupportsStore = false,
+            SupportsReasoningEffort = true,
+            StreamsUsage = true,
+            MaxTokensFieldName = "max_output_tokens",
+            ReasoningFieldNames = ["reasoning"],
+        };
+
+        return document is null ? profile : ApplyProfileOverrides(profile, document);
     }
 
     private static bool TryCreateAnthropicProvider(

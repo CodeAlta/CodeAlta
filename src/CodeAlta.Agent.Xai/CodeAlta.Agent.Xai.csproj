@@ -8,18 +8,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="alta" />
-    <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
-    <InternalsVisibleTo Include="CodeAlta.Agent.Xai" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.AI.OpenAI" />
-    <PackageReference Include="OpenAI" />
+    <PackageReference Include="XenoAtom.Logging" />
   </ItemGroup>
 </Project>
