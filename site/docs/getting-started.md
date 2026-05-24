@@ -59,17 +59,17 @@ On first launch, CodeAlta creates a starter `~/.alta/config.toml` with common pr
 Use the dialog to:
 
 1. Select a provider entry on the left.
-2. Enable it.
-3. Choose or confirm the model and reasoning effort.
-4. Add credentials through an API-key environment variable, direct API key, or provider login flow.
-5. Click **Test** to validate credentials and model discovery.
+2. Choose or confirm the model and reasoning effort.
+3. Add credentials through an API-key environment variable, direct API key, or provider login flow.
+4. Click **Test Provider** to validate credentials and model discovery.
+5. Confirm the provider shows as enabled. Successful tests and subscription login flows enable it automatically.
 6. Click **Save** to write `~/.alta/config.toml` and refresh the runtime.
 
 You can reopen this dialog any time with `Ctrl+G Ctrl+R` or from the provider summary in the footer.
 
 ## Configure one provider quickly
 
-The most common first setup is a subscription-backed provider: **Copilot** for GitHub Copilot subscriptions, or **Codex** for ChatGPT/Codex subscriptions. In the Model Providers dialog, enable the matching provider, keep or choose a model, start the browser/device login flow, then click **Test** and **Save** after login completes.
+The most common first setup is a subscription-backed provider: **Copilot** for GitHub Copilot subscriptions, or **Codex** for ChatGPT/Codex subscriptions. In the Model Providers dialog, keep or choose a model, start the browser/device login flow, then click **Save** after login completes. Successful browser/device login enables that provider automatically; a successful **Test Provider** does the same for any provider type.
 
 Codex and Copilot credentials are stored in CodeAlta-owned state through their login flows. They are intentionally separate from OpenAI platform API keys.
 

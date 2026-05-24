@@ -491,7 +491,20 @@ internal sealed class ModelProvidersDialog
             {
                 if (_providers.Contains(item))
                 {
-                    item.SetTestResult(result.Success, result.Message);
+                    var enabledAfterTest = result.Success && item.SetSuccessfulResultAndEnable(result.Message);
+                    if (!result.Success)
+                    {
+                        item.SetTestResult(success: false, result.Message);
+                    }
+
+                    var statusSuffix = enabledAfterTest
+                        ? $"{Environment.NewLine}[warning]{AnsiMarkup.Escape(item.Label)} was enabled automatically after the successful test. Save to refresh the runtime with this provider.[/]"
+                        : string.Empty;
+
+                    SetStatus(result.Success
+                        ? $"[success]{AnsiMarkup.Escape(result.Message)}[/]{statusSuffix}"
+                        : $"[warning]{AnsiMarkup.Escape(result.Message)}[/]");
+                    return;
                 }
 
                 SetStatus(result.Success
@@ -597,7 +610,22 @@ internal sealed class ModelProvidersDialog
             {
                 if (_providers.Contains(item))
                 {
-                    item.SetTestResult(result.Success, result.Message);
+                    var enabledAfterLogin = result.Success && IsLoginOperation(operationKind)
+                        ? item.SetSuccessfulResultAndEnable(result.Message)
+                        : false;
+                    if (!result.Success || !IsLoginOperation(operationKind))
+                    {
+                        item.SetTestResult(result.Success, result.Message);
+                    }
+
+                    var statusSuffix = enabledAfterLogin
+                        ? $"{Environment.NewLine}[warning]{AnsiMarkup.Escape(item.Label)} was enabled automatically after login. Save to refresh the runtime with this provider.[/]"
+                        : string.Empty;
+
+                    SetStatus(result.Success
+                        ? $"[success]{AnsiMarkup.Escape(result.Message)}[/]{statusSuffix}"
+                        : $"[warning]{AnsiMarkup.Escape(result.Message)}[/]");
+                    return;
                 }
 
                 SetStatus(result.Success
@@ -633,6 +661,10 @@ internal sealed class ModelProvidersDialog
         {
             Wrap = true,
         };
+        var availability = new Markup(() => BuildAvailabilityMarkup(item))
+        {
+            Wrap = true,
+        };
 
         var testButton = new Button("Test Provider")
             .Tone(ControlTone.Primary)
@@ -658,7 +690,7 @@ internal sealed class ModelProvidersDialog
         var row = 0;
         AddTextRow(form, ref row, "Provider Key", CreateKeyField(item), CreateSpacer());
         AddSelectRow(form, ref row, "Type", CreateTypeSelect(item), CreateSpacer());
-        AddCheckRow(form, ref row, "Enabled", CreateEnabledCheckBox(item), CreateSpacer());
+        AddCheckRow(form, ref row, "Available", CreateEnabledCheckBox(item), CreateSpacer());
         AddTextRow(form, ref row, "Display Name", CreateDefaultTextField(bindings.DisplayName, () => item.UseDefaultDisplayName), CreateDefaultCheckBox("Default", bindings.UseDefaultDisplayName));
         AddTextRow(form, ref row, "Model", CreateModelField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultModel));
         AddSelectRow(form, ref row, "Reasoning", CreateReasoningSelect(item), CreateDefaultCheckBox("Default", bindings.UseDefaultReasoningEffort));
@@ -714,6 +746,9 @@ internal sealed class ModelProvidersDialog
         var detailContent = new List<Visual>
         {
             title,
+            CreateSectionRule("Availability"),
+            availability,
+            CreateAvailabilityToggleButton(item),
             summary,
             testButton,
         };
@@ -914,7 +949,28 @@ internal sealed class ModelProvidersDialog
     }
 
     private CheckBox CreateEnabledCheckBox(ModelProviderEditorItemViewModel item)
-        => new CheckBox("Enabled").IsChecked(GetBindings(item).Enabled);
+        => new CheckBox("Enable this provider").IsChecked(GetBindings(item).Enabled);
+
+    private Button CreateAvailabilityToggleButton(ModelProviderEditorItemViewModel item)
+        => new Button(() => new TextBlock(item.Enabled
+                ? $"{NerdFont.MdPauseCircleOutline} Disable Provider"
+                : $"{NerdFont.MdCheckCircleOutline} Enable Provider"))
+            .Tone(() => item.Enabled ? ControlTone.Warning : ControlTone.Success)
+            .IsEnabled(!item.IsReserved)
+            .Click(
+                () =>
+                {
+                    if (IsDialogOperationActive())
+                    {
+                        ReportActiveOperationBlock(item.Enabled ? "disable this provider" : "enable this provider");
+                        return;
+                    }
+
+                    item.Enabled = !item.Enabled;
+                    SetStatus(item.Enabled
+                        ? $"[warning]{AnsiMarkup.Escape(item.Label)} is enabled. Save to refresh the runtime with this provider.[/]"
+                        : $"[warning]{AnsiMarkup.Escape(item.Label)} is disabled. Save to remove it from runtime selection.[/]");
+                });
 
     private Visual CreateModelField(ModelProviderEditorItemViewModel item)
     {
@@ -1218,6 +1274,25 @@ internal sealed class ModelProvidersDialog
                 }));
     }
 
+    private static string BuildAvailabilityMarkup(ModelProviderEditorItemViewModel item)
+    {
+        var (tone, icon) = GetAvailabilityToneAndIcon(item.Enabled);
+        var stateText = item.Enabled ? "Enabled" : "Disabled";
+        var guidance = item.Enabled
+            ? "This provider can appear in the provider picker after you save."
+            : "Disabled providers stay hidden from runtime provider selection until enabled and saved.";
+        return $"[{tone}]{icon} {stateText} in CodeAlta[/] [dim]· {AnsiMarkup.Escape(guidance)}[/]";
+    }
+
+    private static Visual CreateSectionRule(string label)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        return new Markup($"[dim]──── {AnsiMarkup.Escape(label)} ────[/]")
+        {
+            Wrap = false,
+        };
+    }
+
     private bool TryBuildDefinitions(
         out IReadOnlyList<CodeAltaProviderDocument> definitions,
         out string errorMessage)
@@ -1517,6 +1592,11 @@ internal sealed class ModelProvidersDialog
             ModelProviderUiStatusKind.Disabled => ("muted", $"{NerdFont.MdPauseCircleOutline}"),
             _ => ("primary", $"{NerdFont.MdTuneVariant}"),
         };
+
+    private static (string Tone, string Icon) GetAvailabilityToneAndIcon(bool enabled)
+        => enabled
+            ? ("success", $"{NerdFont.MdCheckCircleOutline}")
+            : ("muted", $"{NerdFont.MdPauseCircleOutline}");
 
     private static ValidationMessage? BuildCustomApiUrlGuidance(ModelProviderEditorItemViewModel item)
         => item.Enabled &&
@@ -2098,7 +2178,9 @@ internal sealed class ModelProvidersDialog
     {
         var diagnostics = Analyze(item);
         var (tone, icon) = GetStatusToneAndIcon(diagnostics.StatusKind);
-        return $"[{tone}]{icon} {AnsiMarkup.Escape(item.Label)}[/] [dim]· {AnsiMarkup.Escape(diagnostics.StatusText)}[/]";
+        var (availabilityTone, availabilityIcon) = GetAvailabilityToneAndIcon(item.Enabled);
+        var availabilityText = item.Enabled ? "ON" : "OFF";
+        return $"[{availabilityTone}]{availabilityIcon} {availabilityText}[/] [{tone}]{icon} {AnsiMarkup.Escape(item.Label)}[/] [dim]· {AnsiMarkup.Escape(diagnostics.StatusText)}[/]";
     }
 
     private bool HasUnsavedChanges()

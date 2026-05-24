@@ -65,7 +65,7 @@ Common fixes:
 
 ## No providers are enabled
 
-If no provider is enabled, CodeAlta opens the Model Providers dialog automatically. Enable one provider, configure credentials, click **Test**, then **Save**.
+If no provider is enabled, CodeAlta opens the Model Providers dialog automatically. Configure credentials, click **Test Provider**, then **Save**. A successful test enables the provider automatically; Codex/Copilot browser or device login also enables its provider automatically.
 
 For API-key providers, verify that the environment variable exists in the shell that launches `alta`.
 

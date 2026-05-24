@@ -56,8 +56,8 @@ The dialog can:
 - validate provider keys, endpoint URLs, required credentials, and conflicting settings;
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;
-- run provider tests before applying changes;
-- start and monitor Codex/Copilot browser or device login flows;
+- run provider tests before applying changes; a successful test automatically enables that provider;
+- start and monitor Codex/Copilot browser or device login flows; successful login automatically enables that provider;
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
 - open an Advanced TOML editor with live validation.
 

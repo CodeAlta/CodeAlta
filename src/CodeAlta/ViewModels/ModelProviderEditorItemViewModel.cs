@@ -235,6 +235,18 @@ internal sealed partial class ModelProviderEditorItemViewModel
         LastTestMessage = NormalizeText(message);
     }
 
+    public bool SetSuccessfulResultAndEnable(string? message)
+    {
+        var enabledChanged = !Enabled;
+        if (enabledChanged)
+        {
+            Enabled = true;
+        }
+
+        SetTestResult(success: true, message);
+        return enabledChanged;
+    }
+
     partial void OnProviderKeyChanged(string? value) => ClearTestResultOnEdit();
     partial void OnEnabledChanged(bool value) => ClearTestResultOnEdit();
     partial void OnProviderTypeChanged(string value) => ClearTestResultOnEdit();
