@@ -1,3 +1,5 @@
+using XenoAtom.Terminal.UI;
+
 namespace CodeAlta.Plugins.Abstractions;
 
 /// <summary>Describes a prompt processor contribution.</summary>
@@ -8,6 +10,49 @@ public sealed record PluginPromptProcessorContribution
 
     /// <summary>Gets the processor handler.</summary>
     public required PluginPromptProcessorHandler Handler { get; init; }
+}
+
+/// <summary>Delegate for attaching a plugin-owned behavior to a prompt editor.</summary>
+/// <param name="host">The prompt editor host.</param>
+/// <returns>A disposable attachment, or <see langword="null" /> when the plugin declines to attach.</returns>
+public delegate IAsyncDisposable? PluginPromptEditorAttachHandler(IPluginPromptEditorHost host);
+
+/// <summary>Describes a plugin-owned prompt editor attachment.</summary>
+public sealed record PluginPromptEditorContribution
+{
+    /// <summary>Gets the contribution name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Gets the ordering hint.</summary>
+    public int Order { get; init; }
+
+    /// <summary>Gets the attach handler.</summary>
+    public required PluginPromptEditorAttachHandler Attach { get; init; }
+}
+
+/// <summary>Minimal host surface exposed to plugin-owned prompt editor attachments.</summary>
+public interface IPluginPromptEditorHost
+{
+    /// <summary>Raised after prompt editor text, caret, or selection state may have changed.</summary>
+    event EventHandler? EditorStateChanged;
+
+    /// <summary>Raised when the prompt editor is accepted.</summary>
+    event EventHandler? Accepted;
+
+    /// <summary>Gets the editor visual, used as an anchor for plugin-owned UI.</summary>
+    Visual Visual { get; }
+
+    /// <summary>Gets the prompt editor project path, when known.</summary>
+    string? ProjectPath { get; }
+
+    /// <summary>Gets or sets the prompt text.</summary>
+    string? Text { get; set; }
+
+    /// <summary>Gets or sets the caret index.</summary>
+    int CaretIndex { get; set; }
+
+    /// <summary>Returns focus to the prompt editor.</summary>
+    void FocusPromptEditor();
 }
 
 /// <summary>Describes a prompt-processing result.</summary>

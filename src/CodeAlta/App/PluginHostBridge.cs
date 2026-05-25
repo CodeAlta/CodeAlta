@@ -4,11 +4,11 @@ using CodeAlta.Agent;
 using CodeAlta.App.State;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
+using CodeAlta.Presentation.Prompting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Presentation.Prompting;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.App;
@@ -42,6 +42,9 @@ internal sealed class PluginHostBridge
 
     public IReadOnlyList<PluginCommandContribution> GetCommandContributions()
         => _frontend.GetCommandContributions();
+
+    public IReadOnlyList<PluginPromptEditorContribution> GetPromptEditorContributions()
+        => _frontend.GetPromptEditorContributions();
 
     public IReadOnlyList<PluginStatusItem> GetStatusItems(PluginUiRegion region)
         => _frontend.GetStatusItems(region);

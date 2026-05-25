@@ -44,6 +44,7 @@ internal static class CodeAltaShellViewFactory
             options.ThreadTabHostController,
             options.ProjectFileSearchService,
             options.GetPromptReferenceProjectRoot,
+            options.PromptEditorContributions,
             options.GetPromptComposerSession,
             options.ThinkingAnimationPhase01,
             options.PromptImageCallbacks);

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Catalog;
+using CodeAlta.Plugins.Abstractions;
 using CodeAlta.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
@@ -15,6 +16,19 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ProjectFileReferencePopupControllerTests
 {
+    [TestMethod]
+    public void PromptEditorPluginHostExposesPromptReferenceProjectRoot()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var session = new FakeProjectFileSearchSession(CreateState(tempDirectory.Path, [], isRefreshing: false, candidateCount: 0));
+        var editor = new ChatPromptEditor(_ => { })
+            .EnableProjectFileReferences(new FakeProjectFileSearchService(session), ProjectFileAppearanceRegistry.Default, () => tempDirectory.Path);
+
+        var host = (IPluginPromptEditorHost)editor;
+
+        Assert.AreEqual(tempDirectory.Path, host.ProjectPath);
+    }
+
     [TestMethod]
     public void DialogOpensAcceptsSelectionAndRecordsUsage()
     {

@@ -1,3 +1,4 @@
+using CodeAlta.Plugin.GitHub;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
 
@@ -10,6 +11,15 @@ internal static class CodeAltaBuiltInPlugins
     private static BuiltInPluginRegistry CreateRegistry()
     {
         var registry = new BuiltInPluginRegistry();
+        registry.Add(new BuiltInPluginDefinition
+        {
+            Id = "github",
+            DisplayName = "GitHub",
+            Description = "Adds a GitHub issue prompt picker and exposes the GitHub CLI when available.",
+            EnabledByDefault = true,
+            PluginType = typeof(GitHubPlugin),
+            Factory = static () => new GitHubPlugin(),
+        });
         registry.Add(new BuiltInPluginDefinition
         {
             Id = "statistics",

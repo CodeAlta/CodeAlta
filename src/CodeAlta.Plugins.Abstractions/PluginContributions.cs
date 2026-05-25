@@ -26,6 +26,8 @@ public enum PluginPoint
     SystemPrompt,
     /// <summary>Prompt processor.</summary>
     PromptProcessor,
+    /// <summary>Prompt editor attachment.</summary>
+    PromptEditor,
     /// <summary>Before-agent-run hook.</summary>
     BeforeAgentRun,
     /// <summary>Tool-call hook.</summary>

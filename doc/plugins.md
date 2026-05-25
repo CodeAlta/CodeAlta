@@ -121,7 +121,7 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, `/plugin`, or the comma
 - agent backend/provider factories returning `IAgentBackend`;
 - `alta` live command roots;
 - static and dynamic system/developer prompt parts;
-- prompt processors;
+- prompt processors, prompt-editor attachments, and system/developer prompt parts;
 - before-agent-run hooks;
 - tool-call and tool-result hooks;
 - normalized agent-event observers;
@@ -134,6 +134,12 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, `/plugin`, or the comma
 Low-ceremony factories are available through `Command`, `Startup`, `Prompt`, `Attachments`, `PluginUi`, `Resources`, `Tool`, and `PluginBackend`.
 
 UI-only contributions remain frontend responsibilities. Headless hosts can ignore them or expose no-op services through `IPluginUiService.HasInteractiveUi == false`.
+
+## Prompt-editor attachments
+
+Plugins can implement `PluginBase.GetPromptEditorContributions()` to attach plugin-owned behavior to prompt editors. The host exposes only a small editor host (`Text`, `CaretIndex`, `ProjectPath`, editor-state/accepted events, focus, and the editor visual as an anchor); the plugin owns trigger detection, popup/dialog/control choices, insertion behavior, and any plugin-specific presentation. This keeps CodeAlta from hardcoding a generic issue picker or recreating `XenoAtom.Terminal.UI` abstractions in the plugin API.
+
+Keep attachments cancellable and avoid long synchronous work so typing in the prompt stays responsive. Headless hosts can skip prompt-editor attachments.
 
 ## `alta` live-tool integration
 
@@ -207,7 +213,9 @@ Unload can still fail if plugin code keeps static references, host-static delega
 
 ## Built-in plugins
 
-Built-ins use the same abstraction model. The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
+Built-ins use the same abstraction model. The GitHub plugin is packaged as `CodeAlta.Plugin.GitHub`, is enabled by default, and adds `#` issue lookup for projects whose Git remotes point at `github.com`. It inserts links like `[#18](https://github.com/org/repo/issues/18)`, uses the GitHub REST API through `HttpClient`, and exposes the `gh` agent tool only when the GitHub CLI is installed. The `gh` tool schema accepts arguments as an array of strings and executes them through `ProcessStartInfo.ArgumentList`, not a shell command string. Missing `gh` is logged and may be notified through the host UI without repeated launch spam.
+
+The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 
 ```toml
 [plugins.statistics]

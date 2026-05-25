@@ -69,7 +69,7 @@ The executable is the interactive terminal host. Reusable session/thread orchest
 | `src/CodeAlta.LiveTool` | In-process `alta` command contributors, registry, dispatcher, transcript formatter, and agent-tool wrapper. |
 | `src/CodeAlta.Plugins.Abstractions` | Public plugin authoring contracts. |
 | `src/CodeAlta.Plugins` | Trusted plugin discovery, source builds, loading, activation, contribution registry, adapters, and plugin resource roots. |
-| `src/CodeAlta.Plugin.Statistics` | Built-in plugin implemented through the same plugin model used by source plugins. |
+| `src/CodeAlta.Plugin.GitHub`, `src/CodeAlta.Plugin.Statistics` | Built-in plugins implemented through the same plugin model used by source plugins. |
 | `src/CodeAlta.Acp` | ACP JSON-RPC, protocol models, registry/install support, and generated protocol helpers. |
 | `src/CodeAlta.Tests`, `src/CodeAlta.*.Tests` | MSTest suites, including architecture guardrails for frontend/runtime boundaries and concurrency decisions. |
 

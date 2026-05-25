@@ -2,6 +2,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Frontend.Commands;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Prompting;
+using PluginPromptEditorContribution = CodeAlta.Plugins.Abstractions.PluginPromptEditorContribution;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -31,6 +32,8 @@ internal sealed class CodeAltaShellSurfaceOptions
     public required IProjectFileSearchService ProjectFileSearchService { get; init; }
 
     public required Func<string?> GetPromptReferenceProjectRoot { get; init; }
+
+    public IReadOnlyList<PluginPromptEditorContribution> PromptEditorContributions { get; init; } = [];
 
     public required Func<string, ThreadSessionState?, PromptComposerSessionBinding> GetPromptComposerSession { get; init; }
 

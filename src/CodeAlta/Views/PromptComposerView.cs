@@ -5,6 +5,7 @@ using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Shell;
 using CodeAlta.Presentation.Styling;
 using CodeAlta.Catalog;
+using PluginPromptEditorContribution = CodeAlta.Plugins.Abstractions.PluginPromptEditorContribution;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Graphics;
@@ -27,6 +28,7 @@ internal sealed class PromptComposerView
     private readonly Action _openCommandPalette;
     private readonly IProjectFileSearchService _projectFileSearchService;
     private readonly Func<string?> _getPromptReferenceProjectRoot;
+    private readonly IReadOnlyList<PluginPromptEditorContribution> _promptEditorContributions;
     private readonly Func<Rectangle?> _getDialogBounds;
     private readonly PromptImageAttachmentStripView _promptImageAttachmentStripView;
     private Dialog? _expandedPromptDialog;
@@ -36,6 +38,7 @@ internal sealed class PromptComposerView
         IReadOnlyList<ThreadWorkspaceCommandBinding> commandBindings,
         IProjectFileSearchService projectFileSearchService,
         Func<string?> getPromptReferenceProjectRoot,
+        IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
         Binding<string?> promptText,
         PromptImageAttachmentStripView promptImageAttachmentStripView,
         Func<Rectangle?> getDialogBounds,
@@ -45,6 +48,7 @@ internal sealed class PromptComposerView
         ArgumentNullException.ThrowIfNull(commandBindings);
         ArgumentNullException.ThrowIfNull(projectFileSearchService);
         ArgumentNullException.ThrowIfNull(getPromptReferenceProjectRoot);
+        ArgumentNullException.ThrowIfNull(promptEditorContributions);
         ArgumentNullException.ThrowIfNull(promptImageAttachmentStripView);
         ArgumentNullException.ThrowIfNull(getDialogBounds);
         ArgumentNullException.ThrowIfNull(controller);
@@ -55,10 +59,11 @@ internal sealed class PromptComposerView
         _openCommandPalette = controller.OpenCommandPalette;
         _projectFileSearchService = projectFileSearchService;
         _getPromptReferenceProjectRoot = getPromptReferenceProjectRoot;
+        _promptEditorContributions = promptEditorContributions;
         _getDialogBounds = getDialogBounds;
         _promptImageAttachmentStripView = promptImageAttachmentStripView;
 
-        Editor = CreatePromptEditor(viewModel, controller.OpenHelp, controller.OpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, controller.AcceptPrompt, commandBindings, promptText)
+        Editor = CreatePromptEditor(viewModel, controller.OpenHelp, controller.OpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, promptEditorContributions, controller.AcceptPrompt, commandBindings, promptText)
             .IsEnabled(viewModel.Bind.IsEnabled);
         _promptImageAttachmentStripView.ConfigurePromptImagePasteHandler(Editor);
         EditorView = Editor.Scrollable().IsTabStop(false);
@@ -85,7 +90,7 @@ internal sealed class PromptComposerView
             return;
         }
 
-        var editor = CreateStyledPromptEditor(_ => CloseExpandedPromptDialog(), _openHelp, _openCommandPalette, _projectFileSearchService, _getPromptReferenceProjectRoot, placeholder: null)
+        var editor = CreateStyledPromptEditor(_ => CloseExpandedPromptDialog(), _openHelp, _openCommandPalette, _projectFileSearchService, _getPromptReferenceProjectRoot, _promptEditorContributions, placeholder: null)
             .Placeholder(_viewModel.Bind.Placeholder)
             .Text(_promptText)
             .MinHeight(12)
@@ -145,11 +150,12 @@ internal sealed class PromptComposerView
         Action openCommandPalette,
         IProjectFileSearchService projectFileSearchService,
         Func<string?> getPromptReferenceProjectRoot,
+        IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
         Action<string> acceptPrompt,
         IReadOnlyList<ThreadWorkspaceCommandBinding> commandBindings,
         Binding<string?> promptText)
     {
-        var editor = CreateStyledPromptEditor(acceptPrompt, openHelp, openCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, placeholder: null)
+        var editor = CreateStyledPromptEditor(acceptPrompt, openHelp, openCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, promptEditorContributions, placeholder: null)
             .Placeholder(promptComposerViewModel.Bind.Placeholder)
             .Text(promptText);
 
@@ -166,7 +172,7 @@ internal sealed class PromptComposerView
         Action? onOpenHelp,
         Action? onOpenCommandPalette,
         string? placeholder)
-        => CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, projectFileSearchService: null, getPromptReferenceProjectRoot: null, placeholder);
+        => CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, projectFileSearchService: null, getPromptReferenceProjectRoot: null, promptEditorContributions: [], placeholder);
 
     internal static ChatPromptEditor CreateStyledPromptEditor(
         Action<string> onAccepted,
@@ -174,6 +180,7 @@ internal sealed class PromptComposerView
         Action? onOpenCommandPalette,
         IProjectFileSearchService? projectFileSearchService,
         Func<string?>? getPromptReferenceProjectRoot,
+        IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
         string? placeholder)
     {
         ArgumentNullException.ThrowIfNull(onAccepted);
@@ -203,6 +210,11 @@ internal sealed class PromptComposerView
                 projectFileSearchService,
                 ProjectFileAppearanceRegistry.Default,
                 getPromptReferenceProjectRoot);
+        }
+
+        if (promptEditorContributions.Count > 0)
+        {
+            editor.EnablePromptEditorContributions(promptEditorContributions);
         }
 
         return editor;

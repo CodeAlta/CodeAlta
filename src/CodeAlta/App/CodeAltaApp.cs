@@ -484,8 +484,10 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     {
         if (_shellView is not null) return _shellView;
 
-        var projectFileSearch = _ownedServices?.ProjectFileSearchService ?? NullProjectFileSearchService.Instance;
+        var pfs = _ownedServices?.ProjectFileSearchService ?? NullProjectFileSearchService.Instance;
         Func<string?> promptRoot = ResolvePromptRoot;
+        var pb = _ownedServices?.PluginHostBridge;
+        var pec = pb?.GetPromptEditorContributions() ?? [];
         var getPromptComposerSession = PromptComposerSessionBindingFactory.Create(_promptDraftUiCoordinator, new PromptImageCapabilityContext(GetSelectedThread, _threadStateCoordinator.FindOpenThread, GetPreferredModelProviderId, _chatBackendStates), (message, tone) => SetStatus(message, tone: tone));
         var openHelp = () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.ShowHelpAsync(), "show help");
         var showPalette = () => _shellCommandSurfaceCoordinator.ShowCommandPalette();
@@ -495,13 +497,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             WorkspaceViewModel = _threadWorkspaceViewModel,
             PromptComposerViewModel = _promptComposerViewModel,
             WorkspaceCommandBindings = _shellCommandSurfaceCoordinator.BuildWorkspaceCommandBindings(),
-            WorkspaceChromeController = ThreadWorkspaceChromeController.Create(() => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual), () => ShellPluginFooterComposer.ComposeRegion(_ownedServices?.PluginHostBridge, PluginUiRegion.ThreadStatus), anchor => EnsureThreadInfoPresenter().TogglePopup(anchor), () => ObserveUiTask(OpenModelProvidersAsync, "open model providers")),
+            WorkspaceChromeController = ThreadWorkspaceChromeController.Create(() => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual), () => ShellPluginFooterComposer.ComposeRegion(pb, PluginUiRegion.ThreadStatus), anchor => EnsureThreadInfoPresenter().TogglePopup(anchor), () => ObserveUiTask(OpenModelProvidersAsync, "open model providers")),
             PromptComposerController = PromptComposerViewController.Create(acceptedPrompt => ObserveUiTask(() => _shellCommandSurfaceCoordinator.HandleAcceptedPromptAsync(acceptedPrompt), "submit the current prompt"), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync(steer: false), "submit the current prompt"), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.AbortSelectedThreadAsync(), "abort the selected thread"), openHelp, showPalette),
-            QueuedPromptController = QueuedPromptStripController.Create(markdown => (_threadWorkspaceView?.ThreadPaneLayout.App)?.Terminal.Clipboard.TrySetText(markdown), queuedPromptId => ObserveUiTask(() => _threadCommandCoordinator.ConvertSelectedThreadQueuedPromptToSteerAsync(queuedPromptId), "convert the queued prompt to steer"), pendingSteerId => _threadCommandCoordinator.DeleteSelectedThreadPendingSteer(pendingSteerId), queuedPromptId => _threadCommandCoordinator.DeleteSelectedThreadQueuedPrompt(queuedPromptId), (queuedPromptId, remainingCount) => _threadCommandCoordinator.UpdateSelectedThreadQueuedPromptCount(queuedPromptId, remainingCount), (queuedPromptId, text) => _threadCommandCoordinator.UpdateSelectedThreadQueuedPromptText(queuedPromptId, text), (onAccepted, placeholder) => ThreadWorkspaceView.CreateStyledPromptEditor(onAccepted, openHelp, showPalette, projectFileSearch, promptRoot, placeholder)),
+            QueuedPromptController = QueuedPromptStripController.Create(markdown => (_threadWorkspaceView?.ThreadPaneLayout.App)?.Terminal.Clipboard.TrySetText(markdown), queuedPromptId => ObserveUiTask(() => _threadCommandCoordinator.ConvertSelectedThreadQueuedPromptToSteerAsync(queuedPromptId), "convert the queued prompt to steer"), pendingSteerId => _threadCommandCoordinator.DeleteSelectedThreadPendingSteer(pendingSteerId), queuedPromptId => _threadCommandCoordinator.DeleteSelectedThreadQueuedPrompt(queuedPromptId), (queuedPromptId, remainingCount) => _threadCommandCoordinator.UpdateSelectedThreadQueuedPromptCount(queuedPromptId, remainingCount), (queuedPromptId, text) => _threadCommandCoordinator.UpdateSelectedThreadQueuedPromptText(queuedPromptId, text), (onAccepted, placeholder) => ThreadWorkspaceView.CreateStyledPromptEditor(onAccepted, openHelp, showPalette, pfs, promptRoot, pec, placeholder)),
             ModelProviderSelectorController = ModelProviderSelectorController.Create(OnModelProviderSelectionChanged, OnModelSelectionChanged, OnReasoningSelectionChanged, () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.CompactSelectedThreadAsync(), "compact the selected thread")),
             ThreadTabHostController = ThreadTabHostController.Create(selectedIndex => _threadTabStripCoordinator.ObserveBoundSelection(selectedIndex)),
-            ProjectFileSearchService = projectFileSearch,
+            ProjectFileSearchService = pfs,
             GetPromptReferenceProjectRoot = promptRoot,
+            PromptEditorContributions = pec,
             GetPromptComposerSession = getPromptComposerSession,
             ThinkingAnimationPhase01 = _shellAnimationRuntime.ThinkingPhase01,
             Sidebar = _sidebarCoordinator.View.Root,
@@ -510,7 +513,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             ToggleTerminalLoopCallback = ToggleTerminalLoopCallback,
             ToggleNavigator = () => SidebarUiStateHelpers.ToggleNavigator(_sidebarCoordinator.View, FocusPromptTarget),
             CanUseCommandPalette = () => _fileEditorWorkspaceCoordinator.SelectedTabId is null,
-            ComposePluginFooter = commandBar => ShellPluginFooterComposer.Compose(commandBar, _ownedServices?.PluginHostBridge),
+            ComposePluginFooter = commandBar => ShellPluginFooterComposer.Compose(commandBar, pb),
             CommandBarMultiLine = _commandBarMultiLine,
         });
         _threadWorkspaceView = shellSurface.WorkspaceView;

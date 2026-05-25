@@ -318,6 +318,9 @@ public sealed class PluginContributionRegistry
             case PluginSystemPromptContribution prompt when !string.IsNullOrWhiteSpace(prompt.Title):
                 yield return new ContributionConflictKey("prompt-part", $"prompt:{prompt.Channel}:{prompt.Title}", prompt.Title!);
                 yield break;
+            case PluginPromptEditorContribution promptEditor:
+                yield return new ContributionConflictKey("prompt-editor", $"prompt-editor:{promptEditor.Name}", promptEditor.Name);
+                yield break;
             case PluginResourceContribution resource:
                 yield return new ContributionConflictKey("resource", $"resource:{resource.Kind}:{resource.Path}", $"{resource.Kind}:{resource.Path}");
                 yield break;
@@ -359,6 +362,7 @@ public sealed class PluginContributionRegistry
             PluginCommandContribution command => command.Order,
             PluginSystemPromptContribution prompt => prompt.Order,
             PluginPromptProcessorContribution processor => processor.Order,
+            PluginPromptEditorContribution promptEditor => promptEditor.Order,
             PluginUiContribution ui => ui.Order,
             PluginResourceContribution resource => resource.Precedence,
             PluginAltaCommandContribution alta => alta.Order,
@@ -377,6 +381,7 @@ public sealed class PluginContributionRegistry
             PluginProviderConfigurationContribution provider => provider.DisplayName,
             PluginSystemPromptContribution prompt => prompt.Title,
             PluginPromptProcessorContribution _ => null,
+            PluginPromptEditorContribution promptEditor => promptEditor.Name,
             PluginUiContribution ui => ui.Name,
             PluginResourceContribution resource => resource.Path,
             PluginCompactionContribution _ => null,

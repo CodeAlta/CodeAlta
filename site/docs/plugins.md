@@ -124,7 +124,7 @@ Plugins can contribute:
 - startup hooks and command-line commands;
 - shell, prompt, and thread commands;
 - UI visuals, status rows, dialogs, and renderers;
-- prompt processors and system/developer prompt parts;
+- prompt processors, prompt-editor attachments, and system/developer prompt parts;
 - before-agent-run hooks;
 - LLM-callable agent tools and tool-call/result interception;
 - provider factories;
@@ -134,7 +134,14 @@ Plugins can contribute:
 - normalized agent event observers;
 - transient thread event projections for plugin-owned timeline cards.
 
-Built-in plugins use the same model. For example, the statistics plugin projects per-turn/session statistics from normalized agent events without writing plugin messages into canonical conversation history.
+Prompt-editor attachments can attach plugin-owned behavior to prompt editors. CodeAlta provides only a small editor host, including the prompt project path; each plugin owns its trigger detection and visual presentation.
+
+Built-in plugins use the same model. The GitHub plugin owns its `#` issue lookup UI in GitHub repositories and inserts Markdown links such as `[#18](https://github.com/org/repo/issues/18)`. It also exposes the `gh` CLI as an agent tool only when `gh` is installed; the tool receives arguments as an array of strings and passes them to `ProcessStartInfo.ArgumentList` instead of a shell command string. The statistics plugin projects per-turn/session statistics from normalized agent events without writing plugin messages into canonical conversation history.
+
+<figure class="my-4">
+  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-github-issue-picker.png" alt="CodeAlta GitHub issue prompt picker dialog" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The built-in GitHub plugin contributes the prompt issue picker and keeps the dialog UI plugin-owned.</figcaption>
+</figure>
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plugin-statistics.png" alt="CodeAlta timeline statistics card contributed by a plugin" loading="lazy">

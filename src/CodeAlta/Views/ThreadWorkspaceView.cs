@@ -5,6 +5,7 @@ using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Shell;
 using CodeAlta.Catalog;
+using PluginPromptEditorContribution = CodeAlta.Plugins.Abstractions.PluginPromptEditorContribution;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Graphics;
@@ -30,6 +31,7 @@ internal sealed class ThreadWorkspaceView
     private readonly ModelProviderSelectorController _modelProviderController;
     private readonly IProjectFileSearchService _projectFileSearchService;
     private readonly Func<string?> _getPromptReferenceProjectRoot;
+    private readonly IReadOnlyList<PluginPromptEditorContribution> _promptEditorContributions;
     private readonly Func<string, ThreadSessionState?, PromptComposerSessionBinding> _getPromptComposerSession;
     private readonly State<float> _thinkingAnimationPhase01;
     private readonly PromptImageWorkspaceCallbacks? _fallbackPromptImageCallbacks;
@@ -56,6 +58,41 @@ internal sealed class ThreadWorkspaceView
         Func<string, ThreadSessionState?, PromptComposerSessionBinding> getPromptComposerSession,
         State<float> thinkingAnimationPhase01,
         PromptImageWorkspaceCallbacks? promptImageCallbacks = null)
+        : this(
+            shellViewModel,
+            workspaceViewModel,
+            promptComposerViewModel,
+            commandBindings,
+            chromeController,
+            promptComposerController,
+            queuedPromptController,
+            modelProviderController,
+            tabHostController,
+            projectFileSearchService,
+            getPromptReferenceProjectRoot,
+            [],
+            getPromptComposerSession,
+            thinkingAnimationPhase01,
+            promptImageCallbacks)
+    {
+    }
+
+    public ThreadWorkspaceView(
+        CodeAltaShellViewModel shellViewModel,
+        ThreadWorkspaceViewModel workspaceViewModel,
+        PromptComposerViewModel promptComposerViewModel,
+        IReadOnlyList<ThreadWorkspaceCommandBinding> commandBindings,
+        ThreadWorkspaceChromeController chromeController,
+        PromptComposerViewController promptComposerController,
+        QueuedPromptStripController queuedPromptController,
+        ModelProviderSelectorController modelProviderController,
+        ThreadTabHostController tabHostController,
+        IProjectFileSearchService projectFileSearchService,
+        Func<string?> getPromptReferenceProjectRoot,
+        IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
+        Func<string, ThreadSessionState?, PromptComposerSessionBinding> getPromptComposerSession,
+        State<float> thinkingAnimationPhase01,
+        PromptImageWorkspaceCallbacks? promptImageCallbacks = null)
     {
         ArgumentNullException.ThrowIfNull(shellViewModel);
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
@@ -68,6 +105,7 @@ internal sealed class ThreadWorkspaceView
         ArgumentNullException.ThrowIfNull(tabHostController);
         ArgumentNullException.ThrowIfNull(projectFileSearchService);
         ArgumentNullException.ThrowIfNull(getPromptReferenceProjectRoot);
+        ArgumentNullException.ThrowIfNull(promptEditorContributions);
         ArgumentNullException.ThrowIfNull(getPromptComposerSession);
         ArgumentNullException.ThrowIfNull(thinkingAnimationPhase01);
 
@@ -81,6 +119,7 @@ internal sealed class ThreadWorkspaceView
         _modelProviderController = modelProviderController;
         _projectFileSearchService = projectFileSearchService;
         _getPromptReferenceProjectRoot = getPromptReferenceProjectRoot;
+        _promptEditorContributions = promptEditorContributions;
         _getPromptComposerSession = getPromptComposerSession;
         _thinkingAnimationPhase01 = thinkingAnimationPhase01;
         _fallbackPromptImageCallbacks = promptImageCallbacks;
@@ -206,6 +245,7 @@ internal sealed class ThreadWorkspaceView
             _commandBindings,
             _projectFileSearchService,
             _getPromptReferenceProjectRoot,
+            _promptEditorContributions,
             promptSession.PromptText,
             imageStripView,
             () => ThreadPaneLayout?.GetAbsoluteBounds(),
@@ -349,6 +389,7 @@ internal sealed class ThreadWorkspaceView
         Action? onOpenCommandPalette,
         IProjectFileSearchService? projectFileSearchService,
         Func<string?>? getPromptReferenceProjectRoot,
+        IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
         string? placeholder)
-        => PromptComposerView.CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, placeholder);
+        => PromptComposerView.CreateStyledPromptEditor(onAccepted, onOpenHelp, onOpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, promptEditorContributions, placeholder);
 }

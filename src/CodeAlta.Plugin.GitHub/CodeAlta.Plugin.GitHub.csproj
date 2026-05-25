@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Built-in GitHub integration plugin for CodeAlta.</Description>
+    <Authors>Alexandre Mutel</Authors>
+    <PackageTags>codealta;plugin;github;issues;agentic;ai</PackageTags>
+    <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="XenoAtom.Logging" />
+    <PackageReference Include="XenoAtom.Terminal.UI" />
+    <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

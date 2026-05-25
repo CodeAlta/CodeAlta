@@ -69,6 +69,7 @@
     <ProjectReference Include="..\CodeAlta.LiveTool\CodeAlta.LiveTool.csproj" />
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.GitHub\CodeAlta.Plugin.GitHub.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
   </ItemGroup>
