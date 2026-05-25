@@ -72,12 +72,7 @@ public sealed class GitHubPlugin : PluginBase
 
         var resultLimit = Math.Clamp(maximumResults, 1, 100);
         var query = queryText.Trim();
-        var issues = string.IsNullOrWhiteSpace(query) || ShouldFilterRecentIssues(query)
-            ? FilterRecentIssues(
-                await GitHubIssueClient.SearchIssuesAsync(_httpClient, repository, string.Empty, 100, cancellationToken).ConfigureAwait(false),
-                query,
-                resultLimit)
-            : await GitHubIssueClient.SearchIssuesAsync(_httpClient, repository, query, resultLimit, cancellationToken).ConfigureAwait(false);
+        var issues = await QueryIssuesAsync(_httpClient, repository, query, resultLimit, cancellationToken).ConfigureAwait(false);
 
         return issues
             .OrderByDescending(static issue => issue.UpdatedAt)
@@ -94,6 +89,47 @@ public sealed class GitHubPlugin : PluginBase
     private static bool ShouldFilterRecentIssues(string query)
         => query.Length < 3 || query.All(char.IsAsciiDigit);
 
+    private static async Task<IReadOnlyList<GitHubIssue>> QueryIssuesAsync(HttpClient client, GitHubRepository repository, string query, int resultLimit, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(query) || ShouldFilterRecentIssues(query))
+        {
+            return FilterRecentIssues(
+                await GitHubIssueClient.SearchIssuesAsync(client, repository, string.Empty, 100, cancellationToken).ConfigureAwait(false),
+                query,
+                resultLimit);
+        }
+
+        if (!IsPlainIssueWordQuery(query))
+        {
+            return await GitHubIssueClient.SearchIssuesAsync(client, repository, query, resultLimit, cancellationToken).ConfigureAwait(false);
+        }
+
+        var localMatches = FilterRecentIssues(
+            await GitHubIssueClient.SearchIssuesAsync(client, repository, string.Empty, 100, cancellationToken).ConfigureAwait(false),
+            query,
+            resultLimit);
+        if (localMatches.Count >= resultLimit)
+        {
+            return localMatches;
+        }
+
+        var searchMatches = await GitHubIssueClient.SearchIssuesAsync(client, repository, query, resultLimit, cancellationToken).ConfigureAwait(false);
+        return MergeIssueResults(localMatches, searchMatches, resultLimit);
+    }
+
+    private static bool IsPlainIssueWordQuery(string query)
+    {
+        foreach (var ch in query)
+        {
+            if (char.IsWhiteSpace(ch) || ch is ':' or '"' or '\'')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static IReadOnlyList<GitHubIssue> FilterRecentIssues(IReadOnlyList<GitHubIssue> issues, string query, int maximumResults)
     {
         var filtered = issues;
@@ -109,7 +145,33 @@ public sealed class GitHubPlugin : PluginBase
 
     private static bool IssueMatchesRecentFilter(GitHubIssue issue, string query)
         => issue.Number.ToString(CultureInfo.InvariantCulture).StartsWith(query, StringComparison.OrdinalIgnoreCase) ||
-            issue.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+            issue.Title.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<GitHubIssue> MergeIssueResults(IReadOnlyList<GitHubIssue> primary, IReadOnlyList<GitHubIssue> secondary, int maximumResults)
+    {
+        var results = new List<GitHubIssue>(maximumResults);
+        AddIssues(primary);
+        AddIssues(secondary);
+        return results.ToArray();
+
+        void AddIssues(IReadOnlyList<GitHubIssue> source)
+        {
+            foreach (var issue in source)
+            {
+                if (results.Count >= maximumResults)
+                {
+                    return;
+                }
+
+                if (results.Any(existing => existing.Number == issue.Number && string.Equals(existing.Repository, issue.Repository, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                results.Add(issue);
+            }
+        }
+    }
 
     /// <inheritdoc />
     public override IEnumerable<PluginPromptEditorContribution> GetPromptEditorContributions()

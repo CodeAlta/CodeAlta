@@ -114,6 +114,25 @@ public sealed class GitHubPluginTests
     }
 
     [TestMethod]
+    public async Task IssueReferenceQueryFiltersRecentIssuesCaseInsensitivelyForWordQuery()
+    {
+        using var tempDirectory = TempDirectory.CreateGitHubRepository();
+        await using var plugin = CreatePluginWithIssueJsonResponse(
+            """
+            [
+              { "number": 123, "title": "Improve GitHub PICKER search", "html_url": "https://github.com/org/repo/issues/123", "updated_at": "2026-05-25T10:00:00Z", "state": "open" },
+              { "number": 45, "title": "Other issue", "html_url": "https://github.com/org/repo/issues/45", "updated_at": "2026-05-24T10:00:00Z", "state": "open" }
+            ]
+            """);
+
+        var result = await plugin.QueryIssueReferencesAsync(tempDirectory.Path, "picker", 1, CancellationToken.None);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual(123, result[0].Number);
+    }
+
+    [TestMethod]
     public void PluginContributesPromptEditorAttachment()
     {
         var contribution = new GitHubPlugin().GetPromptEditorContributions().Single();
