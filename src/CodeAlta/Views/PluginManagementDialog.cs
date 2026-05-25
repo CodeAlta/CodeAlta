@@ -58,7 +58,7 @@ internal sealed class PluginManagementDialog
         _plugins = _pluginList.Items;
         _pluginList.SelectedIndex(_selectedPluginIndex.Bind.Value);
         _pluginList.ItemTemplate = new DataTemplate<PluginManagementRow>(
-            (DataTemplateValue<PluginManagementRow> value, in DataTemplateContext _) => BuildPluginListItem(value.GetValue()),
+            (DataTemplateValue<PluginManagementRow> value, in DataTemplateContext context) => BuildPluginListItem(value.GetValue(), context.Index),
             null);
 
         _summaryMarkup = new Markup(() => _summaryText)
@@ -165,6 +165,7 @@ internal sealed class PluginManagementDialog
     {
         _dialog.Show();
         Reload(null);
+        _dialog.App?.Focus(_pluginList);
     }
 
     private void Reload(string? preferredKey)
@@ -303,13 +304,13 @@ internal sealed class PluginManagementDialog
             .Padding(new Thickness(1, 0, 1, 0))
             .HorizontalAlignment(Align.Stretch);
 
-    private Visual BuildPluginListItem(PluginManagementRow row)
-        => new Markup(() => BuildPluginListItemMarkup(row.Entry))
+    private Visual BuildPluginListItem(PluginManagementRow row, int index)
+        => new Markup(() => BuildPluginListItemMarkup(row.Entry, _selectedPluginIndex.Value == index))
         {
             Wrap = false,
         };
 
-    private static string BuildPluginListItemMarkup(PluginManagementEntry entry)
+    private static string BuildPluginListItemMarkup(PluginManagementEntry entry, bool selected)
     {
         var (tone, icon) = GetStatusToneAndIcon(entry.State);
         var description = GetDescription(entry);
@@ -319,7 +320,10 @@ internal sealed class PluginManagementDialog
             hint += $" · {description}";
         }
 
-        return $"[{tone}]{icon} {AnsiMarkup.Escape(entry.DisplayName)}[/] [dim]{AnsiMarkup.Escape(hint)}[/]";
+        var hintMarkup = selected
+            ? AnsiMarkup.Escape(hint)
+            : $"[dim]{AnsiMarkup.Escape(hint)}[/]";
+        return $"[{tone}]{icon} {AnsiMarkup.Escape(entry.DisplayName)}[/] {hintMarkup}";
     }
 
     private static string BuildSelectedTitleMarkup(PluginManagementEntry entry)
