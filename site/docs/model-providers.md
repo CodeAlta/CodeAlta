@@ -120,6 +120,8 @@ Use `[providers.<provider-key>.profile]` only when a provider-compatible endpoin
 | `requires_tool_result_name` | Whether tool-result messages must include a tool name. |
 | `requires_assistant_after_tool_result` | Whether a synthetic assistant turn must be inserted after tool results. |
 | `supports_cache_control` | Whether cache-control metadata is supported. |
+| `supports_strict_tools` | Whether strict tool schemas are supported. |
+| `thinking_format` | Provider-specific thinking/reasoning format name. |
 | `max_tokens_field_name` | Request-body field used for maximum output tokens, such as `max_output_tokens` or `max_completion_tokens`. |
 | `reasoning_field_names` | Response fields inspected for reasoning content. |
 | `reasoning_input_field_name` | Assistant-message field used when replaying prior reasoning content. |

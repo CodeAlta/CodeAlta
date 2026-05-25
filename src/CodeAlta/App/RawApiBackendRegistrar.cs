@@ -870,6 +870,8 @@ internal static class RawApiBackendRegistrar
             RequiresToolResultName = document.RequiresToolResultName ?? profile.RequiresToolResultName,
             RequiresAssistantAfterToolResult = document.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
             SupportsCacheControl = document.SupportsCacheControl ?? profile.SupportsCacheControl,
+            SupportsStrictTools = document.SupportsStrictTools ?? profile.SupportsStrictTools,
+            ThinkingFormat = document.ThinkingFormat ?? profile.ThinkingFormat,
             MaxTokensFieldName = document.MaxTokensFieldName ?? profile.MaxTokensFieldName,
             ReasoningFieldNames = document.ReasoningFieldNames is null
                 ? profile.ReasoningFieldNames

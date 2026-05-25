@@ -1773,6 +1773,7 @@ public sealed class CodeAltaConfigStore
 
         profile.MaxTokensFieldName = NormalizeText(profile.MaxTokensFieldName);
         profile.ReasoningInputFieldName = NormalizeText(profile.ReasoningInputFieldName);
+        profile.ThinkingFormat = NormalizeText(profile.ThinkingFormat);
         profile.ReasoningFieldNames = NormalizeList(profile.ReasoningFieldNames)?
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -2169,6 +2170,8 @@ public sealed class CodeAltaConfigStore
             RequiresToolResultName = profile.RequiresToolResultName,
             RequiresAssistantAfterToolResult = profile.RequiresAssistantAfterToolResult,
             SupportsCacheControl = profile.SupportsCacheControl,
+            SupportsStrictTools = profile.SupportsStrictTools,
+            ThinkingFormat = profile.ThinkingFormat,
             MaxTokensFieldName = profile.MaxTokensFieldName,
             ReasoningFieldNames = profile.ReasoningFieldNames is null ? null : [.. profile.ReasoningFieldNames],
             ReasoningInputFieldName = profile.ReasoningInputFieldName,

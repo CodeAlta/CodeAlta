@@ -57,6 +57,18 @@ public sealed class CodeAltaProviderProfileDocument
     public bool? SupportsCacheControl { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the provider supports strict tool schemas.
+    /// </summary>
+    [JsonPropertyName("supports_strict_tools")]
+    public bool? SupportsStrictTools { get; set; }
+
+    /// <summary>
+    /// Gets or sets the provider-specific thinking/reasoning format name.
+    /// </summary>
+    [JsonPropertyName("thinking_format")]
+    public string? ThinkingFormat { get; set; }
+
+    /// <summary>
     /// Gets or sets the provider-specific max-tokens field name.
     /// </summary>
     [JsonPropertyName("max_tokens_field_name")]

@@ -151,6 +151,16 @@ public sealed record LocalAgentProviderProfile
     public bool SupportsThoughtSignatures { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether the provider supports strict tool schemas.
+    /// </summary>
+    public bool SupportsStrictTools { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the provider-specific thinking/reasoning format name, when applicable.
+    /// </summary>
+    public string? ThinkingFormat { get; init; }
+
+    /// <summary>
     /// Gets or initializes additional provider-specific flags.
     /// </summary>
     public IReadOnlyDictionary<string, object?> Flags { get; init; }

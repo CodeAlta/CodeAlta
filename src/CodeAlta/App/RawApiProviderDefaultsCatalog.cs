@@ -203,6 +203,10 @@ internal static class RawApiProviderDefaultsCatalog
             RequiresToolResultName = defaults.RequiresToolResultName ?? profile.RequiresToolResultName,
             RequiresAssistantAfterToolResult = defaults.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
             SupportsCacheControl = defaults.SupportsCacheControl ?? profile.SupportsCacheControl,
+            SupportsStrictTools = defaults.SupportsStrictTools ?? profile.SupportsStrictTools,
+            ThinkingFormat = string.IsNullOrWhiteSpace(defaults.ThinkingFormat)
+                ? profile.ThinkingFormat
+                : defaults.ThinkingFormat.Trim(),
             MaxTokensFieldName = string.IsNullOrWhiteSpace(defaults.MaxTokensFieldName)
                 ? profile.MaxTokensFieldName
                 : defaults.MaxTokensFieldName.Trim(),
@@ -408,6 +412,12 @@ internal sealed class RawApiProviderDefaultsProfile
 
     [JsonPropertyName("supports_cache_control")]
     public bool? SupportsCacheControl { get; set; }
+
+    [JsonPropertyName("supports_strict_tools")]
+    public bool? SupportsStrictTools { get; set; }
+
+    [JsonPropertyName("thinking_format")]
+    public string? ThinkingFormat { get; set; }
 
     [JsonPropertyName("max_tokens_field_name")]
     public string? MaxTokensFieldName { get; set; }
