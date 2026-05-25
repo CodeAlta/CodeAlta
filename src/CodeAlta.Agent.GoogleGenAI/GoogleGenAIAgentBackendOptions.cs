@@ -92,6 +92,12 @@ public sealed class GoogleGenAIProviderOptions
     public string? ModelsDevProviderId { get; set; }
 
     /// <summary>
+    /// Gets or sets additional static HTTP headers to include with provider requests.
+    /// Authentication headers are owned by the backend and should not be supplied here.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
+
+    /// <summary>
     /// Gets or sets the optional fixed model identifier to expose when remote model discovery is unavailable.
     /// </summary>
     public string? SingleModelId { get; set; }

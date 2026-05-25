@@ -30,6 +30,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         {
             var protocolTrace = OpenAIProtocolTraceLogger.Create(provider.ProtocolTracing, request);
             var client = OpenAIProviderSdkFactory.CreateChatClient(provider, request.ModelId, protocolTrace);
+            var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
+            using var headerScope = provider.RequestHeaderContext?.Push(
+                OpenAIModelRequestOverrides.MergeHeaders(provider.ExtraHeaders, modelRequest));
             var messages = CreateMessages(request);
             var options = CreateOptions(request);
             var streamedToolCalls = new Dictionary<int, StreamingToolCallState>();
@@ -231,7 +234,10 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             options.ReasoningEffortLevel = reasoningEffortLevel;
         }
 
-        OpenAIExtraBodyPatchHelper.Apply(ref options.Patch, provider.ExtraBody);
+        var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
+        OpenAIExtraBodyPatchHelper.Apply(
+            ref options.Patch,
+            OpenAIModelRequestOverrides.MergeExtraBody(provider.ExtraBody, modelRequest));
 
         foreach (var tool in request.Tools)
         {

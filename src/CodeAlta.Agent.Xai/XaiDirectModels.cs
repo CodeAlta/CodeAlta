@@ -49,6 +49,7 @@ internal sealed class XaiModelDiscoveryClient
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.Token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             XaiDirectHeaders.ApplyStaticHeaders(request.Headers);
+            XaiDirectHeaders.ApplyExtraHeaders(request.Headers, _provider.ExtraHeaders);
             using var response = await _httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
             var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

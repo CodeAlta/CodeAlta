@@ -98,7 +98,10 @@ internal sealed class XaiDirectTurnExecutor : ILocalAgentTurnExecutor
             IsDefault = _provider.IsDefault,
             Profile = profile,
             Compaction = _provider.Compaction,
+            ExtraHeaders = _provider.ExtraHeaders,
+            ExtraBody = _provider.ExtraBody,
             ModelOverrides = _provider.ModelOverrides,
+            ModelRequestOverrides = _provider.ModelRequestOverrides,
             ProtocolTracing = _provider.ProtocolTraceEnabled
                 ? new OpenAIProtocolTraceOptions { Enabled = true, StateRootPath = _provider.StateRootPath }
                 : null,

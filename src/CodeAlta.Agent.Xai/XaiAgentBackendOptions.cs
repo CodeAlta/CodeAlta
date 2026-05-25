@@ -87,9 +87,25 @@ public sealed class XaiProviderOptions
     public string? ModelsDevProviderId { get; set; }
 
     /// <summary>
+    /// Gets or sets additional static HTTP headers to include with xAI model discovery and delegated OpenAI-compatible requests.
+    /// Authentication headers are owned by the backend and should not be supplied here.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
+
+    /// <summary>
+    /// Gets or sets provider-specific request-body fields to append to delegated OpenAI-compatible requests.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? ExtraBody { get; set; }
+
+    /// <summary>
     /// Gets or sets per-model metadata overrides.
     /// </summary>
     public IReadOnlyDictionary<string, AgentModelOverride>? ModelOverrides { get; set; }
+
+    /// <summary>
+    /// Gets or sets per-model request customizations for delegated OpenAI-compatible requests.
+    /// </summary>
+    public IReadOnlyDictionary<string, AgentModelRequestOverride>? ModelRequestOverrides { get; set; }
 
     /// <summary>
     /// Gets or sets the shared models.dev catalog service.

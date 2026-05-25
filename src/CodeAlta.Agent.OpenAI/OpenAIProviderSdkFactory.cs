@@ -367,15 +367,17 @@ internal static class OpenAIProviderSdkFactory
             options.AddPolicy(protocolTrace.CreateHttpPolicy(), PipelinePosition.BeforeTransport);
         }
 
-        if (provider.ExtraHeaders is { Count: > 0 } extraHeaders)
+        if (provider.ExtraHeaders is { Count: > 0 } || provider.RequestHeaderContext is not null)
         {
-            options.AddPolicy(new OpenAIExtraHeadersPolicy(extraHeaders), PipelinePosition.BeforeTransport);
+            options.AddPolicy(new OpenAIExtraHeadersPolicy(provider.ExtraHeaders, provider.RequestHeaderContext), PipelinePosition.BeforeTransport);
         }
 
         return options;
     }
 
-    private sealed class OpenAIExtraHeadersPolicy(IReadOnlyDictionary<string, string> headers) : PipelinePolicy
+    private sealed class OpenAIExtraHeadersPolicy(
+        IReadOnlyDictionary<string, string>? headers,
+        OpenAIRequestHeaderContext? requestHeaderContext) : PipelinePolicy
     {
         public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
         {
@@ -392,7 +394,19 @@ internal static class OpenAIProviderSdkFactory
         private void Apply(PipelineMessage message)
         {
             ArgumentNullException.ThrowIfNull(message);
-            foreach (var header in headers)
+            ApplyHeaders(message, requestHeaderContext?.Current ?? headers);
+        }
+
+        private static void ApplyHeaders(
+            PipelineMessage message,
+            IReadOnlyDictionary<string, string>? headersToApply)
+        {
+            if (headersToApply is not { Count: > 0 })
+            {
+                return;
+            }
+
+            foreach (var header in headersToApply)
             {
                 if (!string.IsNullOrWhiteSpace(header.Key) && header.Value is not null)
                 {
@@ -434,9 +448,9 @@ internal static class OpenAIProviderSdkFactory
             options.AddPolicy(protocolTrace.CreateHttpPolicy(), PipelinePosition.BeforeTransport);
         }
 
-        if (provider.ExtraHeaders is { Count: > 0 } extraHeaders)
+        if (provider.ExtraHeaders is { Count: > 0 } || provider.RequestHeaderContext is not null)
         {
-            options.AddPolicy(new OpenAIExtraHeadersPolicy(extraHeaders), PipelinePosition.BeforeTransport);
+            options.AddPolicy(new OpenAIExtraHeadersPolicy(provider.ExtraHeaders, provider.RequestHeaderContext), PipelinePosition.BeforeTransport);
         }
 
         return options;

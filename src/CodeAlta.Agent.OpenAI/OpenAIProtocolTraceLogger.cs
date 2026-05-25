@@ -223,6 +223,13 @@ internal sealed class OpenAIProtocolTraceLogger
         private static bool IsSensitiveHeader(string name)
             => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
                || name.Equals("api-key", StringComparison.OrdinalIgnoreCase)
-               || name.Equals("x-api-key", StringComparison.OrdinalIgnoreCase);
+               || name.Equals("x-api-key", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("cookie", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("set-cookie", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("token", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("credential", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("password", StringComparison.OrdinalIgnoreCase)
+               || name.EndsWith("-key", StringComparison.OrdinalIgnoreCase);
     }
 }

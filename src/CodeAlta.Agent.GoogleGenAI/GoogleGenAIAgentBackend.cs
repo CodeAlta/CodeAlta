@@ -171,12 +171,15 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
 
     private static Client CreateSdkClient(GoogleGenAIProviderOptions provider)
     {
-        var httpOptions = provider.BaseUri is null
-            ? null
-            : new HttpOptions
+        var httpOptions = provider.BaseUri is not null || provider.ExtraHeaders is { Count: > 0 }
+            ? new HttpOptions
             {
-                BaseUrl = provider.BaseUri.ToString(),
-            };
+                BaseUrl = provider.BaseUri?.ToString(),
+                Headers = provider.ExtraHeaders is null
+                    ? null
+                    : new Dictionary<string, string>(provider.ExtraHeaders, StringComparer.OrdinalIgnoreCase),
+            }
+            : null;
         return new Client(
             vertexAI: provider.UseVertexAI,
             apiKey: provider.ApiKey,

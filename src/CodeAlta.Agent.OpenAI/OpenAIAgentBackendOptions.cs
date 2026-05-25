@@ -120,9 +120,20 @@ public sealed class OpenAIProviderOptions
     public IReadOnlyDictionary<string, object?>? ExtraBody { get; set; }
 
     /// <summary>
+    /// Gets or sets additional static HTTP headers to include with provider requests.
+    /// Authentication headers are owned by the backend and should not be supplied here.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
+
+    /// <summary>
     /// Gets or sets per-model metadata overrides.
     /// </summary>
     public IReadOnlyDictionary<string, AgentModelOverride>? ModelOverrides { get; set; }
+
+    /// <summary>
+    /// Gets or sets per-model request customizations.
+    /// </summary>
+    public IReadOnlyDictionary<string, AgentModelRequestOverride>? ModelRequestOverrides { get; set; }
 
     /// <summary>
     /// Gets or sets the shared models.dev catalog service.
@@ -153,7 +164,7 @@ public sealed class OpenAIProviderOptions
 
     internal Func<string?, ChatClient>? ChatClientFactory { get; set; }
 
-    internal IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
+    internal OpenAIRequestHeaderContext? RequestHeaderContext { get; set; }
 
     internal HttpClient? HttpClient { get; set; }
 

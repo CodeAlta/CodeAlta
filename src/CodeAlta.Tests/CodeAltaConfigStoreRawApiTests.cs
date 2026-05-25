@@ -30,6 +30,16 @@ public sealed class CodeAltaConfigStoreRawApiTests
             custom_boolean = true
             custom_threshold = 0.75
 
+            [providers.OpenRouter.request]
+            remove_headers = [" X-Default ", "Authorization"]
+            remove_extra_body = [" inherited_flag "]
+
+            [providers.OpenRouter.request.headers]
+            X-Provider-Feature = " enabled "
+
+            [providers.OpenRouter.request.extra_body]
+            request_boolean = true
+
             [providers.OpenRouter.profile]
             supports_developer_role = false
             supports_store = false
@@ -51,6 +61,16 @@ public sealed class CodeAltaConfigStoreRawApiTests
             description = " flagship "
             context_window = 400000
             output_token_limit = 128000
+
+            [providers.OpenRouter.model_request." gpt-5 "]
+            remove_headers = [" X-Provider-Feature "]
+            remove_extra_body = [" request_boolean "]
+
+            [providers.OpenRouter.model_request." gpt-5 ".headers]
+            X-Model-Feature = "enabled"
+
+            [providers.OpenRouter.model_request." gpt-5 ".extra_body]
+            model_boolean = true
 
             [providers.responses]
             display_name = "OpenAI (Responses)"
@@ -85,6 +105,15 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.IsNotNull(openRouter.ExtraBody);
         Assert.AreEqual(true, openRouter.ExtraBody!["custom_boolean"]);
         Assert.AreEqual(0.75d, Convert.ToDouble(openRouter.ExtraBody["custom_threshold"]));
+        Assert.IsNotNull(openRouter.Request);
+        CollectionAssert.AreEqual(
+            new[] { "X-Default", "Authorization" },
+            openRouter.Request!.RemoveHeaders);
+        CollectionAssert.AreEqual(
+            new[] { "inherited_flag" },
+            openRouter.Request.RemoveExtraBody);
+        Assert.AreEqual(" enabled ", openRouter.Request.Headers!["X-Provider-Feature"]);
+        Assert.AreEqual(true, openRouter.Request.ExtraBody!["request_boolean"]);
         Assert.IsNotNull(openRouter.Profile);
         Assert.IsFalse(openRouter.Profile!.SupportsDeveloperRole);
         Assert.IsFalse(openRouter.Profile.SupportsStore);
@@ -108,6 +137,13 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("flagship", modelOverride.Description);
         Assert.AreEqual(400000L, modelOverride.ContextWindow);
         Assert.AreEqual(128000L, modelOverride.OutputTokenLimit);
+        Assert.IsNotNull(openRouter.ModelRequest);
+        Assert.IsTrue(openRouter.ModelRequest!.TryGetValue("gpt-5", out var modelRequest));
+        Assert.IsNotNull(modelRequest);
+        CollectionAssert.AreEqual(new[] { "X-Provider-Feature" }, modelRequest.RemoveHeaders);
+        CollectionAssert.AreEqual(new[] { "request_boolean" }, modelRequest.RemoveExtraBody);
+        Assert.AreEqual("enabled", modelRequest.Headers!["X-Model-Feature"]);
+        Assert.AreEqual(true, modelRequest.ExtraBody!["model_boolean"]);
 
         var responses = providers["responses"];
         Assert.AreEqual("openai-responses", responses.ProviderType);

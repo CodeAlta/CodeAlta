@@ -51,6 +51,11 @@ internal static class OpenAIBackendFactory
             {
                 protocolTracing.StateRootPath = provider.StateRootPath;
             }
+
+            if (provider.ModelRequestOverrides?.Values.Any(static request => request.Headers is { Count: > 0 } || request.RemoveHeaders is { Count: > 0 }) == true)
+            {
+                provider.RequestHeaderContext ??= new OpenAIRequestHeaderContext();
+            }
         }
 
         return new LocalAgentBackend(

@@ -53,6 +53,32 @@ internal static class RawApiProviderDefaultsCatalog
         return extraBody;
     }
 
+    public static IReadOnlyDictionary<string, object?>? CreateOpenAIExtraBodyDefaults(
+        LocalAgentTransportKind transportKind,
+        string providerKey,
+        Uri? baseUri)
+        => ApplyOpenAIExtraBodyDefaults(transportKind, providerKey, baseUri, null);
+
+    public static IReadOnlyDictionary<string, string>? CreateHeaderDefaults(
+        LocalAgentTransportKind transportKind,
+        string providerKey,
+        Uri? baseUri)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+
+        IReadOnlyDictionary<string, string>? headers = null;
+        var context = new RawApiProviderDefaultsContext(transportKind, providerKey.Trim(), baseUri);
+        foreach (var rule in LoadRules())
+        {
+            if (IsMatch(rule, context) && rule.Headers is not null)
+            {
+                headers = MergeHeaders(headers, rule.Headers.Default, rule.Headers.Remove);
+            }
+        }
+
+        return headers;
+    }
+
     private static IReadOnlyList<RawApiProviderDefaultsRule> LoadRules()
     {
         var path = Path.Combine(AppContext.BaseDirectory, ProviderDefaultsRelativePath);
@@ -174,6 +200,9 @@ internal static class RawApiProviderDefaultsCatalog
             SupportsReasoningEffort = defaults.SupportsReasoningEffort ?? profile.SupportsReasoningEffort,
             StreamsUsage = defaults.StreamsUsage ?? profile.StreamsUsage,
             SupportsThoughtSignatures = defaults.SupportsThoughtSignatures ?? profile.SupportsThoughtSignatures,
+            RequiresToolResultName = defaults.RequiresToolResultName ?? profile.RequiresToolResultName,
+            RequiresAssistantAfterToolResult = defaults.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
+            SupportsCacheControl = defaults.SupportsCacheControl ?? profile.SupportsCacheControl,
             MaxTokensFieldName = string.IsNullOrWhiteSpace(defaults.MaxTokensFieldName)
                 ? profile.MaxTokensFieldName
                 : defaults.MaxTokensFieldName.Trim(),
@@ -246,6 +275,41 @@ internal static class RawApiProviderDefaultsCatalog
         return merged;
     }
 
+    private static IReadOnlyDictionary<string, string>? MergeHeaders(
+        IReadOnlyDictionary<string, string>? configured,
+        Dictionary<string, string>? defaults,
+        List<string>? remove)
+    {
+        Dictionary<string, string>? merged = configured is null || configured.Count == 0
+            ? null
+            : new Dictionary<string, string>(configured, StringComparer.OrdinalIgnoreCase);
+
+        if (defaults is { Count: > 0 })
+        {
+            merged ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in defaults)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    merged[entry.Key.Trim()] = entry.Value ?? string.Empty;
+                }
+            }
+        }
+
+        if (merged is not null && remove is { Count: > 0 })
+        {
+            foreach (var header in remove)
+            {
+                if (!string.IsNullOrWhiteSpace(header))
+                {
+                    merged.Remove(header.Trim());
+                }
+            }
+        }
+
+        return merged is null || merged.Count == 0 ? null : merged;
+    }
+
     private static IReadOnlyDictionary<string, object?> ConvertTomlTable(TomlTable table)
     {
         var converted = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -305,6 +369,18 @@ internal sealed class RawApiProviderDefaultsRule
 
     [JsonPropertyName("openai")]
     public RawApiProviderDefaultsOpenAI? OpenAI { get; set; }
+
+    [JsonPropertyName("headers")]
+    public RawApiProviderDefaultsHeaders? Headers { get; set; }
+}
+
+internal sealed class RawApiProviderDefaultsHeaders
+{
+    [JsonPropertyName("default")]
+    public Dictionary<string, string>? Default { get; set; }
+
+    [JsonPropertyName("remove")]
+    public List<string>? Remove { get; set; }
 }
 
 internal sealed class RawApiProviderDefaultsProfile
@@ -323,6 +399,15 @@ internal sealed class RawApiProviderDefaultsProfile
 
     [JsonPropertyName("supports_thought_signatures")]
     public bool? SupportsThoughtSignatures { get; set; }
+
+    [JsonPropertyName("requires_tool_result_name")]
+    public bool? RequiresToolResultName { get; set; }
+
+    [JsonPropertyName("requires_assistant_after_tool_result")]
+    public bool? RequiresAssistantAfterToolResult { get; set; }
+
+    [JsonPropertyName("supports_cache_control")]
+    public bool? SupportsCacheControl { get; set; }
 
     [JsonPropertyName("max_tokens_field_name")]
     public string? MaxTokensFieldName { get; set; }

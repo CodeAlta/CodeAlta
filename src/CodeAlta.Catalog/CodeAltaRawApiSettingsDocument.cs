@@ -39,6 +39,24 @@ public sealed class CodeAltaProviderProfileDocument
     public bool? SupportsThoughtSignatures { get; set; }
 
     /// <summary>
+    /// Gets or sets whether tool result messages require a tool name field.
+    /// </summary>
+    [JsonPropertyName("requires_tool_result_name")]
+    public bool? RequiresToolResultName { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether tool results require a synthetic assistant turn before the next user turn.
+    /// </summary>
+    [JsonPropertyName("requires_assistant_after_tool_result")]
+    public bool? RequiresAssistantAfterToolResult { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the provider supports cache-control metadata.
+    /// </summary>
+    [JsonPropertyName("supports_cache_control")]
+    public bool? SupportsCacheControl { get; set; }
+
+    /// <summary>
     /// Gets or sets the provider-specific max-tokens field name.
     /// </summary>
     [JsonPropertyName("max_tokens_field_name")]
@@ -121,6 +139,69 @@ public sealed class CodeAltaProviderModelOverrideDocument
 
     [JsonPropertyName("supports_structured_output")]
     public bool? SupportsStructuredOutput { get; set; }
+}
+
+/// <summary>
+/// Represents request-level provider customization.
+/// </summary>
+public sealed class CodeAltaProviderRequestDocument
+{
+    /// <summary>
+    /// Gets or sets static HTTP headers added to provider requests.
+    /// </summary>
+    [JsonPropertyName("headers")]
+    public Dictionary<string, string>? Headers { get; set; }
+
+    /// <summary>
+    /// Gets or sets default/content headers to remove before user headers are applied.
+    /// Required authentication headers cannot be removed.
+    /// </summary>
+    [JsonPropertyName("remove_headers")]
+    public List<string>? RemoveHeaders { get; set; }
+
+    /// <summary>
+    /// Gets or sets provider-specific OpenAI-compatible request-body fields.
+    /// Existing top-level <c>extra_body</c> values take precedence over these values.
+    /// </summary>
+    [JsonPropertyName("extra_body")]
+    public TomlTable? ExtraBody { get; set; }
+
+    /// <summary>
+    /// Gets or sets default/content OpenAI-compatible request-body fields to remove before user fields are applied.
+    /// </summary>
+    [JsonPropertyName("remove_extra_body")]
+    public List<string>? RemoveExtraBody { get; set; }
+}
+
+/// <summary>
+/// Represents one configured provider model request override.
+/// </summary>
+public sealed class CodeAltaProviderModelRequestDocument
+{
+    /// <summary>
+    /// Gets or sets static HTTP headers added to requests for this model.
+    /// </summary>
+    [JsonPropertyName("headers")]
+    public Dictionary<string, string>? Headers { get; set; }
+
+    /// <summary>
+    /// Gets or sets default/provider headers to remove before this model's headers are applied.
+    /// Required authentication headers cannot be removed.
+    /// </summary>
+    [JsonPropertyName("remove_headers")]
+    public List<string>? RemoveHeaders { get; set; }
+
+    /// <summary>
+    /// Gets or sets OpenAI-compatible request-body fields added to requests for this model.
+    /// </summary>
+    [JsonPropertyName("extra_body")]
+    public TomlTable? ExtraBody { get; set; }
+
+    /// <summary>
+    /// Gets or sets provider/default request-body fields to remove before this model's fields are applied.
+    /// </summary>
+    [JsonPropertyName("remove_extra_body")]
+    public List<string>? RemoveExtraBody { get; set; }
 }
 
 /// <summary>
@@ -332,6 +413,12 @@ public sealed class CodeAltaProviderDocument
     public TomlTable? ExtraBody { get; set; }
 
     /// <summary>
+    /// Gets or sets optional request-level customizations.
+    /// </summary>
+    [JsonPropertyName("request")]
+    public CodeAltaProviderRequestDocument? Request { get; set; }
+
+    /// <summary>
     /// Gets or sets the optional compatibility-profile override.
     /// </summary>
     [JsonPropertyName("profile")]
@@ -348,4 +435,10 @@ public sealed class CodeAltaProviderDocument
     /// </summary>
     [JsonPropertyName("model_overrides")]
     public Dictionary<string, CodeAltaProviderModelOverrideDocument>? ModelOverrides { get; set; }
+
+    /// <summary>
+    /// Gets or sets optional per-model request customizations.
+    /// </summary>
+    [JsonPropertyName("model_request")]
+    public Dictionary<string, CodeAltaProviderModelRequestDocument>? ModelRequest { get; set; }
 }

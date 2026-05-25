@@ -171,12 +171,18 @@ internal static class RawApiBackendRegistrar
                         "openai",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
-                    ExtraBody = RawApiProviderDefaultsCatalog.ApplyOpenAIExtraBodyDefaults(
+                    ExtraHeaders = CreateRequestHeaders(
                         LocalAgentTransportKind.OpenAIChatCompletions,
                         definition.ProviderKey,
                         baseUri,
-                        CreateExtraBody(definition.ExtraBody)),
+                        definition.Request),
+                    ExtraBody = CreateOpenAIExtraBody(
+                        LocalAgentTransportKind.OpenAIChatCompletions,
+                        definition.ProviderKey,
+                        baseUri,
+                        definition),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+                    ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
                     ModelCatalog = modelCatalog,
                     ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
                 },
@@ -234,12 +240,18 @@ internal static class RawApiBackendRegistrar
                         "openai",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
-                    ExtraBody = RawApiProviderDefaultsCatalog.ApplyOpenAIExtraBodyDefaults(
+                    ExtraHeaders = CreateRequestHeaders(
                         LocalAgentTransportKind.OpenAIResponses,
                         definition.ProviderKey,
                         baseUri,
-                        CreateExtraBody(definition.ExtraBody)),
+                        definition.Request),
+                    ExtraBody = CreateOpenAIExtraBody(
+                        LocalAgentTransportKind.OpenAIResponses,
+                        definition.ProviderKey,
+                        baseUri,
+                        definition),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+                    ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
                     ModelCatalog = modelCatalog,
                     ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
                 },
@@ -469,7 +481,18 @@ internal static class RawApiBackendRegistrar
             ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? XaiModelDiscoveryModes.EndpointWithStaticFallback,
             SingleModelId = NormalizeText(definition.SingleModelId),
             ModelsDevProviderId = NormalizeText(definition.ModelsDevProviderId),
+            ExtraHeaders = CreateRequestHeaders(
+                LocalAgentTransportKind.OpenAIResponses,
+                definition.ProviderKey,
+                baseUri,
+                definition.Request),
+            ExtraBody = CreateOpenAIExtraBody(
+                LocalAgentTransportKind.OpenAIResponses,
+                definition.ProviderKey,
+                baseUri,
+                definition),
             ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+            ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
             ModelCatalog = modelCatalog,
             ProtocolTraceEnabled = definition.ProtocolTrace == true,
         };
@@ -546,6 +569,11 @@ internal static class RawApiBackendRegistrar
                         "anthropic",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
+                    ExtraHeaders = CreateRequestHeaders(
+                        LocalAgentTransportKind.AnthropicMessages,
+                        definition.ProviderKey,
+                        baseUri,
+                        definition.Request),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                 },
@@ -640,6 +668,11 @@ internal static class RawApiBackendRegistrar
                         "google",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
+                    ExtraHeaders = CreateRequestHeaders(
+                        useVertexAI ? LocalAgentTransportKind.GoogleVertexAI : LocalAgentTransportKind.GoogleGeminiApi,
+                        definition.ProviderKey,
+                        baseUri,
+                        definition.Request),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                 },
@@ -834,6 +867,9 @@ internal static class RawApiBackendRegistrar
             SupportsReasoningEffort = document.SupportsReasoningEffort ?? profile.SupportsReasoningEffort,
             StreamsUsage = document.StreamsUsage ?? profile.StreamsUsage,
             SupportsThoughtSignatures = document.SupportsThoughtSignatures ?? profile.SupportsThoughtSignatures,
+            RequiresToolResultName = document.RequiresToolResultName ?? profile.RequiresToolResultName,
+            RequiresAssistantAfterToolResult = document.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
+            SupportsCacheControl = document.SupportsCacheControl ?? profile.SupportsCacheControl,
             MaxTokensFieldName = document.MaxTokensFieldName ?? profile.MaxTokensFieldName,
             ReasoningFieldNames = document.ReasoningFieldNames is null
                 ? profile.ReasoningFieldNames
@@ -926,6 +962,142 @@ internal static class RawApiBackendRegistrar
             },
             StringComparer.OrdinalIgnoreCase);
     }
+
+    private static IReadOnlyDictionary<string, AgentModelRequestOverride>? CreateModelRequestOverrides(
+        Dictionary<string, CodeAltaProviderModelRequestDocument>? overrides)
+    {
+        if (overrides is null || overrides.Count == 0)
+        {
+            return null;
+        }
+
+        return overrides.ToDictionary(
+            static entry => entry.Key,
+            static entry => new AgentModelRequestOverride
+            {
+                Headers = CreateHeaderDictionary(entry.Value.Headers),
+                RemoveHeaders = entry.Value.RemoveHeaders,
+                ExtraBody = CreateExtraBody(entry.Value.ExtraBody),
+                RemoveExtraBody = entry.Value.RemoveExtraBody,
+            },
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, string>? CreateHeaderDictionary(Dictionary<string, string>? headers)
+    {
+        if (headers is null || headers.Count == 0)
+        {
+            return null;
+        }
+
+        var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (!string.IsNullOrWhiteSpace(header.Key) && !IsRequiredAuthHeader(header.Key))
+            {
+                normalized[header.Key.Trim()] = header.Value ?? string.Empty;
+            }
+        }
+
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static IReadOnlyDictionary<string, string>? CreateRequestHeaders(
+        LocalAgentTransportKind transportKind,
+        string providerKey,
+        Uri? baseUri,
+        CodeAltaProviderRequestDocument? request)
+    {
+        var headers = ToMutableHeaders(RawApiProviderDefaultsCatalog.CreateHeaderDefaults(
+            transportKind,
+            providerKey,
+            baseUri));
+
+        if (request?.RemoveHeaders is { Count: > 0 })
+        {
+            foreach (var headerName in request.RemoveHeaders)
+            {
+                if (!string.IsNullOrWhiteSpace(headerName) && !IsRequiredAuthHeader(headerName))
+                {
+                    headers?.Remove(headerName.Trim());
+                }
+            }
+        }
+
+        if (request?.Headers is { Count: > 0 })
+        {
+            headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var header in request.Headers)
+            {
+                if (!string.IsNullOrWhiteSpace(header.Key) && !IsRequiredAuthHeader(header.Key))
+                {
+                    headers[header.Key.Trim()] = header.Value ?? string.Empty;
+                }
+            }
+        }
+
+        return headers is null || headers.Count == 0 ? null : headers;
+    }
+
+    private static IReadOnlyDictionary<string, object?>? CreateOpenAIExtraBody(
+        LocalAgentTransportKind transportKind,
+        string providerKey,
+        Uri? baseUri,
+        CodeAltaProviderDocument definition)
+    {
+        var body = ToMutableBody(RawApiProviderDefaultsCatalog.CreateOpenAIExtraBodyDefaults(
+            transportKind,
+            providerKey,
+            baseUri));
+
+        if (definition.Request?.RemoveExtraBody is { Count: > 0 })
+        {
+            foreach (var fieldName in definition.Request.RemoveExtraBody)
+            {
+                if (!string.IsNullOrWhiteSpace(fieldName))
+                {
+                    body?.Remove(fieldName.Trim());
+                }
+            }
+        }
+
+        body = MergeBody(body, CreateExtraBody(definition.Request?.ExtraBody));
+        body = MergeBody(body, CreateExtraBody(definition.ExtraBody));
+        return body is null || body.Count == 0 ? null : body;
+    }
+
+    private static Dictionary<string, string>? ToMutableHeaders(IReadOnlyDictionary<string, string>? headers)
+        => headers is null || headers.Count == 0
+            ? null
+            : new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, object?>? ToMutableBody(IReadOnlyDictionary<string, object?>? body)
+        => body is null || body.Count == 0
+            ? null
+            : new Dictionary<string, object?>(body, StringComparer.Ordinal);
+
+    private static Dictionary<string, object?>? MergeBody(
+        Dictionary<string, object?>? target,
+        IReadOnlyDictionary<string, object?>? source)
+    {
+        if (source is not { Count: > 0 })
+        {
+            return target;
+        }
+
+        target ??= [];
+        foreach (var entry in source)
+        {
+            target[entry.Key] = entry.Value;
+        }
+
+        return target;
+    }
+
+    private static bool IsRequiredAuthHeader(string headerName)
+        => headerName.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
+           headerName.Equals("api-key", StringComparison.OrdinalIgnoreCase) ||
+           headerName.Equals("x-api-key", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyDictionary<string, object?>? CreateExtraBody(TomlTable? extraBody)
     {

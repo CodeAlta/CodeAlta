@@ -102,6 +102,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 try
                 {
                     var turnState = GetCodexTurnState(request);
+                    var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
+                    using var headerScope = provider.RequestHeaderContext?.Push(
+                        OpenAIModelRequestOverrides.MergeHeaders(provider.ExtraHeaders, modelRequest));
                     await using var concurrencyLease = await CreateCodexConcurrencyLeaseAsync(
                         request,
                         onSessionUpdate,
@@ -1145,7 +1148,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
             };
         }
 
-        OpenAIExtraBodyPatchHelper.Apply(ref options.Patch, provider.ExtraBody);
+        var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
+        OpenAIExtraBodyPatchHelper.Apply(
+            ref options.Patch,
+            OpenAIModelRequestOverrides.MergeExtraBody(provider.ExtraBody, modelRequest));
         provider.ResponsesRequestCustomizer?.Invoke(new OpenAIResponsesRequestCustomizationContext(request, options));
 
         if (provider.CodexSubscription is not null)

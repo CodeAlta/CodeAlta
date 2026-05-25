@@ -1155,8 +1155,10 @@ public sealed class CodeAltaConfigStore
         definition.ModelsDevProviderId = NormalizeProviderKey(definition.ModelsDevProviderId);
         definition.SingleModelId = NormalizeModel(definition.SingleModelId);
         definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
+        definition.Request = NormalizeRequest(definition.Request);
         definition.Profile = NormalizeProfile(definition.Profile);
         definition.ModelOverrides = NormalizeModelOverrides(definition.ModelOverrides);
+        definition.ModelRequest = NormalizeModelRequests(definition.ModelRequest);
         definition.Compaction = NormalizeCompaction(definition.Compaction);
         CompleteAndValidateProviderDefinition(CloneProviderDefinition(definition));
         PruneProviderDefaults(definition);
@@ -1494,6 +1496,8 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "models_dev_provider_id", definition.ModelsDevProviderId);
                 RejectUnsupportedField(definition, "single_model_id", definition.SingleModelId);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectUnsupportedField(definition, "request", definition.Request);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 ValidateCodexSubscriptionFields(definition);
                 break;
 
@@ -1512,6 +1516,8 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "location", definition.Location);
                 RejectUnsupportedField(definition, "models_dev_provider_id", definition.ModelsDevProviderId);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectUnsupportedField(definition, "request", definition.Request);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 ValidateCopilotDirectFields(definition);
                 break;
 
@@ -1521,6 +1527,8 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "project", definition.Project);
                 RejectUnsupportedField(definition, "location", definition.Location);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectRequestExtraBodyFields(definition);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 break;
 
             case "google-genai":
@@ -1529,6 +1537,8 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "project", definition.Project);
                 RejectUnsupportedField(definition, "location", definition.Location);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectRequestExtraBodyFields(definition);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 break;
 
             case "vertex-ai":
@@ -1537,6 +1547,8 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
                 RejectUnsupportedField(definition, "project_id", definition.ProjectId);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectRequestExtraBodyFields(definition);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 if (definition.Enabled != false && string.IsNullOrWhiteSpace(definition.Project))
                 {
                     throw new InvalidOperationException($"providers.{definition.ProviderKey} project is required for type 'vertex-ai'.");
@@ -1601,6 +1613,12 @@ public sealed class CodeAltaConfigStore
         RejectUnsupportedField(definition, "send_installation_id", definition.SendInstallationId);
         RejectUnsupportedField(definition, "installation_id_source", definition.InstallationIdSource);
         RejectUnsupportedField(definition, "experimental", definition.Experimental);
+    }
+
+    private static void RejectRequestExtraBodyFields(CodeAltaProviderDocument definition)
+    {
+        RejectUnsupportedField(definition, "request.extra_body", definition.Request?.ExtraBody);
+        RejectUnsupportedField(definition, "request.remove_extra_body", definition.Request?.RemoveExtraBody);
     }
 
     private static void RejectCopilotDirectOnlyFields(CodeAltaProviderDocument definition)
@@ -1785,6 +1803,63 @@ public sealed class CodeAltaConfigStore
         return normalized.Count == 0 ? null : normalized;
     }
 
+    private static CodeAltaProviderRequestDocument? NormalizeRequest(CodeAltaProviderRequestDocument? request)
+    {
+        if (request is null)
+        {
+            return null;
+        }
+
+        request.Headers = NormalizeDictionary(request.Headers);
+        request.RemoveHeaders = NormalizeList(request.RemoveHeaders);
+        request.ExtraBody = NormalizeExtraBody(request.ExtraBody);
+        request.RemoveExtraBody = NormalizeList(request.RemoveExtraBody);
+        return request.Headers is { Count: > 0 } ||
+               request.RemoveHeaders is { Count: > 0 } ||
+               request.ExtraBody is { Count: > 0 } ||
+               request.RemoveExtraBody is { Count: > 0 }
+            ? request
+            : null;
+    }
+
+    private static Dictionary<string, CodeAltaProviderModelRequestDocument>? NormalizeModelRequests(
+        Dictionary<string, CodeAltaProviderModelRequestDocument>? requests)
+    {
+        if (requests is null)
+        {
+            return null;
+        }
+
+        var normalized = requests
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
+            .Select(static entry => KeyValuePair.Create(entry.Key.Trim(), NormalizeModelRequest(entry.Value)))
+            .Where(static entry => entry.Value is not null)
+            .ToDictionary(
+                static entry => entry.Key,
+                static entry => entry.Value!,
+                StringComparer.OrdinalIgnoreCase);
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static CodeAltaProviderModelRequestDocument? NormalizeModelRequest(CodeAltaProviderModelRequestDocument? request)
+    {
+        if (request is null)
+        {
+            return null;
+        }
+
+        request.Headers = NormalizeDictionary(request.Headers);
+        request.RemoveHeaders = NormalizeList(request.RemoveHeaders);
+        request.ExtraBody = NormalizeExtraBody(request.ExtraBody);
+        request.RemoveExtraBody = NormalizeList(request.RemoveExtraBody);
+        return request.Headers is { Count: > 0 } ||
+               request.RemoveHeaders is { Count: > 0 } ||
+               request.ExtraBody is { Count: > 0 } ||
+               request.RemoveExtraBody is { Count: > 0 }
+            ? request
+            : null;
+    }
+
     private static void PruneProviderDefaults(CodeAltaProviderDocument definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -1944,9 +2019,11 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ModelsDevProviderId) ||
                !string.IsNullOrWhiteSpace(definition.SingleModelId) ||
                definition.ExtraBody is { Count: > 0 } ||
+               definition.Request is not null ||
                definition.Profile is not null ||
                definition.Compaction is not null ||
-               definition.ModelOverrides is { Count: > 0 };
+               definition.ModelOverrides is { Count: > 0 } ||
+               definition.ModelRequest is { Count: > 0 };
     }
 
     private static HashSet<string> LoadEnabledProviderKeys(IEnumerable<CodeAltaProviderDocument> definitions)
@@ -2051,9 +2128,27 @@ public sealed class CodeAltaConfigStore
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
             ExtraBody = CloneExtraBody(definition.ExtraBody),
+            Request = CloneRequest(definition.Request),
             Profile = CloneProfile(definition.Profile),
             Compaction = CloneCompaction(definition.Compaction),
             ModelOverrides = CloneModelOverrides(definition.ModelOverrides),
+            ModelRequest = CloneModelRequests(definition.ModelRequest),
+        };
+    }
+
+    private static CodeAltaProviderRequestDocument? CloneRequest(CodeAltaProviderRequestDocument? request)
+    {
+        if (request is null)
+        {
+            return null;
+        }
+
+        return new CodeAltaProviderRequestDocument
+        {
+            Headers = request.Headers is null ? null : new Dictionary<string, string>(request.Headers, StringComparer.OrdinalIgnoreCase),
+            RemoveHeaders = request.RemoveHeaders is null ? null : [.. request.RemoveHeaders],
+            ExtraBody = CloneExtraBody(request.ExtraBody),
+            RemoveExtraBody = request.RemoveExtraBody is null ? null : [.. request.RemoveExtraBody],
         };
     }
 
@@ -2071,6 +2166,9 @@ public sealed class CodeAltaConfigStore
             SupportsReasoningEffort = profile.SupportsReasoningEffort,
             StreamsUsage = profile.StreamsUsage,
             SupportsThoughtSignatures = profile.SupportsThoughtSignatures,
+            RequiresToolResultName = profile.RequiresToolResultName,
+            RequiresAssistantAfterToolResult = profile.RequiresAssistantAfterToolResult,
+            SupportsCacheControl = profile.SupportsCacheControl,
             MaxTokensFieldName = profile.MaxTokensFieldName,
             ReasoningFieldNames = profile.ReasoningFieldNames is null ? null : [.. profile.ReasoningFieldNames],
             ReasoningInputFieldName = profile.ReasoningInputFieldName,
@@ -2313,6 +2411,43 @@ public sealed class CodeAltaConfigStore
                 SupportsStructuredOutput = entry.Value.SupportsStructuredOutput,
             },
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, CodeAltaProviderModelRequestDocument>? CloneModelRequests(
+        Dictionary<string, CodeAltaProviderModelRequestDocument>? requests)
+    {
+        if (requests is null || requests.Count == 0)
+        {
+            return null;
+        }
+
+        var clone = new Dictionary<string, CodeAltaProviderModelRequestDocument>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in requests)
+        {
+            var request = CloneModelRequest(entry.Value);
+            if (!string.IsNullOrWhiteSpace(entry.Key) && request is not null)
+            {
+                clone[entry.Key.Trim()] = request;
+            }
+        }
+
+        return clone.Count == 0 ? null : clone;
+    }
+
+    private static CodeAltaProviderModelRequestDocument? CloneModelRequest(CodeAltaProviderModelRequestDocument? request)
+    {
+        if (request is null)
+        {
+            return null;
+        }
+
+        return new CodeAltaProviderModelRequestDocument
+        {
+            Headers = request.Headers is null ? null : new Dictionary<string, string>(request.Headers, StringComparer.OrdinalIgnoreCase),
+            RemoveHeaders = request.RemoveHeaders is null ? null : [.. request.RemoveHeaders],
+            ExtraBody = CloneExtraBody(request.ExtraBody),
+            RemoveExtraBody = request.RemoveExtraBody is null ? null : [.. request.RemoveExtraBody],
+        };
     }
 
     private static void ThrowIfLegacyConfigShapeDetected(string content, string? sourcePath)

@@ -82,6 +82,12 @@ public sealed class AnthropicProviderOptions
     public string? SingleModelId { get; set; }
 
     /// <summary>
+    /// Gets or sets additional static HTTP headers to include with provider requests.
+    /// Authentication headers are owned by the backend and should not be supplied here.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
+
+    /// <summary>
     /// Gets or sets per-model metadata overrides.
     /// </summary>
     public IReadOnlyDictionary<string, AgentModelOverride>? ModelOverrides { get; set; }
@@ -96,8 +102,6 @@ public sealed class AnthropicProviderOptions
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
 
     internal string? AuthToken { get; set; }
-
-    internal IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
 
     internal HttpClient? HttpClient { get; set; }
 }
