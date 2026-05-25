@@ -78,6 +78,12 @@ flowchart LR
 - Persist user-owned state only through the catalog/runtime stores that own that data. Do not write config, session journals, prompt drafts, plugin state, or UI state from unrelated layers.
 - Treat logs, traces, journals, prompts, command output, provider payloads, and plugin diagnostics as potentially sensitive user data.
 
+## Provider Defaults And Compatibility
+
+- Provider-specific request defaults, compatibility profiles, and header/body defaults should live in the copied provider-defaults content file unless they require code-backed message transformation or SDK integration.
+- Keep `config.toml` backward compatible: existing `extra_body`, `profile`, `compaction`, and `model_overrides` semantics remain authoritative over built-in defaults.
+- Do not add script-like provider transforms to config. Complex message restructuring must stay in code behind narrow, named compatibility flags.
+
 ## Public APIs
 
 - Public APIs require XML documentation and should document thrown exceptions.

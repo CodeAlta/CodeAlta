@@ -84,19 +84,21 @@ Common provider fields are:
 | `compaction` | Local raw-API compaction settings; see [Context usage and compaction](#context-usage-and-compaction). |
 | `model_overrides` | Per-model metadata overrides; see [Model metadata overrides](#model-metadata-overrides). |
 | `extra_body` | Additional OpenAI-compatible request-body TOML fields; only used by `openai-chat` and `openai-responses`. |
+| `request` | Request-level headers and OpenAI-compatible body defaults; see [Request customizations](#request-customizations). |
+| `model_request` | Per-model request overrides for OpenAI-compatible providers; see [Model request overrides](#model-request-overrides). |
 
 Provider-type-specific fields and restrictions:
 
 | Type | Credential and endpoint fields | Additional fields handled for that type |
 | --- | --- | --- |
-| `openai-chat`, `openai-responses` | `api_key` or `api_key_env`; optional `api_url`, `organization_id`, `project_id` | `models_dev_provider_id`, `single_model_id`, `extra_body`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+| `openai-chat`, `openai-responses` | `api_key` or `api_key_env`; optional `api_url`, `organization_id`, `project_id` | `models_dev_provider_id`, `single_model_id`, `extra_body`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `azure-openai` | `api_key` or `api_key_env`; required Azure OpenAI resource `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
-| `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
-| `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
-| `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `profile`, `compaction`, `model_overrides` |
+| `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
+| `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
+| `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
-| `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+| `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 
 Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"`, `"codex_auth_import"`, `"codex_auth_file_readonly"`, or `"external_token_command"`; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"`, `"codex_endpoint"`, or `"static"`; `response_transport = "websocket_with_http_fallback"` or `"http"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`.
 
@@ -115,6 +117,9 @@ Use `[providers.<provider-key>.profile]` only when a provider-compatible endpoin
 | `supports_reasoning_effort` | Whether `reasoning_effort` can be sent to the provider. |
 | `streams_usage` | Whether streamed responses include usage data. |
 | `supports_thought_signatures` | Whether provider thought-signature continuity is supported. |
+| `requires_tool_result_name` | Whether tool-result messages must include a tool name. |
+| `requires_assistant_after_tool_result` | Whether a synthetic assistant turn must be inserted after tool results. |
+| `supports_cache_control` | Whether cache-control metadata is supported. |
 | `max_tokens_field_name` | Request-body field used for maximum output tokens, such as `max_output_tokens` or `max_completion_tokens`. |
 | `reasoning_field_names` | Response fields inspected for reasoning content. |
 | `reasoning_input_field_name` | Assistant-message field used when replaying prior reasoning content. |
@@ -134,6 +139,68 @@ Use `single_model_id` when a provider-compatible endpoint serves one model or ca
 ```toml
 [providers.minimax]
 single_model_id = "MiniMax-M2.7"
+```
+
+### Request customizations
+
+Use `[providers.<provider-key>.request]` for static request headers and OpenAI-compatible request-body fields. Existing top-level `[providers.<provider-key>.extra_body]` remains supported and takes precedence over `[providers.<provider-key>.request.extra_body]` for backward compatibility.
+
+Merge order is predictable:
+
+1. generic transport behavior in code;
+2. bundled provider defaults from CodeAlta's copied provider-defaults content file;
+3. user `request.remove_headers` / `request.remove_extra_body` removals for inherited defaults;
+4. user `request.headers` and `request.extra_body`;
+5. existing top-level `extra_body` for OpenAI-compatible providers;
+6. backend-owned authentication headers, which cannot be removed or replaced by request config.
+
+Header names such as `Authorization`, `api-key`, and `x-api-key` are reserved for backend authentication. Protocol traces redact common secret-bearing header names (`Authorization`, `*-key`, `*token*`, `*secret*`, and related names).
+
+```toml
+[providers.openrouter]
+type = "openai-responses"
+api_key_env = "CODEALTA_OPENROUTER_API_KEY"
+api_url = "https://openrouter.ai/api/v1"
+
+[providers.openrouter.request.headers]
+HTTP-Referer = "https://codealta.dev"
+X-Title = "CodeAlta"
+
+[providers.openrouter.request.extra_body]
+include_usage = true
+
+[providers.openrouter.request]
+remove_headers = ["X-Unwanted-Default"]
+remove_extra_body = ["unsupported_default"]
+```
+
+Alibaba/DashScope-style OpenAI-compatible endpoints can use request body defaults without replacing older `extra_body` configs:
+
+```toml
+[providers.alibaba]
+type = "openai-chat"
+api_key_env = "CODEALTA_ALIBABA_API_KEY"
+api_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+[providers.alibaba.request.extra_body]
+enable_search = false
+```
+
+MiniMax and DeepSeek compatibility defaults are bundled in CodeAlta's provider-defaults content file. You usually do not need to restate them in `config.toml`; explicit `profile`, `request`, and `extra_body` values still win when you do.
+
+### Model request overrides
+
+Use `[providers.<provider-key>.model_request.<model-id>]` to apply request mutations only when a matching model is selected. This is separate from `model_overrides`, which changes only metadata used by selectors and token budgeting. Matching uses the same exact/normalized/date-suffix model-id behavior as metadata overrides.
+
+```toml
+[providers.openai.model_request."gpt-5.5"]
+remove_extra_body = ["reasoning_split"]
+
+[providers.openai.model_request."gpt-5.5".extra_body]
+reasoning = { effort = "high" }
+
+[providers.openai.model_request."gpt-5.5".headers]
+X-Model-Mode = "high-reasoning"
 ```
 
 ### Model metadata overrides
