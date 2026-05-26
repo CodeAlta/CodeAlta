@@ -90,7 +90,7 @@ public sealed class CodeAltaShellControllerTests
     }
 
     [TestMethod]
-    public async Task InitializeAsync_MarksShellInitializedBeforeBackendInitializationCompletes()
+    public async Task InitializeAsync_ShowsSessionsBeforeProviderInitializationCompletes()
     {
         var log = new List<string>();
         var shell = new FakeShell(log)
@@ -107,25 +107,61 @@ public sealed class CodeAltaShellControllerTests
 
         var initializationTask = controller.InitializeAsync(CancellationToken.None);
 
-        await WaitUntilAsync(() => log.Contains("Shell.SetInitialized:True")).ConfigureAwait(false);
+        await WaitUntilAsync(() => log.Contains("Shell.ApplyRecoveredCatalogState:1:1")).ConfigureAwait(false);
 
-        Assert.IsFalse(initializationTask.IsCompleted, "Initialization should continue in the background while the shell is usable.");
-        Assert.IsFalse(log.Contains("Importer.Import"), "Session catalog loading should wait until provider initialization finishes.");
+        Assert.IsFalse(initializationTask.IsCompleted, "Provider initialization should still be running.");
+        CollectionAssert.Contains(log, "Shell.InitializeChatBackends");
+        CollectionAssert.Contains(log, "Importer.Import");
+        CollectionAssert.Contains(log, "ThreadSource.List");
+        CollectionAssert.Contains(log, "Shell.TrySchedulePendingStartupThreadRestore");
 
         shell.InitializeChatBackendsCompletion.SetResult(true);
         await initializationTask.ConfigureAwait(false);
-
-        Assert.IsTrue(log.IndexOf("Shell.SetInitialized:True") < log.IndexOf("Importer.Import"));
     }
 
     [TestMethod]
-    public async Task InitializeAsync_AppliesRecoverableSessionsOnceAfterProviderImportsComplete()
+    public async Task InitializeAsync_StartsProviderInitializationBeforeSlowSessionScanCompletes()
     {
         var log = new List<string>();
-        var shell = new FakeShell(log);
+        var shell = new FakeShell(log)
+        {
+            InitializeChatBackendsCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var project = new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" };
+        var threadSource = new BlockingRecoverableSessionSource(
+            log,
+            [
+                CreateThread("thread-1"),
+            ]);
+        var controller = new CodeAltaShellController(
+            shell,
+            new FakeImporter(log),
+            new FakeProjectCatalogStore(log, [project]),
+            threadSource,
+            new FakeSessionDeleter(log));
+        controller.AttachUiDispatcher(new FakeUiDispatcher());
+
+        var initializationTask = controller.InitializeAsync(CancellationToken.None);
+
+        await WaitUntilAsync(() => threadSource.ListStarted.Task.IsCompleted).ConfigureAwait(false);
+
+        CollectionAssert.Contains(log, "Shell.InitializeChatBackends");
+        Assert.IsFalse(log.Any(static entry => entry.StartsWith("Shell.ApplyRecoveredCatalogState:", StringComparison.Ordinal)));
+
+        threadSource.AllowCompletion();
+        shell.InitializeChatBackendsCompletion.SetResult(true);
+        await initializationTask.ConfigureAwait(false);
+
+        CollectionAssert.Contains(log, "Shell.ApplyRecoveredCatalogState:1:1");
+    }
+
+    [TestMethod]
+    public async Task InitializeAsync_AppliesRecoverableSessionsProgressivelyFromOneStream()
+    {
+        var log = new List<string>();
         var codexBackendId = new AgentBackendId("codex");
         var slowBackendId = new AgentBackendId("slow");
-        var importer = new FakeProgressImporter(log, codexBackendId, slowBackendId);
+        var shell = new FakeShell(log);
         var project = new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" };
         var threadSource = new FakeRecoverableSessionSource(
             log,
@@ -135,7 +171,7 @@ public sealed class CodeAltaShellControllerTests
             ]);
         var controller = new CodeAltaShellController(
             shell,
-            importer,
+            new FakeImporter(log),
             new FakeProjectCatalogStore(log, [project]),
             threadSource,
             new FakeSessionDeleter(log),
@@ -145,66 +181,13 @@ public sealed class CodeAltaShellControllerTests
             ]);
         controller.AttachUiDispatcher(new FakeUiDispatcher());
 
-        var initializationTask = controller.InitializeAsync(CancellationToken.None);
-
-        await WaitUntilAsync(() => importer.FirstProgressReported.Task.IsCompleted).ConfigureAwait(false);
-
-        Assert.IsFalse(initializationTask.IsCompleted, "Initialization should wait for provider imports before applying recovered sessions.");
-        Assert.IsFalse(log.Contains("ThreadSource.List"), "Recoverable session listing should not run once per provider progress update.");
-
-        importer.AllowCompletion();
-        await initializationTask.ConfigureAwait(false);
+        await controller.InitializeAsync(CancellationToken.None);
 
         CollectionAssert.Contains(log, "ThreadSource.List");
+        Assert.AreEqual(1, log.Count(static entry => entry == "ThreadSource.List"));
+        CollectionAssert.Contains(log, "Shell.ApplyRecoveredCatalogState:1:1:KeepMissing");
         CollectionAssert.Contains(log, "Shell.ApplyRecoveredCatalogState:1:2:KeepMissing");
         CollectionAssert.Contains(log, "Shell.ApplyRecoveredCatalogState:1:2");
-        Assert.IsTrue(shell.ProviderSessionLoadStatuses.Count > 0);
-        Assert.AreEqual(null, shell.ProviderSessionLoadStatuses.LastOrDefault());
-    }
-
-    [TestMethod]
-    public async Task InitializeAsync_WaitsForStartupProvidersBeforeClearingProviderLoadStatus()
-    {
-        var log = new List<string>();
-        var codexBackendId = new AgentBackendId("codex");
-        var slowBackendId = new AgentBackendId("slow");
-        var shell = new FakeShell(log);
-        shell.BlockBackendInitialization(slowBackendId);
-        var importer = new FakeProgressImporter(log, codexBackendId, slowBackendId, blockSecondImport: false);
-        var project = new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" };
-        var threadSource = new FakeRecoverableSessionSource(
-            log,
-            [
-                CreateThread("thread-codex", backendId: codexBackendId.Value),
-                CreateThread("thread-slow", backendId: slowBackendId.Value),
-            ]);
-        var controller = new CodeAltaShellController(
-            shell,
-            importer,
-            new FakeProjectCatalogStore(log, [project]),
-            threadSource,
-            new FakeSessionDeleter(log),
-            [
-                new ModelProviderDescriptor(codexBackendId, "Codex"),
-                new ModelProviderDescriptor(slowBackendId, "Slow"),
-            ]);
-        controller.AttachUiDispatcher(new FakeUiDispatcher());
-
-        var initializationTask = controller.InitializeAsync(CancellationToken.None);
-
-        await WaitUntilAsync(() => log.Contains("ProgressImporter.ImportBackend:slow")).ConfigureAwait(false);
-
-        Assert.IsFalse(initializationTask.IsCompleted, "The slow provider should still be initializing.");
-        CollectionAssert.Contains(log, "ProgressImporter.ImportBackend:codex");
-        CollectionAssert.Contains(log, "ProgressImporter.ImportBackend:slow");
-        Assert.IsFalse(log.Contains("ThreadSource.List"), "Recoverable session listing should not be coupled to individual provider startup progress.");
-
-        shell.CompleteBackendInitialization(slowBackendId);
-        await initializationTask.ConfigureAwait(false);
-
-        CollectionAssert.Contains(log, "ThreadSource.List");
-        Assert.IsTrue(shell.ProviderSessionLoadStatuses.Count > 0);
-        Assert.AreEqual(null, shell.ProviderSessionLoadStatuses.LastOrDefault());
     }
 
     [TestMethod]
@@ -214,7 +197,6 @@ public sealed class CodeAltaShellControllerTests
         var codexBackendId = new AgentBackendId("codex");
         var slowBackendId = new AgentBackendId("slow");
         var shell = new FakeShell(log);
-        var importer = new FakeProgressImporter(log, codexBackendId, slowBackendId, blockSecondImport: false);
         var project = new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" };
         var parent = CreateThread("thread-parent", backendId: codexBackendId.Value);
         var children = Enumerable.Range(1, 8)
@@ -227,11 +209,10 @@ public sealed class CodeAltaShellControllerTests
             })
             .ToArray();
         var completeThreads = new[] { parent }.Concat(children).ToArray();
-        var progressiveThreads = new[] { parent }.Concat(children.Take(2)).ToArray();
-        var threadSource = new FakeRecoverableSessionSource(log, completeThreads, progressiveThreads);
+        var threadSource = new FakeRecoverableSessionSource(log, completeThreads);
         var controller = new CodeAltaShellController(
             shell,
-            importer,
+            new FakeImporter(log),
             new FakeProjectCatalogStore(log, [project]),
             threadSource,
             new FakeSessionDeleter(log),
@@ -274,48 +255,6 @@ public sealed class CodeAltaShellControllerTests
                 "Shell.HandleRuntimeEvent:thread-1",
             },
             log);
-    }
-
-    [TestMethod]
-    public void FormatProviderSessionLoadStatus_ShowsProgressAndProviderNames()
-    {
-        var status = CodeAltaShellController.FormatProviderSessionLoadStatus(
-            new ProviderSessionLoadProgress(
-                AgentBackendIds.Codex,
-                "Codex",
-                1,
-                2,
-                ["Copilot"]));
-
-        Assert.AreEqual("Loading Copilot sessions [■■■■□□□□] 1/2", status);
-    }
-
-    [TestMethod]
-    public void FormatProviderSessionLoadStatus_HidesWhenComplete()
-    {
-        var status = CodeAltaShellController.FormatProviderSessionLoadStatus(
-            new ProviderSessionLoadProgress(
-                AgentBackendIds.Codex,
-                "Codex",
-                2,
-                2,
-                []));
-
-        Assert.IsNull(status);
-    }
-
-    [TestMethod]
-    public void FormatStartupProviderLoadStatus_ShowsCombinedProviderProgress()
-    {
-        var status = CodeAltaShellController.FormatStartupProviderLoadStatus(
-            new ProviderSessionLoadProgress(
-                AgentBackendIds.Codex,
-                "Codex",
-                1,
-                3,
-                ["OpenAI", "Gemma", "Anthropic"]));
-
-        Assert.AreEqual("Loading OpenAI, Gemma, … [■■■□□□□□] 1/3", status);
     }
 
     [TestMethod]
@@ -859,50 +798,6 @@ public sealed class CodeAltaShellControllerTests
         }
     }
 
-    private sealed class FakeProgressImporter(
-        List<string> log,
-        AgentBackendId firstBackendId,
-        AgentBackendId secondBackendId,
-        bool blockSecondImport = true) : IKnownProjectImporterWithProgress
-    {
-        private readonly TaskCompletionSource<bool> _allowCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public TaskCompletionSource<bool> FirstProgressReported { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public Task ImportAsync(CancellationToken cancellationToken)
-            => ImportAsync(static _ => { }, cancellationToken);
-
-        public async Task ImportAsync(Action<ProviderSessionLoadProgress> reportProgress, CancellationToken cancellationToken)
-        {
-            log.Add("ProgressImporter.Import.Start");
-            reportProgress(new ProviderSessionLoadProgress(firstBackendId, "Codex", 1, 2, ["Slow"]));
-            FirstProgressReported.TrySetResult(true);
-
-            await _allowCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-            reportProgress(new ProviderSessionLoadProgress(secondBackendId, "Slow", 2, 2, []));
-            log.Add("ProgressImporter.Import.End");
-        }
-
-        public void AllowCompletion()
-            => _allowCompletion.TrySetResult(true);
-
-        public async Task ImportBackendAsync(ModelProviderDescriptor descriptor, CancellationToken cancellationToken)
-        {
-            log.Add($"ProgressImporter.ImportBackend:{descriptor.BackendId.Value}");
-            if (descriptor.BackendId == firstBackendId)
-            {
-                FirstProgressReported.TrySetResult(true);
-                return;
-            }
-
-            if (blockSecondImport && descriptor.BackendId == secondBackendId)
-            {
-                await _allowCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
-    }
-
     private sealed class FakeProjectCatalogStore(List<string> log, IReadOnlyList<ProjectDescriptor> projects) : IProjectCatalogStore
     {
         public List<ProjectDescriptor> Projects { get; } = projects.ToList();
@@ -954,8 +849,7 @@ public sealed class CodeAltaShellControllerTests
 
     private sealed class FakeRecoverableSessionSource(
         List<string> log,
-        IReadOnlyList<SessionViewDescriptor> threads,
-        IReadOnlyList<SessionViewDescriptor>? providerScopedThreads = null) : IRecoverableSessionSource
+        IReadOnlyList<SessionViewDescriptor> threads) : IRecoverableSessionSource
     {
         public async IAsyncEnumerable<SessionViewDescriptor> ListRecoverableSessionsAsync(
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
@@ -968,16 +862,23 @@ public sealed class CodeAltaShellControllerTests
                 yield return thread;
             }
         }
+    }
+
+    private sealed class BlockingRecoverableSessionSource(
+        List<string> log,
+        IReadOnlyList<SessionViewDescriptor> threads) : IRecoverableSessionSource
+    {
+        private readonly TaskCompletionSource<bool> _allowCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ListStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async IAsyncEnumerable<SessionViewDescriptor> ListRecoverableSessionsAsync(
-            Func<ModelProviderId, bool>? shouldListProviderSessions,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            var filteredThreads = (providerScopedThreads ?? threads)
-                .Where(thread => shouldListProviderSessions?.Invoke(new ModelProviderId(thread.BackendId)) != false)
-                .ToArray();
-            LogBackendList(filteredThreads, "ThreadSource.List");
-            foreach (var thread in filteredThreads)
+            log.Add("ThreadSource.List");
+            ListStarted.TrySetResult(true);
+            await _allowCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var thread in threads)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await Task.Yield();
@@ -985,17 +886,8 @@ public sealed class CodeAltaShellControllerTests
             }
         }
 
-        private void LogBackendList(IReadOnlyList<SessionViewDescriptor> filteredThreads, string prefix)
-        {
-            var backendIds = filteredThreads
-                .Select(static thread => thread.BackendId)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(static backendId => backendId, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            log.Add(backendIds.Length == 0
-                ? $"{prefix}:empty"
-                : $"{prefix}:{string.Join(",", backendIds)}");
-        }
+        public void AllowCompletion()
+            => _allowCompletion.TrySetResult(true);
     }
 
     private sealed class FakeSessionDeleter(List<string> log) : ISessionDeleter

@@ -16,13 +16,12 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
     private readonly IKnownProjectImporter _knownProjectImporter;
     private readonly IProjectCatalogStore _projectCatalog;
     private readonly IRecoverableSessionSource _recoverableSessionSource;
+    private readonly SessionLoadCoordinator _sessionLoadCoordinator;
     private readonly ISessionDeleter _sessionDeleter;
-    private readonly IReadOnlyList<ModelProviderDescriptor> _backendDescriptors;
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly ConcurrentQueue<WorkThreadRuntimeEvent> _pendingRuntimeEvents = new();
     private IUiDispatcher? _uiDispatcher;
     private int _runtimeEventDrainScheduled;
-    private long _providerSessionLoadStatusVersion;
     private CancellationTokenSource? _initializationCts;
     private Task? _initializationTask;
 
@@ -44,8 +43,8 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
         _knownProjectImporter = knownProjectImporter;
         _projectCatalog = projectCatalog;
         _recoverableSessionSource = recoverableSessionSource;
+        _sessionLoadCoordinator = new SessionLoadCoordinator(recoverableSessionSource, () => UiDispatcher, shell);
         _sessionDeleter = sessionDeleter;
-        _backendDescriptors = backendDescriptors ?? [];
     }
 
     public void AttachUiDispatcher(IUiDispatcher uiDispatcher)
@@ -84,7 +83,7 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
 
             await _knownProjectImporter.ImportAsync(cancellationToken).ConfigureAwait(false);
             var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-            await ApplyRecoverableSessionsProgressivelyAsync(projects, shouldListProviderSessions: null, cancellationToken).ConfigureAwait(false);
+            await _sessionLoadCoordinator.ApplyRecoverableSessionsProgressivelyAsync(projects, cancellationToken).ConfigureAwait(false);
 
             await UiDispatcher.InvokeAsync(
                     () =>
@@ -432,7 +431,7 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
         {
             // These startup calls are background I/O and must not assume UI-thread affinity.
             var startupProviderLoadTask = Task.Run(
-                () => InitializeAndLoadStartupProviderStateAsync(cancellationToken),
+                () => InitializeStartupTracksAsync(cancellationToken),
                 CancellationToken.None);
             await MarkInitializedForInteractionAsync(cancellationToken).ConfigureAwait(false);
             initializedForInteraction = true;
@@ -453,64 +452,43 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
         }
     }
 
-    private async Task InitializeAndLoadStartupProviderStateAsync(CancellationToken cancellationToken)
+    private async Task InitializeStartupTracksAsync(CancellationToken cancellationToken)
     {
-        if (_backendDescriptors.Count == 0 || _knownProjectImporter is not IKnownProjectImporterWithProgress progressImporter)
-        {
-            await _shell.InitializeChatBackendsAsync(cancellationToken).ConfigureAwait(false);
-            await RefreshCatalogFromBackendsAsync(cancellationToken).ConfigureAwait(false);
-            return;
-        }
+        var providerInitializationTask = InitializeStartupProvidersAsync(cancellationToken);
+        var sessionLoadTask = LoadStartupSessionsAsync(cancellationToken);
 
+        await Task.WhenAll(providerInitializationTask, sessionLoadTask).ConfigureAwait(false);
+    }
+
+    private async Task InitializeStartupProvidersAsync(CancellationToken cancellationToken)
+    {
         try
         {
-            var progress = new ProviderStartupLoadProgress(_backendDescriptors);
-            ReportStartupProviderLoadProgress(progress.Snapshot(null));
-            var providerTasks = _backendDescriptors
-                .Select(descriptor => InitializeStartupProviderAsync(descriptor, progressImporter, progress, cancellationToken))
-                .ToArray();
-            await Task.WhenAll(providerTasks).ConfigureAwait(false);
-
-            var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-            await ApplyRecoverableSessionsProgressivelyAsync(projects, shouldListProviderSessions: null, cancellationToken).ConfigureAwait(false);
-            await SetProviderSessionLoadStatusAsync(null)
-                .ConfigureAwait(false);
+            await _shell.InitializeChatBackendsAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
         catch (Exception ex)
         {
-            await SetProviderSessionLoadStatusAsync(null).ConfigureAwait(false);
-            CodeAltaApp.UiLogger.Error(ex, "Failed to refresh backend startup state.");
+            CodeAltaApp.UiLogger.Error(ex, "Failed to initialize model providers.");
         }
     }
 
-    private async Task InitializeStartupProviderAsync(
-        ModelProviderDescriptor descriptor,
-        IKnownProjectImporterWithProgress projectImporter,
-        ProviderStartupLoadProgress progress,
-        CancellationToken cancellationToken)
+    private async Task LoadStartupSessionsAsync(CancellationToken cancellationToken)
     {
-        Task? backendInitializationTask = null;
         try
         {
-            backendInitializationTask = _shell.InitializeChatBackendAsync(descriptor.BackendId, cancellationToken);
-            await projectImporter.ImportBackendAsync(descriptor, cancellationToken).ConfigureAwait(false);
+            await _knownProjectImporter.ImportAsync(cancellationToken).ConfigureAwait(false);
+            var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            await _sessionLoadCoordinator.ApplyRecoverableSessionsProgressivelyAsync(projects, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                if (backendInitializationTask is not null)
-                {
-                    await backendInitializationTask.ConfigureAwait(false);
-                }
-            }
-            finally
-            {
-                ReportStartupProviderLoadProgress(progress.Snapshot(descriptor));
-            }
+        }
+        catch (Exception ex)
+        {
+            CodeAltaApp.UiLogger.Error(ex, "Failed to refresh startup session catalog state.");
         }
     }
 
@@ -527,120 +505,6 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
             });
     }
 
-    private async Task RefreshCatalogFromBackendsAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (_knownProjectImporter is IKnownProjectImporterWithProgress progressImporter)
-            {
-                await progressImporter.ImportAsync(
-                        progress =>
-                        {
-                            ReportProviderSessionLoadProgress(progress);
-                        },
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                await _knownProjectImporter.ImportAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-            await ApplyRecoverableSessionsProgressivelyAsync(projects, shouldListProviderSessions: null, cancellationToken).ConfigureAwait(false);
-            await SetProviderSessionLoadStatusAsync(null)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            await SetProviderSessionLoadStatusAsync(null).ConfigureAwait(false);
-            CodeAltaApp.UiLogger.Error(ex, "Failed to refresh backend startup state.");
-        }
-    }
-
-    private async Task ApplyRecoverableSessionsProgressivelyAsync(
-        IReadOnlyList<ProjectDescriptor> projects,
-        Func<ModelProviderId, bool>? shouldListProviderSessions,
-        CancellationToken cancellationToken)
-    {
-        var recoveredSessions = new Dictionary<string, SessionViewDescriptor>(StringComparer.OrdinalIgnoreCase);
-        using var applyGate = new SemaphoreSlim(initialCount: 1, maxCount: 1);
-        var appliedAny = false;
-        var sessions = shouldListProviderSessions is null
-            ? _recoverableSessionSource.ListRecoverableSessionsAsync(cancellationToken)
-            : _recoverableSessionSource.ListRecoverableSessionsAsync(shouldListProviderSessions, cancellationToken);
-        await foreach (var session in sessions.ConfigureAwait(false))
-        {
-            appliedAny = true;
-            await ApplyRecoveredSessionSnapshotAsync(
-                    projects,
-                    recoveredSessions,
-                    session,
-                    applyGate,
-                    pruneMissingThreads: false,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        if (!appliedAny)
-        {
-            await UiDispatcher.InvokeAsync(
-                    () =>
-                    {
-                        _shell.ApplyRecoveredCatalogState(projects, []);
-                        _shell.TrySchedulePendingStartupThreadRestore(CancellationToken.None);
-                    })
-                .ConfigureAwait(false);
-            return;
-        }
-
-        await ApplyRecoveredSessionSnapshotAsync(
-                projects,
-                recoveredSessions,
-                session: null,
-                applyGate,
-                pruneMissingThreads: true,
-                cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private async Task ApplyRecoveredSessionSnapshotAsync(
-        IReadOnlyList<ProjectDescriptor> projects,
-        Dictionary<string, SessionViewDescriptor> recoveredSessions,
-        SessionViewDescriptor? session,
-        SemaphoreSlim applyGate,
-        bool pruneMissingThreads,
-        CancellationToken cancellationToken)
-    {
-        await applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (session is not null)
-            {
-                recoveredSessions[session.ThreadId] = session;
-            }
-
-            var sessions = recoveredSessions.Values
-                .OrderByDescending(static item => item.LastActiveAt)
-                .ToArray();
-
-            await UiDispatcher.InvokeAsync(
-                    () =>
-                    {
-                        _shell.ApplyRecoveredCatalogState(projects, sessions, pruneMissingThreads);
-                        _shell.TrySchedulePendingStartupThreadRestore(CancellationToken.None);
-                    })
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            applyGate.Release();
-        }
-    }
-
     private static async Task<IReadOnlyList<SessionViewDescriptor>> CollectRecoverableSessionsAsync(
         IAsyncEnumerable<SessionViewDescriptor> sessions,
         CancellationToken cancellationToken)
@@ -653,129 +517,6 @@ internal sealed class CodeAltaShellController : IThreadRuntimeEventProjector, IA
         }
 
         return results;
-    }
-
-    private void ReportProviderSessionLoadProgress(ProviderSessionLoadProgress progress)
-    {
-        var status = FormatProviderSessionLoadStatus(progress);
-        QueueProviderSessionLoadStatus(status);
-    }
-
-    private void ReportStartupProviderLoadProgress(ProviderSessionLoadProgress progress)
-    {
-        var status = FormatStartupProviderLoadStatus(progress);
-        QueueProviderSessionLoadStatus(status);
-    }
-
-    private void QueueProviderSessionLoadStatus(string? status)
-    {
-        var version = Interlocked.Increment(ref _providerSessionLoadStatusVersion);
-        _ = UiDispatcher.InvokeAsync(
-            () =>
-            {
-                if (version == Volatile.Read(ref _providerSessionLoadStatusVersion))
-                {
-                    _shell.SetProviderSessionLoadStatus(status);
-                }
-            });
-    }
-
-    private Task SetProviderSessionLoadStatusAsync(string? status)
-    {
-        var version = Interlocked.Increment(ref _providerSessionLoadStatusVersion);
-        return UiDispatcher.InvokeAsync(
-            () =>
-            {
-                if (version == Volatile.Read(ref _providerSessionLoadStatusVersion))
-                {
-                    _shell.SetProviderSessionLoadStatus(status);
-                }
-            });
-    }
-
-    internal static string? FormatStartupProviderLoadStatus(ProviderSessionLoadProgress progress)
-    {
-        if (progress.TotalProviderCount <= 0 ||
-            progress.CompletedProviderCount >= progress.TotalProviderCount)
-        {
-            return null;
-        }
-
-        var completed = Math.Clamp(progress.CompletedProviderCount, 0, progress.TotalProviderCount);
-        var loadingNames = progress.LoadingProviderDisplayNames
-            .Where(static name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(2)
-            .ToArray();
-        var loadingText = loadingNames.Length == 0
-            ? "providers"
-            : string.Join(", ", loadingNames) + (progress.LoadingProviderDisplayNames.Count > loadingNames.Length ? ", …" : string.Empty);
-
-        return $"Loading {loadingText} {BuildProgressBar(completed, progress.TotalProviderCount)} {completed}/{progress.TotalProviderCount}";
-    }
-
-    internal static string? FormatProviderSessionLoadStatus(ProviderSessionLoadProgress progress)
-    {
-        if (progress.TotalProviderCount <= 0 ||
-            progress.CompletedProviderCount >= progress.TotalProviderCount)
-        {
-            return null;
-        }
-
-        var completed = Math.Clamp(progress.CompletedProviderCount, 0, progress.TotalProviderCount);
-        var loadingNames = progress.LoadingProviderDisplayNames
-            .Where(static name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(2)
-            .ToArray();
-        var loadingText = loadingNames.Length == 0
-            ? "provider sessions"
-            : string.Join(", ", loadingNames) + (progress.LoadingProviderDisplayNames.Count > loadingNames.Length ? ", …" : string.Empty) + " sessions";
-
-        return $"Loading {loadingText} {BuildProgressBar(completed, progress.TotalProviderCount)} {completed}/{progress.TotalProviderCount}";
-    }
-
-    private static string BuildProgressBar(int completed, int total)
-    {
-        const int width = 8;
-        var filled = total <= 0 ? 0 : (int)Math.Round((double)completed / total * width, MidpointRounding.AwayFromZero);
-        filled = Math.Clamp(filled, 0, width);
-        return "[" + new string('■', filled) + new string('□', width - filled) + "]";
-    }
-
-    private sealed class ProviderStartupLoadProgress
-    {
-        private readonly object _gate = new();
-        private readonly List<string> _loadingProviderDisplayNames;
-        private int _completedProviderCount;
-
-        public ProviderStartupLoadProgress(IReadOnlyList<ModelProviderDescriptor> descriptors)
-        {
-            _loadingProviderDisplayNames = descriptors.Select(static descriptor => descriptor.DisplayName).ToList();
-            TotalProviderCount = descriptors.Count;
-        }
-
-        public int TotalProviderCount { get; }
-
-        public ProviderSessionLoadProgress Snapshot(ModelProviderDescriptor? completedDescriptor)
-        {
-            lock (_gate)
-            {
-                if (completedDescriptor is not null)
-                {
-                    _completedProviderCount++;
-                    _loadingProviderDisplayNames.RemoveAll(
-                        name => string.Equals(name, completedDescriptor.DisplayName, StringComparison.Ordinal));
-                }
-
-                return new ProviderSessionLoadProgress(
-                    completedDescriptor?.BackendId ?? default,
-                    completedDescriptor?.DisplayName ?? string.Empty,
-                    _completedProviderCount,
-                    TotalProviderCount,
-                    _loadingProviderDisplayNames.ToArray());
-            }
-        }
     }
 
     internal static bool TryMergeRuntimeEvents(

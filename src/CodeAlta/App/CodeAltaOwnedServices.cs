@@ -38,6 +38,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         PluginHostBridge pluginHostBridge,
         CatalogOptions catalogOptions,
         List<ModelProviderDescriptor> backendDescriptors,
+        IAgentSessionCatalog sessionCatalog,
         AcpAgentRegistryService acpAgentRegistryService,
         ProjectCatalog projectCatalog,
         WorkThreadCatalog threadCatalog,
@@ -56,6 +57,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         PluginRuntime = pluginRuntime;
         PluginHostBridge = pluginHostBridge;
         _backendDescriptors = backendDescriptors;
+        SessionCatalog = sessionCatalog;
         CatalogOptions = catalogOptions;
         AcpAgentRegistryService = acpAgentRegistryService;
         ProjectCatalog = projectCatalog;
@@ -89,6 +91,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     public AgentHub AgentHub { get; }
 
     public SessionRuntimeService RuntimeService { get; }
+
+    public IAgentSessionCatalog SessionCatalog { get; }
 
     public IProjectFileSearchService ProjectFileSearchService { get; }
 
@@ -163,6 +167,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
             pluginHostBridge,
             sharedHost.CatalogOptions,
             backendDescriptors,
+            sharedHost.SessionCatalog,
             acpAgentRegistryService,
             sharedHost.ProjectCatalog,
             sharedHost.ThreadCatalog,

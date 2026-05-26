@@ -43,14 +43,43 @@ internal sealed class ChatBackendInitializationCoordinator
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         var progress = new ProviderInitializationProgress(_backendDescriptors);
+        var descriptorsByProviderId = _backendDescriptors.ToDictionary(
+            static descriptor => ModelProviderId.NormalizeValue(descriptor.ProviderId.Value),
+            StringComparer.OrdinalIgnoreCase);
+        var completedProviderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         ReportProviderInitializationProgress(progress.Snapshot(null));
+        using var stateReaderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var stateReaderTask = ApplyProviderStateChangesAsync(
+            descriptorsByProviderId,
+            completedProviderIds,
+            progress,
+            stateReaderCts.Token);
         try
         {
-            await Task.WhenAll(_backendDescriptors.Select(descriptor => RefreshAndReportAsync(descriptor, progress, cancellationToken)))
-                .ConfigureAwait(false);
+            await _providerInitializationService.InitializeAllAsync(cancellationToken).ConfigureAwait(false);
+
+            foreach (var providerState in _providerInitializationService.CurrentStates)
+            {
+                await ApplyProviderStateChangeAsync(
+                        providerState,
+                        descriptorsByProviderId,
+                        completedProviderIds,
+                        progress,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
         finally
         {
+            stateReaderCts.Cancel();
+            try
+            {
+                await stateReaderTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stateReaderCts.IsCancellationRequested)
+            {
+            }
+
             ReportProviderInitializationProgress(null);
         }
     }
@@ -126,23 +155,72 @@ internal sealed class ChatBackendInitializationCoordinator
         return $"Initializing {initializingText} {BuildProgressBar(completed, totalProviderCount)} {completed}/{totalProviderCount}";
     }
 
-    private async Task RefreshAndReportAsync(
-        ModelProviderDescriptor descriptor,
+    private async Task RefreshAsync(ModelProviderId providerId, CancellationToken cancellationToken)
+        => await RefreshAsync(providerId, displayName: null, cancellationToken).ConfigureAwait(false);
+
+    private async Task ApplyProviderStateChangesAsync(
+        IReadOnlyDictionary<string, ModelProviderDescriptor> descriptorsByProviderId,
+        HashSet<string> completedProviderIds,
         ProviderInitializationProgress progress,
         CancellationToken cancellationToken)
     {
-        try
+        await foreach (var change in _providerInitializationService.StreamStateChangesAsync(cancellationToken).ConfigureAwait(false))
         {
-            await RefreshAsync(descriptor.ProviderId, descriptor.DisplayName, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            ReportProviderInitializationProgress(progress.Snapshot(descriptor));
+            await ApplyProviderStateChangeAsync(
+                    change.State,
+                    descriptorsByProviderId,
+                    completedProviderIds,
+                    progress,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
-    private async Task RefreshAsync(ModelProviderId providerId, CancellationToken cancellationToken)
-        => await RefreshAsync(providerId, displayName: null, cancellationToken).ConfigureAwait(false);
+    private async Task ApplyProviderStateChangeAsync(
+        ModelProviderStateSnapshot providerState,
+        IReadOnlyDictionary<string, ModelProviderDescriptor> descriptorsByProviderId,
+        HashSet<string> completedProviderIds,
+        ProviderInitializationProgress progress,
+        CancellationToken cancellationToken)
+    {
+        var key = ModelProviderId.NormalizeValue(providerState.ProviderId.Value);
+        if (!descriptorsByProviderId.TryGetValue(key, out var descriptor))
+        {
+            return;
+        }
+
+        var isTerminal = IsTerminalAvailability(providerState.Availability);
+        lock (completedProviderIds)
+        {
+            if (!isTerminal && completedProviderIds.Contains(key))
+            {
+                return;
+            }
+        }
+
+        var state = await EnsureBackendStateAsync(providerState.ProviderId, descriptor.DisplayName, cancellationToken).ConfigureAwait(false);
+        _dispatchToUi(
+            () =>
+            {
+                ApplyProviderState(providerState, state);
+                LogInfo(
+                    $"Chat backend state updated provider={providerState.ProviderId.Value} displayName={state.DisplayName} availability={state.Availability} models={state.Models.Count} status={state.StatusMessage}");
+                PublishProviderStateChanged(providerState.ProviderId);
+            });
+
+        if (isTerminal)
+        {
+            lock (completedProviderIds)
+            {
+                if (!completedProviderIds.Add(key))
+                {
+                    return;
+                }
+            }
+
+            ReportProviderInitializationProgress(progress.Snapshot(descriptor));
+        }
+    }
 
     private async Task RefreshAsync(
         ModelProviderId providerId,
@@ -285,6 +363,12 @@ internal sealed class ChatBackendInitializationCoordinator
 
     private static bool IsProcessBackedProviderBackend(ModelProviderId providerId)
         => false;
+
+    private static bool IsTerminalAvailability(ModelProviderAvailability availability)
+        => availability is ModelProviderAvailability.Ready or
+            ModelProviderAvailability.Failed or
+            ModelProviderAvailability.Unsupported or
+            ModelProviderAvailability.Disabled;
 
     private void ReportProviderInitializationProgress(ProviderInitializationProgressSnapshot? progress)
     {

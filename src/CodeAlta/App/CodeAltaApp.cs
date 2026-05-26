@@ -127,7 +127,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             ownedServices.CatalogOptions,
             ownedServices.AgentHub,
             ownedServices.ProjectFileSearchService,
-            new KnownProjectImporter(ownedServices.AgentHub, ownedServices.BackendDescriptors, ownedServices.ProjectCatalog, ownedServices.CatalogOptions),
+            new KnownProjectImporter(ownedServices.SessionCatalog, ownedServices.ProjectCatalog),
             ownedServices,
             updateService);
     }
@@ -153,7 +153,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         _runtimeService = runtimeService;
         _catalogOptions = catalogOptions;
         _agentHub = agentHub;
-        _knownProjectImporter = knownProjectImporter ?? new KnownProjectImporter(agentHub, backendDescriptors, projectCatalog, catalogOptions);
+        _knownProjectImporter = knownProjectImporter ?? new KnownProjectImporter(
+            new AgentSessionCatalog(threadCatalog.JournalStore.CreateSessionStore()),
+            projectCatalog);
         _ownedServices = ownedServices;
         _frontendHost = new ShellFrontendHost(this);
         var composition = CodeAltaFrontendComposition.Create(

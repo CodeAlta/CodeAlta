@@ -98,7 +98,6 @@ internal sealed class CodeAltaFrontendComposition
             frontend.GetPromptText,
             () => frontendEvents.Publish(new PromptAvailabilityChangedEvent()),
             frontend.UpdatePromptImageAttachmentsUi);
-        knownProjectImporter.ShouldLoadProviderSessions = backendId => ShouldLoadProviderSessions(new ModelProviderId(backendId.Value));
         var configStore = new CodeAltaConfigStore(catalogOptions);
         var modelProviderPreferences = new ModelProviderPreferenceCoordinator(configStore, CodeAlta.Views.CodeAltaApp.UiLogger);
         var altaToolBackendIds = ResolveAltaToolBackendIds(configStore);
@@ -138,7 +137,7 @@ internal sealed class CodeAltaFrontendComposition
             shell,
             knownProjectImporter,
             new ProjectCatalogStore(projectCatalog),
-            new RecoverableSessionSource(runtimeService) { ShouldListProviderSessions = ShouldLoadProviderSessions },
+            new RecoverableSessionSource(runtimeService),
             new SessionDeleter(runtimeService),
             backendDescriptors);
         var runtimeEventPump = new RuntimeEventPump(runtimeService, shellController);
@@ -403,10 +402,6 @@ internal sealed class CodeAltaFrontendComposition
             WorkspaceRefreshContext = workspaceRefreshContext,
         };
 
-        bool ShouldLoadProviderSessions(ModelProviderId providerId)
-        {
-            return backendDescriptors.Any(descriptor => descriptor.ProviderId == providerId);
-        }
     }
 
     private sealed class EmptyModelProviderInitializationService : IModelProviderInitializationService
