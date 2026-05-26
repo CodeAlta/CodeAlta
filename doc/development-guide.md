@@ -21,7 +21,36 @@ Add a rule here when it is important enough that contributors and agents should 
 - Keep plugin prompt/notification abstractions minimal data contracts. Do not reproduce `XenoAtom.Terminal.UI` toast or control APIs in plugin abstractions; terminal controls and dialogs stay owned by the frontend.
 - Treat plugin-derived thread events as transient projections. Do not persist them as canonical user/agent transcript events unless a future decision explicitly changes the event model.
 - Prefer named ports, request/response DTOs, immutable snapshots, and event streams over large callback aggregates or callback-wrapper context classes.
-- New shell/application contracts should use `ModelProvider` terminology for selectable LLM runtime and endpoint configuration. Keep `Backend` names for low-level runtime adapters such as `IAgentBackend`.
+- New shell/application contracts should use `ModelProvider` terminology for selectable LLM runtime and endpoint configuration. Do not introduce new `Backend` names for provider/session ownership; existing `IAgentBackend` terminology is transitional during the backend refactor.
+
+### Agent runtime, sessions, and model providers
+
+Phase 0 of the backend refactor locks the target boundaries and names before code churn starts:
+
+- Final target names are `AgentRuntime`/`IAgentRuntime` for the CodeAlta-owned active-session facade, `SessionRuntimeService` for the orchestration service currently named `WorkThreadRuntimeService`, `SessionViewDescriptor` for the UI/catalog projection currently named `WorkThreadDescriptor`, `ModelProviderId`, `ModelProviderDescriptor`, `ModelProviderState`, and `IAgentSessionStore`. Avoid introducing a broad `SessionDescriptor`; use `AgentSessionMetadata` for durable stored session metadata unless a narrower descriptor is required.
+- `AgentRuntime` owns active session handles, per-session run coordination, abort/steer/compact flow, and provider resolution for start/resume/run. It must not own persisted session discovery or model-provider probing.
+- `IAgentSessionStore` and the session catalog are the durable session owners. Session listing, metadata reads, history reads, and deletion are provider-independent and should scan one configured sessions root once per runtime/catalog instance.
+- Model providers own configured provider identity, protocol adaptation, readiness, capabilities, and model catalogs only. Provider initialization must be independent per provider and must not gate local session listing or history loading.
+- Conversation-like orchestration and UI concepts should use `Session` naming. Keep `Thread` only for actual OS/runtime threading concepts and tolerant readers for legacy persisted fields.
+- Do not add public/internal API compatibility shims for old backend/session APIs. Direct renames, splits, and deletions are acceptable; temporary bridges are implementation scaffolding only and should be removed within the refactor.
+- Compatibility constraints are user data and configuration only: existing session journals and work-thread view state must remain loadable with tolerant reads of legacy `BackendId`/`ThreadId`/provider fields, and existing provider `config.toml` / `[providers]` semantics must stay stable unless a focused migrator is added.
+- Active sessions must remain independently scheduled. Use per-session ownership/serialization for mutable runtime state and event append ordering; do not add a process-wide run lock, event-writer lock, or provider/session deduplication layer.
+
+Phase 0 baseline on 2026-05-26: `dotnet test -c Release` from `src` passed with 0 failed, 1512 passed, and 1 skipped (`ProjectFileSearchSession_PublishesIncrementalUpdatesAndIgnoresStaleRefreshes`).
+
+Tests identified as assuming backend-owned sessions or the current backend/session coupling and therefore expected to move or change during the refactor:
+
+- `src/CodeAlta.Orchestration.Tests/AgentHubTests.cs`: `UsesSharedSessionMetadataStoreAsync_UsesRegistrationMetadataWithoutStartingBackend`.
+- `src/CodeAlta.Orchestration.Tests/WorkThreadRuntimeServiceTests.cs`: `ListRecoverableThreadsAsync_IncludesLocalRuntimeSessionsForUnregisteredProviders`, `EnsureCoordinatorSessionAsync_RecreatesSharedMetadataSessionWhenResumeTargetIsMissing`.
+- `src/CodeAlta.Tests/AgentBackendFactoryTests.cs`: `UsesSharedSessionMetadataStore_ReturnsRegistrationMetadata`.
+- `src/CodeAlta.Tests/AgentHubBackendReloadTests.cs`: `ListSessionsAsync_CachesProcessBackedBackendSessions`, `ListSessionsAsync_CachesRegularBackendSessions`, `DeleteSessionAsync_InvalidatesProcessBackedSessionCache`.
+- `src/CodeAlta.Tests/FileSystemLocalAgentSessionStoreTests.cs`: provider-scoped `ListSessionsAsync` and persisted `BackendId`/provider metadata coverage.
+- `src/CodeAlta.Tests/LocalAgentBackendTests.cs`: backend create/list/resume/delete, default-provider resume, provider-switch resume, and resume-time usage repair tests.
+- `src/CodeAlta.Tests/RawApiBackendRegistrarTests.cs`: configured-provider registration through `AgentBackendFactory` and `CreateSessionAsync` persistence coverage.
+- `src/CodeAlta.Tests/AcpAgentBackendIntegrationTests.cs`: external ACP backend create/list/resume lifecycle tests.
+- `src/CodeAlta.Tests/OpenAIRawApiAgentBackendTests.cs`, `src/CodeAlta.Tests/RawApiAgentBackendTests.cs`, `src/CodeAlta.Tests/CopilotDirectProviderTests.cs`, and `src/CodeAlta.Tests/ModelsDevCatalogTests.cs`: provider backend tests that directly create or resume sessions through provider-specific `IAgentBackend` wrappers.
+- `src/CodeAlta.Tests/ChatAgentConnectionTests.cs` and `src/CodeAlta.Tests/ChatBackendInitializationCoordinatorTests.cs`: tests covering backend-bound session recreation and provider initialization enabling session loading.
+- `src/CodeAlta.Plugins.Abstractions.Tests/PluginAbstractionsTests.cs` and `src/CodeAlta.Plugins.Tests/PluginContributionAdapterServiceTests.cs`: plugin backend contribution coverage.
 
 ## Frontend Shell Shape
 
