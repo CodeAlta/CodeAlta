@@ -1,19 +1,23 @@
+using CodeAlta.Agent.LocalRuntime;
+
 namespace CodeAlta.Agent.OpenAI;
 
 /// <summary>
-/// Local-runtime backend for OpenAI Responses providers.
+/// OpenAI Responses provider runtime with a transitional backend facade.
 /// </summary>
-public sealed class OpenAIResponsesAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend
+public sealed class OpenAIResponsesAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend, ICodeAltaModelProviderRuntime
 {
+    private readonly ICodeAltaModelProviderRuntime _runtime;
     private readonly IAgentBackend _inner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenAIResponsesAgentBackend"/> class.
     /// </summary>
-    /// <param name="options">The backend options.</param>
+    /// <param name="options">The provider runtime options.</param>
     public OpenAIResponsesAgentBackend(OpenAIResponsesAgentBackendOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        _runtime = OpenAIBackendFactory.CreateResponsesProviderRuntime(options);
         _inner = OpenAIBackendFactory.CreateResponsesBackend(options);
     }
 
@@ -24,14 +28,41 @@ public sealed class OpenAIResponsesAgentBackend : IAgentBackend, IAgentSharedSes
     public string DisplayName => _inner.DisplayName;
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken = default) => _inner.StartAsync(cancellationToken);
+    public ModelProviderDescriptor Descriptor => _runtime.Descriptor;
 
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken = default) => _inner.StopAsync(cancellationToken);
+    public ModelProviderRuntimeDescriptor RuntimeDescriptor => _runtime.RuntimeDescriptor;
+
+    /// <inheritdoc />
+    public IModelProviderModelCatalog? ModelCatalog => _runtime.ModelCatalog;
+
+    /// <inheritdoc />
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        await _runtime.StartAsync(cancellationToken).ConfigureAwait(false);
+        await _inner.StartAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        await _runtime.StopAsync(cancellationToken).ConfigureAwait(false);
+        await _inner.StopAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
         => _inner.ListModelsAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+        => _runtime.ProbeAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
+
+    /// <inheritdoc />
+    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
@@ -57,5 +88,9 @@ public sealed class OpenAIResponsesAgentBackend : IAgentBackend, IAgentSharedSes
         => _inner.ResumeSessionAsync(sessionId, options, cancellationToken);
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => _inner.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await _inner.DisposeAsync().ConfigureAwait(false);
+        await _runtime.DisposeAsync().ConfigureAwait(false);
+    }
 }

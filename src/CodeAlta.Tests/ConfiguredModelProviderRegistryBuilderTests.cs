@@ -13,10 +13,10 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Tests;
 
 [TestClass]
-public sealed class RawApiBackendRegistrarTests
+public sealed class ConfiguredModelProviderRegistryBuilderTests
 {
     [TestMethod]
-    public async Task RegisterConfiguredBackends_RegistersConfiguredProviders()
+    public async Task RegisterConfiguredProviders_RegistersConfiguredProviders()
     {
         using var temp = TempDirectory.Create();
         var openAiKeyName = $"CODEALTA_OPENAI_{Guid.NewGuid():N}";
@@ -64,7 +64,7 @@ public sealed class RawApiBackendRegistrarTests
             var factory = new AgentBackendFactory();
             await using var providerRegistry = new ModelProviderRegistry();
 
-            var descriptors = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            var descriptors = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 providerRegistry,
                 store,
@@ -121,7 +121,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public void RegisterConfiguredBackends_SkipsProvidersWithoutUsableCredentials()
+    public void RegisterConfiguredProviders_SkipsProvidersWithoutUsableCredentials()
     {
         using var temp = TempDirectory.Create();
         File.WriteAllText(
@@ -134,7 +134,7 @@ public sealed class RawApiBackendRegistrarTests
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
         var factory = new AgentBackendFactory();
 
-        var descriptors = RawApiBackendRegistrar.RegisterConfiguredBackends(
+        var descriptors = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
             factory,
             store,
             Path.Combine(temp.Path, "machine", "agents"));
@@ -144,7 +144,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public void RegisterConfiguredBackends_UsesSingleProviderDisplayNameForDescriptor()
+    public void RegisterConfiguredProviders_UsesSingleProviderDisplayNameForDescriptor()
     {
         using var temp = TempDirectory.Create();
         var minimaxKeyName = $"MINIMAX_{Guid.NewGuid():N}";
@@ -165,7 +165,7 @@ public sealed class RawApiBackendRegistrarTests
             var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
             var factory = new AgentBackendFactory();
 
-            var descriptors = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            var descriptors = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 store,
                 Path.Combine(temp.Path, "machine", "agents"));
@@ -181,7 +181,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public async Task RegisterConfiguredBackends_RegistersCodexSubscriptionProvider()
+    public async Task RegisterConfiguredProviders_RegistersCodexSubscriptionProvider()
     {
         using var temp = TempDirectory.Create();
         File.WriteAllText(
@@ -195,7 +195,7 @@ public sealed class RawApiBackendRegistrarTests
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
         var factory = new AgentBackendFactory();
 
-        var descriptors = RawApiBackendRegistrar.RegisterConfiguredBackends(
+        var descriptors = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
             factory,
             store,
             Path.Combine(temp.Path, "machine", "agents"));
@@ -216,7 +216,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public async Task RegisterConfiguredBackends_StartAsync_DoesNotPersistProviderDescriptors()
+    public async Task RegisterConfiguredProviders_StartAsync_DoesNotPersistProviderDescriptors()
     {
         using var temp = TempDirectory.Create();
         var minimaxKeyName = $"MINIMAX_{Guid.NewGuid():N}";
@@ -238,7 +238,7 @@ public sealed class RawApiBackendRegistrarTests
             var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
             var factory = new AgentBackendFactory();
 
-            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            _ = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 store,
                 stateRoot);
@@ -255,7 +255,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public async Task RegisterConfiguredBackends_CreateSession_PersistsOnlySessionJournal()
+    public async Task RegisterConfiguredProviders_CreateSession_PersistsOnlySessionJournal()
     {
         using var temp = TempDirectory.Create();
         var minimaxKeyName = $"MINIMAX_{Guid.NewGuid():N}";
@@ -277,7 +277,7 @@ public sealed class RawApiBackendRegistrarTests
             var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
             var factory = new AgentBackendFactory();
 
-            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            _ = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 store,
                 stateRoot);
@@ -432,7 +432,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public async Task RegisterConfiguredBackends_OpenAICompatibleProviderWithoutModelsEndpoint_FallsBackToModelsDevCatalog()
+    public async Task RegisterConfiguredProviders_OpenAICompatibleProviderWithoutModelsEndpoint_FallsBackToModelsDevCatalog()
     {
         using var temp = TempDirectory.Create();
         using var server = new StaticStatusServer(HttpStatusCode.NotFound, "404 Page not found");
@@ -455,7 +455,7 @@ public sealed class RawApiBackendRegistrarTests
             var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
             var factory = new AgentBackendFactory();
 
-            var descriptors = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            var descriptors = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 store,
                 Path.Combine(temp.Path, "machine", "agents"),
@@ -479,7 +479,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public async Task RegisterConfiguredBackends_SingleModelId_ExposesOnlyConfiguredModel()
+    public async Task RegisterConfiguredProviders_SingleModelId_ExposesOnlyConfiguredModel()
     {
         using var temp = TempDirectory.Create();
         await using var modelCatalog = CreateModelCatalog();
@@ -502,7 +502,7 @@ public sealed class RawApiBackendRegistrarTests
             var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
             var factory = new AgentBackendFactory();
 
-            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            _ = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 store,
                 Path.Combine(temp.Path, "machine", "agents"),
@@ -523,7 +523,7 @@ public sealed class RawApiBackendRegistrarTests
     }
 
     [TestMethod]
-    public async Task RegisterConfiguredBackends_AnthropicSingleModelId_ExposesOnlyConfiguredModel()
+    public async Task RegisterConfiguredProviders_AnthropicSingleModelId_ExposesOnlyConfiguredModel()
     {
         using var temp = TempDirectory.Create();
         await using var modelCatalog = CreateModelCatalog();
@@ -546,7 +546,7 @@ public sealed class RawApiBackendRegistrarTests
             var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
             var factory = new AgentBackendFactory();
 
-            _ = RawApiBackendRegistrar.RegisterConfiguredBackends(
+            _ = ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 factory,
                 store,
                 Path.Combine(temp.Path, "machine", "agents"),

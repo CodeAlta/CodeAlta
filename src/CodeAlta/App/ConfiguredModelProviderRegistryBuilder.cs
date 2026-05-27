@@ -14,18 +14,18 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.App;
 
-internal static class RawApiBackendRegistrar
+internal static class ConfiguredModelProviderRegistryBuilder
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.RawApi");
 
-    public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredBackends(
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredProviders(
         AgentBackendFactory backendFactory,
         CodeAltaConfigStore configStore,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog = null)
-        => RegisterConfiguredBackends(backendFactory, null, configStore, stateRootPath, modelCatalog);
+        => RegisterConfiguredProviders(backendFactory, null, configStore, stateRootPath, modelCatalog);
 
-    public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredBackends(
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredProviders(
         AgentBackendFactory backendFactory,
         ModelProviderRegistry? modelProviderRegistry,
         CodeAltaConfigStore configStore,
@@ -40,17 +40,13 @@ internal static class RawApiBackendRegistrar
         var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
         foreach (var definition in configStore.LoadGlobalProviderDefinitions())
         {
-            if (TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend))
+            if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend, out var createRuntime))
             {
                 backendFactory.RegisterOrReplace(
                     descriptor.BackendId,
                     createBackend,
                     AgentBackendRegistrationOptions.SharedSessionMetadataStore);
-                // Phase 1 provider descriptors are sourced from the config definition above.
-                // The backend wrapper registered here is short-lived scaffolding until the
-                // Phase 8 provider-runtime migration removes IAgentBackend from provider
-                // registry execution paths.
-                modelProviderRegistry?.RegisterOrReplaceBackendRuntime(descriptor, createBackend);
+                modelProviderRegistry?.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
             }
         }
@@ -58,14 +54,14 @@ internal static class RawApiBackendRegistrar
         return descriptors;
     }
 
-    public static IReadOnlyList<ModelProviderDescriptor> RegisterOrReplaceConfiguredBackends(
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterOrReplaceConfiguredProviders(
         AgentBackendFactory backendFactory,
         IEnumerable<CodeAltaProviderDocument> definitions,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog = null)
-        => RegisterOrReplaceConfiguredBackends(backendFactory, null, definitions, stateRootPath, modelCatalog);
+        => RegisterOrReplaceConfiguredProviders(backendFactory, null, definitions, stateRootPath, modelCatalog);
 
-    public static IReadOnlyList<ModelProviderDescriptor> RegisterOrReplaceConfiguredBackends(
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterOrReplaceConfiguredProviders(
         AgentBackendFactory backendFactory,
         ModelProviderRegistry? modelProviderRegistry,
         IEnumerable<CodeAltaProviderDocument> definitions,
@@ -80,7 +76,7 @@ internal static class RawApiBackendRegistrar
         var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
         foreach (var definition in definitions)
         {
-            if (!TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend))
+            if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend, out var createRuntime))
             {
                 continue;
             }
@@ -89,38 +85,37 @@ internal static class RawApiBackendRegistrar
                 descriptor.BackendId,
                 createBackend,
                 AgentBackendRegistrationOptions.SharedSessionMetadataStore);
-            // Phase 1 provider descriptors are sourced from the config definition above.
-            // The backend wrapper registered here is short-lived scaffolding until the
-            // Phase 8 provider-runtime migration removes IAgentBackend from provider
-            // registry execution paths.
-            modelProviderRegistry?.RegisterOrReplaceBackendRuntime(descriptor, createBackend);
+            modelProviderRegistry?.RegisterOrReplace(descriptor, createRuntime);
             descriptors.Add(descriptor);
         }
 
         return descriptors;
     }
 
-    public static bool TryCreateBackendRegistration(
+    public static bool TryCreateProviderRegistration(
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
-        => TryCreateBackendRegistration(
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
+        => TryCreateProviderRegistration(
             definition,
             stateRootPath,
             modelCatalog,
             new CodexSubscriptionConcurrencyLimiter(),
             out descriptor,
-            out createBackend);
+            out createBackend,
+            out createRuntime);
 
-    private static bool TryCreateBackendRegistration(
+    private static bool TryCreateProviderRegistration(
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(codexSubscriptionConcurrencyLimiter);
@@ -129,26 +124,27 @@ internal static class RawApiBackendRegistrar
         switch (definition.ProviderType)
         {
             case "openai-chat":
-                return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             case "openai-responses":
-                return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             case "azure-openai":
-                return TryCreateAzureOpenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateAzureOpenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             case "codex":
-                return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createBackend);
+                return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createBackend, out createRuntime);
             case "copilot":
-                return TryCreateCopilotDirectProvider(definition, stateRootPath, out descriptor, out createBackend);
+                return TryCreateCopilotDirectProvider(definition, stateRootPath, out descriptor, out createBackend, out createRuntime);
             case "xai":
-                return TryCreateXaiProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateXaiProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             case "anthropic":
-                return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             case "google-genai":
-                return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             case "vertex-ai":
-                return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend);
+                return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createBackend, out createRuntime);
             default:
                 descriptor = null!;
                 createBackend = null!;
+                createRuntime = null!;
                 return false;
         }
     }
@@ -158,7 +154,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -167,6 +164,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -217,6 +215,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new OpenAIChatAgentBackend(options);
+        createRuntime = () => new OpenAIChatAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
         return true;
@@ -227,7 +226,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -236,6 +236,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -286,6 +287,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new OpenAIResponsesAgentBackend(options);
+        createRuntime = () => new OpenAIResponsesAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
         return true;
@@ -296,7 +298,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -305,6 +308,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -344,6 +348,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new OpenAIChatAgentBackend(options);
+        createRuntime = () => new OpenAIChatAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} azureOpenAI=true");
         return true;
@@ -355,7 +360,8 @@ internal static class RawApiBackendRegistrar
         ModelsDevCatalogService? modelCatalog,
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var backendId = new AgentBackendId(definition.ProviderKey);
         var displayName = ResolveProviderDisplayName(definition);
@@ -397,6 +403,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new OpenAIResponsesAgentBackend(options);
+        createRuntime = () => new OpenAIResponsesAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.CodexSubscription.AuthSource}");
         return true;
@@ -406,7 +413,8 @@ internal static class RawApiBackendRegistrar
         CodeAltaProviderDocument definition,
         string stateRootPath,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var authSource = NormalizeText(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;
         var githubTokenEnv = NormalizeText(definition.GitHubTokenEnv);
@@ -418,6 +426,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-github-token-env");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -428,6 +437,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-copilot-token-env");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -467,6 +477,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new CopilotDirectAgentBackend(options);
+        createRuntime = () => new CopilotDirectAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.Auth.AuthSource} modelDiscovery={providerOptions.ModelDiscovery}");
         return true;
@@ -477,7 +488,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var authSource = NormalizeText(definition.AuthSource) ?? XaiAuthSources.XaiBrowserOAuth;
         if (authSource != XaiAuthSources.XaiBrowserOAuth && authSource != XaiAuthSources.XaiDeviceFlow)
@@ -486,6 +498,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=unsupported-auth-source authSource={authSource}");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -533,6 +546,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new XaiDirectAgentBackend(options);
+        createRuntime = () => new XaiDirectAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} authSource={providerOptions.Auth.AuthSource} modelDiscovery={providerOptions.ModelDiscovery}");
         return true;
@@ -558,7 +572,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -567,6 +582,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -608,6 +624,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new AnthropicAgentBackend(options);
+        createRuntime = () => new AnthropicAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
         return true;
@@ -618,7 +635,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -627,6 +645,7 @@ internal static class RawApiBackendRegistrar
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
             descriptor = null!;
             createBackend = null!;
+            createRuntime = null!;
             return false;
         }
 
@@ -637,7 +656,8 @@ internal static class RawApiBackendRegistrar
             useVertexAI: false,
             apiKey,
             out descriptor,
-            out createBackend);
+            out createBackend,
+            out createRuntime);
     }
 
     private static bool TryCreateVertexAIProvider(
@@ -645,7 +665,8 @@ internal static class RawApiBackendRegistrar
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         return TryCreateGoogleProvider(
             definition,
@@ -654,7 +675,8 @@ internal static class RawApiBackendRegistrar
             useVertexAI: true,
             apiKey: null,
             out descriptor,
-            out createBackend);
+            out createBackend,
+            out createRuntime);
     }
 
     private static bool TryCreateGoogleProvider(
@@ -664,7 +686,8 @@ internal static class RawApiBackendRegistrar
         bool useVertexAI,
         string? apiKey,
         out ModelProviderDescriptor descriptor,
-        out Func<IAgentBackend> createBackend)
+        out Func<IAgentBackend> createBackend,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         var backendId = new AgentBackendId(definition.ProviderKey);
         var displayName = ResolveProviderDisplayName(definition);
@@ -707,6 +730,7 @@ internal static class RawApiBackendRegistrar
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createBackend = () => new GoogleGenAIAgentBackend(options);
+        createRuntime = () => new GoogleGenAIAgentBackend(options);
         LogInfo(
             $"Registered provider backend={backendId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} vertex={useVertexAI}");
         return true;

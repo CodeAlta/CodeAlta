@@ -506,7 +506,7 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
-        if (!RawApiBackendRegistrar.TryCreateBackendRegistration(definition, stateRootPath, modelCatalog, out _, out var createBackend))
+        if (!ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, out _, out var createBackend, out _))
         {
             backend = null!;
             return false;

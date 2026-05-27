@@ -179,7 +179,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         void RegisterFrontendModelProviders(ModelProviderRegistry modelProviderRegistry, AgentBackendFactory backendFactory)
         {
             backendDescriptors.AddRange(
-                RawApiBackendRegistrar.RegisterConfiguredBackends(
+                ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     backendFactory,
                     modelProviderRegistry,
                     configStore,
@@ -235,7 +235,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         var providerDescriptors = new List<ModelProviderDescriptor>();
 
         providerDescriptors.AddRange(
-            RawApiBackendRegistrar.RegisterOrReplaceConfiguredBackends(
+            ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(
                 _backendFactory,
                 _modelProviderRegistry,
                 providerDefinitions.Values.Where(static definition => definition.Enabled != false),
