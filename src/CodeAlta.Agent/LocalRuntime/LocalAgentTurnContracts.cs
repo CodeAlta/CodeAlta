@@ -3,49 +3,19 @@ using System.Text.Json;
 namespace CodeAlta.Agent.LocalRuntime;
 
 /// <summary>
-/// Defines the provider-specific turn executor used by local-runtime sessions.
+/// Provides cached or probed model metadata for a configured provider. Turn execution does not require this contract.
 /// </summary>
-public interface ILocalAgentTurnExecutor
+public interface IModelProviderModelCatalog
 {
     /// <summary>
     /// Lists models available to the provider implementation.
     /// </summary>
-    /// <param name="provider">The configured provider descriptor.</param>
+    /// <param name="provider">The configured provider runtime descriptor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The available models.</returns>
     Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Executes a single assistant turn.
-    /// </summary>
-    /// <param name="request">The turn request.</param>
-    /// <param name="onUpdate">Streaming callback used for best-effort progress projection.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The final assistant turn response.</returns>
-    Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Executes a single assistant turn with a callback for provider session updates.
-    /// </summary>
-    /// <param name="request">The turn request.</param>
-    /// <param name="onUpdate">Streaming callback used for best-effort progress projection.</param>
-    /// <param name="onSessionUpdate">Session update callback used for best-effort status projection.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The final assistant turn response.</returns>
-    Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(onSessionUpdate);
-        return ExecuteTurnAsync(request, onUpdate, cancellationToken);
-    }
 }
 
 internal interface ILocalAgentProviderSessionCleanup
@@ -76,7 +46,7 @@ public sealed record LocalAgentTurnRequest
     /// <summary>
     /// Gets or initializes the configured provider descriptor.
     /// </summary>
-    public required LocalAgentProviderDescriptor Provider { get; init; }
+    public required ModelProviderRuntimeDescriptor Provider { get; init; }
 
     /// <summary>
     /// Gets or initializes the backend identifier.

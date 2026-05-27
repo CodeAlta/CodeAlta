@@ -372,9 +372,9 @@ public sealed class AgentBackendFactory
     private IAgentBackend CreateFromRegistration(Registration registration)
     {
         var backend = registration.Factory();
-        if (backend is LocalAgentBackend localBackend && LocalSessionJournalFile is { } journalFile)
+        if (backend is CodeAltaAgentRuntime runtime && LocalSessionJournalFile is { } journalFile)
         {
-            localBackend.UseSessionJournalFile(journalFile);
+            runtime.UseSessionJournalFile(journalFile);
         }
 
         return ValidateCreatedBackend(registration.BackendId, backend);

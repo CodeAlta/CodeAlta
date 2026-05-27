@@ -21,7 +21,7 @@ internal sealed class CopilotModelDiscoveryClient
         _httpClient = httpClient;
     }
 
-    public async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(LocalAgentProviderDescriptor providerDescriptor, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(ModelProviderRuntimeDescriptor providerDescriptor, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(_provider.SingleModelId))
         {
@@ -138,7 +138,7 @@ internal sealed class CopilotModelDiscoveryClient
            item.Name.Contains("preview", StringComparison.OrdinalIgnoreCase) ||
            item.Version.Contains("preview", StringComparison.OrdinalIgnoreCase);
 
-    private static AgentModelInfo MapModel(CopilotModelItem item, LocalAgentProviderDescriptor providerDescriptor)
+    private static AgentModelInfo MapModel(CopilotModelItem item, ModelProviderRuntimeDescriptor providerDescriptor)
     {
         CopilotEndpointDispatcher.TryResolveEndpointKind(item.SupportedEndpoints, item.Capabilities?.Family, out var endpointKind);
         var efforts = MapReasoningEfforts(item.Capabilities?.Supports);
@@ -243,7 +243,7 @@ internal sealed class CopilotModelDiscoveryClient
         }
     }
 
-    private static AgentModelInfo CreateSingleModel(string modelId, LocalAgentProviderDescriptor providerDescriptor)
+    private static AgentModelInfo CreateSingleModel(string modelId, ModelProviderRuntimeDescriptor providerDescriptor)
     {
         var endpointKind = modelId.Contains("claude", StringComparison.OrdinalIgnoreCase)
             ? CopilotEndpointKind.AnthropicMessages
@@ -280,7 +280,7 @@ internal sealed class CopilotModelDiscoveryClient
 
 internal static class CopilotStaticModelFallbackCatalog
 {
-    public static IReadOnlyList<AgentModelInfo> List(LocalAgentProviderDescriptor provider)
+    public static IReadOnlyList<AgentModelInfo> List(ModelProviderRuntimeDescriptor provider)
         =>
         [
             Create("gpt-5.1-codex", "GPT-5.1 Codex", CopilotEndpointKind.Responses, provider),
@@ -288,7 +288,7 @@ internal static class CopilotStaticModelFallbackCatalog
             Create("claude-sonnet-4.5", "Claude Sonnet 4.5", CopilotEndpointKind.AnthropicMessages, provider),
         ];
 
-    private static AgentModelInfo Create(string id, string displayName, CopilotEndpointKind endpointKind, LocalAgentProviderDescriptor provider)
+    private static AgentModelInfo Create(string id, string displayName, CopilotEndpointKind endpointKind, ModelProviderRuntimeDescriptor provider)
         => new(
             id,
             DisplayName: displayName,

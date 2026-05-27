@@ -39,22 +39,21 @@ public sealed class XaiDirectAgentBackend : IAgentBackend, IAgentSharedSessionMe
             ? "xAI Grok"
             : options.DisplayNameOverride.Trim();
 
-        _inner = new LocalAgentBackend(
+        _inner = new CodeAltaAgentRuntime(
             backendId,
             displayName,
-            new LocalAgentBackendOptions
+            new CodeAltaAgentRuntimeOptions
             {
                 StateRootPath = options.StateRootPath,
                 Providers =
                 [
-                    .. options.Providers.Select(provider => new LocalAgentBackendProviderRegistration
+                    .. options.Providers.Select(provider => new CodeAltaAgentRuntimeProviderRegistration
                     {
-                        Provider = new LocalAgentProviderDescriptor
+                        Provider = new ModelProviderRuntimeDescriptor
                         {
                             ProtocolFamily = ProtocolFamily,
                             ProviderKey = provider.ProviderKey.Trim(),
                             DisplayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.ProviderKey.Trim() : provider.DisplayName.Trim(),
-                            BackendId = backendId,
                             TransportKind = LocalAgentTransportKind.OpenAIResponses,
                             BaseUri = provider.BaseUri ?? XaiDefaults.DefaultApiBaseUri,
                             IsDefault = provider.IsDefault,

@@ -26,22 +26,21 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
             throw new ArgumentException("At least one provider registration is required.", nameof(options));
         }
 
-        _inner = new LocalAgentBackend(
+        _inner = new CodeAltaAgentRuntime(
             options.BackendIdOverride ?? AgentBackendIds.GoogleGenAI,
             string.IsNullOrWhiteSpace(options.DisplayNameOverride) ? "Google GenAI" : options.DisplayNameOverride.Trim(),
-            new LocalAgentBackendOptions
+            new CodeAltaAgentRuntimeOptions
             {
                 StateRootPath = options.StateRootPath,
                 Providers =
                 [
-                    .. options.Providers.Select(provider => new LocalAgentBackendProviderRegistration
+                    .. options.Providers.Select(provider => new CodeAltaAgentRuntimeProviderRegistration
                     {
-                        Provider = new LocalAgentProviderDescriptor
+                        Provider = new ModelProviderRuntimeDescriptor
                         {
                             ProtocolFamily = "google-genai",
                             ProviderKey = provider.ProviderKey.Trim(),
                             DisplayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.ProviderKey.Trim() : provider.DisplayName.Trim(),
-                            BackendId = options.BackendIdOverride ?? AgentBackendIds.GoogleGenAI,
                             TransportKind = provider.UseVertexAI ? LocalAgentTransportKind.GoogleVertexAI : LocalAgentTransportKind.GoogleGeminiApi,
                             BaseUri = provider.BaseUri,
                             IsDefault = provider.IsDefault,
@@ -102,7 +101,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
 
-    private static ILocalAgentTurnExecutor CreateTurnExecutor(GoogleGenAIProviderOptions provider)
+    private static IModelProviderTurnExecutor CreateTurnExecutor(GoogleGenAIProviderOptions provider)
     {
         return new LocalAgentChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
@@ -111,7 +110,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
 
     private static ValueTask<IChatClient> CreateChatClientAsync(
         GoogleGenAIProviderOptions provider,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -126,7 +125,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         GoogleGenAIProviderOptions provider,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<AgentModelInfo> models;
@@ -189,7 +188,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
     }
 
     private static AgentModelInfo ToAgentModelInfo(
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         Model model)
     {
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -210,7 +209,7 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
 
     private static AgentModelInfo CreateSingleModelInfo(
         string modelId,
-        LocalAgentProviderDescriptor providerDescriptor)
+        ModelProviderRuntimeDescriptor providerDescriptor)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(providerDescriptor);

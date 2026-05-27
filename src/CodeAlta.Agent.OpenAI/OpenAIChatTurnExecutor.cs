@@ -11,10 +11,10 @@ using OpenAI.Chat;
 
 namespace CodeAlta.Agent.OpenAI;
 
-internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : ILocalAgentTurnExecutor
+internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken = default)
         => OpenAIProviderSdkFactory.ListModelsAsync(provider, providerDescriptor, cancellationToken);
 

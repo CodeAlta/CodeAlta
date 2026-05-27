@@ -525,12 +525,11 @@ public sealed class CopilotDirectProviderTests
             },
             HttpClient = new HttpClient(handler),
         });
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.AnthropicMessages,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
@@ -542,7 +541,7 @@ public sealed class CopilotDirectProviderTests
                 new LocalAgentTurnRequest
                 {
                     Provider = provider,
-                    BackendId = provider.BackendId,
+                    BackendId = new AgentBackendId(provider.ProviderKey),
                     SessionId = "session-test",
                     RunId = new AgentRunId("run-test"),
                     ModelId = "claude-haiku-4.5",
@@ -634,12 +633,11 @@ public sealed class CopilotDirectProviderTests
             },
             HttpClient = new HttpClient(handler),
         });
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.AnthropicMessages,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
@@ -651,7 +649,7 @@ public sealed class CopilotDirectProviderTests
                 new LocalAgentTurnRequest
                 {
                     Provider = provider,
-                    BackendId = provider.BackendId,
+                    BackendId = new AgentBackendId(provider.ProviderKey),
                     SessionId = "session-test",
                     RunId = new AgentRunId("run-test"),
                     ModelId = "claude-haiku-4.5",
@@ -728,12 +726,11 @@ public sealed class CopilotDirectProviderTests
             },
             HttpClient = new HttpClient(handler),
         });
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
@@ -745,7 +742,7 @@ public sealed class CopilotDirectProviderTests
                 new LocalAgentTurnRequest
                 {
                     Provider = provider,
-                    BackendId = provider.BackendId,
+                    BackendId = new AgentBackendId(provider.ProviderKey),
                     SessionId = "session-test",
                     RunId = new AgentRunId("run-test"),
                     ModelId = "gemini-2.5-pro",
@@ -840,12 +837,11 @@ public sealed class CopilotDirectProviderTests
             },
             HttpClient = new HttpClient(handler),
         });
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
@@ -857,7 +853,7 @@ public sealed class CopilotDirectProviderTests
                 new LocalAgentTurnRequest
                 {
                     Provider = provider,
-                    BackendId = provider.BackendId,
+                    BackendId = new AgentBackendId(provider.ProviderKey),
                     SessionId = "session-test",
                     RunId = new AgentRunId("run-test"),
                     ModelId = "gpt-test",
@@ -950,12 +946,11 @@ public sealed class CopilotDirectProviderTests
             },
             HttpClient = new HttpClient(handler),
         });
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = CopilotDirectAgentBackend.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            BackendId = new AgentBackendId("github-copilot"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
@@ -968,7 +963,7 @@ public sealed class CopilotDirectProviderTests
                 new LocalAgentTurnRequest
                 {
                     Provider = provider,
-                    BackendId = provider.BackendId,
+                    BackendId = new AgentBackendId(provider.ProviderKey),
                     SessionId = "session-test",
                     RunId = new AgentRunId("run-test"),
                     ModelId = "gpt-5.5",

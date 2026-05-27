@@ -3942,7 +3942,7 @@ public sealed class LocalAgentSessionTests
             : shell.Trim();
     }
 
-    private static AgentSessionCreateOptions CreateOptions(LocalAgentProviderDescriptor provider, string workingDirectory)
+    private static AgentSessionCreateOptions CreateOptions(ModelProviderRuntimeDescriptor provider, string workingDirectory)
     {
         return new AgentSessionCreateOptions
         {
@@ -3992,14 +3992,13 @@ public sealed class LocalAgentSessionTests
         return -1;
     }
 
-    private static LocalAgentProviderDescriptor CreateProvider(LocalAgentCompactionSettings? compaction = null)
+    private static ModelProviderRuntimeDescriptor CreateProvider(LocalAgentCompactionSettings? compaction = null)
     {
-        return new LocalAgentProviderDescriptor
+        return new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = "openai-responses",
             ProviderKey = "openai",
             DisplayName = "OpenAI",
-            BackendId = AgentBackendIds.OpenAIResponses,
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.openai.com/v1"),
             Profile = new LocalAgentProviderProfile
@@ -4089,12 +4088,12 @@ public sealed class LocalAgentSessionTests
             """;
     }
 
-    private sealed class CleanupRecordingTurnExecutor : ILocalAgentTurnExecutor, ILocalAgentProviderSessionCleanup
+    private sealed class CleanupRecordingTurnExecutor : IModelProviderTurnExecutor, ILocalAgentProviderSessionCleanup
     {
         public List<string> DisposedSessionIds { get; } = [];
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
+            ModelProviderRuntimeDescriptor provider,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentModelInfo>>([new AgentModelInfo("gpt-5.4", "GPT-5.4")]);
 
@@ -4117,10 +4116,10 @@ public sealed class LocalAgentSessionTests
         }
     }
 
-    private sealed class SessionUpdateTurnExecutor : ILocalAgentTurnExecutor
+    private sealed class SessionUpdateTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
+            ModelProviderRuntimeDescriptor provider,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentModelInfo>>([new AgentModelInfo("gpt-5.4", "GPT-5.4")]);
 
@@ -4157,7 +4156,7 @@ public sealed class LocalAgentSessionTests
                 });
     }
 
-    private sealed class ScriptedTurnExecutor : ILocalAgentTurnExecutor
+    private sealed class ScriptedTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
         private readonly IReadOnlyList<AgentModelInfo> _models;
         private readonly Func<LocalAgentTurnRequest, Func<LocalAgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<LocalAgentTurnResponse>>? _summaryHandler;
@@ -4182,7 +4181,7 @@ public sealed class LocalAgentSessionTests
         }
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
+            ModelProviderRuntimeDescriptor provider,
             CancellationToken cancellationToken = default)
             => Task.FromResult(_models);
 
@@ -4208,10 +4207,10 @@ public sealed class LocalAgentSessionTests
         }
     }
 
-    private sealed class AliasAwareTurnExecutor : ILocalAgentTurnExecutor
+    private sealed class AliasAwareTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
+            ModelProviderRuntimeDescriptor provider,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
             [

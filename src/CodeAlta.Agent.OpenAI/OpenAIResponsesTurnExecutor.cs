@@ -18,7 +18,7 @@ namespace CodeAlta.Agent.OpenAI;
 
 internal sealed class OpenAIResponsesTurnExecutor(
     OpenAIProviderOptions provider,
-    CodexSubscriptionConcurrencyLimiter? codexSubscriptionConcurrencyLimiter = null) : ILocalAgentTurnExecutor, ILocalAgentProviderSessionCleanup, IAsyncDisposable
+    CodexSubscriptionConcurrencyLimiter? codexSubscriptionConcurrencyLimiter = null) : IModelProviderTurnExecutor, IModelProviderModelCatalog, ILocalAgentProviderSessionCleanup, IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
     private static readonly ResponseReasoningEffortLevel XHighReasoningEffortLevel = new("xhigh");
@@ -38,7 +38,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private readonly ConcurrentDictionary<OpenAIResponsesTurnStateKey, CodexTurnState> _codexTurnStates = new();
 
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken = default)
         => OpenAIProviderSdkFactory.ListModelsAsync(provider, providerDescriptor, cancellationToken);
 

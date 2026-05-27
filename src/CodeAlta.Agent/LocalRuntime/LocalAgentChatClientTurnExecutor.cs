@@ -7,10 +7,10 @@ namespace CodeAlta.Agent.LocalRuntime;
 /// <summary>
 /// Shared turn executor for provider SDKs that expose <see cref="IChatClient"/>.
 /// </summary>
-internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
+internal sealed class LocalAgentChatClientTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
-    private readonly Func<LocalAgentProviderDescriptor, CancellationToken, ValueTask<IChatClient>> _chatClientFactory;
-    private readonly Func<LocalAgentProviderDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> _listModelsAsync;
+    private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> _chatClientFactory;
+    private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> _listModelsAsync;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalAgentChatClientTurnExecutor"/> class.
@@ -18,8 +18,8 @@ internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
     /// <param name="chatClientFactory">Factory that creates an <see cref="IChatClient"/> for a provider.</param>
     /// <param name="listModelsAsync">Delegate that lists models for a provider.</param>
     public LocalAgentChatClientTurnExecutor(
-        Func<LocalAgentProviderDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
-        Func<LocalAgentProviderDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync)
+        Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
+        Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -30,7 +30,7 @@ internal sealed class LocalAgentChatClientTurnExecutor : ILocalAgentTurnExecutor
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         CancellationToken cancellationToken = default)
         => _listModelsAsync(provider, cancellationToken);
 

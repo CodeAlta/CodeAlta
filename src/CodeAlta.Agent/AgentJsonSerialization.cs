@@ -228,7 +228,7 @@ internal sealed class AgentObjectDictionaryJsonConverter : JsonConverter<IReadOn
 [JsonSerializable(typeof(LocalAgentTransportKind))]
 [JsonSerializable(typeof(LocalAgentCompactionSettings))]
 [JsonSerializable(typeof(LocalAgentProviderProfile))]
-[JsonSerializable(typeof(LocalAgentProviderDescriptor))]
+[JsonSerializable(typeof(ModelProviderRuntimeDescriptor))]
 [JsonSerializable(typeof(LocalAgentCompactionSnapshot))]
 [JsonSerializable(typeof(LocalAgentCompactionCheckpoint))]
 [JsonSerializable(typeof(LocalAgentConversationMessage))]
@@ -328,7 +328,7 @@ internal partial class AgentJsonSerializerContext : JsonSerializerContext;
 [JsonSerializable(typeof(LocalAgentTransportKind))]
 [JsonSerializable(typeof(LocalAgentCompactionSettings))]
 [JsonSerializable(typeof(LocalAgentProviderProfile))]
-[JsonSerializable(typeof(LocalAgentProviderDescriptor))]
+[JsonSerializable(typeof(ModelProviderRuntimeDescriptor))]
 [JsonSerializable(typeof(LocalAgentCompactionSnapshot))]
 [JsonSerializable(typeof(LocalAgentCompactionCheckpoint))]
 [JsonSerializable(typeof(LocalAgentConversationMessage))]
@@ -457,8 +457,8 @@ public static class AgentJsonExtensions
     /// <param name="value">The value to serialize.</param>
     /// <param name="indented">Whether to use indented formatting.</param>
     /// <returns>The JSON representation.</returns>
-    public static string ToJson(this LocalAgentProviderDescriptor value, bool indented = false)
-        => Serialize(value, AgentJsonSerializerContext.Default.LocalAgentProviderDescriptor, AgentIndentedJsonSerializerContext.Default.LocalAgentProviderDescriptor, indented);
+    public static string ToJson(this ModelProviderRuntimeDescriptor value, bool indented = false)
+        => Serialize(value, AgentJsonSerializerContext.Default.ModelProviderRuntimeDescriptor, AgentIndentedJsonSerializerContext.Default.ModelProviderRuntimeDescriptor, indented);
 
     /// <summary>
     /// Serializes the local session summary to JSON.

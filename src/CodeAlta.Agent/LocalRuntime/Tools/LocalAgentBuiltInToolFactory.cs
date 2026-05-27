@@ -1016,7 +1016,7 @@ public static class LocalAgentBuiltInToolFactory
                IsApplyPatchSupported(options.Provider, options.BackendId);
     }
 
-    private static bool IsApplyPatchSupported(LocalAgentProviderDescriptor? provider, AgentBackendId backendId)
+    private static bool IsApplyPatchSupported(ModelProviderRuntimeDescriptor? provider, AgentBackendId backendId)
     {
         if (provider is null)
         {

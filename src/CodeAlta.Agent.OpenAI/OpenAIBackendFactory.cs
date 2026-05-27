@@ -36,7 +36,7 @@ internal static class OpenAIBackendFactory
         string protocolFamily,
         LocalAgentTransportKind transportKind,
         OpenAIAgentBackendOptions options,
-        Func<OpenAIProviderOptions, ILocalAgentTurnExecutor> executorFactory,
+        Func<OpenAIProviderOptions, IModelProviderTurnExecutor> executorFactory,
         Func<OpenAIProviderOptions, string>? protocolFamilySelector = null)
     {
         if (options.Providers.Count == 0)
@@ -58,22 +58,21 @@ internal static class OpenAIBackendFactory
             }
         }
 
-        return new LocalAgentBackend(
+        return new CodeAltaAgentRuntime(
             backendId,
             displayName,
-            new LocalAgentBackendOptions
+            new CodeAltaAgentRuntimeOptions
             {
                 StateRootPath = options.StateRootPath,
                 Providers =
                 [
-                    .. options.Providers.Select(provider => new LocalAgentBackendProviderRegistration
+                    .. options.Providers.Select(provider => new CodeAltaAgentRuntimeProviderRegistration
                     {
-                        Provider = new LocalAgentProviderDescriptor
+                        Provider = new ModelProviderRuntimeDescriptor
                         {
                             ProtocolFamily = protocolFamilySelector?.Invoke(provider) ?? protocolFamily,
                             ProviderKey = provider.ProviderKey.Trim(),
                             DisplayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.ProviderKey.Trim() : provider.DisplayName.Trim(),
-                            BackendId = backendId,
                             TransportKind = transportKind,
                             BaseUri = provider.BaseUri,
                             IsDefault = provider.IsDefault,

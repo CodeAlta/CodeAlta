@@ -108,7 +108,7 @@ internal static class OpenAIProviderSdkFactory
 
     public static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         OpenAIProviderOptions provider,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
         var models = await ListModelsCoreAsync(provider, providerDescriptor, cancellationToken).ConfigureAwait(false);
@@ -121,7 +121,7 @@ internal static class OpenAIProviderSdkFactory
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsCoreAsync(
         OpenAIProviderOptions provider,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
         try
@@ -137,7 +137,7 @@ internal static class OpenAIProviderSdkFactory
             if (!string.IsNullOrWhiteSpace(provider.SingleModelId))
             {
                 LogInfo(
-                    $"Using configured single-model catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} model={provider.SingleModelId.Trim()}");
+                    $"Using configured single-model catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} model={provider.SingleModelId.Trim()}");
                 return
                 [
                     CreateSingleModelInfo(provider.SingleModelId, providerDescriptor),
@@ -152,7 +152,7 @@ internal static class OpenAIProviderSdkFactory
             if (provider.IsAzureOpenAI)
             {
                 LogInfo(
-                    $"Azure OpenAI model discovery is not supported by the Azure OpenAI SDK; using empty catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName}");
+                    $"Azure OpenAI model discovery is not supported by the Azure OpenAI SDK; using empty catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName}");
                 return [];
             }
 
@@ -182,7 +182,7 @@ internal static class OpenAIProviderSdkFactory
 
     private static async ValueTask<IReadOnlyList<AgentModelInfo>> ListCodexSubscriptionModelsAsync(
         OpenAIProviderOptions provider,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
         var options = provider.CodexSubscription
@@ -209,24 +209,24 @@ internal static class OpenAIProviderSdkFactory
                 providerDescriptor,
                 options);
             LogInfo(
-                $"Using Codex subscription authenticated model catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
+                $"Using Codex subscription authenticated model catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
             return models;
         }
         catch (Exception ex) when (ShouldUseCodexStaticModelFallback(options, ex))
         {
             LogWarn(
                 ex,
-                $"Codex model discovery failed; falling back to static catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName}");
+                $"Codex model discovery failed; falling back to static catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName}");
             return ListCodexSubscriptionStaticModels(providerDescriptor);
         }
     }
 
     private static IReadOnlyList<AgentModelInfo> ListCodexSubscriptionStaticModels(
-        LocalAgentProviderDescriptor providerDescriptor)
+        ModelProviderRuntimeDescriptor providerDescriptor)
     {
         var models = CodexSubscriptionStaticModelCatalog.List(providerDescriptor);
         LogInfo(
-            $"Using Codex subscription static model catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
+            $"Using Codex subscription static model catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} models={models.Count}");
         return models;
     }
 
@@ -256,7 +256,7 @@ internal static class OpenAIProviderSdkFactory
 
     private static IReadOnlyList<AgentModelInfo> MapCodexSubscriptionDiscoveredModels(
         IReadOnlyList<CodexSubscriptionDiscoveredModel> discoveredModels,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         OpenAICodexSubscriptionOptions options)
     {
         var includeWebSocketRequiredModels = AllowsWebSocketRequiredModels(options);
@@ -275,7 +275,7 @@ internal static class OpenAIProviderSdkFactory
 
     private static AgentModelInfo CreateModelInfo(
         CodexSubscriptionDiscoveredModel model,
-        LocalAgentProviderDescriptor providerDescriptor)
+        ModelProviderRuntimeDescriptor providerDescriptor)
     {
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -518,7 +518,7 @@ internal static class OpenAIProviderSdkFactory
 
     private static bool TryListModelsFromCatalog(
         OpenAIProviderOptions provider,
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         Exception exception,
         out IReadOnlyList<AgentModelInfo> models)
     {
@@ -553,9 +553,9 @@ internal static class OpenAIProviderSdkFactory
 
         LogWarn(
             exception,
-            $"Remote model discovery failed; falling back to models.dev catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} modelsDevProviderId={provider.ModelsDevProviderId}");
+            $"Remote model discovery failed; falling back to models.dev catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} modelsDevProviderId={provider.ModelsDevProviderId}");
         LogInfo(
-            $"Using models.dev fallback catalog backend={providerDescriptor.BackendId.Value} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} modelsDevProviderId={provider.ModelsDevProviderId} models={catalogModels.Length}");
+            $"Using models.dev fallback catalog backend={providerDescriptor.ProviderKey} provider={providerDescriptor.ProviderKey} displayName={providerDescriptor.DisplayName} modelsDevProviderId={provider.ModelsDevProviderId} models={catalogModels.Length}");
         models = catalogModels;
         return true;
     }
@@ -586,7 +586,7 @@ internal static class OpenAIProviderSdkFactory
 
     private static AgentModelInfo CreateSingleModelInfo(
         string modelId,
-        LocalAgentProviderDescriptor providerDescriptor)
+        ModelProviderRuntimeDescriptor providerDescriptor)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(providerDescriptor);

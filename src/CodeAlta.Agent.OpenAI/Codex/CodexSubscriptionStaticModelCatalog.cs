@@ -21,7 +21,7 @@ internal static class CodexSubscriptionStaticModelCatalog
         new("gpt-5.2", "GPT-5.2", SupportsImageInput: true, DefaultReasoningEffort: AgentReasoningEffort.Medium),
     ];
 
-    public static IReadOnlyList<AgentModelInfo> List(LocalAgentProviderDescriptor providerDescriptor)
+    public static IReadOnlyList<AgentModelInfo> List(ModelProviderRuntimeDescriptor providerDescriptor)
     {
         ArgumentNullException.ThrowIfNull(providerDescriptor);
 
@@ -35,7 +35,7 @@ internal static class CodexSubscriptionStaticModelCatalog
 
     private static AgentModelInfo CreateModelInfo(
         CodexStaticModel model,
-        LocalAgentProviderDescriptor providerDescriptor)
+        ModelProviderRuntimeDescriptor providerDescriptor)
         => new(
             model.Id,
             DisplayName: model.DisplayName,

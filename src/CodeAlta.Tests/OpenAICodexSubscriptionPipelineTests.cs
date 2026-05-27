@@ -171,12 +171,11 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                 "gpt-5.3-codex",
                 "session_456",
                 new AgentRunId("run_789"),
-                new LocalAgentProviderDescriptor
+                new ModelProviderRuntimeDescriptor
                 {
                     ProtocolFamily = "codex",
                     ProviderKey = "codex",
                     DisplayName = "Codex",
-                    BackendId = new AgentBackendId("codex"),
                     TransportKind = LocalAgentTransportKind.OpenAIResponses,
                 }));
 
@@ -390,12 +389,11 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     [TestMethod]
     public void StaticModelCatalog_ReturnsVisiblePickerModels()
     {
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = "codex",
             ProviderKey = "codex",
             DisplayName = "Codex",
-            BackendId = new AgentBackendId("codex"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
         };
 
@@ -814,13 +812,12 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             }).ConfigureAwait(false);
     }
 
-    private static LocalAgentProviderDescriptor CreateProviderDescriptor()
+    private static ModelProviderRuntimeDescriptor CreateProviderDescriptor()
         => new()
         {
             ProtocolFamily = "codex",
             ProviderKey = "codex",
             DisplayName = "Codex",
-            BackendId = new AgentBackendId("codex"),
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
         };
 

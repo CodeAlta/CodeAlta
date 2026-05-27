@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.LocalRuntime;
 /// <summary>
 /// Describes a configured local-runtime provider.
 /// </summary>
-public sealed record LocalAgentProviderDescriptor
+public sealed record ModelProviderRuntimeDescriptor
 {
     /// <summary>
     /// Gets or initializes the protocol family.
@@ -22,11 +22,6 @@ public sealed record LocalAgentProviderDescriptor
     /// Gets or initializes the display name.
     /// </summary>
     public required string DisplayName { get; init; }
-
-    /// <summary>
-    /// Gets or initializes the backend identifier used with this provider.
-    /// </summary>
-    public required AgentBackendId BackendId { get; init; }
 
     /// <summary>
     /// Gets or initializes the transport kind.

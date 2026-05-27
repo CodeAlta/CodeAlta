@@ -5,10 +5,10 @@ using CodeAlta.Agent.LocalRuntime;
 namespace CodeAlta.Tests;
 
 [TestClass]
-public sealed class LocalAgentBackendTests
+public sealed class CodeAltaAgentRuntimeTests
 {
     [TestMethod]
-    public async Task LocalAgentBackend_CreateListResumeAndDelete_Works()
+    public async Task CodeAltaAgentRuntime_CreateListResumeAndDelete_Works()
     {
         using var temp = TestTempDirectory.Create();
         var backend = CreateBackend(temp.Path, out var executor);
@@ -20,6 +20,8 @@ public sealed class LocalAgentBackendTests
                 {
                     ProviderKey = "openai",
                     Title = "Initial thread title",
+                    ParentSessionId = "parent-session",
+                    CreatedByRunId = new AgentRunId("run-parent"),
                     Model = "gpt-5.4",
                     WorkingDirectory = "C:\\repo\\sample",
                     OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
@@ -38,6 +40,9 @@ public sealed class LocalAgentBackendTests
         Assert.AreEqual("openai", sessions[0].ProviderKey);
         Assert.AreEqual("gpt-5.4", sessions[0].ModelId);
         Assert.AreEqual("C:\\repo\\sample", sessions[0].WorkspacePath);
+        Assert.AreEqual("parent-session", sessions[0].ParentSessionId);
+        Assert.AreEqual("parent-session", sessions[0].CreatedBySessionId);
+        Assert.AreEqual(new AgentRunId("run-parent"), sessions[0].CreatedByRunId);
         var details = Assert.IsInstanceOfType<RawApiSessionMetadataDetails>(sessions[0].Details);
         Assert.AreEqual("OpenAI", details.ProviderDisplayName);
         Assert.AreEqual("Initial thread title", details.Title);
@@ -65,7 +70,7 @@ public sealed class LocalAgentBackendTests
     }
 
     [TestMethod]
-    public async Task LocalAgentBackend_CreateSession_UsesDefaultProviderWhenNotSpecified()
+    public async Task CodeAltaAgentRuntime_CreateSession_UsesDefaultProviderWhenNotSpecified()
     {
         using var temp = TestTempDirectory.Create();
         var backend = CreateBackend(temp.Path, out _);
@@ -84,7 +89,57 @@ public sealed class LocalAgentBackendTests
     }
 
     [TestMethod]
-    public async Task LocalAgentBackend_ResumeSession_DifferentProvider_ReplaysStoredHistory()
+    public async Task CodeAltaAgentRuntime_ResumeSession_LoadsLegacyBackendIdOnlyJournalAndSwitchesProvider()
+    {
+        using var temp = TestTempDirectory.Create();
+        var sessionId = "019e836a-ef6d-7a2a-97a7-893f0f0c1001";
+        var createdAt = DateTimeOffset.Parse("2026-05-20T12:00:00+00:00");
+        await WriteLegacyBackendOnlyJournalAsync(
+                temp.Path,
+                sessionId,
+                createdAt,
+                backendId: "openai",
+                providerSessionId: "resp_legacy")
+            .ConfigureAwait(false);
+
+        var targetExecutor = new RecordingTurnExecutor();
+        var targetBackend = CreateBackend(
+            temp.Path,
+            targetExecutor,
+            providerKey: "anthropic",
+            displayName: "Anthropic",
+            protocolFamily: "anthropic-messages",
+            transportKind: LocalAgentTransportKind.AnthropicMessages,
+            backendId: new AgentBackendId("anthropic"));
+
+        var legacySessions = await targetBackend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        Assert.AreEqual(1, legacySessions.Length);
+        Assert.AreEqual(sessionId, legacySessions[0].SessionId);
+        Assert.AreEqual("openai", legacySessions[0].ProviderKey);
+
+        await using var resumedSession = await targetBackend.ResumeSessionAsync(
+                sessionId,
+                new AgentSessionResumeOptions
+                {
+                    ProviderKey = "anthropic",
+                    Model = "claude-sonnet-4.5",
+                    WorkingDirectory = "C:\\repo\\legacy",
+                    OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                })
+            .ConfigureAwait(false);
+
+        _ = await resumedSession.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Continue") }).ConfigureAwait(false);
+
+        var request = targetExecutor.Requests.Single();
+        Assert.AreEqual("anthropic", request.Provider.ProviderKey);
+        Assert.AreEqual("anthropic", request.State.ProviderKey);
+        Assert.AreEqual("anthropic-messages", request.State.ProtocolFamily);
+        Assert.IsNull(request.State.ProviderSessionId);
+        Assert.IsNull(request.State.ProviderState);
+    }
+
+    [TestMethod]
+    public async Task CodeAltaAgentRuntime_ResumeSession_DifferentProvider_ReplaysStoredHistory()
     {
         using var temp = TestTempDirectory.Create();
         var sourceExecutor = new RecordingTurnExecutor();
@@ -164,7 +219,7 @@ public sealed class LocalAgentBackendTests
     }
 
     [TestMethod]
-    public async Task LocalAgentBackend_SendAsync_EmitsTurnDiffForBuiltInFileChanges()
+    public async Task CodeAltaAgentRuntime_SendAsync_EmitsTurnDiffForBuiltInFileChanges()
     {
         using var temp = TestTempDirectory.Create();
         var workspacePath = Path.Combine(temp.Path, "workspace");
@@ -264,7 +319,7 @@ public sealed class LocalAgentBackendTests
     }
 
     [TestMethod]
-    public async Task LocalAgentBackend_ResumeSession_RepairsRecoveredUsageUsingEquivalentModelIds()
+    public async Task CodeAltaAgentRuntime_ResumeSession_RepairsRecoveredUsageUsingEquivalentModelIds()
     {
         using var temp = TestTempDirectory.Create();
         var backend = CreateBackend(temp.Path, out _);
@@ -302,6 +357,7 @@ public sealed class LocalAgentBackendTests
 
         await store.UpsertSessionAsync(summary).ConfigureAwait(false);
         await store.UpsertStateAsync(state).ConfigureAwait(false);
+        _ = await backend.ListModelsAsync().ConfigureAwait(false);
 
         await using var resumedSession = await backend.ResumeSessionAsync(
             sessionId,
@@ -319,7 +375,61 @@ public sealed class LocalAgentBackendTests
     }
 
     [TestMethod]
-    public async Task LocalAgentBackend_ResumeSession_RecoversUsageFromPersistedHistoryEvents()
+    public async Task CodeAltaAgentRuntime_ResumeSession_SkipsModelEnrichmentWhenCacheUnavailable()
+    {
+        using var temp = TestTempDirectory.Create();
+        var backend = CreateBackend(temp.Path, out var executor);
+        var store = new FileSystemLocalAgentSessionStore(
+            new LocalAgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var sessionId = "019e17b0-1b23-74a8-b1f1-a532f06c4ef2";
+        var createdAt = DateTimeOffset.Parse("2026-05-11T15:10:00+00:00");
+        var usage = new AgentSessionUsage(
+            LastOperation: new AgentOperationUsageSnapshot(
+                Model: "gpt-5.4-2026-03-05",
+                InputTokens: 100,
+                OutputTokens: 10),
+            Scope: AgentUsageScope.LastOperation,
+            Source: AgentUsageSource.RecoveredHistory,
+            UpdatedAt: createdAt);
+        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+            {
+                SessionId = sessionId,
+                BackendId = AgentBackendIds.OpenAIResponses,
+                ProtocolFamily = "openai-responses",
+                ProviderKey = "openai",
+                ModelId = "gpt-5.4",
+                WorkingDirectory = "C:\\code\\CodeAlta",
+                CreatedAt = createdAt,
+                UpdatedAt = createdAt,
+                Usage = usage,
+            })
+            .ConfigureAwait(false);
+        await store.UpsertStateAsync(new LocalAgentSessionState
+            {
+                SessionId = sessionId,
+                ProtocolFamily = "openai-responses",
+                ProviderKey = "openai",
+                UpdatedAt = createdAt,
+                Usage = usage,
+            })
+            .ConfigureAwait(false);
+
+        await using var resumedSession = await backend.ResumeSessionAsync(
+            sessionId,
+            new AgentSessionResumeOptions
+            {
+                WorkingDirectory = "C:\\code\\CodeAlta",
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            }).ConfigureAwait(false);
+
+        var repairedSummary = await store.GetSessionAsync("openai-responses", "openai", sessionId).ConfigureAwait(false);
+        Assert.IsNotNull(repairedSummary?.Usage);
+        Assert.IsNull(repairedSummary.Usage.TokenLimit);
+        Assert.AreEqual(0, executor.ModelListRequests);
+    }
+
+    [TestMethod]
+    public async Task CodeAltaAgentRuntime_ResumeSession_RecoversUsageFromPersistedHistoryEvents()
     {
         using var temp = TestTempDirectory.Create();
         var backend = CreateBackend(temp.Path, out var executor);
@@ -372,6 +482,7 @@ public sealed class LocalAgentBackendTests
                     "Usage updated.",
                     Usage: usage)])
             .ConfigureAwait(false);
+        _ = await backend.ListModelsAsync().ConfigureAwait(false);
 
         await using var resumedSession = await backend.ResumeSessionAsync(
             sessionId,
@@ -394,13 +505,13 @@ public sealed class LocalAgentBackendTests
         Assert.AreEqual(0, executor.Requests.Count);
     }
 
-    private static LocalAgentBackend CreateBackend(string tempRoot, out RecordingTurnExecutor executor)
+    private static CodeAltaAgentRuntime CreateBackend(string tempRoot, out RecordingTurnExecutor executor)
     {
         executor = new RecordingTurnExecutor();
         return CreateBackend(tempRoot, executor);
     }
 
-    private static LocalAgentBackend CreateBackend(string tempRoot, ILocalAgentTurnExecutor executor)
+    private static CodeAltaAgentRuntime CreateBackend(string tempRoot, IModelProviderTurnExecutor executor)
         => CreateBackend(
             tempRoot,
             executor,
@@ -410,31 +521,30 @@ public sealed class LocalAgentBackendTests
             transportKind: LocalAgentTransportKind.OpenAIResponses,
             backendId: AgentBackendIds.OpenAIResponses);
 
-    private static LocalAgentBackend CreateBackend(
+    private static CodeAltaAgentRuntime CreateBackend(
         string tempRoot,
-        ILocalAgentTurnExecutor executor,
+        IModelProviderTurnExecutor executor,
         string providerKey,
         string displayName,
         string protocolFamily,
         LocalAgentTransportKind transportKind,
         AgentBackendId backendId)
     {
-        return new LocalAgentBackend(
+        return new CodeAltaAgentRuntime(
             backendId,
             displayName,
-            new LocalAgentBackendOptions
+            new CodeAltaAgentRuntimeOptions
             {
                 StateRootPath = Path.Combine(tempRoot, "machine", "agents"),
                 Providers =
                 [
-                    new LocalAgentBackendProviderRegistration
+                    new CodeAltaAgentRuntimeProviderRegistration
                     {
-                        Provider = new LocalAgentProviderDescriptor
+                        Provider = new ModelProviderRuntimeDescriptor
                         {
                             ProtocolFamily = protocolFamily,
                             ProviderKey = providerKey,
                             DisplayName = displayName,
-                            BackendId = backendId,
                             TransportKind = transportKind,
                             BaseUri = new Uri("https://api.openai.com/v1"),
                             IsDefault = true,
@@ -454,19 +564,72 @@ public sealed class LocalAgentBackendTests
             });
     }
 
+    private static async Task WriteLegacyBackendOnlyJournalAsync(
+        string tempRoot,
+        string sessionId,
+        DateTimeOffset createdAt,
+        string backendId,
+        string? providerSessionId = null)
+    {
+        var layout = new LocalAgentRuntimePathLayout(Path.Combine(tempRoot, "machine", "agents"));
+        var sessionFile = layout.GetSessionFilePath(sessionId, createdAt);
+        Directory.CreateDirectory(Path.GetDirectoryName(sessionFile)!);
+
+        using var summaryDocument = JsonDocument.Parse(
+            $$"""
+              {
+                "sessionId": "{{sessionId}}",
+                "backendId": "{{backendId}}",
+                "modelId": "legacy-model",
+                "workingDirectory": "C:\\repo\\legacy",
+                "createdAt": "{{createdAt:O}}",
+                "updatedAt": "{{createdAt:O}}"
+              }
+              """);
+        using var stateDocument = JsonDocument.Parse(
+            $$"""
+              {
+                "sessionId": "{{sessionId}}",
+                "providerSessionId": "{{providerSessionId}}",
+                "updatedAt": "{{createdAt:O}}"
+              }
+              """);
+        var events = new AgentEvent[]
+        {
+            new AgentRawEvent(
+                new AgentBackendId(backendId),
+                sessionId,
+                createdAt,
+                "local.sessionSummary",
+                summaryDocument.RootElement.Clone()),
+            new AgentRawEvent(
+                new AgentBackendId(backendId),
+                sessionId,
+                createdAt,
+                "local.sessionState",
+                stateDocument.RootElement.Clone()),
+        };
+
+        await File.WriteAllLinesAsync(sessionFile, events.Select(static @event => @event.ToJson())).ConfigureAwait(false);
+    }
+
     private static int CountUnifiedDiffLines(string diff, char prefix)
         => diff.Split('\n')
             .Count(line => line.StartsWith(prefix) &&
                            !line.StartsWith(new string(prefix, 3), StringComparison.Ordinal));
 
-    private sealed class RecordingTurnExecutor : ILocalAgentTurnExecutor
+    private sealed class RecordingTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
         public List<LocalAgentTurnRequest> Requests { get; } = [];
 
+        public int ModelListRequests { get; private set; }
+
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
+            ModelProviderRuntimeDescriptor provider,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
+        {
+            ModelListRequests++;
+            return Task.FromResult<IReadOnlyList<AgentModelInfo>>(
             [
                 new AgentModelInfo(
                     "gpt-5.4-2026-03-05",
@@ -476,6 +639,7 @@ public sealed class LocalAgentBackendTests
                         ["contextWindow"] = 1050000L,
                     }),
             ]);
+        }
 
         public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
             LocalAgentTurnRequest request,
@@ -493,12 +657,12 @@ public sealed class LocalAgentBackendTests
         }
     }
 
-    private sealed class FileWritingTurnExecutor : ILocalAgentTurnExecutor
+    private sealed class FileWritingTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
         private int _requestCount;
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-            LocalAgentProviderDescriptor provider,
+            ModelProviderRuntimeDescriptor provider,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
             [

@@ -82,7 +82,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     public async Task<LocalAgentCompactionResult> SummarizeAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
@@ -151,7 +151,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     public async Task<LocalAgentCompactionResult> ShrinkSummaryAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
@@ -206,7 +206,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     private async Task<LocalAgentCompactionResult> SummarizePreparationAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
@@ -313,7 +313,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     private async Task<LocalAgentCompactionResult> SummarizeChunkedAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
@@ -487,7 +487,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     private async Task<(string Synopsis, int InvocationCount)> ReduceOversizedAnchorAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
@@ -523,7 +523,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     private async Task<(string Synopsis, int InvocationCount)> ReduceOversizedAnchorTextAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
@@ -599,7 +599,7 @@ internal sealed class LocalAgentCompactionSummarizer(ILocalAgentCompactionSummar
 
     private async Task<LocalAgentCompactionSummaryResponse> ExecuteSummaryRequestAsync(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,

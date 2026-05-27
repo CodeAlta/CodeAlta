@@ -169,6 +169,8 @@ public sealed class RawApiAgentBackendTests
             },
         });
 
+        _ = await backend.ListModelsAsync().ConfigureAwait(false);
+
         await using var session = await backend.CreateSessionAsync(new AgentSessionCreateOptions
         {
             Model = "MiniMax-M2.7",
@@ -351,6 +353,8 @@ public sealed class RawApiAgentBackendTests
                 },
             },
         });
+
+        _ = await backend.ListModelsAsync().ConfigureAwait(false);
 
         await using var session = await backend.CreateSessionAsync(new AgentSessionCreateOptions
         {

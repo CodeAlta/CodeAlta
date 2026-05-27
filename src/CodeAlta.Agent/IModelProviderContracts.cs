@@ -76,6 +76,18 @@ public interface IModelProviderTurnExecutor
     /// </summary>
     /// <param name="request">The turn request.</param>
     /// <param name="onUpdate">Streaming callback used for best-effort progress projection.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The final assistant turn response.</returns>
+    Task<LocalAgentTurnResponse> ExecuteTurnAsync(
+        LocalAgentTurnRequest request,
+        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes a single assistant turn with a callback for provider session updates.
+    /// </summary>
+    /// <param name="request">The turn request.</param>
+    /// <param name="onUpdate">Streaming callback used for best-effort progress projection.</param>
     /// <param name="onSessionUpdate">Session update callback used for best-effort status projection.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The final assistant turn response.</returns>
@@ -83,5 +95,9 @@ public interface IModelProviderTurnExecutor
         LocalAgentTurnRequest request,
         Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(onSessionUpdate);
+        return ExecuteTurnAsync(request, onUpdate, cancellationToken);
+    }
 }

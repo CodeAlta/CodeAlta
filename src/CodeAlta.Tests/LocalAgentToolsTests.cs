@@ -1502,7 +1502,7 @@ public sealed class LocalAgentToolsTests
         HttpClient? httpClient = null,
         AgentUserInputRequestHandler? onUserInputRequest = null,
         AgentPermissionRequestHandler? onPermissionRequest = null,
-        LocalAgentProviderDescriptor? provider = null,
+        ModelProviderRuntimeDescriptor? provider = null,
         TimeSpan? webGetTimeout = null)
     {
         return new LocalAgentBuiltInToolOptions
@@ -1518,18 +1518,17 @@ public sealed class LocalAgentToolsTests
         };
     }
 
-    private static LocalAgentProviderDescriptor CreateProviderDescriptor(
+    private static ModelProviderRuntimeDescriptor CreateProviderDescriptor(
         LocalAgentTransportKind transportKind,
         Uri? baseUri,
         LocalAgentProviderProfile? profile = null,
         string? protocolFamily = null)
     {
-        return new LocalAgentProviderDescriptor
+        return new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = protocolFamily ?? transportKind.ToString(),
             ProviderKey = "provider-1",
             DisplayName = "Provider 1",
-            BackendId = AgentBackendIds.OpenAIResponses,
             TransportKind = transportKind,
             BaseUri = baseUri,
             Profile = profile,

@@ -238,12 +238,11 @@ public sealed class LocalAgentChatClientTurnExecutorTests
     private static LocalAgentTurnRequest CreateTurnRequest(IReadOnlyList<LocalAgentConversationMessage>? conversation = null)
         => new()
         {
-            Provider = new LocalAgentProviderDescriptor
+            Provider = new ModelProviderRuntimeDescriptor
             {
                 ProtocolFamily = "anthropic-messages",
                 ProviderKey = "anthropic",
                 DisplayName = "Anthropic",
-                BackendId = AgentBackendIds.AnthropicMessages,
                 TransportKind = LocalAgentTransportKind.AnthropicMessages,
             },
             BackendId = AgentBackendIds.AnthropicMessages,

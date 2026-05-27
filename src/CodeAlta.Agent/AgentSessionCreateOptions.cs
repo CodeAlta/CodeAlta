@@ -16,6 +16,16 @@ public class AgentSessionCreateOptions
     public string? ParentSessionId { get; init; }
 
     /// <summary>
+    /// Gets or initializes the session that directly created this session, when different from <see cref="ParentSessionId" />.
+    /// </summary>
+    public string? CreatedBySessionId { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the run that created this session, when known.
+    /// </summary>
+    public AgentRunId? CreatedByRunId { get; init; }
+
+    /// <summary>
     /// Gets or initializes the user-facing session title when known at creation time.
     /// </summary>
     public string? Title { get; init; }

@@ -34,7 +34,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     private readonly string _protocolFamily;
     private readonly string _providerKey;
     private readonly ILocalAgentSessionStore _store;
-    private readonly ILocalAgentTurnExecutor _turnExecutor;
+    private readonly IModelProviderTurnExecutor _turnExecutor;
+    private readonly IReadOnlyList<AgentModelInfo> _cachedModels;
     private readonly LocalAgentCompactionSummarizer _compactionSummarizer;
     private readonly AgentSessionCreateOptions _options;
     private readonly bool _allowProviderContinuation;
@@ -65,16 +66,18 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     /// <param name="turnExecutor">The provider turn executor.</param>
     /// <param name="options">The session options.</param>
     /// <param name="allowProviderContinuation">Whether provider-native live continuation may be reused for this session.</param>
+    /// <param name="cachedModels">Cached provider model metadata available at session creation/resume time.</param>
     public LocalAgentSession(
         AgentBackendId backendId,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         LocalAgentSessionSummary summary,
         LocalAgentSessionState state,
         IReadOnlyList<AgentEvent> history,
         ILocalAgentSessionStore store,
-        ILocalAgentTurnExecutor turnExecutor,
+        IModelProviderTurnExecutor turnExecutor,
         AgentSessionCreateOptions options,
-        bool allowProviderContinuation = false)
+        bool allowProviderContinuation = false,
+        IReadOnlyList<AgentModelInfo>? cachedModels = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(summary);
@@ -89,6 +92,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
         _providerKey = provider.ProviderKey;
         _store = store;
         _turnExecutor = turnExecutor;
+        _cachedModels = cachedModels ?? LoadConstructorModelCache(provider, turnExecutor);
         _compactionSummarizer = new LocalAgentCompactionSummarizer(new LocalAgentTurnExecutorCompactionSummaryExecutor(turnExecutor));
         _options = options;
         _allowProviderContinuation = allowProviderContinuation;
@@ -108,7 +112,7 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
     /// <summary>
     /// Gets the configured provider descriptor.
     /// </summary>
-    public LocalAgentProviderDescriptor Provider { get; }
+    public ModelProviderRuntimeDescriptor Provider { get; }
 
     /// <inheritdoc />
     public AgentBackendId BackendId { get; }
@@ -3107,6 +3111,25 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
             : condensed[..237] + "...";
     }
 
+    private static IReadOnlyList<AgentModelInfo> LoadConstructorModelCache(
+        ModelProviderRuntimeDescriptor provider,
+        IModelProviderTurnExecutor turnExecutor)
+    {
+        if (turnExecutor is not IModelProviderModelCatalog modelCatalog)
+        {
+            return [];
+        }
+
+        try
+        {
+            return modelCatalog.ListModelsAsync(provider, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private sealed record ToolFileActivity(IReadOnlyList<string> ReadFiles, IReadOnlyList<string> ModifiedFiles);
 
     private sealed class LocalUnsubscriber(Action dispose) : IDisposable
@@ -3141,8 +3164,8 @@ public sealed class LocalAgentSession : IAgentSession, IAgentCompactionOutcomePr
 
         try
         {
-            var models = await _turnExecutor.ListModelsAsync(Provider, cancellationToken).ConfigureAwait(false);
-            _resolvedModelInfo = AgentModelIdentity.FindBestMatch(models, modelId);
+            cancellationToken.ThrowIfCancellationRequested();
+            _resolvedModelInfo = AgentModelIdentity.FindBestMatch(_cachedModels, modelId);
         }
         catch (OperationCanceledException)
         {

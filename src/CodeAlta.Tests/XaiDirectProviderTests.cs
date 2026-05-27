@@ -239,12 +239,11 @@ public sealed class XaiDirectProviderTests
         });
 
         var models = await executor.ListModelsAsync(
-            new LocalAgentProviderDescriptor
+            new ModelProviderRuntimeDescriptor
             {
                 ProtocolFamily = XaiDirectAgentBackend.ProtocolFamily,
                 ProviderKey = "xai",
                 DisplayName = "xAI Grok",
-                BackendId = new AgentBackendId("xai"),
                 TransportKind = LocalAgentTransportKind.OpenAIResponses,
             }).ConfigureAwait(false);
 

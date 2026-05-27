@@ -6,7 +6,7 @@ using CodeAlta.Agent.OpenAI;
 
 namespace CodeAlta.Agent.Xai;
 
-internal sealed class XaiDirectTurnExecutor : ILocalAgentTurnExecutor
+internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
     private static readonly LocalAgentProviderProfile OpenAIResponsesProfile = new()
     {
@@ -33,7 +33,7 @@ internal sealed class XaiDirectTurnExecutor : ILocalAgentTurnExecutor
     }
 
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         CancellationToken cancellationToken = default)
         => _modelDiscovery.ListModelsAsync(provider, cancellationToken);
 

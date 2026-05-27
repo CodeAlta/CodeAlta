@@ -40,7 +40,7 @@ public sealed class LocalAgentBuiltInToolOptions
     /// <summary>
     /// Gets or initializes the provider descriptor used to tailor the built-in tool set.
     /// </summary>
-    public LocalAgentProviderDescriptor? Provider { get; init; }
+    public ModelProviderRuntimeDescriptor? Provider { get; init; }
 
     /// <summary>
     /// Gets or initializes the default maximum number of lines returned by <c>read_file</c>.

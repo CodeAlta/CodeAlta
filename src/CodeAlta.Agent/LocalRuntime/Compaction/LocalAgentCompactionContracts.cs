@@ -60,7 +60,7 @@ internal sealed record LocalAgentCompactionResult(
 
 internal sealed record LocalAgentCompactionSummaryRequest(
     AgentBackendId BackendId,
-    LocalAgentProviderDescriptor Provider,
+    ModelProviderRuntimeDescriptor Provider,
     string SessionId,
     string? ModelId,
     AgentModelInfo? ModelInfo,

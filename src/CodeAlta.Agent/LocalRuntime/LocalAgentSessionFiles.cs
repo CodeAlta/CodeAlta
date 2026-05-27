@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace CodeAlta.Agent.LocalRuntime;
 
 /// <summary>
-/// Represents the persisted session summary stored in <c>session.json</c>.
+/// Represents the persisted provider-agnostic session summary stored in the local session journal.
 /// </summary>
 public sealed record LocalAgentSessionSummary
 {
@@ -13,22 +13,22 @@ public sealed record LocalAgentSessionSummary
     public required string SessionId { get; init; }
 
     /// <summary>
-    /// Gets or initializes the backend identifier.
+    /// Gets or initializes the legacy backend identifier. New code treats this as persisted compatibility data.
     /// </summary>
-    public required AgentBackendId BackendId { get; init; }
+    public AgentBackendId BackendId { get; init; }
 
     /// <summary>
-    /// Gets or initializes the protocol family.
+    /// Gets or initializes the last-used protocol family.
     /// </summary>
-    public required string ProtocolFamily { get; init; }
+    public string ProtocolFamily { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets or initializes the provider key.
+    /// Gets or initializes the last-used provider key.
     /// </summary>
-    public required string ProviderKey { get; init; }
+    public string ProviderKey { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets or initializes the model identifier.
+    /// Gets or initializes the last-used model identifier.
     /// </summary>
     public string? ModelId { get; init; }
 
@@ -46,6 +46,21 @@ public sealed record LocalAgentSessionSummary
     /// Gets or initializes the latest preview text.
     /// </summary>
     public string? Summary { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the parent session identifier used for lineage/orchestration metadata only.
+    /// </summary>
+    public string? ParentSessionId { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the session that created this session, when known.
+    /// </summary>
+    public string? CreatedBySessionId { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the run that created this session, when known.
+    /// </summary>
+    public AgentRunId? CreatedByRunId { get; init; }
 
     /// <summary>
     /// Gets or initializes the creation timestamp.
@@ -69,7 +84,7 @@ public sealed record LocalAgentSessionSummary
 }
 
 /// <summary>
-/// Represents the persisted state stored in <c>state.json</c>.
+/// Represents the persisted provider-agnostic session state stored in the local session journal.
 /// </summary>
 public sealed record LocalAgentSessionState
 {
@@ -79,17 +94,17 @@ public sealed record LocalAgentSessionState
     public required string SessionId { get; init; }
 
     /// <summary>
-    /// Gets or initializes the protocol family.
+    /// Gets or initializes the last-used protocol family.
     /// </summary>
-    public required string ProtocolFamily { get; init; }
+    public string ProtocolFamily { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets or initializes the provider key.
+    /// Gets or initializes the last-used provider key.
     /// </summary>
-    public required string ProviderKey { get; init; }
+    public string ProviderKey { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets or initializes the provider-native session or response identifier.
+    /// Gets or initializes the provider-native session or response identifier for the last-used provider.
     /// </summary>
     public string? ProviderSessionId { get; init; }
 
@@ -109,7 +124,7 @@ public sealed record LocalAgentSessionState
     public AgentSessionUsage? Usage { get; init; }
 
     /// <summary>
-    /// Gets or initializes provider-specific replay hints and diagnostics.
+    /// Gets or initializes provider-specific replay hints and diagnostics for the last-used provider.
     /// </summary>
     public JsonElement? ProviderState { get; init; }
 

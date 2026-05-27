@@ -1,9 +1,9 @@
 namespace CodeAlta.Agent.LocalRuntime.Compaction;
 
-internal sealed class LocalAgentTurnExecutorCompactionSummaryExecutor(ILocalAgentTurnExecutor turnExecutor)
+internal sealed class LocalAgentTurnExecutorCompactionSummaryExecutor(IModelProviderTurnExecutor turnExecutor)
     : ILocalAgentCompactionSummaryExecutor
 {
-    private readonly ILocalAgentTurnExecutor _turnExecutor = turnExecutor ?? throw new ArgumentNullException(nameof(turnExecutor));
+    private readonly IModelProviderTurnExecutor _turnExecutor = turnExecutor ?? throw new ArgumentNullException(nameof(turnExecutor));
 
     public async Task<LocalAgentCompactionSummaryResponse> ExecuteAsync(
         LocalAgentCompactionSummaryRequest request,

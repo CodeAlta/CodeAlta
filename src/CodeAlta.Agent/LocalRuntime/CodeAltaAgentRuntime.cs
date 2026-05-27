@@ -4,29 +4,30 @@ using XenoAtom.Logging;
 namespace CodeAlta.Agent.LocalRuntime;
 
 /// <summary>
-/// Shared <see cref="IAgentBackend"/> implementation for provider-backed local raw-API runtimes.
+/// CodeAlta-owned session runtime for provider-backed raw-API sessions.
 /// </summary>
-public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend
+public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMetadataBackend
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.LocalRuntime");
-    private readonly LocalAgentBackendOptions _options;
+    private readonly CodeAltaAgentRuntimeOptions _options;
     private readonly object _storeLock = new();
     private readonly LocalAgentRuntimePathLayout _layout;
-    private readonly IReadOnlyDictionary<string, LocalAgentBackendProviderRegistration> _providersByKey;
+    private readonly IReadOnlyDictionary<string, CodeAltaAgentRuntimeProviderRegistration> _providersByKey;
+    private readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> _modelCache = new(StringComparer.OrdinalIgnoreCase);
     private LocalAgentSessionJournalFile? _journalFile;
     private ILocalAgentSessionStore? _store;
     private bool _started;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LocalAgentBackend"/> class.
+    /// Initializes a new instance of the <see cref="CodeAltaAgentRuntime"/> class.
     /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="displayName">The user-facing backend name.</param>
-    /// <param name="options">Backend options.</param>
-    public LocalAgentBackend(
+    /// <param name="backendId">The transitional provider/backend identifier used by existing provider wrappers.</param>
+    /// <param name="displayName">The user-facing runtime name.</param>
+    /// <param name="options">Runtime options.</param>
+    public CodeAltaAgentRuntime(
         AgentBackendId backendId,
         string displayName,
-        LocalAgentBackendOptions options)
+        CodeAltaAgentRuntimeOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
         ArgumentNullException.ThrowIfNull(options);
@@ -123,7 +124,13 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
             IReadOnlyList<AgentModelInfo> models;
             try
             {
-                models = await provider.TurnExecutor.ListModelsAsync(provider.Provider, cancellationToken).ConfigureAwait(false);
+                var modelCatalog = ResolveModelCatalog(provider);
+                if (modelCatalog is null)
+                {
+                    continue;
+                }
+
+                models = await modelCatalog.ListModelsAsync(provider.Provider, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -139,6 +146,7 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
 
             LogInfo(
                 $"Listed models backend={BackendId.Value} provider={provider.Provider.ProviderKey} displayName={provider.Provider.DisplayName} count={models.Count}");
+            _modelCache[provider.Provider.ProviderKey] = models;
             results.AddRange(models);
         }
 
@@ -162,24 +170,14 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         await foreach (var summary in Store.ListSessionSummariesAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_providersByKey.TryGetValue(summary.ProviderKey, out var provider) ||
-                !string.Equals(summary.ProtocolFamily, provider.Provider.ProtocolFamily, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             if (!MatchesFilter(summary, filter))
             {
                 continue;
             }
 
-            var state = await Store.GetStateAsync(
-                    summary.ProtocolFamily,
-                    summary.ProviderKey,
-                    summary.SessionId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            yield return ToMetadata(summary, state, provider.Provider);
+            var state = await Store.GetStateAsync(summary.SessionId, cancellationToken).ConfigureAwait(false);
+            _providersByKey.TryGetValue(summary.ProviderKey, out var provider);
+            yield return ToMetadata(summary, state, provider?.Provider);
         }
     }
 
@@ -191,19 +189,7 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         await StartAsync(cancellationToken).ConfigureAwait(false);
 
-        foreach (var provider in _options.Providers)
-        {
-            if (await Store.DeleteSessionAsync(
-                    provider.Provider.ProtocolFamily,
-                    provider.Provider.ProviderKey,
-                    sessionId,
-                    cancellationToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return await Store.DeleteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -229,6 +215,9 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
             WorkingDirectory = options.WorkingDirectory,
             Title = NormalizeOptionalText(options.Title),
             Summary = null,
+            ParentSessionId = NormalizeOptionalText(options.ParentSessionId),
+            CreatedBySessionId = NormalizeOptionalText(options.CreatedBySessionId ?? options.ParentSessionId),
+            CreatedByRunId = options.CreatedByRunId,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -251,7 +240,8 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
             Store,
             registration.TurnExecutor,
             options,
-            allowProviderContinuation: true);
+            allowProviderContinuation: true,
+            cachedModels: GetCachedModels(registration));
     }
 
     /// <inheritdoc />
@@ -264,89 +254,45 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         ArgumentNullException.ThrowIfNull(options);
         await StartAsync(cancellationToken).ConfigureAwait(false);
 
-        var resumeProviders = GetResumeProviders(options).ToArray();
-        foreach (var provider in resumeProviders)
+        var summary = await Store.GetSessionSummaryAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (summary is null)
         {
-            var summary = await Store.GetSessionAsync(
-                    provider.Provider.ProtocolFamily,
-                    provider.Provider.ProviderKey,
-                    sessionId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (summary is null)
-            {
-                continue;
-            }
-
-            var state = await Store.GetStateAsync(
-                    provider.Provider.ProtocolFamily,
-                    provider.Provider.ProviderKey,
-                    sessionId,
-                    cancellationToken)
-                .ConfigureAwait(false)
-                ?? new LocalAgentSessionState
-                {
-                    SessionId = sessionId,
-                    ProtocolFamily = summary.ProtocolFamily,
-                    ProviderKey = summary.ProviderKey,
-                    UpdatedAt = summary.UpdatedAt,
-                };
-            var history = await Store.ReadEventsAsync(
-                    provider.Provider.ProtocolFamily,
-                    provider.Provider.ProviderKey,
-                    sessionId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            (summary, state) = await RepairRecoveredUsageAsync(summary, state, history, provider, options, cancellationToken).ConfigureAwait(false);
-
-            return new LocalAgentSession(
-                BackendId,
-                provider.Provider,
-                OverrideSummary(summary, options),
-                state,
-                history,
-                Store,
-                provider.TurnExecutor,
-                options,
-                allowProviderContinuation: false);
+            throw new KeyNotFoundException($"The session '{sessionId}' was not found for runtime '{BackendId.Value}'.");
         }
 
-        if (resumeProviders.Length == 1)
-        {
-            var provider = resumeProviders[0];
-            var summary = await Store.GetSessionSummaryAsync(sessionId, cancellationToken).ConfigureAwait(false);
-            if (summary is not null)
+        var provider = ResolveResumeProvider(options, summary);
+        var state = await Store.GetStateAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            ?? new LocalAgentSessionState
             {
-                var state = await Store.GetStateAsync(sessionId, cancellationToken).ConfigureAwait(false)
-                    ?? new LocalAgentSessionState
-                    {
-                        SessionId = sessionId,
-                        ProtocolFamily = summary.ProtocolFamily,
-                        ProviderKey = summary.ProviderKey,
-                        UpdatedAt = summary.UpdatedAt,
-                    };
-                var history = await Store.ReadEventsAsync(sessionId, cancellationToken).ConfigureAwait(false);
-                var now = DateTimeOffset.UtcNow;
-                summary = TransferSummaryToProvider(summary, provider.Provider, options, now);
-                state = TransferStateToProvider(state, provider.Provider, now);
-                await Store.UpsertSessionAsync(summary, cancellationToken).ConfigureAwait(false);
-                await Store.UpsertStateAsync(state, cancellationToken).ConfigureAwait(false);
-                (summary, state) = await RepairRecoveredUsageAsync(summary, state, history, provider, options, cancellationToken).ConfigureAwait(false);
-
-                return new LocalAgentSession(
-                    BackendId,
-                    provider.Provider,
-                    OverrideSummary(summary, options),
-                    state,
-                    history,
-                    Store,
-                    provider.TurnExecutor,
-                    options,
-                    allowProviderContinuation: false);
-            }
+                SessionId = sessionId,
+                ProtocolFamily = summary.ProtocolFamily,
+                ProviderKey = summary.ProviderKey,
+                UpdatedAt = summary.UpdatedAt,
+            };
+        var history = await Store.ReadEventsAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (!MatchesProvider(summary, provider.Provider) || !MatchesProvider(state, provider.Provider))
+        {
+            var now = DateTimeOffset.UtcNow;
+            summary = TransferSummaryToProvider(summary, provider.Provider, options, now);
+            state = TransferStateToProvider(state, provider.Provider, now);
+            await Store.UpsertSessionAsync(summary, cancellationToken).ConfigureAwait(false);
+            await Store.UpsertStateAsync(state, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new KeyNotFoundException($"The session '{sessionId}' was not found for backend '{BackendId.Value}'.");
+        (summary, state) = await RepairRecoveredUsageAsync(summary, state, history, provider, options, cancellationToken).ConfigureAwait(false);
+
+        return new LocalAgentSession(
+            BackendId,
+            provider.Provider,
+            OverrideSummary(summary, options),
+            state,
+            history,
+            Store,
+            provider.TurnExecutor,
+            options,
+            allowProviderContinuation: false,
+            cachedModels: GetCachedModels(provider));
+
     }
 
     /// <inheritdoc />
@@ -366,7 +312,7 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         }
     }
 
-    private LocalAgentBackendProviderRegistration ResolveProvider(string? providerKey)
+    private CodeAltaAgentRuntimeProviderRegistration ResolveProvider(string? providerKey)
     {
         if (!string.IsNullOrWhiteSpace(providerKey))
         {
@@ -389,19 +335,27 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         return preferred;
     }
 
-    private IReadOnlyList<LocalAgentBackendProviderRegistration> GetResumeProviders(AgentSessionResumeOptions options)
+    private CodeAltaAgentRuntimeProviderRegistration ResolveResumeProvider(
+        AgentSessionResumeOptions options,
+        LocalAgentSessionSummary summary)
     {
         if (!string.IsNullOrWhiteSpace(options.ProviderKey))
         {
-            return [ResolveProvider(options.ProviderKey)];
+            return ResolveProvider(options.ProviderKey);
         }
 
-        return _options.Providers;
+        if (!string.IsNullOrWhiteSpace(summary.ProviderKey) &&
+            _providersByKey.TryGetValue(summary.ProviderKey, out var lastProvider))
+        {
+            return lastProvider;
+        }
+
+        return ResolveProvider(null);
     }
 
     private LocalAgentSessionSummary TransferSummaryToProvider(
         LocalAgentSessionSummary summary,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         AgentSessionResumeOptions options,
         DateTimeOffset updatedAt)
         => summary with
@@ -417,7 +371,7 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
 
     private static LocalAgentSessionState TransferStateToProvider(
         LocalAgentSessionState state,
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         DateTimeOffset updatedAt)
         => state with
         {
@@ -463,7 +417,7 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         LocalAgentSessionSummary summary,
         LocalAgentSessionState state,
         IReadOnlyList<AgentEvent> history,
-        LocalAgentBackendProviderRegistration provider,
+        CodeAltaAgentRuntimeProviderRegistration provider,
         AgentSessionResumeOptions options,
         CancellationToken cancellationToken)
     {
@@ -488,12 +442,15 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
         {
             try
             {
-                var models = await provider.TurnExecutor.ListModelsAsync(provider.Provider, cancellationToken).ConfigureAwait(false);
-                var modelInfo = AgentModelIdentity.FindBestMatch(models, effectiveModelId);
-                if (modelInfo is not null)
+                var models = GetCachedModels(provider);
+                if (models.Count > 0)
                 {
-                    summary = summary with { Usage = LocalAgentUsageFactory.AttachModelInfo(summary.Usage, modelInfo) };
-                    state = state with { Usage = LocalAgentUsageFactory.AttachModelInfo(state.Usage, modelInfo) };
+                    var modelInfo = AgentModelIdentity.FindBestMatch(models, effectiveModelId);
+                    if (modelInfo is not null)
+                    {
+                        summary = summary with { Usage = LocalAgentUsageFactory.AttachModelInfo(summary.Usage, modelInfo) };
+                        state = state with { Usage = LocalAgentUsageFactory.AttachModelInfo(state.Usage, modelInfo) };
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -552,10 +509,35 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
                (current.TokenLimit is null && recovered.TokenLimit is not null);
     }
 
+    private IReadOnlyList<AgentModelInfo> GetCachedModels(CodeAltaAgentRuntimeProviderRegistration provider)
+    {
+        var providerKey = provider.Provider.ProviderKey;
+        var state = _options.ModelProviderInitializationService?.CurrentStates.FirstOrDefault(
+            state => string.Equals(state.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase));
+        if (state?.Models is { Count: > 0 } models)
+        {
+            _modelCache[providerKey] = models;
+            return models;
+        }
+
+        return _modelCache.TryGetValue(providerKey, out var cached) ? cached : [];
+    }
+
+    private static IModelProviderModelCatalog? ResolveModelCatalog(CodeAltaAgentRuntimeProviderRegistration provider)
+        => provider.ModelCatalog ?? provider.TurnExecutor as IModelProviderModelCatalog;
+
+    private static bool MatchesProvider(LocalAgentSessionSummary summary, ModelProviderRuntimeDescriptor provider)
+        => string.Equals(summary.ProtocolFamily, provider.ProtocolFamily, StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(summary.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
+
+    private static bool MatchesProvider(LocalAgentSessionState state, ModelProviderRuntimeDescriptor provider)
+        => string.Equals(state.ProtocolFamily, provider.ProtocolFamily, StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(state.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
+
     private static AgentSessionMetadata ToMetadata(
         LocalAgentSessionSummary summary,
         LocalAgentSessionState? state,
-        LocalAgentProviderDescriptor provider)
+        ModelProviderRuntimeDescriptor? provider)
     {
         return new AgentSessionMetadata(
             summary.SessionId,
@@ -565,13 +547,16 @@ public sealed class LocalAgentBackend : IAgentBackend, IAgentSharedSessionMetada
             summary.WorkingDirectory is null ? null : new AgentSessionContext(summary.WorkingDirectory),
             summary.WorkingDirectory,
             new RawApiSessionMetadataDetails(
-                provider.DisplayName,
-                provider.BaseUri?.ToString(),
+                provider?.DisplayName,
+                provider?.BaseUri?.ToString(),
                 state?.ProviderSessionId,
                 summary.Title),
             summary.ProtocolFamily,
             summary.ProviderKey,
-            summary.ModelId);
+            summary.ModelId,
+            summary.ParentSessionId,
+            summary.CreatedBySessionId,
+            summary.CreatedByRunId);
     }
 
     private static string FormatUri(Uri? uri)

@@ -22,14 +22,13 @@ public sealed class LocalAgentRuntimeContractsTests
     }
 
     [TestMethod]
-    public void LocalAgentProviderDescriptor_ToJson_SerializesProfile()
+    public void ModelProviderRuntimeDescriptor_ToJson_SerializesProfile()
     {
-        var descriptor = new LocalAgentProviderDescriptor
+        var descriptor = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = "openai",
             ProviderKey = "openai",
             DisplayName = "OpenAI",
-            BackendId = AgentBackendIds.OpenAIResponses,
             TransportKind = LocalAgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.openai.com/v1"),
             IsDefault = true,
@@ -48,7 +47,7 @@ public sealed class LocalAgentRuntimeContractsTests
         var root = document.RootElement;
 
         Assert.AreEqual("openai", root.GetProperty("protocolFamily").GetString());
-        Assert.AreEqual("openai-responses", root.GetProperty("backendId").GetString());
+        Assert.IsFalse(root.TryGetProperty("backendId", out _));
         Assert.AreEqual("OpenAIResponses", root.GetProperty("transportKind").GetString());
         Assert.AreEqual("max_completion_tokens", root.GetProperty("profile").GetProperty("maxTokensFieldName").GetString());
         Assert.AreEqual(0.95d, root.GetProperty("compaction").GetProperty("ratio").GetDouble(), 0.0001d);
@@ -174,19 +173,18 @@ public sealed class LocalAgentRuntimeContractsTests
         LocalAgentTransportKind transportKind,
         string modelId)
     {
-        var provider = new LocalAgentProviderDescriptor
+        var provider = new ModelProviderRuntimeDescriptor
         {
             ProtocolFamily = protocolFamily,
             ProviderKey = providerKey,
             DisplayName = providerKey,
-            BackendId = new AgentBackendId(providerKey),
             TransportKind = transportKind,
         };
 
         return new LocalAgentTurnRequest
         {
             Provider = provider,
-            BackendId = provider.BackendId,
+            BackendId = new AgentBackendId(provider.ProviderKey),
             SessionId = "session-1",
             RunId = new AgentRunId("run-1"),
             ModelId = modelId,

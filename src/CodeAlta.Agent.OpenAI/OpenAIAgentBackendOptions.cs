@@ -261,14 +261,14 @@ internal sealed record OpenAIResponsesClientFactoryContext(
     string? ModelId,
     string SessionId,
     AgentRunId RunId,
-    LocalAgentProviderDescriptor Provider,
+    ModelProviderRuntimeDescriptor Provider,
     CodexTurnState? TurnState = null);
 
 internal sealed record OpenAIResponsesWebSocketSessionFactoryContext(
     string? ModelId,
     string SessionId,
     AgentRunId RunId,
-    LocalAgentProviderDescriptor Provider,
+    ModelProviderRuntimeDescriptor Provider,
     CodexTurnState TurnState);
 
 internal sealed record OpenAIResponsesRequestCustomizationContext(

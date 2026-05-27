@@ -549,7 +549,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
             }
         }
 
-        return new SessionProjection(summary, state, []);
+        return NormalizeProjection(new SessionProjection(summary, state, []));
     }
 
     private static async Task<IReadOnlyList<string>> ReadMetadataProbeLinesAsync(
@@ -604,7 +604,7 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
             history.Add(@event);
         }
 
-        return new SessionProjection(summary, state, history);
+        return NormalizeProjection(new SessionProjection(summary, state, history));
     }
 
     private static void ProjectMetadataSnapshot(
@@ -645,6 +645,51 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
             }
         }
     }
+
+    private static SessionProjection NormalizeProjection(SessionProjection projection)
+    {
+        var summary = NormalizeSummary(projection.Summary);
+        var state = NormalizeState(projection.State, summary);
+        return projection with { Summary = summary, State = state };
+    }
+
+    private static LocalAgentSessionSummary? NormalizeSummary(LocalAgentSessionSummary? summary)
+    {
+        if (summary is null)
+        {
+            return null;
+        }
+
+        var providerKey = NormalizeOptionalText(summary.ProviderKey)
+            ?? NormalizeOptionalText(summary.BackendId.Value)
+            ?? string.Empty;
+        var backendId = string.IsNullOrWhiteSpace(summary.BackendId.Value)
+            ? new AgentBackendId(providerKey)
+            : summary.BackendId;
+        return summary with
+        {
+            BackendId = backendId,
+            ProviderKey = providerKey,
+            ProtocolFamily = summary.ProtocolFamily ?? string.Empty,
+        };
+    }
+
+    private static LocalAgentSessionState? NormalizeState(LocalAgentSessionState? state, LocalAgentSessionSummary? summary)
+    {
+        if (state is null)
+        {
+            return null;
+        }
+
+        return state with
+        {
+            ProviderKey = NormalizeOptionalText(state.ProviderKey) ?? summary?.ProviderKey ?? string.Empty,
+            ProtocolFamily = NormalizeOptionalText(state.ProtocolFamily) ?? summary?.ProtocolFamily ?? string.Empty,
+        };
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private async IAsyncEnumerable<AgentEvent> ReadJournalEventsAsync(
         string path,
@@ -855,7 +900,10 @@ public sealed class FileSystemLocalAgentSessionStore : ILocalAgentSessionStore
                 Title: summary.Title),
             summary.ProtocolFamily,
             summary.ProviderKey,
-            summary.ModelId);
+            summary.ModelId,
+            summary.ParentSessionId,
+            summary.CreatedBySessionId,
+            summary.CreatedByRunId);
 
     private void DeleteEmptySessionDirectories(string? directory)
     {

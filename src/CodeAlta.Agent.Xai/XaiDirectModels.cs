@@ -23,7 +23,7 @@ internal sealed class XaiModelDiscoveryClient
     }
 
     public async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor providerDescriptor,
+        ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(_provider.SingleModelId))
@@ -77,7 +77,7 @@ internal sealed class XaiModelDiscoveryClient
         }
     }
 
-    private static AgentModelInfo MapModel(XaiModelItem item, LocalAgentProviderDescriptor providerDescriptor)
+    private static AgentModelInfo MapModel(XaiModelItem item, ModelProviderRuntimeDescriptor providerDescriptor)
     {
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -99,7 +99,7 @@ internal sealed class XaiModelDiscoveryClient
             _provider.ModelsDevProviderId,
             _provider.ModelOverrides);
 
-    private static AgentModelInfo CreateSingleModel(string modelId, LocalAgentProviderDescriptor providerDescriptor)
+    private static AgentModelInfo CreateSingleModel(string modelId, ModelProviderRuntimeDescriptor providerDescriptor)
         => new(
             modelId,
             DisplayName: modelId,
@@ -109,7 +109,7 @@ internal sealed class XaiModelDiscoveryClient
 
 internal static class XaiStaticModelFallbackCatalog
 {
-    public static IReadOnlyList<AgentModelInfo> List(LocalAgentProviderDescriptor provider)
+    public static IReadOnlyList<AgentModelInfo> List(ModelProviderRuntimeDescriptor provider)
         =>
         [
             Create("grok-4.3", "Grok 4.3", provider),
@@ -117,7 +117,7 @@ internal static class XaiStaticModelFallbackCatalog
             Create("grok-4-fast", "Grok 4 Fast", provider),
         ];
 
-    private static AgentModelInfo Create(string id, string displayName, LocalAgentProviderDescriptor provider)
+    private static AgentModelInfo Create(string id, string displayName, ModelProviderRuntimeDescriptor provider)
         => new(
             id,
             DisplayName: displayName,

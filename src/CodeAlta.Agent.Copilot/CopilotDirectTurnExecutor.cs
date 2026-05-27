@@ -8,7 +8,7 @@ using OpenAI.Responses;
 
 namespace CodeAlta.Agent.Copilot;
 
-internal sealed class CopilotDirectTurnExecutor : ILocalAgentTurnExecutor
+internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
     private static readonly LocalAgentProviderProfile OpenAIChatProfile = new()
     {
@@ -53,7 +53,7 @@ internal sealed class CopilotDirectTurnExecutor : ILocalAgentTurnExecutor
     }
 
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
-        LocalAgentProviderDescriptor provider,
+        ModelProviderRuntimeDescriptor provider,
         CancellationToken cancellationToken = default)
         => _modelDiscovery.ListModelsAsync(provider, cancellationToken);
 

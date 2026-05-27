@@ -178,6 +178,8 @@ public sealed class OpenAIRawApiAgentBackendTests
             },
         });
 
+        _ = await backend.ListModelsAsync().ConfigureAwait(false);
+
         await using var session = await backend.CreateSessionAsync(new AgentSessionCreateOptions
         {
             Model = "gpt-chat-test",
@@ -299,12 +301,11 @@ public sealed class OpenAIRawApiAgentBackendTests
         _ = await executor.ExecuteTurnAsync(
                 new LocalAgentTurnRequest
                 {
-                    Provider = new LocalAgentProviderDescriptor
+                    Provider = new ModelProviderRuntimeDescriptor
                     {
                         ProtocolFamily = "openai",
                         ProviderKey = "alibaba",
                         DisplayName = "Alibaba",
-                        BackendId = new AgentBackendId("alibaba"),
                         TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
                         Profile = profile,
                     },
@@ -368,12 +369,11 @@ public sealed class OpenAIRawApiAgentBackendTests
         _ = await executor.ExecuteTurnAsync(
                 new LocalAgentTurnRequest
                 {
-                    Provider = new LocalAgentProviderDescriptor
+                    Provider = new ModelProviderRuntimeDescriptor
                     {
                         ProtocolFamily = "openai",
                         ProviderKey = "openai",
                         DisplayName = "OpenAI",
-                        BackendId = new AgentBackendId("openai"),
                         TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
                     },
                     BackendId = new AgentBackendId("openai"),
@@ -3568,12 +3568,11 @@ public sealed class OpenAIRawApiAgentBackendTests
     private static LocalAgentTurnRequest CreateTurnRequest()
         => new()
         {
-            Provider = new LocalAgentProviderDescriptor
+            Provider = new ModelProviderRuntimeDescriptor
             {
                 ProtocolFamily = "openai-responses",
                 ProviderKey = "openai",
                 DisplayName = "OpenAI Responses",
-                BackendId = new AgentBackendId("openai-responses"),
                 TransportKind = LocalAgentTransportKind.OpenAIResponses,
             },
             BackendId = new AgentBackendId("openai-responses"),

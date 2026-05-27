@@ -304,6 +304,8 @@ public sealed class ModelsDevCatalogTests
             },
         });
 
+        _ = await backend.ListModelsAsync().ConfigureAwait(false);
+
         await using var session = await backend.CreateSessionAsync(new AgentSessionCreateOptions
         {
             Model = "claude-sonnet-test",
