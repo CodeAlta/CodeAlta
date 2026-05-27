@@ -1,13 +1,13 @@
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.OpenAI;
 
 /// <summary>
 /// OpenAI Responses model-provider runtime.
 /// </summary>
-public sealed class OpenAIResponsesModelProviderRuntime : ICodeAltaModelProviderRuntime
+public sealed class OpenAIResponsesModelProviderRuntime : IAgentModelProviderRuntime
 {
-    private readonly ICodeAltaModelProviderRuntime _runtime;
+    private readonly IAgentModelProviderRuntime _runtime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenAIResponsesModelProviderRuntime"/> class.
@@ -44,7 +44,7 @@ public sealed class OpenAIResponsesModelProviderRuntime : ICodeAltaModelProvider
     public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
 
     /// <inheritdoc />
-    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
+    public AgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();

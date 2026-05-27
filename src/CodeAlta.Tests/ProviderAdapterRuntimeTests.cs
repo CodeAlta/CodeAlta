@@ -165,7 +165,7 @@ public sealed class ProviderAdapterRuntimeTests
     }
 
     private static void AssertProviderRuntime(
-        ICodeAltaModelProviderRuntime runtime,
+        IAgentModelProviderRuntime runtime,
         string providerType,
         string protocolFamily,
         string expectedModelId)

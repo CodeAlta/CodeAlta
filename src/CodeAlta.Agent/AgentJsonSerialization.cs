@@ -2,8 +2,8 @@ using System.Collections;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent;
 
@@ -225,25 +225,25 @@ internal sealed class AgentObjectDictionaryJsonConverter : JsonConverter<IReadOn
 [JsonSerializable(typeof(CodexSessionMetadataDetails))]
 [JsonSerializable(typeof(CopilotSessionMetadataDetails))]
 [JsonSerializable(typeof(RawApiSessionMetadataDetails))]
-[JsonSerializable(typeof(LocalAgentTransportKind))]
-[JsonSerializable(typeof(LocalAgentCompactionSettings))]
-[JsonSerializable(typeof(LocalAgentProviderProfile))]
+[JsonSerializable(typeof(AgentTransportKind))]
+[JsonSerializable(typeof(AgentCompactionSettings))]
+[JsonSerializable(typeof(AgentProviderProfile))]
 [JsonSerializable(typeof(ModelProviderRuntimeDescriptor))]
-[JsonSerializable(typeof(LocalAgentCompactionSnapshot))]
-[JsonSerializable(typeof(LocalAgentCompactionCheckpoint))]
-[JsonSerializable(typeof(LocalAgentConversationMessage))]
-[JsonSerializable(typeof(LocalAgentConversationRole))]
-[JsonSerializable(typeof(LocalAgentReasoningProvenance))]
-[JsonSerializable(typeof(LocalAgentMessagePart))]
-[JsonSerializable(typeof(LocalAgentMessagePart.Text), TypeInfoPropertyName = "LocalAgentMessagePartText")]
-[JsonSerializable(typeof(LocalAgentMessagePart.Reasoning), TypeInfoPropertyName = "LocalAgentMessagePartReasoning")]
-[JsonSerializable(typeof(LocalAgentMessagePart.ToolCall), TypeInfoPropertyName = "LocalAgentMessagePartToolCall")]
-[JsonSerializable(typeof(LocalAgentMessagePart.ToolResult), TypeInfoPropertyName = "LocalAgentMessagePartToolResult")]
-[JsonSerializable(typeof(LocalAgentMessagePart.Uri), TypeInfoPropertyName = "LocalAgentMessagePartUri")]
-[JsonSerializable(typeof(LocalAgentMessagePart.Data), TypeInfoPropertyName = "LocalAgentMessagePartData")]
-[JsonSerializable(typeof(LocalAgentLoadedSkillState))]
-[JsonSerializable(typeof(LocalAgentSessionSummary))]
-[JsonSerializable(typeof(LocalAgentSessionState))]
+[JsonSerializable(typeof(AgentCompactionSnapshot))]
+[JsonSerializable(typeof(AgentCompactionCheckpoint))]
+[JsonSerializable(typeof(AgentConversationMessage))]
+[JsonSerializable(typeof(AgentConversationRole))]
+[JsonSerializable(typeof(AgentReasoningProvenance))]
+[JsonSerializable(typeof(AgentMessagePart))]
+[JsonSerializable(typeof(AgentMessagePart.Text), TypeInfoPropertyName = "AgentMessagePartText")]
+[JsonSerializable(typeof(AgentMessagePart.Reasoning), TypeInfoPropertyName = "AgentMessagePartReasoning")]
+[JsonSerializable(typeof(AgentMessagePart.ToolCall), TypeInfoPropertyName = "AgentMessagePartToolCall")]
+[JsonSerializable(typeof(AgentMessagePart.ToolResult), TypeInfoPropertyName = "AgentMessagePartToolResult")]
+[JsonSerializable(typeof(AgentMessagePart.Uri), TypeInfoPropertyName = "AgentMessagePartUri")]
+[JsonSerializable(typeof(AgentMessagePart.Data), TypeInfoPropertyName = "AgentMessagePartData")]
+[JsonSerializable(typeof(AgentLoadedSkillState))]
+[JsonSerializable(typeof(AgentSessionSummary))]
+[JsonSerializable(typeof(AgentSessionState))]
 [JsonSerializable(typeof(AgentSessionUsage))]
 [JsonSerializable(typeof(AgentWindowUsageSnapshot))]
 [JsonSerializable(typeof(AgentOperationUsageSnapshot))]
@@ -325,25 +325,25 @@ internal partial class AgentJsonSerializerContext : JsonSerializerContext;
 [JsonSerializable(typeof(CodexSessionMetadataDetails))]
 [JsonSerializable(typeof(CopilotSessionMetadataDetails))]
 [JsonSerializable(typeof(RawApiSessionMetadataDetails))]
-[JsonSerializable(typeof(LocalAgentTransportKind))]
-[JsonSerializable(typeof(LocalAgentCompactionSettings))]
-[JsonSerializable(typeof(LocalAgentProviderProfile))]
+[JsonSerializable(typeof(AgentTransportKind))]
+[JsonSerializable(typeof(AgentCompactionSettings))]
+[JsonSerializable(typeof(AgentProviderProfile))]
 [JsonSerializable(typeof(ModelProviderRuntimeDescriptor))]
-[JsonSerializable(typeof(LocalAgentCompactionSnapshot))]
-[JsonSerializable(typeof(LocalAgentCompactionCheckpoint))]
-[JsonSerializable(typeof(LocalAgentConversationMessage))]
-[JsonSerializable(typeof(LocalAgentConversationRole))]
-[JsonSerializable(typeof(LocalAgentReasoningProvenance))]
-[JsonSerializable(typeof(LocalAgentMessagePart))]
-[JsonSerializable(typeof(LocalAgentMessagePart.Text), TypeInfoPropertyName = "IndentedLocalAgentMessagePartText")]
-[JsonSerializable(typeof(LocalAgentMessagePart.Reasoning), TypeInfoPropertyName = "IndentedLocalAgentMessagePartReasoning")]
-[JsonSerializable(typeof(LocalAgentMessagePart.ToolCall), TypeInfoPropertyName = "IndentedLocalAgentMessagePartToolCall")]
-[JsonSerializable(typeof(LocalAgentMessagePart.ToolResult), TypeInfoPropertyName = "IndentedLocalAgentMessagePartToolResult")]
-[JsonSerializable(typeof(LocalAgentMessagePart.Uri), TypeInfoPropertyName = "IndentedLocalAgentMessagePartUri")]
-[JsonSerializable(typeof(LocalAgentMessagePart.Data), TypeInfoPropertyName = "IndentedLocalAgentMessagePartData")]
-[JsonSerializable(typeof(LocalAgentLoadedSkillState))]
-[JsonSerializable(typeof(LocalAgentSessionSummary))]
-[JsonSerializable(typeof(LocalAgentSessionState))]
+[JsonSerializable(typeof(AgentCompactionSnapshot))]
+[JsonSerializable(typeof(AgentCompactionCheckpoint))]
+[JsonSerializable(typeof(AgentConversationMessage))]
+[JsonSerializable(typeof(AgentConversationRole))]
+[JsonSerializable(typeof(AgentReasoningProvenance))]
+[JsonSerializable(typeof(AgentMessagePart))]
+[JsonSerializable(typeof(AgentMessagePart.Text), TypeInfoPropertyName = "IndentedAgentMessagePartText")]
+[JsonSerializable(typeof(AgentMessagePart.Reasoning), TypeInfoPropertyName = "IndentedAgentMessagePartReasoning")]
+[JsonSerializable(typeof(AgentMessagePart.ToolCall), TypeInfoPropertyName = "IndentedAgentMessagePartToolCall")]
+[JsonSerializable(typeof(AgentMessagePart.ToolResult), TypeInfoPropertyName = "IndentedAgentMessagePartToolResult")]
+[JsonSerializable(typeof(AgentMessagePart.Uri), TypeInfoPropertyName = "IndentedAgentMessagePartUri")]
+[JsonSerializable(typeof(AgentMessagePart.Data), TypeInfoPropertyName = "IndentedAgentMessagePartData")]
+[JsonSerializable(typeof(AgentLoadedSkillState))]
+[JsonSerializable(typeof(AgentSessionSummary))]
+[JsonSerializable(typeof(AgentSessionState))]
 [JsonSerializable(typeof(AgentSessionUsage))]
 [JsonSerializable(typeof(AgentWindowUsageSnapshot))]
 [JsonSerializable(typeof(AgentOperationUsageSnapshot))]
@@ -407,13 +407,13 @@ public static class AgentJsonExtensions
         => Serialize(value, AgentJsonSerializerContext.Default.AgentInput, AgentIndentedJsonSerializerContext.Default.AgentInput, indented);
 
     /// <summary>
-    /// Serializes the local-runtime conversation message to JSON.
+    /// Serializes the agent-runtime conversation message to JSON.
     /// </summary>
     /// <param name="value">The value to serialize.</param>
     /// <param name="indented">Whether to use indented formatting.</param>
     /// <returns>The JSON representation.</returns>
-    public static string ToJson(this LocalAgentConversationMessage value, bool indented = false)
-        => Serialize(value, AgentJsonSerializerContext.Default.LocalAgentConversationMessage, AgentIndentedJsonSerializerContext.Default.LocalAgentConversationMessage, indented);
+    public static string ToJson(this AgentConversationMessage value, bool indented = false)
+        => Serialize(value, AgentJsonSerializerContext.Default.AgentConversationMessage, AgentIndentedJsonSerializerContext.Default.AgentConversationMessage, indented);
 
     /// <summary>
     /// Serializes the send options to JSON.
@@ -466,8 +466,8 @@ public static class AgentJsonExtensions
     /// <param name="value">The value to serialize.</param>
     /// <param name="indented">Whether to use indented formatting.</param>
     /// <returns>The JSON representation.</returns>
-    public static string ToJson(this LocalAgentSessionSummary value, bool indented = false)
-        => Serialize(value, AgentJsonSerializerContext.Default.LocalAgentSessionSummary, AgentIndentedJsonSerializerContext.Default.LocalAgentSessionSummary, indented);
+    public static string ToJson(this AgentSessionSummary value, bool indented = false)
+        => Serialize(value, AgentJsonSerializerContext.Default.AgentSessionSummary, AgentIndentedJsonSerializerContext.Default.AgentSessionSummary, indented);
 
     /// <summary>
     /// Serializes the local session state to JSON.
@@ -475,8 +475,8 @@ public static class AgentJsonExtensions
     /// <param name="value">The value to serialize.</param>
     /// <param name="indented">Whether to use indented formatting.</param>
     /// <returns>The JSON representation.</returns>
-    public static string ToJson(this LocalAgentSessionState value, bool indented = false)
-        => Serialize(value, AgentJsonSerializerContext.Default.LocalAgentSessionState, AgentIndentedJsonSerializerContext.Default.LocalAgentSessionState, indented);
+    public static string ToJson(this AgentSessionState value, bool indented = false)
+        => Serialize(value, AgentJsonSerializerContext.Default.AgentSessionState, AgentIndentedJsonSerializerContext.Default.AgentSessionState, indented);
 
     /// <summary>
     /// Serializes the model info to JSON.
@@ -537,8 +537,8 @@ public static class AgentJsonExtensions
     /// </summary>
     /// <param name="value">The serialized JSON payload.</param>
     /// <returns>The loaded-skill state when the payload is valid; otherwise <see langword="null"/>.</returns>
-    public static LocalAgentLoadedSkillState? ToLocalAgentLoadedSkillState(this JsonElement value)
-        => value.Deserialize(AgentJsonSerializerContext.Default.LocalAgentLoadedSkillState);
+    public static AgentLoadedSkillState? ToAgentLoadedSkillState(this JsonElement value)
+        => value.Deserialize(AgentJsonSerializerContext.Default.AgentLoadedSkillState);
 
     /// <summary>
     /// Serializes the value to indented JSON.

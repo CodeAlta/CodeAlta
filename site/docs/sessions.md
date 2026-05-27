@@ -54,7 +54,7 @@ Local compaction targets a smaller post-compaction context by default so long se
 
 ## Agent delegation and self-inspection
 
-CodeAlta-managed local-runtime sessions include an in-process `alta` live tool, but it is not a command surface that you normally type into the terminal. It is a tool the selected agent can use when your prompt asks it to inspect CodeAlta state, coordinate with other sessions, or delegate work.
+CodeAlta-managed agent-runtime sessions include an in-process `alta` live tool, but it is not a command surface that you normally type into the terminal. It is a tool the selected agent can use when your prompt asks it to inspect CodeAlta state, coordinate with other sessions, or delegate work.
 
 Think of it as CodeAlta giving the agent a safe, scoped way to ask the host questions such as:
 

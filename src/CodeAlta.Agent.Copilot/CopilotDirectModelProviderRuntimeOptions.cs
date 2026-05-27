@@ -1,12 +1,12 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.ModelCatalog;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent.Copilot;
 
 /// <summary>
-/// Options used to create a GitHub Copilot direct local-runtime provider runtime.
+/// Options used to create a GitHub Copilot direct agent-runtime provider runtime.
 /// </summary>
 public sealed class CopilotDirectModelProviderRuntimeOptions
 {
@@ -59,12 +59,12 @@ public sealed class CopilotDirectProviderOptions
     /// <summary>
     /// Gets or sets the compatibility profile for the provider.
     /// </summary>
-    public LocalAgentProviderProfile? Profile { get; set; }
+    public AgentProviderProfile? Profile { get; set; }
 
     /// <summary>
     /// Gets or sets normalized compaction settings for the provider.
     /// </summary>
-    public LocalAgentCompactionSettings? Compaction { get; set; }
+    public AgentCompactionSettings? Compaction { get; set; }
 
     /// <summary>
     /// Gets or sets Copilot authentication options.

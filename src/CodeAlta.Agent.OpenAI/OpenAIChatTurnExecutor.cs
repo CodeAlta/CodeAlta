@@ -5,8 +5,8 @@ using System.ClientModel.Primitives;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Tools;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Tools;
 using OpenAI.Chat;
 
 namespace CodeAlta.Agent.OpenAI;
@@ -18,9 +18,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         CancellationToken cancellationToken = default)
         => OpenAIProviderSdkFactory.ListModelsAsync(provider, providerDescriptor, cancellationToken);
 
-    public async Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+    public async Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -58,7 +58,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                     {
                         streamedAssistantContent.Append(contentPart.Text);
                         await onUpdate(
-                            new LocalAgentTurnDelta
+                            new AgentTurnDelta
                             {
                                 Kind = AgentContentKind.Assistant,
                                 ContentId = assistantContentId,
@@ -72,7 +72,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 {
                     streamedAssistantContent.Append(update.RefusalUpdate);
                     await onUpdate(
-                        new LocalAgentTurnDelta
+                        new AgentTurnDelta
                         {
                             Kind = AgentContentKind.Assistant,
                             ContentId = assistantContentId,
@@ -89,7 +89,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 {
                     streamedReasoning.Append(reasoningDelta);
                     await onUpdate(
-                        new LocalAgentTurnDelta
+                        new AgentTurnDelta
                         {
                             Kind = AgentContentKind.Reasoning,
                             ContentId = reasoningContentId,
@@ -124,36 +124,36 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 }
             }
 
-            var parts = new List<LocalAgentMessagePart>();
+            var parts = new List<AgentMessagePart>();
             var assistantPartContentIds = new List<string?>();
             if (streamedAssistantContent.Length > 0)
             {
-                parts.Add(new LocalAgentMessagePart.Text(streamedAssistantContent.ToString()));
+                parts.Add(new AgentMessagePart.Text(streamedAssistantContent.ToString()));
                 assistantPartContentIds.Add(assistantContentId);
             }
 
             if (streamedReasoning.Length > 0)
             {
-                parts.Add(new LocalAgentMessagePart.Reasoning(
+                parts.Add(new AgentMessagePart.Reasoning(
                     streamedReasoning.ToString(),
                     ProtectedData: null,
-                    LocalAgentReasoningReplay.CreateProvenance(request)));
+                    AgentReasoningReplay.CreateProvenance(request)));
                 assistantPartContentIds.Add(reasoningContentId);
             }
 
             foreach (var toolState in streamedToolCalls.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
             {
-                parts.Add(new LocalAgentMessagePart.ToolCall(
+                parts.Add(new AgentMessagePart.ToolCall(
                     toolState.CallId ?? $"tool:{Guid.CreateVersion7()}",
                     toolState.Name ?? string.Empty,
                     DeserializeToolArguments(toolState.Arguments.ToString())));
                 assistantPartContentIds.Add(null);
             }
 
-            var assistantMessage = new LocalAgentConversationMessage(LocalAgentConversationRole.Assistant, parts);
+            var assistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, parts);
             protocolTrace?.WriteLine(
                 $"### turn end provider={request.Provider.ProviderKey} session={request.SessionId} run={request.RunId.Value} completion={completionId ?? "<none>"} model={modelId ?? "<none>"}");
-            return new LocalAgentTurnResponse
+            return new AgentTurnResponse
             {
                 AssistantMessage = assistantMessage,
                 AssistantPartContentIds = assistantPartContentIds,
@@ -167,7 +167,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         {
             throw;
         }
-        catch (LocalAgentTurnExecutionException)
+        catch (AgentTurnExecutionException)
         {
             throw;
         }
@@ -177,7 +177,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         }
     }
 
-    private static IReadOnlyList<ChatMessage> CreateMessages(LocalAgentTurnRequest request)
+    private static IReadOnlyList<ChatMessage> CreateMessages(AgentTurnRequest request)
     {
         var supportsDeveloperRole = request.Provider.Profile?.SupportsDeveloperRole ?? true;
         var messages = new List<ChatMessage>();
@@ -208,7 +208,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             }
         }
 
-        foreach (var message in LocalAgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
+        foreach (var message in AgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
         {
             messages.Add(MapMessage(message, request.Provider.Profile));
         }
@@ -216,7 +216,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         return messages;
     }
 
-    private ChatCompletionOptions CreateOptions(LocalAgentTurnRequest request)
+    private ChatCompletionOptions CreateOptions(AgentTurnRequest request)
     {
         var options = new ChatCompletionOptions
         {
@@ -246,16 +246,16 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         {
             options.Tools.Add(
                 ChatTool.CreateFunctionTool(
-                    LocalAgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
+                    AgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
                     tool.Spec.Description,
-                    BinaryData.FromString(LocalAgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema).GetRawText()),
+                    BinaryData.FromString(AgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema).GetRawText()),
                     functionSchemaIsStrict: true));
         }
 
         return options;
     }
 
-    private static void ApplyMaxOutputTokens(LocalAgentTurnRequest request, ChatCompletionOptions options)
+    private static void ApplyMaxOutputTokens(AgentTurnRequest request, ChatCompletionOptions options)
     {
         if (request.MaxOutputTokens is not { } maxOutputTokens)
         {
@@ -282,7 +282,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             ? "max_completion_tokens"
             : fieldName.Trim();
 
-    private static bool SupportsRequestedReasoningEffort(LocalAgentTurnRequest request, AgentReasoningEffort reasoningEffort)
+    private static bool SupportsRequestedReasoningEffort(AgentTurnRequest request, AgentReasoningEffort reasoningEffort)
     {
         if (reasoningEffort == AgentReasoningEffort.None)
         {
@@ -315,43 +315,43 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
     }
 
     private static ChatMessage MapMessage(
-        LocalAgentConversationMessage message,
-        LocalAgentProviderProfile? profile)
+        AgentConversationMessage message,
+        AgentProviderProfile? profile)
     {
         return message.Role switch
         {
-            LocalAgentConversationRole.System => ChatMessage.CreateSystemMessage(CreateContentParts(message.Parts)),
-            LocalAgentConversationRole.User => ChatMessage.CreateUserMessage(CreateContentParts(message.Parts)),
-            LocalAgentConversationRole.Assistant => CreateAssistantMessage(message.Parts, profile),
-            LocalAgentConversationRole.Tool => CreateToolMessage(message.Parts),
+            AgentConversationRole.System => ChatMessage.CreateSystemMessage(CreateContentParts(message.Parts)),
+            AgentConversationRole.User => ChatMessage.CreateUserMessage(CreateContentParts(message.Parts)),
+            AgentConversationRole.Assistant => CreateAssistantMessage(message.Parts, profile),
+            AgentConversationRole.Tool => CreateToolMessage(message.Parts),
             _ => ChatMessage.CreateUserMessage(string.Empty),
         };
     }
 
-    private static ChatMessageContentPart[] CreateContentParts(IReadOnlyList<LocalAgentMessagePart> parts)
+    private static ChatMessageContentPart[] CreateContentParts(IReadOnlyList<AgentMessagePart> parts)
     {
         var contentParts = new List<ChatMessageContentPart>(parts.Count);
         foreach (var part in parts)
         {
             switch (part)
             {
-                case LocalAgentMessagePart.Text text:
+                case AgentMessagePart.Text text:
                     contentParts.Add(ChatMessageContentPart.CreateTextPart(text.Value));
                     break;
-                case LocalAgentMessagePart.Uri uri when Uri.TryCreate(uri.Value, UriKind.Absolute, out var absoluteUri):
+                case AgentMessagePart.Uri uri when Uri.TryCreate(uri.Value, UriKind.Absolute, out var absoluteUri):
                     contentParts.Add(
                         IsImageMediaType(uri.MediaType)
                             ? ChatMessageContentPart.CreateImagePart(absoluteUri)
                             : ChatMessageContentPart.CreateTextPart(uri.Value));
                     break;
-                case LocalAgentMessagePart.Data data:
+                case AgentMessagePart.Data data:
                     var bytes = BinaryData.FromBytes(Convert.FromBase64String(data.Base64Data));
                     contentParts.Add(
                         IsImageMediaType(data.MediaType)
                             ? ChatMessageContentPart.CreateImagePart(bytes, data.MediaType ?? "image/*")
                             : ChatMessageContentPart.CreateFilePart(bytes, data.MediaType ?? "application/octet-stream", data.Name ?? "attachment"));
                     break;
-                case LocalAgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value):
+                case AgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value):
                     contentParts.Add(ChatMessageContentPart.CreateTextPart($"<assistant_reasoning>{reasoning.Value}</assistant_reasoning>"));
                     break;
             }
@@ -363,8 +363,8 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
     }
 
     private static AssistantChatMessage CreateAssistantMessage(
-        IReadOnlyList<LocalAgentMessagePart> parts,
-        LocalAgentProviderProfile? profile)
+        IReadOnlyList<AgentMessagePart> parts,
+        AgentProviderProfile? profile)
     {
         var contentParts = new List<ChatMessageContentPart>();
         var toolCalls = new List<ChatToolCall>();
@@ -375,16 +375,16 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         {
             switch (part)
             {
-                case LocalAgentMessagePart.Text text:
+                case AgentMessagePart.Text text:
                     contentParts.Add(ChatMessageContentPart.CreateTextPart(text.Value));
                     break;
-                case LocalAgentMessagePart.Uri uri:
+                case AgentMessagePart.Uri uri:
                     contentParts.Add(ChatMessageContentPart.CreateTextPart(uri.Value));
                     break;
-                case LocalAgentMessagePart.Data data:
+                case AgentMessagePart.Data data:
                     contentParts.Add(ChatMessageContentPart.CreateTextPart(data.Name ?? data.MediaType ?? "attachment"));
                     break;
-                case LocalAgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value) &&
+                case AgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value) &&
                     reasoningInputFieldName is not null:
                     reasoningInput ??= new StringBuilder();
                     if (reasoningInput.Length > 0)
@@ -394,14 +394,14 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
                     reasoningInput.Append(reasoning.Value);
                     break;
-                case LocalAgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value):
+                case AgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value):
                     contentParts.Add(ChatMessageContentPart.CreateTextPart($"<assistant_reasoning>{reasoning.Value}</assistant_reasoning>"));
                     break;
-                case LocalAgentMessagePart.ToolCall toolCall:
+                case AgentMessagePart.ToolCall toolCall:
                     toolCalls.Add(
                         ChatToolCall.CreateFunctionToolCall(
                             toolCall.CallId,
-                            LocalAgentToolBridge.GetRegisteredToolName(toolCall.Name),
+                            AgentToolBridge.GetRegisteredToolName(toolCall.Name),
                             BinaryData.FromString(toolCall.Arguments.GetRawText())));
                     break;
             }
@@ -449,9 +449,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             : normalized;
     }
 
-    private static ToolChatMessage CreateToolMessage(IReadOnlyList<LocalAgentMessagePart> parts)
+    private static ToolChatMessage CreateToolMessage(IReadOnlyList<AgentMessagePart> parts)
     {
-        var toolResult = parts.OfType<LocalAgentMessagePart.ToolResult>().FirstOrDefault();
+        var toolResult = parts.OfType<AgentMessagePart.ToolResult>().FirstOrDefault();
         if (toolResult is null)
         {
             return new ToolChatMessage($"tool:{Guid.CreateVersion7()}", string.Empty);
@@ -478,14 +478,14 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         }
     }
 
-    private static AgentSessionUsage? CreateUsage(LocalAgentTurnRequest request, string? modelId, ChatTokenUsage? usage)
+    private static AgentSessionUsage? CreateUsage(AgentTurnRequest request, string? modelId, ChatTokenUsage? usage)
     {
         if (usage is null)
         {
             return null;
         }
 
-        return LocalAgentUsageFactory.CreateOperationUsage(
+        return AgentUsageFactory.CreateOperationUsage(
             modelId: modelId ?? request.ModelId,
             modelInfo: request.ModelInfo,
             inputTokens: usage.InputTokenCount,
@@ -527,9 +527,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static string? ExtractSummary(LocalAgentConversationMessage message)
+    private static string? ExtractSummary(AgentConversationMessage message)
         => message.Parts
-            .OfType<LocalAgentMessagePart.Text>()
+            .OfType<AgentMessagePart.Text>()
             .Select(static part => part.Value)
             .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
 
@@ -633,9 +633,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             ? persistable.Write(new ModelReaderWriterOptions("J")).ToString()
             : model.ToString() ?? string.Empty;
 
-    private static LocalAgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+    private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
         => new(
-            new LocalAgentTurnFailure(
+            new AgentTurnFailure(
                 ex.Message,
                 IsContextOverflowMessage(ex.Message)),
             ex);

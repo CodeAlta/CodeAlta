@@ -5,7 +5,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Reflection;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI;
@@ -176,7 +176,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                     ProtocolFamily = "codex",
                     ProviderKey = "codex",
                     DisplayName = "Codex",
-                    TransportKind = LocalAgentTransportKind.OpenAIResponses,
+                    TransportKind = AgentTransportKind.OpenAIResponses,
                 }));
 
         Assert.AreEqual("https://chatgpt.com/backend-api/codex", client.Endpoint.ToString());
@@ -394,7 +394,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             ProtocolFamily = "codex",
             ProviderKey = "codex",
             DisplayName = "Codex",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         var visibleModels = CodexSubscriptionStaticModelCatalog.List(provider);
@@ -818,7 +818,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             ProtocolFamily = "codex",
             ProviderKey = "codex",
             DisplayName = "Codex",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
     private static HttpResponseMessage CreateResponse(string? turnState = null)

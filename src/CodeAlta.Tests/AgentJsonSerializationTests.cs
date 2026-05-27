@@ -1,6 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -217,18 +217,18 @@ public sealed class AgentJsonSerializationTests
     }
 
     [TestMethod]
-    public void LocalAgentConversationMessage_ToJson_SerializesPolymorphicParts()
+    public void AgentConversationMessage_ToJson_SerializesPolymorphicParts()
     {
         using var argumentsDocument = JsonDocument.Parse("""{"path":"Program.cs"}""");
-        var message = new LocalAgentConversationMessage(
-            LocalAgentConversationRole.Assistant,
+        var message = new AgentConversationMessage(
+            AgentConversationRole.Assistant,
             [
-                new LocalAgentMessagePart.Reasoning("Inspecting the file."),
-                new LocalAgentMessagePart.ToolCall("call-1", "read_file", argumentsDocument.RootElement.Clone()),
-                new LocalAgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("done")]))
+                new AgentMessagePart.Reasoning("Inspecting the file."),
+                new AgentMessagePart.ToolCall("call-1", "read_file", argumentsDocument.RootElement.Clone()),
+                new AgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("done")]))
             ]);
 
-        var json = JsonSerializer.Serialize(message, AgentJsonSerializerContext.Default.LocalAgentConversationMessage);
+        var json = JsonSerializer.Serialize(message, AgentJsonSerializerContext.Default.AgentConversationMessage);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
 

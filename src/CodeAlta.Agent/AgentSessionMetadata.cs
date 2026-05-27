@@ -67,7 +67,7 @@ public sealed record CopilotSessionMetadataDetails(
     : AgentSessionMetadataDetails;
 
 /// <summary>
-/// Provider-backed local-runtime session metadata details.
+/// Provider-backed agent-runtime session metadata details.
 /// </summary>
 /// <param name="ProviderDisplayName">The configured provider display name.</param>
 /// <param name="ProviderBaseUri">The configured provider base URI when applicable.</param>

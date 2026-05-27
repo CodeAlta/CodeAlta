@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime.Actors;
@@ -256,7 +256,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Reads persisted CodeAlta-owned local-runtime history for a recoverable session without resuming the session.
+    /// Reads persisted CodeAlta-owned agent-runtime history for a recoverable session without resuming the session.
     /// </summary>
     /// <param name="session">The session descriptor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -268,7 +268,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         => await TryReadStoredHistoryAsync(session, onUnavailable: null, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Reads persisted CodeAlta-owned local-runtime history for a recoverable session without resuming the session.
+    /// Reads persisted CodeAlta-owned agent-runtime history for a recoverable session without resuming the session.
     /// </summary>
     /// <param name="session">The session descriptor.</param>
     /// <param name="onUnavailable">Optional callback invoked when a local history file exists but cannot be read.</param>
@@ -716,7 +716,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Activates a CodeAlta-managed skill for a session through the host-owned local runtime path.
+    /// Activates a CodeAlta-managed skill for a session through the host-owned agent runtime path.
     /// </summary>
     /// <param name="session">Target session.</param>
     /// <param name="options">Execution options used to resolve the backing session.</param>
@@ -1686,7 +1686,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         await store.UpsertSessionAsync(
-                new LocalAgentSessionSummary
+                new AgentSessionSummary
                 {
                     SessionId = session.SessionId,
                     ProviderId = new ModelProviderId(options.ProviderId.Value),

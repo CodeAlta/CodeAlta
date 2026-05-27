@@ -1,12 +1,12 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 
 namespace CodeAlta.Agent.Xai;
 
 /// <summary>
-/// Options used to create an xAI direct local-runtime provider runtime.
+/// Options used to create an xAI direct agent-runtime provider runtime.
 /// </summary>
 public sealed class XaiModelProviderRuntimeOptions
 {
@@ -59,12 +59,12 @@ public sealed class XaiProviderOptions
     /// <summary>
     /// Gets or sets the compatibility profile for the provider.
     /// </summary>
-    public LocalAgentProviderProfile? Profile { get; set; }
+    public AgentProviderProfile? Profile { get; set; }
 
     /// <summary>
     /// Gets or sets normalized compaction settings for the provider.
     /// </summary>
-    public LocalAgentCompactionSettings? Compaction { get; set; }
+    public AgentCompactionSettings? Compaction { get; set; }
 
     /// <summary>
     /// Gets or sets xAI authentication options.

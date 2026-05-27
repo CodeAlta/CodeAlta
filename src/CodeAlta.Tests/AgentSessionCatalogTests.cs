@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -68,8 +68,8 @@ public sealed class AgentSessionCatalogTests
     public async Task FileSystemStoreAndCatalog_ListSessionsWithoutRegisteredProvider()
     {
         using var temp = TestTempDirectory.Create();
-        var layout = new LocalAgentRuntimePathLayout(temp.Path);
-        var store = new FileSystemLocalAgentSessionStore(layout);
+        var layout = new AgentRuntimePathLayout(temp.Path);
+        var store = new FileSystemAgentSessionStore(layout);
         await store.UpsertSessionAsync(CreateSession("session-missing-provider", "missing-provider")).ConfigureAwait(false);
         await store.UpsertSessionAsync(CreateSession("session-disabled-provider", "disabled-provider")).ConfigureAwait(false);
         var catalog = new AgentSessionCatalog(store);
@@ -90,8 +90,8 @@ public sealed class AgentSessionCatalogTests
     public async Task FileSystemStore_ListSessionsAsync_SkipsCorruptSessionFiles()
     {
         using var temp = TestTempDirectory.Create();
-        var layout = new LocalAgentRuntimePathLayout(temp.Path);
-        var store = new FileSystemLocalAgentSessionStore(layout);
+        var layout = new AgentRuntimePathLayout(temp.Path);
+        var store = new FileSystemAgentSessionStore(layout);
         await store.UpsertSessionAsync(CreateSession("session-valid", "missing-provider")).ConfigureAwait(false);
 
         var corruptDirectory = Path.Combine(layout.SessionsRootPath, "corrupt");
@@ -103,10 +103,10 @@ public sealed class AgentSessionCatalogTests
         CollectionAssert.AreEqual(new[] { "session-valid" }, sessions.Select(static session => session.SessionId).ToArray());
     }
 
-    private static LocalAgentSessionSummary CreateSession(string sessionId, string providerKey)
+    private static AgentSessionSummary CreateSession(string sessionId, string providerKey)
     {
         var createdAt = DateTimeOffset.Parse("2026-04-06T10:00:00+00:00");
-        return new LocalAgentSessionSummary
+        return new AgentSessionSummary
         {
             SessionId = sessionId,
             ProviderId = new ModelProviderId(providerKey),

@@ -36,7 +36,7 @@ public sealed class CatalogOptions
     public string ConfigPath => Path.Combine(GlobalRoot, "config.toml");
 
     /// <summary>
-    /// Gets the local runtime root path under the global catalog.
+    /// Gets the agent runtime root path under the global catalog.
     /// </summary>
     [Obsolete("Use CacheRoot for caches or the dedicated roots such as SessionsRoot and PromptDraftsRoot.")]
     public string LocalRoot => CacheRoot;
@@ -62,7 +62,7 @@ public sealed class CatalogOptions
     public string UiStatePath => Path.Combine(GlobalRoot, "ui-state.yaml");
 
     /// <summary>
-    /// Gets the legacy machine-local runtime root path under the legacy catalog.
+    /// Gets the legacy machine-agent runtime root path under the legacy catalog.
     /// </summary>
     [Obsolete("Use CacheRoot. The machine root path was renamed to cache.")]
     public string MachineRoot => CacheRoot;

@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TD
-    Session[Local-runtime session]
+    Session[Agent-runtime session]
     Tool[Agent tool named alta]
     Dispatcher[AltaCommandDispatcher]
     Registry[AltaCommandRegistry]
@@ -173,7 +173,7 @@ alta skill show <skill-name>
 alta skill activate <skill-name> --session <session-id>
 ```
 
-Activation uses the same runtime path as the UI. It succeeds only when CodeAlta can inject skill context into the target local-runtime session; provider-managed native skill sessions return an unsupported-capability diagnostic.
+Activation uses the same runtime path as the UI. It succeeds only when CodeAlta can inject skill context into the target agent-runtime session; provider-managed native skill sessions return an unsupported-capability diagnostic.
 
 ## Plugin command roots
 

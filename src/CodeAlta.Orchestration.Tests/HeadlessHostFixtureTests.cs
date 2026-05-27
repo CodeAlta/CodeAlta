@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -181,7 +181,7 @@ public sealed class HeadlessHostFixtureTests
         registry.RegisterOrReplace(descriptor, () => new FakeModelProviderRuntime(descriptor));
     }
 
-    private sealed class FakeModelProviderRuntime(ModelProviderDescriptor descriptor) : ICodeAltaModelProviderRuntime
+    private sealed class FakeModelProviderRuntime(ModelProviderDescriptor descriptor) : IAgentModelProviderRuntime
     {
         public ModelProviderDescriptor Descriptor { get; } = descriptor;
 
@@ -190,12 +190,12 @@ public sealed class HeadlessHostFixtureTests
             ProtocolFamily = "test",
             ProviderKey = descriptor.ProviderId.Value,
             DisplayName = descriptor.DisplayName,
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         public IModelProviderModelCatalog? ModelCatalog => null;
 
-        public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => new()
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new()
         {
             Provider = RuntimeDescriptor,
             TurnExecutor = new FakeTurnExecutor(),
@@ -223,13 +223,13 @@ public sealed class HeadlessHostFixtureTests
 
     private sealed class FakeTurnExecutor : IModelProviderTurnExecutor
     {
-        public async Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-            LocalAgentTurnRequest request,
-            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
             CancellationToken cancellationToken = default)
         {
             await onUpdate(
-                    new LocalAgentTurnDelta
+                    new AgentTurnDelta
                     {
                         Kind = AgentContentKind.Assistant,
                         ContentId = "content-1",
@@ -238,11 +238,11 @@ public sealed class HeadlessHostFixtureTests
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            return new LocalAgentTurnResponse
+            return new AgentTurnResponse
             {
-                AssistantMessage = new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.Assistant,
-                    [new LocalAgentMessagePart.Text("fake response")]),
+                AssistantMessage = new AgentConversationMessage(
+                    AgentConversationRole.Assistant,
+                    [new AgentMessagePart.Text("fake response")]),
                 AssistantPartContentIds = ["content-1"],
             };
         }

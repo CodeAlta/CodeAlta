@@ -584,7 +584,7 @@ public sealed class ArchitectureGuardrailTests
         {
             "CodeAlta.Agent/AgentEvent.cs",
             "CodeAlta.Agent/AgentToolDefinition.cs",
-            "CodeAlta.Agent/LocalRuntime/LocalAgentSessionFiles.cs",
+            "CodeAlta.Agent/Runtime/AgentSessionFiles.cs",
             "CodeAlta.Catalog/SessionViewDescriptor.cs",
             "CodeAlta.Catalog/SessionViewJournalStore.cs",
             "CodeAlta.Catalog/SessionViewYamlSerializer.cs",
@@ -627,6 +627,44 @@ public sealed class ArchitectureGuardrailTests
                         !allowedLegacyProviderIdentityFields.Contains(entry.RelativePath)
                     ? [$"{entry.RelativePath}:BackendId/backendId/backend_id"]
                     : []))
+            .OrderBy(static violation => violation, StringComparer.Ordinal)
+            .ToArray();
+
+        CollectionAssert.AreEqual(Array.Empty<string>(), violations);
+    }
+
+    [TestMethod]
+    public void AgentPackage_UsesNeutralRuntimeSessionProviderTypeNames()
+    {
+        var sourceRoot = GetSourceRoot();
+        var agentRoot = Path.Combine(sourceRoot, "CodeAlta.Agent");
+        var allowedLocalTypeNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "CodeAlta.Agent/AgentInputItem.cs:LocalImage",
+        };
+        var declarationPattern = new Regex(
+            @"\b(?:class|record|struct|interface|enum)\s+(?<name>I?(?:Local[A-Za-z0-9_]*|CodeAlta[A-Za-z0-9_]*))\b",
+            RegexOptions.Compiled);
+
+        var violations = Directory.EnumerateFiles(agentRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(static file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                                  !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file =>
+            {
+                var relativePath = Path.GetRelativePath(sourceRoot, file).Replace('\\', '/');
+                var content = File.ReadAllText(file);
+                var pathViolations = relativePath.Contains("LocalRuntime", StringComparison.Ordinal) ||
+                                     content.Contains("CodeAlta.Agent.LocalRuntime", StringComparison.Ordinal) ||
+                                     content.Contains("LocalAgent", StringComparison.Ordinal)
+                    ? [$"{relativePath}:LocalRuntime/LocalAgent"]
+                    : Array.Empty<string>();
+                var declarationViolations = declarationPattern.Matches(content)
+                    .Select(match => match.Groups["name"].Value)
+                    .Select(name => $"{relativePath}:{name}")
+                    .Where(symbol => !allowedLocalTypeNames.Contains(symbol));
+
+                return pathViolations.Concat(declarationViolations);
+            })
             .OrderBy(static violation => violation, StringComparer.Ordinal)
             .ToArray();
 

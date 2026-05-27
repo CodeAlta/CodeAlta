@@ -4,7 +4,7 @@ using System.ClientModel;
 using System.ClientModel.Primitives;
 using System.Text.Json;
 using Azure.AI.OpenAI;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI;

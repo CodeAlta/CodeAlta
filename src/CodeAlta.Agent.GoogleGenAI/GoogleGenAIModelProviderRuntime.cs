@@ -1,5 +1,5 @@
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using Google.GenAI;
 using Google.GenAI.Types;
@@ -10,9 +10,9 @@ namespace CodeAlta.Agent.GoogleGenAI;
 /// <summary>
 /// Google GenAI model-provider runtime.
 /// </summary>
-public sealed class GoogleGenAIModelProviderRuntime : ICodeAltaModelProviderRuntime
+public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
 {
-    private readonly ICodeAltaModelProviderRuntime _runtime;
+    private readonly IAgentModelProviderRuntime _runtime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GoogleGenAIModelProviderRuntime"/> class.
@@ -56,12 +56,12 @@ public sealed class GoogleGenAIModelProviderRuntime : ICodeAltaModelProviderRunt
     public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
 
     /// <inheritdoc />
-    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
+    public AgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 
-    private static CodeAltaModelProviderRuntime CreateProviderRuntime(GoogleGenAIProviderOptions provider)
+    private static AgentModelProviderRuntime CreateProviderRuntime(GoogleGenAIProviderOptions provider)
     {
         var providerKey = provider.ProviderKey.Trim();
         var displayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? providerKey : provider.DisplayName.Trim();
@@ -70,17 +70,17 @@ public sealed class GoogleGenAIModelProviderRuntime : ICodeAltaModelProviderRunt
             ProtocolFamily = provider.UseVertexAI ? "vertex-ai" : "google-genai",
             ProviderKey = providerKey,
             DisplayName = displayName,
-            TransportKind = provider.UseVertexAI ? LocalAgentTransportKind.GoogleVertexAI : LocalAgentTransportKind.GoogleGeminiApi,
+            TransportKind = provider.UseVertexAI ? AgentTransportKind.GoogleVertexAI : AgentTransportKind.GoogleGeminiApi,
             BaseUri = provider.BaseUri,
             IsDefault = provider.IsDefault,
-            Profile = provider.Profile ?? new LocalAgentProviderProfile
+            Profile = provider.Profile ?? new AgentProviderProfile
             {
                 SupportsDeveloperRole = false,
                 SupportsReasoningEffort = true,
                 StreamsUsage = true,
                 SupportsThoughtSignatures = true,
             },
-            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
+            Compaction = provider.Compaction ?? AgentCompactionSettings.Default,
         };
         var descriptor = new ModelProviderDescriptor(new ModelProviderId(providerKey), displayName, runtimeDescriptor.ProtocolFamily)
         {
@@ -88,7 +88,7 @@ public sealed class GoogleGenAIModelProviderRuntime : ICodeAltaModelProviderRunt
             IsDefault = provider.IsDefault,
             DefaultModelId = provider.SingleModelId,
         };
-        return new CodeAltaModelProviderRuntime(
+        return new AgentModelProviderRuntime(
             descriptor,
             runtimeDescriptor,
             CreateTurnExecutor(provider));
@@ -96,7 +96,7 @@ public sealed class GoogleGenAIModelProviderRuntime : ICodeAltaModelProviderRunt
 
     private static IModelProviderTurnExecutor CreateTurnExecutor(GoogleGenAIProviderOptions provider)
     {
-        return new LocalAgentChatClientTurnExecutor(
+        return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken));
     }

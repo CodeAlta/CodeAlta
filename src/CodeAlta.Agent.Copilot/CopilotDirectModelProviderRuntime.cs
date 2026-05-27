@@ -1,20 +1,20 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent.Copilot;
 
 /// <summary>
 /// Direct GitHub Copilot model-provider runtime.
 /// </summary>
-public sealed class CopilotDirectModelProviderRuntime : ICodeAltaModelProviderRuntime
+public sealed class CopilotDirectModelProviderRuntime : IAgentModelProviderRuntime
 {
     /// <summary>
     /// The canonical provider type and protocol family for direct Copilot access.
     /// </summary>
     public const string ProtocolFamily = "copilot";
 
-    private readonly ICodeAltaModelProviderRuntime _runtime;
+    private readonly IAgentModelProviderRuntime _runtime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CopilotDirectModelProviderRuntime"/> class.
@@ -65,12 +65,12 @@ public sealed class CopilotDirectModelProviderRuntime : ICodeAltaModelProviderRu
     public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
 
     /// <inheritdoc />
-    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
+    public AgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 
-    private static CodeAltaModelProviderRuntime CreateProviderRuntime(CopilotDirectProviderOptions provider)
+    private static AgentModelProviderRuntime CreateProviderRuntime(CopilotDirectProviderOptions provider)
     {
         var providerKey = provider.ProviderKey.Trim();
         var displayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? providerKey : provider.DisplayName.Trim();
@@ -79,11 +79,11 @@ public sealed class CopilotDirectModelProviderRuntime : ICodeAltaModelProviderRu
             ProtocolFamily = ProtocolFamily,
             ProviderKey = providerKey,
             DisplayName = displayName,
-            TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
+            TransportKind = AgentTransportKind.OpenAIChatCompletions,
             BaseUri = provider.BaseUri,
             IsDefault = provider.IsDefault,
             Profile = provider.Profile ?? CreateDefaultProfile(),
-            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
+            Compaction = provider.Compaction ?? AgentCompactionSettings.Default,
         };
         var descriptor = new ModelProviderDescriptor(new ModelProviderId(providerKey), displayName, ProtocolFamily)
         {
@@ -91,13 +91,13 @@ public sealed class CopilotDirectModelProviderRuntime : ICodeAltaModelProviderRu
             IsDefault = provider.IsDefault,
             DefaultModelId = provider.SingleModelId,
         };
-        return new CodeAltaModelProviderRuntime(
+        return new AgentModelProviderRuntime(
             descriptor,
             runtimeDescriptor,
             new CopilotDirectTurnExecutor(provider));
     }
 
-    private static LocalAgentProviderProfile CreateDefaultProfile()
+    private static AgentProviderProfile CreateDefaultProfile()
         => new()
         {
             SupportsDeveloperRole = true,

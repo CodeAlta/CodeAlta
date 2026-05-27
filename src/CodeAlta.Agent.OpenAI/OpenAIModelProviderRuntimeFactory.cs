@@ -1,19 +1,19 @@
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.OpenAI.Codex;
 
 namespace CodeAlta.Agent.OpenAI;
 
 internal static class OpenAIModelProviderRuntimeFactory
 {
-    public static ICodeAltaModelProviderRuntime CreateResponsesProviderRuntime(OpenAIResponsesModelProviderRuntimeOptions options)
+    public static IAgentModelProviderRuntime CreateResponsesProviderRuntime(OpenAIResponsesModelProviderRuntimeOptions options)
     {
         var codexSubscriptionConcurrencyLimiter = options.CodexSubscriptionConcurrencyLimiter ?? new CodexSubscriptionConcurrencyLimiter();
         return CreateSingleProviderRuntime(
             options.ProviderIdOverride ?? ModelProviderIds.OpenAIResponses,
             string.IsNullOrWhiteSpace(options.DisplayNameOverride) ? "OpenAI Responses" : options.DisplayNameOverride.Trim(),
             "openai-responses",
-            LocalAgentTransportKind.OpenAIResponses,
+            AgentTransportKind.OpenAIResponses,
             options,
             provider => new OpenAIResponsesTurnExecutor(provider, codexSubscriptionConcurrencyLimiter),
             static provider => provider.CodexSubscription is null
@@ -21,20 +21,20 @@ internal static class OpenAIModelProviderRuntimeFactory
                 : "codex");
     }
 
-    public static ICodeAltaModelProviderRuntime CreateChatProviderRuntime(OpenAIChatModelProviderRuntimeOptions options)
+    public static IAgentModelProviderRuntime CreateChatProviderRuntime(OpenAIChatModelProviderRuntimeOptions options)
         => CreateSingleProviderRuntime(
             options.ProviderIdOverride ?? ModelProviderIds.OpenAIChat,
             string.IsNullOrWhiteSpace(options.DisplayNameOverride) ? "OpenAI Chat" : options.DisplayNameOverride.Trim(),
             "openai-chat",
-            LocalAgentTransportKind.OpenAIChatCompletions,
+            AgentTransportKind.OpenAIChatCompletions,
             options,
             static provider => new OpenAIChatTurnExecutor(provider));
 
-    private static ICodeAltaModelProviderRuntime CreateSingleProviderRuntime(
+    private static IAgentModelProviderRuntime CreateSingleProviderRuntime(
         ModelProviderId providerId,
         string displayName,
         string providerType,
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         OpenAIModelProviderRuntimeOptions options,
         Func<OpenAIProviderOptions, IModelProviderTurnExecutor> executorFactory,
         Func<OpenAIProviderOptions, string>? protocolFamilySelector = null)
@@ -55,11 +55,11 @@ internal static class OpenAIModelProviderRuntimeFactory
             protocolFamilySelector);
     }
 
-    private static CodeAltaModelProviderRuntime CreateProviderRuntime(
+    private static AgentModelProviderRuntime CreateProviderRuntime(
         ModelProviderId providerId,
         string displayName,
         string providerType,
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         OpenAIProviderOptions provider,
         Func<OpenAIProviderOptions, IModelProviderTurnExecutor> executorFactory,
         Func<OpenAIProviderOptions, string>? protocolFamilySelector)
@@ -75,7 +75,7 @@ internal static class OpenAIModelProviderRuntimeFactory
             BaseUri = provider.BaseUri,
             IsDefault = provider.IsDefault,
             Profile = provider.Profile ?? CreateDefaultProfile(transportKind),
-            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
+            Compaction = provider.Compaction ?? AgentCompactionSettings.Default,
         };
         var descriptor = new ModelProviderDescriptor(new ModelProviderId(providerKey), providerDisplayName, providerType)
         {
@@ -83,7 +83,7 @@ internal static class OpenAIModelProviderRuntimeFactory
             IsDefault = provider.IsDefault,
             DefaultModelId = provider.SingleModelId,
         };
-        return new CodeAltaModelProviderRuntime(
+        return new AgentModelProviderRuntime(
             descriptor,
             runtimeDescriptor,
             executorFactory(provider));
@@ -106,11 +106,11 @@ internal static class OpenAIModelProviderRuntimeFactory
         }
     }
 
-    private static LocalAgentProviderProfile CreateDefaultProfile(LocalAgentTransportKind transportKind)
+    private static AgentProviderProfile CreateDefaultProfile(AgentTransportKind transportKind)
     {
         return transportKind switch
         {
-            LocalAgentTransportKind.OpenAIResponses => new LocalAgentProviderProfile
+            AgentTransportKind.OpenAIResponses => new AgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = true,
@@ -119,7 +119,7 @@ internal static class OpenAIModelProviderRuntimeFactory
                 MaxTokensFieldName = "max_output_tokens",
                 ReasoningFieldNames = ["reasoning"],
             },
-            _ => new LocalAgentProviderProfile
+            _ => new AgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = true,

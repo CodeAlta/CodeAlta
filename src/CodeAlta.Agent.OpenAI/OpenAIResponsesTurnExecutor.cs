@@ -8,8 +8,8 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Tools;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI.Responses;
 using XenoAtom.Logging;
@@ -18,7 +18,7 @@ namespace CodeAlta.Agent.OpenAI;
 
 internal sealed class OpenAIResponsesTurnExecutor(
     OpenAIProviderOptions provider,
-    CodexSubscriptionConcurrencyLimiter? codexSubscriptionConcurrencyLimiter = null) : IModelProviderTurnExecutor, IModelProviderModelCatalog, ILocalAgentProviderSessionCleanup, IAsyncDisposable
+    CodexSubscriptionConcurrencyLimiter? codexSubscriptionConcurrencyLimiter = null) : IModelProviderTurnExecutor, IModelProviderModelCatalog, IAgentProviderSessionCleanup, IAsyncDisposable
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
     private static readonly ResponseReasoningEffortLevel XHighReasoningEffortLevel = new("xhigh");
@@ -56,7 +56,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return ValueTask.CompletedTask;
     }
 
-    ValueTask ILocalAgentProviderSessionCleanup.DisposeProviderSessionAsync(string sessionId)
+    ValueTask IAgentProviderSessionCleanup.DisposeProviderSessionAsync(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ResetWebSocketSession(sessionId);
@@ -66,9 +66,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return ValueTask.CompletedTask;
     }
 
-    public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+    public Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken = default)
         => ExecuteTurnAsync(
             request,
@@ -76,10 +76,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
             static (_, _) => ValueTask.CompletedTask,
             cancellationToken);
 
-    public async Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+    public async Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -160,7 +160,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 case StreamingResponseOutputTextDeltaUpdate outputTextDelta when !string.IsNullOrEmpty(outputTextDelta.Delta):
                                     attemptState.EmittedAssistantDelta = true;
                                     await onUpdate(
-                                        new LocalAgentTurnDelta
+                                        new AgentTurnDelta
                                         {
                                             Kind = AgentContentKind.Assistant,
                                             ContentId = ResolveStreamingContentId(
@@ -177,7 +177,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 case StreamingResponseRefusalDeltaUpdate refusalDelta when !string.IsNullOrEmpty(refusalDelta.Delta):
                                     attemptState.EmittedAssistantDelta = true;
                                     await onUpdate(
-                                        new LocalAgentTurnDelta
+                                        new AgentTurnDelta
                                         {
                                             Kind = AgentContentKind.Assistant,
                                             ContentId = ResolveStreamingContentId(
@@ -194,7 +194,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 case StreamingResponseReasoningSummaryTextDeltaUpdate reasoningSummaryDelta when !string.IsNullOrEmpty(reasoningSummaryDelta.Delta):
                                     attemptState.EmittedReasoningDelta = true;
                                     await onUpdate(
-                                        new LocalAgentTurnDelta
+                                        new AgentTurnDelta
                                         {
                                             Kind = AgentContentKind.Reasoning,
                                             ContentId = ResolveStreamingReasoningContentId(
@@ -210,7 +210,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 case StreamingResponseReasoningTextDeltaUpdate reasoningTextDelta when !string.IsNullOrEmpty(reasoningTextDelta.Delta):
                                     attemptState.EmittedReasoningDelta = true;
                                     await onUpdate(
-                                        new LocalAgentTurnDelta
+                                        new AgentTurnDelta
                                         {
                                             Kind = AgentContentKind.Reasoning,
                                             ContentId = ResolveStreamingContentId(
@@ -310,9 +310,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     UpdateLiveContinuation(request, fullOptions, completedResponse, assistantMessage);
                     WriteCodexConsoleDiagnostic(
                         provider,
-                        $"mapped assistantParts={assistantMessage.Parts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} textParts={assistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Count().ToString(System.Globalization.CultureInfo.InvariantCulture)} reasoningParts={assistantMessage.Parts.OfType<LocalAgentMessagePart.Reasoning>().Count().ToString(System.Globalization.CultureInfo.InvariantCulture)} toolCalls={assistantMessage.Parts.OfType<LocalAgentMessagePart.ToolCall>().Count().ToString(System.Globalization.CultureInfo.InvariantCulture)} response={completedResponse.Id ?? "(none)"}");
+                        $"mapped assistantParts={assistantMessage.Parts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} textParts={assistantMessage.Parts.OfType<AgentMessagePart.Text>().Count().ToString(System.Globalization.CultureInfo.InvariantCulture)} reasoningParts={assistantMessage.Parts.OfType<AgentMessagePart.Reasoning>().Count().ToString(System.Globalization.CultureInfo.InvariantCulture)} toolCalls={assistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Count().ToString(System.Globalization.CultureInfo.InvariantCulture)} response={completedResponse.Id ?? "(none)"}");
                     LogCodexDiagnostic("response", request, attempt, completedResponse.Id);
-                    return new LocalAgentTurnResponse
+                    return new AgentTurnResponse
                     {
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
@@ -420,7 +420,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         {
             throw;
         }
-        catch (LocalAgentTurnExecutionException)
+        catch (AgentTurnExecutionException)
         {
             throw;
         }
@@ -437,7 +437,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
     }
 
-    private OpenAIResponsesTransport ResolveInitialTransport(LocalAgentTurnRequest request)
+    private OpenAIResponsesTransport ResolveInitialTransport(AgentTurnRequest request)
     {
         var transport = ResolveConfiguredInitialTransport(provider);
         return transport == OpenAIResponsesTransport.WebSocket &&
@@ -493,7 +493,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     private async IAsyncEnumerable<StreamingResponseUpdate> CreateResponseStreamingAsync(
         ResponsesClient client,
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CreateResponseOptions fullOptions,
         OpenAIResponsesTransport transport,
         List<OpenAIResponsesWebSocketSideChannelEvent> sideChannelEvents,
@@ -536,7 +536,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private async ValueTask<OpenAIResponsesWebSocketSessionEntry> GetOrCreateWebSocketSessionAsync(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CancellationToken cancellationToken)
     {
         while (_webSocketSessions.TryGetValue(request.SessionId, out var existing))
@@ -576,7 +576,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private ValueTask<IOpenAIResponsesWebSocketSession> CreateDefaultWebSocketSessionAsync(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CancellationToken cancellationToken)
     {
         if (provider.CodexSubscription is not { } codexOptions)
@@ -650,7 +650,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private void ClearLiveContinuation(string sessionId)
         => _liveContinuations.TryRemove(sessionId, out _);
 
-    private CodexTurnState? GetCodexTurnState(LocalAgentTurnRequest request)
+    private CodexTurnState? GetCodexTurnState(AgentTurnRequest request)
     {
         if (provider.CodexSubscription is null)
         {
@@ -688,7 +688,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private CreateResponseOptions CreateWebSocketContinuationRequestOptions(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CreateResponseOptions fullOptions)
     {
         if (provider.CodexSubscription is null)
@@ -770,10 +770,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private void UpdateLiveContinuation(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CreateResponseOptions fullOptions,
         ResponseResult response,
-        LocalAgentConversationMessage assistantMessage)
+        AgentConversationMessage assistantMessage)
     {
         if (!request.CanUseProviderContinuation ||
             provider.CodexSubscription is null ||
@@ -879,7 +879,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     private void LogCodexDiagnostic(
         string eventName,
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         int attempt,
         string? responseId = null,
         System.Net.HttpStatusCode? httpStatus = null,
@@ -945,8 +945,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private ValueTask<IAsyncDisposable?> CreateCodexConcurrencyLeaseAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+        AgentTurnRequest request,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
         if (provider.CodexSubscription is not { } codexOptions)
@@ -958,9 +958,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private async ValueTask<IAsyncDisposable?> AcquireCodexConcurrencyLeaseAsync(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         OpenAICodexSubscriptionOptions codexOptions,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
         => await _codexSubscriptionConcurrencyLimiter.AcquireAsync(
             provider.ProviderKey,
@@ -1040,7 +1040,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static ResponseResult? CreateResponseFromTerminalOrStreamedItems(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         ResponseResult? completedResponse,
         ResponseResult? latestResponse,
         IReadOnlyDictionary<int, ResponseItem> streamedOutputItems)
@@ -1056,7 +1056,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static ResponseResult? TryCreateResponseWithoutTerminalPayload(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         ResponseResult? latestResponse,
         IReadOnlyDictionary<int, ResponseItem> streamedOutputItems)
     {
@@ -1074,7 +1074,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static ResponseResult CreateResponseWithStreamedOutputItems(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         ResponseResult? sourceResponse,
         IReadOnlyDictionary<int, ResponseItem> streamedOutputItems)
     {
@@ -1098,7 +1098,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private async ValueTask<CreateResponseOptions> CreateRequestPayloadAsync(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CancellationToken cancellationToken)
     {
         var toolDefinitions = request.Tools.Select(CreateFunctionTool).Cast<ResponseTool>().ToArray();
@@ -1113,7 +1113,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             MaxOutputTokenCount = request.MaxOutputTokens,
         };
 
-        foreach (var inputItem in CreateConversationItems(LocalAgentReasoningReplay.SanitizeForRequest(request.Conversation, request)))
+        foreach (var inputItem in CreateConversationItems(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request)))
         {
             options.InputItems.Add(inputItem);
         }
@@ -1166,7 +1166,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return options;
     }
 
-    private static bool SupportsRequestedReasoningEffort(LocalAgentTurnRequest request, AgentReasoningEffort reasoningEffort)
+    private static bool SupportsRequestedReasoningEffort(AgentTurnRequest request, AgentReasoningEffort reasoningEffort)
     {
         if (reasoningEffort == AgentReasoningEffort.None)
         {
@@ -1178,7 +1178,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private async ValueTask ApplyCodexSubscriptionRequestCustomizationAsync(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CreateResponseOptions options,
         OpenAICodexSubscriptionOptions codexOptions,
         CancellationToken cancellationToken)
@@ -1216,7 +1216,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
     }
 
-    private static string? ComposeInstructions(LocalAgentTurnRequest request)
+    private static string? ComposeInstructions(AgentTurnRequest request)
     {
         var systemMessage = string.IsNullOrWhiteSpace(request.SystemMessage)
             ? null
@@ -1241,31 +1241,31 @@ internal sealed class OpenAIResponsesTurnExecutor(
                """;
     }
 
-    private static IReadOnlyList<ResponseItem> CreateConversationItems(IReadOnlyList<LocalAgentConversationMessage> messages)
+    private static IReadOnlyList<ResponseItem> CreateConversationItems(IReadOnlyList<AgentConversationMessage> messages)
     {
         var items = new List<ResponseItem>();
         foreach (var message in messages)
         {
             switch (message.Role)
             {
-                case LocalAgentConversationRole.System:
+                case AgentConversationRole.System:
                     if (TryCreateTextualMessage(message.Parts, static parts => ResponseItem.CreateSystemMessageItem(parts), out var systemMessage))
                     {
                         items.Add(systemMessage);
                     }
 
                     break;
-                case LocalAgentConversationRole.User:
+                case AgentConversationRole.User:
                     if (TryCreateTextualMessage(message.Parts, static parts => ResponseItem.CreateUserMessageItem(parts), out var userMessage))
                     {
                         items.Add(userMessage);
                     }
 
                     break;
-                case LocalAgentConversationRole.Assistant:
+                case AgentConversationRole.Assistant:
                     items.AddRange(CreateAssistantItems(message.Parts));
                     break;
-                case LocalAgentConversationRole.Tool:
+                case AgentConversationRole.Tool:
                     items.AddRange(CreateToolResultItems(message.Parts));
                     break;
             }
@@ -1274,7 +1274,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return items;
     }
 
-    private static IEnumerable<ResponseItem> CreateAssistantItems(IReadOnlyList<LocalAgentMessagePart> parts)
+    private static IEnumerable<ResponseItem> CreateAssistantItems(IReadOnlyList<AgentMessagePart> parts)
     {
         var contentParts = new List<ResponseContentPart>();
         var reasoningItems = new List<ResponseItem>();
@@ -1284,16 +1284,16 @@ internal sealed class OpenAIResponsesTurnExecutor(
         {
             switch (part)
             {
-                case LocalAgentMessagePart.Text text:
+                case AgentMessagePart.Text text:
                     contentParts.Add(ResponseContentPart.CreateOutputTextPart(text.Value, []));
                     break;
-                case LocalAgentMessagePart.Uri uri:
+                case AgentMessagePart.Uri uri:
                     contentParts.Add(ResponseContentPart.CreateOutputTextPart(uri.Value, []));
                     break;
-                case LocalAgentMessagePart.Data data:
+                case AgentMessagePart.Data data:
                     contentParts.Add(ResponseContentPart.CreateOutputTextPart(data.Name ?? data.MediaType ?? "attachment", []));
                     break;
-                case LocalAgentMessagePart.Reasoning reasoning:
+                case AgentMessagePart.Reasoning reasoning:
                     var reasoningItem = ResponseItem.CreateReasoningItem(reasoning.Value ?? string.Empty);
                     if (!string.IsNullOrWhiteSpace(reasoning.ProtectedData))
                     {
@@ -1302,11 +1302,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
                     reasoningItems.Add(reasoningItem);
                     break;
-                case LocalAgentMessagePart.ToolCall toolCall:
+                case AgentMessagePart.ToolCall toolCall:
                     toolCalls.Add(
                         ResponseItem.CreateFunctionCallItem(
                             toolCall.CallId,
-                            LocalAgentToolBridge.GetRegisteredToolName(toolCall.Name),
+                            AgentToolBridge.GetRegisteredToolName(toolCall.Name),
                             BinaryData.FromString(toolCall.Arguments.GetRawText())));
                     break;
             }
@@ -1328,9 +1328,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
     }
 
-    private static IEnumerable<ResponseItem> CreateToolResultItems(IReadOnlyList<LocalAgentMessagePart> parts)
+    private static IEnumerable<ResponseItem> CreateToolResultItems(IReadOnlyList<AgentMessagePart> parts)
     {
-        foreach (var part in parts.OfType<LocalAgentMessagePart.ToolResult>())
+        foreach (var part in parts.OfType<AgentMessagePart.ToolResult>())
         {
             yield return ResponseItem.CreateFunctionCallOutputItem(
                 part.CallId,
@@ -1339,7 +1339,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static bool TryCreateTextualMessage(
-        IReadOnlyList<LocalAgentMessagePart> parts,
+        IReadOnlyList<AgentMessagePart> parts,
         Func<ResponseContentPart[], MessageResponseItem> factory,
         out MessageResponseItem message)
     {
@@ -1348,13 +1348,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
         {
             switch (part)
             {
-                case LocalAgentMessagePart.Text text:
+                case AgentMessagePart.Text text:
                     contentParts.Add(ResponseContentPart.CreateInputTextPart(text.Value));
                     break;
-                case LocalAgentMessagePart.Uri uri when TryCreateInputContentPart(uri, out var uriPart):
+                case AgentMessagePart.Uri uri when TryCreateInputContentPart(uri, out var uriPart):
                     contentParts.Add(uriPart);
                     break;
-                case LocalAgentMessagePart.Data data when TryCreateInputContentPart(data, out var dataPart):
+                case AgentMessagePart.Data data when TryCreateInputContentPart(data, out var dataPart):
                     contentParts.Add(dataPart);
                     break;
             }
@@ -1370,7 +1370,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return true;
     }
 
-    private static bool TryCreateInputContentPart(LocalAgentMessagePart.Uri part, out ResponseContentPart contentPart)
+    private static bool TryCreateInputContentPart(AgentMessagePart.Uri part, out ResponseContentPart contentPart)
     {
         if (Uri.TryCreate(part.Value, UriKind.Absolute, out var uri))
         {
@@ -1384,7 +1384,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return false;
     }
 
-    private static bool TryCreateInputContentPart(LocalAgentMessagePart.Data part, out ResponseContentPart contentPart)
+    private static bool TryCreateInputContentPart(AgentMessagePart.Data part, out ResponseContentPart contentPart)
     {
         var mediaType = string.IsNullOrWhiteSpace(part.MediaType)
             ? "application/octet-stream"
@@ -1398,19 +1398,19 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     private static FunctionTool CreateFunctionTool(AgentToolDefinition tool)
         => ResponseTool.CreateFunctionTool(
-            LocalAgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
-            BinaryData.FromString(LocalAgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema).GetRawText()),
+            AgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
+            BinaryData.FromString(AgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema).GetRawText()),
             strictModeEnabled: true,
             functionDescription: tool.Spec.Description);
 
-    private static (LocalAgentConversationMessage Message, IReadOnlyList<string?> PartContentIds) MapAssistantMessage(
-        LocalAgentTurnRequest request,
+    private static (AgentConversationMessage Message, IReadOnlyList<string?> PartContentIds) MapAssistantMessage(
+        AgentTurnRequest request,
         ResponseResult response,
         IReadOnlyDictionary<int, string>? streamedOutputItemIds = null)
     {
-        var parts = new List<LocalAgentMessagePart>();
+        var parts = new List<AgentMessagePart>();
         var partContentIds = new List<string?>();
-        var reasoningProvenance = LocalAgentReasoningReplay.CreateProvenance(request);
+        var reasoningProvenance = AgentReasoningReplay.CreateProvenance(request);
         for (var outputIndex = 0; outputIndex < response.OutputItems.Count; outputIndex++)
         {
             var item = response.OutputItems[outputIndex];
@@ -1434,7 +1434,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
                     if (textBuilder.Length > 0)
                     {
-                        parts.Add(new LocalAgentMessagePart.Text(textBuilder.ToString()));
+                        parts.Add(new AgentMessagePart.Text(textBuilder.ToString()));
                         partContentIds.Add(stableItemId);
                     }
 
@@ -1442,7 +1442,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 case ReasoningResponseItem reasoning:
                     if (!string.IsNullOrWhiteSpace(reasoning.GetSummaryText()) || !string.IsNullOrWhiteSpace(reasoning.EncryptedContent))
                     {
-                        parts.Add(new LocalAgentMessagePart.Reasoning(
+                        parts.Add(new AgentMessagePart.Reasoning(
                             reasoning.GetSummaryText() ?? string.Empty,
                             string.IsNullOrWhiteSpace(reasoning.EncryptedContent) ? null : reasoning.EncryptedContent,
                             reasoningProvenance));
@@ -1451,7 +1451,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
                     break;
                 case FunctionCallResponseItem toolCall:
-                    parts.Add(new LocalAgentMessagePart.ToolCall(
+                    parts.Add(new AgentMessagePart.ToolCall(
                         toolCall.CallId,
                         toolCall.FunctionName,
                         DeserializeJson(toolCall.FunctionArguments)));
@@ -1460,7 +1460,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             }
         }
 
-        return (new LocalAgentConversationMessage(LocalAgentConversationRole.Assistant, parts), partContentIds);
+        return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds);
     }
 
     private static string? ResolveCompletedItemContentId(
@@ -1479,7 +1479,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return string.IsNullOrWhiteSpace(item.Id) ? response.Id : item.Id;
     }
 
-    private static AgentSessionUsage? CreateUsage(LocalAgentTurnRequest request, ResponseResult response)
+    private static AgentSessionUsage? CreateUsage(AgentTurnRequest request, ResponseResult response)
     {
         if (response.Usage is null)
         {
@@ -1487,7 +1487,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         var cachedInputTokens = response.Usage.InputTokenDetails?.CachedTokenCount;
-        return LocalAgentUsageFactory.CreateOperationUsage(
+        return AgentUsageFactory.CreateOperationUsage(
             modelId: response.Model,
             modelInfo: request.ModelInfo,
             inputTokens: response.Usage.InputTokenCount,
@@ -1913,9 +1913,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return document.RootElement.Clone();
     }
 
-    private static string? ExtractSummary(LocalAgentConversationMessage message)
+    private static string? ExtractSummary(AgentConversationMessage message)
         => message.Parts
-            .OfType<LocalAgentMessagePart.Text>()
+            .OfType<AgentMessagePart.Text>()
             .Select(static part => part.Value)
             .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
 
@@ -1995,9 +1995,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
     }
 
-    private static LocalAgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+    private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
         => new(
-            new LocalAgentTurnFailure(
+            new AgentTurnFailure(
                 ex.Message,
                 IsContextOverflowMessage(ex.Message)),
             ex);
@@ -2074,7 +2074,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         if (provider.CodexSubscription is null ||
             !attemptState.CanRetrySafely ||
             attempt >= retryBudget ||
-            exception is LocalAgentTurnExecutionException ||
+            exception is AgentTurnExecutionException ||
             exception is OperationCanceledException && !IsTransportAbortedOperationCanceled(exception))
         {
             return false;
@@ -2105,7 +2105,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             alreadyActivatedFallback ||
             attempt < retryBudget ||
             !attemptState.CanRetrySafely ||
-            exception is LocalAgentTurnExecutionException ||
+            exception is AgentTurnExecutionException ||
             exception is OperationCanceledException && !IsTransportAbortedOperationCanceled(exception) ||
             !IsRetryableCodexSubscriptionException(exception))
         {
@@ -2116,8 +2116,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return true;
     }
 
-    private static LocalAgentTurnSessionUpdate CreateCodexReconnectSessionUpdate(
-        LocalAgentTurnRequest request,
+    private static AgentTurnSessionUpdate CreateCodexReconnectSessionUpdate(
+        AgentTurnRequest request,
         CodexStreamAttemptState attemptState,
         int retryAttempt,
         int retryBudget,
@@ -2127,7 +2127,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         var maxRetries = Math.Max(retryBudget - 1, 1);
         var retryText = retryAttempt.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var maxRetriesText = maxRetries.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return new LocalAgentTurnSessionUpdate
+        return new AgentTurnSessionUpdate
         {
             Kind = AgentSessionUpdateKind.Reconnecting,
             Message = $"Reconnecting to ChatGPT/Codex... {retryText}/{maxRetriesText}",
@@ -2135,12 +2135,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
         };
     }
 
-    private static LocalAgentTurnSessionUpdate CreateCodexConcurrencyLimitWaitSessionUpdate(
+    private static AgentTurnSessionUpdate CreateCodexConcurrencyLimitWaitSessionUpdate(
         string providerKey,
         int maxConcurrentRequests)
     {
         var maxConcurrentRequestsText = maxConcurrentRequests.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return new LocalAgentTurnSessionUpdate
+        return new AgentTurnSessionUpdate
         {
             Kind = AgentSessionUpdateKind.Warning,
             Message = $"Waiting for CodeAlta's local ChatGPT/Codex concurrency guard: {maxConcurrentRequestsText} active request(s) for this ChatGPT account are already running. To allow more parallel sessions, set max_concurrent_requests to a higher value under [providers.{providerKey}] in config.toml.",
@@ -2148,7 +2148,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static JsonElement CreateCodexReconnectDetails(
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         CodexStreamAttemptState attemptState,
         int retryAttempt,
         int retryBudget,
@@ -2187,7 +2187,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static string CreateDraftAttemptId(LocalAgentTurnRequest request, int attempt)
+    private static string CreateDraftAttemptId(AgentTurnRequest request, int attempt)
         => $"{request.RunId.Value}:{attempt.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 
     private static string GetRetryReason(Exception exception)

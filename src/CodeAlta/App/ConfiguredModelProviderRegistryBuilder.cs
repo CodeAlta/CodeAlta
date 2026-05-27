@@ -3,8 +3,8 @@ using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Agent.GoogleGenAI;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
@@ -166,12 +166,12 @@ internal static class ConfiguredModelProviderRegistryBuilder
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
                     ExtraHeaders = CreateRequestHeaders(
-                        LocalAgentTransportKind.OpenAIChatCompletions,
+                        AgentTransportKind.OpenAIChatCompletions,
                         definition.ProviderKey,
                         baseUri,
                         definition.Request),
                     ExtraBody = CreateOpenAIExtraBody(
-                        LocalAgentTransportKind.OpenAIChatCompletions,
+                        AgentTransportKind.OpenAIChatCompletions,
                         definition.ProviderKey,
                         baseUri,
                         definition),
@@ -235,12 +235,12 @@ internal static class ConfiguredModelProviderRegistryBuilder
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
                     ExtraHeaders = CreateRequestHeaders(
-                        LocalAgentTransportKind.OpenAIResponses,
+                        AgentTransportKind.OpenAIResponses,
                         definition.ProviderKey,
                         baseUri,
                         definition.Request),
                     ExtraBody = CreateOpenAIExtraBody(
-                        LocalAgentTransportKind.OpenAIResponses,
+                        AgentTransportKind.OpenAIResponses,
                         definition.ProviderKey,
                         baseUri,
                         definition),
@@ -476,12 +476,12 @@ internal static class ConfiguredModelProviderRegistryBuilder
             SingleModelId = NormalizeText(definition.SingleModelId),
             ModelsDevProviderId = NormalizeText(definition.ModelsDevProviderId),
             ExtraHeaders = CreateRequestHeaders(
-                LocalAgentTransportKind.OpenAIResponses,
+                AgentTransportKind.OpenAIResponses,
                 definition.ProviderKey,
                 baseUri,
                 definition.Request),
             ExtraBody = CreateOpenAIExtraBody(
-                LocalAgentTransportKind.OpenAIResponses,
+                AgentTransportKind.OpenAIResponses,
                 definition.ProviderKey,
                 baseUri,
                 definition),
@@ -506,9 +506,9 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return true;
     }
 
-    private static LocalAgentProviderProfile CreateXaiProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile CreateXaiProfile(CodeAltaProviderProfileDocument? document)
     {
-        var profile = new LocalAgentProviderProfile
+        var profile = new AgentProviderProfile
         {
             SupportsDeveloperRole = true,
             SupportsStore = false,
@@ -564,7 +564,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
                     ExtraHeaders = CreateRequestHeaders(
-                        LocalAgentTransportKind.AnthropicMessages,
+                        AgentTransportKind.AnthropicMessages,
                         definition.ProviderKey,
                         baseUri,
                         definition.Request),
@@ -663,7 +663,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
                     ExtraHeaders = CreateRequestHeaders(
-                        useVertexAI ? LocalAgentTransportKind.GoogleVertexAI : LocalAgentTransportKind.GoogleGeminiApi,
+                        useVertexAI ? AgentTransportKind.GoogleVertexAI : AgentTransportKind.GoogleGeminiApi,
                         definition.ProviderKey,
                         baseUri,
                         definition.Request),
@@ -733,16 +733,16 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return NormalizeText(Environment.GetEnvironmentVariable(normalizedEnvironmentVariableName));
     }
 
-    private static LocalAgentProviderProfile CreateOpenAIResponsesProfile(
+    private static AgentProviderProfile CreateOpenAIResponsesProfile(
         string providerKey,
         Uri? apiUrl,
         CodeAltaProviderProfileDocument? document)
     {
-        var profile = CreateOpenAIBaseProfile(LocalAgentTransportKind.OpenAIResponses, providerKey, apiUrl, responses: true);
+        var profile = CreateOpenAIBaseProfile(AgentTransportKind.OpenAIResponses, providerKey, apiUrl, responses: true);
         if (document is not null)
         {
             var overridden = ApplyProfileOverrides(profile, document);
-            profile = new LocalAgentProviderProfile
+            profile = new AgentProviderProfile
             {
                 SupportsDeveloperRole = overridden.SupportsDeveloperRole,
                 SupportsStore = false,
@@ -758,18 +758,18 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return profile;
     }
 
-    private static LocalAgentProviderProfile CreateOpenAIChatProfile(
+    private static AgentProviderProfile CreateOpenAIChatProfile(
         string providerKey,
         Uri? apiUrl,
         CodeAltaProviderProfileDocument? document)
     {
-        var profile = CreateOpenAIBaseProfile(LocalAgentTransportKind.OpenAIChatCompletions, providerKey, apiUrl, responses: false);
+        var profile = CreateOpenAIBaseProfile(AgentTransportKind.OpenAIChatCompletions, providerKey, apiUrl, responses: false);
         return document is null ? profile : ApplyProfileOverrides(profile, document);
     }
 
-    private static LocalAgentProviderProfile CreateAzureOpenAIProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile CreateAzureOpenAIProfile(CodeAltaProviderProfileDocument? document)
     {
-        var profile = new LocalAgentProviderProfile
+        var profile = new AgentProviderProfile
         {
             SupportsDeveloperRole = true,
             SupportsStore = false,
@@ -782,14 +782,14 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return document is null ? profile : ApplyProfileOverrides(profile, document);
     }
 
-    private static LocalAgentProviderProfile CreateOpenAIBaseProfile(
-        LocalAgentTransportKind transportKind,
+    private static AgentProviderProfile CreateOpenAIBaseProfile(
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? apiUrl,
         bool responses)
     {
         var profile = responses
-            ? new LocalAgentProviderProfile
+            ? new AgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = true,
@@ -798,7 +798,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 MaxTokensFieldName = "max_output_tokens",
                 ReasoningFieldNames = ["reasoning"],
             }
-            : new LocalAgentProviderProfile
+            : new AgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = true,
@@ -811,9 +811,9 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return RawApiProviderDefaultsCatalog.ApplyProfileDefaults(transportKind, providerKey, apiUrl, profile);
     }
 
-    private static LocalAgentProviderProfile CreateCodexSubscriptionProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile CreateCodexSubscriptionProfile(CodeAltaProviderProfileDocument? document)
     {
-        var profile = new LocalAgentProviderProfile
+        var profile = new AgentProviderProfile
         {
             SupportsDeveloperRole = true,
             SupportsStore = false,
@@ -826,9 +826,9 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return document is null ? profile : ApplyProfileOverrides(profile, document);
     }
 
-    private static LocalAgentProviderProfile CreateCopilotDirectProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile CreateCopilotDirectProfile(CodeAltaProviderProfileDocument? document)
     {
-        var profile = new LocalAgentProviderProfile
+        var profile = new AgentProviderProfile
         {
             SupportsDeveloperRole = true,
             SupportsStore = false,
@@ -842,7 +842,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return document is null ? profile : ApplyProfileOverrides(profile, document);
     }
 
-    private static LocalAgentProviderProfile? CreateAnthropicProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile? CreateAnthropicProfile(CodeAltaProviderProfileDocument? document)
     {
         if (document is null)
         {
@@ -850,7 +850,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
         }
 
         return ApplyProfileOverrides(
-            new LocalAgentProviderProfile
+            new AgentProviderProfile
             {
                 SupportsDeveloperRole = false,
                 StreamsUsage = true,
@@ -859,7 +859,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
             document);
     }
 
-    private static LocalAgentProviderProfile? CreateGoogleGenAIProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile? CreateGoogleGenAIProfile(CodeAltaProviderProfileDocument? document)
     {
         if (document is null)
         {
@@ -867,7 +867,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
         }
 
         return ApplyProfileOverrides(
-            new LocalAgentProviderProfile
+            new AgentProviderProfile
             {
                 SupportsDeveloperRole = false,
                 SupportsReasoningEffort = true,
@@ -877,14 +877,14 @@ internal static class ConfiguredModelProviderRegistryBuilder
             document);
     }
 
-    private static LocalAgentProviderProfile ApplyProfileOverrides(
-        LocalAgentProviderProfile profile,
+    private static AgentProviderProfile ApplyProfileOverrides(
+        AgentProviderProfile profile,
         CodeAltaProviderProfileDocument document)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(document);
 
-        return new LocalAgentProviderProfile
+        return new AgentProviderProfile
         {
             SupportsDeveloperRole = document.SupportsDeveloperRole ?? profile.SupportsDeveloperRole,
             SupportsStore = document.SupportsStore ?? profile.SupportsStore,
@@ -1030,7 +1030,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
     }
 
     private static IReadOnlyDictionary<string, string>? CreateRequestHeaders(
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri,
         CodeAltaProviderRequestDocument? request)
@@ -1067,7 +1067,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
     }
 
     private static IReadOnlyDictionary<string, object?>? CreateOpenAIExtraBody(
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri,
         CodeAltaProviderDocument definition)
@@ -1158,19 +1158,19 @@ internal static class ConfiguredModelProviderRegistryBuilder
         };
     }
 
-    private static LocalAgentCompactionSettings CreateCompactionSettings(CodeAltaProviderCompactionDocument? compaction)
+    private static AgentCompactionSettings CreateCompactionSettings(CodeAltaProviderCompactionDocument? compaction)
     {
         var normalized = compaction ?? new CodeAltaProviderCompactionDocument();
-        return new LocalAgentCompactionSettings(
-            Enabled: normalized.Enabled ?? LocalAgentCompactionSettings.Default.Enabled,
-            Ratio: normalized.Ratio ?? LocalAgentCompactionSettings.Default.Ratio,
-            KeepLastUserMessage: normalized.KeepLastUserMessage ?? LocalAgentCompactionSettings.Default.KeepLastUserMessage,
-            AllowSplitTurn: normalized.AllowSplitTurn ?? LocalAgentCompactionSettings.Default.AllowSplitTurn)
+        return new AgentCompactionSettings(
+            Enabled: normalized.Enabled ?? AgentCompactionSettings.Default.Enabled,
+            Ratio: normalized.Ratio ?? AgentCompactionSettings.Default.Ratio,
+            KeepLastUserMessage: normalized.KeepLastUserMessage ?? AgentCompactionSettings.Default.KeepLastUserMessage,
+            AllowSplitTurn: normalized.AllowSplitTurn ?? AgentCompactionSettings.Default.AllowSplitTurn)
         {
-            SummaryOutputRatio = normalized.SummaryOutputRatio ?? LocalAgentCompactionSettings.Default.SummaryOutputRatio,
-            PostCompactionTargetRatio = normalized.PostCompactionTargetRatio ?? LocalAgentCompactionSettings.Default.PostCompactionTargetRatio,
-            SummaryShareOfTarget = normalized.SummaryShareOfTarget ?? LocalAgentCompactionSettings.Default.SummaryShareOfTarget,
-            FileContextShareOfSummaryTarget = normalized.FileContextShareOfSummaryTarget ?? LocalAgentCompactionSettings.Default.FileContextShareOfSummaryTarget,
+            SummaryOutputRatio = normalized.SummaryOutputRatio ?? AgentCompactionSettings.Default.SummaryOutputRatio,
+            PostCompactionTargetRatio = normalized.PostCompactionTargetRatio ?? AgentCompactionSettings.Default.PostCompactionTargetRatio,
+            SummaryShareOfTarget = normalized.SummaryShareOfTarget ?? AgentCompactionSettings.Default.SummaryShareOfTarget,
+            FileContextShareOfSummaryTarget = normalized.FileContextShareOfSummaryTarget ?? AgentCompactionSettings.Default.FileContextShareOfSummaryTarget,
         };
     }
 

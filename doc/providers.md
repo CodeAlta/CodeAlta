@@ -68,10 +68,10 @@ Important behavior:
 | `openai-responses` | `CodeAlta.Agent.OpenAI` responses executor | Requires API key. Uses Responses streaming over HTTP by default and stores local CodeAlta session journals. |
 | `azure-openai` | `CodeAlta.Agent.OpenAI` Azure OpenAI chat-completions executor | Requires API key and an Azure OpenAI resource endpoint. Uses deployment names as model ids. |
 | `codex` | `CodeAlta.Agent.OpenAI` responses executor with subscription options | Uses ChatGPT/Codex subscription credentials stored in CodeAlta state; not treated as an OpenAI platform API-key provider. |
-| `copilot` | `CodeAlta.Agent.Copilot` direct HTTP executor | Uses configured token/device-flow auth and dispatches turns through compatible local-runtime executors according to the selected model. |
+| `copilot` | `CodeAlta.Agent.Copilot` direct HTTP executor | Uses configured token/device-flow auth and dispatches turns through compatible agent-runtime executors according to the selected model. |
 | `xai` | `CodeAlta.Agent.Xai` direct HTTP executor | PKCE browser OAuth or device-code OAuth against the xAI API; every turn is dispatched through the OpenAI Responses executor. |
-| `anthropic` | `CodeAlta.Agent.Anthropic` | Requires API key. Wraps SDK chat streaming through the local runtime and supports model metadata enrichment. |
-| `google-genai` | `CodeAlta.Agent.GoogleGenAI` | Requires API key. Wraps SDK chat streaming through the local runtime and supports model metadata enrichment. |
+| `anthropic` | `CodeAlta.Agent.Anthropic` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
+| `google-genai` | `CodeAlta.Agent.GoogleGenAI` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
 | `vertex-ai` | `CodeAlta.Agent.GoogleGenAI` | Uses Vertex project/location settings instead of an API key. |
 
 External ACP CLI adapters are no longer registered as model providers. Legacy `[acp]` config is ignored and preserved only as compatibility data.
@@ -162,7 +162,7 @@ Relevant config keys for `type = "codex"` include `auth_source`, `account_id`, `
 
 The `copilot` provider type registers direct HTTP access through `CodeAlta.Agent.Copilot`. Supported auth sources are device-flow, a GitHub-token environment variable, or a provider-token environment variable. Device-flow and GitHub-token auth exchange for a provider token and cache CodeAlta-owned credentials under the global state root.
 
-Model discovery uses the provider `/models` endpoint with a static fallback according to configuration. Per-model dispatch selects the compatible local-runtime executor for Responses, chat-completions, or messages-style turns. Optional settings control enterprise domain, model-policy handling, preview model inclusion, single-model pinning, model overrides, and protocol tracing.
+Model discovery uses the provider `/models` endpoint with a static fallback according to configuration. Per-model dispatch selects the compatible agent-runtime executor for Responses, chat-completions, or messages-style turns. Optional settings control enterprise domain, model-policy handling, preview model inclusion, single-model pinning, model overrides, and protocol tracing.
 
 ## Direct HTTP `xai` provider
 
@@ -181,7 +181,7 @@ Relevant config keys for `type = "xai"` include `auth_source`, `model_discovery`
 
 ## Anthropic and Google providers
 
-`anthropic`, `google-genai`, and `vertex-ai` are implemented CodeAlta-runtime providers, not placeholders. They wrap SDK chat streaming through `LocalAgentChatClientTurnExecutor`, list upstream models when supported, and can be constrained with `single_model_id`.
+`anthropic`, `google-genai`, and `vertex-ai` are implemented CodeAlta-runtime providers, not placeholders. They wrap SDK chat streaming through `ChatClientTurnExecutor`, list upstream models when supported, and can be constrained with `single_model_id`.
 
 `vertex-ai` uses project/location configuration and application-default/environment credentials expected by the Google SDK. `google-genai` uses API-key configuration. Both can use `models_dev_provider_id` and `model_overrides` for context-window and output-limit metadata.
 

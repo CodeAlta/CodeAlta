@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Presentation.Sessions;
 
@@ -18,7 +18,7 @@ internal sealed record SessionInfoReport(
     int? AssistantMessageCount,
     SessionInfoStorageLocation? StorageLocation,
     IReadOnlyList<SessionInfoFact> ProviderFacts,
-    IReadOnlyList<LocalAgentLoadedSkillState> LoadedSkills);
+    IReadOnlyList<AgentLoadedSkillState> LoadedSkills);
 
 internal sealed record SessionInfoStorageLocation(
     string Path,

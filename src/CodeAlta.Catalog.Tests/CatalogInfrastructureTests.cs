@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Bootstrap;
 using CodeAlta.Catalog.Skills;
@@ -552,7 +552,7 @@ public sealed class CatalogInfrastructureTests
         await catalog.JournalStore.EnsureHeaderAsync(session).ConfigureAwait(false);
         await catalog.JournalStore.AppendStateAsync(session, new SessionViewLocalState { MessageCount = 42 }).ConfigureAwait(false);
 
-        var path = new LocalAgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        var path = new AgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
         var firstLine = File.ReadLines(path).First();
         using var document = JsonDocument.Parse(firstLine);
         Assert.AreEqual(SessionViewJournalStore.SessionHeaderEventType, document.RootElement.GetProperty("backendEventType").GetString());
@@ -592,7 +592,7 @@ public sealed class CatalogInfrastructureTests
         var writes = Enumerable.Range(0, 40)
             .Select(index => index % 2 == 0
                 ? sessionStore.UpsertSessionAsync(
-                    new LocalAgentSessionSummary
+                    new AgentSessionSummary
                     {
                         SessionId = session.SessionId,
                         ProviderId = new ModelProviderId(session.ProviderId),
@@ -606,7 +606,7 @@ public sealed class CatalogInfrastructureTests
 
         await Task.WhenAll(writes).ConfigureAwait(false);
 
-        var path = new LocalAgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        var path = new AgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
         var lines = File.ReadLines(path).ToArray();
         Assert.AreEqual(41, lines.Length);
         using var firstLine = JsonDocument.Parse(lines[0]);
@@ -636,7 +636,7 @@ public sealed class CatalogInfrastructureTests
         };
 
         await catalog.JournalStore.EnsureHeaderAsync(session).ConfigureAwait(false);
-        var path = new LocalAgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        var path = new AgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await using var exclusiveHandle = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
@@ -678,7 +678,7 @@ public sealed class CatalogInfrastructureTests
         };
 
         await sessionStore.UpsertSessionAsync(
-                new LocalAgentSessionSummary
+                new AgentSessionSummary
                 {
                     SessionId = session.SessionId,
                     ProviderId = new ModelProviderId(session.ProviderId),
@@ -691,7 +691,7 @@ public sealed class CatalogInfrastructureTests
 
         await catalog.JournalStore.AppendStateAsync(session, new SessionViewLocalState { MessageCount = 7 }).ConfigureAwait(false);
 
-        var path = new LocalAgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        var path = new AgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
         var lines = File.ReadLines(path).ToArray();
         Assert.AreEqual(3, lines.Length);
         using var firstLine = JsonDocument.Parse(lines[0]);
@@ -723,7 +723,7 @@ public sealed class CatalogInfrastructureTests
         };
 
         await catalog.JournalStore.AppendStateAsync(session, new SessionViewLocalState { MessageCount = 99 }).ConfigureAwait(false);
-        var path = new LocalAgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        var path = new AgentRuntimePathLayout(options.GlobalRoot).GetSessionFilePath(session.SessionId, session.CreatedAt);
         var padding = new string('x', 70 * 1024);
         await File.AppendAllTextAsync(path, $"{{\"$type\":\"raw\",\"ProviderId\":\"codex\",\"sessionId\":\"{session.SessionId}\",\"timestamp\":\"{createdAt:O}\",\"backendEventType\":\"padding\",\"raw\":{{\"value\":\"{padding}\"}}}}{Environment.NewLine}").ConfigureAwait(false);
 

@@ -151,7 +151,7 @@ internal static class SessionInfoFormatter
         }
     }
 
-    private static void AppendLoadedSkills(StringBuilder builder, IReadOnlyList<CodeAlta.Agent.LocalRuntime.LocalAgentLoadedSkillState> loadedSkills)
+    private static void AppendLoadedSkills(StringBuilder builder, IReadOnlyList<CodeAlta.Agent.Runtime.AgentLoadedSkillState> loadedSkills)
     {
         if (loadedSkills.Count == 0)
         {

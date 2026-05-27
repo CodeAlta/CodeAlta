@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Presentation.Sessions;
@@ -104,14 +104,14 @@ internal static class SessionInfoReportBuilder
         return facts;
     }
 
-    private static IReadOnlyList<LocalAgentLoadedSkillState> BuildLoadedSkills(IReadOnlyList<AgentEvent>? history)
+    private static IReadOnlyList<AgentLoadedSkillState> BuildLoadedSkills(IReadOnlyList<AgentEvent>? history)
     {
         if (history is null)
         {
             return [];
         }
 
-        var loadedSkills = new Dictionary<string, LocalAgentLoadedSkillState>(StringComparer.OrdinalIgnoreCase);
+        var loadedSkills = new Dictionary<string, AgentLoadedSkillState>(StringComparer.OrdinalIgnoreCase);
         foreach (var rawEvent in history.OfType<AgentRawEvent>())
         {
             if (!string.Equals(rawEvent.BackendEventType, "local.skillActivation", StringComparison.Ordinal))
@@ -119,7 +119,7 @@ internal static class SessionInfoReportBuilder
                 continue;
             }
 
-            var skill = rawEvent.Raw.ToLocalAgentLoadedSkillState();
+            var skill = rawEvent.Raw.ToAgentLoadedSkillState();
             if (skill is null || string.IsNullOrWhiteSpace(skill.Name))
             {
                 continue;

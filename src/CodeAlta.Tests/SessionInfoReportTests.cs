@@ -1,6 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Presentation.Sessions;
 
@@ -39,7 +39,7 @@ public sealed class SessionInfoReportTests
                     session.StartedAt.Value.AddMinutes(4),
                     "local.skillActivation",
                     JsonSerializer.SerializeToElement(
-                        new LocalAgentLoadedSkillState
+                        new AgentLoadedSkillState
                         {
                             Name = "code-review",
                             SkillFilePath = @"C:\code\CodeAlta\.alta\skills\code-review\SKILL.md",
@@ -121,7 +121,7 @@ public sealed class SessionInfoReportTests
             ],
             LoadedSkills:
             [
-                new LocalAgentLoadedSkillState
+                new AgentLoadedSkillState
                 {
                     Name = "code-review",
                     SkillFilePath = @"C:\skills\code-review\SKILL.md",

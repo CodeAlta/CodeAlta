@@ -10,7 +10,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI;
@@ -156,7 +156,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 {
                     ProviderKey = "compat-provider",
                     IsDefault = true,
-                    Profile = new LocalAgentProviderProfile
+                    Profile = new AgentProviderProfile
                     {
                         SupportsDeveloperRole = false,
                         SupportsReasoningEffort = true,
@@ -240,7 +240,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 {
                     ProviderKey = "compat-provider",
                     IsDefault = true,
-                    Profile = new LocalAgentProviderProfile
+                    Profile = new AgentProviderProfile
                     {
                         SupportsDeveloperRole = true,
                         SupportsReasoningEffort = true,
@@ -284,7 +284,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 contentUpdate: [ChatMessageContentPart.CreateTextPart("OK")],
                 model: "qwen-test"),
         ]);
-        var profile = new LocalAgentProviderProfile
+        var profile = new AgentProviderProfile
         {
             SupportsStore = false,
             SupportsParallelToolCalls = false,
@@ -299,14 +299,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var executor = new OpenAIChatTurnExecutor(provider);
 
         _ = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = new ModelProviderRuntimeDescriptor
                     {
                         ProtocolFamily = "openai",
                         ProviderKey = "alibaba",
                         DisplayName = "Alibaba",
-                        TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
+                        TransportKind = AgentTransportKind.OpenAIChatCompletions,
                         Profile = profile,
                     },
                     ProviderId = new ModelProviderId("alibaba"),
@@ -316,9 +316,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     MaxOutputTokens = 1234,
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("Hello")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("Hello")]),
                     ],
                     Tools =
                     [
@@ -329,7 +329,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                                 JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""").RootElement.Clone()),
                             static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
                     ],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-1",
                         ProtocolFamily = "openai",
@@ -367,14 +367,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var executor = new OpenAIChatTurnExecutor(provider);
 
         _ = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = new ModelProviderRuntimeDescriptor
                     {
                         ProtocolFamily = "openai",
                         ProviderKey = "openai",
                         DisplayName = "OpenAI",
-                        TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
+                        TransportKind = AgentTransportKind.OpenAIChatCompletions,
                     },
                     ProviderId = new ModelProviderId("openai"),
                     SessionId = "session-1",
@@ -382,9 +382,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     ModelId = "gpt-test",
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("Inspect README")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("Inspect README")]),
                     ],
                     Tools =
                     [
@@ -395,7 +395,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                                 JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""").RootElement.Clone()),
                             static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
                     ],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-1",
                         ProtocolFamily = "openai",
@@ -452,7 +452,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             Input = new AgentInput([new AgentInputItem.Text("Trace this")]),
         }).ConfigureAwait(false);
 
-        var tracePath = new LocalAgentRuntimePathLayout(temp.Path).GetSessionTraceFilePath(session.SessionId);
+        var tracePath = new AgentRuntimePathLayout(temp.Path).GetSessionTraceFilePath(session.SessionId);
         Assert.IsTrue(File.Exists(tracePath));
         var trace = File.ReadAllText(tracePath);
         StringAssert.Contains(trace, "### turn start provider=openai");
@@ -658,7 +658,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 {
                     ProviderKey = "deepseek",
                     IsDefault = true,
-                    Profile = new LocalAgentProviderProfile
+                    Profile = new AgentProviderProfile
                     {
                         SupportsDeveloperRole = true,
                         SupportsReasoningEffort = true,
@@ -788,7 +788,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 {
                     ProviderKey = "minimax",
                     IsDefault = true,
-                    Profile = new LocalAgentProviderProfile
+                    Profile = new AgentProviderProfile
                     {
                         SupportsDeveloperRole = false,
                         SupportsReasoningEffort = true,
@@ -855,7 +855,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CreateTurnRequest(),
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
-        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Recovered answer.", text);
         Assert.AreEqual("response-recovered", response.ProviderSessionId);
     }
@@ -901,7 +901,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ProviderKey = "copilot",
             ResponsesClientFactory = _ => responsesClient,
         });
-        var deltas = new List<LocalAgentTurnDelta>();
+        var deltas = new List<AgentTurnDelta>();
         var request = CreateTurnRequest();
 
         var response = await executor.ExecuteTurnAsync(
@@ -953,11 +953,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         {
             Conversation =
             [
-                new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.User,
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
                     [
-                        new LocalAgentMessagePart.Text("Describe this image."),
-                        new LocalAgentMessagePart.Data(Convert.ToBase64String(imageBytes), "image/png", "image.png"),
+                        new AgentMessagePart.Text("Describe this image."),
+                        new AgentMessagePart.Data(Convert.ToBase64String(imageBytes), "image/png", "image.png"),
                     ]),
             ],
         };
@@ -966,7 +966,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             request,
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
-        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Image received.", text);
         var message = Assert.IsInstanceOfType<MessageResponseItem>(responsesClient.Requests[0].InputItems.Single());
         var imagePart = message.Content.Single(static part => part.Kind == ResponseContentPartKind.InputImage);
@@ -1010,7 +1010,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CreateTurnRequest(),
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
-        var toolCall = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.ToolCall>().Single();
+        var toolCall = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
         Assert.AreEqual("call-read", toolCall.CallId);
         Assert.AreEqual("read_file", toolCall.Name);
         Assert.AreEqual("response-empty-terminal", response.ProviderSessionId);
@@ -1034,7 +1034,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ResponsesClientFactory = _ => responsesClient,
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
             () => executor.ExecuteTurnAsync(
                 CreateTurnRequest(),
                 static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
@@ -1336,7 +1336,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ProtocolFamily = "codex",
                 ProviderKey = "codex",
                 DisplayName = "Codex",
-                Profile = new LocalAgentProviderProfile
+                Profile = new AgentProviderProfile
                 {
                     SupportsStore = false,
                     SupportsReasoningEffort = true,
@@ -1511,7 +1511,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ProtocolFamily = "codex",
                 ProviderKey = "codex",
                 DisplayName = "Codex",
-                Profile = new LocalAgentProviderProfile
+                Profile = new AgentProviderProfile
                 {
                     SupportsStore = false,
                     SupportsReasoningEffort = true,
@@ -1853,8 +1853,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.AreEqual(6, webSocketSession.RequestCount);
         Assert.AreEqual(2, responsesClient.Requests.Count);
-        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
-        Assert.AreEqual("Sticky fallback answer.", secondResponse.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Sticky fallback answer.", secondResponse.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -1886,7 +1886,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
             },
         });
-        var deltas = new List<LocalAgentTurnDelta>();
+        var deltas = new List<AgentTurnDelta>();
 
         var response = await executor.ExecuteTurnAsync(
                 CreateCodexTurnRequest(),
@@ -1901,7 +1901,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(6, webSocketSession.DisposeCount);
         Assert.AreEqual(1, responsesClient.Requests.Count);
         Assert.AreEqual(0, deltas.Count);
-        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -1942,7 +1942,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(6, webSocketSession.RequestCount);
         Assert.AreEqual(6, webSocketSession.DisposeCount);
         Assert.AreEqual(1, responsesClient.Requests.Count);
-        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -2027,7 +2027,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     public async Task OpenAIResponsesTurnExecutor_CodexSlowResponseDoesNotPublishPendingStatus()
     {
         var releaseResponse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sessionUpdates = new List<LocalAgentTurnSessionUpdate>();
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
         var responsesClient = new DelayedOpenAIResponseClient(
             releaseResponse.Task,
             [
@@ -2059,7 +2059,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         releaseResponse.SetResult();
 
         var response = await turnTask.ConfigureAwait(false);
-        Assert.AreEqual("Slow answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Slow answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
         Assert.IsFalse(sessionUpdates.Any(static update =>
             update.Kind == AgentSessionUpdateKind.Info &&
             update.Message?.Contains("Waiting for ChatGPT/Codex response", StringComparison.Ordinal) == true));
@@ -2092,7 +2092,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -2138,7 +2138,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.AreEqual(2, webSocketSession.RequestCount);
         Assert.AreEqual(0, responsesClient.Requests.Count);
-        Assert.AreEqual("Retried over WebSocket.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Retried over WebSocket.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -2170,7 +2170,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 CreateCodexTurnRequest(),
                 static (_, _) => ValueTask.CompletedTask)
             .ConfigureAwait(false);
-        await ((ILocalAgentProviderSessionCleanup)executor).DisposeProviderSessionAsync("session-1").ConfigureAwait(false);
+        await ((IAgentProviderSessionCleanup)executor).DisposeProviderSessionAsync("session-1").ConfigureAwait(false);
 
         Assert.AreEqual(1, webSocketSession.RequestCount);
         Assert.AreEqual(1, webSocketSession.DisposeCount);
@@ -2358,9 +2358,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
             },
         });
-        var firstUserMessage = new LocalAgentConversationMessage(
-            LocalAgentConversationRole.User,
-            [new LocalAgentMessagePart.Text("First prompt")]);
+        var firstUserMessage = new AgentConversationMessage(
+            AgentConversationRole.User,
+            [new AgentMessagePart.Text("First prompt")]);
         var firstRequest = CreateCodexTurnRequest() with
         {
             Conversation = [firstUserMessage],
@@ -2378,9 +2378,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             [
                 firstUserMessage,
                 firstResponse.AssistantMessage,
-                new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.User,
-                    [new LocalAgentMessagePart.Text("Second prompt")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("Second prompt")]),
             ],
         };
 
@@ -2427,9 +2427,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
             },
         });
-        var firstUserMessage = new LocalAgentConversationMessage(
-            LocalAgentConversationRole.User,
-            [new LocalAgentMessagePart.Text("First prompt")]);
+        var firstUserMessage = new AgentConversationMessage(
+            AgentConversationRole.User,
+            [new AgentMessagePart.Text("First prompt")]);
         var firstRequest = CreateCodexTurnRequest() with
         {
             Conversation = [firstUserMessage],
@@ -2447,9 +2447,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             [
                 firstUserMessage,
                 firstResponse.AssistantMessage,
-                new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.User,
-                    [new LocalAgentMessagePart.Text("Second prompt")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("Second prompt")]),
             ],
         };
 
@@ -2496,9 +2496,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ResponseTransport = "http",
             },
         });
-        var firstUserMessage = new LocalAgentConversationMessage(
-            LocalAgentConversationRole.User,
-            [new LocalAgentMessagePart.Text("First prompt")]);
+        var firstUserMessage = new AgentConversationMessage(
+            AgentConversationRole.User,
+            [new AgentMessagePart.Text("First prompt")]);
         var firstRequest = CreateCodexTurnRequest() with
         {
             Conversation = [firstUserMessage],
@@ -2516,9 +2516,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             [
                 firstUserMessage,
                 firstResponse.AssistantMessage,
-                new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.User,
-                    [new LocalAgentMessagePart.Text("Second prompt")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("Second prompt")]),
             ],
         };
 
@@ -2553,9 +2553,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         {
             Conversation =
             [
-                new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.User,
-                    [new LocalAgentMessagePart.Text("do not log this prompt")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("do not log this prompt")]),
             ],
         };
 
@@ -2679,7 +2679,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ModelId = "gpt-5.3-codex",
         };
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask))
             .ConfigureAwait(false);
 
@@ -2712,7 +2712,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ModelId = "gpt-5.3-codex",
         };
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask))
             .ConfigureAwait(false);
 
@@ -2748,7 +2748,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 },
             });
 
-            var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+            var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                     () => executor.ExecuteTurnAsync(
                         CreateCodexTurnRequest(),
                         static (_, _) => ValueTask.CompletedTask))
@@ -2772,7 +2772,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -2819,7 +2819,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.AreEqual(1, refreshCount);
         Assert.AreEqual(2, responsesClient.RequestCount);
-        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Authorized answer.", text);
     }
 
@@ -2849,7 +2849,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -2891,7 +2891,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         Assert.AreEqual(2, responsesClient.RequestCount);
-        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Retried answer.", text);
     }
 
@@ -2926,7 +2926,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         Assert.AreEqual(2, responsesClient.Requests.Count);
-        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Retried answer.", text);
     }
 
@@ -2948,7 +2948,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ResponseTransport = "http",
             },
         });
-        var sessionUpdates = new List<LocalAgentTurnSessionUpdate>();
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
 
         var response = await executor.ExecuteTurnAsync(
             CreateCodexTurnRequest(),
@@ -2961,7 +2961,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.AreEqual(2, responsesClient.Requests.Count);
         Assert.AreEqual(AgentSessionUpdateKind.Reconnecting, sessionUpdates.Single().Kind);
-        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -2983,7 +2983,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -3017,7 +3017,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         Assert.AreEqual(2, responsesClient.Requests.Count);
-        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -3052,7 +3052,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         Assert.AreEqual(2, responsesClient.Requests.Count);
-        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -3077,7 +3077,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -3106,7 +3106,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        var exception = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -3133,7 +3133,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         });
 
-        _ = await Assert.ThrowsExactlyAsync<LocalAgentTurnExecutionException>(
+        _ = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
                     CreateCodexTurnRequest(),
                     static (_, _) => ValueTask.CompletedTask))
@@ -3170,8 +3170,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ResponseTransport = "http",
             },
         });
-        var deltas = new List<LocalAgentTurnDelta>();
-        var sessionUpdates = new List<LocalAgentTurnSessionUpdate>();
+        var deltas = new List<AgentTurnDelta>();
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
 
         var response = await executor.ExecuteTurnAsync(
             CreateCodexTurnRequest(),
@@ -3191,7 +3191,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(1, sessionUpdates.Count);
         Assert.AreEqual(AgentSessionUpdateKind.Reconnecting, sessionUpdates[0].Kind);
         Assert.AreEqual("Reconnecting to ChatGPT/Codex... 1/5", sessionUpdates[0].Message);
-        var text = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value;
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Retried answer.", text);
     }
 
@@ -3221,8 +3221,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ResponseTransport = "http",
             },
         });
-        var deltas = new List<LocalAgentTurnDelta>();
-        var sessionUpdates = new List<LocalAgentTurnSessionUpdate>();
+        var deltas = new List<AgentTurnDelta>();
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
 
         var response = await executor.ExecuteTurnAsync(
             CreateCodexTurnRequest(),
@@ -3245,11 +3245,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(reconnect.Details.HasValue);
         Assert.IsTrue(reconnect.Details.Value.GetProperty("discardDraft").GetBoolean());
         Assert.AreEqual(deltas[0].AttemptId, reconnect.Details.Value.GetProperty("draftAttemptId").GetString());
-        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
-    private static FileSystemLocalAgentSessionStore CreateSessionStore(string stateRootPath)
-        => new(new LocalAgentRuntimePathLayout(stateRootPath));
+    private static FileSystemAgentSessionStore CreateSessionStore(string stateRootPath)
+        => new(new AgentRuntimePathLayout(stateRootPath));
 
     private static StreamingResponseUpdate CreateAssistantResponseUpdate(
         string responseId,
@@ -3568,7 +3568,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     private static string SerializeJsonStringOrNull(string? value)
         => value is null ? "null" : JsonSerializer.Serialize(value);
 
-    private static LocalAgentTurnRequest CreateTurnRequest()
+    private static AgentTurnRequest CreateTurnRequest()
         => new()
         {
             Provider = new ModelProviderRuntimeDescriptor
@@ -3576,7 +3576,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ProtocolFamily = "openai-responses",
                 ProviderKey = "openai",
                 DisplayName = "OpenAI Responses",
-                TransportKind = LocalAgentTransportKind.OpenAIResponses,
+                TransportKind = AgentTransportKind.OpenAIResponses,
             },
             ProviderId = new ModelProviderId("openai-responses"),
             SessionId = "session-1",
@@ -3591,12 +3591,12 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 }),
             Conversation =
             [
-                new LocalAgentConversationMessage(
-                    LocalAgentConversationRole.User,
-                    [new LocalAgentMessagePart.Text("Hello")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("Hello")]),
             ],
             Tools = [],
-            State = new LocalAgentSessionState
+            State = new AgentSessionState
             {
                 SessionId = "session-1",
                 ProtocolFamily = "openai-responses",
@@ -3605,7 +3605,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             },
         };
 
-    private static LocalAgentTurnRequest CreateCodexTurnRequest()
+    private static AgentTurnRequest CreateCodexTurnRequest()
         => CreateTurnRequest() with
         {
             Provider = CreateTurnRequest().Provider with

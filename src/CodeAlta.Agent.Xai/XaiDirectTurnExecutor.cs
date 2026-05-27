@@ -1,14 +1,14 @@
 #pragma warning disable OPENAI001
 
 using System.ClientModel;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
 
 namespace CodeAlta.Agent.Xai;
 
 internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
-    private static readonly LocalAgentProviderProfile OpenAIResponsesProfile = new()
+    private static readonly AgentProviderProfile OpenAIResponsesProfile = new()
     {
         SupportsDeveloperRole = true,
         SupportsReasoningEffort = true,
@@ -37,9 +37,9 @@ internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModel
         CancellationToken cancellationToken = default)
         => _modelDiscovery.ListModelsAsync(provider, cancellationToken);
 
-    public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+    public Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken = default)
         => ExecuteTurnAsync(
             request,
@@ -47,10 +47,10 @@ internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModel
             static (_, _) => ValueTask.CompletedTask,
             cancellationToken);
 
-    public async Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+    public async Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -68,10 +68,10 @@ internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModel
         }
     }
 
-    private async Task<LocalAgentTurnResponse> ExecuteTurnCoreAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+    private async Task<AgentTurnResponse> ExecuteTurnCoreAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
         var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
@@ -87,7 +87,7 @@ internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModel
 
     private OpenAIProviderOptions CreateOpenAIProviderOptions(
         XaiDirectCredential credential,
-        LocalAgentProviderProfile profile)
+        AgentProviderProfile profile)
         => new()
         {
             ProviderKey = _provider.ProviderKey,
@@ -107,15 +107,15 @@ internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModel
                 : null,
         };
 
-    private static LocalAgentTurnRequest CreateDelegatedRequest(
-        LocalAgentTurnRequest request,
+    private static AgentTurnRequest CreateDelegatedRequest(
+        AgentTurnRequest request,
         XaiDirectCredential credential,
-        LocalAgentProviderProfile profile)
+        AgentProviderProfile profile)
     {
         var provider = request.Provider with
         {
             ProtocolFamily = "openai-responses",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
             BaseUri = credential.BaseUri,
             Profile = profile,
         };

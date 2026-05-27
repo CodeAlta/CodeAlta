@@ -11,7 +11,7 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 1 | [Architecture overview](architecture.md) | Process composition, project layering, frontend/runtime boundaries, and the main data flow. |
 | 2 | [Catalog, configuration, and state](catalog-and-config.md) | `~/.alta` layout, project-local state, TOML configuration, projects, sessions, legacy session metadata, and prompt drafts. |
 | 3 | [Runtime and agent sessions](runtime.md) | `AgentHub`, `SessionRuntimeService`, active sessions, provider runtime adapters, system prompts, tools, compaction, and journals. |
-| 4 | [Model providers](providers.md) | Provider registration, configured provider types, local-runtime adapters, model metadata, credentials, and protocol tracing. |
+| 4 | [Model providers](providers.md) | Provider registration, configured provider types, agent-runtime adapters, model metadata, credentials, and protocol tracing. |
 | 5 | [`alta` live tool](live-tool.md) | In-process command registry, JSONL output contract, session control commands, queueing, delegated work, and plugin commands. |
 | 6 | [ACP integration](acp.md) | Current ACP protocol-library status, legacy config preservation, and future server-adapter direction. |
 | 7 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, contributions, safe mode, and built-in plugins. |
@@ -29,7 +29,7 @@ flowchart TD
     Frontend[CodeAlta TUI frontend - CodeAltaApp + views + coordinators]
     LiveTool[CodeAlta.LiveTool - alta registry + dispatcher]
     Orchestration[CodeAlta.Orchestration - AgentHub + SessionRuntimeService]
-    Agent[CodeAlta.Agent - session catalog, provider contracts, events, local runtime]
+    Agent[CodeAlta.Agent - session catalog, provider contracts, events, agent runtime]
     Providers[Provider packages - OpenAI-compatible, Anthropic, Google, direct HTTP]
     Catalog[CodeAlta.Catalog - projects, config, sessions, skills]
     Plugins[CodeAlta.Plugins - runtime + adapters]

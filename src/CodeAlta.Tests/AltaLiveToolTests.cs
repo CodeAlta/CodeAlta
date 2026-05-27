@@ -1,6 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.LiveTool;
@@ -1001,8 +1001,8 @@ public sealed class AltaLiveToolTests
         var ProviderId = new ModelProviderId("openai");
         var sessionId = "session-history";
         var timestamp = new DateTimeOffset(2026, 05, 09, 11, 00, 00, TimeSpan.Zero);
-        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(root.Path));
-        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root.Path));
+        await store.UpsertSessionAsync(new AgentSessionSummary
         {
             SessionId = sessionId,
             ProviderId = ProviderId,
@@ -1015,7 +1015,7 @@ public sealed class AltaLiveToolTests
             CreatedAt = timestamp,
             UpdatedAt = timestamp.AddMinutes(4),
         }).ConfigureAwait(false);
-        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        await store.UpsertSessionAsync(new AgentSessionSummary
         {
             SessionId = "session-empty",
             ProviderId = ProviderId,
@@ -1082,8 +1082,8 @@ public sealed class AltaLiveToolTests
         var sessionId = "session-metrics";
         var secondSessionId = "session-metrics-second";
         var timestamp = new DateTimeOffset(2026, 05, 09, 11, 00, 00, TimeSpan.Zero);
-        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(root.Path));
-        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root.Path));
+        await store.UpsertSessionAsync(new AgentSessionSummary
         {
             SessionId = sessionId,
             ProviderId = ProviderId,
@@ -1096,7 +1096,7 @@ public sealed class AltaLiveToolTests
             CreatedAt = timestamp,
             UpdatedAt = timestamp.AddMinutes(4),
         }).ConfigureAwait(false);
-        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        await store.UpsertSessionAsync(new AgentSessionSummary
         {
             SessionId = secondSessionId,
             ProviderId = ProviderId,
@@ -1232,8 +1232,8 @@ public sealed class AltaLiveToolTests
         var ProviderId = new ModelProviderId("error-result");
         var sessionId = "session-error-result";
         var timestamp = new DateTimeOffset(2026, 05, 09, 12, 00, 00, TimeSpan.Zero);
-        var store = new FileSystemLocalAgentSessionStore(new LocalAgentRuntimePathLayout(root.Path));
-        await store.UpsertSessionAsync(new LocalAgentSessionSummary
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root.Path));
+        await store.UpsertSessionAsync(new AgentSessionSummary
         {
             SessionId = sessionId,
             ProviderId = ProviderId,
@@ -1298,7 +1298,7 @@ public sealed class AltaLiveToolTests
         var lockedSession = await runtime.CreateGlobalSessionAsync(executionOptions, "Locked history").ConfigureAwait(false);
         Assert.IsNotNull(corruptSession.SessionId);
         Assert.IsNotNull(lockedSession.SessionId);
-        var layout = new LocalAgentRuntimePathLayout(root.Path);
+        var layout = new AgentRuntimePathLayout(root.Path);
         var corruptHistoryPath = layout.GetSessionFilePath(corruptSession.SessionId!, DateTimeOffset.UtcNow);
         Directory.CreateDirectory(Path.GetDirectoryName(corruptHistoryPath)!);
         await File.WriteAllTextAsync(corruptHistoryPath, "{not-json\n{}\n").ConfigureAwait(false);

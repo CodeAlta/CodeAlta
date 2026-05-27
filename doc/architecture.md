@@ -125,7 +125,7 @@ UI code awaits normally on the UI path. Background work must marshal back throug
 
 ## Runtime services
 
-`SessionRuntimeService` is the central session runtime service. It owns coordinator sessions, recoverable-session projection, runtime events, prompt send/queue/steer/abort/compact flow, activation of CodeAlta-managed skills, and legacy session-view metadata persisted in local session journals.
+`SessionRuntimeService` is the central session runtime service. It owns coordinator sessions, recoverable-session projection, runtime events, prompt send/queue/steer/abort/compact flow, activation of CodeAlta-managed skills, and legacy session-view metadata persisted in session journals.
 
 `AgentHub` is the active CodeAlta agent/session facade. It resolves provider runtimes through `IModelProviderRegistry` when creating or resuming a runnable session, then owns active session handles and per-session run coordination. It does not discover/list persisted sessions and does not probe model providers.
 
@@ -172,7 +172,7 @@ The `CodeAlta.Agent` contracts are split by responsibility:
 
 Provider-runtime compatibility surfaces now use model-provider names. Do not reintroduce `IAgentBackend`, `AgentBackendId`, or `AgentBackendFactory`; new user-facing docs and UI should say **model provider** and **session**, not backend-owned session.
 
-Provider packages create model-provider runtimes and turn executors. The CodeAlta local session runtime (`CodeAltaAgentRuntime`/`LocalAgentSession`) replays journals, composes provider requests, executes turns, appends events, and can switch compatible providers by replaying canonical CodeAlta history.
+Provider packages create model-provider runtimes and turn executors. The CodeAlta local session runtime (`AgentRuntime`/`AgentSession`) replays journals, composes provider requests, executes turns, appends events, and can switch compatible providers by replaying canonical CodeAlta history.
 
 ## Extension integration
 
@@ -193,9 +193,9 @@ Extensions do not own canonical transcript persistence. Plugin-derived timeline 
 3. `AgentHub` starts or resumes the CodeAlta session with the selected provider runtime.
 4. The session receives a prompt through `IAgentSession.SendAsync` or an accepted steering request through `SteerAsync` when supported.
 5. Provider/tool events are normalized to `AgentEvent` values and projected to `SessionRuntimeEvent` values.
-6. Local-runtime sessions append normalized events plus legacy session-view headers/state to the sharded JSONL journal.
+6. Agent-runtime sessions append normalized events plus legacy session-view headers/state to the sharded JSONL journal.
 7. The frontend event pump projects runtime events into tabs, timelines, sidebars, usage indicators, and plugin projections.
-8. Idle sessions can drain one queued prompt, switch providers when the local-runtime history can be replayed safely, or compact when supported.
+8. Idle sessions can drain one queued prompt, switch providers when the agent-runtime history can be replayed safely, or compact when supported.
 
 ## Where to put new code
 

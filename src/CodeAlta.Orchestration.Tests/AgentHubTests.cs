@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Orchestration.Tests;
@@ -29,7 +29,7 @@ public sealed class AgentHubTests
         Assert.AreEqual(0, runtime.ProbeCallCount);
     }
 
-    private sealed class CountingProviderRuntime(string providerId) : ICodeAltaModelProviderRuntime
+    private sealed class CountingProviderRuntime(string providerId) : IAgentModelProviderRuntime
     {
         public int StartCallCount { get; private set; }
 
@@ -42,12 +42,12 @@ public sealed class AgentHubTests
             ProtocolFamily = "test",
             ProviderKey = providerId,
             DisplayName = "Counting",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         public IModelProviderModelCatalog? ModelCatalog => null;
 
-        public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => new()
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new()
         {
             Provider = RuntimeDescriptor,
             TurnExecutor = new NoOpTurnExecutor(),
@@ -74,9 +74,9 @@ public sealed class AgentHubTests
 
     private sealed class NoOpTurnExecutor : IModelProviderTurnExecutor
     {
-        public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-            LocalAgentTurnRequest request,
-            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        public Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }

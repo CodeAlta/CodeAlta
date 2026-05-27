@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.OpenAI.Codex;
 

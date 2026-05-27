@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -22,7 +22,7 @@ internal static class ModelProviderRuntimeTestExtensions
     }
 
     public static async Task<IAgentSession> CreateSessionAsync(
-        this ICodeAltaModelProviderRuntime runtime,
+        this IAgentModelProviderRuntime runtime,
         AgentSessionCreateOptions options,
         CancellationToken cancellationToken = default)
     {
@@ -32,7 +32,7 @@ internal static class ModelProviderRuntimeTestExtensions
     }
 
     public static async Task<IAgentSession> ResumeSessionAsync(
-        this ICodeAltaModelProviderRuntime runtime,
+        this IAgentModelProviderRuntime runtime,
         string sessionId,
         AgentSessionResumeOptions options,
         CancellationToken cancellationToken = default)
@@ -48,17 +48,17 @@ internal static class ModelProviderRuntimeTestExtensions
         return await sessionRuntime.ResumeSessionAsync(sessionId, options, cancellationToken).ConfigureAwait(false);
     }
 
-    private static CodeAltaAgentRuntime CreateSessionRuntime(ICodeAltaModelProviderRuntime runtime, string? stateRootPath)
+    private static AgentRuntime CreateSessionRuntime(IAgentModelProviderRuntime runtime, string? stateRootPath)
         => new(
             runtime.Descriptor.ProviderId,
             runtime.Descriptor.DisplayName,
-            new CodeAltaAgentRuntimeOptions
+            new AgentRuntimeOptions
             {
                 StateRootPath = stateRootPath,
                 Providers = [runtime.CreateProviderRegistration()],
             });
 
-    private static async Task TryPrimeModelCacheAsync(CodeAltaAgentRuntime runtime, CancellationToken cancellationToken)
+    private static async Task TryPrimeModelCacheAsync(AgentRuntime runtime, CancellationToken cancellationToken)
     {
         try
         {

@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -24,7 +24,7 @@ public sealed class AgentHub : IAsyncDisposable
     /// Initializes a new instance of the <see cref="AgentHub"/> class.
     /// </summary>
     /// <param name="modelProviderRegistry">Model provider registry used to create provider runtimes.</param>
-    /// <param name="stateRootPath">The local runtime storage root path.</param>
+    /// <param name="stateRootPath">The agent runtime storage root path.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="modelProviderRegistry"/> is <see langword="null"/>.</exception>
     public AgentHub(ModelProviderRegistry modelProviderRegistry, string? stateRootPath = null)
     {
@@ -366,16 +366,16 @@ public sealed class AgentHub : IAsyncDisposable
             }
         }
 
-        if (providerRuntime is not ICodeAltaModelProviderRuntime codeAltaProviderRuntime)
+        if (providerRuntime is not IAgentModelProviderRuntime codeAltaProviderRuntime)
         {
             await providerRuntime.DisposeAsync().ConfigureAwait(false);
             throw new InvalidOperationException($"Model provider '{providerId.Value}' does not expose a CodeAlta session runtime.");
         }
 
-        var runtime = new CodeAltaAgentRuntime(
+        var runtime = new AgentRuntime(
             providerId,
             providerRuntime.Descriptor.DisplayName,
-            new CodeAltaAgentRuntimeOptions
+            new AgentRuntimeOptions
             {
                 StateRootPath = _stateRootPath,
                 Providers = [codeAltaProviderRuntime.CreateProviderRegistration()],
@@ -446,10 +446,10 @@ public sealed class AgentHub : IAsyncDisposable
 
     private sealed class ProviderSessionRuntimeLease : IAsyncDisposable
     {
-        private readonly CodeAltaAgentRuntime? _runtime;
+        private readonly AgentRuntime? _runtime;
         private readonly IModelProviderSessionRuntime? _sessionRuntime;
 
-        public ProviderSessionRuntimeLease(CodeAltaAgentRuntime runtime)
+        public ProviderSessionRuntimeLease(AgentRuntime runtime)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         }

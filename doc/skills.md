@@ -50,19 +50,19 @@ Resource listing excludes VCS directories and respects ignore rules. Activation 
 
 ## Runtime behavior
 
-For local-runtime sessions, CodeAlta advertises compact skill metadata in instructions. The full skill body is loaded only when the user, UI, plugin, or agent activates a skill through the host-owned runtime path.
+For agent-runtime sessions, CodeAlta advertises compact skill metadata in instructions. The full skill body is loaded only when the user, UI, plugin, or agent activates a skill through the host-owned runtime path.
 
 Activation:
 
 1. resolves the valid unshadowed skill for the current project/user scope;
 2. builds a canonical payload and related-file list;
 3. records activation in the session journal;
-4. injects skill context into the selected local-runtime session;
+4. injects skill context into the selected agent-runtime session;
 5. emits visible activity/session updates.
 
 Provider-managed native skill sessions return an unsupported-capability diagnostic when CodeAlta cannot inject a CodeAlta-managed skill payload into that session.
 
-Activated local-runtime skills are replayed from the session journal after resume. Before compaction, activated payloads remain ordinary replayed context. After compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions retain skill guidance without duplicating current context. If a compacted skill payload references a missing on-disk skill, CodeAlta preserves history and reports the missing path.
+Activated agent-runtime skills are replayed from the session journal after resume. Before compaction, activated payloads remain ordinary replayed context. After compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions retain skill guidance without duplicating current context. If a compacted skill payload references a missing on-disk skill, CodeAlta preserves history and reports the missing path.
 
 ## UI
 
@@ -89,7 +89,7 @@ alta skill show <skill-name> [--project <id|slug|path>]
 alta skill activate <skill-name> --session <session-id>
 ```
 
-`alta skills activate` and `alta skills_activate` remain aliases for existing prompt text; prefer `alta skill activate` in new guidance. Activation uses the same runtime path as the UI and records the activation in the local session journal.
+`alta skills activate` and `alta skills_activate` remain aliases for existing prompt text; prefer `alta skill activate` in new guidance. Activation uses the same runtime path as the UI and records the activation in the session journal.
 
 ## Plugin skill roots
 

@@ -3,7 +3,7 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
 using System.Text;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.OpenAI;
 
@@ -24,7 +24,7 @@ internal sealed class OpenAIProtocolTraceLogger
 
     public static OpenAIProtocolTraceLogger? Create(
         OpenAIProtocolTraceOptions? options,
-        LocalAgentTurnRequest request)
+        AgentTurnRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (options?.Enabled != true || string.IsNullOrWhiteSpace(options.StateRootPath))
@@ -32,7 +32,7 @@ internal sealed class OpenAIProtocolTraceLogger
             return null;
         }
 
-        var layout = new LocalAgentRuntimePathLayout(options.StateRootPath);
+        var layout = new AgentRuntimePathLayout(options.StateRootPath);
         var logger = new OpenAIProtocolTraceLogger(
             layout.GetSessionTraceFilePath(request.SessionId),
             options.MaxBodyBytes);
@@ -51,7 +51,7 @@ internal sealed class OpenAIProtocolTraceLogger
             return null;
         }
 
-        var layout = new LocalAgentRuntimePathLayout(options.StateRootPath);
+        var layout = new AgentRuntimePathLayout(options.StateRootPath);
         var logger = new OpenAIProtocolTraceLogger(
             layout.GetSessionTraceFilePath(context.SessionId),
             options.MaxBodyBytes);

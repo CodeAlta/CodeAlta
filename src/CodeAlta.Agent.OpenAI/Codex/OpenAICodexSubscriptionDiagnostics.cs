@@ -1,5 +1,5 @@
 using System.Net;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
 
 namespace CodeAlta.Agent.OpenAI.Codex;
@@ -8,7 +8,7 @@ internal static class OpenAICodexSubscriptionDiagnostics
 {
     public static string CreateRequestShape(
         OpenAIProviderOptions provider,
-        LocalAgentTurnRequest request,
+        AgentTurnRequest request,
         int retryCount,
         string eventName,
         string? responseId = null,

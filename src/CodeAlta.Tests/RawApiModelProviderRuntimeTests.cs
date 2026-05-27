@@ -3,7 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.GoogleGenAI;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using Microsoft.Extensions.AI;
 using AnthropicDisplay = Anthropic.Models.Messages.Display;
 using AnthropicEffort = Anthropic.Models.Messages.Effort;
@@ -379,9 +379,9 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.AreEqual(1000000L, usageEvent.Usage?.TokenLimit);
 
         var rawAssistant = history.OfType<AgentRawEvent>().Single(static e => e.BackendEventType == "local.assistantMessage");
-        var message = rawAssistant.Raw.Deserialize(AgentJsonSerializerContext.Default.LocalAgentConversationMessage);
+        var message = rawAssistant.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentConversationMessage);
         Assert.IsNotNull(message);
-        var reasoningPart = Assert.IsInstanceOfType<LocalAgentMessagePart.Reasoning>(message.Parts[0]);
+        var reasoningPart = Assert.IsInstanceOfType<AgentMessagePart.Reasoning>(message.Parts[0]);
         Assert.AreEqual("google-signature", reasoningPart.ProtectedData);
     }
 

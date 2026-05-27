@@ -1,13 +1,13 @@
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.OpenAI;
 
 /// <summary>
 /// OpenAI-compatible Chat/Completions model-provider runtime.
 /// </summary>
-public sealed class OpenAIChatModelProviderRuntime : ICodeAltaModelProviderRuntime
+public sealed class OpenAIChatModelProviderRuntime : IAgentModelProviderRuntime
 {
-    private readonly ICodeAltaModelProviderRuntime _runtime;
+    private readonly IAgentModelProviderRuntime _runtime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenAIChatModelProviderRuntime"/> class.
@@ -44,7 +44,7 @@ public sealed class OpenAIChatModelProviderRuntime : ICodeAltaModelProviderRunti
     public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
 
     /// <inheritdoc />
-    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
+    public AgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();

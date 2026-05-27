@@ -1,20 +1,20 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent.Xai;
 
 /// <summary>
 /// Direct xAI (Grok) model-provider runtime.
 /// </summary>
-public sealed class XaiDirectModelProviderRuntime : ICodeAltaModelProviderRuntime
+public sealed class XaiDirectModelProviderRuntime : IAgentModelProviderRuntime
 {
     /// <summary>
     /// The canonical provider type and protocol family for direct xAI access.
     /// </summary>
     public const string ProtocolFamily = "xai";
 
-    private readonly ICodeAltaModelProviderRuntime _runtime;
+    private readonly IAgentModelProviderRuntime _runtime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="XaiDirectModelProviderRuntime"/> class.
@@ -65,12 +65,12 @@ public sealed class XaiDirectModelProviderRuntime : ICodeAltaModelProviderRuntim
     public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
 
     /// <inheritdoc />
-    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
+    public AgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 
-    private static CodeAltaModelProviderRuntime CreateProviderRuntime(XaiProviderOptions provider)
+    private static AgentModelProviderRuntime CreateProviderRuntime(XaiProviderOptions provider)
     {
         var providerKey = provider.ProviderKey.Trim();
         var displayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? providerKey : provider.DisplayName.Trim();
@@ -79,11 +79,11 @@ public sealed class XaiDirectModelProviderRuntime : ICodeAltaModelProviderRuntim
             ProtocolFamily = ProtocolFamily,
             ProviderKey = providerKey,
             DisplayName = displayName,
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
             BaseUri = provider.BaseUri ?? XaiDefaults.DefaultApiBaseUri,
             IsDefault = provider.IsDefault,
             Profile = provider.Profile ?? CreateDefaultProfile(),
-            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
+            Compaction = provider.Compaction ?? AgentCompactionSettings.Default,
         };
         var descriptor = new ModelProviderDescriptor(new ModelProviderId(providerKey), displayName, ProtocolFamily)
         {
@@ -91,13 +91,13 @@ public sealed class XaiDirectModelProviderRuntime : ICodeAltaModelProviderRuntim
             IsDefault = provider.IsDefault,
             DefaultModelId = provider.SingleModelId,
         };
-        return new CodeAltaModelProviderRuntime(
+        return new AgentModelProviderRuntime(
             descriptor,
             runtimeDescriptor,
             new XaiDirectTurnExecutor(provider));
     }
 
-    private static LocalAgentProviderProfile CreateDefaultProfile()
+    private static AgentProviderProfile CreateDefaultProfile()
         => new()
         {
             SupportsDeveloperRole = true,

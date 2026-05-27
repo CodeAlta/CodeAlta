@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Catalog;
 
@@ -25,8 +25,8 @@ public sealed class SessionViewJournalStore
 
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    private readonly LocalAgentRuntimePathLayout _layout;
-    private readonly LocalAgentSessionJournalFile _journalFile;
+    private readonly AgentRuntimePathLayout _layout;
+    private readonly AgentSessionJournalFile _journalFile;
     private readonly ConcurrentDictionary<string, CachedLatestState> _latestStateCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -35,23 +35,23 @@ public sealed class SessionViewJournalStore
     /// <param name="options">Catalog options.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options" /> is <see langword="null" />.</exception>
     public SessionViewJournalStore(CatalogOptions options)
-        : this(options, new LocalAgentSessionJournalFile())
+        : this(options, new AgentSessionJournalFile())
     {
     }
 
-    internal SessionViewJournalStore(CatalogOptions options, LocalAgentSessionJournalFile journalFile)
+    internal SessionViewJournalStore(CatalogOptions options, AgentSessionJournalFile journalFile)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(journalFile);
-        _layout = new LocalAgentRuntimePathLayout(options.GlobalRoot);
+        _layout = new AgentRuntimePathLayout(options.GlobalRoot);
         _journalFile = journalFile;
     }
 
     /// <summary>
     /// Creates a session store that shares this journal store's in-memory per-file locks.
     /// </summary>
-    /// <returns>A session store for the same local-runtime layout.</returns>
-    public FileSystemLocalAgentSessionStore CreateSessionStore()
+    /// <returns>A session store for the same agent-runtime layout.</returns>
+    public FileSystemAgentSessionStore CreateSessionStore()
         => new(_layout, _journalFile);
 
     /// <summary>

@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
@@ -168,7 +168,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 .ConfigureAwait(false);
         }
 
-        var sessionJournalFile = new LocalAgentSessionJournalFile();
+        var sessionJournalFile = new AgentSessionJournalFile();
         var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile);
         var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
         var skillCatalog = new SkillCatalog([

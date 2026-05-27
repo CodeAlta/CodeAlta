@@ -1,8 +1,8 @@
 #pragma warning disable OPENAI001
 
 using System.ClientModel;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI.Chat;
@@ -11,7 +11,7 @@ using OpenAI.Responses;
 namespace CodeAlta.Agent.OpenAI;
 
 /// <summary>
-/// Shared options for the OpenAI-backed local-runtime provider runtimes.
+/// Shared options for the OpenAI-backed agent-runtime provider runtimes.
 /// </summary>
 public abstract class OpenAIModelProviderRuntimeOptions
 {
@@ -97,12 +97,12 @@ public sealed class OpenAIProviderOptions
     /// <summary>
     /// Gets or sets the compatibility profile for the provider.
     /// </summary>
-    public LocalAgentProviderProfile? Profile { get; set; }
+    public AgentProviderProfile? Profile { get; set; }
 
     /// <summary>
     /// Gets or sets normalized compaction settings for the provider.
     /// </summary>
-    public LocalAgentCompactionSettings? Compaction { get; set; }
+    public AgentCompactionSettings? Compaction { get; set; }
 
     /// <summary>
     /// Gets or sets the models.dev provider identifier used to enrich model metadata.
@@ -272,7 +272,7 @@ internal sealed record OpenAIResponsesWebSocketSessionFactoryContext(
     CodexTurnState TurnState);
 
 internal sealed record OpenAIResponsesRequestCustomizationContext(
-    LocalAgentTurnRequest Request,
+    AgentTurnRequest Request,
     CreateResponseOptions Options);
 
 internal sealed record OpenAIResponsesWebSocketSideChannelEvent(

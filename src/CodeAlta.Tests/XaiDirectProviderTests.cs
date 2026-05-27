@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Catalog;
@@ -244,7 +244,7 @@ public sealed class XaiDirectProviderTests
                 ProtocolFamily = XaiDirectModelProviderRuntime.ProtocolFamily,
                 ProviderKey = "xai",
                 DisplayName = "xAI Grok",
-                TransportKind = LocalAgentTransportKind.OpenAIResponses,
+                TransportKind = AgentTransportKind.OpenAIResponses,
             }).ConfigureAwait(false);
 
         var grok43 = models.Single(static model => model.Id == "grok-4.3");

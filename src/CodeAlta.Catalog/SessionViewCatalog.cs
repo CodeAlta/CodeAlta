@@ -1,4 +1,4 @@
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Catalog;
 
@@ -18,13 +18,13 @@ public sealed class SessionViewCatalog
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <see cref="CatalogOptions.GlobalRoot"/> is empty.</exception>
     public SessionViewCatalog(CatalogOptions options, SessionViewYamlSerializer? serializer = null)
-        : this(options, new LocalAgentSessionJournalFile(), serializer)
+        : this(options, new AgentSessionJournalFile(), serializer)
     {
     }
 
     internal SessionViewCatalog(
         CatalogOptions options,
-        LocalAgentSessionJournalFile journalFile,
+        AgentSessionJournalFile journalFile,
         SessionViewYamlSerializer? serializer = null)
     {
         ArgumentNullException.ThrowIfNull(options);

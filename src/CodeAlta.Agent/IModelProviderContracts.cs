@@ -1,4 +1,4 @@
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent;
 
@@ -69,7 +69,7 @@ public interface IModelProviderRuntime : IAsyncDisposable
 /// <summary>
 /// Represents a CodeAlta-owned provider runtime that can be attached to the local session runtime.
 /// </summary>
-public interface ICodeAltaModelProviderRuntime : IModelProviderRuntime
+public interface IAgentModelProviderRuntime : IModelProviderRuntime
 {
     /// <summary>
     /// Gets the provider descriptor used by CodeAlta session execution.
@@ -85,7 +85,7 @@ public interface ICodeAltaModelProviderRuntime : IModelProviderRuntime
     /// Creates the provider registration consumed by the CodeAlta session runtime.
     /// </summary>
     /// <returns>The provider registration.</returns>
-    CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration();
+    AgentRuntimeProviderRegistration CreateProviderRegistration();
 }
 
 /// <summary>
@@ -116,9 +116,9 @@ public interface IModelProviderTurnExecutor
     /// <param name="onUpdate">Streaming callback used for best-effort progress projection.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The final assistant turn response.</returns>
-    Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+    Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -129,10 +129,10 @@ public interface IModelProviderTurnExecutor
     /// <param name="onSessionUpdate">Session update callback used for best-effort status projection.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The final assistant turn response.</returns>
-    Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+    Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(onSessionUpdate);

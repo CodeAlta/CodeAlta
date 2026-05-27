@@ -95,7 +95,7 @@ Busy-session sends are queued when requested by UI or live-tool options. Queue i
 
 ## CodeAlta local session runtime
 
-`CodeAltaAgentRuntime` and `LocalAgentSession` implement CodeAlta-owned local sessions for raw provider APIs. Provider packages create model-provider runtimes with provider-specific turn executors, profiles, model catalogs, credentials, and compaction settings; the session runtime attaches those providers when starting or resuming work.
+`AgentRuntime` and `AgentSession` implement CodeAlta-owned local sessions for raw provider APIs. Provider packages create model-provider runtimes with provider-specific turn executors, profiles, model catalogs, credentials, and compaction settings; the session runtime attaches those providers when starting or resuming work.
 
 A local session:
 
@@ -138,13 +138,13 @@ System prompts are file-backed and layered from shipped, user, project, and plug
 - project-context sections and file/reference context;
 - plugin-contributed prompt parts.
 
-`LocalAgentInstructionComposer` then adds local-runtime context and project instruction files unless equivalent content is already present. Provider-managed skill sessions may omit CodeAlta-managed skill advertisements while still receiving parent/additional developer guidance that orchestration explicitly supplies.
+`AgentInstructionComposer` then adds agent-runtime context and project instruction files unless equivalent content is already present. Provider-managed skill sessions may omit CodeAlta-managed skill advertisements while still receiving parent/additional developer guidance that orchestration explicitly supplies.
 
 Instruction composition should remain deterministic and file-backed. Avoid embedding large static prompt strings directly in orchestration code when they belong in prompt resources.
 
 ## Compaction
 
-Local-runtime compaction is implemented in `LocalAgentSession` and the `CodeAlta.Agent.LocalRuntime.Compaction` namespace. It is a provider-call workflow, not a separate remote compaction API.
+Agent-runtime compaction is implemented in `AgentSession` and the `CodeAlta.Agent.Runtime.Compaction` namespace. It is a provider-call workflow, not a separate remote compaction API.
 
 Triggers:
 
@@ -152,7 +152,7 @@ Triggers:
 - **Threshold:** automatic compaction is considered before turns and after idle when projected active context reaches the resolved input-context limit times the configured ratio.
 - **Overflow recovery:** the runtime can compact after provider context-limit failures when the session can still be summarized.
 
-Defaults from `LocalAgentCompactionSettings`:
+Defaults from `AgentCompactionSettings`:
 
 | Setting | Default |
 | --- | ---: |
@@ -169,10 +169,10 @@ The summarizer is an ordinary provider turn executed through the same turn execu
 
 ## Persistence model
 
-Local-runtime session journals contain replayable normalized history plus raw state records:
+Agent-runtime session journals contain replayable normalized history plus raw state records:
 
 - `local.sessionSummary` for session summary metadata;
-- `local.sessionState` for local runtime replay state;
+- `local.sessionState` for agent runtime replay state;
 - `local.compactionCheckpoint` for compaction outcomes;
 - `codealta.sessionHeader` and `codealta.sessionState` for legacy session-view/session-view metadata.
 

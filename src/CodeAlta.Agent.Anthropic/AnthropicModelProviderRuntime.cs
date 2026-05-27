@@ -2,8 +2,8 @@ using Anthropic;
 using Anthropic.Core;
 using Anthropic.Credentials;
 using Anthropic.Models.Models;
-using CodeAlta.Agent.LocalRuntime;
-using CodeAlta.Agent.LocalRuntime.Compaction;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using Microsoft.Extensions.AI;
 using XenoAtom.Logging;
@@ -13,10 +13,10 @@ namespace CodeAlta.Agent.Anthropic;
 /// <summary>
 /// Anthropic Messages model-provider runtime.
 /// </summary>
-public sealed class AnthropicModelProviderRuntime : ICodeAltaModelProviderRuntime
+public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Anthropic");
-    private readonly ICodeAltaModelProviderRuntime _runtime;
+    private readonly IAgentModelProviderRuntime _runtime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AnthropicModelProviderRuntime"/> class.
@@ -60,12 +60,12 @@ public sealed class AnthropicModelProviderRuntime : ICodeAltaModelProviderRuntim
     public IModelProviderTurnExecutor CreateTurnExecutor() => _runtime.CreateTurnExecutor();
 
     /// <inheritdoc />
-    public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
+    public AgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 
-    private static CodeAltaModelProviderRuntime CreateProviderRuntime(AnthropicProviderOptions provider)
+    private static AgentModelProviderRuntime CreateProviderRuntime(AnthropicProviderOptions provider)
     {
         var providerKey = provider.ProviderKey.Trim();
         var displayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? providerKey : provider.DisplayName.Trim();
@@ -74,16 +74,16 @@ public sealed class AnthropicModelProviderRuntime : ICodeAltaModelProviderRuntim
             ProtocolFamily = "anthropic-messages",
             ProviderKey = providerKey,
             DisplayName = displayName,
-            TransportKind = LocalAgentTransportKind.AnthropicMessages,
+            TransportKind = AgentTransportKind.AnthropicMessages,
             BaseUri = provider.BaseUri,
             IsDefault = provider.IsDefault,
-            Profile = provider.Profile ?? new LocalAgentProviderProfile
+            Profile = provider.Profile ?? new AgentProviderProfile
             {
                 SupportsDeveloperRole = false,
                 StreamsUsage = true,
                 SupportsThoughtSignatures = true,
             },
-            Compaction = provider.Compaction ?? LocalAgentCompactionSettings.Default,
+            Compaction = provider.Compaction ?? AgentCompactionSettings.Default,
         };
         var descriptor = new ModelProviderDescriptor(new ModelProviderId(providerKey), displayName, "anthropic")
         {
@@ -91,7 +91,7 @@ public sealed class AnthropicModelProviderRuntime : ICodeAltaModelProviderRuntim
             IsDefault = provider.IsDefault,
             DefaultModelId = provider.SingleModelId,
         };
-        return new CodeAltaModelProviderRuntime(
+        return new AgentModelProviderRuntime(
             descriptor,
             runtimeDescriptor,
             CreateTurnExecutor(provider));
@@ -99,7 +99,7 @@ public sealed class AnthropicModelProviderRuntime : ICodeAltaModelProviderRuntim
 
     internal static IModelProviderTurnExecutor CreateTurnExecutor(AnthropicProviderOptions provider)
     {
-        return new LocalAgentChatClientTurnExecutor(
+        return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken));
     }

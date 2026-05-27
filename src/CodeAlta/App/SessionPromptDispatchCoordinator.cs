@@ -208,7 +208,7 @@ internal sealed class SessionPromptDispatchCoordinator
                 }
             }
 
-            // Local runtime sessions can complete and publish Idle before SendAsync returns.
+            // Agent runtime sessions can complete and publish Idle before SendAsync returns.
             // Do not revive a run that the event stream has already marked idle.
             if (tab.ActiveRunStartedAt is not null)
             {

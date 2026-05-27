@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Tests;
@@ -530,7 +530,7 @@ public sealed class CopilotDirectProviderTests
             ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            TransportKind = LocalAgentTransportKind.AnthropicMessages,
+            TransportKind = AgentTransportKind.AnthropicMessages,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
 
@@ -538,7 +538,7 @@ public sealed class CopilotDirectProviderTests
         try
         {
             var response = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = provider,
                     ProviderId = new ModelProviderId(provider.ProviderKey),
@@ -555,12 +555,12 @@ public sealed class CopilotDirectProviderTests
                         }),
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("test")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("test")]),
                     ],
                     Tools = [],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-test",
                         ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
@@ -570,7 +570,7 @@ public sealed class CopilotDirectProviderTests
                 },
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
-            Assert.IsTrue(response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>()
+            Assert.IsTrue(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>()
                 .Any(static part => part.Value.Contains("Hello from Haiku", StringComparison.Ordinal)));
 
             _ = await executor.ListModelsAsync(provider).ConfigureAwait(false);
@@ -638,7 +638,7 @@ public sealed class CopilotDirectProviderTests
             ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            TransportKind = LocalAgentTransportKind.AnthropicMessages,
+            TransportKind = AgentTransportKind.AnthropicMessages,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
 
@@ -646,7 +646,7 @@ public sealed class CopilotDirectProviderTests
         try
         {
             var response = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = provider,
                     ProviderId = new ModelProviderId(provider.ProviderKey),
@@ -663,12 +663,12 @@ public sealed class CopilotDirectProviderTests
                         }),
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("hi")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("hi")]),
                     ],
                     Tools = [],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-test",
                         ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
@@ -679,7 +679,7 @@ public sealed class CopilotDirectProviderTests
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
             Assert.IsTrue(sawAnthropicRequest);
-            Assert.IsTrue(response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Any());
+            Assert.IsTrue(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Any());
         }
         finally
         {
@@ -731,7 +731,7 @@ public sealed class CopilotDirectProviderTests
             ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            TransportKind = LocalAgentTransportKind.OpenAIChatCompletions,
+            TransportKind = AgentTransportKind.OpenAIChatCompletions,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
 
@@ -739,7 +739,7 @@ public sealed class CopilotDirectProviderTests
         try
         {
             _ = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = provider,
                     ProviderId = new ModelProviderId(provider.ProviderKey),
@@ -760,12 +760,12 @@ public sealed class CopilotDirectProviderTests
                         }),
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("test")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("test")]),
                     ],
                     Tools = [],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-test",
                         ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
@@ -842,7 +842,7 @@ public sealed class CopilotDirectProviderTests
             ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
 
@@ -850,7 +850,7 @@ public sealed class CopilotDirectProviderTests
         try
         {
             var response = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = provider,
                     ProviderId = new ModelProviderId(provider.ProviderKey),
@@ -867,12 +867,12 @@ public sealed class CopilotDirectProviderTests
                         }),
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("test")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("test")]),
                     ],
                     Tools = [],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-test",
                         ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
@@ -883,11 +883,11 @@ public sealed class CopilotDirectProviderTests
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
             Assert.AreEqual(1, response.AssistantMessage.Parts.Count);
-            var toolCall = Assert.IsInstanceOfType<LocalAgentMessagePart.ToolCall>(response.AssistantMessage.Parts[0]);
+            var toolCall = Assert.IsInstanceOfType<AgentMessagePart.ToolCall>(response.AssistantMessage.Parts[0]);
             Assert.AreEqual("call_test", toolCall.CallId);
             Assert.AreEqual("list_dir", toolCall.Name);
             Assert.AreEqual(@"C:\code\CodeAlta", toolCall.Arguments.GetProperty("path").GetString());
-            Assert.IsFalse(response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Any());
+            Assert.IsFalse(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Any());
         }
         finally
         {
@@ -951,16 +951,16 @@ public sealed class CopilotDirectProviderTests
             ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
             ProviderKey = "github-copilot",
             DisplayName = "Copilot",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
             BaseUri = new Uri("https://api.individual.githubcopilot.com"),
         };
-        var deltas = new List<LocalAgentTurnDelta>();
+        var deltas = new List<AgentTurnDelta>();
 
         Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
         try
         {
             var response = await executor.ExecuteTurnAsync(
-                new LocalAgentTurnRequest
+                new AgentTurnRequest
                 {
                     Provider = provider,
                     ProviderId = new ModelProviderId(provider.ProviderKey),
@@ -977,12 +977,12 @@ public sealed class CopilotDirectProviderTests
                         }),
                     Conversation =
                     [
-                        new LocalAgentConversationMessage(
-                            LocalAgentConversationRole.User,
-                            [new LocalAgentMessagePart.Text("test")]),
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("test")]),
                     ],
                     Tools = [],
-                    State = new LocalAgentSessionState
+                    State = new AgentSessionState
                     {
                         SessionId = "session-test",
                         ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
@@ -998,7 +998,7 @@ public sealed class CopilotDirectProviderTests
 
             var reasoningDelta = deltas.Single(static delta => delta.Kind == AgentContentKind.Reasoning);
             Assert.AreEqual("Thinking visible.", reasoningDelta.Text);
-            var reasoningPart = response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Reasoning>().Single();
+            var reasoningPart = response.AssistantMessage.Parts.OfType<AgentMessagePart.Reasoning>().Single();
             Assert.AreEqual("Thinking visible.", reasoningPart.Value);
             Assert.AreEqual("encrypted-reasoning", reasoningPart.ProtectedData);
         }

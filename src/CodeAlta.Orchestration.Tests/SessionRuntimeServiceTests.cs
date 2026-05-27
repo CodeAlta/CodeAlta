@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
 
@@ -9,7 +9,7 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class SessionRuntimeServiceTests
 {
     [TestMethod]
-    public async Task ListRecoverableSessionsAsync_IncludesLocalRuntimeSessionsForUnregisteredProviders()
+    public async Task ListRecoverableSessionsAsync_IncludesAgentRuntimeSessionsForUnregisteredProviders()
     {
         using var temp = new TempDirectory();
         var registry = new ModelProviderRegistry();
@@ -18,7 +18,7 @@ public sealed class SessionRuntimeServiceTests
         var store = new SessionViewCatalog(new CatalogOptions { GlobalRoot = temp.Path }).JournalStore.CreateSessionStore();
         var createdAt = DateTimeOffset.Parse("2026-05-16T12:00:00+00:00");
         await store.UpsertSessionAsync(
-            new LocalAgentSessionSummary
+            new AgentSessionSummary
             {
                 SessionId = "session-1",
                 ProviderId = new ModelProviderId("old-provider"),
@@ -51,7 +51,7 @@ public sealed class SessionRuntimeServiceTests
         var store = new SessionViewCatalog(new CatalogOptions { GlobalRoot = temp.Path }).JournalStore.CreateSessionStore();
         var createdAt = DateTimeOffset.Parse("2026-05-16T12:00:00+00:00");
         await store.UpsertSessionAsync(
-            new LocalAgentSessionSummary
+            new AgentSessionSummary
             {
                 SessionId = "session-1",
                 ProviderId = ProviderId,
@@ -141,7 +141,7 @@ public sealed class SessionRuntimeServiceTests
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         };
 
-    private sealed class MinimalProviderRuntime(ModelProviderId providerId) : ICodeAltaModelProviderRuntime
+    private sealed class MinimalProviderRuntime(ModelProviderId providerId) : IAgentModelProviderRuntime
     {
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(providerId.Value), "Missing Resume") { DefaultModelId = "test-model" };
 
@@ -150,12 +150,12 @@ public sealed class SessionRuntimeServiceTests
             ProtocolFamily = "test",
             ProviderKey = providerId.Value,
             DisplayName = "Missing Resume",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         public IModelProviderModelCatalog? ModelCatalog => null;
 
-        public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => new()
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new()
         {
             Provider = RuntimeDescriptor,
             TurnExecutor = new NoOpTurnExecutor(),
@@ -173,7 +173,7 @@ public sealed class SessionRuntimeServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class ThrowingProviderRuntime(ModelProviderId providerId) : ICodeAltaModelProviderRuntime
+    private sealed class ThrowingProviderRuntime(ModelProviderId providerId) : IAgentModelProviderRuntime
     {
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(providerId.Value), "Throwing Provider");
 
@@ -182,14 +182,14 @@ public sealed class SessionRuntimeServiceTests
             ProtocolFamily = "test",
             ProviderKey = providerId.Value,
             DisplayName = "Throwing Provider",
-            TransportKind = LocalAgentTransportKind.OpenAIResponses,
+            TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         public IModelProviderModelCatalog? ModelCatalog => null;
 
         public int StartAttempts { get; private set; }
 
-        public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => new()
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new()
         {
             Provider = RuntimeDescriptor,
             TurnExecutor = new NoOpTurnExecutor(),
@@ -213,9 +213,9 @@ public sealed class SessionRuntimeServiceTests
 
     private sealed class NoOpTurnExecutor : IModelProviderTurnExecutor
     {
-        public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-            LocalAgentTurnRequest request,
-            Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        public Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }

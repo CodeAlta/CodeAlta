@@ -2,7 +2,7 @@
 
 using System.ClientModel;
 using CodeAlta.Agent.Anthropic;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
 using OpenAI.Responses;
 
@@ -10,7 +10,7 @@ namespace CodeAlta.Agent.Copilot;
 
 internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
-    private static readonly LocalAgentProviderProfile OpenAIChatProfile = new()
+    private static readonly AgentProviderProfile OpenAIChatProfile = new()
     {
         SupportsDeveloperRole = false,
         SupportsReasoningEffort = false,
@@ -21,7 +21,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         ReasoningInputFieldName = "reasoning_opaque",
     };
 
-    private static readonly LocalAgentProviderProfile OpenAIResponsesProfile = new()
+    private static readonly AgentProviderProfile OpenAIResponsesProfile = new()
     {
         SupportsDeveloperRole = true,
         SupportsReasoningEffort = true,
@@ -31,7 +31,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         ReasoningFieldNames = ["reasoning"],
     };
 
-    private static readonly LocalAgentProviderProfile AnthropicMessagesProfile = new()
+    private static readonly AgentProviderProfile AnthropicMessagesProfile = new()
     {
         SupportsDeveloperRole = false,
         StreamsUsage = true,
@@ -57,9 +57,9 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         CancellationToken cancellationToken = default)
         => _modelDiscovery.ListModelsAsync(provider, cancellationToken);
 
-    public Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+    public Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken = default)
         => ExecuteTurnAsync(
             request,
@@ -67,10 +67,10 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             static (_, _) => ValueTask.CompletedTask,
             cancellationToken);
 
-    public async Task<LocalAgentTurnResponse> ExecuteTurnAsync(
-        LocalAgentTurnRequest request,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+    public async Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -89,11 +89,11 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         }
     }
 
-    private async Task<LocalAgentTurnResponse> ExecuteTurnCoreAsync(
-        LocalAgentTurnRequest request,
+    private async Task<AgentTurnResponse> ExecuteTurnCoreAsync(
+        AgentTurnRequest request,
         CopilotEndpointKind endpointKind,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
         var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
@@ -105,48 +105,48 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         };
     }
 
-    private async Task<LocalAgentTurnResponse> ExecuteOpenAIChatAsync(
-        LocalAgentTurnRequest request,
+    private async Task<AgentTurnResponse> ExecuteOpenAIChatAsync(
+        AgentTurnRequest request,
         CopilotDirectCredential credential,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken)
     {
         var profile = _provider.Profile ?? CreateOpenAIChatProfile(request.ModelInfo);
         var provider = CreateOpenAIProviderOptions(credential, request, profile);
         var executor = new OpenAIChatTurnExecutor(provider);
         return await executor.ExecuteTurnAsync(
-            CreateDelegatedRequest(request, credential, "openai-chat", LocalAgentTransportKind.OpenAIChatCompletions, profile),
+            CreateDelegatedRequest(request, credential, "openai-chat", AgentTransportKind.OpenAIChatCompletions, profile),
             onUpdate,
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static LocalAgentProviderProfile CreateOpenAIChatProfile(AgentModelInfo? modelInfo)
+    private static AgentProviderProfile CreateOpenAIChatProfile(AgentModelInfo? modelInfo)
         => OpenAIChatProfile with
         {
             SupportsReasoningEffort = modelInfo?.SupportedReasoningEfforts is { Count: > 0 },
         };
 
-    private async Task<LocalAgentTurnResponse> ExecuteOpenAIResponsesAsync(
-        LocalAgentTurnRequest request,
+    private async Task<AgentTurnResponse> ExecuteOpenAIResponsesAsync(
+        AgentTurnRequest request,
         CopilotDirectCredential credential,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
-        Func<LocalAgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
         var profile = _provider.Profile ?? OpenAIResponsesProfile;
         var provider = CreateOpenAIProviderOptions(credential, request, profile);
         await using var executor = new OpenAIResponsesTurnExecutor(provider);
         return await executor.ExecuteTurnAsync(
-            CreateDelegatedRequest(request, credential, "openai-responses", LocalAgentTransportKind.OpenAIResponses, profile),
+            CreateDelegatedRequest(request, credential, "openai-responses", AgentTransportKind.OpenAIResponses, profile),
             onUpdate,
             onSessionUpdate,
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<LocalAgentTurnResponse> ExecuteAnthropicMessagesAsync(
-        LocalAgentTurnRequest request,
+    private async Task<AgentTurnResponse> ExecuteAnthropicMessagesAsync(
+        AgentTurnRequest request,
         CopilotDirectCredential credential,
-        Func<LocalAgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken)
     {
         var provider = new AnthropicProviderOptions
@@ -164,15 +164,15 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         };
         var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(provider);
         return await executor.ExecuteTurnAsync(
-            CreateDelegatedRequest(request, credential, "anthropic-messages", LocalAgentTransportKind.AnthropicMessages, _provider.Profile ?? AnthropicMessagesProfile),
+            CreateDelegatedRequest(request, credential, "anthropic-messages", AgentTransportKind.AnthropicMessages, _provider.Profile ?? AnthropicMessagesProfile),
             onUpdate,
             cancellationToken).ConfigureAwait(false);
     }
 
     private OpenAIProviderOptions CreateOpenAIProviderOptions(
         CopilotDirectCredential credential,
-        LocalAgentTurnRequest request,
-        LocalAgentProviderProfile profile)
+        AgentTurnRequest request,
+        AgentProviderProfile profile)
         => new()
         {
             ProviderKey = _provider.ProviderKey,
@@ -243,12 +243,12 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         return headers;
     }
 
-    private static LocalAgentTurnRequest CreateDelegatedRequest(
-        LocalAgentTurnRequest request,
+    private static AgentTurnRequest CreateDelegatedRequest(
+        AgentTurnRequest request,
         CopilotDirectCredential credential,
         string protocolFamily,
-        LocalAgentTransportKind transportKind,
-        LocalAgentProviderProfile profile)
+        AgentTransportKind transportKind,
+        AgentProviderProfile profile)
     {
         var provider = request.Provider with
         {
@@ -284,14 +284,14 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         return false;
     }
 
-    private static bool IsAgentInitiated(LocalAgentTurnRequest request)
-        => request.Conversation.LastOrDefault()?.Role != LocalAgentConversationRole.User;
+    private static bool IsAgentInitiated(AgentTurnRequest request)
+        => request.Conversation.LastOrDefault()?.Role != AgentConversationRole.User;
 
-    private static bool HasVisionInput(LocalAgentTurnRequest request)
+    private static bool HasVisionInput(AgentTurnRequest request)
         => request.Conversation.SelectMany(static message => message.Parts).Any(static part => part switch
         {
-            LocalAgentMessagePart.Uri uri => IsImageMediaType(uri.MediaType),
-            LocalAgentMessagePart.Data data => IsImageMediaType(data.MediaType),
+            AgentMessagePart.Uri uri => IsImageMediaType(uri.MediaType),
+            AgentMessagePart.Data data => IsImageMediaType(data.MediaType),
             _ => false,
         });
 

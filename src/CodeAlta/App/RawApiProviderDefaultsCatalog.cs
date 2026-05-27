@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using CodeAlta.Agent.LocalRuntime;
+using CodeAlta.Agent.Runtime;
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Serialization;
@@ -12,11 +12,11 @@ internal static class RawApiProviderDefaultsCatalog
     private const string ProviderDefaultsRelativePath = "ProviderDefaults/provider_defaults.toml";
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.ProviderDefaults");
 
-    public static LocalAgentProviderProfile ApplyProfileDefaults(
-        LocalAgentTransportKind transportKind,
+    public static AgentProviderProfile ApplyProfileDefaults(
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri,
-        LocalAgentProviderProfile profile)
+        AgentProviderProfile profile)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentNullException.ThrowIfNull(profile);
@@ -34,7 +34,7 @@ internal static class RawApiProviderDefaultsCatalog
     }
 
     public static IReadOnlyDictionary<string, object?>? ApplyOpenAIExtraBodyDefaults(
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri,
         IReadOnlyDictionary<string, object?>? extraBody)
@@ -54,13 +54,13 @@ internal static class RawApiProviderDefaultsCatalog
     }
 
     public static IReadOnlyDictionary<string, object?>? CreateOpenAIExtraBodyDefaults(
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri)
         => ApplyOpenAIExtraBodyDefaults(transportKind, providerKey, baseUri, null);
 
     public static IReadOnlyDictionary<string, string>? CreateHeaderDefaults(
-        LocalAgentTransportKind transportKind,
+        AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri)
     {
@@ -211,22 +211,22 @@ internal static class RawApiProviderDefaultsCatalog
                (hasHostCriteria && rule.HostSuffixes!.Any(hostSuffix => HasHost(context.BaseUri, hostSuffix)));
     }
 
-    private static bool IsTransportTypeMatch(string? configuredType, LocalAgentTransportKind transportKind)
+    private static bool IsTransportTypeMatch(string? configuredType, AgentTransportKind transportKind)
     {
         var normalized = configuredType?.Trim().ToLowerInvariant();
         return transportKind switch
         {
-            LocalAgentTransportKind.OpenAIChatCompletions => normalized is "openai-chat" or "openai" or "chat",
-            LocalAgentTransportKind.OpenAIResponses => normalized is "openai-responses" or "responses",
-            LocalAgentTransportKind.AnthropicMessages => normalized is "anthropic" or "anthropic-messages",
-            LocalAgentTransportKind.GoogleGeminiApi => normalized is "google" or "google-genai" or "gemini",
-            LocalAgentTransportKind.GoogleVertexAI => normalized is "vertex" or "vertex-ai" or "google-vertex",
+            AgentTransportKind.OpenAIChatCompletions => normalized is "openai-chat" or "openai" or "chat",
+            AgentTransportKind.OpenAIResponses => normalized is "openai-responses" or "responses",
+            AgentTransportKind.AnthropicMessages => normalized is "anthropic" or "anthropic-messages",
+            AgentTransportKind.GoogleGeminiApi => normalized is "google" or "google-genai" or "gemini",
+            AgentTransportKind.GoogleVertexAI => normalized is "vertex" or "vertex-ai" or "google-vertex",
             _ => false,
         };
     }
 
-    private static LocalAgentProviderProfile ApplyProfile(
-        LocalAgentProviderProfile profile,
+    private static AgentProviderProfile ApplyProfile(
+        AgentProviderProfile profile,
         RawApiProviderDefaultsProfile defaults)
     {
         var reasoningFieldNames = profile.ReasoningFieldNames;
@@ -385,7 +385,7 @@ internal static class RawApiProviderDefaultsCatalog
         };
 
     private readonly record struct RawApiProviderDefaultsContext(
-        LocalAgentTransportKind TransportKind,
+        AgentTransportKind TransportKind,
         string ProviderKey,
         Uri? BaseUri);
 }

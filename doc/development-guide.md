@@ -36,7 +36,7 @@ The current provider/session split is intentional and should be preserved:
 - Parent/sub-session relationships are lineage/orchestration metadata only. Do not make child sessions share the parent's run gate, cancellation token, provider continuation state, or journal writer after creation.
 - Conversation-like orchestration and UI concepts should use `Session` or `SessionView` naming. Keep `Thread` only for actual OS/runtime threading, framework terms, or explicit tolerant readers/legacy view-state APIs that still load old session-view data.
 - Removed `AgentBackendId`, `BackendId`, `IAgentBackend`, and `AgentBackendFactory` symbols must not be reintroduced. Use `ModelProviderId`, `ModelProviderDescriptor`, `IModelProviderRegistry`, and `IModelProviderRuntime` for selectable providers.
-- Avoid `LocalAgentBackend` and new broad `Local*` names for runtime/session ownership. The CodeAlta-owned runtime is `CodeAltaAgentRuntime`/`AgentHub`; provider-specific raw API pieces may still use `LocalAgent*` when they describe the local replay/journal implementation.
+- Avoid `LocalRuntime`, active `LocalAgent*`, and broad `CodeAlta*` runtime class prefixes in `CodeAlta.Agent`; use neutral agent/session/provider names such as `AgentRuntime`, `AgentSession`, and `AgentModelProviderRuntime`. Keep legacy `backend*`, `Local*`, and `Thread*` terminology only for explicit persisted/wire/config compatibility or genuine external framework/runtime terms.
 - Compatibility constraints are user data and configuration only: existing session journals and legacy session-view view state must remain loadable with tolerant reads of legacy `BackendId`/`SessionId`/provider fields, and existing provider `config.toml` / `[providers]` semantics must stay stable unless a focused migrator is added.
 
 Existing guardrail coverage to keep intact when touching startup/session boundaries:
@@ -44,7 +44,7 @@ Existing guardrail coverage to keep intact when touching startup/session boundar
 - `src/CodeAlta.Tests/AgentSessionCatalogTests.cs` covers concurrent callers sharing one catalog load, cached streaming snapshots, corrupt-file tolerance, and provider-independent listing for missing/disabled providers.
 - `src/CodeAlta.Tests/CodeAltaShellControllerTests.cs` covers sessions becoming visible before provider initialization completes, provider initialization starting before slow session scans complete, and complete startup catalog loading through one recoverable session stream.
 - `src/CodeAlta.Tests/ModelProviderInitializationServiceTests.cs` covers per-provider failure/timeout isolation and model-list caching/reuse.
-- `src/CodeAlta.Orchestration.Tests/AgentHubTests.cs`, `src/CodeAlta.Tests/LocalAgentSessionJournalFileTests.cs`, and `src/CodeAlta.Orchestration.Tests/SessionRuntimeStressTests.cs` cover per-session runtime coordination and journal/concurrency behavior.
+- `src/CodeAlta.Orchestration.Tests/AgentHubTests.cs`, `src/CodeAlta.Tests/AgentSessionJournalFileTests.cs`, and `src/CodeAlta.Orchestration.Tests/SessionRuntimeStressTests.cs` cover per-session runtime coordination and journal/concurrency behavior.
 
 ## Frontend Shell Shape
 
