@@ -21,7 +21,7 @@ public sealed class XaiModelProviderRuntimeOptions
     public string? DisplayNameOverride { get; set; }
 
     /// <summary>
-    /// Gets or sets the optional root directory used to persist machine-local agent state.
+    /// Gets or sets the optional root directory used to persist machine-scoped agent state.
     /// </summary>
     public string? StateRootPath { get; set; }
 

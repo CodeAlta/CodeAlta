@@ -78,7 +78,7 @@ External ACP CLI adapters are no longer registered as model providers. Legacy `[
 
 ## CodeAlta runtime provider behavior
 
-OpenAI-compatible, Anthropic, Google, direct HTTP, and subscription-backed providers attach to the CodeAlta-owned local session runtime. They share these properties:
+OpenAI-compatible, Anthropic, Google, direct HTTP, and subscription-backed providers attach to the agent session runtime. They share these properties:
 
 - sessions are CodeAlta-owned, provider-independent, and journaled under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`;
 - provider/model switches are represented as events in the journal when history can be replayed safely;

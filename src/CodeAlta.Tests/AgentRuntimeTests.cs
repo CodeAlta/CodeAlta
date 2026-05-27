@@ -464,7 +464,7 @@ public sealed class AgentRuntimeTests
                 OutputTokens: 105,
                 CachedInputTokens: 202_752),
             Scope: AgentUsageScope.CurrentWindow,
-            Source: AgentUsageSource.LocalProviderUsage,
+            Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: usageUpdatedAt);
 
         await store.UpsertSessionAsync(summary).ConfigureAwait(false);

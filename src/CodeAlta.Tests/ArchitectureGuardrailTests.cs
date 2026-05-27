@@ -638,12 +638,16 @@ public sealed class ArchitectureGuardrailTests
     {
         var sourceRoot = GetSourceRoot();
         var agentRoot = Path.Combine(sourceRoot, "CodeAlta.Agent");
-        var allowedLocalTypeNames = new HashSet<string>(StringComparer.Ordinal)
+        var allowedCompatibilityIdentifiers = new HashSet<string>(StringComparer.Ordinal)
         {
             "CodeAlta.Agent/AgentInputItem.cs:LocalImage",
+            "CodeAlta.Agent/AgentJsonSerialization.cs:LocalImage",
+            "CodeAlta.Agent/Runtime/AgentSession.cs:LocalImage",
+            "CodeAlta.Agent/Runtime/FileSystemAgentSessionStore.cs:CodeAltaSessionHeaderEventType",
+            "CodeAlta.Agent/Runtime/FileSystemAgentSessionStore.cs:CodeAltaSessionStateEventType",
         };
-        var declarationPattern = new Regex(
-            @"\b(?:class|record|struct|interface|enum)\s+(?<name>I?(?:Local[A-Za-z0-9_]*|CodeAlta[A-Za-z0-9_]*))\b",
+        var identifierPattern = new Regex(
+            @"\b(?<name>Local[A-Z][A-Za-z0-9_]*|CodeAlta[A-Z][A-Za-z0-9_]*)\b",
             RegexOptions.Compiled);
 
         var violations = Directory.EnumerateFiles(agentRoot, "*.cs", SearchOption.AllDirectories)
@@ -652,18 +656,22 @@ public sealed class ArchitectureGuardrailTests
             .SelectMany(file =>
             {
                 var relativePath = Path.GetRelativePath(sourceRoot, file).Replace('\\', '/');
-                var content = File.ReadAllText(file);
+                var lines = File.ReadLines(file).ToArray();
+                var content = string.Join('\n', lines);
                 var pathViolations = relativePath.Contains("LocalRuntime", StringComparison.Ordinal) ||
                                      content.Contains("CodeAlta.Agent.LocalRuntime", StringComparison.Ordinal) ||
                                      content.Contains("LocalAgent", StringComparison.Ordinal)
                     ? [$"{relativePath}:LocalRuntime/LocalAgent"]
                     : Array.Empty<string>();
-                var declarationViolations = declarationPattern.Matches(content)
-                    .Select(match => match.Groups["name"].Value)
-                    .Select(name => $"{relativePath}:{name}")
-                    .Where(symbol => !allowedLocalTypeNames.Contains(symbol));
+                var identifierViolations = lines
+                    .SelectMany((line, index) => identifierPattern.Matches(line)
+                        .Select(match => new { Line = line, Number = index + 1, Name = match.Groups["name"].Value }))
+                    .Select(match => new { Key = $"{relativePath}:{match.Name}", match.Number, match.Line })
+                    .Where(match => !allowedCompatibilityIdentifiers.Contains(match.Key))
+                    .Where(static match => !match.Line.Contains("JsonStringEnumMemberName(\"LocalProviderUsage\")", StringComparison.Ordinal))
+                    .Select(match => $"{match.Key}:{match.Number}:{match.Line.Trim()}");
 
-                return pathViolations.Concat(declarationViolations);
+                return pathViolations.Concat(identifierViolations);
             })
             .OrderBy(static violation => violation, StringComparer.Ordinal)
             .ToArray();

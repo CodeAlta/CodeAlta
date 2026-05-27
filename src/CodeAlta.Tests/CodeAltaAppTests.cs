@@ -724,7 +724,7 @@ public sealed class CodeAltaAppTests
                 OutputTokens: 105,
                 CachedInputTokens: 202_752),
             Scope: AgentUsageScope.CurrentWindow,
-            Source: AgentUsageSource.LocalProviderUsage,
+            Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: timestamp.AddSeconds(2));
         AgentEvent[] history =
         [
@@ -2490,7 +2490,7 @@ public sealed class CodeAltaAppTests
         var usage = new AgentSessionUsage(
             Window: new AgentWindowUsageSnapshot(3_495_220, 272_000, 63, "Estimated active context"),
             Scope: AgentUsageScope.CurrentWindow,
-            Source: AgentUsageSource.LocalProviderUsage,
+            Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: DateTimeOffset.Parse("2026-05-18T18:38:43+00:00"));
 
         var indicator = SessionUsageAggregator.BuildIndicatorMarkup(usage);
@@ -2510,7 +2510,7 @@ public sealed class CodeAltaAppTests
                 OutputTokens: 450,
                 Label: "Last API call"),
             Scope: AgentUsageScope.CurrentWindow,
-            Source: AgentUsageSource.LocalProviderUsage,
+            Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: DateTimeOffset.Parse("2026-04-08T10:00:00+00:00"));
 
         var indicator = SessionUsageAggregator.BuildIndicatorMarkup(usage);

@@ -89,7 +89,7 @@ public sealed class ChatClientTurnExecutorTests
         Assert.AreEqual(20L, response.Usage.CurrentTokens);
         Assert.AreEqual(200000L, response.Usage.TokenLimit);
         Assert.AreEqual(AgentUsageScope.CurrentWindow, response.Usage.Scope);
-        Assert.AreEqual(AgentUsageSource.LocalProviderUsage, response.Usage.Source);
+        Assert.AreEqual(AgentUsageSource.ProviderUsage, response.Usage.Source);
         Assert.IsNotNull(response.ProviderState);
         Assert.AreEqual("response-1", response.ProviderState.Value.GetProperty("responseId").GetString());
         Assert.AreEqual("conversation-1", response.ProviderState.Value.GetProperty("conversationId").GetString());

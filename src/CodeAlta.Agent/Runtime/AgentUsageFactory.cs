@@ -39,7 +39,7 @@ internal static class AgentUsageFactory
                     ? null
                     : $"{modelId}: {inputTokens ?? 0}/{outputTokens ?? 0} tokens"),
             Scope: window is null ? AgentUsageScope.LastOperation : AgentUsageScope.CurrentWindow,
-            Source: AgentUsageSource.LocalProviderUsage,
+            Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: updatedAt);
     }
 
@@ -157,7 +157,7 @@ internal static class AgentUsageFactory
             Window = window,
             Scope = AgentUsageScope.CurrentWindow,
             Source = usage?.Source is AgentUsageSource.Unknown or null
-                ? AgentUsageSource.LocalProviderUsage
+                ? AgentUsageSource.ProviderUsage
                 : usage.Source,
             UpdatedAt = updatedAt,
         };

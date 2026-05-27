@@ -216,9 +216,10 @@ public enum AgentUsageSource
     RecoveredHistory,
 
     /// <summary>
-    /// Live usage data reported by a local raw-API provider.
+    /// Live usage data reported by a provider turn executor.
     /// </summary>
-    LocalProviderUsage
+    [JsonStringEnumMemberName("LocalProviderUsage")]
+    ProviderUsage
 }
 
 /// <summary>

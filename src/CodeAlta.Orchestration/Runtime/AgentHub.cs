@@ -366,10 +366,10 @@ public sealed class AgentHub : IAsyncDisposable
             }
         }
 
-        if (providerRuntime is not IAgentModelProviderRuntime codeAltaProviderRuntime)
+        if (providerRuntime is not IAgentModelProviderRuntime agentProviderRuntime)
         {
             await providerRuntime.DisposeAsync().ConfigureAwait(false);
-            throw new InvalidOperationException($"Model provider '{providerId.Value}' does not expose a CodeAlta session runtime.");
+            throw new InvalidOperationException($"Model provider '{providerId.Value}' does not expose an agent session runtime.");
         }
 
         var runtime = new AgentRuntime(
@@ -378,7 +378,7 @@ public sealed class AgentHub : IAsyncDisposable
             new AgentRuntimeOptions
             {
                 StateRootPath = _stateRootPath,
-                Providers = [codeAltaProviderRuntime.CreateProviderRegistration()],
+                Providers = [agentProviderRuntime.CreateProviderRegistration()],
             });
         try
         {

@@ -172,7 +172,7 @@ The `CodeAlta.Agent` contracts are split by responsibility:
 
 Provider-runtime compatibility surfaces now use model-provider names. Do not reintroduce `IAgentBackend`, `AgentBackendId`, or `AgentBackendFactory`; new user-facing docs and UI should say **model provider** and **session**, not backend-owned session.
 
-Provider packages create model-provider runtimes and turn executors. The CodeAlta local session runtime (`AgentRuntime`/`AgentSession`) replays journals, composes provider requests, executes turns, appends events, and can switch compatible providers by replaying canonical CodeAlta history.
+Provider packages create model-provider runtimes and turn executors. The agent session runtime (`AgentRuntime`/`AgentSession`) replays journals, composes provider requests, executes turns, appends events, and can switch compatible providers by replaying canonical CodeAlta history.
 
 ## Extension integration
 

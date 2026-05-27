@@ -1128,7 +1128,7 @@ public sealed class AltaLiveToolTests
                         Window: new AgentWindowUsageSnapshot(321, 1000, 4, "test window"),
                         LastOperation: new AgentOperationUsageSnapshot(Model: "gpt-metrics", InputTokens: 100, OutputTokens: 20, CachedInputTokens: 10),
                         Scope: AgentUsageScope.CurrentWindow,
-                        Source: AgentUsageSource.LocalProviderUsage,
+                        Source: AgentUsageSource.ProviderUsage,
                         UpdatedAt: timestamp.AddMinutes(3))),
                 new AgentContentCompletedEvent(ProviderId, sessionId, timestamp.AddMinutes(4), new AgentRunId("run-1"), AgentContentKind.Assistant, "assistant-1", null, "final concise answer"),
             ]).ConfigureAwait(false);

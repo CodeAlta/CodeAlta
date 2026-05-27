@@ -14,7 +14,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `machines/` | Catalog model | Machine-specific override profile root. |
 | `agents/` | Catalog model | File-backed agent-definition root used by host-owned coordinator setup. |
 | `cache/` | Process/runtime services | Machine-local cache root, including refreshed model metadata and plugin build cache. |
-| `sessions/` | CodeAlta session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
+| `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
 | `saved_prompts/` | Frontend prompt draft service | Unsent per-session prompt drafts. |
 | `ui-state.yaml` | Frontend view-state service | Open/selected tabs, session/model preferences, theme, and shell view state. |
 | `plugins/` | Plugin runtime | User-scoped source plugin packages. |
@@ -86,7 +86,7 @@ CodeAlta uses two related records for active work:
 - **Session-view descriptors** are catalog/runtime metadata for global, project, and internal session views. They carry title, project reference, provider/model/reasoning preferences, parent/created-by attribution, and last-active timestamps. Some persisted readers and file names still use `SessionView`/`SessionId` for legacy compatibility.
 - **Agent session journals** are CodeAlta-owned JSONL files under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. They contain replayable normalized `AgentEvent` records plus raw snapshot events for `local.sessionSummary`, `local.sessionState`, `codealta.sessionHeader`, and `codealta.sessionState`.
 
-`SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the local agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
+`SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
 
 Optional protocol traces are written to `~/.alta/sessions/traces/<session-id>.trace` only when a provider has tracing enabled. Credential headers are redacted, but trace files can still contain sensitive prompts, outputs, tool arguments, and streamed protocol updates.
 

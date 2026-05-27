@@ -3663,7 +3663,7 @@ public sealed class AgentSessionTests
             new AgentSessionUsage(
                 LastOperation: new AgentOperationUsageSnapshot(InputTokens: 120, OutputTokens: 30),
                 Scope: AgentUsageScope.LastOperation,
-                Source: AgentUsageSource.LocalProviderUsage,
+                Source: AgentUsageSource.ProviderUsage,
                 UpdatedAt: DateTimeOffset.UtcNow));
 
         Assert.AreEqual("provider-last-operation+local-tail", estimate.Source);
@@ -3716,7 +3716,7 @@ public sealed class AgentSessionTests
                     MessageCount: conversation.Length,
                     Label: "Estimated active context"),
                 Scope: AgentUsageScope.CurrentWindow,
-                Source: AgentUsageSource.LocalProviderUsage,
+                Source: AgentUsageSource.ProviderUsage,
                 UpdatedAt: DateTimeOffset.UtcNow));
 
         Assert.AreEqual("window-snapshot", estimate.Source);
@@ -3785,7 +3785,7 @@ public sealed class AgentSessionTests
             new AgentSessionUsage(
                 LastOperation: new AgentOperationUsageSnapshot(InputTokens: 120, OutputTokens: 30),
                 Scope: AgentUsageScope.LastOperation,
-                Source: AgentUsageSource.LocalProviderUsage,
+                Source: AgentUsageSource.ProviderUsage,
                 UpdatedAt: DateTimeOffset.UtcNow));
 
         Assert.AreEqual("local-heuristic", estimate.Source);
@@ -4064,7 +4064,7 @@ public sealed class AgentSessionTests
                 InputTokens: inputTokens,
                 OutputTokens: outputTokens),
             Scope: AgentUsageScope.CurrentWindow,
-            Source: AgentUsageSource.LocalProviderUsage,
+            Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: DateTimeOffset.Parse("2026-04-06T10:00:00+00:00"));
     }
 

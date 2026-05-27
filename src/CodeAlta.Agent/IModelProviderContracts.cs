@@ -67,12 +67,12 @@ public interface IModelProviderRuntime : IAsyncDisposable
 }
 
 /// <summary>
-/// Represents a CodeAlta-owned provider runtime that can be attached to the local session runtime.
+/// Represents a provider runtime that can be attached to the agent session runtime.
 /// </summary>
 public interface IAgentModelProviderRuntime : IModelProviderRuntime
 {
     /// <summary>
-    /// Gets the provider descriptor used by CodeAlta session execution.
+    /// Gets the provider descriptor used by agent session execution.
     /// </summary>
     ModelProviderRuntimeDescriptor RuntimeDescriptor { get; }
 
@@ -82,7 +82,7 @@ public interface IAgentModelProviderRuntime : IModelProviderRuntime
     IModelProviderModelCatalog? ModelCatalog { get; }
 
     /// <summary>
-    /// Creates the provider registration consumed by the CodeAlta session runtime.
+    /// Creates the provider registration consumed by the agent session runtime.
     /// </summary>
     /// <returns>The provider registration.</returns>
     AgentRuntimeProviderRegistration CreateProviderRegistration();

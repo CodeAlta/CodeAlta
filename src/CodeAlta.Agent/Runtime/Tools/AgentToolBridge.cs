@@ -6,7 +6,7 @@ using Microsoft.Extensions.AI;
 namespace CodeAlta.Agent.Runtime.Tools;
 
 /// <summary>
-/// Converts local agent tool definitions into provider-agnostic chat-tool declarations.
+/// Converts agent tool definitions into provider-agnostic chat-tool declarations.
 /// </summary>
 public static class AgentToolBridge
 {

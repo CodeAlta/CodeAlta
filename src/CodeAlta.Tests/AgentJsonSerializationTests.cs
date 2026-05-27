@@ -330,4 +330,19 @@ public sealed class AgentJsonSerializationTests
         Assert.AreEqual("Last API call", usageRoot.GetProperty("lastOperation").GetProperty("label").GetString());
         Assert.AreEqual("request", usageRoot.GetProperty("details").GetProperty("quotaSnapshots")[0].GetProperty("details").GetProperty("$type").GetString());
     }
+
+    [TestMethod]
+    public void AgentSessionUsage_ProviderUsage_KeepsLegacySerializedSourceName()
+    {
+        var usage = new AgentSessionUsage(Source: AgentUsageSource.ProviderUsage);
+
+        var json = JsonSerializer.Serialize(usage, AgentJsonSerializerContext.Default.AgentSessionUsage);
+        var deserialized = JsonSerializer.Deserialize(
+            """{"source":"LocalProviderUsage"}""",
+            AgentJsonSerializerContext.Default.AgentSessionUsage);
+
+        using var document = JsonDocument.Parse(json);
+        Assert.AreEqual("LocalProviderUsage", document.RootElement.GetProperty("source").GetString());
+        Assert.AreEqual(AgentUsageSource.ProviderUsage, deserialized?.Source);
+    }
 }
