@@ -40,9 +40,7 @@ Phase 0 baseline on 2026-05-26: `dotnet test -c Release` from `src` passed with 
 
 Tests identified as assuming backend-owned sessions or the current backend/session coupling and therefore expected to move or change during the refactor:
 
-- `src/CodeAlta.Orchestration.Tests/AgentHubTests.cs`: `UsesSharedSessionMetadataStoreAsync_UsesRegistrationMetadataWithoutStartingBackend`.
 - `src/CodeAlta.Orchestration.Tests/SessionRuntimeServiceTests.cs`: session-runtime recovery and missing-resume coverage that moved off backend-owned session enumeration.
-- `src/CodeAlta.Tests/AgentBackendFactoryTests.cs`: `UsesSharedSessionMetadataStore_ReturnsRegistrationMetadata`.
 - `src/CodeAlta.Tests/AgentHubBackendReloadTests.cs`: `ListSessionsAsync_CachesProcessBackedBackendSessions`, `ListSessionsAsync_CachesRegularBackendSessions`, `DeleteSessionAsync_InvalidatesProcessBackedSessionCache`.
 - `src/CodeAlta.Tests/FileSystemLocalAgentSessionStoreTests.cs`: provider-scoped `ListSessionsAsync` and persisted `BackendId`/provider metadata coverage.
 - `src/CodeAlta.Tests/LocalAgentBackendTests.cs`: backend create/list/resume/delete, default-provider resume, provider-switch resume, and resume-time usage repair tests.

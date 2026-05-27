@@ -1,7 +1,7 @@
 namespace CodeAlta.Agent;
 
 /// <summary>
-/// Represents an agent backend runtime capable of creating and resuming sessions.
+/// Represents an agent backend runtime capable of creating and resuming active sessions.
 /// </summary>
 public interface IAgentBackend : IAsyncDisposable
 {
@@ -32,15 +32,6 @@ public interface IAgentBackend : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Lists sessions known to the backend.
-    /// </summary>
-    /// <param name="filter">Optional filter.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes an existing backend session when supported.

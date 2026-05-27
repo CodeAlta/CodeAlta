@@ -187,10 +187,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
         ]);
         var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions);
-        var backendFactory = new AgentBackendFactory
-        {
-            LocalSessionJournalFile = sessionJournalFile,
-        };
+        var backendFactory = new AgentBackendFactory();
         var modelProviderRegistry = new ModelProviderRegistry();
         options.ConfigureModelProviders?.Invoke(modelProviderRegistry, backendFactory);
         options.ConfigureAgentBackends?.Invoke(backendFactory);

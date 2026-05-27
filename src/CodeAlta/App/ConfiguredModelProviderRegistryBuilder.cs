@@ -42,10 +42,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createBackend, out var createRuntime))
             {
-                backendFactory.RegisterOrReplace(
-                    descriptor.BackendId,
-                    createBackend,
-                    AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+                backendFactory.RegisterOrReplace(descriptor.BackendId, createBackend);
                 modelProviderRegistry?.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
             }
@@ -81,10 +78,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 continue;
             }
 
-            backendFactory.RegisterOrReplace(
-                descriptor.BackendId,
-                createBackend,
-                AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+            backendFactory.RegisterOrReplace(descriptor.BackendId, createBackend);
             modelProviderRegistry?.RegisterOrReplace(descriptor, createRuntime);
             descriptors.Add(descriptor);
         }

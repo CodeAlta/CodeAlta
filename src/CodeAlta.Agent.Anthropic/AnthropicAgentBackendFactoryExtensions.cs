@@ -20,8 +20,7 @@ public static class AnthropicAgentBackendFactoryExtensions
 
         factory.Register(
             options.BackendIdOverride ?? AgentBackendIds.AnthropicMessages,
-            () => new AnthropicAgentBackend(options),
-            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+            () => new AnthropicAgentBackend(options));
         return factory;
     }
 }

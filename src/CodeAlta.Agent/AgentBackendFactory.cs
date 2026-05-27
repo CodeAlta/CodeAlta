@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using CodeAlta.Agent.LocalRuntime;
 
 namespace CodeAlta.Agent;
 
@@ -11,8 +10,6 @@ public sealed class AgentBackendFactory
     private readonly object _lock = new();
     private readonly Dictionary<string, Registration> _registrations = new(StringComparer.OrdinalIgnoreCase);
 
-    internal LocalAgentSessionJournalFile? LocalSessionJournalFile { get; set; }
-
     /// <summary>
     /// Registers a backend factory for a backend identifier.
     /// </summary>
@@ -22,21 +19,8 @@ public sealed class AgentBackendFactory
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the backend identifier is already registered.</exception>
     public void Register(AgentBackendId backendId, Func<IAgentBackend> backendFactory)
-        => Register(backendId, backendFactory, AgentBackendRegistrationOptions.Default);
-
-    /// <summary>
-    /// Registers a backend factory for a backend identifier.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="backendFactory">The backend factory delegate.</param>
-    /// <param name="options">Registration metadata for the backend.</param>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the backend identifier is already registered.</exception>
-    public void Register(AgentBackendId backendId, Func<IAgentBackend> backendFactory, AgentBackendRegistrationOptions options)
     {
         ArgumentNullException.ThrowIfNull(backendFactory);
-        ArgumentNullException.ThrowIfNull(options);
         var normalizedBackendId = NormalizeBackendId(backendId);
 
         lock (_lock)
@@ -48,7 +32,7 @@ public sealed class AgentBackendFactory
 
             _registrations.Add(
                 normalizedBackendId,
-                new Registration(new AgentBackendId(normalizedBackendId), backendFactory, options.UsesSharedSessionMetadataStore));
+                new Registration(new AgentBackendId(normalizedBackendId), backendFactory));
         }
     }
 
@@ -66,20 +50,6 @@ public sealed class AgentBackendFactory
     }
 
     /// <summary>
-    /// Registers a backend factory for a backend identifier.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="backendFactory">The backend factory delegate.</param>
-    /// <param name="options">Registration metadata for the backend.</param>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the backend identifier is already registered.</exception>
-    public void Register(string backendId, Func<IAgentBackend> backendFactory, AgentBackendRegistrationOptions options)
-    {
-        Register(new AgentBackendId(backendId), backendFactory, options);
-    }
-
-    /// <summary>
     /// Registers a backend factory if it is not already registered.
     /// </summary>
     /// <param name="backendId">The backend identifier.</param>
@@ -88,21 +58,8 @@ public sealed class AgentBackendFactory
     /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> is <see langword="null"/>.</exception>
     public bool TryRegister(AgentBackendId backendId, Func<IAgentBackend> backendFactory)
-        => TryRegister(backendId, backendFactory, AgentBackendRegistrationOptions.Default);
-
-    /// <summary>
-    /// Registers a backend factory if it is not already registered.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="backendFactory">The backend factory delegate.</param>
-    /// <param name="options">Registration metadata for the backend.</param>
-    /// <returns><see langword="true"/> when registration succeeded; otherwise <see langword="false"/>.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    public bool TryRegister(AgentBackendId backendId, Func<IAgentBackend> backendFactory, AgentBackendRegistrationOptions options)
     {
         ArgumentNullException.ThrowIfNull(backendFactory);
-        ArgumentNullException.ThrowIfNull(options);
         var normalizedBackendId = NormalizeBackendId(backendId);
 
         lock (_lock)
@@ -112,7 +69,7 @@ public sealed class AgentBackendFactory
 
             _registrations.Add(
                 normalizedBackendId,
-                new Registration(new AgentBackendId(normalizedBackendId), backendFactory, options.UsesSharedSessionMetadataStore));
+                new Registration(new AgentBackendId(normalizedBackendId), backendFactory));
             return true;
         }
     }
@@ -131,20 +88,6 @@ public sealed class AgentBackendFactory
     }
 
     /// <summary>
-    /// Registers a backend factory if it is not already registered.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="backendFactory">The backend factory delegate.</param>
-    /// <param name="options">Registration metadata for the backend.</param>
-    /// <returns><see langword="true"/> when registration succeeded; otherwise <see langword="false"/>.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    public bool TryRegister(string backendId, Func<IAgentBackend> backendFactory, AgentBackendRegistrationOptions options)
-    {
-        return TryRegister(new AgentBackendId(backendId), backendFactory, options);
-    }
-
-    /// <summary>
     /// Registers or replaces a backend factory for a backend identifier.
     /// </summary>
     /// <param name="backendId">The backend identifier.</param>
@@ -152,28 +95,15 @@ public sealed class AgentBackendFactory
     /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> is <see langword="null"/>.</exception>
     public void RegisterOrReplace(AgentBackendId backendId, Func<IAgentBackend> backendFactory)
-        => RegisterOrReplace(backendId, backendFactory, AgentBackendRegistrationOptions.Default);
-
-    /// <summary>
-    /// Registers or replaces a backend factory for a backend identifier.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="backendFactory">The backend factory delegate.</param>
-    /// <param name="options">Registration metadata for the backend.</param>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    public void RegisterOrReplace(AgentBackendId backendId, Func<IAgentBackend> backendFactory, AgentBackendRegistrationOptions options)
     {
         ArgumentNullException.ThrowIfNull(backendFactory);
-        ArgumentNullException.ThrowIfNull(options);
         var normalizedBackendId = NormalizeBackendId(backendId);
 
         lock (_lock)
         {
             _registrations[normalizedBackendId] = new Registration(
                 new AgentBackendId(normalizedBackendId),
-                backendFactory,
-                options.UsesSharedSessionMetadataStore);
+                backendFactory);
         }
     }
 
@@ -187,19 +117,6 @@ public sealed class AgentBackendFactory
     public void RegisterOrReplace(string backendId, Func<IAgentBackend> backendFactory)
     {
         RegisterOrReplace(new AgentBackendId(backendId), backendFactory);
-    }
-
-    /// <summary>
-    /// Registers or replaces a backend factory for a backend identifier.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <param name="backendFactory">The backend factory delegate.</param>
-    /// <param name="options">Registration metadata for the backend.</param>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="backendFactory"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    public void RegisterOrReplace(string backendId, Func<IAgentBackend> backendFactory, AgentBackendRegistrationOptions options)
-    {
-        RegisterOrReplace(new AgentBackendId(backendId), backendFactory, options);
     }
 
     /// <summary>
@@ -266,22 +183,6 @@ public sealed class AgentBackendFactory
                 .Select(static x => x.BackendId)
                 .OrderBy(static x => x.Value, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-        }
-    }
-
-    /// <summary>
-    /// Returns whether a backend registration declares that session metadata is stored in the shared CodeAlta session store.
-    /// </summary>
-    /// <param name="backendId">The backend identifier.</param>
-    /// <returns><see langword="true"/> when the registration declares shared session metadata; otherwise <see langword="false"/>.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="backendId"/> is empty or whitespace.</exception>
-    public bool UsesSharedSessionMetadataStore(AgentBackendId backendId)
-    {
-        var normalizedBackendId = NormalizeBackendId(backendId);
-        lock (_lock)
-        {
-            return _registrations.TryGetValue(normalizedBackendId, out var registration) &&
-                   registration.UsesSharedSessionMetadataStore;
         }
     }
 
@@ -372,11 +273,6 @@ public sealed class AgentBackendFactory
     private IAgentBackend CreateFromRegistration(Registration registration)
     {
         var backend = registration.Factory();
-        if (backend is CodeAltaAgentRuntime runtime && LocalSessionJournalFile is { } journalFile)
-        {
-            runtime.UseSessionJournalFile(journalFile);
-        }
-
         return ValidateCreatedBackend(registration.BackendId, backend);
     }
 
@@ -417,5 +313,5 @@ public sealed class AgentBackendFactory
         return normalizedBackendId;
     }
 
-    private readonly record struct Registration(AgentBackendId BackendId, Func<IAgentBackend> Factory, bool UsesSharedSessionMetadataStore);
+    private readonly record struct Registration(AgentBackendId BackendId, Func<IAgentBackend> Factory);
 }

@@ -33,7 +33,7 @@ public sealed class CodeAltaAgentRuntimeTests
                     Input = AgentInput.Text("First prompt"),
                 }).ConfigureAwait(false);
 
-        var sessions = await backend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        var sessions = await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
         Assert.AreEqual(1, sessions.Length);
         Assert.AreEqual(createdSession.SessionId, sessions[0].SessionId);
         Assert.AreEqual("openai-responses", sessions[0].ProtocolFamily);
@@ -44,7 +44,7 @@ public sealed class CodeAltaAgentRuntimeTests
         Assert.AreEqual("parent-session", sessions[0].CreatedBySessionId);
         Assert.AreEqual(new AgentRunId("run-parent"), sessions[0].CreatedByRunId);
         var details = Assert.IsInstanceOfType<RawApiSessionMetadataDetails>(sessions[0].Details);
-        Assert.AreEqual("OpenAI", details.ProviderDisplayName);
+        Assert.IsNull(details.ProviderDisplayName);
         Assert.AreEqual("Initial thread title", details.Title);
 
         await using var resumedSession = await backend.ResumeSessionAsync(
@@ -66,7 +66,7 @@ public sealed class CodeAltaAgentRuntimeTests
         Assert.AreEqual(3, executor.Requests[1].Conversation.Count);
 
         Assert.IsTrue(await backend.DeleteSessionAsync(createdSession.SessionId).ConfigureAwait(false));
-        Assert.AreEqual(0, (await backend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        Assert.AreEqual(0, (await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
     }
 
     [TestMethod]
@@ -83,7 +83,7 @@ public sealed class CodeAltaAgentRuntimeTests
                     OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
                 }).ConfigureAwait(false);
 
-        var sessions = await backend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        var sessions = await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
         Assert.AreEqual("openai", sessions.Single().ProviderKey);
         Assert.AreEqual(session.SessionId, sessions.Single().SessionId);
     }
@@ -112,7 +112,7 @@ public sealed class CodeAltaAgentRuntimeTests
             transportKind: LocalAgentTransportKind.AnthropicMessages,
             backendId: new AgentBackendId("anthropic"));
 
-        var legacySessions = await targetBackend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        var legacySessions = await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
         Assert.AreEqual(1, legacySessions.Length);
         Assert.AreEqual(sessionId, legacySessions[0].SessionId);
         Assert.AreEqual("openai", legacySessions[0].ProviderKey);
@@ -510,6 +510,9 @@ public sealed class CodeAltaAgentRuntimeTests
         executor = new RecordingTurnExecutor();
         return CreateBackend(tempRoot, executor);
     }
+
+    private static FileSystemLocalAgentSessionStore CreateSessionStore(string tempRoot)
+        => new(new LocalAgentRuntimePathLayout(Path.Combine(tempRoot, "machine", "agents")));
 
     private static CodeAltaAgentRuntime CreateBackend(string tempRoot, IModelProviderTurnExecutor executor)
         => CreateBackend(

@@ -5,7 +5,7 @@ namespace CodeAlta.Agent.OpenAI;
 /// <summary>
 /// OpenAI Responses provider runtime with a transitional backend facade.
 /// </summary>
-public sealed class OpenAIResponsesAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend, ICodeAltaModelProviderRuntime
+public sealed class OpenAIResponsesAgentBackend : IAgentBackend, ICodeAltaModelProviderRuntime
 {
     private readonly ICodeAltaModelProviderRuntime _runtime;
     private readonly IAgentBackend _inner;
@@ -63,12 +63,6 @@ public sealed class OpenAIResponsesAgentBackend : IAgentBackend, IAgentSharedSes
 
     /// <inheritdoc />
     public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        CancellationToken cancellationToken = default)
-        => _inner.ListSessionsAsync(filter, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)

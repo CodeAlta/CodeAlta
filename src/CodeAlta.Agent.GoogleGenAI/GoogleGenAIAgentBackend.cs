@@ -10,7 +10,7 @@ namespace CodeAlta.Agent.GoogleGenAI;
 /// <summary>
 /// Google GenAI provider runtime with a transitional backend facade.
 /// </summary>
-public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend, ICodeAltaModelProviderRuntime
+public sealed class GoogleGenAIAgentBackend : IAgentBackend, ICodeAltaModelProviderRuntime
 {
     private readonly ICodeAltaModelProviderRuntime _runtime;
     private readonly IAgentBackend _inner;
@@ -103,12 +103,6 @@ public sealed class GoogleGenAIAgentBackend : IAgentBackend, IAgentSharedSession
 
     /// <inheritdoc />
     public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        CancellationToken cancellationToken = default)
-        => _inner.ListSessionsAsync(filter, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)

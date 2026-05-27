@@ -11,8 +11,6 @@ public sealed class CodeAltaAgentRuntimeOptions
     /// </summary>
     public string? StateRootPath { get; init; }
 
-    internal LocalAgentSessionJournalFile? SessionJournalFile { get; init; }
-
     /// <summary>
     /// Gets or initializes the provider model cache used for optional model/usage enrichment.
     /// </summary>

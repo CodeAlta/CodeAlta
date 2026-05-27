@@ -13,7 +13,7 @@ namespace CodeAlta.Agent.Anthropic;
 /// <summary>
 /// Anthropic Messages provider runtime with a transitional backend facade.
 /// </summary>
-public sealed class AnthropicAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend, ICodeAltaModelProviderRuntime
+public sealed class AnthropicAgentBackend : IAgentBackend, ICodeAltaModelProviderRuntime
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Anthropic");
     private readonly ICodeAltaModelProviderRuntime _runtime;
@@ -108,12 +108,6 @@ public sealed class AnthropicAgentBackend : IAgentBackend, IAgentSharedSessionMe
 
     /// <inheritdoc />
     public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        CancellationToken cancellationToken = default)
-        => _inner.ListSessionsAsync(filter, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)

@@ -7,7 +7,7 @@ namespace CodeAlta.Agent.Xai;
 /// <summary>
 /// Direct xAI (Grok) provider runtime with a transitional backend facade.
 /// </summary>
-public sealed class XaiDirectAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend, ICodeAltaModelProviderRuntime
+public sealed class XaiDirectAgentBackend : IAgentBackend, ICodeAltaModelProviderRuntime
 {
     /// <summary>
     /// The canonical provider type and protocol family for direct xAI access.
@@ -110,12 +110,6 @@ public sealed class XaiDirectAgentBackend : IAgentBackend, IAgentSharedSessionMe
 
     /// <inheritdoc />
     public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        CancellationToken cancellationToken = default)
-        => _inner.ListSessionsAsync(filter, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)

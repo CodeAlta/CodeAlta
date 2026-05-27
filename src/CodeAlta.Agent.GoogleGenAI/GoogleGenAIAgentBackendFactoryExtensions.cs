@@ -20,8 +20,7 @@ public static class GoogleGenAIAgentBackendFactoryExtensions
 
         factory.Register(
             options.BackendIdOverride ?? AgentBackendIds.GoogleGenAI,
-            () => new GoogleGenAIAgentBackend(options),
-            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+            () => new GoogleGenAIAgentBackend(options));
         return factory;
     }
 }

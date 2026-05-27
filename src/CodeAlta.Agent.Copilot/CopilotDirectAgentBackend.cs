@@ -7,7 +7,7 @@ namespace CodeAlta.Agent.Copilot;
 /// <summary>
 /// Direct GitHub Copilot provider runtime with a transitional backend facade.
 /// </summary>
-public sealed class CopilotDirectAgentBackend : IAgentBackend, IAgentSharedSessionMetadataBackend, ICodeAltaModelProviderRuntime
+public sealed class CopilotDirectAgentBackend : IAgentBackend, ICodeAltaModelProviderRuntime
 {
     /// <summary>
     /// The canonical provider type and protocol family for direct Copilot access.
@@ -110,12 +110,6 @@ public sealed class CopilotDirectAgentBackend : IAgentBackend, IAgentSharedSessi
 
     /// <inheritdoc />
     public CodeAltaAgentRuntimeProviderRegistration CreateProviderRegistration() => _runtime.CreateProviderRegistration();
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        CancellationToken cancellationToken = default)
-        => _inner.ListSessionsAsync(filter, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)

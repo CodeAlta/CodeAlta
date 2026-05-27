@@ -124,7 +124,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         Assert.AreEqual(200000L, usageEvent.Usage.TokenLimit);
         Assert.AreEqual(4, usageEvent.Usage.MessageCount);
 
-        var metadata = (await backend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
+        var metadata = (await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
         var details = Assert.IsInstanceOfType<RawApiSessionMetadataDetails>(metadata.Details);
         Assert.AreEqual("response-2", details.ProviderSessionId);
     }
@@ -214,7 +214,7 @@ public sealed class OpenAIRawApiAgentBackendTests
         Assert.AreEqual(128000L, usageEvent.Usage.TokenLimit);
         Assert.AreEqual(2, usageEvent.Usage.MessageCount);
 
-        var metadata = (await backend.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
+        var metadata = (await CreateSessionStore(temp.Path).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
         var details = Assert.IsInstanceOfType<RawApiSessionMetadataDetails>(metadata.Details);
         Assert.AreEqual("chatcmpl-1", details.ProviderSessionId);
     }
@@ -3247,6 +3247,9 @@ public sealed class OpenAIRawApiAgentBackendTests
         Assert.AreEqual(deltas[0].AttemptId, reconnect.Details.Value.GetProperty("draftAttemptId").GetString());
         Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<LocalAgentMessagePart.Text>().Single().Value);
     }
+
+    private static FileSystemLocalAgentSessionStore CreateSessionStore(string stateRootPath)
+        => new(new LocalAgentRuntimePathLayout(stateRootPath));
 
     private static StreamingResponseUpdate CreateAssistantResponseUpdate(
         string responseId,

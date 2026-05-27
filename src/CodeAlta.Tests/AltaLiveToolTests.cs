@@ -2515,7 +2515,7 @@ public sealed class AltaLiveToolTests
         };
 
     private static SessionRuntimeService CreateRuntime(CatalogOptions options, AgentBackendId backendId)
-        => CreateRuntime(options, new SharedMetadataBackend(backendId));
+        => CreateRuntime(options, new TestAgentBackend(backendId));
 
     private static SessionRuntimeService CreateRuntime(CatalogOptions options, IAgentBackend backend)
     {
@@ -2782,11 +2782,11 @@ public sealed class AltaLiveToolTests
             => throw new InvalidOperationException("Session infos must not be loaded for this path.");
     }
 
-    private sealed class SharedMetadataBackend(AgentBackendId backendId) : IAgentBackend, IAgentSharedSessionMetadataBackend
+    private sealed class TestAgentBackend(AgentBackendId backendId) : IAgentBackend
     {
         public AgentBackendId BackendId => backendId;
 
-        public string DisplayName => "Shared Metadata Backend";
+        public string DisplayName => "Test Agent Backend";
 
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -2794,15 +2794,6 @@ public sealed class AltaLiveToolTests
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]);
-
-        public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-            AgentSessionListFilter? filter = null,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.CompletedTask;
-            yield break;
-        }
 
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
@@ -2815,7 +2806,6 @@ public sealed class AltaLiveToolTests
 
     private sealed class StatefulBackend(AgentBackendId backendId) : IAgentBackend
     {
-        private readonly List<AgentSessionMetadata> _sessions = [];
         private readonly Dictionary<string, List<Action<AgentEvent>>> _subscriptions = new(StringComparer.Ordinal);
         private int _nextSession;
 
@@ -2852,36 +2842,13 @@ public sealed class AltaLiveToolTests
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(Models);
 
-        public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-            AgentSessionListFilter? filter = null,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            await Task.CompletedTask;
-            foreach (var session in _sessions)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return session;
-            }
-        }
-
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
         {
             CreatedOptions.Add(options);
             var sessionId = string.IsNullOrWhiteSpace(options.ThreadId)
                 ? "session-" + Interlocked.Increment(ref _nextSession).ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : options.ThreadId!;
-            var timestamp = DateTimeOffset.UtcNow;
             var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-            _sessions.Add(new AgentSessionMetadata(
-                sessionId,
-                timestamp,
-                timestamp,
-                Summary: sessionId,
-                Context: new AgentSessionContext(workingDirectory),
-                WorkspacePath: workingDirectory,
-                ProtocolFamily: backendId.Value,
-                ProviderKey: options.ProviderKey ?? backendId.Value,
-                ModelId: options.Model));
             return Task.FromResult<IAgentSession>(new StatefulAgentSession(this, backendId, sessionId, workingDirectory));
         }
 

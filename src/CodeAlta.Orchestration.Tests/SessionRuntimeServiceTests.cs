@@ -43,7 +43,7 @@ public sealed class SessionRuntimeServiceTests
     {
         using var temp = new TempDirectory();
         var backendId = new AgentBackendId("registered-provider");
-        var backend = new ThrowingListSessionsBackend(backendId);
+        var backend = new ThrowingProviderBackend(backendId);
         var factory = new AgentBackendFactory();
         factory.Register(backendId, () => backend);
         await using var hub = new AgentHub(factory);
@@ -67,17 +67,16 @@ public sealed class SessionRuntimeServiceTests
 
         Assert.AreEqual(1, threads.Count);
         Assert.AreEqual(0, backend.StartAttempts);
-        Assert.AreEqual(0, backend.ListSessionsAttempts);
     }
 
     [TestMethod]
-    public async Task EnsureCoordinatorSessionAsync_RecreatesSharedMetadataSessionWhenResumeTargetIsMissing()
+    public async Task EnsureCoordinatorSessionAsync_RecreatesSessionWhenResumeTargetIsMissing()
     {
         using var temp = new TempDirectory();
         var backendId = new AgentBackendId("shared-missing");
         var backend = new MissingResumeBackend(backendId);
         var factory = new AgentBackendFactory();
-        factory.Register(backendId, () => backend, AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+        factory.Register(backendId, () => backend);
         await using var hub = new AgentHub(factory);
         await using var runtime = CreateRuntime(temp.Path, hub);
         var thread = CreateThread("thread-1", backendId, temp.Path);
@@ -163,15 +162,6 @@ public sealed class SessionRuntimeServiceTests
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]);
 
-        public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-            AgentSessionListFilter? filter = null,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.CompletedTask.ConfigureAwait(false);
-            yield break;
-        }
-
         public Task<IAgentSession> CreateSessionAsync(
             AgentSessionCreateOptions options,
             CancellationToken cancellationToken = default)
@@ -193,15 +183,13 @@ public sealed class SessionRuntimeServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class ThrowingListSessionsBackend(AgentBackendId backendId) : IAgentBackend
+    private sealed class ThrowingProviderBackend(AgentBackendId backendId) : IAgentBackend
     {
         public AgentBackendId BackendId { get; } = backendId;
 
-        public string DisplayName => "Throwing List Sessions";
+        public string DisplayName => "Throwing Provider";
 
         public int StartAttempts { get; private set; }
-
-        public int ListSessionsAttempts { get; private set; }
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
@@ -213,18 +201,6 @@ public sealed class SessionRuntimeServiceTests
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Provider models should not be listed while listing recoverable sessions.");
-
-        public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-            AgentSessionListFilter? filter = null,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            ListSessionsAttempts++;
-            await Task.CompletedTask.ConfigureAwait(false);
-            throw new InvalidOperationException("Provider sessions should not be listed while listing recoverable sessions.");
-#pragma warning disable CS0162
-            yield break;
-#pragma warning restore CS0162
-        }
 
         public Task<IAgentSession> CreateSessionAsync(
             AgentSessionCreateOptions options,

@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.LocalRuntime;
 /// <summary>
 /// CodeAlta-owned session runtime for provider-backed raw-API sessions.
 /// </summary>
-public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMetadataBackend
+public sealed class CodeAltaAgentRuntime : IAgentBackend
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.LocalRuntime");
     private readonly CodeAltaAgentRuntimeOptions _options;
@@ -14,7 +14,7 @@ public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMet
     private readonly LocalAgentRuntimePathLayout _layout;
     private readonly IReadOnlyDictionary<string, CodeAltaAgentRuntimeProviderRegistration> _providersByKey;
     private readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> _modelCache = new(StringComparer.OrdinalIgnoreCase);
-    private LocalAgentSessionJournalFile? _journalFile;
+    private readonly LocalAgentSessionJournalFile _journalFile = new();
     private ILocalAgentSessionStore? _store;
     private bool _started;
 
@@ -45,7 +45,6 @@ public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMet
                 ".alta")
             : options.StateRootPath;
         _layout = new LocalAgentRuntimePathLayout(stateRootPath);
-        _journalFile = options.SessionJournalFile;
         _providersByKey = options.Providers.ToDictionary(
             static provider => provider.Provider.ProviderKey,
             StringComparer.OrdinalIgnoreCase);
@@ -70,20 +69,7 @@ public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMet
             {
                 return _store ??= new FileSystemLocalAgentSessionStore(
                     _layout,
-                    _journalFile ??= new LocalAgentSessionJournalFile());
-            }
-        }
-    }
-
-    internal void UseSessionJournalFile(LocalAgentSessionJournalFile journalFile)
-    {
-        ArgumentNullException.ThrowIfNull(journalFile);
-
-        lock (_storeLock)
-        {
-            if (_store is null)
-            {
-                _journalFile = journalFile;
+                    _journalFile);
             }
         }
     }
@@ -158,27 +144,6 @@ public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMet
 
         LogInfo($"Backend model catalog ready backend={BackendId.Value} providers={_options.Providers.Count} models={mergedModels.Length}");
         return mergedModels;
-    }
-
-    /// <inheritdoc />
-    public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
-        AgentSessionListFilter? filter = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await StartAsync(cancellationToken).ConfigureAwait(false);
-
-        await foreach (var summary in Store.ListSessionSummariesAsync(cancellationToken).ConfigureAwait(false))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!MatchesFilter(summary, filter))
-            {
-                continue;
-            }
-
-            var state = await Store.GetStateAsync(summary.SessionId, cancellationToken).ConfigureAwait(false);
-            _providersByKey.TryGetValue(summary.ProviderKey, out var provider);
-            yield return ToMetadata(summary, state, provider?.Provider);
-        }
     }
 
     /// <inheritdoc />
@@ -397,22 +362,6 @@ public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMet
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static bool MatchesFilter(LocalAgentSessionSummary summary, AgentSessionListFilter? filter)
-    {
-        if (filter is null)
-        {
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(filter.Cwd) &&
-            !string.Equals(summary.WorkingDirectory, filter.Cwd, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
     private async Task<(LocalAgentSessionSummary Summary, LocalAgentSessionState State)> RepairRecoveredUsageAsync(
         LocalAgentSessionSummary summary,
         LocalAgentSessionState state,
@@ -533,31 +482,6 @@ public sealed class CodeAltaAgentRuntime : IAgentBackend, IAgentSharedSessionMet
     private static bool MatchesProvider(LocalAgentSessionState state, ModelProviderRuntimeDescriptor provider)
         => string.Equals(state.ProtocolFamily, provider.ProtocolFamily, StringComparison.OrdinalIgnoreCase) &&
            string.Equals(state.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
-
-    private static AgentSessionMetadata ToMetadata(
-        LocalAgentSessionSummary summary,
-        LocalAgentSessionState? state,
-        ModelProviderRuntimeDescriptor? provider)
-    {
-        return new AgentSessionMetadata(
-            summary.SessionId,
-            summary.CreatedAt,
-            summary.UpdatedAt,
-            summary.Summary,
-            summary.WorkingDirectory is null ? null : new AgentSessionContext(summary.WorkingDirectory),
-            summary.WorkingDirectory,
-            new RawApiSessionMetadataDetails(
-                provider?.DisplayName,
-                provider?.BaseUri?.ToString(),
-                state?.ProviderSessionId,
-                summary.Title),
-            summary.ProtocolFamily,
-            summary.ProviderKey,
-            summary.ModelId,
-            summary.ParentSessionId,
-            summary.CreatedBySessionId,
-            summary.CreatedByRunId);
-    }
 
     private static string FormatUri(Uri? uri)
         => uri?.ToString() ?? "<default>";

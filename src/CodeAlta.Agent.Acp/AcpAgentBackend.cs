@@ -124,7 +124,16 @@ public sealed partial class AcpAgentBackend : IAgentBackend
         return Task.FromResult(_knownModels);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Lists sessions from an ACP agent that advertises ACP session-list support.
+    /// </summary>
+    /// <remarks>
+    /// This compatibility method is intentionally concrete to keep external ACP support working while persisted
+    /// CodeAlta-owned sessions are discovered through <see cref="IAgentSessionCatalog" /> and <see cref="IAgentSessionStore" />.
+    /// </remarks>
+    /// <param name="filter">Optional ACP session filter.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>ACP session metadata streamed from the agent.</returns>
     public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
         AgentSessionListFilter? filter = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)

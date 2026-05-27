@@ -20,8 +20,7 @@ public static class OpenAIAgentBackendFactoryExtensions
 
         factory.Register(
             options.BackendIdOverride ?? AgentBackendIds.OpenAIResponses,
-            () => new OpenAIResponsesAgentBackend(options),
-            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+            () => new OpenAIResponsesAgentBackend(options));
         return factory;
     }
 
@@ -40,8 +39,7 @@ public static class OpenAIAgentBackendFactoryExtensions
 
         factory.Register(
             options.BackendIdOverride ?? AgentBackendIds.OpenAIChat,
-            () => new OpenAIChatAgentBackend(options),
-            AgentBackendRegistrationOptions.SharedSessionMetadataStore);
+            () => new OpenAIChatAgentBackend(options));
         return factory;
     }
 }
