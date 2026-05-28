@@ -1,0 +1,270 @@
+using System.Text;
+using System.Text.Json;
+using CodeAlta.Agent;
+using CodeAlta.Plugins.Abstractions;
+
+namespace CodeAlta.Plugin.Mcp;
+
+/// <summary>
+/// Built-in plugin that inspects Model Context Protocol server configuration for CodeAlta.
+/// </summary>
+[Plugin("mcp", DisplayName = "MCP", Description = "Connects CodeAlta to configured Model Context Protocol servers.")]
+public sealed class McpPlugin : PluginBase
+{
+    /// <inheritdoc />
+    public override IEnumerable<PluginAltaCommandContribution> GetAltaCommands()
+    {
+        yield return new PluginAltaCommandContribution
+        {
+            Path = "mcp",
+            Description = "Inspect and manage configured Model Context Protocol servers.",
+            Policy = new PluginAltaCommandPolicy
+            {
+                RequiresInProcessRuntime = true,
+                IsMutating = true,
+                SupportsCatalogOnlyContext = false,
+            },
+            CreateCommandNode = McpCommandFactory.CreateCommand,
+        };
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContributions()
+    {
+        yield return Prompt.Dynamic(
+            PluginPromptChannel.Developer,
+            CreatePromptDiscoveryAsync,
+            title: "MCP servers",
+            kind: PluginPromptPartKind.ToolGuidance,
+            order: 50);
+    }
+
+    /// <inheritdoc />
+    public override async ValueTask<PluginBeforeAgentRunResult?> OnBeforeAgentRunAsync(
+        PluginBeforeAgentRunContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
+        await using var runtime = new McpRuntimeService();
+        var direct = await runtime.ListDirectToolsAsync(new McpRuntimeRequest { ProjectDirectory = projectPath }, cancellationToken).ConfigureAwait(false);
+        if (direct.Tools.Count == 0 && direct.Diagnostics.Count == 0)
+        {
+            return null;
+        }
+
+        return new PluginBeforeAgentRunResult
+        {
+            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath)).ToArray(),
+            TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
+        };
+    }
+
+    private static ValueTask<string?> CreatePromptDiscoveryAsync(PluginSystemPromptContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+        var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
+        var snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectPath });
+        if (!snapshot.Policy.DiscoverInPrompt || snapshot.Summary.ConfiguredServerCount == 0)
+        {
+            return new ValueTask<string?>((string?)null);
+        }
+
+        var activeServers = snapshot.Servers
+            .Where(static server => server.State == McpManagementServerState.Configured)
+            .Take(Math.Max(1, snapshot.Policy.PromptMaxServers))
+            .ToArray();
+        var builder = new StringBuilder();
+        builder.AppendLine("Configured MCP tools are exposed directly as `mcp__<server>__<tool>` where policy allows. Use `alta mcp tool search`, `alta mcp tool describe --server <server> --tool <tool>`, and `alta mcp tool call --server <server> --tool <tool> --arguments {}` for discovery, schema inspection, diagnostics, or manual calls.");
+        foreach (var server in activeServers)
+        {
+            builder.Append("- ");
+            builder.Append(server.DisplayName);
+            builder.Append(": ");
+            builder.Append(server.Transport == McpManagementTransport.Stdio ? "stdio" : "http/sse");
+            builder.Append(" from ");
+            builder.Append(server.SourceScope == McpManagementScope.Project ? "project" : "global");
+            if (server.DisabledTools.Count > 0)
+            {
+                builder.Append("; disabled tools: ");
+                builder.AppendJoin(", ", server.DisabledTools.Take(Math.Max(1, snapshot.Policy.PromptMaxTools)));
+                if (server.DisabledTools.Count > snapshot.Policy.PromptMaxTools)
+                {
+                    builder.Append(", …");
+                }
+            }
+
+            if (server.AllowedTools.Count > 0)
+            {
+                builder.Append("; allowed tools: ");
+                builder.AppendJoin(", ", server.AllowedTools.Take(Math.Max(1, snapshot.Policy.PromptMaxTools)));
+                if (server.AllowedTools.Count > snapshot.Policy.PromptMaxTools)
+                {
+                    builder.Append(", …");
+                }
+            }
+
+            builder.AppendLine();
+        }
+
+        if (snapshot.Summary.ConfiguredServerCount > activeServers.Length)
+        {
+            builder.AppendLine("- Additional MCP servers are omitted from this prompt summary; run `alta mcp status` for all configured and disabled servers.");
+        }
+
+        return new ValueTask<string?>(builder.ToString().TrimEnd());
+    }
+
+    internal static string? ResolveProjectPath(string? primary, string? secondary, string? fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(primary))
+        {
+            return primary;
+        }
+
+        if (!string.IsNullOrWhiteSpace(secondary))
+        {
+            return secondary;
+        }
+
+        return string.IsNullOrWhiteSpace(fallback) ? null : fallback;
+    }
+
+    private static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath)
+    {
+        var description = CreateToolDescription(tool);
+        return new AgentToolDefinition(
+            new AgentToolSpec(tool.Alias, description, tool.InputSchema.Clone()),
+            async (invocation, cancellationToken) => await InvokeDirectToolAsync(tool.Server, tool.Name, projectPath, invocation, cancellationToken).ConfigureAwait(false));
+    }
+
+    private static string CreateToolDescription(McpRuntimeTool tool)
+    {
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(tool.Title))
+        {
+            builder.Append(tool.Title.Trim()).Append(". ");
+        }
+
+        if (!string.IsNullOrWhiteSpace(tool.Description))
+        {
+            builder.Append(tool.Description.Trim()).Append(" ");
+        }
+
+        builder.Append("MCP tool '").Append(tool.Name).Append("' on server '").Append(tool.Server).Append("'.");
+        return builder.ToString();
+    }
+
+    private static async Task<AgentToolResult> InvokeDirectToolAsync(
+        string server,
+        string tool,
+        string? projectPath,
+        AgentToolInvocation invocation,
+        CancellationToken cancellationToken)
+    {
+        if (!TryReadArguments(invocation.Arguments, out var arguments, out var error))
+        {
+            return new AgentToolResult(false, [new AgentToolResultItem.Text(error)], error);
+        }
+
+        await using var runtime = new McpRuntimeService();
+        var diagnostics = new List<McpRuntimeDiagnostic>();
+        var result = await runtime.CallToolAsync(
+            new McpRuntimeRequest { ProjectDirectory = projectPath },
+            server,
+            tool,
+            arguments,
+            diagnostics,
+            cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            var message = diagnostics.Count == 0
+                ? $"MCP tool '{tool}' on server '{server}' is unavailable."
+                : string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => diagnostic.Message));
+            return new AgentToolResult(false, [new AgentToolResultItem.Text(message)], message);
+        }
+
+        var text = FormatDirectToolResult(result);
+        return new AgentToolResult(!result.IsError, [new AgentToolResultItem.Text(text)], result.IsError ? text : null);
+    }
+
+    private static bool TryReadArguments(JsonElement element, out IReadOnlyDictionary<string, object?> arguments, out string error)
+    {
+        if (element.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
+            error = string.Empty;
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
+            error = "MCP direct tool arguments must be a JSON object.";
+            return false;
+        }
+
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var property in element.EnumerateObject())
+        {
+            values[property.Name] = property.Value.Clone();
+        }
+
+        arguments = values;
+        error = string.Empty;
+        return true;
+    }
+
+    private static string FormatDirectToolResult(McpRuntimeToolCallResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.ContentText))
+        {
+            return result.Truncated ? result.ContentText + "\n[truncated]" : result.ContentText;
+        }
+
+        if (result.StructuredContent is { } structured)
+        {
+            var json = JsonSerializer.Serialize(structured);
+            return result.Truncated ? json + "\n[truncated]" : json;
+        }
+
+        var summaries = result.Content
+            .Select(static block => block.Summary)
+            .Where(static summary => !string.IsNullOrWhiteSpace(summary))
+            .ToArray();
+        if (summaries.Length > 0)
+        {
+            var text = string.Join(Environment.NewLine, summaries);
+            return result.Truncated ? text + "\n[truncated]" : text;
+        }
+
+        return result.Truncated ? "[truncated]" : "(empty MCP response)";
+    }
+
+    private static IReadOnlyList<PluginSystemPromptContribution> CreateDirectToolDiagnosticsPrompt(IReadOnlyList<McpRuntimeDiagnostic> diagnostics)
+    {
+        if (diagnostics.Count == 0)
+        {
+            return [];
+        }
+
+        var content = string.Join(Environment.NewLine, diagnostics.Take(5).Select(static diagnostic => "- " + diagnostic.Message));
+        if (diagnostics.Count > 5)
+        {
+            content += Environment.NewLine + "- Additional MCP direct-tool diagnostics omitted; run `alta mcp status` or `alta mcp tool search` for details.";
+        }
+
+        return
+        [
+            new PluginSystemPromptContribution
+            {
+                Channel = PluginPromptChannel.Developer,
+                Content = (_, _) => new ValueTask<string?>("Some MCP direct tools were unavailable for this run:\n" + content),
+                Title = "MCP direct-tool diagnostics",
+                Kind = PluginPromptPartKind.ToolGuidance,
+                Order = 51,
+            },
+        ];
+    }
+}

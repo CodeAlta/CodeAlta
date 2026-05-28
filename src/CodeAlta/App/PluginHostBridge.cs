@@ -202,6 +202,8 @@ internal sealed class PluginHostBridge
             };
         }
 
+        activeTools = MergeRunTools(activeTools, before.Result.AdditionalTools, options);
+
         var promptTemporaryContributions = _promptContributionScope.Take(CreatePromptContributionScopeKey(session, tab));
         var temporaryPromptContributions = promptTemporaryContributions.Concat(before.Result.TemporaryPromptContributions).ToArray();
         var systemParts = await _runtime.Adapter.BuildSystemPromptPartsAsync(_runtime.ActivePlugins, PluginPromptChannel.System, supportsDirectInjection: isManaged, options, cancellationToken);
@@ -245,6 +247,40 @@ internal sealed class PluginHostBridge
         foreach (var contribution in _runtime.Adapter.GetAgentTools(options))
         {
             tools.Add(WrapPluginTool(contribution.Definition, options));
+        }
+
+        return tools.Count == 0 ? null : tools;
+    }
+
+    private IReadOnlyList<AgentToolDefinition>? MergeRunTools(
+        IReadOnlyList<AgentToolDefinition>? existingTools,
+        IReadOnlyList<AgentToolDefinition> additionalTools,
+        PluginAdapterOperationOptions options)
+    {
+        if (additionalTools.Count == 0)
+        {
+            return existingTools;
+        }
+
+        var tools = new List<AgentToolDefinition>();
+        var toolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (existingTools is not null)
+        {
+            foreach (var tool in existingTools)
+            {
+                if (toolNames.Add(tool.Spec.Name))
+                {
+                    tools.Add(tool);
+                }
+            }
+        }
+
+        foreach (var tool in additionalTools)
+        {
+            if (toolNames.Add(tool.Spec.Name))
+            {
+                tools.Add(WrapPluginTool(tool, options));
+            }
         }
 
         return tools.Count == 0 ? null : tools;

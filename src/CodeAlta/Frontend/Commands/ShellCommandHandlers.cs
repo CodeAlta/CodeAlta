@@ -132,6 +132,7 @@ internal static class DialogCommandHandlers
         registry.Register<OpenFileEditorCommand>((_, _) => ToValueTask(dialogCommandService.OpenFileEditorAsync()));
         registry.Register<OpenSkillsCommand>((_, _) => ToValueTask(dialogCommandService.OpenSkillsAsync()));
         registry.Register<OpenPluginsCommand>((_, _) => ToValueTask(dialogCommandService.OpenPluginsAsync()));
+        registry.Register<OpenMcpServersCommand>((_, _) => ToValueTask(dialogCommandService.OpenMcpServersAsync()));
         registry.Register<OpenWorkspaceSettingsCommand>((_, _) =>
         {
             dialogCommandService.OpenWorkspaceSettings();

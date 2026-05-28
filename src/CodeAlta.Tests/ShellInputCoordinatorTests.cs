@@ -8,6 +8,7 @@ public sealed class ShellInputCoordinatorTests
     [TestMethod]
     [DataRow("/help providers", typeof(OpenHelpCommand))]
     [DataRow("/providers", typeof(OpenModelProvidersCommand))]
+    [DataRow("/mcp", typeof(OpenMcpServersCommand))]
     [DataRow("/settings", typeof(OpenWorkspaceSettingsCommand))]
     [DataRow("/model", typeof(FocusModelProviderCommand))]
     [DataRow("/logs", typeof(OpenApplicationLogsCommand))]

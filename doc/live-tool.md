@@ -101,6 +101,8 @@ alta provider list
 alta model list --provider <provider-key>
 alta skill list --project <project>
 alta plugin list
+alta mcp status
+alta mcp tool search
 ```
 
 Most list commands support compact defaults plus a `--detailed` mode.
@@ -184,6 +186,24 @@ The host reserves these root commands: `version`, `project`, `session`, `skill`,
 Plugin command policy flags describe whether a command mutates state, is disruptive, requires the in-process runtime, or supports catalog-only context. Mutating plugin-originated commands include plugin provenance for audit and timeline reconstruction.
 
 Plugins can also call built-in commands through `Services.Alta.InvokeAsync(...)` without referencing `CodeAlta.LiveTool`. Project-scoped plugin invocations inherit their project scope and working directory unless overridden by the runtime rules.
+
+The built-in MCP plugin contributes the `mcp` root. Current shipped commands are:
+
+```text
+alta mcp list
+alta mcp status
+alta mcp config sources
+alta mcp server add <server> --command <command>
+alta mcp server add <server> --url https://example.test/mcp --header Key=Value
+alta mcp server remove <server>
+alta mcp server enable <server>
+alta mcp server disable <server>
+alta mcp tool search
+alta mcp tool describe --server <server> --tool <raw-tool-name>
+alta mcp tool call --server <server> --tool <raw-tool-name> --arguments {"key":"value"}
+```
+
+MCP config/list/status commands read fixed JSON config paths and report overlay/shadowing without connecting to servers. MCP server add/remove mutates JSON MCP config only; enable/disable mutates TOML policy only. MCP tool commands lazily connect to stdio and HTTP/SSE servers, apply policy filters, emit redacted diagnostics, and return raw server/tool names plus stable aliases such as `mcp__server__tool`. Direct policy-controlled MCP agent tools use those same aliases; agents can use `alta mcp tool ...` commands for discovery, diagnostics, and manual calls. See [MCP support](mcp.md).
 
 ## Capability policy
 

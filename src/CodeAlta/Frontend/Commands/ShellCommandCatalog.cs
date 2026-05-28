@@ -34,6 +34,13 @@ internal static class ShellCommandCatalog
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl));
 
+    // Ctrl+G Ctrl+M is intentionally not used for MCP because some terminal
+    // backends report Enter as Ctrl+M. Ctrl+G Ctrl+Y is otherwise unused by the
+    // shell command catalog and avoids prompt submission ambiguity.
+    public static readonly KeySequence McpServersShortcutSequence = new(
+        new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+        new KeyGesture(TerminalChar.CtrlY, TerminalModifiers.Ctrl));
+
     public static readonly KeySequence WorkspaceSettingsShortcutSequence = new(
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlW, TerminalModifiers.Ctrl));
@@ -139,6 +146,17 @@ internal static class ShellCommandCatalog
             Sequence: PluginsShortcutSequence,
             CommandName: "plugins",
             Aliases: ["plugin"],
+            ShowInCommandBar: true),
+        new(
+            "CodeAlta.Mcp.Manage",
+            "MCP Servers",
+            "Open MCP server management and inspect configuration, policy, overlay state, and cached tool counts.",
+            ShellCommandHelpCategory.General,
+            ShellCommandScope.AnyShell,
+            ShellCommandAvailability.Always,
+            Sequence: McpServersShortcutSequence,
+            CommandName: "mcp",
+            Aliases: ["mcp_servers"],
             ShowInCommandBar: true),
         new(
             "CodeAlta.Workspace.Settings",

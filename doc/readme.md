@@ -13,12 +13,13 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 3 | [Runtime and agent sessions](runtime.md) | `AgentHub`, `SessionRuntimeService`, active sessions, provider runtime adapters, system prompts, tools, compaction, and journals. |
 | 4 | [Model providers](providers.md) | Provider registration, configured provider types, agent-runtime adapters, model metadata, credentials, and protocol tracing. |
 | 5 | [`alta` live tool](live-tool.md) | In-process command registry, JSONL output contract, session control commands, queueing, delegated work, and plugin commands. |
-| 6 | [ACP integration](acp.md) | Current ACP protocol-library status, legacy config preservation, and future server-adapter direction. |
-| 7 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, contributions, safe mode, and built-in plugins. |
-| 8 | [Skills](skills.md) | Filesystem `SKILL.md` discovery, validation, precedence, UI/live-tool activation, and runtime injection. |
-| 9 | [Orchestration actor model](orchestration-actor-model.md) | Internal mailbox/actor ownership rules for runtime mutation and event backpressure. |
-| 10 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow. |
-| 11 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
+| 6 | [MCP support](mcp.md) | Fixed MCP config paths, JSON/TOML overlay rules, controlled direct MCP tools, `alta mcp` commands, runtime behavior, and dialog/status surfaces. |
+| 7 | [ACP integration](acp.md) | Current ACP protocol-library status, legacy config preservation, and future server-adapter direction. |
+| 8 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, contributions, safe mode, and built-in plugins. |
+| 9 | [Skills](skills.md) | Filesystem `SKILL.md` discovery, validation, precedence, UI/live-tool activation, and runtime injection. |
+| 10 | [Orchestration actor model](orchestration-actor-model.md) | Internal mailbox/actor ownership rules for runtime mutation and event backpressure. |
+| 11 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow. |
+| 12 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
 
 ## System map
 
@@ -69,7 +70,7 @@ The executable is the interactive terminal host. Reusable session orchestration 
 | `src/CodeAlta.LiveTool` | In-process `alta` command contributors, registry, dispatcher, transcript formatter, and agent-tool wrapper. |
 | `src/CodeAlta.Plugins.Abstractions` | Public plugin authoring contracts. |
 | `src/CodeAlta.Plugins` | Trusted plugin discovery, source builds, loading, activation, contribution registry, adapters, and plugin resource roots. |
-| `src/CodeAlta.Plugin.GitHub`, `src/CodeAlta.Plugin.Statistics` | Built-in plugins implemented through the same plugin model used by source plugins. |
+| `src/CodeAlta.Plugin.GitHub`, `src/CodeAlta.Plugin.Statistics`, `src/CodeAlta.Plugin.Mcp` | Built-in plugins implemented through the same plugin model used by source plugins. MCP-specific contracts are in [MCP support](mcp.md). |
 | `src/CodeAlta.Acp` | ACP JSON-RPC, protocol models, and generated protocol helpers kept for future server exposure. |
 | `src/CodeAlta.Tests`, `src/CodeAlta.*.Tests` | MSTest suites, including architecture guardrails for frontend/runtime boundaries and concurrency decisions. |
 
@@ -87,9 +88,10 @@ CodeAlta's default global root is `~/.alta`. Important roots are:
 - `auth/` for provider credential/token stores owned by provider auth managers;
 - `saved_prompts/` for unsent prompt drafts;
 - `ui-state.yaml` for frontend view/session selection state;
-- `plugins/` and `skills/` for user-scoped source plugins and skills.
+- `plugins/` and `skills/` for user-scoped source plugins and skills;
+- `mcp.json` for user-scoped MCP server connection definitions.
 
-Project-local configuration and extensions live under `<project>/.alta/`, including `<project>/.alta/config.toml`, `<project>/.alta/plugins/`, and `<project>/.alta/skills/`.
+Project-local configuration and extensions live under `<project>/.alta/`, including `<project>/.alta/config.toml`, `<project>/.alta/mcp.json`, `<project>/.alta/plugins/`, and `<project>/.alta/skills/`.
 
 ## Documentation rules
 

@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins.Abstractions;
@@ -259,6 +260,9 @@ public sealed record PluginBeforeAgentRunResult
 
     /// <summary>Gets tool names that should be preferred for this run.</summary>
     public IReadOnlyList<string> PreferredToolNames { get; init; } = [];
+
+    /// <summary>Gets additional agent tools that should be available for this run.</summary>
+    public IReadOnlyList<AgentToolDefinition> AdditionalTools { get; init; } = [];
 
     /// <summary>Gets an optional model hint.</summary>
     public string? ModelHint { get; init; }

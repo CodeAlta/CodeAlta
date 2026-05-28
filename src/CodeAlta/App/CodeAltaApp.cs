@@ -15,6 +15,7 @@ using CodeAlta.Presentation.Tabs;
 using CodeAlta.Presentation.Sessions;
 using CodeAlta.Presentation.Usage;
 using CodeAlta.Presentation.Workspace;
+using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugins.Abstractions;
 using CodeAlta.ViewModels;
 using XenoAtom.Logging;
@@ -73,6 +74,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private readonly WorkspaceRefreshContext _workspaceRefreshContext;
     private readonly ProviderFrontendCoordinator _providerUi;
     private readonly ProviderDialogCoordinator _providerDialogCoordinator;
+    private readonly McpManagementService _mcpManagementService = new();
+    private readonly McpManagementCoordinator _mcpManagementCoordinator;
     private readonly FileEditorWorkspaceCoordinator _fileEditorWorkspaceCoordinator;
     private readonly InitialCatalogStateCoordinator _initialCatalogStateCoordinator;
     private CodeAltaShellView? _shellView;
@@ -218,6 +221,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             DispatchToUiDeferred,
             SyncSessionTabControl,
             SetStatus);
+        _mcpManagementCoordinator = McpManagementCoordinatorFactory.Create(_mcpManagementService, ResolvePromptRoot, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, () => DialogBoundsResolver.ResolveAppBounds(GetDialogAnchor()), GetDialogAnchor);
         _sessionTabContext = new SessionTabContext(
             new DelegatingSessionTabSurfacePort(
                 () => _sessionWorkspaceView?.SessionTabControl,
@@ -247,7 +251,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             () => DialogBoundsResolver.ResolveAppBounds(SessionInput), () => SessionInput, () => _sessionStateCoordinator.Projects,
             OpenFolderAsync, OpenModelProvidersAsync, () => new AboutDialog(() => DialogBoundsResolver.ResolveAppBounds(GetDialogAnchor()), GetDialogAnchor, _shellAnimationRuntime.WelcomePhase01, updateService).Show(), composition.ModelCatalogCoordinator.Open, _sidebarCoordinator.OpenLogs, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
             SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, _sessionCommandCoordinator.ActivateSelectedSkillAsync, SetStatus),
-            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync), _sidebarCoordinator.OpenNavigatorSettings,
+            PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync),
+            () => { _mcpManagementCoordinator.Open(); return Task.CompletedTask; },
+            _sidebarCoordinator.OpenNavigatorSettings,
             () => EnsureSessionUsagePresenter().TogglePopupFromIndicator(),
             () => { if (SessionInput is not null) EnsureSessionInfoPresenter().TogglePopup(SessionInput); },
             () => _sessionWorkspaceView?.OpenExpandedPromptDialog(), ToggleCommandBarMultiLine);
@@ -481,7 +487,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             WorkspaceViewModel = _sessionWorkspaceViewModel,
             PromptComposerViewModel = _promptComposerViewModel,
             WorkspaceCommandBindings = _shellCommandSurfaceCoordinator.BuildWorkspaceCommandBindings(),
-            WorkspaceChromeController = SessionWorkspaceChromeController.Create(() => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual), () => ShellPluginFooterComposer.ComposeRegion(pb, PluginUiRegion.SessionStatus), anchor => EnsureSessionInfoPresenter().TogglePopup(anchor), () => ObserveUiTask(OpenModelProvidersAsync, "open model providers")),
+            WorkspaceChromeController = SessionWorkspaceChromeController.Create(() => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual), () => McpStatusIndicatorComposer.Compose(_mcpManagementService, ResolvePromptRoot, () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.OpenMcpServersAsync(), "open MCP servers"), pb), anchor => EnsureSessionInfoPresenter().TogglePopup(anchor), () => ObserveUiTask(OpenModelProvidersAsync, "open model providers")),
             PromptComposerController = PromptComposerViewController.Create(acceptedPrompt => ObserveUiTask(() => _shellCommandSurfaceCoordinator.HandleAcceptedPromptAsync(acceptedPrompt), "submit the current prompt"), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync(steer: false), "submit the current prompt"), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.AbortSelectedSessionAsync(), "abort the selected session"), openHelp, showPalette),
             QueuedPromptController = QueuedPromptStripController.Create(markdown => (_sessionWorkspaceView?.SessionPaneLayout.App)?.Terminal.Clipboard.TrySetText(markdown), queuedPromptId => ObserveUiTask(() => _sessionCommandCoordinator.ConvertSelectedSessionQueuedPromptToSteerAsync(queuedPromptId), "convert the queued prompt to steer"), pendingSteerId => _sessionCommandCoordinator.DeleteSelectedSessionPendingSteer(pendingSteerId), queuedPromptId => _sessionCommandCoordinator.DeleteSelectedSessionQueuedPrompt(queuedPromptId), (queuedPromptId, remainingCount) => _sessionCommandCoordinator.UpdateSelectedSessionQueuedPromptCount(queuedPromptId, remainingCount), (queuedPromptId, text) => _sessionCommandCoordinator.UpdateSelectedSessionQueuedPromptText(queuedPromptId, text), (onAccepted, placeholder) => SessionWorkspaceView.CreateStyledPromptEditor(onAccepted, openHelp, showPalette, pfs, promptRoot, pec, placeholder)),
             ModelProviderSelectorController = ModelProviderSelectorController.Create(OnModelProviderSelectionChanged, OnModelSelectionChanged, OnReasoningSelectionChanged, () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.CompactSelectedSessionAsync(), "compact the selected session")),

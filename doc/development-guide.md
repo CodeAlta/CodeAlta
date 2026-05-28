@@ -108,6 +108,15 @@ flowchart LR
 - Keep `config.toml` backward compatible: existing `extra_body`, `profile`, `compaction`, and `model_overrides` semantics remain authoritative over built-in defaults.
 - Do not add script-like provider transforms to config. Complex message restructuring must stay in code behind narrow, named compatibility flags.
 
+## MCP Configuration And Runtime Boundaries
+
+- Keep MCP server connection definitions only in fixed JSON MCP files: global `~/.alta/mcp.json` and project `<project>/.alta/mcp.json`. Do not add scans of editor/provider-specific MCP paths or additional per-scope MCP files.
+- Preserve the MCP overlay contract: load global JSON first, then project JSON when a project scope is active; a project server key shadows the matching global server key without creating duplicate connections or tools.
+- New MCP JSON files should use CodeAlta's `mcpServers` root. Existing supported MCP JSON flavors must be detected and preserved when writing.
+- Keep TOML under `[plugins.mcp]` as policy only. Server connection fields stay in JSON; server/tool enablement (`disabled_tools`), prompt caps, timeouts, static policy knobs, and direct-exposure settings belong in TOML.
+- Direct dynamic MCP `AgentToolDefinition` exposure is shipped behavior: enabled/config-controlled MCP tools are exposed where policy allows. Do not document timeline display refinements, OAuth UX, resources/prompts/elicitation, or `tool-list-changed` refresh as shipped until those paths have implementation and tests.
+- Keep reusable MCP config, policy, runtime, and management code in the MCP plugin/runtime boundary. TUI-specific dialog/status rendering stays in the frontend project. See [MCP support](mcp.md).
+
 ## Public APIs
 
 - Public APIs require XML documentation and should document thrown exceptions.

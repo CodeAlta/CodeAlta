@@ -63,6 +63,7 @@ public sealed class PluginContributionAdapterServiceTests
         Assert.AreEqual(0, before.Diagnostics.Count, string.Join(Environment.NewLine, before.Diagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.AreEqual("before", before.Result.AdditionalMessages.Single().Content);
         Assert.AreEqual("sample_tool", before.Result.PreferredToolNames.Single());
+        Assert.AreEqual("before_tool", before.Result.AdditionalTools.Single().Spec.Name);
         Assert.AreEqual(0, callDiagnostics.Count, string.Join(Environment.NewLine, callDiagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.AreEqual(PluginToolCallDisposition.Block, call!.Disposition);
         Assert.AreEqual("blocked", call.BlockReason);
@@ -428,6 +429,7 @@ public sealed class PluginContributionAdapterServiceTests
             {
                 AdditionalMessages = [new PluginPromptMessage { Role = PluginPromptMessageRole.Developer, Content = "before" }],
                 PreferredToolNames = ["sample_tool"],
+                AdditionalTools = [CreateTool("before_tool")],
             });
 
         public override ValueTask<PluginToolCallResult?> OnToolCallAsync(PluginToolCallContext context, CancellationToken cancellationToken = default)

@@ -44,6 +44,8 @@ public sealed class ShellInputRouterTests
         Assert.IsInstanceOfType<OpenSkillsIntent>(_router.Route("/skill", steerRequested: false));
         Assert.IsInstanceOfType<OpenPluginsIntent>(_router.Route("/plugins", steerRequested: false));
         Assert.IsInstanceOfType<OpenPluginsIntent>(_router.Route("/plugin", steerRequested: false));
+        Assert.IsInstanceOfType<OpenMcpServersIntent>(_router.Route("/mcp", steerRequested: false));
+        Assert.IsInstanceOfType<OpenMcpServersIntent>(_router.Route("/mcp_servers", steerRequested: false));
         Assert.IsInstanceOfType<OpenWorkspaceSettingsIntent>(_router.Route("/settings", steerRequested: false));
         Assert.IsInstanceOfType<FocusSidebarIntent>(_router.Route("/go_to_sidebar", steerRequested: false));
         Assert.IsInstanceOfType<FocusPromptIntent>(_router.Route("/go_to_prompt", steerRequested: false));

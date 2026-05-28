@@ -161,6 +161,8 @@ internal interface IShellDialogCommandService
 
     Task OpenPluginsAsync();
 
+    Task OpenMcpServersAsync();
+
     void OpenWorkspaceSettings();
 
     void OpenSessionUsage();
@@ -187,6 +189,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
     private readonly Func<Task> _openFileEditorAsync;
     private readonly Func<Task> _openSkillsAsync;
     private readonly Func<Task> _openPluginsAsync;
+    private readonly Func<Task> _openMcpServersAsync;
     private readonly Action _openWorkspaceSettings;
     private readonly Action _openSessionUsage;
     private readonly Action _openSessionInfo;
@@ -205,6 +208,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
         Func<Task> openFileEditorAsync,
         Func<Task> openSkillsAsync,
         Func<Task> openPluginsAsync,
+        Func<Task> openMcpServersAsync,
         Action openWorkspaceSettings,
         Action openSessionUsage,
         Action openSessionInfo,
@@ -222,6 +226,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
         ArgumentNullException.ThrowIfNull(openFileEditorAsync);
         ArgumentNullException.ThrowIfNull(openSkillsAsync);
         ArgumentNullException.ThrowIfNull(openPluginsAsync);
+        ArgumentNullException.ThrowIfNull(openMcpServersAsync);
         ArgumentNullException.ThrowIfNull(openWorkspaceSettings);
         ArgumentNullException.ThrowIfNull(openSessionUsage);
         ArgumentNullException.ThrowIfNull(openSessionInfo);
@@ -238,6 +243,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
         _openFileEditorAsync = openFileEditorAsync;
         _openSkillsAsync = openSkillsAsync;
         _openPluginsAsync = openPluginsAsync;
+        _openMcpServersAsync = openMcpServersAsync;
         _openWorkspaceSettings = openWorkspaceSettings;
         _openSessionUsage = openSessionUsage;
         _openSessionInfo = openSessionInfo;
@@ -266,6 +272,8 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
     public Task OpenSkillsAsync() => _openSkillsAsync();
 
     public Task OpenPluginsAsync() => _openPluginsAsync();
+
+    public Task OpenMcpServersAsync() => _openMcpServersAsync();
 
     public void OpenWorkspaceSettings() => _openWorkspaceSettings();
 

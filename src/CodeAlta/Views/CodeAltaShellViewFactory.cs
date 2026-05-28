@@ -135,6 +135,9 @@ internal static class CodeAltaShellViewFactory
             ShellCommandCatalog.Get("CodeAlta.Plugins.Manage"),
             () => _ = shellCommandSurfaceCoordinator.OpenPluginsAsync()));
         shellView.Root.AddCommand(ShellCommandViewFactory.Create(
+            ShellCommandCatalog.Get("CodeAlta.Mcp.Manage"),
+            () => _ = shellCommandSurfaceCoordinator.OpenMcpServersAsync()));
+        shellView.Root.AddCommand(ShellCommandViewFactory.Create(
             ShellCommandCatalog.Get("CodeAlta.Workspace.Settings"),
             () => _ = shellCommandSurfaceCoordinator.OpenWorkspaceSettingsAsync()));
         shellView.Root.AddCommand(ShellCommandViewFactory.Create(

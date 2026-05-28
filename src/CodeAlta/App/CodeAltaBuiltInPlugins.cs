@@ -1,4 +1,5 @@
 using CodeAlta.Plugin.GitHub;
+using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
 
@@ -19,6 +20,15 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(GitHubPlugin),
             Factory = static () => new GitHubPlugin(),
+        });
+        registry.Add(new BuiltInPluginDefinition
+        {
+            Id = "mcp",
+            DisplayName = "MCP",
+            Description = "Connects CodeAlta to configured Model Context Protocol servers.",
+            EnabledByDefault = true,
+            PluginType = typeof(McpPlugin),
+            Factory = static () => new McpPlugin(),
         });
         registry.Add(new BuiltInPluginDefinition
         {

@@ -55,6 +55,7 @@ internal sealed class ShellInputRouter
             { Id: "CodeAlta.ApplicationLogs.Open" } => new OpenApplicationLogsIntent(),
             { Id: "CodeAlta.Skills.Manage" } => new OpenSkillsIntent(),
             { Id: "CodeAlta.Plugins.Manage" } => new OpenPluginsIntent(),
+            { Id: "CodeAlta.Mcp.Manage" } => new OpenMcpServersIntent(),
             { Id: "CodeAlta.Workspace.Settings" } => new OpenWorkspaceSettingsIntent(),
             { Id: "CodeAlta.Shell.FocusSidebar" } => new FocusSidebarIntent(),
             { Id: "CodeAlta.Shell.FocusPrompt" } => new FocusPromptIntent(),

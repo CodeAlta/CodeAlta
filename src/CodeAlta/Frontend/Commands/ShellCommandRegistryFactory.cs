@@ -57,6 +57,7 @@ internal sealed class ShellCommandRegistryFactory
         registry.RegisterFactory("CodeAlta.File.Edit", static () => new OpenFileEditorCommand());
         registry.RegisterFactory("CodeAlta.Skills.Manage", static () => new OpenSkillsCommand());
         registry.RegisterFactory("CodeAlta.Plugins.Manage", static () => new OpenPluginsCommand());
+        registry.RegisterFactory("CodeAlta.Mcp.Manage", static () => new OpenMcpServersCommand());
         registry.RegisterFactory("CodeAlta.Workspace.Settings", static () => new OpenWorkspaceSettingsCommand());
         registry.RegisterFactory("CodeAlta.Session.SessionUsage", static () => new OpenSessionUsageCommand());
         registry.RegisterFactory("CodeAlta.Session.Info", static () => new OpenSessionInfoCommand());

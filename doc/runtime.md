@@ -127,6 +127,8 @@ Mutation and shell tools flow through host permission handling. Tool schemas are
 
 The `alta` live tool is injected for configured provider ids that support host tools. See [`alta` live tool](live-tool.md).
 
+MCP uses policy-controlled `AgentToolDefinition` registration for enabled/config-controlled MCP tools, with `alta mcp tool search|describe|call` remaining available for discovery, diagnostics, and manual invocation. Both paths use a finite MCP runtime, connect lazily to configured stdio or HTTP/SSE servers, apply TOML policy (`enabled`, `allowed_tools`, `disabled_tools`, direct-exposure controls, timeouts, output caps), and redact diagnostics/results. Timeline refinements for friendly direct-tool labels and automatic refresh on `tool-list-changed` notifications are follow-up work. See [MCP support](mcp.md).
+
 ## System prompt and instruction composition
 
 System prompts are file-backed and layered from shipped, user, project, and plugin resource roots. `SystemPromptBuilder` composes:

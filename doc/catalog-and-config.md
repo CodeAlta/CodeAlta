@@ -9,6 +9,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | Path under `~/.alta` | Owner | Purpose |
 | --- | --- | --- |
 | `config.toml` | `CodeAltaConfigStore` | Global chat defaults, providers, and plugins. |
+| `mcp.json` | MCP plugin | Global MCP server connection definitions. |
 | `projects/` | `ProjectCatalog` | Markdown project descriptors keyed by project slug. |
 | `checkouts/` | `ProjectCatalog` helpers | Default checkout root used by catalog planning APIs. |
 | `machines/` | Catalog model | Machine-specific override profile root. |
@@ -30,6 +31,7 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 | Path | Purpose |
 | --- | --- |
 | `<project>/.alta/config.toml` | Project-local config overrides. |
+| `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
 | `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. |
 | `<project>/.alta/skills/<skill-name>/SKILL.md` | Project-scoped skills. |
 
@@ -57,11 +59,13 @@ enabled = true
 
 - `chat`: chat-level defaults, currently the default provider key;
 - `providers`: configured model-provider documents keyed by provider key;
-- `plugins`: plugin enablement keyed by built-in id or source package id.
+- `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`.
 
 Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them while preserving their TOML text when saving normalized config so existing user data is not deleted.
 
 Global config is loaded from `~/.alta/config.toml`. Project config is loaded from `<project>/.alta/config.toml` when a project scope is active. The provider-management UI edits the same global file and validates TOML before saving. During startup, `CodeAltaConfigStore` upgrades a valid existing global config by adding entries that are present in the bundled default template but missing from the user file; it preserves existing text, validates the merged result, and writes a `config.toml.backup*` copy before replacement.
+
+MCP server connection definitions are intentionally separate JSON files: global `~/.alta/mcp.json` and project `<project>/.alta/mcp.json`. CodeAlta loads one file per scope, global first and then project overlay; a project server key shadows a global server key. New files use the default `mcpServers` format, while supported existing `mcpServers`/`servers` flavors are detected and preserved. String values in stdio `env` entries and HTTP/SSE `headers` may reference process environment variables with `${NAME}` placeholders, keeping secrets out of JSON when desired. TOML under `[plugins.mcp]` is a policy overlay only: per-server enablement, per-tool `disabled_tools`/`allowed_tools`, prompt caps, timeouts, and direct-exposure controls. Runtime availability is finite diagnostic state rather than durable config: failed or timed-out MCP servers are reported as unavailable for the current request/test, and diagnostics/results are redacted before display. Direct dynamic MCP tool exposure is enabled for all enabled/config-controlled tools where policy allows; see [MCP support](mcp.md).
 
 ### Provider enablement
 

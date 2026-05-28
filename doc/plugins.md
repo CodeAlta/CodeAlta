@@ -199,6 +199,8 @@ enabled = false
 
 It contributes transient per-turn/session statistics projections and a `statistics` live-tool command root without writing plugin messages into canonical session history.
 
+The MCP plugin is packaged as `CodeAlta.Plugin.Mcp`, is enabled by default, and contributes the `alta mcp` command root plus dynamic developer prompt guidance for configured MCP servers. It reads fixed MCP JSON server files (`~/.alta/mcp.json` and project `.alta/mcp.json`) and TOML policy under `[plugins.mcp]`; connection fields stay in JSON, while enablement, `disabled_tools`, prompt caps, timeouts, and direct-exposure policy stay in TOML. The plugin also provides reusable `McpManagementService`/runtime services consumed by direct MCP agent tools, the TUI MCP Servers dialog, and the status indicator. Direct dynamic MCP `AgentToolDefinition` exposure is enabled: every enabled/config-controlled MCP tool is exposed where policy allows it. Automatic refresh on `tool-list-changed` remains follow-up work unless direct-tool freshness requires it. See [MCP support](mcp.md).
+
 ## Troubleshooting
 
 - **Missing SDK:** source plugins require the .NET 10 SDK selected by the generated plugin-root `global.json`. If `dotnet build plugin.cs` is treated as a project build, install the required SDK or start with safe mode.

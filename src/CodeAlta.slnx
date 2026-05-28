@@ -38,6 +38,7 @@
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
     <Project Path="CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj" />
+    <Project Path="CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <Project Path="CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions/CodeAlta.Plugins.Abstractions.csproj" />
     <Project Path="CodeAlta.Plugins/CodeAlta.Plugins.csproj" />
@@ -51,6 +52,7 @@
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
+    <Project Path="CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />

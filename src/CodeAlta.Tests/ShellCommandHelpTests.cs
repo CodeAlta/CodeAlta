@@ -18,6 +18,7 @@ public sealed class ShellCommandHelpTests
         var editFileCommand = ShellCommandCatalog.Get("CodeAlta.File.Edit");
         var skillsCommand = ShellCommandCatalog.Get("CodeAlta.Skills.Manage");
         var pluginsCommand = ShellCommandCatalog.Get("CodeAlta.Plugins.Manage");
+        var mcpCommand = ShellCommandCatalog.Get("CodeAlta.Mcp.Manage");
         var workspaceSettingsCommand = ShellCommandCatalog.Get("CodeAlta.Workspace.Settings");
         var applicationLogsCommand = ShellCommandCatalog.Get("CodeAlta.ApplicationLogs.Open");
         var goToSidebarCommand = ShellCommandCatalog.Get("CodeAlta.Shell.FocusSidebar");
@@ -47,6 +48,9 @@ public sealed class ShellCommandHelpTests
         var pluginsEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, pluginsCommand.Label, StringComparison.Ordinal));
+        var mcpEntry = sections
+            .SelectMany(static section => section.Entries)
+            .Single(candidate => string.Equals(candidate.Label, mcpCommand.Label, StringComparison.Ordinal));
         var workspaceSettingsEntry = sections
             .SelectMany(static section => section.Entries)
             .Single(candidate => string.Equals(candidate.Label, workspaceSettingsCommand.Label, StringComparison.Ordinal));
@@ -90,6 +94,9 @@ public sealed class ShellCommandHelpTests
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), ShellCommandCatalog.PluginsShortcutSequence.ToString()!);
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), "/plugins");
         CollectionAssert.Contains(pluginsEntry.Bindings.ToArray(), "/plugin");
+        CollectionAssert.Contains(mcpEntry.Bindings.ToArray(), ShellCommandCatalog.McpServersShortcutSequence.ToString()!);
+        CollectionAssert.Contains(mcpEntry.Bindings.ToArray(), "/mcp");
+        CollectionAssert.Contains(mcpEntry.Bindings.ToArray(), "/mcp_servers");
         CollectionAssert.Contains(workspaceSettingsEntry.Bindings.ToArray(), ShellCommandCatalog.WorkspaceSettingsShortcutSequence.ToString()!);
         CollectionAssert.Contains(workspaceSettingsEntry.Bindings.ToArray(), "/settings");
         CollectionAssert.Contains(applicationLogsEntry.Bindings.ToArray(), ShellCommandCatalog.ApplicationLogsShortcutSequence.ToString()!);

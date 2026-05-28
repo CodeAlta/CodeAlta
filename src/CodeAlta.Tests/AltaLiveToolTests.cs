@@ -5,6 +5,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
@@ -208,6 +209,52 @@ public sealed class AltaLiveToolTests
         Assert.IsTrue(currentResult.Success);
         var currentResolution = ReadJsonLines(AssertTextItem(currentResult)).Single(static line => line.GetProperty("type").GetString() == "alta.project.resolution");
         Assert.AreEqual(project.Id, currentResolution.GetProperty("projectId").GetString());
+    }
+
+    [TestMethod]
+    public async Task SessionTool_CanInvokeMcpPluginCommandAndHelpShowsRoot()
+    {
+        using var project = TempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(project.Path, ".alta"));
+        File.WriteAllText(
+            Path.Combine(project.Path, ".alta", "mcp.json"),
+            """
+            { "mcpServers": { "memory": { "command": "npx" } } }
+            """);
+        var plugin = new McpPlugin();
+        var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
+        {
+            Plugin = CreatePluginDescriptor("mcp"),
+            Services = NoopPluginServices.Create(),
+            Scope = PluginScope.Global,
+            Command = plugin.GetAltaCommands().Single(),
+        });
+        var dispatcher = CreateDispatcher(catalog);
+        var tool = AltaSessionToolFactory.Create(dispatcher, new AltaSessionToolOptions());
+        using var arguments = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            args = new[] { "mcp", "list" },
+            cwd = project.Path,
+        }));
+
+        var rootHelp = await dispatcher.InvokeAsync(["--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var mcpHelp = await dispatcher.InvokeAsync(["mcp", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var capabilities = await dispatcher.InvokeAsync(["tool", "capability", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var result = await tool.Handler(CreateInvocation(arguments.RootElement), CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, rootHelp.ExitCode);
+        StringAssert.Contains(rootHelp.Stdout, "  mcp");
+        Assert.AreEqual(AltaExitCodes.Success, mcpHelp.ExitCode);
+        StringAssert.Contains(mcpHelp.Stdout, "server");
+        StringAssert.Contains(mcpHelp.Stdout, "tool");
+        StringAssert.Contains(mcpHelp.Stdout, "config");
+        Assert.AreEqual(AltaExitCodes.Success, capabilities.ExitCode);
+        var capability = ReadJsonLines(capabilities.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.capabilities");
+        AssertJsonArrayContains(capability.GetProperty("paths"), "mcp");
+        AssertJsonArrayContains(capability.GetProperty("mutating"), "mcp");
+        Assert.IsTrue(result.Success, result.Error);
+        var lines = ReadJsonLines(AssertTextItem(result));
+        Assert.IsTrue(lines.Any(static line => line.GetProperty("type").GetString() == "alta.mcp.server" && line.GetProperty("server").GetString() == "memory"));
     }
 
     [TestMethod]

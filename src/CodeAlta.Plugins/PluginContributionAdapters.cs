@@ -348,6 +348,7 @@ public sealed class PluginContributionAdapterService
         var messages = new List<PluginPromptMessage>();
         var prompts = new List<PluginSystemPromptContribution>();
         var preferredTools = new List<string>();
+        var additionalTools = new List<AgentToolDefinition>();
         foreach (var active in GetApplicableActivePlugins(activePlugins, options))
         {
             var context = CreateBeforeAgentRunContext(active, template, options, cancellationToken);
@@ -368,6 +369,7 @@ public sealed class PluginContributionAdapterService
                 messages.AddRange(result.AdditionalMessages);
                 prompts.AddRange(result.TemporaryPromptContributions);
                 preferredTools.AddRange(result.PreferredToolNames);
+                additionalTools.AddRange(result.AdditionalTools);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -383,6 +385,7 @@ public sealed class PluginContributionAdapterService
                 AdditionalMessages = messages,
                 TemporaryPromptContributions = prompts,
                 PreferredToolNames = preferredTools.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                AdditionalTools = additionalTools,
             },
             Diagnostics = diagnostics,
         };

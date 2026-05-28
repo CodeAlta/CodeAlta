@@ -95,6 +95,9 @@ internal sealed class ShellCommandSurfaceCoordinator
     public Task OpenPluginsAsync()
         => DispatchShellCommandAsync(new OpenPluginsCommand());
 
+    public Task OpenMcpServersAsync()
+        => DispatchShellCommandAsync(new OpenMcpServersCommand());
+
     public Task OpenWorkspaceSettingsAsync()
         => DispatchShellCommandAsync(new OpenWorkspaceSettingsCommand());
 

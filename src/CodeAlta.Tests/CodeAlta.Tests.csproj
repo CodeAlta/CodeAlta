@@ -26,6 +26,8 @@
     <ProjectReference Include="..\CodeAlta.Acp.Generator\CodeAlta.Acp.Generator.csproj" />
     <ProjectReference Include="..\CodeAlta.LiveTool\CodeAlta.LiveTool.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.GitHub\CodeAlta.Plugin.GitHub.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Tests.TinyMcpServer\CodeAlta.Tests.TinyMcpServer.csproj" />
   </ItemGroup>
 
 </Project>
