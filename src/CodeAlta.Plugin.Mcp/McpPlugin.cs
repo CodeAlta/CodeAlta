@@ -182,15 +182,14 @@ public sealed class McpPlugin : PluginBase
 
         var activeServers = configuredServers.Where(server => activeKeys.Contains(server.Key)).ToArray();
         var inactiveServers = configuredServers.Where(server => !activeKeys.Contains(server.Key)).ToArray();
-        var toolCounts = _activationState.GetToolCounts(activationScope);
         var maxServers = Math.Max(1, snapshot.Policy.PromptMaxServers);
         var builder = new StringBuilder();
-        builder.AppendLine("MCP servers (+#tools):");
+        builder.AppendLine("MCP servers:");
         builder.Append("- Active: ");
-        AppendServerList(builder, activeServers, maxServers, toolCounts, includeToolCounts: true);
+        AppendServerList(builder, activeServers, maxServers);
         builder.AppendLine();
         builder.Append("- Inactive (`alta mcp activate <id>*`): ");
-        AppendServerList(builder, inactiveServers, maxServers, toolCounts, includeToolCounts: false);
+        AppendServerList(builder, inactiveServers, maxServers);
 
         return new ValueTask<string?>(builder.ToString().TrimEnd());
     }
@@ -226,9 +225,7 @@ public sealed class McpPlugin : PluginBase
     private static void AppendServerList(
         StringBuilder builder,
         IReadOnlyList<McpManagementServerSnapshot> servers,
-        int maxServers,
-        IReadOnlyDictionary<string, int> toolCounts,
-        bool includeToolCounts)
+        int maxServers)
     {
         if (servers.Count == 0)
         {
@@ -245,12 +242,6 @@ public sealed class McpPlugin : PluginBase
             }
 
             builder.Append('`').Append(displayed[index].Key).Append('`');
-            if (includeToolCounts)
-            {
-                builder.Append('(');
-                builder.Append(toolCounts.TryGetValue(displayed[index].Key, out var count) ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "?");
-                builder.Append(')');
-            }
         }
 
         if (servers.Count > displayed.Length)

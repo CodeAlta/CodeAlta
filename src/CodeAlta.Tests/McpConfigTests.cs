@@ -662,7 +662,7 @@ public sealed class McpConfigTests
         var content = await contribution.Content(CreatePromptContext(project.Path), CancellationToken.None);
 
         Assert.IsNotNull(content);
-        StringAssert.Contains(content, "MCP servers (+#tools):");
+        StringAssert.Contains(content, "MCP servers:");
         StringAssert.Contains(content, "docs");
         StringAssert.Contains(content, "Inactive (`alta mcp activate <id>*`): `docs`");
         Assert.IsFalse(content.Contains("http/sse", StringComparison.Ordinal));

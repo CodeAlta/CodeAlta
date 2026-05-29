@@ -39,7 +39,7 @@ public sealed class McpManagementServiceTests
             {
               "servers": {
                 "shared": { "type": "stdio", "command": "project", "env": { "API_TOKEN": "abc123" } },
-                "remote": { "type": "sse", "url": "https://example.test/mcp?token=secret", "headers": { "Authorization": "Bearer token" } }
+                "remote": { "type": "sse", "url": "https://example.test/mcp?token=secret", "headers": { "Authorization": "Bearer token", "X-Test": "visible" } }
               }
             }
             """);
@@ -78,11 +78,27 @@ public sealed class McpManagementServiceTests
         Assert.AreEqual(McpManagementServerState.Disabled, remote.State);
         Assert.AreEqual("https://example.test/mcp?token=[redacted]", remote.Url);
         Assert.AreEqual("[redacted]", remote.Headers["Authorization"]);
+        Assert.AreEqual("visible", remote.Headers["X-Test"]);
         CollectionAssert.Contains(remote.DisabledTools.ToArray(), "danger");
         var shared = snapshot.Servers.First(server => server.Key == "shared" && server.State == McpManagementServerState.Configured);
         Assert.AreEqual("[redacted]", shared.Env["API_TOKEN"]);
         Assert.IsTrue(invalidSnapshot.Servers.Any(server => server.State == McpManagementServerState.InvalidConfig));
         Assert.IsTrue(missingSnapshot.Servers.Any(server => server.State == McpManagementServerState.MissingConfig));
+    }
+
+    [TestMethod]
+    public void Redactor_PreservesLongNormalTextAndNonSecretHeaders()
+    {
+        var longText = "issue 27 title body created updated comments normal response 1234567890";
+        var headers = McpRedactor.RedactDictionary(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Authorization"] = "Bearer secret-token-value",
+            ["X-GitHub-Api-Version"] = "2022-11-28",
+        });
+
+        Assert.AreEqual(longText, McpRedactor.RedactValue(null, longText));
+        Assert.AreEqual("[redacted]", headers["Authorization"]);
+        Assert.AreEqual("2022-11-28", headers["X-GitHub-Api-Version"]);
     }
 
     [TestMethod]

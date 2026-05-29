@@ -174,7 +174,7 @@ Reusable MCP configuration, policy, runtime, and management code lives in `src/C
 
 Progressive dynamic `AgentToolDefinition` exposure is shipped behavior:
 
-- the MCP plugin prompt contribution reads configured MCP servers without connecting and emits a compact active/inactive server inventory, for example: `MCP servers (+#tools): Active memory(8); Inactive docs`;
+- the MCP plugin prompt contribution reads configured MCP servers without connecting and emits a compact active/inactive server inventory, for example: `MCP servers: Active memory; Inactive docs`;
 - `alta mcp activate <server> [<server>...]` marks configured servers active for the current session (falling back to project scope when no session is available);
 - before each agent run, the MCP plugin connects only to activated servers and lists their tools;
 - every enabled tool on an activated server that passes global/server policy (`enabled`, `allowed_tools`, `disabled_tools`) is exposed as a direct agent tool;

@@ -23,9 +23,9 @@ internal static class McpRedactor
     {
         ArgumentNullException.ThrowIfNull(values);
         var result = new Dictionary<string, string>(values.Count, StringComparer.Ordinal);
-        foreach (var (key, _) in values)
+        foreach (var (key, value) in values)
         {
-            result[key] = Redacted;
+            result[key] = RedactValue(key, value);
         }
 
         return result;
@@ -100,7 +100,7 @@ internal static class McpRedactor
 
             var key = part[..separatorIndex];
             var parameterValue = part[(separatorIndex + 1)..];
-            if (ShouldRedactKey(key) || LooksSecretLike(parameterValue))
+            if (ShouldRedactKey(key) || HasCredentialPrefix(parameterValue))
             {
                 parts[index] = key + "=" + Redacted;
             }
@@ -116,7 +116,7 @@ internal static class McpRedactor
             return string.Empty;
         }
 
-        return ShouldRedactKey(key) || LooksSecretLike(value) ? Redacted : value;
+        return ShouldRedactKey(key) || HasCredentialPrefix(value) ? Redacted : value;
     }
 
     private static bool ShouldRedactKey(string? key)
@@ -140,12 +140,14 @@ internal static class McpRedactor
     private static bool LooksSecretLike(string value)
     {
         var trimmed = value.Trim();
-        if (trimmed.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+        return HasCredentialPrefix(trimmed) ||
+               trimmed.Length >= 32 && trimmed.Any(char.IsDigit) && trimmed.Any(char.IsLetter);
+    }
 
-        return trimmed.Length >= 32 && trimmed.Any(char.IsDigit) && trimmed.Any(char.IsLetter);
+    private static bool HasCredentialPrefix(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase);
     }
 }
