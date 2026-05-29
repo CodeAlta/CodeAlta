@@ -433,25 +433,7 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
-    public void ShellInputCoordinator_UsesCommandDispatcherInsteadOfCallbackFanOut()
-    {
-        var constructor = typeof(ShellInputCoordinator)
-            .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Single();
-        var parameters = constructor.GetParameters();
-        var delegateParameters = parameters.Count(static parameter => typeof(Delegate).IsAssignableFrom(parameter.ParameterType));
-
-        Assert.AreEqual(4, parameters.Length);
-        Assert.AreEqual(2, delegateParameters);
-        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(IShellCommandDispatcher)));
-
-        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellInputCoordinator.cs"));
-        Assert.IsFalse(source.Contains("PluginHostBridge", StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains("SessionCommandCoordinator", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
-    public void ShellCommandSurfaceCoordinator_UsesNamedCommandServicesInsteadOfCallbackFanOut()
+    public void ShellCommandSurfaceCoordinator_UsesRegistryContextAndPresenterInsteadOfCallbackFanOut()
     {
         var constructor = typeof(ShellCommandSurfaceCoordinator)
             .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -459,37 +441,23 @@ public sealed class ArchitectureGuardrailTests
         var parameters = constructor.GetParameters();
         var delegateParameters = parameters.Count(static parameter => typeof(Delegate).IsAssignableFrom(parameter.ParameterType));
 
-        Assert.IsTrue(delegateParameters <= 1, $"ShellCommandSurfaceCoordinator has {delegateParameters} delegate parameters.");
-        Assert.IsTrue(parameters.Any(static parameter => parameter.Name == "toggleCommandBarMultiLine" && typeof(Delegate).IsAssignableFrom(parameter.ParameterType)));
-        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(IShellPromptInputService)));
-        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(IShellCommandDispatcher)));
-        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(ShellCommandBindingProjector)));
-        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(IShellCommandSurfacePresenter)));
+        Assert.AreEqual(0, delegateParameters, $"ShellCommandSurfaceCoordinator has {delegateParameters} delegate parameters.");
+        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(ShellCommandContext)));
+        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(ShellCommandRegistry)));
+        Assert.IsTrue(parameters.Any(static parameter => parameter.ParameterType == typeof(IShellCommandPresenter)));
 
         var compositionSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandSurfaceComposition.cs"));
         var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandSurfaceCoordinator.cs"));
-        var factorySource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandRegistryFactory.cs"));
-        var projectorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandBindingProjector.cs"));
         var paletteSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandPalettePresenter.cs"));
-        var serviceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandServices.cs"));
         var viewFactorySource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "CodeAltaShellViewFactory.cs"));
-        Assert.IsFalse(source.Contains("new ShellCommandRegistryFactory(", StringComparison.Ordinal));
-        Assert.IsTrue(compositionSource.Contains("new ShellCommandRegistryFactory(", StringComparison.Ordinal));
-        Assert.IsTrue(compositionSource.Contains("new ShellCommandDispatcher(", StringComparison.Ordinal));
-        Assert.IsTrue(compositionSource.Contains("new ShellCommandBindingProjector(", StringComparison.Ordinal));
+        Assert.IsTrue(compositionSource.Contains("new ShellCommandRegistry(", StringComparison.Ordinal));
         Assert.IsTrue(compositionSource.Contains("new ShellCommandPalettePresenter(", StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains("registry.RegisterFactory(", StringComparison.Ordinal));
-        Assert.IsTrue(factorySource.Contains("registry.RegisterFactory(", StringComparison.Ordinal));
-        Assert.IsTrue(projectorSource.Contains("ShellCommandCatalog.Get(", StringComparison.Ordinal));
         Assert.IsTrue(paletteSource.Contains("new CommandPalette()", StringComparison.Ordinal));
-        Assert.IsTrue(serviceSource.Contains("internal interface IPluginCommandService", StringComparison.Ordinal));
         Assert.IsFalse(source.Contains("Func<Task> scrollToPreviousMessageAsync", StringComparison.Ordinal));
         Assert.IsFalse(source.Contains("Func<Task> openModelProvidersAsync", StringComparison.Ordinal));
         Assert.IsFalse(source.Contains("Func<SessionViewDescriptor?> getSelectedSession", StringComparison.Ordinal));
         Assert.IsFalse(viewFactorySource.Contains("Action focusSidebar", StringComparison.Ordinal));
         Assert.IsFalse(viewFactorySource.Contains("Action focusPromptEditor", StringComparison.Ordinal));
-        Assert.IsTrue(viewFactorySource.Contains("shellCommandSurfaceCoordinator.FocusSidebarAsync", StringComparison.Ordinal));
-        Assert.IsTrue(viewFactorySource.Contains("shellCommandSurfaceCoordinator.FocusPromptAsync", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -718,9 +686,9 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/CodeAltaShellController.cs:70:_initializationTask = Task.Run(",
             "App/CodeAltaShellController.cs:433:var startupProviderLoadTask = Task.Run(",
-            "App/CodeAltaApp.cs:337:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:368:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:441:_ = OpenModelProvidersAsync();",
+            "App/CodeAltaApp.cs:332:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:363:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:436:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
             "App/ShellSessionStateCoordinator.cs:274:_ = RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);",
             "App/ShellSessionStateCoordinator.cs:283:_ = PersistViewStateAsync();",
@@ -1503,16 +1471,13 @@ public sealed class ArchitectureGuardrailTests
         var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs"));
         var compositionSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaFrontendComposition.cs"));
         var creationSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "SessionCreationCoordinator.cs"));
-        var shellCommandSurfaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandSurfaceCoordinator.cs"));
         var sessionCommandSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "SessionCommandCoordinator.cs"));
         var executionOptionsSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "SessionExecutionOptionsFactory.cs"));
 
         Assert.IsTrue(appSource.Contains("CodeAltaFrontendComposition.Create(", StringComparison.Ordinal));
         Assert.IsTrue(appSource.Contains("_shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync", StringComparison.Ordinal));
         Assert.IsTrue(compositionSource.Contains("new SessionCommandCoordinator(", StringComparison.Ordinal));
-        Assert.IsTrue(shellCommandSurfaceSource.Contains("new ShellInputCoordinator(", StringComparison.Ordinal));
         Assert.IsFalse(appSource.Contains("SubmitCurrentDelegationAsync", StringComparison.Ordinal));
-        Assert.IsFalse(shellCommandSurfaceSource.Contains("CodeAlta.Session.Delegate", StringComparison.Ordinal));
         Assert.IsFalse(sessionCommandSource.Contains("GetSessionInput()", StringComparison.Ordinal));
         Assert.IsFalse(sessionCommandSource.Contains("/help", StringComparison.Ordinal));
         Assert.IsFalse(sessionCommandSource.Contains("AgentPermissionRequest", StringComparison.Ordinal));
@@ -1942,13 +1907,13 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
-    public void HelpAndWorkspaceCommands_ShareShellCommandCatalog()
+    public void HelpAndWorkspaceCommands_UseRegisteredShellCommands()
     {
         var helpSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Help", "ShellHelpContentBuilder.cs"));
-        var projectorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandBindingProjector.cs"));
+        var surfaceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Frontend", "Commands", "ShellCommandSurfaceCoordinator.cs"));
 
-        Assert.IsTrue(helpSource.Contains("ShellCommandCatalog.Commands", StringComparison.Ordinal));
-        Assert.IsTrue(projectorSource.Contains("ShellCommandCatalog.Get(", StringComparison.Ordinal));
+        Assert.IsTrue(helpSource.Contains("IReadOnlyList<ShellCommand> commands", StringComparison.Ordinal));
+        Assert.IsTrue(surfaceSource.Contains("_registry.Commands", StringComparison.Ordinal));
     }
 
     [TestMethod]

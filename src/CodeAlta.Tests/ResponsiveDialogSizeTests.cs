@@ -60,9 +60,9 @@ public sealed class ResponsiveDialogSizeTests
         => Assert.AreEqual("F6", SessionWorkspaceView.ExpandPromptShortcutKey.ToString());
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlSForFocusSidebarShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlSForFocusSidebarShortcut()
     {
-        var sequence = ShellCommandCatalog.FocusSidebarShortcutSequence;
+        var sequence = BuiltinShellCommands.FocusSidebarShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -72,9 +72,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlPForFocusPromptShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlPForFocusPromptShortcut()
     {
-        var sequence = ShellCommandCatalog.FocusPromptShortcutSequence;
+        var sequence = BuiltinShellCommands.FocusPromptShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -84,9 +84,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlOForModelsShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlOForModelsShortcut()
     {
-        var sequence = ShellCommandCatalog.ModelsShortcutSequence;
+        var sequence = BuiltinShellCommands.ModelsShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -108,9 +108,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlNForPluginsShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlNForPluginsShortcut()
     {
-        var sequence = ShellCommandCatalog.PluginsShortcutSequence;
+        var sequence = BuiltinShellCommands.PluginsShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -120,22 +120,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlYForMcpServersShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlWForWorkspaceSettingsShortcut()
     {
-        var sequence = ShellCommandCatalog.McpServersShortcutSequence;
-
-        Assert.AreEqual(2, sequence.Count);
-        Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
-        Assert.AreEqual(TerminalModifiers.Ctrl, sequence[0].Modifiers);
-        Assert.AreEqual(TerminalChar.CtrlY, sequence[1].Char);
-        Assert.AreEqual(TerminalModifiers.Ctrl, sequence[1].Modifiers);
-        Assert.IsFalse(ShellCommandCatalog.Commands.Any(command => command.Sequence is not null && command.Id != "CodeAlta.Mcp.Manage" && command.Sequence.ToString() == sequence.ToString()));
-    }
-
-    [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlWForWorkspaceSettingsShortcut()
-    {
-        var sequence = ShellCommandCatalog.WorkspaceSettingsShortcutSequence;
+        var sequence = BuiltinShellCommands.WorkspaceSettingsShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -145,9 +132,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlGForToggleNavigatorShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlGForToggleNavigatorShortcut()
     {
-        var sequence = ShellCommandCatalog.ToggleNavigatorShortcutSequence;
+        var sequence = BuiltinShellCommands.ToggleNavigatorShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -157,9 +144,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlLForApplicationLogsShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlLForApplicationLogsShortcut()
     {
-        var sequence = ShellCommandCatalog.ApplicationLogsShortcutSequence;
+        var sequence = BuiltinShellCommands.ApplicationLogsShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -169,9 +156,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlKForSkillsShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlKForSkillsShortcut()
     {
-        var sequence = ShellCommandCatalog.SkillsShortcutSequence;
+        var sequence = BuiltinShellCommands.SkillsShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -181,9 +168,9 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlGCtrlAForAboutShortcut()
+    public void BuiltinShellCommands_UsesCtrlGCtrlAForAboutShortcut()
     {
-        var sequence = ShellCommandCatalog.AboutShortcutSequence;
+        var sequence = BuiltinShellCommands.AboutShortcutSequence;
 
         Assert.AreEqual(2, sequence.Count);
         Assert.AreEqual(TerminalChar.CtrlG, sequence[0].Char);
@@ -217,27 +204,27 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlAltLeftForTabLeftShortcut()
+    public void BuiltinShellCommands_UsesCtrlAltLeftForTabLeftShortcut()
     {
-        var gesture = ShellCommandCatalog.Get("CodeAlta.Session.TabLeft").Gesture;
+        var gesture = BuiltinShellCommands.TabLeft.Gesture;
 
         Assert.AreEqual(new KeyGesture(TerminalKey.Left, TerminalModifiers.Ctrl | TerminalModifiers.Alt), gesture);
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesCtrlAltRightForTabRightShortcut()
+    public void BuiltinShellCommands_UsesCtrlAltRightForTabRightShortcut()
     {
-        var gesture = ShellCommandCatalog.Get("CodeAlta.Session.TabRight").Gesture;
+        var gesture = BuiltinShellCommands.TabRight.Gesture;
 
         Assert.AreEqual(new KeyGesture(TerminalKey.Right, TerminalModifiers.Ctrl | TerminalModifiers.Alt), gesture);
     }
 
     [TestMethod]
-    public void ShellCommandCatalog_UsesFunctionKeysForMessageNavigation()
+    public void BuiltinShellCommands_UsesFunctionKeysForMessageNavigation()
     {
-        Assert.AreEqual(new KeyGesture(TerminalKey.F3), ShellCommandCatalog.Get("CodeAlta.Session.MessagePrevious").Gesture);
-        Assert.AreEqual(new KeyGesture(TerminalKey.F4), ShellCommandCatalog.Get("CodeAlta.Session.MessageNext").Gesture);
-        Assert.AreEqual(new KeyGesture(TerminalKey.F3, TerminalModifiers.Ctrl), ShellCommandCatalog.Get("CodeAlta.Session.MessageFirst").Gesture);
-        Assert.AreEqual(new KeyGesture(TerminalKey.F4, TerminalModifiers.Ctrl), ShellCommandCatalog.Get("CodeAlta.Session.MessageLast").Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F3), BuiltinShellCommands.MessagePrevious.Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F4), BuiltinShellCommands.MessageNext.Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F3, TerminalModifiers.Ctrl), BuiltinShellCommands.MessageFirst.Gesture);
+        Assert.AreEqual(new KeyGesture(TerminalKey.F4, TerminalModifiers.Ctrl), BuiltinShellCommands.MessageLast.Gesture);
     }
 }

@@ -34,14 +34,14 @@ public sealed class PluginFrontendContributionFixtureTests
             var bridge = new PluginFrontendBridge(runtime, static () => null);
 
             var command = bridge.GetCommandContributions().Single();
-            var commandResult = await bridge.ExecuteCommandAsync("fixture", "one two");
+            var commandResult = await bridge.ExecuteCommandAsync(command);
             var status = bridge.GetStatusItems(PluginUiRegion.SessionStatus).Single();
             var footerStatus = bridge.GetStatusItems(PluginUiRegion.SessionFooter).Single();
             var visuals = bridge.CreateVisuals(PluginUiRegion.CommandBar);
 
             Assert.AreEqual("fixture", command.Name);
             Assert.AreEqual(PluginCommandDisposition.Handled, commandResult.Disposition);
-            Assert.AreEqual("frontend:one,two", commandResult.UserMessage);
+            Assert.AreEqual("frontend", commandResult.UserMessage);
             Assert.AreEqual("Fixture", status.Label);
             Assert.AreEqual("ready", status.Text);
             Assert.AreEqual(PluginStatusTone.Success, status.Tone);
@@ -69,7 +69,7 @@ public sealed class PluginFrontendContributionFixtureTests
             {
                 Name = "fixture",
                 Label = "Fixture",
-                Handler = static (context, _) => ValueTask.FromResult(PluginCommandResult.Message($"frontend:{string.Join(',', context.Arguments)}")),
+                Handler = static (_, _) => ValueTask.FromResult(PluginCommandResult.Message("frontend")),
             };
         }
 

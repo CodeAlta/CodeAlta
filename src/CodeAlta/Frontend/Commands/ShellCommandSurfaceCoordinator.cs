@@ -1,112 +1,72 @@
+using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Commands;
+
 namespace CodeAlta.Frontend.Commands;
 
 internal sealed class ShellCommandSurfaceCoordinator
 {
-    private readonly Action _toggleCommandBarMultiLine;
-    private readonly IShellCommandSurfacePresenter _presenter;
-    private readonly IShellCommandDispatcher _shellCommandDispatcher;
-    private readonly ShellCommandBindingProjector _bindingProjector;
-    private readonly ShellInputCoordinator _shellInputCoordinator;
+    private readonly ShellCommandContext _context;
+    private readonly ShellCommandRegistry _registry;
+    private readonly UiCommandRunner _runner;
+    private readonly IShellCommandPresenter _presenter;
 
     public ShellCommandSurfaceCoordinator(
-        IShellPromptInputService promptInputService,
-        IShellCommandDispatcher shellCommandDispatcher,
-        ShellCommandBindingProjector bindingProjector,
-        IShellCommandSurfacePresenter presenter,
-        Action toggleCommandBarMultiLine)
+        ShellCommandContext context,
+        ShellCommandRegistry registry,
+        UiCommandRunner runner,
+        IShellCommandPresenter presenter)
     {
-        ArgumentNullException.ThrowIfNull(promptInputService);
-        ArgumentNullException.ThrowIfNull(shellCommandDispatcher);
-        ArgumentNullException.ThrowIfNull(bindingProjector);
-        ArgumentNullException.ThrowIfNull(presenter);
-        ArgumentNullException.ThrowIfNull(toggleCommandBarMultiLine);
-
-        _toggleCommandBarMultiLine = toggleCommandBarMultiLine;
-        _presenter = presenter;
-        _shellCommandDispatcher = shellCommandDispatcher;
-        _bindingProjector = bindingProjector;
-        _shellInputCoordinator = new ShellInputCoordinator(
-            new ShellInputRouter(),
-            promptInputService.GetPromptText,
-            promptInputService.IsCurrentPromptEmpty,
-            _shellCommandDispatcher);
+        _context = context ?? throw new ArgumentNullException(nameof(context));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _runner = runner ?? throw new ArgumentNullException(nameof(runner));
+        _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
     }
 
-    public IReadOnlyList<SessionWorkspaceCommandBinding> BuildWorkspaceCommandBindings()
-        => _bindingProjector.BuildWorkspaceCommandBindings();
+    public IReadOnlyList<ShellCommand> Commands => _registry.Commands;
+
+    public IEnumerable<ShellCommand> CommandsFor(ShellCommandPlacement placement)
+        => _registry.CommandsFor(placement);
+
+    public Command CreateViewCommand(ShellCommand command)
+        => ShellCommandViewFactory.Create(command, _context, _runner);
 
     public Task HandleAcceptedPromptAsync(string? rawInput, CancellationToken cancellationToken = default)
-        => _shellInputCoordinator.HandleAcceptedPromptAsync(rawInput, cancellationToken);
+        => _context.PromptDispatch.SendPromptAsync(rawInput, steer: false, cancellationToken);
 
     public Task SubmitCurrentPromptAsync(bool steer, CancellationToken cancellationToken = default)
-        => _shellInputCoordinator.SubmitCurrentPromptAsync(steer, cancellationToken);
+        => _context.PromptDispatch.SendPromptAsync(_context.PromptInput.GetPromptText(), steer, cancellationToken);
 
     public Task AbortSelectedSessionAsync(CancellationToken cancellationToken = default)
-        => _shellInputCoordinator.AbortSelectedSessionAsync(cancellationToken);
+        => _context.SessionActions.AbortSelectedSessionAsync();
 
     public Task CompactSelectedSessionAsync(CancellationToken cancellationToken = default)
-        => _shellInputCoordinator.CompactSelectedSessionAsync(cancellationToken);
+        => _context.SessionActions.CompactSelectedSessionAsync();
 
     public Task CloseCurrentTabAsync(CancellationToken cancellationToken = default)
-        => _shellInputCoordinator.CloseCurrentTabAsync(cancellationToken);
+        => _context.Tabs.CloseCurrentTabAsync();
 
     public Task ShowHelpAsync(string? filterText = null, CancellationToken cancellationToken = default)
-        => DispatchShellCommandAsync(new OpenHelpCommand(filterText), cancellationToken);
+        => _presenter.ShowHelpDialogAsync(_registry.Commands, filterText);
 
     public void ShowCommandPalette()
         => _presenter.ShowCommandPalette();
 
     public Task ShowCommandPaletteAsync()
-        => DispatchShellCommandAsync(new OpenCommandPaletteCommand());
-
-    public Task ExitAppAsync()
-        => DispatchShellCommandAsync(new ExitAppCommand());
-
-    public Task FocusSidebarAsync()
-        => DispatchShellCommandAsync(new FocusSidebarCommand());
-
-    public Task FocusPromptAsync()
-        => DispatchShellCommandAsync(new FocusPromptCommand());
-
-    public Task FocusModelProviderAsync()
-        => DispatchShellCommandAsync(new FocusModelProviderCommand());
-
-    public void ToggleCommandBarMultiLine()
-        => _toggleCommandBarMultiLine();
-
-    public Task ShowOpenFolderDialogAsync(string? initialPath = null)
-        => DispatchShellCommandAsync(new OpenFolderCommand(initialPath));
-
-    public Task OpenModelProvidersAsync()
-        => DispatchShellCommandAsync(new OpenModelProvidersCommand());
-
-    public Task OpenAboutAsync()
-        => DispatchShellCommandAsync(new OpenAboutCommand());
-
-    public Task OpenApplicationLogsAsync()
-        => DispatchShellCommandAsync(new OpenApplicationLogsCommand());
-
-    public Task OpenFileEditorAsync()
-        => DispatchShellCommandAsync(new OpenFileEditorCommand());
-
-    public Task OpenSkillsAsync()
-        => DispatchShellCommandAsync(new OpenSkillsCommand());
-
-    public Task OpenPluginsAsync()
-        => DispatchShellCommandAsync(new OpenPluginsCommand());
-
-    public Task OpenMcpServersAsync()
-        => DispatchShellCommandAsync(new OpenMcpServersCommand());
-
-    public Task OpenWorkspaceSettingsAsync()
-        => DispatchShellCommandAsync(new OpenWorkspaceSettingsCommand());
-
-    private async Task DispatchShellCommandAsync(ShellCommand command, CancellationToken cancellationToken = default)
-        => await _shellCommandDispatcher.DispatchAsync(command, cancellationToken);
-
-    internal static string BuildUnknownCommandStatus(string commandName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(commandName);
-        return $"Unknown command '/{commandName}'. Press F1 or type /help.";
+        _presenter.ShowCommandPalette();
+        return Task.CompletedTask;
+    }
+
+    public bool TryCreateCommand(string id, out Command command)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        if (!_registry.TryGetById(id, out var shellCommand))
+        {
+            command = null!;
+            return false;
+        }
+
+        command = CreateViewCommand(shellCommand);
+        return true;
     }
 }

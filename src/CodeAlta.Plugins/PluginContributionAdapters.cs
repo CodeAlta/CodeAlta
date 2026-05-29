@@ -167,30 +167,26 @@ public sealed class PluginContributionAdapterService
         => GetRegistrations(point, options).Where(static registration => registration.Contribution is TContribution).ToArray();
 
     /// <summary>
-    /// Executes a command contribution by name or alias.
+    /// Executes a command contribution by contribution snapshot.
     /// </summary>
     /// <param name="activePlugins">Active plugins used to build operation contexts.</param>
-    /// <param name="name">The command name or alias.</param>
-    /// <param name="arguments">Invocation arguments.</param>
-    /// <param name="rawText">Raw invocation text, when known.</param>
+    /// <param name="contribution">The command contribution.</param>
     /// <param name="options">Operation options.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The command result and diagnostics.</returns>
     public async ValueTask<(PluginCommandResult Result, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> ExecuteCommandAsync(
         IReadOnlyList<ActivePluginInstance> activePlugins,
-        string name,
-        IReadOnlyList<string>? arguments = null,
-        string? rawText = null,
+        PluginCommandContribution contribution,
         PluginAdapterOperationOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(activePlugins);
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(contribution);
         var diagnostics = new List<PluginRuntimeDiagnostic>();
         foreach (var registration in GetRegistrations(PluginPoint.Command, options))
         {
-            if (registration.Contribution is not PluginCommandContribution command ||
-                !MatchesCommandName(command, name))
+            if (!ReferenceEquals(registration.Contribution, contribution) ||
+                registration.Contribution is not PluginCommandContribution command)
             {
                 continue;
             }
@@ -202,7 +198,7 @@ public sealed class PluginContributionAdapterService
 
             try
             {
-                var context = CreateCommandContext(active, options, arguments ?? [], rawText, cancellationToken);
+                var context = CreateCommandContext(active, options, cancellationToken);
                 var result = await command.Handler(context, cancellationToken).ConfigureAwait(false);
                 context.Invalidate();
                 return (result, diagnostics);
@@ -733,10 +729,6 @@ public sealed class PluginContributionAdapterService
             .Where(registration => registration.Handle.Point == point && PluginContributionRegistry.AppliesToProject(registration, options?.ProjectId, options?.ProjectPath))
             .ToArray();
 
-    private static bool MatchesCommandName(PluginCommandContribution command, string name)
-        => string.Equals(command.Name, name, StringComparison.OrdinalIgnoreCase) ||
-            command.Aliases.Any(alias => string.Equals(alias, name, StringComparison.OrdinalIgnoreCase));
-
     private static bool TryGetActivePlugin(IReadOnlyList<ActivePluginInstance> activePlugins, PluginContributionRegistration registration, out ActivePluginInstance active)
     {
         active = activePlugins.FirstOrDefault(plugin => string.Equals(plugin.Descriptor.RuntimeKey, registration.Handle.PluginRuntimeKey, StringComparison.Ordinal))!;
@@ -838,7 +830,7 @@ public sealed class PluginContributionAdapterService
             Exception = PluginExceptionInfo.FromException(exception),
         };
 
-    private static PluginCommandContext CreateCommandContext(ActivePluginInstance active, PluginAdapterOperationOptions? options, IReadOnlyList<string> arguments, string? rawText, CancellationToken cancellationToken)
+    private static PluginCommandContext CreateCommandContext(ActivePluginInstance active, PluginAdapterOperationOptions? options, CancellationToken cancellationToken)
         => new()
         {
             Plugin = active.Descriptor,
@@ -852,8 +844,6 @@ public sealed class PluginContributionAdapterService
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
-            Arguments = arguments,
-            RawText = rawText,
             CancellationToken = cancellationToken,
         };
 

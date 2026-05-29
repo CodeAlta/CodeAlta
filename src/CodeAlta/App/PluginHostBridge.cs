@@ -286,9 +286,9 @@ internal sealed class PluginHostBridge
         return tools.Count == 0 ? null : tools;
     }
 
-    public async Task<PluginCommandResult> ExecuteCommandAsync(string name, string? arguments, CancellationToken cancellationToken = default)
+    public async Task<PluginCommandResult> ExecuteCommandAsync(PluginCommandContribution contribution, CancellationToken cancellationToken = default)
     {
-        return await _frontend.ExecuteCommandAsync(name, arguments, cancellationToken);
+        return await _frontend.ExecuteCommandAsync(contribution, cancellationToken);
     }
 
     public async Task ObserveAgentEventAsync(SessionViewDescriptor session, AgentEvent @event, CancellationToken cancellationToken = default)

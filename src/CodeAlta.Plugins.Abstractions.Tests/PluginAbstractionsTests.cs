@@ -116,50 +116,6 @@ public sealed class PluginAbstractionsTests
     }
 
     [TestMethod]
-    public async Task HelperFactoriesProduceLowCeremonyContributions()
-    {
-        var command = Command.Prompt(
-            "hello_plugin",
-            "Say hello.",
-            static _ => new ValueTask<PluginCommandResult>(PluginCommandResult.Handled),
-            ["hello"]);
-        var prompt = Prompt.Developer("Always mention the plugin.");
-        var visual = PluginUi.Visual(PluginUiRegion.SessionFooter, new Markup("hello"));
-        var visualFactory = PluginUi.Visual(PluginUiRegion.CommandBar, static _ => new Markup("dynamic"));
-        var status = PluginUi.Status("Plugin", static _ => "ready");
-        var inputDialog = PluginUi.InputDialog("Input", "seed");
-        var confirmDialog = PluginUi.ConfirmDialog("Confirm", "Continue?");
-        var resource = Resources.SkillRoot("skills");
-        var cliCommand = new CliCommand("plugin", "Plugin command-line commands.");
-        var cliGroup = new CliCommandGroup();
-        XenoAtom.CommandLine.CommandExtensions.Add(cliGroup, "plugin-test", "Enable plugin test mode.", static _ => { });
-        var startup = Startup.Resources("early-resources", [resource]);
-        var attachment = Attachments.File("src/Program.cs", "Program.cs");
-        var tool = Tool.FromDefinition(CreateToolDefinition(), promptSnippet: "Use hello_tool.");
-
-        Assert.AreEqual(PluginCommandKind.Prompt, command.Kind);
-        Assert.AreEqual("Hello Plugin", command.Label);
-        CollectionAssert.Contains(command.Aliases.ToArray(), "hello");
-        Assert.AreEqual(PluginPromptChannel.Developer, prompt.Channel);
-        Assert.AreEqual("Always mention the plugin.", await prompt.Content(CreateSystemPromptContext(), CancellationToken.None));
-        Assert.IsNotNull(visual.Visual);
-        Assert.IsNotNull(visualFactory.CreateVisual!(CreateVisualContext()));
-        Assert.AreEqual("ready", status.GetStatus(CreateStatusContext())?.Text);
-        Assert.AreEqual(PluginDialogKind.Input, inputDialog.Kind);
-        Assert.AreEqual("seed", inputDialog.InitialText);
-        Assert.AreEqual(2, confirmDialog.Buttons.Count);
-        Assert.AreEqual(PluginResourceKind.SkillRoot, resource.Kind);
-        Assert.IsTrue(resource.IsPackageRelative);
-        Assert.AreEqual("plugin", cliCommand.Name);
-        Assert.IsInstanceOfType(cliGroup.Nodes.Single(), typeof(XenoAtom.CommandLine.Option));
-        Assert.AreEqual("plugin-test", ((XenoAtom.CommandLine.Option)cliGroup.Nodes.Single()).Prototype);
-        Assert.AreEqual(resource, startup.Resources[0]);
-        Assert.AreEqual(PluginPromptAttachmentKind.File, attachment.Kind);
-        Assert.AreEqual("hello_tool", tool.Definition.Spec.Name);
-        Assert.AreEqual("Use hello_tool.", tool.PromptSnippet);
-    }
-
-    [TestMethod]
     public async Task PromptToolCompactionAndDiagnosticsResultsHaveExpectedShapes()
     {
         using var document = JsonDocument.Parse("{\"value\":1}");

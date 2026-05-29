@@ -17,8 +17,6 @@ internal sealed class CodeAltaShellSurfaceOptions
 
     public required PromptComposerViewModel PromptComposerViewModel { get; init; }
 
-    public required IReadOnlyList<SessionWorkspaceCommandBinding> WorkspaceCommandBindings { get; init; }
-
     public required SessionWorkspaceChromeController WorkspaceChromeController { get; init; }
 
     public required PromptComposerViewController PromptComposerController { get; init; }
@@ -44,12 +42,6 @@ internal sealed class CodeAltaShellSurfaceOptions
     public required Visual Sidebar { get; init; }
 
     public required ShellCommandSurfaceCoordinator ShellCommandSurfaceCoordinator { get; init; }
-
-    public required Action ToggleTerminalLoopCallback { get; init; }
-
-    public required Action ToggleNavigator { get; init; }
-
-    public required Func<bool> CanUseCommandPalette { get; init; }
 
     public Func<CommandBar, Visual?>? ComposePluginFooter { get; init; }
 

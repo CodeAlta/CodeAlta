@@ -14,18 +14,16 @@ public sealed class PluginContributionAdapterServiceTests
         var (registry, active) = await ActivateAsync<ComprehensivePlugin>();
         var adapter = new PluginContributionAdapterService(registry);
 
+        var command = (PluginCommandContribution)registry.GetSnapshot().Single(static registration => registration.Contribution is PluginCommandContribution).Contribution;
         var (result, diagnostics) = await adapter.ExecuteCommandAsync(
             [active],
-            "sample_alias",
-            ["one", "two"],
-            "/sample one two",
+            command,
             new PluginAdapterOperationOptions { ProjectId = "project", ProjectPath = Environment.CurrentDirectory, SessionId = "session" });
 
         Assert.AreEqual(0, diagnostics.Count, string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.AreEqual(PluginCommandDisposition.Handled, result.Disposition);
-        Assert.AreEqual("command:one,two", result.UserMessage);
+        Assert.AreEqual("command", result.UserMessage);
         Assert.AreEqual("project", ComprehensivePlugin.LastCommandProjectId);
-        Assert.AreEqual("/sample one two", ComprehensivePlugin.LastCommandRawText);
         await active.DeactivateAsync(TimeSpan.FromSeconds(5));
     }
 
@@ -143,7 +141,8 @@ public sealed class PluginContributionAdapterServiceTests
         Assert.IsNotNull(result.ActivePlugin);
         var adapter = new PluginContributionAdapterService(registry, diagnostics);
 
-        var (commandResult, commandDiagnostics) = await adapter.ExecuteCommandAsync([result.ActivePlugin], "fail");
+        var command = (PluginCommandContribution)registry.GetSnapshot().Single(static registration => registration.Contribution is PluginCommandContribution).Contribution;
+        var (commandResult, commandDiagnostics) = await adapter.ExecuteCommandAsync([result.ActivePlugin], command);
 
         Assert.AreEqual(PluginCommandDisposition.NotHandled, commandResult.Disposition);
         Assert.AreEqual(1, commandDiagnostics.Count);
@@ -203,7 +202,8 @@ public sealed class PluginContributionAdapterServiceTests
         Assert.AreNotEqual(0, registry.GetSnapshot().Count);
 
         await active.DeactivateAsync(TimeSpan.FromSeconds(5));
-        var (result, diagnostics) = await adapter.ExecuteCommandAsync([active], "sample");
+        var command = new PluginCommandContribution { Name = "sample", Handler = static (_, _) => ValueTask.FromResult(PluginCommandResult.Handled) };
+        var (result, diagnostics) = await adapter.ExecuteCommandAsync([active], command);
 
         Assert.AreEqual(0, diagnostics.Count, string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.AreEqual(0, registry.GetSnapshot().Count);
@@ -315,7 +315,6 @@ public sealed class PluginContributionAdapterServiceTests
     {
         public static string? LastCommandProjectId { get; private set; }
 
-        public static string? LastCommandRawText { get; private set; }
 
         public static bool StartupInvoked { get; private set; }
 
@@ -326,7 +325,6 @@ public sealed class PluginContributionAdapterServiceTests
         public static void Reset()
         {
             LastCommandProjectId = null;
-            LastCommandRawText = null;
             StartupInvoked = false;
             AfterCompactionInvoked = false;
             AgentEventsObserved = 0;
@@ -351,12 +349,10 @@ public sealed class PluginContributionAdapterServiceTests
             yield return new PluginCommandContribution
             {
                 Name = "sample",
-                Aliases = ["sample_alias"],
                 Handler = static (context, _) =>
                 {
                     LastCommandProjectId = context.ProjectId;
-                    LastCommandRawText = context.RawText;
-                    return ValueTask.FromResult(PluginCommandResult.Message($"command:{string.Join(',', context.Arguments)}"));
+                    return ValueTask.FromResult(PluginCommandResult.Message("command"));
                 },
             };
         }

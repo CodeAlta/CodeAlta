@@ -119,7 +119,7 @@ public sealed class PluginContributionRegistryTests
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         CollectionAssert.IsSubsetOf(
-            new[] { "command", "command-alias", "keybinding", "tool", "prompt-part", "resource", "ui-region" },
+            new[] { "command", "keybinding", "tool", "prompt-part", "resource", "ui-region" },
             conflictKinds.ToArray());
     }
 
@@ -138,7 +138,6 @@ public sealed class PluginContributionRegistryTests
             new PluginCommandContribution
             {
                 Name = "same-command",
-                Aliases = ["same-alias"],
                 KeyBinding = new PluginKeyBinding { DisplayText = "Ctrl+X" },
                 Handler = static (_, _) => ValueTask.FromResult(PluginCommandResult.Handled),
             },

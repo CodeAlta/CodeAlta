@@ -6,7 +6,7 @@ using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Frontend.Commands;
 
-internal sealed class ShellCommandPalettePresenter : IShellCommandSurfacePresenter
+internal sealed class ShellCommandPalettePresenter : IShellCommandPresenter
 {
     internal static CommandPaletteStyle CommandPalettePopupStyle { get; } = CommandPaletteStyle.Default with
     {
@@ -36,10 +36,11 @@ internal sealed class ShellCommandPalettePresenter : IShellCommandSurfacePresent
         _dialogCommandService = dialogCommandService;
     }
 
-    public Task ShowHelpDialogAsync(string? filterText = null)
+    public Task ShowHelpDialogAsync(IReadOnlyList<ShellCommand> commands, string? filterText = null)
     {
+        ArgumentNullException.ThrowIfNull(commands);
         _helpDialog ??= new ShellHelpDialog(_dialogCommandService.GetDialogBounds, _dialogCommandService.GetDialogFocusTarget);
-        return _helpDialog.ShowAsync(filterText);
+        return _helpDialog.ShowAsync(commands, filterText);
     }
 
     public void ShowCommandPalette()

@@ -134,6 +134,10 @@ Plugins can contribute:
 - normalized agent event observers;
 - transient session event projections for plugin-owned timeline cards (current APIs still use some legacy `Session` names).
 
+Plugin shell commands are no-argument frontend activations. A `PluginCommandContribution` declares placement, command-palette/search metadata, visibility flags, optional shortcut, and availability; CodeAlta adapts active contributions into the same shell command registry as built-ins. Plugin commands therefore appear in help, the command palette, command bars, and shortcuts without frontend-specific code.
+
+`PluginCommandContext` exposes public services such as `Ui`, `Sessions`, `Prompts`, and `Workspace`, but not raw slash text or argument tokens. Commands that need input should use plugin UI services, prompt/session services, or a plugin-owned dialog/workflow contribution. Plugins do not receive internal frontend command types, XenoAtom `Visual` targets, or frontend view models.
+
 Prompt-editor attachments can attach plugin-owned behavior to prompt editors. CodeAlta provides only a small editor host, including the prompt project path; each plugin owns its trigger detection and visual presentation. Attachments can also set `PluginPromptEditorContribution.PlaceholderText` with a short placeholder segment such as `[#] to reference a GitHub issue`, which appears in the ready prompt placeholder while that contribution applies.
 
 Built-in plugins use the same model. The GitHub plugin owns its `#` issue lookup UI in GitHub repositories and inserts Markdown links such as `[#18](https://github.com/org/repo/issues/18)`. It also exposes the `gh` CLI as an agent tool only when `gh` is installed; the tool receives arguments as an array of strings and passes them to `ProcessStartInfo.ArgumentList` instead of a shell command string. The statistics plugin projects per-turn/session statistics from normalized agent events without writing plugin messages into canonical conversation history.

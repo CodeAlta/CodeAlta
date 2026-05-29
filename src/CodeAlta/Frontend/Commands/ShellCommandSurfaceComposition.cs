@@ -16,7 +16,9 @@ internal static class ShellCommandSurfaceComposition
         IShellTabCommandService tabCommandService,
         IShellStatusService statusService,
         IPluginCommandService pluginCommandService,
-        Action toggleCommandBarMultiLine)
+        Action toggleTerminalLoop,
+        Func<bool> canUseCommandPalette,
+        Func<bool> isCommandBarMultiLine)
     {
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
         ArgumentNullException.ThrowIfNull(sessionWorkspaceViewModel);
@@ -28,30 +30,43 @@ internal static class ShellCommandSurfaceComposition
         ArgumentNullException.ThrowIfNull(tabCommandService);
         ArgumentNullException.ThrowIfNull(statusService);
         ArgumentNullException.ThrowIfNull(pluginCommandService);
-        ArgumentNullException.ThrowIfNull(toggleCommandBarMultiLine);
+        ArgumentNullException.ThrowIfNull(toggleTerminalLoop);
+        ArgumentNullException.ThrowIfNull(canUseCommandPalette);
+        ArgumentNullException.ThrowIfNull(isCommandBarMultiLine);
 
-        var commandPalettePresenter = new ShellCommandPalettePresenter(dialogCommandService);
-        var shellCommandRegistry = new ShellCommandRegistryFactory(
-            sessionCommandCoordinator,
-            dialogCommandService,
-            navigationCommandService,
-            tabCommandService,
-            statusService,
-            pluginCommandService).Create(commandPalettePresenter);
-        var shellCommandDispatcher = new ShellCommandDispatcher(shellCommandRegistry);
-        var shellCommandBindingProjector = new ShellCommandBindingProjector(
-            promptComposerViewModel,
-            sessionWorkspaceViewModel,
-            sessionCommandService,
-            statusService,
-            shellCommandRegistry,
-            shellCommandDispatcher,
-            pluginCommandService);
-        return new ShellCommandSurfaceCoordinator(
-            promptInputService,
-            shellCommandDispatcher,
-            shellCommandBindingProjector,
-            commandPalettePresenter,
-            toggleCommandBarMultiLine);
+        ShellCommandRegistry? registry = null;
+        var presenter = new ShellCommandPalettePresenter(dialogCommandService);
+        var context = new ShellCommandContext
+        {
+            PromptInput = promptInputService,
+            PromptDispatch = new DelegatingShellPromptDispatchService(sessionCommandCoordinator.SendPromptAsync),
+            Sessions = sessionCommandService,
+            Dialogs = dialogCommandService,
+            Navigation = navigationCommandService,
+            Tabs = tabCommandService,
+            Status = statusService,
+            Availability = new DelegatingShellCommandAvailabilityService(
+                canUseCommandPalette,
+                () => promptComposerViewModel.IsEnabled,
+                () => promptComposerViewModel.CanSend,
+                () => promptComposerViewModel.CanSteer,
+                () => promptComposerViewModel.CanAbort,
+                () => promptComposerViewModel.CanClearQueue,
+                () => promptComposerViewModel.CanCompact,
+                () => promptComposerViewModel.CanCloseTab,
+                () => sessionWorkspaceViewModel.CanShowSessionInfo),
+            Presenter = presenter,
+            Plugins = pluginCommandService,
+            SessionActions = new DelegatingShellSessionActionService(
+                sessionCommandCoordinator.AbortSelectedSessionAsync,
+                sessionCommandCoordinator.CompactSelectedSessionAsync,
+                sessionCommandCoordinator.ClearSelectedSessionQueueAsync),
+            Diagnostics = new DelegatingShellDiagnosticsCommandService(toggleTerminalLoop),
+            GetCommands = () => registry?.Commands ?? [],
+            IsCommandBarMultiLine = isCommandBarMultiLine,
+        };
+        registry = new ShellCommandRegistry(BuiltinShellCommands.Enumerate().Concat(PluginShellCommandAdapter.CreateCommands(pluginCommandService)));
+        var runner = new UiCommandRunner(statusService.SetStatus);
+        return new ShellCommandSurfaceCoordinator(context, registry, runner, presenter);
     }
 }

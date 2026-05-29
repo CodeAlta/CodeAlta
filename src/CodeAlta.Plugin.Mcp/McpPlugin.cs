@@ -2,6 +2,11 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
+using XenoAtom.Terminal;
+using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Input;
+using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Plugin.Mcp;
 
@@ -11,6 +16,47 @@ namespace CodeAlta.Plugin.Mcp;
 [Plugin("mcp", DisplayName = "MCP", Description = "Connects CodeAlta to configured Model Context Protocol servers.")]
 public sealed class McpPlugin : PluginBase
 {
+    private static readonly PluginKeyBinding ManageServersKeyBinding = new()
+    {
+        DisplayText = "Ctrl+G Ctrl+Y",
+        Sequence = new KeySequence(
+            new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
+            new KeyGesture(TerminalChar.CtrlY, TerminalModifiers.Ctrl)),
+    };
+
+    /// <inheritdoc />
+    public override IEnumerable<PluginCommandContribution> GetCommands()
+    {
+        yield return new PluginCommandContribution
+        {
+            Name = "mcp",
+            Label = "MCP Servers",
+            Description = "Inspect and manage configured Model Context Protocol servers.",
+            Placement = PluginCommandPlacement.ShellRoot | PluginCommandPlacement.PromptEditor | PluginCommandPlacement.WorkspaceRoot,
+            SearchText = "model context protocol servers tools",
+            KeyBinding = ManageServersKeyBinding,
+            Availability = PluginCommandAvailability.InteractiveUi,
+            Handler = static (context, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ShowManagementDialog(context);
+                return new ValueTask<PluginCommandResult>(PluginCommandResult.Handled);
+            },
+        };
+    }
+
+    /// <inheritdoc />
+    public override IEnumerable<PluginUiContribution> GetUiContributions()
+    {
+        yield return new PluginVisualContribution
+        {
+            Region = PluginUiRegion.SessionStatus,
+            Name = "mcp-status",
+            Order = 100,
+            CreateVisual = static context => CreateStatusIndicator(context),
+        };
+    }
+
     /// <inheritdoc />
     public override IEnumerable<PluginAltaCommandContribution> GetAltaCommands()
     {
@@ -26,6 +72,35 @@ public sealed class McpPlugin : PluginBase
             },
             CreateCommandNode = McpCommandFactory.CreateCommand,
         };
+    }
+
+    private static void ShowManagementDialog(PluginOperationContext context)
+    {
+        var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
+        new McpServersDialog(
+            new McpManagementService(),
+            () => new McpManagementRequest { ProjectDirectory = projectPath },
+            static (_, _) => Task.CompletedTask,
+            static () => null,
+            static () => null)
+            .Show();
+    }
+
+    private static Visual? CreateStatusIndicator(PluginVisualContext context)
+    {
+        var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
+        var snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectPath });
+        if (!snapshot.Summary.HasConfiguration && snapshot.Summary.ConfiguredServerCount == 0 && snapshot.Summary.InvalidSourceCount == 0)
+        {
+            return null;
+        }
+
+        var label = snapshot.Summary.UnavailableServerCount > 0
+            ? $"MCP {snapshot.Summary.ActiveServerCount}/{snapshot.Summary.ConfiguredServerCount} · {snapshot.Summary.UnavailableServerCount} unavailable · tools {snapshot.Summary.ExposedToolCount}/{snapshot.Summary.TotalToolCount}"
+            : $"MCP {snapshot.Summary.ActiveServerCount}/{snapshot.Summary.ConfiguredServerCount} · tools {snapshot.Summary.ExposedToolCount}/{snapshot.Summary.TotalToolCount}";
+        return new Button(label)
+            .Tone(snapshot.Summary.UnavailableServerCount > 0 ? ControlTone.Warning : ControlTone.Default)
+            .Click(() => ShowManagementDialog(context));
     }
 
     /// <inheritdoc />

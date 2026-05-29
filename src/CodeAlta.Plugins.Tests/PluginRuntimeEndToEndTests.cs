@@ -102,7 +102,7 @@ public sealed class PluginRuntimeEndToEndTests
         var activePlugin = await LoadAndActivateAsync(buildResult, package, registry, temp.Path);
         var adapter = new PluginContributionAdapterService(registry);
 
-        var (result, diagnostics) = await adapter.ExecuteCommandAsync([activePlugin], "sample-humanize");
+        var (result, diagnostics) = await ExecuteSingleCommandAsync(registry, adapter, activePlugin);
 
         Assert.AreEqual(PluginCommandDisposition.Handled, result.Disposition);
         Assert.AreEqual("Humanizer says: Sample plugin", result.UserMessage);
@@ -116,6 +116,15 @@ public sealed class PluginRuntimeEndToEndTests
             buildResult.RuntimeDiagnostics.Select(static diagnostic => diagnostic.Message)
                 .Concat(buildResult.Diagnostics.Select(static diagnostic => diagnostic.Message))
                 .Concat([buildResult.StandardOutput, buildResult.StandardError]));
+
+    private static async Task<(PluginCommandResult Result, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> ExecuteSingleCommandAsync(
+        PluginContributionRegistry registry,
+        PluginContributionAdapterService adapter,
+        ActivePluginInstance activePlugin)
+    {
+        var command = (PluginCommandContribution)registry.GetSnapshot().Single(static registration => registration.Contribution is PluginCommandContribution).Contribution;
+        return await adapter.ExecuteCommandAsync([activePlugin], command);
+    }
 
     private static async Task<(SourcePluginPackage Package, PluginBuildResult BuildResult)> BuildHelloCommandSampleAsync(TestTempDirectory temp)
         => await BuildSampleAsync(temp, "hello-command");

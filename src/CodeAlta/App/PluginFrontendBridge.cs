@@ -55,16 +55,12 @@ internal sealed class PluginFrontendBridge
         CancellationToken cancellationToken = default)
         => _runtime.Adapter.RenderAsync(_runtime.ActivePlugins, region, target, payload, CreateOptions(), cancellationToken).AsTask();
 
-    public async Task<PluginCommandResult> ExecuteCommandAsync(string name, string? arguments, CancellationToken cancellationToken = default)
+    public async Task<PluginCommandResult> ExecuteCommandAsync(PluginCommandContribution contribution, CancellationToken cancellationToken = default)
     {
-        var parsedArguments = string.IsNullOrWhiteSpace(arguments)
-            ? []
-            : arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        ArgumentNullException.ThrowIfNull(contribution);
         var result = await _runtime.Adapter.ExecuteCommandAsync(
                 _runtime.ActivePlugins,
-                name,
-                parsedArguments,
-                string.IsNullOrWhiteSpace(arguments) ? name : string.Concat(name, " ", arguments),
+                contribution,
                 CreateOptions(),
                 cancellationToken);
         return result.Result;

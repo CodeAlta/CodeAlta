@@ -257,39 +257,6 @@ public sealed class SessionWorkspaceViewTests
     }
 
     [TestMethod]
-    public void SessionInput_UsesHumanLabelsAndSlashCommandSearchText()
-    {
-        var shellViewModel = new CodeAltaShellViewModel();
-        var workspaceViewModel = new SessionWorkspaceViewModel();
-        var promptComposerViewModel = new PromptComposerViewModel();
-        var closeTabBinding = new SessionWorkspaceCommandBinding(
-            ShellCommandCatalog.Get("CodeAlta.Session.CloseTab"),
-            static () => { });
-        var steerBinding = new SessionWorkspaceCommandBinding(
-            ShellCommandCatalog.Get("CodeAlta.Session.Steer"),
-            static () => { });
-        var view = CreateSessionWorkspaceView(
-            shellViewModel,
-            workspaceViewModel,
-            promptComposerViewModel,
-            [closeTabBinding, steerBinding]);
-
-        var closeTabCommand = Assert.IsInstanceOfType<Command>(
-            view.SessionInput.Commands.Single(command => string.Equals(command.Id, "CodeAlta.Session.CloseTab", StringComparison.Ordinal)));
-        var steerCommand = Assert.IsInstanceOfType<Command>(
-            view.SessionInput.Commands.Single(command => string.Equals(command.Id, "CodeAlta.Session.Steer", StringComparison.Ordinal)));
-
-        Assert.AreEqual("Close Tab", closeTabCommand.LabelMarkup);
-        Assert.AreEqual("close_tab", closeTabCommand.Name);
-        StringAssert.Contains(closeTabCommand.SearchText, "/close_tab");
-        StringAssert.Contains(closeTabCommand.SearchText, "/close");
-        Assert.AreEqual("Steer", steerCommand.LabelMarkup);
-        Assert.AreEqual(CommandPresentation.CommandBar, steerCommand.Presentation);
-        Assert.IsNotNull(steerCommand.SearchText);
-        Assert.IsFalse(steerCommand.SearchText.Contains("/steer", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
     public void ToggleControls_UseCheckBoxesBoundToViewModels()
     {
         var shellViewModel = new CodeAltaShellViewModel();
@@ -339,36 +306,6 @@ public sealed class SessionWorkspaceViewTests
         var view = CreateSessionWorkspaceView();
 
         Assert.IsFalse(view.SessionCommandBar.MultiLine);
-    }
-
-    [TestMethod]
-    public void CommandBarToggleCommand_UsesCtrlGCtrlBShortcut()
-    {
-        var metadata = ShellCommandCatalog.Get("CodeAlta.Shell.ToggleCommandBarMultiLine");
-
-        Assert.AreEqual("Show More Shortcuts", metadata.Label);
-        Assert.AreEqual(ShellCommandCatalog.ToggleCommandBarMultiLineShortcutSequence, metadata.Sequence);
-        Assert.AreEqual(CommandImportance.Primary, metadata.Importance);
-        Assert.IsTrue(metadata.ShowInCommandBar);
-        Assert.IsTrue(metadata.ShowInCommandPalette);
-
-        var command = ShellCommandViewFactory.Create(metadata, static () => { });
-
-        Assert.AreEqual(CommandImportance.Primary, command.Importance);
-    }
-
-    [TestMethod]
-    public void CommandBarToggleCommand_LabelReflectsExpandedState()
-    {
-        var showMoreCommand = CodeAltaShellViewFactory.CreateToggleCommandBarMultiLineCommand(static () => { }, commandBarMultiLine: false);
-        var showLessCommand = CodeAltaShellViewFactory.CreateToggleCommandBarMultiLineCommand(static () => { }, commandBarMultiLine: true);
-
-        Assert.AreEqual("Show More Shortcuts", showMoreCommand.LabelMarkup);
-        Assert.AreEqual("Show Less Shortcuts", showLessCommand.LabelMarkup);
-        Assert.AreEqual(ShellCommandCatalog.ToggleCommandBarMultiLineShortcutSequence, showMoreCommand.Sequence);
-        Assert.AreEqual(showMoreCommand.Sequence, showLessCommand.Sequence);
-        Assert.AreEqual(CommandImportance.Primary, showMoreCommand.Importance);
-        Assert.AreEqual(CommandImportance.Primary, showLessCommand.Importance);
     }
 
     [TestMethod]
@@ -549,7 +486,7 @@ public sealed class SessionWorkspaceViewTests
         CodeAltaShellViewModel? shellViewModel = null,
         SessionWorkspaceViewModel? workspaceViewModel = null,
         PromptComposerViewModel? promptComposerViewModel = null,
-        IReadOnlyList<SessionWorkspaceCommandBinding>? commandBindings = null,
+        ShellCommandSurfaceCoordinator? shellCommandSurfaceCoordinator = null,
         SessionWorkspaceChromeController? chromeController = null,
         PromptComposerViewController? promptComposerController = null,
         QueuedPromptStripController? queuedPromptController = null,
@@ -562,7 +499,7 @@ public sealed class SessionWorkspaceViewTests
             shellViewModel ?? new CodeAltaShellViewModel(),
             workspaceViewModel ?? new SessionWorkspaceViewModel(),
             promptComposerViewModel ?? new PromptComposerViewModel(),
-            commandBindings ?? [],
+            shellCommandSurfaceCoordinator ?? TestShellCommandSurface.Create(),
             chromeController ?? SessionWorkspaceChromeController.Empty,
             promptComposerController ?? PromptComposerViewController.Create(static _ => { }, static () => { }, static () => { }, static () => { }, static () => { }),
             queuedPromptController ?? QueuedPromptStripController.Create(

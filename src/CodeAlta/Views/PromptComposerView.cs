@@ -35,7 +35,7 @@ internal sealed class PromptComposerView
 
     public PromptComposerView(
         PromptComposerViewModel viewModel,
-        IReadOnlyList<SessionWorkspaceCommandBinding> commandBindings,
+        ShellCommandSurfaceCoordinator shellCommandSurfaceCoordinator,
         IProjectFileSearchService projectFileSearchService,
         Func<string?> getPromptReferenceProjectRoot,
         IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
@@ -45,7 +45,7 @@ internal sealed class PromptComposerView
         PromptComposerViewController controller)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
-        ArgumentNullException.ThrowIfNull(commandBindings);
+        ArgumentNullException.ThrowIfNull(shellCommandSurfaceCoordinator);
         ArgumentNullException.ThrowIfNull(projectFileSearchService);
         ArgumentNullException.ThrowIfNull(getPromptReferenceProjectRoot);
         ArgumentNullException.ThrowIfNull(promptEditorContributions);
@@ -63,7 +63,7 @@ internal sealed class PromptComposerView
         _getDialogBounds = getDialogBounds;
         _promptImageAttachmentStripView = promptImageAttachmentStripView;
 
-        Editor = CreatePromptEditor(viewModel, controller.OpenHelp, controller.OpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, promptEditorContributions, controller.AcceptPrompt, commandBindings, promptText)
+        Editor = CreatePromptEditor(viewModel, controller.OpenHelp, controller.OpenCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, promptEditorContributions, controller.AcceptPrompt, shellCommandSurfaceCoordinator, promptText)
             .IsEnabled(viewModel.Bind.IsEnabled);
         _promptImageAttachmentStripView.ConfigurePromptImagePasteHandler(Editor);
         EditorView = Editor.Scrollable().IsTabStop(false);
@@ -152,16 +152,16 @@ internal sealed class PromptComposerView
         Func<string?> getPromptReferenceProjectRoot,
         IReadOnlyList<PluginPromptEditorContribution> promptEditorContributions,
         Action<string> acceptPrompt,
-        IReadOnlyList<SessionWorkspaceCommandBinding> commandBindings,
+        ShellCommandSurfaceCoordinator shellCommandSurfaceCoordinator,
         Binding<string?> promptText)
     {
         var editor = CreateStyledPromptEditor(acceptPrompt, openHelp, openCommandPalette, projectFileSearchService, getPromptReferenceProjectRoot, promptEditorContributions, placeholder: null)
             .Placeholder(promptComposerViewModel.Bind.Placeholder)
             .Text(promptText);
 
-        foreach (var binding in commandBindings)
+        foreach (var command in shellCommandSurfaceCoordinator.CommandsFor(ShellCommandPlacement.PromptEditor))
         {
-            editor.AddCommand(BuildCommand(binding));
+            editor.AddCommand(shellCommandSurfaceCoordinator.CreateViewCommand(command));
         }
 
         return editor;
@@ -295,40 +295,5 @@ internal sealed class PromptComposerView
             .Click(onClick);
         configureButton?.Invoke(button);
         return button.Tooltip(new TextBlock(tooltipText));
-    }
-
-    private static Command BuildCommand(SessionWorkspaceCommandBinding binding)
-    {
-        var metadata = binding.Metadata;
-        return new Command
-        {
-            Id = metadata.Id,
-            LabelMarkup = metadata.DisplayLabelMarkup,
-            Name = metadata.CommandName,
-            DescriptionMarkup = metadata.DescriptionMarkup,
-            SearchText = metadata.CommandSearchText,
-            Execute = _ => binding.Execute(),
-            CanExecute = _ => binding.CanExecute(),
-            Gesture = metadata.Gesture,
-            Sequence = metadata.Sequence,
-            Importance = metadata.Importance,
-            Presentation = ResolvePresentation(metadata),
-        };
-    }
-
-    private static CommandPresentation ResolvePresentation(ShellCommandMetadata metadata)
-    {
-        var presentation = CommandPresentation.None;
-        if (metadata.ShowInCommandBar)
-        {
-            presentation |= CommandPresentation.CommandBar;
-        }
-
-        if (metadata.ShowInCommandPalette)
-        {
-            presentation |= CommandPresentation.CommandPalette;
-        }
-
-        return presentation;
     }
 }

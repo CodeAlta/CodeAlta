@@ -1,3 +1,4 @@
+using CodeAlta.Frontend.Commands;
 using CodeAlta.Frontend.Help;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -24,14 +25,14 @@ internal sealed class ShellHelpDialog
         _getFocusTarget = getFocusTarget;
     }
 
-    public Task ShowAsync(string? filterText = null)
+    public Task ShowAsync(IReadOnlyList<ShellCommand> commands, string? filterText = null)
     {
         if (_dialog is { App: not null })
         {
             return Task.CompletedTask;
         }
 
-        var markdown = ShellHelpContentBuilder.BuildMarkdown(filterText);
+        var markdown = ShellHelpContentBuilder.BuildMarkdown(commands, filterText);
 
         var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
         {

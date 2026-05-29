@@ -53,7 +53,7 @@ The TUI frontend should stay organized around explicit state, commands, events, 
 ```mermaid
 flowchart LR
     Views[Views and dialogs - view models + narrow controllers]
-    Commands[ShellCommandDispatcher - command registry + handlers]
+    Commands[ShellCommandRegistry - immutable commands + UI projection]
     App[CodeAltaApp - composition facade]
     State[ShellStateStore - selection, tabs, prompt sessions]
     Domain[Domain services - selection, catalog, prompts, model providers]
@@ -84,7 +84,10 @@ flowchart LR
 - Remaining `CodeAltaApp` internal methods are grouped by owner: composition/lifecycle wiring; provider and prompt services; projection/status/focus adapters; catalog/selection/session restore coordinators; and tab/file/dialog command routing. Move a method only when doing so deletes callbacks/adapters or shortens an existing call path.
 - Views and dialogs receive view models plus command/service interfaces; they should not receive long domain callback lists.
 - Selection, catalog, tab, prompt, model-provider, runtime, persistence, and plugin changes should either publish a typed frontend event or return a typed command/use-case result that a small application service projects.
-- The command palette, command bar, slash commands, and shortcuts should share the same shell command metadata and dispatcher path.
+- Shell commands are single immutable `ShellCommand` objects: metadata, placement, visibility/availability, dynamic label, routing flags, and execution callback live together. Add a built-in command by adding one static command instance and one `BuiltinShellCommands.Enumerate()` entry.
+- Command activation is no-argument UI activation. Commands read current UI state through narrow `ShellCommandContext` ports or open dialog/controller workflows for additional input; do not reintroduce slash-tail parsers, runtime argument containers, or command-ID switch dispatchers.
+- `ShellCommandViewFactory` is the shared XenoAtom projection path for command palette, command bar, shortcuts, help, and placement registration. It forwards the triggering `Visual` to availability, visibility, dynamic labels, and execution, and runs async callbacks through the UI command runner/status diagnostics path.
+- Plugin commands enter the same registry by adapting `PluginCommandContribution` instances. The frontend may add generic insertion points, but must not add plugin-specific command, dialog, or status wiring.
 - Logical draft, session, editor, and plugin tabs should be inspectable through a single shell tab state/service model even when a visual toolkit requires cached tab-page instances.
 
 ## Runtime Orchestration Concurrency

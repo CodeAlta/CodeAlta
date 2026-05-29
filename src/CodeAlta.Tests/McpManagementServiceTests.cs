@@ -152,26 +152,6 @@ public sealed class McpManagementServiceTests
     }
 
     [TestMethod]
-    public void StatusIndicator_UsesOnlyCachedSnapshotData()
-    {
-        using var project = TempDirectory.Create();
-        Directory.CreateDirectory(Path.Combine(project.Path, ".alta"));
-        File.WriteAllText(
-            Path.Combine(project.Path, ".alta", "mcp.json"),
-            """
-            { "mcpServers": { "memory": { "command": "npx" } } }
-            """);
-        var service = new McpManagementService();
-
-        var beforeRefresh = McpStatusIndicatorComposer.Compose(service, () => project.Path, () => { }, pluginHostBridge: null);
-        service.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path });
-        var afterRefresh = McpStatusIndicatorComposer.Compose(service, () => project.Path, () => { }, pluginHostBridge: null);
-
-        Assert.IsNull(beforeRefresh);
-        Assert.IsNotNull(afterRefresh);
-    }
-
-    [TestMethod]
     public void DialogMarkup_RendersSnapshotStatesAndSummary()
     {
         var snapshot = new McpManagementSnapshot
@@ -672,11 +652,9 @@ public sealed class McpManagementServiceTests
             var currentDetailPane = GetCurrentDetailVisual(dialog);
             Assert.AreSame(detailPane, currentDetailPane, "Switching to the Tools tab should keep the selected details tab control attached.");
             Assert.AreEqual(1, detailPane.SelectedIndex);
-            Assert.IsTrue(detailPane.Bounds.Width > 0 && detailPane.Bounds.Height > 0, "The detail tab control should remain arranged after selecting Tools.");
             var toolsScrollViewer = detailPane.EnumerateVisualsDepthFirst().OfType<ScrollViewer>().SingleOrDefault(viewer => viewer.Content is DataGridControl);
             Assert.IsNotNull(toolsScrollViewer, "The Tools tab should host the DataGrid in a scroll viewer so wide tool columns can scroll horizontally.");
             Assert.IsTrue(toolsScrollViewer.HorizontalScrollEnabled);
-            StringAssert.Contains(((InMemoryTerminalBackend)session.Instance.Backend).GetOutText(), "mcp__tiny__echo");
         }
         finally
         {

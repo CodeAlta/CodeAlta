@@ -269,12 +269,6 @@ public sealed class PluginCommandContext : PluginOperationContext
 
     /// <summary>Gets workspace services.</summary>
     public IPluginWorkspaceService Workspace => Services.Workspace;
-
-    /// <summary>Gets the command invocation arguments.</summary>
-    public IReadOnlyList<string> Arguments { get; init; } = [];
-
-    /// <summary>Gets the raw invocation text, when available.</summary>
-    public string? RawText { get; init; }
 }
 
 /// <summary>Context for prompt processor and prompt-submission callbacks.</summary>

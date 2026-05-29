@@ -14,6 +14,7 @@
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.Core" />
     <PackageReference Include="Tomlyn" />
+    <PackageReference Include="XenoAtom.Terminal.UI" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
   </ItemGroup>
 

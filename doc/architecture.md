@@ -114,12 +114,14 @@ flowchart LR
 
 Key frontend pieces:
 
-- `CodeAltaApp` is the TUI composition facade and compatibility surface for existing view integration. New behavior should move into command handlers, coordinators, presenters, or adapters when doing so shortens call paths.
+- `CodeAltaApp` is the TUI composition facade and compatibility surface for existing view integration. New behavior should move into immutable shell commands, coordinators, presenters, or adapters when doing so shortens call paths.
 - `CodeAltaFrontendComposition.Create` wires view models, `ShellStateStore`, frontend events, model-provider state, shell controllers, prompt/session coordinators, project-file search, plugin bridges, and the `alta` dispatcher.
 - `CodeAltaShellController` owns startup catalog loading, project/session open operations, recoverable-session discovery, and runtime-event queuing/draining. Runtime-event mutations are marshalled through `IUiDispatcher`.
 - `ShellStateStore` is an immutable UI-session-owned projection snapshot for selection, tabs, and prompt sessions. It is not the owner of all runtime state.
 - `RuntimeEventPump` is the frontend consumer of the orchestration runtime event stream and projects events into the shell controller.
-- The command palette, slash commands, key bindings, and command bar are backed by shared shell command metadata and dispatch paths.
+- Shell commands are registry-backed `ShellCommand` instances. Each instance owns its command-palette name/search text, help/category data, placement, shortcut, availability/visibility, dynamic label, routing flags, and no-argument activation callback.
+- The active `ShellCommandRegistry` is the shared source for command palette, command bar, shortcuts, help, and placement registration. Plugin `PluginCommandContribution` instances are adapted into the same registry; plugin-specific dialogs, status items, visuals, and commands must be supplied by the plugin through generic contribution points rather than hard-coded in frontend views.
+- Prompt text is not a shell command line. Empty-prompt `?` and `/` remain transient shortcuts for Help and Command Palette, while commands that need user input collect it from current UI state or from explicit dialog/controller workflows.
 
 UI code awaits normally on the UI path. Background work must marshal back through the UI dispatcher before touching bindable state or controls.
 

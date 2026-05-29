@@ -8,44 +8,40 @@ namespace CodeAlta.Plugins.Abstractions;
 /// </summary>
 public static class Command
 {
-    /// <summary>Creates a prompt command.</summary>
+    /// <summary>Creates a prompt-editor command.</summary>
     /// <param name="name">The command name.</param>
     /// <param name="description">The command description.</param>
     /// <param name="handler">The command handler.</param>
-    /// <param name="aliases">Optional aliases.</param>
     /// <returns>The command contribution.</returns>
-    public static PluginCommandContribution Prompt(string name, string description, PluginCommandHandler handler, IReadOnlyList<string>? aliases = null)
-        => Create(name, description, PluginCommandKind.Prompt, handler, aliases);
+    public static PluginCommandContribution Prompt(string name, string description, PluginCommandHandler handler)
+        => Create(name, description, PluginCommandPlacement.PromptEditor, handler);
 
-    /// <summary>Creates a prompt command from a one-parameter handler.</summary>
+    /// <summary>Creates a prompt-editor command from a one-parameter handler.</summary>
     /// <param name="name">The command name.</param>
     /// <param name="description">The command description.</param>
     /// <param name="handler">The command handler.</param>
-    /// <param name="aliases">Optional aliases.</param>
     /// <returns>The command contribution.</returns>
-    public static PluginCommandContribution Prompt(string name, string description, Func<PluginCommandContext, ValueTask<PluginCommandResult>> handler, IReadOnlyList<string>? aliases = null)
+    public static PluginCommandContribution Prompt(string name, string description, Func<PluginCommandContext, ValueTask<PluginCommandResult>> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
-        return Prompt(name, description, (context, _) => handler(context), aliases);
+        return Prompt(name, description, (context, _) => handler(context));
     }
 
     /// <summary>Creates a shell command.</summary>
     /// <param name="name">The command name.</param>
     /// <param name="description">The command description.</param>
     /// <param name="handler">The command handler.</param>
-    /// <param name="aliases">Optional aliases.</param>
     /// <returns>The command contribution.</returns>
-    public static PluginCommandContribution Shell(string name, string description, PluginCommandHandler handler, IReadOnlyList<string>? aliases = null)
-        => Create(name, description, PluginCommandKind.Shell, handler, aliases);
+    public static PluginCommandContribution Shell(string name, string description, PluginCommandHandler handler)
+        => Create(name, description, PluginCommandPlacement.ShellRoot, handler);
 
     /// <summary>Creates a session command.</summary>
     /// <param name="name">The command name.</param>
     /// <param name="description">The command description.</param>
     /// <param name="handler">The command handler.</param>
-    /// <param name="aliases">Optional aliases.</param>
     /// <returns>The command contribution.</returns>
-    public static PluginCommandContribution Session(string name, string description, PluginCommandHandler handler, IReadOnlyList<string>? aliases = null)
-        => Create(name, description, PluginCommandKind.Session, handler, aliases) with
+    public static PluginCommandContribution Session(string name, string description, PluginCommandHandler handler)
+        => Create(name, description, PluginCommandPlacement.PromptEditor | PluginCommandPlacement.WorkspaceRoot, handler) with
         {
             Availability = PluginCommandAvailability.SessionSelected,
         };
@@ -53,9 +49,8 @@ public static class Command
     private static PluginCommandContribution Create(
         string name,
         string description,
-        PluginCommandKind kind,
-        PluginCommandHandler handler,
-        IReadOnlyList<string>? aliases)
+        PluginCommandPlacement placement,
+        PluginCommandHandler handler)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
@@ -65,9 +60,8 @@ public static class Command
             Name = name,
             Label = ToLabel(name),
             Description = description,
-            Kind = kind,
+            Placement = placement,
             Handler = handler,
-            Aliases = aliases ?? [],
         };
     }
 
@@ -123,39 +117,63 @@ public static class Startup
 }
 
 /// <summary>
-/// Low-ceremony factories for prompt contributions.
+/// Low-ceremony factories for resource contributions.
+/// </summary>
+public static class Resources
+{
+    /// <summary>Creates a skill-root resource contribution.</summary>
+    public static PluginResourceContribution SkillRoot(string path, bool isPackageRelative = true)
+        => Create(PluginResourceKind.SkillRoot, path, isPackageRelative);
+
+    /// <summary>Creates a template-root resource contribution.</summary>
+    public static PluginResourceContribution TemplateRoot(string path, bool isPackageRelative = true)
+        => Create(PluginResourceKind.TemplateRoot, path, isPackageRelative);
+
+    private static PluginResourceContribution Create(PluginResourceKind kind, string path, bool isPackageRelative)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return new PluginResourceContribution { Kind = kind, Path = path, IsPackageRelative = isPackageRelative };
+    }
+}
+
+/// <summary>
+/// Low-ceremony factories for agent tool contributions.
+/// </summary>
+public static class AgentTool
+{
+    /// <summary>Creates an agent tool contribution.</summary>
+    public static PluginAgentToolContribution Create(AgentToolDefinition definition, string? promptSnippet = null, string? promptGuidance = null)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return new PluginAgentToolContribution { Definition = definition, PromptSnippet = promptSnippet, PromptGuidance = promptGuidance };
+    }
+}
+
+/// <summary>
+/// Low-ceremony factories for system prompt contributions.
 /// </summary>
 public static class Prompt
 {
-    /// <summary>Creates a developer prompt contribution with static content.</summary>
-    /// <param name="content">The prompt content.</param>
-    /// <param name="title">Optional title.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The prompt contribution.</returns>
-    public static PluginSystemPromptContribution Developer(string content, string? title = null, int order = 0)
-        => Static(PluginPromptChannel.Developer, content, title, order);
+    /// <summary>Creates a static developer prompt contribution.</summary>
+    public static PluginSystemPromptContribution Developer(string content, string? title = null, PluginPromptPartKind kind = PluginPromptPartKind.Other, int order = 0)
+        => Static(PluginPromptChannel.Developer, content, title, kind, order);
 
-    /// <summary>Creates a system prompt contribution with static content.</summary>
-    /// <param name="content">The prompt content.</param>
-    /// <param name="title">Optional title.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The prompt contribution.</returns>
-    public static PluginSystemPromptContribution System(string content, string? title = null, int order = 0)
-        => Static(PluginPromptChannel.System, content, title, order);
+    /// <summary>Creates a static system prompt contribution.</summary>
+    public static PluginSystemPromptContribution Static(PluginPromptChannel channel, string content, string? title = null, PluginPromptPartKind kind = PluginPromptPartKind.Other, int order = 0)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return new PluginSystemPromptContribution
+        {
+            Channel = channel,
+            Content = (_, _) => new ValueTask<string?>(content),
+            Title = title,
+            Kind = kind,
+            Order = order,
+        };
+    }
 
-    /// <summary>Creates a prompt contribution with dynamic content.</summary>
-    /// <param name="channel">The prompt channel.</param>
-    /// <param name="content">The content provider.</param>
-    /// <param name="title">Optional title.</param>
-    /// <param name="kind">Prompt part kind.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The prompt contribution.</returns>
-    public static PluginSystemPromptContribution Dynamic(
-        PluginPromptChannel channel,
-        PluginSystemPromptContentProvider content,
-        string? title = null,
-        PluginPromptPartKind kind = PluginPromptPartKind.Guidance,
-        int order = 0)
+    /// <summary>Creates a dynamic system prompt contribution.</summary>
+    public static PluginSystemPromptContribution Dynamic(PluginPromptChannel channel, PluginSystemPromptContentProvider content, string? title = null, PluginPromptPartKind kind = PluginPromptPartKind.Other, int order = 0)
     {
         ArgumentNullException.ThrowIfNull(content);
         return new PluginSystemPromptContribution
@@ -167,12 +185,6 @@ public static class Prompt
             Order = order,
         };
     }
-
-    private static PluginSystemPromptContribution Static(PluginPromptChannel channel, string content, string? title, int order)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(content);
-        return Dynamic(channel, (_, _) => new ValueTask<string?>(content), title, PluginPromptPartKind.Guidance, order);
-    }
 }
 
 /// <summary>
@@ -180,66 +192,43 @@ public static class Prompt
 /// </summary>
 public static class PluginUi
 {
-    /// <summary>Creates a direct visual contribution.</summary>
-    /// <param name="region">The UI region.</param>
-    /// <param name="visual">The visual.</param>
-    /// <param name="name">Optional natural name.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The UI contribution.</returns>
+    /// <summary>Creates a visual contribution.</summary>
     public static PluginVisualContribution Visual(PluginUiRegion region, Visual visual, string? name = null, int order = 0)
     {
         ArgumentNullException.ThrowIfNull(visual);
-        return new PluginVisualContribution { Region = region, Visual = visual, Name = name, Order = order };
+        return new PluginVisualContribution { Region = region, Name = name, Order = order, Visual = visual };
     }
 
-    /// <summary>Creates a factory visual contribution.</summary>
-    /// <param name="region">The UI region.</param>
-    /// <param name="factory">The visual factory.</param>
-    /// <param name="name">Optional natural name.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The UI contribution.</returns>
+    /// <summary>Creates a visual contribution from a context factory.</summary>
     public static PluginVisualContribution Visual(PluginUiRegion region, Func<PluginVisualContext, Visual?> factory, string? name = null, int order = 0)
     {
         ArgumentNullException.ThrowIfNull(factory);
-        return new PluginVisualContribution { Region = region, CreateVisual = factory, Name = name, Order = order };
+        return new PluginVisualContribution { Region = region, Name = name, Order = order, CreateVisual = factory };
     }
 
-    /// <summary>Creates a factory visual contribution from a parameterless factory.</summary>
-    /// <param name="region">The UI region.</param>
-    /// <param name="factory">The visual factory.</param>
-    /// <param name="name">Optional natural name.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The UI contribution.</returns>
+    /// <summary>Creates a visual contribution from a factory.</summary>
     public static PluginVisualContribution Visual(PluginUiRegion region, Func<Visual?> factory, string? name = null, int order = 0)
     {
         ArgumentNullException.ThrowIfNull(factory);
         return Visual(region, _ => factory(), name, order);
     }
 
-    /// <summary>Creates a status contribution.</summary>
-    /// <param name="label">The status label.</param>
-    /// <param name="getText">The status text provider.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The status contribution.</returns>
-    public static PluginStatusContribution Status(string label, Func<PluginStatusContext, string?> getText, int order = 0)
+    /// <summary>Creates a status item contribution.</summary>
+    public static PluginStatusContribution Status(PluginUiRegion region, PluginStatusItem item, string? name = null, int order = 0)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(label);
-        ArgumentNullException.ThrowIfNull(getText);
-        return new PluginStatusContribution
-        {
-            Region = PluginUiRegion.SessionStatus,
-            Name = label,
-            Order = order,
-            GetStatus = context => getText(context) is { } text ? new PluginStatusItem { Label = label, Text = text } : null,
-        };
+        ArgumentNullException.ThrowIfNull(item);
+        return new PluginStatusContribution { Region = region, Name = name, Order = order, GetStatus = _ => item };
     }
 
+    /// <summary>Creates a session-status contribution.</summary>
+    public static PluginStatusContribution SessionStatus(string label, string text, PluginStatusTone tone = PluginStatusTone.Info, string? iconMarkup = null, string? name = null, int order = 0)
+        => Status(
+            PluginUiRegion.SessionStatus,
+            new PluginStatusItem { Label = label, Text = text, Tone = tone, IconMarkup = iconMarkup },
+            name,
+            order);
+
     /// <summary>Creates a renderer contribution.</summary>
-    /// <param name="region">The UI region.</param>
-    /// <param name="target">The renderer target.</param>
-    /// <param name="renderer">The renderer callback.</param>
-    /// <param name="order">Ordering hint.</param>
-    /// <returns>The renderer contribution.</returns>
     public static PluginRendererContribution Renderer(PluginUiRegion region, string? target, PluginRenderer renderer, int order = 0)
     {
         ArgumentNullException.ThrowIfNull(renderer);
@@ -247,16 +236,10 @@ public static class PluginUi
     }
 
     /// <summary>Creates a notification dialog request.</summary>
-    /// <param name="title">The dialog title.</param>
-    /// <param name="message">The dialog message.</param>
-    /// <returns>The dialog request.</returns>
     public static PluginDialogRequest NotifyDialog(string title, string message)
         => Dialog(PluginDialogKind.Notification, title, message);
 
     /// <summary>Creates a confirmation dialog request.</summary>
-    /// <param name="title">The dialog title.</param>
-    /// <param name="message">The dialog message.</param>
-    /// <returns>The dialog request.</returns>
     public static PluginDialogRequest ConfirmDialog(string title, string message)
         => Dialog(PluginDialogKind.Confirmation, title, message) with
         {
@@ -268,16 +251,10 @@ public static class PluginUi
         };
 
     /// <summary>Creates an input dialog request.</summary>
-    /// <param name="title">The dialog title.</param>
-    /// <param name="initialText">Optional initial text.</param>
-    /// <returns>The dialog request.</returns>
     public static PluginDialogRequest InputDialog(string title, string? initialText = null)
         => Dialog(PluginDialogKind.Input, title, null) with { InitialText = initialText };
 
     /// <summary>Creates a text editor dialog request.</summary>
-    /// <param name="title">The dialog title.</param>
-    /// <param name="text">Initial editor text.</param>
-    /// <returns>The dialog request.</returns>
     public static PluginDialogRequest TextEditorDialog(string title, string text)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -285,12 +262,8 @@ public static class PluginUi
     }
 
     /// <summary>Creates a selection dialog request.</summary>
-    /// <param name="title">The dialog title.</param>
-    /// <param name="items">Selectable item labels.</param>
-    /// <returns>The dialog request.</returns>
     public static PluginDialogRequest SelectionDialog(string title, IReadOnlyList<string> items)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(items);
         return new PluginDialogRequest
         {
@@ -301,12 +274,8 @@ public static class PluginUi
     }
 
     /// <summary>Creates a custom visual dialog request.</summary>
-    /// <param name="title">The dialog title.</param>
-    /// <param name="content">The dialog content.</param>
-    /// <returns>The dialog request.</returns>
     public static PluginDialogRequest CustomDialog(string title, Visual content)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(content);
         return new PluginDialogRequest
         {
@@ -319,147 +288,6 @@ public static class PluginUi
     private static PluginDialogRequest Dialog(PluginDialogKind kind, string title, string? message)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
-        return new PluginDialogRequest
-        {
-            Kind = kind,
-            Title = title,
-            Message = message,
-        };
-    }
-}
-
-/// <summary>
-/// Low-ceremony factories for prompt attachments.
-/// </summary>
-public static class Attachments
-{
-    /// <summary>Creates a text attachment.</summary>
-    /// <param name="text">The attachment text.</param>
-    /// <param name="displayName">Optional display name.</param>
-    /// <returns>The attachment.</returns>
-    public static PluginPromptAttachment Text(string text, string? displayName = null)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-        return new PluginPromptAttachment { Kind = PluginPromptAttachmentKind.Text, Text = text, DisplayName = displayName };
-    }
-
-    /// <summary>Creates a file attachment.</summary>
-    /// <param name="path">The file path.</param>
-    /// <param name="displayName">Optional display name.</param>
-    /// <returns>The attachment.</returns>
-    public static PluginPromptAttachment File(string path, string? displayName = null) => PathBacked(PluginPromptAttachmentKind.File, path, displayName);
-
-    /// <summary>Creates a directory attachment.</summary>
-    /// <param name="path">The directory path.</param>
-    /// <param name="displayName">Optional display name.</param>
-    /// <returns>The attachment.</returns>
-    public static PluginPromptAttachment Directory(string path, string? displayName = null) => PathBacked(PluginPromptAttachmentKind.Directory, path, displayName);
-
-    /// <summary>Creates an image attachment.</summary>
-    /// <param name="pathOrUrl">The image path or URL.</param>
-    /// <param name="displayName">Optional display name.</param>
-    /// <param name="mediaType">Optional media type.</param>
-    /// <returns>The attachment.</returns>
-    public static PluginPromptAttachment Image(string pathOrUrl, string? displayName = null, string? mediaType = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(pathOrUrl);
-        return new PluginPromptAttachment
-        {
-            Kind = PluginPromptAttachmentKind.Image,
-            Path = pathOrUrl,
-            DisplayName = displayName,
-            MediaType = mediaType,
-        };
-    }
-
-    private static PluginPromptAttachment PathBacked(PluginPromptAttachmentKind kind, string path, string? displayName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return new PluginPromptAttachment { Kind = kind, Path = path, DisplayName = displayName };
-    }
-}
-
-/// <summary>
-/// Low-ceremony factories for resource contributions.
-/// </summary>
-public static class Resources
-{
-    /// <summary>Creates a skill-root resource.</summary>
-    /// <param name="path">The resource path.</param>
-    /// <param name="precedence">Resource precedence.</param>
-    /// <returns>The resource contribution.</returns>
-    public static PluginResourceContribution SkillRoot(string path, int precedence = 0) => Create(PluginResourceKind.SkillRoot, path, precedence);
-
-    /// <summary>Creates a system-prompt-root resource.</summary>
-    /// <param name="path">The resource path.</param>
-    /// <param name="precedence">Resource precedence.</param>
-    /// <returns>The resource contribution.</returns>
-    public static PluginResourceContribution SystemPromptRoot(string path, int precedence = 0) => Create(PluginResourceKind.SystemPromptRoot, path, precedence);
-
-    /// <summary>Creates a template-root resource.</summary>
-    /// <param name="path">The resource path.</param>
-    /// <param name="precedence">Resource precedence.</param>
-    /// <returns>The resource contribution.</returns>
-    public static PluginResourceContribution TemplateRoot(string path, int precedence = 0) => Create(PluginResourceKind.TemplateRoot, path, precedence);
-
-    /// <summary>Creates a theme-root resource.</summary>
-    /// <param name="path">The resource path.</param>
-    /// <param name="precedence">Resource precedence.</param>
-    /// <returns>The resource contribution.</returns>
-    public static PluginResourceContribution ThemeRoot(string path, int precedence = 0) => Create(PluginResourceKind.ThemeRoot, path, precedence);
-
-    /// <summary>Creates an MCP manifest resource.</summary>
-    /// <param name="path">The resource path.</param>
-    /// <param name="precedence">Resource precedence.</param>
-    /// <returns>The resource contribution.</returns>
-    public static PluginResourceContribution McpServerManifest(string path, int precedence = 0) => Create(PluginResourceKind.McpServerManifest, path, precedence);
-
-    /// <summary>Creates an agent-definition-root resource.</summary>
-    /// <param name="path">The resource path.</param>
-    /// <param name="precedence">Resource precedence.</param>
-    /// <returns>The resource contribution.</returns>
-    public static PluginResourceContribution AgentDefinitionRoot(string path, int precedence = 0) => Create(PluginResourceKind.AgentDefinitionRoot, path, precedence);
-
-    private static PluginResourceContribution Create(PluginResourceKind kind, string path, int precedence)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return new PluginResourceContribution
-        {
-            Kind = kind,
-            Path = path,
-            Precedence = precedence,
-            IsPackageRelative = !System.IO.Path.IsPathRooted(path),
-        };
-    }
-}
-
-/// <summary>
-/// Low-ceremony factories for agent tool contributions.
-/// </summary>
-public static class Tool
-{
-    /// <summary>Creates a plugin tool contribution from an existing definition.</summary>
-    /// <param name="definition">The tool definition.</param>
-    /// <param name="promptSnippet">Optional prompt snippet.</param>
-    /// <param name="promptGuidance">Optional prompt guidance.</param>
-    /// <param name="activationPolicy">Optional activation policy.</param>
-    /// <param name="renderer">Optional renderer.</param>
-    /// <returns>The tool contribution.</returns>
-    public static PluginAgentToolContribution FromDefinition(
-        AgentToolDefinition definition,
-        string? promptSnippet = null,
-        string? promptGuidance = null,
-        PluginToolActivationPolicy? activationPolicy = null,
-        PluginRenderer? renderer = null)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        return new PluginAgentToolContribution
-        {
-            Definition = definition,
-            PromptSnippet = promptSnippet,
-            PromptGuidance = promptGuidance,
-            ActivationPolicy = activationPolicy ?? PluginToolActivationPolicy.Default,
-            Renderer = renderer,
-        };
+        return new PluginDialogRequest { Kind = kind, Title = title, Message = message };
     }
 }

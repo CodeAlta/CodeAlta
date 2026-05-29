@@ -24,7 +24,7 @@ internal sealed class SessionWorkspaceView
     private readonly CodeAltaShellViewModel _shellViewModel;
     private readonly SessionWorkspaceViewModel _workspaceViewModel;
     private readonly PromptComposerViewModel _promptComposerViewModel;
-    private readonly IReadOnlyList<SessionWorkspaceCommandBinding> _commandBindings;
+    private readonly ShellCommandSurfaceCoordinator _shellCommandSurfaceCoordinator;
     private readonly SessionWorkspaceChromeController _chromeController;
     private readonly PromptComposerViewController _promptComposerController;
     private readonly QueuedPromptStripController _queuedPromptController;
@@ -39,15 +39,15 @@ internal sealed class SessionWorkspaceView
     private SessionPromptPanel? _fallbackPromptPanel;
 
     internal const TerminalKey ExpandPromptShortcutKey = TerminalKey.F6;
-    internal static readonly KeySequence ModelProvidersShortcutSequence = ShellCommandCatalog.ModelProvidersShortcutSequence;
-    internal static readonly KeySequence SessionUsageShortcutSequence = ShellCommandCatalog.SessionUsageShortcutSequence;
-    internal static readonly KeySequence SessionInfoShortcutSequence = ShellCommandCatalog.SessionInfoShortcutSequence;
+    internal static readonly KeySequence ModelProvidersShortcutSequence = BuiltinShellCommands.ModelProvidersShortcutSequence;
+    internal static readonly KeySequence SessionUsageShortcutSequence = BuiltinShellCommands.SessionUsageShortcutSequence;
+    internal static readonly KeySequence SessionInfoShortcutSequence = BuiltinShellCommands.SessionInfoShortcutSequence;
 
     public SessionWorkspaceView(
         CodeAltaShellViewModel shellViewModel,
         SessionWorkspaceViewModel workspaceViewModel,
         PromptComposerViewModel promptComposerViewModel,
-        IReadOnlyList<SessionWorkspaceCommandBinding> commandBindings,
+        ShellCommandSurfaceCoordinator shellCommandSurfaceCoordinator,
         SessionWorkspaceChromeController chromeController,
         PromptComposerViewController promptComposerController,
         QueuedPromptStripController queuedPromptController,
@@ -62,7 +62,7 @@ internal sealed class SessionWorkspaceView
             shellViewModel,
             workspaceViewModel,
             promptComposerViewModel,
-            commandBindings,
+            shellCommandSurfaceCoordinator,
             chromeController,
             promptComposerController,
             queuedPromptController,
@@ -81,7 +81,7 @@ internal sealed class SessionWorkspaceView
         CodeAltaShellViewModel shellViewModel,
         SessionWorkspaceViewModel workspaceViewModel,
         PromptComposerViewModel promptComposerViewModel,
-        IReadOnlyList<SessionWorkspaceCommandBinding> commandBindings,
+        ShellCommandSurfaceCoordinator shellCommandSurfaceCoordinator,
         SessionWorkspaceChromeController chromeController,
         PromptComposerViewController promptComposerController,
         QueuedPromptStripController queuedPromptController,
@@ -97,7 +97,7 @@ internal sealed class SessionWorkspaceView
         ArgumentNullException.ThrowIfNull(shellViewModel);
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
         ArgumentNullException.ThrowIfNull(promptComposerViewModel);
-        ArgumentNullException.ThrowIfNull(commandBindings);
+        ArgumentNullException.ThrowIfNull(shellCommandSurfaceCoordinator);
         ArgumentNullException.ThrowIfNull(chromeController);
         ArgumentNullException.ThrowIfNull(promptComposerController);
         ArgumentNullException.ThrowIfNull(queuedPromptController);
@@ -112,7 +112,7 @@ internal sealed class SessionWorkspaceView
         _shellViewModel = shellViewModel;
         _workspaceViewModel = workspaceViewModel;
         _promptComposerViewModel = promptComposerViewModel;
-        _commandBindings = commandBindings;
+        _shellCommandSurfaceCoordinator = shellCommandSurfaceCoordinator;
         _chromeController = chromeController;
         _promptComposerController = promptComposerController;
         _queuedPromptController = queuedPromptController;
@@ -133,12 +133,9 @@ internal sealed class SessionWorkspaceView
         _sessionTabHostView = new SessionTabHostView(tabHostController);
         SessionPaneLayout = _sessionTabHostView.Root;
         Root = SessionPaneLayout;
-        foreach (var binding in commandBindings)
+        foreach (var command in shellCommandSurfaceCoordinator.CommandsFor(ShellCommandPlacement.WorkspaceRoot))
         {
-            if (IsSharedEditorCommand(binding.Metadata.Id))
-            {
-                Root.AddCommand(BuildCommand(binding));
-            }
+            Root.AddCommand(shellCommandSurfaceCoordinator.CreateViewCommand(command));
         }
     }
 
@@ -242,7 +239,7 @@ internal sealed class SessionWorkspaceView
             () => SessionInput);
         var promptComposerView = new PromptComposerView(
             promptComposerViewModel,
-            _commandBindings,
+            _shellCommandSurfaceCoordinator,
             _projectFileSearchService,
             _getPromptReferenceProjectRoot,
             _promptEditorContributions,
@@ -312,56 +309,6 @@ internal sealed class SessionWorkspaceView
             promptComposerView,
             modelProviderSelectorView,
             chromeState);
-    }
-
-    private static bool IsSharedEditorCommand(string commandId)
-        => commandId is
-            "CodeAlta.Shell.Help" or
-            "CodeAlta.Shell.About" or
-            "CodeAlta.Providers.Manage" or
-            "CodeAlta.Session.CloseTab" or
-            "CodeAlta.Session.TabLeft" or
-            "CodeAlta.Session.TabRight" or
-            "CodeAlta.Session.MessagePrevious" or
-            "CodeAlta.Session.MessageNext" or
-            "CodeAlta.Session.MessageFirst" or
-            "CodeAlta.Session.MessageLast";
-
-    private static Command BuildCommand(SessionWorkspaceCommandBinding binding)
-    {
-        ArgumentNullException.ThrowIfNull(binding);
-
-        var metadata = binding.Metadata;
-        return new Command
-        {
-            Id = metadata.Id,
-            LabelMarkup = metadata.DisplayLabelMarkup,
-            Name = metadata.CommandName,
-            DescriptionMarkup = metadata.DescriptionMarkup,
-            SearchText = metadata.CommandSearchText,
-            Execute = _ => binding.Execute(),
-            CanExecute = _ => binding.CanExecute(),
-            Gesture = metadata.Gesture,
-            Sequence = metadata.Sequence,
-            Importance = metadata.Importance,
-            Presentation = ResolvePresentation(metadata),
-        };
-    }
-
-    private static CommandPresentation ResolvePresentation(ShellCommandMetadata metadata)
-    {
-        var presentation = CommandPresentation.None;
-        if (metadata.ShowInCommandBar)
-        {
-            presentation |= CommandPresentation.CommandBar;
-        }
-
-        if (metadata.ShowInCommandPalette)
-        {
-            presentation |= CommandPresentation.CommandPalette;
-        }
-
-        return presentation;
     }
 
     private static Visual CreateIconButton(string icon, string tooltipText, Action onClick, Action<Button>? configureButton = null)

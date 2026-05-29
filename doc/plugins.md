@@ -109,7 +109,7 @@ The plugin runtime:
 
 Runtime status separates plugin diagnostics from conversation history. Diagnostics include config, discovery, build, load, activation, contribution, callback, source-change, and unload records plus structured build summaries and unknown config entries.
 
-Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, `/plugin`, or the command palette. The dialog shows enablement, diagnostics, properties, contributions, and source/README actions. `--plugins-status` provides a headless discovery/config summary.
+Open plugin management with `Ctrl+G Ctrl+N` or the command palette (search for `plugins` or `plugin`). The dialog shows enablement, diagnostics, properties, contributions, and source/README actions. `--plugins-status` provides a headless discovery/config summary.
 
 ## Contribution areas
 
@@ -130,7 +130,11 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, `/plugin`, or the comma
 - resource roots for skills, system prompts, templates, themes, and MCP manifests;
 - plugin-lifetime background tasks through `IPluginTaskService`.
 
-Low-ceremony factories are available through `Command`, `Startup`, `Prompt`, `Attachments`, `PluginUi`, `Resources`, and `Tool`.
+Plugin shell commands are no-argument frontend activations. A `PluginCommandContribution` declares its name, label/description, placement (`ShellRoot`, `PromptEditor`, and/or `WorkspaceRoot`), command-palette/search metadata, visibility flags, optional shortcut, and availability rule. CodeAlta adapts each active contribution into the same internal shell command registry used by built-ins, so plugin commands can appear in help, the command palette, command bars, and shortcuts without frontend-specific registration code.
+
+`PluginCommandContext` intentionally exposes public services such as `Ui`, `Sessions`, `Prompts`, and `Workspace`; it does not expose raw slash-command text or argument tokens. Commands that need user input should use plugin UI services, prompt/session services, or a plugin-owned dialog/workflow contribution. Frontend state is mapped to public plugin operation options before the handler runs; plugins never receive internal `ShellCommandContext`, XenoAtom `Visual` targets, or frontend view models.
+
+Low-ceremony factories are available through `Command`, `Startup`, `Prompt`, `PluginUi`, `Resources`, and `AgentTool`.
 
 UI-only contributions remain frontend responsibilities. Headless hosts can ignore them or expose no-op services through `IPluginUiService.HasInteractiveUi == false`.
 

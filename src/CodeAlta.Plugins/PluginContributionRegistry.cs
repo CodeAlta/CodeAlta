@@ -285,11 +285,6 @@ public sealed class PluginContributionRegistry
         {
             case PluginCommandContribution command:
                 yield return new ContributionConflictKey("command", $"command:{command.Name}", command.Name);
-                foreach (var alias in command.Aliases.Where(static alias => !string.IsNullOrWhiteSpace(alias)))
-                {
-                    yield return new ContributionConflictKey("command-alias", $"command-alias:{alias}", alias);
-                }
-
                 if (command.KeyBinding?.DisplayText is { Length: > 0 } displayText)
                 {
                     yield return new ContributionConflictKey("keybinding", $"keybinding:{displayText}", displayText);

@@ -204,26 +204,38 @@ public sealed record PluginStartupContribution
 /// <summary>Describes a command or shortcut contribution.</summary>
 public sealed record PluginCommandContribution
 {
-    /// <summary>Gets the command natural name.</summary>
+    /// <summary>Gets the command-palette name.</summary>
     public required string Name { get; init; }
 
     /// <summary>Gets the command label.</summary>
-    public string? Label { get; init; }
+    public string Label { get; init; } = string.Empty;
 
     /// <summary>Gets the command description.</summary>
-    public string? Description { get; init; }
+    public string Description { get; init; } = string.Empty;
 
-    /// <summary>Gets the command kind.</summary>
-    public PluginCommandKind Kind { get; init; }
+    /// <summary>Gets the frontend placements where the command should be registered.</summary>
+    public PluginCommandPlacement Placement { get; init; } = PluginCommandPlacement.ShellRoot;
 
-    /// <summary>Gets command aliases.</summary>
-    public IReadOnlyList<string> Aliases { get; init; } = [];
+    /// <summary>Gets command-palette search text.</summary>
+    public string? SearchText { get; init; }
 
     /// <summary>Gets an optional key binding.</summary>
     public PluginKeyBinding? KeyBinding { get; init; }
 
-    /// <summary>Gets command presentation metadata.</summary>
-    public PluginCommandPresentation Presentation { get; init; } = PluginCommandPresentation.Default;
+    /// <summary>Gets a value indicating whether to show in the command palette.</summary>
+    public bool ShowInCommandPalette { get; init; } = true;
+
+    /// <summary>Gets a value indicating whether to show in the command bar.</summary>
+    public bool ShowInCommandBar { get; init; } = true;
+
+    /// <summary>Gets a value indicating whether to show in help.</summary>
+    public bool ShowInHelp { get; init; } = true;
+
+    /// <summary>Gets optional icon or markup text.</summary>
+    public string? IconMarkup { get; init; }
+
+    /// <summary>Gets an optional grouping label.</summary>
+    public string? Group { get; init; }
 
     /// <summary>Gets command availability metadata.</summary>
     public PluginCommandAvailability Availability { get; init; } = PluginCommandAvailability.Always;
@@ -235,15 +247,18 @@ public sealed record PluginCommandContribution
     public int Order { get; init; }
 }
 
-/// <summary>Identifies a plugin command kind.</summary>
-public enum PluginCommandKind
+/// <summary>Identifies frontend placements for plugin commands.</summary>
+[Flags]
+public enum PluginCommandPlacement
 {
-    /// <summary>A global shell command.</summary>
-    Shell,
-    /// <summary>A prompt slash/text command.</summary>
-    Prompt,
-    /// <summary>A selected-session command.</summary>
-    Session,
+    /// <summary>No frontend placement.</summary>
+    None = 0,
+    /// <summary>The shell root command scope.</summary>
+    ShellRoot = 1,
+    /// <summary>The prompt editor command scope.</summary>
+    PromptEditor = 2,
+    /// <summary>The workspace root command scope.</summary>
+    WorkspaceRoot = 4,
 }
 
 /// <summary>Describes a plugin key binding.</summary>
@@ -257,28 +272,6 @@ public sealed record PluginKeyBinding
 
     /// <summary>Gets a multi-key sequence.</summary>
     public KeySequence? Sequence { get; init; }
-}
-
-/// <summary>Describes plugin command presentation.</summary>
-public sealed record PluginCommandPresentation
-{
-    /// <summary>Gets the default presentation.</summary>
-    public static PluginCommandPresentation Default { get; } = new();
-
-    /// <summary>Gets a value indicating whether to show in the command palette.</summary>
-    public bool ShowInCommandPalette { get; init; } = true;
-
-    /// <summary>Gets a value indicating whether to show in the command bar.</summary>
-    public bool ShowInCommandBar { get; init; } = true;
-
-    /// <summary>Gets a value indicating whether to show in help.</summary>
-    public bool ShowInHelp { get; init; } = true;
-
-    /// <summary>Gets an optional grouping label.</summary>
-    public string? Group { get; init; }
-
-    /// <summary>Gets optional icon or markup text.</summary>
-    public string? IconMarkup { get; init; }
 }
 
 /// <summary>Describes when a command is available.</summary>

@@ -588,7 +588,7 @@ public sealed class CodeAltaAppTabStripTests
             new CodeAltaShellViewModel(),
             new SessionWorkspaceViewModel(),
             new PromptComposerViewModel(),
-            Array.Empty<SessionWorkspaceCommandBinding>(),
+            TestShellCommandSurface.Create(),
             SessionWorkspaceChromeController.Empty,
             PromptComposerViewController.Create(static _ => { }, static () => { }, static () => { }, static () => { }, static () => { }),
             QueuedPromptStripController.Create(

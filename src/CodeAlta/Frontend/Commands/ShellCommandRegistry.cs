@@ -2,44 +2,80 @@ namespace CodeAlta.Frontend.Commands;
 
 internal sealed class ShellCommandRegistry
 {
-    private readonly Dictionary<Type, Func<ShellCommand, CancellationToken, ValueTask>> _handlers = new();
-    private readonly Dictionary<string, Func<ShellCommand>> _factories = new(StringComparer.Ordinal);
+    private readonly IReadOnlyList<ShellCommand> _commands;
+    private readonly Dictionary<string, ShellCommand> _byId;
+    private readonly Dictionary<string, ShellCommand> _byName;
 
-    public void Register<TCommand>(Func<TCommand, CancellationToken, ValueTask> handler)
-        where TCommand : ShellCommand
+    public ShellCommandRegistry(IEnumerable<ShellCommand> commands)
     {
-        ArgumentNullException.ThrowIfNull(handler);
-        _handlers[typeof(TCommand)] = (command, cancellationToken) => handler((TCommand)command, cancellationToken);
+        ArgumentNullException.ThrowIfNull(commands);
+        var list = commands.ToArray();
+        Validate(list);
+        _commands = list;
+        _byId = list.ToDictionary(static command => command.Id, StringComparer.Ordinal);
+        _byName = list
+            .Where(static command => !string.IsNullOrWhiteSpace(command.Name) && command.ShowInCommandPalette)
+            .ToDictionary(static command => command.Name!, StringComparer.OrdinalIgnoreCase);
     }
 
-    public bool TryGetHandler(ShellCommand command, out Func<ShellCommand, CancellationToken, ValueTask> handler)
+    public IReadOnlyList<ShellCommand> Commands => _commands;
+
+    public IEnumerable<ShellCommand> CommandsFor(ShellCommandPlacement placement)
+        => _commands.Where(command => (command.Placement & placement) != 0);
+
+    public bool TryGetById(string id, out ShellCommand command)
     {
-        ArgumentNullException.ThrowIfNull(command);
-        return _handlers.TryGetValue(command.GetType(), out handler!);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return _byId.TryGetValue(id, out command!);
     }
 
-    public void RegisterFactory(string commandId, Func<ShellCommand> factory)
+    public bool TryGetByName(string name, out ShellCommand command)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(commandId);
-        ArgumentNullException.ThrowIfNull(factory);
-        if (!ShellCommandCatalog.Contains(commandId))
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return _byName.TryGetValue(name, out command!);
+    }
+
+    private static void Validate(IReadOnlyList<ShellCommand> commands)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var command in commands)
         {
-            throw new ArgumentException($"Shell command '{commandId}' must be declared in {nameof(ShellCommandCatalog)} before a factory can be registered.", nameof(commandId));
+            ArgumentNullException.ThrowIfNull(command);
+            if (string.IsNullOrWhiteSpace(command.Id))
+            {
+                throw new ArgumentException("Shell command IDs must be non-empty.", nameof(commands));
+            }
+
+            if (string.IsNullOrWhiteSpace(command.Label))
+            {
+                throw new ArgumentException($"Shell command '{command.Id}' must have a non-empty label.", nameof(commands));
+            }
+
+            if (string.IsNullOrWhiteSpace(command.Description))
+            {
+                throw new ArgumentException($"Shell command '{command.Id}' must have a non-empty description.", nameof(commands));
+            }
+
+            if (!ids.Add(command.Id))
+            {
+                throw new ArgumentException($"Duplicate shell command ID '{command.Id}'.", nameof(commands));
+            }
+
+            if (command.Gesture is not null && command.Sequence is not null)
+            {
+                throw new ArgumentException($"Shell command '{command.Id}' cannot declare both Gesture and Sequence.", nameof(commands));
+            }
+
+            if (command.AdditionalHelpBindings is List<string>)
+            {
+                throw new ArgumentException($"Shell command '{command.Id}' uses a mutable help binding collection.", nameof(commands));
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.Name) && command.ShowInCommandPalette && !names.Add(command.Name))
+            {
+                throw new ArgumentException($"Duplicate command-palette name '{command.Name}'.", nameof(commands));
+            }
         }
-
-        _factories[commandId] = factory;
-    }
-
-    public bool TryCreateCommand(string commandId, out ShellCommand command)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(commandId);
-        if (!_factories.TryGetValue(commandId, out var factory))
-        {
-            command = null!;
-            return false;
-        }
-
-        command = factory();
-        return true;
     }
 }

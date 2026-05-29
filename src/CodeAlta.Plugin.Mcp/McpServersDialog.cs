@@ -1,5 +1,4 @@
 using System.Text;
-using CodeAlta.Plugin.Mcp;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -13,7 +12,7 @@ using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Templating;
 using UiCommand = XenoAtom.Terminal.UI.Commands.Command;
 
-namespace CodeAlta.Views;
+namespace CodeAlta.Plugin.Mcp;
 
 internal sealed class McpServersDialog
 {
@@ -176,7 +175,6 @@ internal sealed class McpServersDialog
             .IsModal(true)
             .Padding(1)
             .Content(contentHost);
-        ResponsiveDialogSize.Apply(_dialog, getBounds(), minWidth: 116, minHeight: 30, widthFactor: 0.88, heightFactor: 0.82);
         _dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Mcp.Manage.Close",
@@ -324,14 +322,7 @@ internal sealed class McpServersDialog
 
         var key = row.OriginalKey;
         var scope = row.OriginalScope.Value;
-        new ConfirmationDialog(
-            "Remove MCP Server?",
-            [$"Remove MCP server '{key}' from {FormatScopeText(scope)} JSON config?", "This does not remove TOML policy entries for the same key."],
-            "Remove",
-            ControlTone.Error,
-            () => RemoveServerAsync(key, scope),
-            _getBounds,
-            () => _dialog).Show();
+        _ = RemoveServerAsync(key, scope);
     }
 
     private async Task RemoveServerAsync(string key, McpManagementScope scope)
