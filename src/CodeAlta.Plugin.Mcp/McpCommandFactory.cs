@@ -75,7 +75,7 @@ internal static class McpCommandFactory
             }
 
             var projectDirectory = ResolveProjectDirectory(context);
-            var scopeKey = McpActivationState.ResolveScopeKey(context.Services.Sessions.SelectedSessionId, projectDirectory);
+            var scopeKey = ResolveActivationScopeKey(context, projectDirectory);
             var activated = activationState.ActivateServers(scopeKey, serverKeys);
             WriteRecord(context.Stdout, new
             {
@@ -541,6 +541,11 @@ internal static class McpCommandFactory
             context.Services.Workspace.SelectedProjectPath,
             context.ScopeProjectPath,
             context.WorkingDirectory);
+
+    private static string ResolveActivationScopeKey(PluginAltaCommandContext context, string? projectDirectory)
+        => McpActivationState.ResolveScopeKey(
+            string.IsNullOrWhiteSpace(context.SourceSessionId) ? context.Services.Sessions.SelectedSessionId : context.SourceSessionId,
+            projectDirectory);
 
     private static McpRuntimeRequest CreateRuntimeRequest(PluginAltaCommandContext context, McpCommandFactoryOptions options)
         => new() { UserHomeDirectory = options.UserHomeDirectory, ProjectDirectory = ResolveProjectDirectory(context) };

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -88,6 +90,32 @@ public sealed class SessionRuntimeServiceTests
         Assert.AreNotEqual(Guid.Empty, agentId.Value);
         Assert.AreEqual("session-1", session.SessionId);
         Assert.AreEqual(0, history.Count);
+    }
+
+    [TestMethod]
+    public async Task EnsureCoordinatorSessionAsync_RecreatesSessionWhenToolSchemaChanges()
+    {
+        using var temp = new TempDirectory();
+        var providerId = new ModelProviderId("tool-refresh");
+        var recorder = new ToolSchemaRecordingProviderRuntime.Recorder();
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(
+            new ModelProviderDescriptor(new ModelProviderId(providerId.Value), "Tool Refresh") { DefaultModelId = "test-model" },
+            () => new ToolSchemaRecordingProviderRuntime(providerId, recorder));
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var session = CreateSession("session-1", providerId, temp.Path);
+
+        var firstHandle = await runtime.EnsureCoordinatorSessionAsync(session, CreateOptions(providerId, temp.Path)).ConfigureAwait(false);
+        var secondHandle = await runtime.EnsureCoordinatorSessionAsync(
+                session,
+                CreateOptions(providerId, temp.Path, [CreateTool("mcp__github__issue_read")]))
+            .ConfigureAwait(false);
+
+        Assert.AreNotEqual(firstHandle, secondHandle);
+        Assert.AreEqual(2, recorder.ResumeToolNames.Count);
+        CollectionAssert.AreEqual(Array.Empty<string>(), recorder.ResumeToolNames[0].ToArray());
+        CollectionAssert.AreEqual(new[] { "mcp__github__issue_read" }, recorder.ResumeToolNames[1].ToArray());
     }
 
     [TestMethod]
@@ -194,15 +222,24 @@ public sealed class SessionRuntimeServiceTests
             LastActiveAt = DateTimeOffset.UtcNow,
         };
 
-    private static SessionExecutionOptions CreateOptions(ModelProviderId ProviderId, string root)
+    private static SessionExecutionOptions CreateOptions(
+        ModelProviderId ProviderId,
+        string root,
+        IReadOnlyList<AgentToolDefinition>? tools = null)
         => new()
         {
             ProviderId = ProviderId,
             ProviderKey = ProviderId.Value,
             WorkingDirectory = root,
             ProjectRoots = [root],
+            Tools = tools,
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         };
+
+    private static AgentToolDefinition CreateTool(string name)
+        => new(
+            new AgentToolSpec(name, "Test tool", JsonSerializer.SerializeToElement(new { type = "object" })),
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [])));
 
     private sealed class MinimalProviderRuntime(ModelProviderId providerId) : IAgentModelProviderRuntime
     {
@@ -272,6 +309,41 @@ public sealed class SessionRuntimeServiceTests
             => throw new InvalidOperationException("Provider models should not be listed while listing recoverable sessions.");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ToolSchemaRecordingProviderRuntime(ModelProviderId providerId, ToolSchemaRecordingProviderRuntime.Recorder recorder) : IModelProviderSessionRuntime
+    {
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(providerId.Value), "Tool Refresh") { DefaultModelId = "test-model" };
+
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
+        {
+            recorder.CreateToolNames.Add(options.Tools?.Select(static tool => tool.Spec.Name).ToArray() ?? []);
+            return Task.FromResult<IAgentSession>(new EmptyAgentSession(providerId, options.SessionId ?? Guid.CreateVersion7().ToString()));
+        }
+
+        public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+        {
+            recorder.ResumeToolNames.Add(options.Tools?.Select(static tool => tool.Spec.Name).ToArray() ?? []);
+            return Task.FromResult<IAgentSession>(new EmptyAgentSession(providerId, sessionId));
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId, Availability = ModelProviderAvailability.Ready });
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => new NoOpTurnExecutor();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public sealed class Recorder
+        {
+            public List<IReadOnlyList<string>> CreateToolNames { get; } = [];
+
+            public List<IReadOnlyList<string>> ResumeToolNames { get; } = [];
+        }
     }
 
     private sealed class NoOpTurnExecutor : IModelProviderTurnExecutor

@@ -580,6 +580,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             options.ReasoningEffort,
             options.AdditionalSystemMessage,
             options.AdditionalDeveloperInstructions,
+            CreateToolSignatures(options.Tools),
             projector,
             subscription);
 
@@ -2016,6 +2017,23 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private static IReadOnlyList<string> CreateToolSignatures(IReadOnlyList<AgentToolDefinition>? tools)
+    {
+        if (tools is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        return tools
+            .Select(static tool => string.Join(
+                '\u001f',
+                tool.Spec.Name,
+                tool.Spec.Description,
+                tool.Spec.InputSchema.GetRawText()))
+            .OrderBy(static signature => signature, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static AgentReasoningEffort? ParseReasoningEffort(string? value)
     {
         return value?.Trim().ToLowerInvariant() switch
@@ -2061,6 +2079,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             AgentReasoningEffort? reasoningEffort,
             string? additionalSystemMessage,
             string? additionalDeveloperInstructions,
+            IReadOnlyList<string> toolSignatures,
             EventProjector projector,
             IDisposable subscription)
         {
@@ -2080,6 +2099,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = reasoningEffort;
             AdditionalSystemMessage = additionalSystemMessage;
             AdditionalDeveloperInstructions = additionalDeveloperInstructions;
+            ToolSignatures = toolSignatures;
             Projector = projector;
             Subscription = subscription;
         }
@@ -2115,6 +2135,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         public string? AdditionalSystemMessage { get; }
 
         public string? AdditionalDeveloperInstructions { get; }
+
+        public IReadOnlyList<string> ToolSignatures { get; }
 
         public IDisposable Subscription { get; }
 
@@ -2165,7 +2187,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 && string.Equals(Model, options.Model, StringComparison.Ordinal)
                 && ReasoningEffort == options.ReasoningEffort
                 && string.Equals(AdditionalSystemMessage, options.AdditionalSystemMessage, StringComparison.Ordinal)
-                && string.Equals(AdditionalDeveloperInstructions, options.AdditionalDeveloperInstructions, StringComparison.Ordinal);
+                && string.Equals(AdditionalDeveloperInstructions, options.AdditionalDeveloperInstructions, StringComparison.Ordinal)
+                && ToolSignatures.SequenceEqual(CreateToolSignatures(options.Tools), StringComparer.Ordinal);
         }
 
         public void ObserveEvent(AgentEvent @event)

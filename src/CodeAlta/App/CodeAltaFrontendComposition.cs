@@ -7,6 +7,7 @@ using CodeAlta.LiveTool;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Workspace;
 using CodeAlta.Threading;
@@ -119,6 +120,7 @@ internal sealed class CodeAltaFrontendComposition
         if (pluginHostBridge?.Runtime is { } pluginRuntime)
         {
             altaServices.Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(pluginRuntime));
+            altaServices.Add(new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins));
         }
 
         var altaRegistry = new AltaCommandRegistry();

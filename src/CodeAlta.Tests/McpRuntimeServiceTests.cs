@@ -207,7 +207,58 @@ public sealed class McpRuntimeServiceTests
             },
             CancellationToken.None);
         Assert.IsNotNull(prompt);
-        StringAssert.Contains(prompt, "- Active: `tiny`(1)");
+        StringAssert.Contains(prompt, "- Active: `tiny`");
+        StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
+    }
+
+    [TestMethod]
+    public async Task Activate_UsesCallerSourceSessionForNextRunScope()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        var plugin = new McpPlugin();
+        var contribution = plugin.GetAltaCommands().Single();
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var app = new CommandApp("alta", "test") { contribution.CreateCommandNode(CreateAltaContext(stdout, stderr, project.Path, sourceSessionId: "session-a")) };
+
+        var activateExitCode = await app.RunAsync(["mcp", "activate", "tiny"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr });
+
+        Assert.AreEqual(0, activateExitCode, stderr.ToString());
+        var otherSession = await plugin.OnBeforeAgentRunAsync(
+            new PluginBeforeAgentRunContext
+            {
+                Plugin = CreatePluginDescriptor(),
+                Services = NoopPluginServices.Create(),
+                ProjectPath = project.Path,
+                SessionId = "session-b",
+            },
+            CancellationToken.None);
+        Assert.IsNull(otherSession, "Activation from an agent caller must not fall back to the project scope for a different session.");
+
+        var sameSession = await plugin.OnBeforeAgentRunAsync(
+            new PluginBeforeAgentRunContext
+            {
+                Plugin = CreatePluginDescriptor(),
+                Services = NoopPluginServices.Create(),
+                ProjectPath = project.Path,
+                SessionId = "session-a",
+            },
+            CancellationToken.None);
+        Assert.IsNotNull(sameSession);
+        Assert.IsTrue(sameSession.AdditionalTools.Any(static tool => tool.Spec.Name == "mcp__tiny__echo"));
+
+        var prompt = await plugin.GetSystemPromptContributions().Single().Content(
+            new PluginSystemPromptContext
+            {
+                Plugin = CreatePluginDescriptor(),
+                Services = NoopPluginServices.Create(),
+                ProjectPath = project.Path,
+                SessionId = "session-a",
+            },
+            CancellationToken.None);
+        Assert.IsNotNull(prompt);
+        StringAssert.Contains(prompt, "- Active: `tiny`");
         StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
     }
 
@@ -714,7 +765,7 @@ public sealed class McpRuntimeServiceTests
         File.WriteAllText(path, content);
     }
 
-    private static PluginAltaCommandContext CreateAltaContext(TextWriter stdout, TextWriter stderr, string? projectPath)
+    private static PluginAltaCommandContext CreateAltaContext(TextWriter stdout, TextWriter stderr, string? projectPath, string? sourceSessionId = null)
         => new()
         {
             Plugin = CreatePluginDescriptor(),
@@ -722,6 +773,7 @@ public sealed class McpRuntimeServiceTests
             Scope = PluginScope.Global,
             CorrelationId = "corr-1",
             WorkingDirectory = projectPath,
+            SourceSessionId = sourceSessionId,
             Stdin = TextReader.Null,
             Stdout = stdout,
             Stderr = stderr,

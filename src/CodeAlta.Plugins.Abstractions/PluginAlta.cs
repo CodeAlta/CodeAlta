@@ -74,6 +74,15 @@ public sealed record PluginAltaCommandContext
     /// <summary>Gets the invocation working directory.</summary>
     public string? WorkingDirectory { get; init; }
 
+    /// <summary>Gets the source CodeAlta session id associated with the command caller, when known.</summary>
+    public string? SourceSessionId { get; init; }
+
+    /// <summary>Gets the source project id associated with the command caller, when known.</summary>
+    public string? SourceProjectId { get; init; }
+
+    /// <summary>Gets the source agent id associated with the command caller, when known.</summary>
+    public string? SourceAgentId { get; init; }
+
     /// <summary>Gets the command standard input reader.</summary>
     public required TextReader Stdin { get; init; }
 

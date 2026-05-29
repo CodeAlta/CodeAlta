@@ -5,7 +5,9 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
@@ -255,6 +257,49 @@ public sealed class AltaLiveToolTests
         Assert.IsTrue(result.Success, result.Error);
         var lines = ReadJsonLines(AssertTextItem(result));
         Assert.IsTrue(lines.Any(static line => line.GetProperty("type").GetString() == "alta.mcp.server" && line.GetProperty("server").GetString() == "memory"));
+    }
+
+    [TestMethod]
+    public async Task SessionTool_McpActivateUsesSourceSessionScopeForPromptRefresh()
+    {
+        using var project = TempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(project.Path, ".alta"));
+        File.WriteAllText(
+            Path.Combine(project.Path, ".alta", "mcp.json"),
+            """
+            { "mcpServers": { "memory": { "command": "npx" } } }
+            """);
+        var plugin = new McpPlugin();
+        var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
+        {
+            Plugin = CreatePluginDescriptor("mcp"),
+            Services = NoopPluginServices.Create(),
+            Scope = PluginScope.Global,
+            Command = plugin.GetAltaCommands().Single(),
+        });
+        var dispatcher = CreateDispatcher(catalog);
+        var tool = AltaSessionToolFactory.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = "session-a" });
+        using var arguments = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            args = new[] { "mcp", "activate", "memory" },
+            cwd = project.Path,
+        }));
+
+        var result = await tool.Handler(CreateInvocation(arguments.RootElement), CancellationToken.None).ConfigureAwait(false);
+        var prompt = await plugin.GetSystemPromptContributions().Single().Content(
+            new PluginSystemPromptContext
+            {
+                Plugin = CreatePluginDescriptor("mcp"),
+                Services = NoopPluginServices.Create(),
+                ProjectPath = project.Path,
+                SessionId = "session-a",
+            },
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success, result.Error);
+        Assert.IsNotNull(prompt);
+        StringAssert.Contains(prompt, "- Active: `memory`");
+        StringAssert.Contains(prompt, "- Inactive (`alta mcp activate <id>*`): (none)");
     }
 
     [TestMethod]
@@ -642,6 +687,59 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Success, capabilities.ExitCode);
         var capability = ReadJsonLines(capabilities.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.capabilities");
         AssertJsonArrayContains(capability.GetProperty("paths"), "statistics");
+    }
+
+    [TestMethod]
+    public async Task PluginAltaCommandContribution_ReceivesCallerSourceContext()
+    {
+        var plugin = CreatePluginDescriptor("source-plugin");
+        var catalog = new FakeAltaPluginCatalog(
+            new AltaPluginCommandContribution
+            {
+                Plugin = plugin,
+                Services = NoopPluginServices.Create(),
+                Scope = PluginScope.Global,
+                Command = new PluginAltaCommandContribution
+                {
+                    Path = "caller-context",
+                    Description = "Report caller context supplied to a plugin command.",
+                    Policy = new PluginAltaCommandPolicy { RequiresInProcessRuntime = true },
+                    CreateCommandNode = pluginContext =>
+                    {
+                        var command = new Command("caller-context", "Report caller context.");
+                        command.Add((_, _) =>
+                        {
+                            AltaJsonlWriter.WriteRecord(pluginContext.Stdout, new
+                            {
+                                type = "alta.plugin.caller_context",
+                                version = 1,
+                                correlationId = pluginContext.CorrelationId,
+                                sourceSessionId = pluginContext.SourceSessionId,
+                                sourceProjectId = pluginContext.SourceProjectId,
+                                sourceAgentId = pluginContext.SourceAgentId,
+                            });
+                            return new ValueTask<int>(AltaExitCodes.Success);
+                        });
+                        return command;
+                    },
+                },
+            });
+        var dispatcher = CreateDispatcher(catalog);
+        var caller = new AltaCallerIdentity
+        {
+            Kind = "agent",
+            SourceSessionId = "session-123",
+            SourceProjectId = "project-456",
+            SourceAgentId = "agent-789",
+        };
+
+        var result = await dispatcher.InvokeAsync(["caller-context"], caller: caller).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+        var record = ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.plugin.caller_context");
+        Assert.AreEqual("session-123", record.GetProperty("sourceSessionId").GetString());
+        Assert.AreEqual("project-456", record.GetProperty("sourceProjectId").GetString());
+        Assert.AreEqual("agent-789", record.GetProperty("sourceAgentId").GetString());
     }
 
     [TestMethod]
@@ -1683,6 +1781,71 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Failure, send.ExitCode);
         Assert.IsInstanceOfType(errorEvent.Event, typeof(AgentErrorEvent));
         Assert.AreEqual("provider runtime rejected request shape", failedEvent.Event.Message);
+    }
+
+    [TestMethod]
+    public async Task SessionSend_AppliesHeadlessPluginPromptAndToolAugmentation()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var ProviderId = new ModelProviderId("headless-plugin");
+        var providerRuntime = new StatefulProviderRuntime(ProviderId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var registry = new PluginContributionRegistry();
+        ActivePluginInstance? active = null;
+        var services = new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime)
+            .Add(new PluginOrchestrationBridge(new PluginContributionAdapterService(registry), () => active is null ? [] : [active]));
+        var dispatcher = CreateDispatcher(services);
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        var initialSend = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "before activation"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var initialRunId = ReadJsonLines(initialSend.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.submitted").GetProperty("runId").GetString()!;
+        providerRuntime.PublishIdle(sessionId, new AgentRunId(initialRunId));
+        SessionViewDescriptor? activeSession = null;
+        await WaitUntilAsync(() =>
+        {
+            activeSession = runtime.TryGetActiveSessionDescriptorAsync(sessionId).ConfigureAwait(false).GetAwaiter().GetResult();
+            return activeSession is not null && !runtime.HasActiveRunAsync(activeSession).ConfigureAwait(false).GetAwaiter().GetResult();
+        }).ConfigureAwait(false);
+        var activator = new PluginRuntimeActivator(registry);
+        var activation = await activator.ActivateAsync(
+            CreateDiscovered<HeadlessRunAugmentationPlugin>(),
+            sourcePackage: null,
+            loadContext: null,
+            new PluginActivationOptions { HostInfo = CreateHeadlessPluginHostInfo(root.Path) }).ConfigureAwait(false);
+        Assert.IsTrue(activation.Succeeded, string.Join(Environment.NewLine, activation.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.IsNotNull(activation.ActivePlugin);
+        active = activation.ActivePlugin;
+        var directAugmentation = await services.Get<PluginOrchestrationBridge>()!.BuildAgentRunAugmentationAsync(
+            new SessionExecutionOptions
+            {
+                ProviderId = ProviderId,
+                WorkingDirectory = root.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            },
+            AgentInput.Text("direct check")).ConfigureAwait(false);
+        Assert.IsTrue(directAugmentation.Tools?.Any(static tool => tool.Spec.Name == "mcp__fixture__read") == true);
+        var send = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "after activation"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, initialSend.ExitCode, initialSend.Stderr);
+        Assert.AreEqual(AltaExitCodes.Success, send.ExitCode, send.Stderr);
+        Assert.AreEqual(1, providerRuntime.CreatedOptions.Count);
+        Assert.AreEqual(1, providerRuntime.ResumedOptions.Count, "Sending after plugin activation must refresh the provider session with updated prompt and tool schemas.");
+        var refreshedCreate = providerRuntime.ResumedOptions.Last();
+        Assert.IsNotNull(refreshedCreate.Tools);
+        Assert.IsTrue(refreshedCreate.Tools.Any(static tool => tool.Spec.Name == "mcp__fixture__read"));
+        Assert.IsNotNull(refreshedCreate.SystemMessage);
+        Assert.IsNotNull(refreshedCreate.DeveloperInstructions);
+        StringAssert.Contains(refreshedCreate.SystemMessage!, "headless fixture system prompt");
+        StringAssert.Contains(refreshedCreate.DeveloperInstructions!, "headless fixture developer prompt");
+
+        await active.DeactivateAsync(TimeSpan.FromSeconds(5));
     }
 
     [TestMethod]
@@ -2844,12 +3007,64 @@ public sealed class AltaLiveToolTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    private static DiscoveredPluginType CreateDiscovered<TPlugin>()
+        where TPlugin : PluginBase
+        => new()
+        {
+            Type = typeof(TPlugin),
+            Descriptor = PluginDescriptorFactory.FromType(typeof(TPlugin)),
+        };
+
+    private static PluginHostInfo CreateHeadlessPluginHostInfo(string userDataDirectory)
+        => new()
+        {
+            ApplicationName = "CodeAlta.Tests",
+            Version = "1.0.0",
+            HostApiVersion = "1.0.0",
+            UserDataDirectory = userDataDirectory,
+            IsHeadless = true,
+            HasInteractiveUi = false,
+        };
+
+    public sealed class HeadlessRunAugmentationPlugin : PluginBase
+    {
+        public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContributions()
+        {
+            yield return new PluginSystemPromptContribution
+            {
+                Title = "Headless Fixture System",
+                Channel = PluginPromptChannel.System,
+                Content = static (_, _) => ValueTask.FromResult<string?>("headless fixture system prompt"),
+            };
+            yield return new PluginSystemPromptContribution
+            {
+                Title = "Headless Fixture Developer",
+                Channel = PluginPromptChannel.Developer,
+                Content = static (_, _) => ValueTask.FromResult<string?>("headless fixture developer prompt"),
+            };
+        }
+
+        public override ValueTask<PluginBeforeAgentRunResult?> OnBeforeAgentRunAsync(PluginBeforeAgentRunContext context, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<PluginBeforeAgentRunResult?>(new PluginBeforeAgentRunResult
+            {
+                PreferredToolNames = ["mcp__fixture__read"],
+                AdditionalTools =
+                [
+                    new AgentToolDefinition(
+                        new AgentToolSpec("mcp__fixture__read", "Fixture MCP tool", JsonDocument.Parse("{}").RootElement.Clone()),
+                        static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("fixture tool result")]))),
+                ],
+            });
+    }
+
     private sealed class StatefulProviderRuntime(ModelProviderId providerId) : ITestModelProviderSessionRuntime
     {
         private readonly Dictionary<string, List<Action<AgentEvent>>> _subscriptions = new(StringComparer.Ordinal);
         private int _nextSession;
 
         public List<AgentSessionCreateOptions> CreatedOptions { get; } = [];
+
+        public List<AgentSessionResumeOptions> ResumedOptions { get; } = [];
 
         public List<AgentSendOptions> SentOptions { get; } = [];
 
@@ -2894,6 +3109,7 @@ public sealed class AltaLiveToolTests
 
         public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
         {
+            ResumedOptions.Add(options);
             var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
             return Task.FromResult<IAgentSession>(new StatefulAgentSession(this, ProviderId, sessionId, workingDirectory));
         }

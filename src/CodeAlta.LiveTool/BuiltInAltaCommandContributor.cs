@@ -6,6 +6,8 @@ using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Plugins;
+using CodeAlta.Plugins;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -1803,6 +1805,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             ? BuildPeerAgentMessage(context, info.Session, options, promptResult.Prompt!)
             : promptResult.Prompt!;
         var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info).ConfigureAwait(false);
+        var agentInput = AgentInput.Text(inputText);
 
         try
         {
@@ -1818,18 +1821,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 return AltaExitCodes.Success;
             }
 
-            if (kind == PromptDispatchKind.Steer)
-            {
-                var runId = await runtime.SteerAsync(
-                    info.Session,
-                    executionOptions,
-                    new AgentSteerOptions { Input = AgentInput.Text(inputText) },
-                    context.CancellationToken).ConfigureAwait(false);
-                await PersistPromptProvenanceAsync(context, info.Session, runId.Value, queued: false, kind, inputText).ConfigureAwait(false);
-                WritePromptResult(context, "alta.session.steered", info.Session, runId.Value, null, queued: false, kind, inputText);
-                return AltaExitCodes.Success;
-            }
-
             if (options.QueueIfBusy && await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false))
             {
                 var queueItem = await runtime.QueuePromptAsync(
@@ -1842,10 +1833,31 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 return AltaExitCodes.Success;
             }
 
+            var augmentation = await BuildPluginAgentRunAugmentationAsync(context, info, executionOptions, agentInput).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
+            {
+                return PermissionDenied(context, "plugin.runCancelled", augmentation.CancelReason);
+            }
+
+            agentInput = augmentation.Input;
+            executionOptions = augmentation.ExecutionOptions;
+
+            if (kind == PromptDispatchKind.Steer)
+            {
+                var runId = await runtime.SteerAsync(
+                    info.Session,
+                    executionOptions,
+                    new AgentSteerOptions { Input = agentInput },
+                    context.CancellationToken).ConfigureAwait(false);
+                await PersistPromptProvenanceAsync(context, info.Session, runId.Value, queued: false, kind, inputText).ConfigureAwait(false);
+                WritePromptResult(context, "alta.session.steered", info.Session, runId.Value, null, queued: false, kind, inputText);
+                return AltaExitCodes.Success;
+            }
+
             var sendTask = runtime.SendAsync(
                 info.Session,
                 executionOptions,
-                new AgentSendOptions { Input = AgentInput.Text(inputText) },
+                new AgentSendOptions { Input = agentInput },
                 IsAgentCaller(context) ? CancellationToken.None : context.CancellationToken);
 
             if (IsAgentCaller(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask).ConfigureAwait(false) && !sendTask.IsCompleted)
@@ -2363,6 +2375,74 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             OnUserInputRequest = static (_, _) => Task.FromResult(new AgentUserInputResponse(new Dictionary<string, string>(StringComparer.Ordinal))),
         };
     }
+
+    private static async Task<AltaPluginAgentRunAugmentation> BuildPluginAgentRunAugmentationAsync(
+        AltaCommandContext context,
+        AltaSessionInfo info,
+        SessionExecutionOptions executionOptions,
+        AgentInput input)
+    {
+        var pluginBridge = context.Services.Get<PluginOrchestrationBridge>();
+        if (pluginBridge is null)
+        {
+            return new AltaPluginAgentRunAugmentation(executionOptions, input);
+        }
+
+        var pluginOptions = new PluginAdapterOperationOptions
+        {
+            ProjectId = info.Session.ProjectRef,
+            ProjectPath = executionOptions.WorkingDirectory,
+            SessionId = info.Session.SessionId,
+            ProviderId = executionOptions.ProviderId.Value,
+            Model = executionOptions.Model,
+            IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(executionOptions.ProviderId),
+        };
+        var augmentation = await pluginBridge.BuildAgentRunAugmentationAsync(executionOptions, input, pluginOptions, context.CancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
+        {
+            return new AltaPluginAgentRunAugmentation(executionOptions, input, augmentation.CancelReason);
+        }
+
+        return new AltaPluginAgentRunAugmentation(
+            CopyExecutionOptions(executionOptions, augmentation),
+            augmentation.Input ?? input);
+    }
+
+    private static SessionExecutionOptions CopyExecutionOptions(SessionExecutionOptions source, PluginAgentRunAugmentation augmentation)
+        => new()
+        {
+            ProviderId = source.ProviderId,
+            ProviderKey = source.ProviderKey,
+            WorkingDirectory = source.WorkingDirectory,
+            ProjectRoots = source.ProjectRoots,
+            Model = source.Model,
+            ReasoningEffort = source.ReasoningEffort,
+            Tools = augmentation.Tools ?? source.Tools,
+            AdditionalSystemMessage = AppendPromptText(source.AdditionalSystemMessage, augmentation.AdditionalSystemMessage),
+            AdditionalDeveloperInstructions = AppendPromptText(source.AdditionalDeveloperInstructions, augmentation.AdditionalDeveloperInstructions),
+            PreferredToolNames = source.PreferredToolNames.Concat(augmentation.PreferredToolNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            OnPermissionRequest = source.OnPermissionRequest,
+            OnUserInputRequest = source.OnUserInputRequest,
+        };
+
+    private static string? AppendPromptText(string? existing, string? additional)
+    {
+        if (string.IsNullOrWhiteSpace(existing))
+        {
+            return string.IsNullOrWhiteSpace(additional) ? null : additional;
+        }
+
+        if (string.IsNullOrWhiteSpace(additional))
+        {
+            return existing;
+        }
+
+        return existing.TrimEnd() + "\n\n" + additional.Trim();
+    }
+
+    private static bool IsCodeAltaManagedProvider(ModelProviderId providerId)
+        => !string.Equals(providerId.Value, ModelProviderIds.Codex.Value, StringComparison.OrdinalIgnoreCase) &&
+           !string.Equals(providerId.Value, ModelProviderIds.Copilot.Value, StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(
         AltaCommandContext context,
@@ -3892,6 +3972,8 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
         public static PromptReadResult Fail(int exitCode) => new(exitCode, null);
     }
+
+    private sealed record AltaPluginAgentRunAugmentation(SessionExecutionOptions ExecutionOptions, AgentInput Input, string? CancelReason = null);
 
     private sealed record ParentSessionResolutionResult(int ExitCode, string? ParentSessionId)
     {
