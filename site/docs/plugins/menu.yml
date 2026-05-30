@@ -3,3 +3,4 @@ doc:
   - {path: github.md, title: "GitHub"}
   - {path: mcp.md, title: "MCP"}
   - {path: statistics.md, title: "Statistics"}
+  - {path: developers.md, title: "For developers"}

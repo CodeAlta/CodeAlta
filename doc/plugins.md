@@ -38,7 +38,7 @@ public sealed class HelloPlugin : PluginBase
 
     public override IEnumerable<PluginUiContribution> GetUiContributions()
     {
-        yield return PluginUi.Status("Hello", static _ => "hello plugin active");
+        yield return PluginUi.SessionStatus("Hello", "active");
         yield return PluginUi.Visual(PluginUiRegion.SessionFooter, static _ => new Markup("[dim]Hello plugin[/]"));
     }
 }
@@ -125,7 +125,7 @@ Open plugin management with `Ctrl+G Ctrl+N` or the command palette (search for `
 - tool-call and tool-result hooks;
 - normalized agent-event observers;
 - compaction hooks;
-- UI contributions such as status rows, visuals, dialogs, and renderers;
+- UI contributions such as status rows, visuals, and renderers;
 - transient session/timeline projections (current APIs still use some legacy `Session` names);
 - resource roots for skills, system prompts, templates, themes, and MCP manifests;
 - plugin-lifetime background tasks through `IPluginTaskService`.
@@ -174,7 +174,11 @@ Resource roots expose plugin package content to host services:
 public override IEnumerable<PluginResourceContribution> GetResources()
 {
     yield return Resources.SkillRoot("skills");
-    yield return Resources.SystemPromptRoot("prompts");
+    yield return new PluginResourceContribution
+    {
+        Kind = PluginResourceKind.SystemPromptRoot,
+        Path = "prompts",
+    };
 }
 ```
 

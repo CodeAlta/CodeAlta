@@ -164,7 +164,7 @@ CodeAlta should support trusted local plugins that remain visible as source and 
 **What this means in practice:**
 
 - Plugins should be able to live under `~/.alta/plugins/` or project `.alta/plugins/` folders.
-- Plugins should be able to add commands, prompt processors, UI regions, tools, provider factories, timeline projections, and `alta` live-tool commands.
+- Plugins should be able to add commands, prompt processors, UI regions, tools, resource roots, timeline projections, and `alta` live-tool commands.
 - Plugin diagnostics, state, and contributions should be inspectable.
 - Safe-mode and no-plugin startup paths should provide recovery when extension code breaks.
 
