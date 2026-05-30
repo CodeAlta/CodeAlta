@@ -861,6 +861,90 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexRejectsStreamWithoutCompletedPayload()
+    {
+        var partialUpdates = new StreamingResponseUpdate[]
+        {
+            CreateCreatedResponseUpdate(
+                responseId: "response-started-without-terminal",
+                modelId: "gpt-5.3-codex"),
+            CreateOutputItemDoneUpdate(
+                outputIndex: 0,
+                item: ResponseItem.CreateAssistantMessageItem("Partial answer.", [])),
+        };
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            partialUpdates,
+            partialUpdates,
+            partialUpdates,
+            partialUpdates,
+            partialUpdates,
+            partialUpdates,
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+            },
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(6, responsesClient.Requests.Count);
+        StringAssert.Contains(exception.Failure.Message, "ended prematurely before a terminal response");
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexRejectsTerminalReasoningOnlyResponse()
+    {
+        var reasoningOnlyResponse = new ResponseResult
+        {
+            Id = "response-reasoning-only",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Model = "gpt-5.3-codex",
+            Status = ResponseStatus.Completed,
+        };
+        reasoningOnlyResponse.OutputItems.Add(new ReasoningResponseItem("Still thinking."));
+        var reasoningOnlyUpdate = CreateCompletedUpdate(reasoningOnlyResponse);
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [reasoningOnlyUpdate],
+            [reasoningOnlyUpdate],
+            [reasoningOnlyUpdate],
+            [reasoningOnlyUpdate],
+            [reasoningOnlyUpdate],
+            [reasoningOnlyUpdate],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+            },
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(6, responsesClient.Requests.Count);
+        StringAssert.Contains(exception.Failure.Message, "terminal response did not contain assistant output or a tool call");
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_NormalizesRotatingCopilotDeltaItemIds()
     {
         var streamMessageItem = ResponseItem.CreateAssistantMessageItem(string.Empty, []);
@@ -1960,6 +2044,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             Model = "gpt-5.3-codex",
             Status = ResponseStatus.Completed,
         };
+        fallbackResponse.OutputItems.Add(ResponseItem.CreateAssistantMessageItem("HTTP fallback answer.", []));
         var responsesClient = new RecordingOpenAIResponseClient(
         [
             [CreateCompletedUpdate(fallbackResponse)],
@@ -1983,7 +2068,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(6, webSocketSession.RequestCount);
         Assert.AreEqual(1, responsesClient.Requests.Count);
         Assert.AreEqual("response-http-empty", response.ProviderSessionId);
-        Assert.AreEqual(0, response.AssistantMessage.Parts.Count);
+        Assert.AreEqual("HTTP fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
     [TestMethod]
@@ -2778,8 +2863,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     static (_, _) => ValueTask.CompletedTask))
             .ConfigureAwait(false);
 
-        StringAssert.Contains(exception.Failure.Message, "expected protocol");
-        StringAssert.Contains(exception.Failure.Message, "terminal response payload");
+        StringAssert.Contains(exception.Failure.Message, "ended prematurely");
+        StringAssert.Contains(exception.Failure.Message, "terminal response");
     }
 
     [TestMethod]

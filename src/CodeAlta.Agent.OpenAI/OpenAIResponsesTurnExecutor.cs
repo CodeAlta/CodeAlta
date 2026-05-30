@@ -284,6 +284,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     WriteCodexConsoleDiagnostic(
                         provider,
                         $"stream end latestOutputItems={latestResponse?.OutputItems.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "(none)"} streamedOutputItems={streamedOutputItems.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} terminal={(completedResponse is null ? "(none)" : completedResponse.Status.ToString())}");
+                    var receivedTerminalResponse = completedResponse is not null;
+                    if (provider.CodexSubscription is not null && !receivedTerminalResponse)
+                    {
+                        throw new InvalidOperationException("ChatGPT/Codex response stream closed before response.completed.");
+                    }
+
                     completedResponse = CreateResponseFromTerminalOrStreamedItems(
                         request,
                         completedResponse,
@@ -306,6 +312,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     }
 
                     var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(request, completedResponse, streamedOutputItemIds);
+                    ValidateCodexTerminalResponseShape(provider, assistantMessage);
                     attemptState.CommittedFinalContent = true;
                     UpdateLiveContinuation(request, fullOptions, completedResponse, assistantMessage);
                     WriteCodexConsoleDiagnostic(
@@ -1463,6 +1470,26 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds);
     }
 
+    private static void ValidateCodexTerminalResponseShape(
+        OpenAIProviderOptions provider,
+        AgentConversationMessage assistantMessage)
+    {
+        if (provider.CodexSubscription is null)
+        {
+            return;
+        }
+
+        if (assistantMessage.Parts.Any(static part =>
+                part is AgentMessagePart.ToolCall ||
+                part is AgentMessagePart.Text text && !string.IsNullOrWhiteSpace(text.Value)))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "ChatGPT/Codex terminal response completed without assistant output or a tool call.");
+    }
+
     private static string? ResolveCompletedItemContentId(
         ResponseResult response,
         ResponseItem item,
@@ -2031,13 +2058,6 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return new InvalidOperationException(message, exception);
         }
 
-        if (IsPrematureResponseEnded(exception))
-        {
-            return new InvalidOperationException(
-                "ChatGPT/Codex response stream ended prematurely before a terminal response was received. This is usually a transient network or service hiccup; retry the prompt if no answer was recorded.",
-                exception);
-        }
-
         if (exception is JsonException ||
             exception is InvalidOperationException invalidOperationException &&
             invalidOperationException.Message.Contains(
@@ -2046,6 +2066,20 @@ internal sealed class OpenAIResponsesTurnExecutor(
         {
             return new InvalidOperationException(
                 "ChatGPT/Codex response stream did not match the expected protocol; no terminal response payload was received.",
+                exception);
+        }
+
+        if (IsCodexTerminalResponseWithoutAssistantOutput(exception))
+        {
+            return new InvalidOperationException(
+                "ChatGPT/Codex response stream did not match the expected protocol; terminal response did not contain assistant output or a tool call.",
+                exception);
+        }
+
+        if (IsPrematureResponseEnded(exception))
+        {
+            return new InvalidOperationException(
+                "ChatGPT/Codex response stream ended prematurely before a terminal response was received. This is usually a transient network or service hiccup; retry the prompt if no answer was recorded.",
                 exception);
         }
 
@@ -2207,6 +2241,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return "stream_idle_timeout";
         }
 
+        if (IsCodexTerminalResponseWithoutAssistantOutput(exception))
+        {
+            return "terminal_response_without_assistant_output";
+        }
+
         if (TryGetResponsesErrorCode(exception, out var errorCode))
         {
             return errorCode;
@@ -2241,6 +2280,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         if (exception.Message.Contains("stream closed before a terminal response event", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (exception.Message.Contains("stream closed before response.completed", StringComparison.OrdinalIgnoreCase) ||
+            exception.Message.Contains("terminal response payload", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -2293,6 +2338,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         if (IsWebSocketTransportTimeout(exception))
+        {
+            return true;
+        }
+
+        if (IsCodexTerminalResponseWithoutAssistantOutput(exception))
         {
             return true;
         }
@@ -2374,6 +2424,17 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         return exception.InnerException is not null && IsWebSocketTransportTimeout(exception.InnerException);
+    }
+
+    private static bool IsCodexTerminalResponseWithoutAssistantOutput(Exception exception)
+    {
+        if (exception is InvalidOperationException &&
+            exception.Message.Contains("terminal response completed without assistant output or a tool call", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return exception.InnerException is not null && IsCodexTerminalResponseWithoutAssistantOutput(exception.InnerException);
     }
 
     private static bool IsNonRetryableCodexSubscriptionLimit(Exception exception)
