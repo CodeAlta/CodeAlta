@@ -75,6 +75,8 @@ public sealed class AltaCommandRegistry
         app.Add("  `alta session tail <session-id> --last 10 --include assistant`");
         app.Add("  `alta session create --project <project> --reasoning low`");
         app.Add("  `alta session create --project <project> --same-model-as <session-id>`");
+        app.Add("  `alta prompt list`; `alta prompt create <prompt-id> --scope global --stdin`");
+        app.Add("  `alta session send <session-id> --prompt-id <prompt-id> --stdin`");
         app.Add("  `alta session send <session-id> --stdin`");
         app.Add("  `alta session steer <session-id> --message \"...\"`");
         app.Add("  `alta session request <session-id> --reply-requested --stdin`");

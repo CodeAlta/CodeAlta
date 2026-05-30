@@ -6,6 +6,7 @@ using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Extensions.CodeEditor.TextMateSharp;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Hosting;
 
@@ -14,6 +15,19 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class PromptManagementDialogTests
 {
+    [TestMethod]
+    public void BodyEditorUsesMarkdownSyntaxHighlighter()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var promptDialog = CreatePromptDialog(tempDirectory.Path);
+
+        var editor = GetPrivateField<CodeEditor>(promptDialog, "_bodyEditor");
+        var highlighter = Assert.IsInstanceOfType<TextMateCodeEditorSyntaxHighlighter>(editor.SyntaxHighlighter);
+
+        Assert.AreEqual("markdown", highlighter.Options.LanguageId);
+        Assert.AreEqual("prompt.md", highlighter.Options.FileName);
+    }
+
     [TestMethod]
     public void DeleteKeyInsideBodyEditorDeletesTextInsteadOfPrompt()
     {
@@ -87,6 +101,71 @@ public sealed class PromptManagementDialogTests
         }
     }
 
+    [TestMethod]
+    public void SystemPromptTabDisplaysGlobalSystemPromptForEditing()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var systemPromptPath = WriteSystemPrompt(tempDirectory.Path, body: "abc");
+        var promptDialog = CreatePromptDialog(tempDirectory.Path);
+
+        using var terminalSession = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(120, 40)), new TerminalOptions { ImplicitStartInput = true }, force: true);
+        var app = new TerminalApp(
+            new TextBlock("Host"),
+            terminalSession.Instance,
+            new TerminalAppOptions
+            {
+                HostKind = TerminalHostKind.Fullscreen,
+            });
+
+        InvokeTerminalApp(app, "BeginRun");
+        try
+        {
+            promptDialog.Show();
+            TickTerminalApp(app);
+            var tabs = app.Root.EnumerateVisualsDepthFirst().OfType<TabControl>().First();
+            tabs.SelectedIndex = 1;
+            TickTerminalApp(app);
+            var editor = GetPrivateField<CodeEditor>(promptDialog, "_bodyEditor");
+            editor.CaretIndex = 0;
+            app.Focus(editor);
+
+            DispatchKeyEvent(app, TerminalKey.Delete);
+
+            Assert.AreEqual("bc", GetEditorText(editor));
+            Assert.AreEqual(1, CountDialogs(app));
+            Assert.IsTrue(File.Exists(systemPromptPath));
+        }
+        finally
+        {
+            InvokeTerminalApp(app, "EndRun");
+        }
+    }
+
+    [TestMethod]
+    public void SystemPromptCatalogListsBuiltInAndOverrideWithoutOverwritingBuiltIn()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var appBase = Path.Combine(tempDirectory.Path, "app");
+        var builtInPath = WriteSystemPromptRoot(Path.Combine(appBase, "content", "instructions"), "default", "built-in body");
+        var overridePath = WriteSystemPromptRoot(Path.Combine(tempDirectory.Path, "global", "instructions"), "default", "override body");
+        var catalog = new UserPromptCatalog(new FileSystemPromptContentLocator(appBase));
+
+        var prompts = catalog.ListSystemPrompts(new UserPromptCatalogQuery
+        {
+            UserCodeAltaRoot = Path.Combine(tempDirectory.Path, "global"),
+        });
+
+        Assert.AreEqual(2, prompts.Count);
+        var builtIn = prompts.Single(prompt => prompt.IsBuiltIn);
+        var userGlobal = prompts.Single(prompt => prompt.SourceKind == UserPromptSourceKind.UserGlobal);
+        Assert.AreEqual(Path.GetFullPath(builtInPath), builtIn.SourcePath);
+        Assert.AreEqual(Path.GetFullPath(overridePath), userGlobal.SourcePath);
+        Assert.IsTrue(builtIn.IsShadowed);
+        Assert.IsFalse(userGlobal.IsShadowed);
+        Assert.AreEqual("built-in body", builtIn.Body);
+        Assert.AreEqual("override body", userGlobal.Body);
+    }
+
     private static PromptManagementDialog CreatePromptDialog(string root)
     {
         var globalRoot = Path.Combine(root, "global");
@@ -108,6 +187,18 @@ public sealed class PromptManagementDialogTests
         Directory.CreateDirectory(promptDirectory);
         var promptPath = Path.Combine(promptDirectory, "custom.prompt.md");
         File.WriteAllText(promptPath, $"---\nname: Custom Prompt\n---\n{body}\n");
+        return promptPath;
+    }
+
+    private static string WriteSystemPrompt(string root, string body)
+        => WriteSystemPromptRoot(Path.Combine(root, "global", "instructions"), "custom", body);
+
+    private static string WriteSystemPromptRoot(string instructionsRoot, string id, string body)
+    {
+        var promptDirectory = Path.Combine(instructionsRoot, "system");
+        Directory.CreateDirectory(promptDirectory);
+        var promptPath = Path.Combine(promptDirectory, id + ".system-prompt.md");
+        File.WriteAllText(promptPath, body + "\n");
         return promptPath;
     }
 

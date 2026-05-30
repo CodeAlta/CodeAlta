@@ -55,7 +55,9 @@ The file name supplies the prompt id. For example, `reviewer.prompt.md` creates 
 
 Use the **Prompt:** selector below the prompt editor to choose the prompt for a draft or session. CodeAlta stores draft prompt preferences per global/project scope and session prompt selections in session-local state, alongside provider/model/reasoning preferences.
 
-Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt`. It lists built-in, global, and project prompts; shows shadowed overrides; and lets you create, edit, save, or delete global/project prompt files. Built-in prompts are visible for inspection but read-only. Creating a global or project prompt with the same id as a lower-precedence prompt overrides it.
+Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt`. The default **Prompt** tab lists built-in, global, and project user prompts; shows shadowed overrides; and lets you create, edit, save, or delete global/project prompt files. The **System Prompt** tab uses the same source precedence for system prompt files and lets you inspect built-ins while editing only global/project override files. Built-in prompt and system prompt files are visible for inspection but read-only. Creating a global or project prompt/system prompt with the same id as a lower-precedence resource overrides it.
+
+The live tool exposes the same resources for automation. Use `alta prompt list --scope all` to discover prompt ids, add `--system` to target system prompts, and add `--verbose` to include full prompt content. Use `alta prompt show <prompt-id>` for one prompt, `alta prompt create <prompt-id> --scope global|project --name <name> --stdin` to create a complete prompt file, and `alta prompt edit <prompt-id> --scope global|project` to get or update an editable file path. For one-off sends, `alta session send <session-id> --prompt-id <prompt-id> --stdin` runs the session with that user prompt; omit `--prompt-id` to keep the default/current selection.
 
 ## System prompts and templates
 

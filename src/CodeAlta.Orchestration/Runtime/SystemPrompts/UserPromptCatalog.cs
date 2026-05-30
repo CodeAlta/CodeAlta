@@ -63,6 +63,46 @@ public sealed class UserPromptCatalog
     }
 
     /// <summary>
+    /// Lists every valid system prompt file in display/source order.
+    /// </summary>
+    /// <param name="query">Discovery inputs.</param>
+    /// <returns>All valid system prompt descriptors, including shadowed lower-precedence prompts.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="query"/> is <see langword="null"/>.</exception>
+    public IReadOnlyList<SystemPromptDescriptor> ListSystemPrompts(UserPromptCatalogQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var roots = ResolveRoots(query);
+        var prompts = EnumerateSystemPromptRoots(roots)
+            .SelectMany(static root => LoadSystemPrompts(root))
+            .OrderBy(static prompt => prompt.Precedence)
+            .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static prompt => prompt.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (prompts.Length == 0)
+        {
+            return prompts;
+        }
+
+        var effectiveByName = prompts
+            .GroupBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.OrderBy(static prompt => prompt.Precedence).Last(),
+                StringComparer.OrdinalIgnoreCase);
+
+        return prompts
+            .Select(prompt =>
+            {
+                var effective = effectiveByName[prompt.PromptName];
+                return ReferenceEquals(prompt, effective)
+                    ? prompt
+                    : prompt with { IsShadowed = true, ShadowedByPath = effective.SourcePath };
+            })
+            .ToArray();
+    }
+
+    /// <summary>
     /// Lists effective user prompts after applying source precedence.
     /// </summary>
     /// <param name="query">Discovery inputs.</param>
@@ -124,6 +164,31 @@ public sealed class UserPromptCatalog
         return ResolveRoots(query).ProjectPromptRoot;
     }
 
+    /// <summary>
+    /// Resolves the global system prompt directory for the query.
+    /// </summary>
+    /// <param name="query">Discovery inputs.</param>
+    /// <returns>The absolute global system prompt directory path.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="query"/> is <see langword="null"/>.</exception>
+    public string ResolveUserSystemPromptDirectory(UserPromptCatalogQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return Path.Combine(ResolveRoots(query).UserPromptRoot, "system");
+    }
+
+    /// <summary>
+    /// Resolves the project-local system prompt directory for the query.
+    /// </summary>
+    /// <param name="query">Discovery inputs.</param>
+    /// <returns>The project system prompt directory path, or <see langword="null"/> when no project root is available.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="query"/> is <see langword="null"/>.</exception>
+    public string? ResolveProjectSystemPromptDirectory(UserPromptCatalogQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var root = ResolveRoots(query).ProjectPromptRoot;
+        return root is null ? null : Path.Combine(root, "system");
+    }
+
     private SystemPromptContentRoots ResolveRoots(UserPromptCatalogQuery query)
         => _contentLocator.GetRoots(new SystemPromptDiscoveryContext
         {
@@ -152,11 +217,40 @@ public sealed class UserPromptCatalog
         }
     }
 
+    private static IEnumerable<UserPromptRoot> EnumerateSystemPromptRoots(SystemPromptContentRoots roots)
+    {
+        if (Directory.Exists(Path.Combine(roots.ShippedPromptRoot, "system")))
+        {
+            yield return new UserPromptRoot(UserPromptSourceKind.BuiltIn, 0, Path.Combine(roots.ShippedPromptRoot, "system"));
+        }
+
+        if (Directory.Exists(Path.Combine(roots.UserPromptRoot, "system")))
+        {
+            yield return new UserPromptRoot(UserPromptSourceKind.UserGlobal, 1, Path.Combine(roots.UserPromptRoot, "system"));
+        }
+
+        if (roots.ProjectPromptResourcesTrusted && roots.ProjectPromptRoot is not null && Directory.Exists(Path.Combine(roots.ProjectPromptRoot, "system")))
+        {
+            yield return new UserPromptRoot(UserPromptSourceKind.Project, 2, Path.Combine(roots.ProjectPromptRoot, "system"));
+        }
+    }
+
     private static IEnumerable<UserPromptDescriptor> LoadPrompts(UserPromptRoot root)
     {
         foreach (var path in Directory.EnumerateFiles(root.Path, "*.prompt.md", SearchOption.TopDirectoryOnly))
         {
             if (TryLoadPrompt(root, path, out var descriptor))
+            {
+                yield return descriptor;
+            }
+        }
+    }
+
+    private static IEnumerable<SystemPromptDescriptor> LoadSystemPrompts(UserPromptRoot root)
+    {
+        foreach (var path in Directory.EnumerateFiles(root.Path, "*.system-prompt.md", SearchOption.TopDirectoryOnly))
+        {
+            if (TryLoadSystemPrompt(root, path, out var descriptor))
             {
                 yield return descriptor;
             }
@@ -200,6 +294,43 @@ public sealed class UserPromptCatalog
             DisplayName: displayName,
             Description: NormalizeOptionalText(frontmatter.GetValueOrDefault("description")),
             SystemPromptName: systemPromptName,
+            Body: trimmedBody,
+            SourceKind: root.SourceKind,
+            Precedence: root.Precedence,
+            SourcePath: Path.GetFullPath(path),
+            ContentHash: HashText(trimmedBody),
+            IsShadowed: false,
+            ShadowedByPath: null);
+        return true;
+    }
+
+    private static bool TryLoadSystemPrompt(UserPromptRoot root, string path, out SystemPromptDescriptor descriptor)
+    {
+        descriptor = null!;
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        var (_, body) = SplitFrontmatter(text);
+        var promptName = Path.GetFileName(path);
+        promptName = promptName.EndsWith(".system-prompt.md", StringComparison.OrdinalIgnoreCase)
+            ? promptName[..^".system-prompt.md".Length]
+            : Path.GetFileNameWithoutExtension(path);
+        var normalizedPromptName = NormalizePromptName(promptName);
+        var trimmedBody = body.Trim();
+        if (normalizedPromptName is null || string.IsNullOrWhiteSpace(trimmedBody))
+        {
+            return false;
+        }
+
+        descriptor = new SystemPromptDescriptor(
+            PromptName: normalizedPromptName,
             Body: trimmedBody,
             SourceKind: root.SourceKind,
             Precedence: root.Precedence,
@@ -327,6 +458,31 @@ public sealed record UserPromptDescriptor(
     string DisplayName,
     string? Description,
     string SystemPromptName,
+    string Body,
+    UserPromptSourceKind SourceKind,
+    int Precedence,
+    string SourcePath,
+    string ContentHash,
+    bool IsShadowed,
+    string? ShadowedByPath)
+{
+    /// <summary>Gets a value indicating whether the prompt is built into CodeAlta.</summary>
+    public bool IsBuiltIn => SourceKind == UserPromptSourceKind.BuiltIn;
+}
+
+/// <summary>
+/// Describes a discovered system prompt resource.
+/// </summary>
+/// <param name="PromptName">The file-derived system prompt identifier.</param>
+/// <param name="Body">The system prompt body.</param>
+/// <param name="SourceKind">The prompt source kind.</param>
+/// <param name="Precedence">The source precedence where larger values override smaller values.</param>
+/// <param name="SourcePath">The absolute source file path.</param>
+/// <param name="ContentHash">The SHA-256 content hash.</param>
+/// <param name="IsShadowed">Whether a higher-precedence system prompt with the same name overrides this prompt.</param>
+/// <param name="ShadowedByPath">The overriding prompt path, when shadowed.</param>
+public sealed record SystemPromptDescriptor(
+    string PromptName,
     string Body,
     UserPromptSourceKind SourceKind,
     int Precedence,

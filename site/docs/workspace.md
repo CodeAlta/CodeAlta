@@ -137,7 +137,7 @@ Open it with `Ctrl+G Ctrl+R` or the provider summary. Use it to enable providers
 
 ## Prompt manager
 
-Open it with `Ctrl+G Ctrl+H` or `/prompt`. The dialog lists built-in, global, and project user prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. The editable properties are `name`, `description`, `system`, and the Markdown body. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt with the same id to override one.
+Open it with `Ctrl+G Ctrl+H` or `/prompt`. The dialog opens on the **Prompt** tab, which lists built-in, global, and project user prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. User prompt properties are `name`, `description`, `system`, and the Markdown body. The **System Prompt** tab lists system prompt files with the same override rules and lets you edit only global/project override bodies. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt/system prompt with the same id to override one.
 
 ## Model browser
 

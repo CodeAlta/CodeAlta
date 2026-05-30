@@ -126,6 +126,116 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task PromptListAndShow_EmitProgressivePromptRecordsForUserAndSystemScopes()
+    {
+        using var root = TempDirectory.Create();
+        var globalPromptDirectory = Path.Combine(root.Path, "instructions", "prompts");
+        var globalSystemDirectory = Path.Combine(root.Path, "instructions", "system");
+        Directory.CreateDirectory(globalPromptDirectory);
+        Directory.CreateDirectory(globalSystemDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(globalPromptDirectory, "custom.prompt.md"),
+            """
+            ---
+            name: Custom Prompt
+            description: Custom prompt description
+            system: custom-system
+            ---
+            Custom prompt body.
+            """).ConfigureAwait(false);
+        await File.WriteAllTextAsync(
+            Path.Combine(globalSystemDirectory, "custom-system.system-prompt.md"),
+            """
+            ---
+            description: Custom system description
+            ---
+            Custom system body.
+            """).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }));
+
+        var list = await dispatcher.InvokeAsync(["prompt", "list", "--scope", "global"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var showSystem = await dispatcher.InvokeAsync(["prompt", "show", "custom-system", "--system", "--scope", "global"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, list.ExitCode, list.Stderr);
+        var prompt = ReadJsonLines(list.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.prompt");
+        Assert.AreEqual("custom", prompt.GetProperty("promptId").GetString());
+        Assert.AreEqual("custom", prompt.GetProperty("id").GetString());
+        Assert.AreEqual("Custom Prompt", prompt.GetProperty("name").GetString());
+        Assert.AreEqual("Custom prompt description", prompt.GetProperty("description").GetString());
+        Assert.AreEqual("global", prompt.GetProperty("scope").GetString());
+        Assert.AreEqual("user-global", prompt.GetProperty("source").GetString());
+        Assert.AreEqual("custom-system", prompt.GetProperty("systemPromptId").GetString());
+        Assert.IsFalse(prompt.TryGetProperty("content", out _));
+
+        Assert.AreEqual(AltaExitCodes.Success, showSystem.ExitCode, showSystem.Stderr);
+        var systemPrompt = ReadJsonLines(showSystem.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.prompt");
+        Assert.AreEqual("custom-system", systemPrompt.GetProperty("promptId").GetString());
+        Assert.AreEqual("system", systemPrompt.GetProperty("promptKind").GetString());
+        Assert.AreEqual("Custom system description", systemPrompt.GetProperty("description").GetString());
+        Assert.AreEqual("Custom system body.", systemPrompt.GetProperty("content").GetString());
+    }
+
+    [TestMethod]
+    public async Task PromptEdit_WritesGlobalUserPromptFromStdin()
+    {
+        using var root = TempDirectory.Create();
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }));
+
+        var result = await dispatcher.InvokeAsync(
+                ["prompt", "edit", "created", "--scope", "global", "--stdin"],
+                caller: AltaCallerIdentity.Cli,
+                stdin: "---\nname: Created\n---\nCreated body.")
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+        var edit = ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.prompt.edit");
+        Assert.IsTrue(edit.GetProperty("updated").GetBoolean());
+        Assert.IsTrue(File.Exists(edit.GetProperty("path").GetString()!));
+        StringAssert.Contains(await File.ReadAllTextAsync(edit.GetProperty("path").GetString()!).ConfigureAwait(false), "Created body.");
+    }
+
+    [TestMethod]
+    public async Task PromptCreate_CreatesCompleteUserAndSystemPromptFiles()
+    {
+        using var root = TempDirectory.Create();
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }));
+
+        var user = await dispatcher.InvokeAsync(
+                ["prompt", "create", "reviewer", "--scope", "global", "--name", "Reviewer", "--description", "Review prompt", "--system-prompt-id", "review-system", "--content", "Review the change."],
+                caller: AltaCallerIdentity.Cli)
+            .ConfigureAwait(false);
+        var system = await dispatcher.InvokeAsync(
+                ["prompt", "create", "review-system", "--system", "--scope", "global", "--description", "Review system", "--stdin"],
+                caller: AltaCallerIdentity.Cli,
+                stdin: "Stay concise.")
+            .ConfigureAwait(false);
+        var duplicate = await dispatcher.InvokeAsync(
+                ["prompt", "create", "reviewer", "--scope", "global", "--name", "Reviewer", "--content", "Replacement."],
+                caller: AltaCallerIdentity.Cli)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, user.ExitCode, user.Stderr);
+        var userRecord = ReadJsonLines(user.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.prompt.created");
+        Assert.AreEqual("reviewer", userRecord.GetProperty("promptId").GetString());
+        Assert.AreEqual("Reviewer", userRecord.GetProperty("name").GetString());
+        Assert.AreEqual("review-system", userRecord.GetProperty("systemPromptId").GetString());
+        var userText = await File.ReadAllTextAsync(userRecord.GetProperty("path").GetString()!).ConfigureAwait(false);
+        StringAssert.Contains(userText, "name: Reviewer");
+        StringAssert.Contains(userText, "description: Review prompt");
+        StringAssert.Contains(userText, "system: review-system");
+        StringAssert.Contains(userText, "Review the change.");
+
+        Assert.AreEqual(AltaExitCodes.Success, system.ExitCode, system.Stderr);
+        var systemRecord = ReadJsonLines(system.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.prompt.created");
+        Assert.AreEqual("system", systemRecord.GetProperty("promptKind").GetString());
+        var systemText = await File.ReadAllTextAsync(systemRecord.GetProperty("path").GetString()!).ConfigureAwait(false);
+        StringAssert.Contains(systemText, "description: Review system");
+        StringAssert.Contains(systemText, "Stay concise.");
+
+        Assert.AreEqual(AltaExitCodes.Usage, duplicate.ExitCode);
+    }
+
+    [TestMethod]
     public async Task SessionTool_Help_ReturnsPlainHelpText()
     {
         using var arguments = JsonDocument.Parse("""{"args":["--help"]}""");
@@ -1829,6 +1939,46 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Failure, send.ExitCode);
         Assert.IsInstanceOfType(errorEvent.Event, typeof(AgentErrorEvent));
         Assert.AreEqual("provider runtime rejected request shape", failedEvent.Event.Message);
+    }
+
+    [TestMethod]
+    public async Task SessionSend_PromptIdSelectsUserPromptForThatSend()
+    {
+        using var root = TempDirectory.Create();
+        var globalPromptDirectory = Path.Combine(root.Path, "instructions", "prompts");
+        Directory.CreateDirectory(globalPromptDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(globalPromptDirectory, "custom.prompt.md"),
+            """
+            ---
+            name: Custom Prompt
+            description: Used by session send prompt-id.
+            system: default
+            ---
+            Custom prompt body selected by prompt-id.
+            """).ConfigureAwait(false);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("prompt-id-send");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        var send = await dispatcher.InvokeAsync(["session", "send", sessionId, "--prompt-id", "custom", "--message", "hello"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var missing = await dispatcher.InvokeAsync(["session", "send", sessionId, "--prompt-id", "missing", "--message", "hello"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, send.ExitCode, send.Stderr);
+        Assert.AreEqual("hello", ExtractText(providerRuntime.SentOptions.Single().Input));
+        Assert.IsTrue(providerRuntime.ResumedOptions.Count >= 1);
+        StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Custom prompt body selected by prompt-id.");
+        Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode);
+        Assert.AreEqual("prompt.notFound", ReadJsonLines(missing.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
     }
 
     [TestMethod]
