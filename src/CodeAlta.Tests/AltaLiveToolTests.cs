@@ -1982,6 +1982,69 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ReminderCreate_DefaultsToCallerSessionAndDispatchesContentLater()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("reminder-default-session");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId };
+
+        var reminder = await dispatcher.InvokeAsync(["reminder", "create", "--duration", "0.05", "--content", "remind me"], caller: caller).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, reminder.ExitCode, reminder.Stderr);
+        var reminderRecord = ReadJsonLines(reminder.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.reminder.created");
+        Assert.AreEqual(sessionId, reminderRecord.GetProperty("sessionId").GetString());
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+        Assert.AreEqual("remind me", ExtractText(providerRuntime.SentOptions.Single().Input));
+    }
+
+    [TestMethod]
+    public async Task ReminderListAndDelete_ManageRepeatedReminders()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("reminder-repeat");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        var create = await dispatcher.InvokeAsync(["reminder", "create", "--duration", "0.03", "--repeat", "2", "--session", sessionId, "--content", "repeat me"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var reminderId = ReadJsonLines(create.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.reminder.created").GetProperty("reminderId").GetString()!;
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+        providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
+
+        var list = await dispatcher.InvokeAsync(["reminder", "list", "--all"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var item = ReadJsonLines(list.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.reminder.item");
+        Assert.AreEqual(reminderId, item.GetProperty("reminderId").GetString());
+        Assert.AreEqual("completed", item.GetProperty("state").GetString());
+        Assert.AreEqual(2, item.GetProperty("firedCount").GetInt32());
+
+        var delete = await dispatcher.InvokeAsync(["reminder", "delete", reminderId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var listAfterDelete = await dispatcher.InvokeAsync(["reminder", "list", "--all"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, delete.ExitCode, delete.Stderr);
+        Assert.AreEqual(0, ReadJsonLines(listAfterDelete.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.reminder.summary").GetProperty("count").GetInt32());
+    }
+
+    [TestMethod]
     public async Task SessionSend_AppliesHeadlessPluginPromptAndToolAugmentation()
     {
         using var root = TempDirectory.Create();
@@ -2431,7 +2494,7 @@ public sealed class AltaLiveToolTests
             Assert.IsFalse(record.GetProperty("waitForCompletion").GetBoolean());
             Assert.AreEqual("notification", record.GetProperty("followUpMode").GetString());
             Assert.AreEqual("stop", record.GetProperty("recommendedAction").GetString());
-            StringAssert.Contains(record.GetProperty("nextStep").GetString()!, "Do not call any tool, shell sleep, timer, status, tail, events, or polling command to wait for completion");
+            StringAssert.Contains(record.GetProperty("nextStep").GetString()!, "Do not call any tool, shell sleep, reminder, status, tail, events, or polling command to wait for completion");
             CollectionAssert.Contains(record.GetProperty("forbiddenWaitActions").EnumerateArray().Select(static item => item.GetString()).ToArray(), "shell sleep");
             var notification = record.GetProperty("notification");
             Assert.AreEqual(parentSessionId, notification.GetProperty("parentSessionId").GetString());

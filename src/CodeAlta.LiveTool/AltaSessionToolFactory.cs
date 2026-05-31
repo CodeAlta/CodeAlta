@@ -15,6 +15,7 @@ public static class AltaSessionToolFactory
         "Use it to discover projects, sessions, providers/models, skills, plugins, and tool capabilities; " +
         "inspect live or recoverable session status/history; create project/global child sessions; " +
         "send, queue, steer, abort, compact, or coordinate sessions and peer-agent requests; " +
+        "create/list/delete delayed prompt reminders; " +
         "and activate CodeAlta-managed skills. Pass CLI-style args excluding `alta`. " +
         "Start with args [\"--help\"] for the quick-start, then narrower help such as [\"session\",\"send\",\"--help\"] for options. " +
         "Calls are finite/non-streaming; non-help results are compact JSONL headed by alta.result.";

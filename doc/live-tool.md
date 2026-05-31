@@ -81,6 +81,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `version` | Report host/live-tool version metadata. |
 | `project` | List, show, resolve, upsert, and inspect current project context. |
 | `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions. |
+| `reminder` | Schedule delayed prompt content for the current or another session, and list/delete reminders. |
 | `skill` | List, show, and activate CodeAlta-managed skills. |
 | `tool` | Inspect live-tool status and command capabilities. |
 | `provider` | List configured providers and provider model refs. |
@@ -137,6 +138,17 @@ alta session compact <session-id>
 ```
 
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
+
+## Reminders
+
+Use `alta reminder create` to schedule prompt content to be sent later while the current CodeAlta host process remains running. The target defaults to the calling agent's current session; use `--session <session-id>` or `--session-id <session-id>` to target another session. `--duration` is a positive number of seconds or a `TimeSpan` such as `00:05:00`. `--repeat` is the total number of firings and defaults to 1. Reminder delivery uses normal `session send --queue-if-busy` semantics so a busy target queues the reminder instead of dropping it.
+
+```text
+alta reminder create --duration 60 --content "Check the build status."
+alta reminder create --duration 300 --repeat 3 --session <session-id> --stdin
+alta reminder list --all
+alta reminder delete <reminder-id>
+```
 
 ## Delegated work and peer messages
 

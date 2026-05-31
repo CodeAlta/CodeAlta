@@ -80,6 +80,7 @@ public sealed class AltaCommandRegistry
         app.Add("  `alta session send <session-id> --stdin`");
         app.Add("  `alta session steer <session-id> --message \"...\"`");
         app.Add("  `alta session request <session-id> --reply-requested --stdin`");
+        app.Add("  `alta reminder create --duration 60 --content \"...\"`; `alta reminder list`");
         app.Add("  `alta tool status`; `alta tool capability list`");
         app.Add("Coordinate: delegate project-folder work to project sessions; use `session request`/`message` for peer-agent notes and `session steer` only for active runs.");
         app.Add("Discover: `alta <command> --help` or `alta <command> <subcommand> --help`.");

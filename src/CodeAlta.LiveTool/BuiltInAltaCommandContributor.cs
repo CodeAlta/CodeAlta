@@ -18,14 +18,14 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     // Agent-originated sends should return after the delegated run is accepted, not after
     // the delegated LLM finishes. The timeout is only a submission-acknowledgement guard.
     private static readonly TimeSpan AgentCallerSubmitAckTimeout = TimeSpan.FromSeconds(5);
-    private const string NotificationFollowUpNextStep = "Do not call any tool, shell sleep, timer, status, tail, events, or polling command to wait for completion; yield control and wait for parent-session notifications.";
+    private const string NotificationFollowUpNextStep = "Do not call any tool, shell sleep, reminder, status, tail, events, or polling command to wait for completion; yield control and wait for parent-session notifications.";
     private const string NotificationFollowUpGuidance = "Do not poll or actively wait for this delegated session to complete. CodeAlta will forward the delegated session's final assistant reply to the parent session automatically.";
 
     private static readonly string[] NotificationFollowUpForbiddenWaitActions =
     [
         "tool call",
         "shell sleep",
-        "timer",
+        "reminder",
         "session status",
         "session tail",
         "session events",
@@ -59,6 +59,9 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         Read("session join"),
         Mutating("session message"),
         Mutating("session request"),
+        Mutating("reminder create"),
+        Read("reminder list"),
+        Mutating("reminder delete"),
         Read("skill list", supportsCatalogOnlyContext: true),
         Read("skill show", supportsCatalogOnlyContext: true),
         Mutating("skill activate"),
@@ -86,6 +89,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         yield return CreateVersionCommand(context.Invocation);
         yield return CreateProjectCommand(context.Invocation);
         yield return CreateSessionCommand(context.Invocation);
+        yield return CreateReminderCommand(context.Invocation);
         yield return CreateSkillCommand(context.Invocation);
         yield return CreateSkillsAliasCommand(context.Invocation);
         yield return CreateSkillsActivateAliasCommand(context.Invocation);
@@ -511,6 +515,54 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         command.Add("reply-requested", "Annotate the request as expecting a reply.", value => options.ReplyRequested = value is not null);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Request).ConfigureAwait(false));
         AddHelpText(command, "Example: `alta session request <session-id> --reply-requested --stdin` for coordinator-to-agent requests.");
+        return command;
+    }
+
+    private static Command CreateReminderCommand(AltaCommandContext context)
+    {
+        var group = Group("reminder", "Create, list, and delete delayed prompt reminders.");
+        group.Add(CreateReminderCreateCommand(context));
+        group.Add(CreateReminderListCommand(context));
+        group.Add(CreateReminderDeleteCommand(context));
+        AddHelpText(
+            group,
+            "Examples: `alta reminder create --duration 60 --content \"Check status\"`; `alta reminder create --duration 300 --repeat 3 --session <session-id> --stdin`; `alta reminder list --all`; `alta reminder delete <reminder-id>`.");
+        return group;
+    }
+
+    private static Command CreateReminderCreateCommand(AltaCommandContext context)
+    {
+        var options = new ReminderCreateOptions();
+        var command = Leaf("create", "Schedule prompt content to be sent to a session later.");
+        command.Add("duration=", "Delay before each firing, in seconds; TimeSpan values such as 00:01:00 are also accepted.", value => options.Duration = value);
+        command.Add("content=", "Prompt content to send when the reminder fires. Prefer --stdin for multi-line content.", value => options.Content = value);
+        command.Add("stdin", "Read reminder prompt content from stdin.", value => options.UseStdin = value is not null);
+        command.Add("session=", "Target CodeAlta session id. Defaults to the caller's current session when available.", value => options.SessionId = value);
+        command.Add("session-id=", "Alias for --session.", value => options.SessionId = value);
+        command.Add("repeat=", "Number of total firings. Defaults to 1.", value => options.Repeat = value);
+        command.Add(async (_, _) => await HandleReminderCreateAsync(context, options).ConfigureAwait(false));
+        AddHelpText(command, "Examples: `alta reminder create --duration 60 --content \"Remind me to check tests\"`; use `--session <session-id>` to target another session and `--repeat 10` to fire ten times.");
+        return command;
+    }
+
+    private static Command CreateReminderListCommand(AltaCommandContext context)
+    {
+        string? sessionId = null;
+        var includeCompleted = false;
+        var command = Leaf("list", "List scheduled prompt reminders.");
+        command.Add("session=", "Filter by target session id.", value => sessionId = value);
+        command.Add("session-id=", "Alias for --session.", value => sessionId = value);
+        command.Add("all", "Include completed reminders as well as active reminders.", value => includeCompleted = value is not null);
+        command.Add((_, _) => ValueTask.FromResult(HandleReminderList(context, sessionId, includeCompleted)));
+        return command;
+    }
+
+    private static Command CreateReminderDeleteCommand(AltaCommandContext context)
+    {
+        string? reminderId = null;
+        var command = Leaf("delete", "Delete a scheduled prompt reminder.");
+        command.Add("<reminder-id>", "Reminder id returned by `alta reminder create` or `alta reminder list`.", value => reminderId = value);
+        command.Add((_, _) => ValueTask.FromResult(HandleReminderDelete(context, reminderId)));
         return command;
     }
 
@@ -1968,9 +2020,9 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 info.Session,
                 executionOptions,
                 new AgentSendOptions { Input = agentInput },
-                IsAgentCaller(context) ? CancellationToken.None : context.CancellationToken);
+                ShouldDetachPromptSubmission(context) ? CancellationToken.None : context.CancellationToken);
 
-            if (IsAgentCaller(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask).ConfigureAwait(false) && !sendTask.IsCompleted)
+            if (ShouldDetachPromptSubmission(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask).ConfigureAwait(false) && !sendTask.IsCompleted)
             {
                 _ = ObserveDetachedPromptSubmissionAsync(sendTask);
                 await runtime.PersistSessionLocalStateAsync(info.Session, CancellationToken.None).ConfigureAwait(false);
@@ -2064,6 +2116,113 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             sessionId = sessionInfo.Session.SessionId,
             compactedBy = CreateProvenance(context),
         });
+        return AltaExitCodes.Success;
+    }
+
+    private static async ValueTask<int> HandleReminderCreateAsync(AltaCommandContext context, ReminderCreateOptions options)
+    {
+        if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out _))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (!TryGetReminderService(context, out var reminderService))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (!TryParseReminderDuration(options.Duration, out var duration, out var durationError))
+        {
+            return UsageError(context, "usage.invalidDuration", durationError, "alta reminder create");
+        }
+
+        if (!TryParseReminderRepeat(options.Repeat, out var repeat, out var repeatError))
+        {
+            return UsageError(context, "usage.invalidRepeat", repeatError, "alta reminder create");
+        }
+
+        var contentResult = await ReadReminderContentAsync(context, options).ConfigureAwait(false);
+        if (contentResult.ExitCode != AltaExitCodes.Success)
+        {
+            return contentResult.ExitCode;
+        }
+
+        var targetSessionId = FirstNonEmpty(options.SessionId, context.Caller.SourceSessionId);
+        if (string.IsNullOrWhiteSpace(targetSessionId))
+        {
+            return UsageError(context, "usage.missingSession", "A target session id is required outside a session caller. Use --session <session-id>.", "alta reminder create");
+        }
+
+        var infoResult = await ResolveSessionInfoAsync(context, targetSessionId).ConfigureAwait(false);
+        if (infoResult.ExitCode != AltaExitCodes.Success)
+        {
+            return infoResult.ExitCode;
+        }
+
+        AltaReminderDescriptor descriptor;
+        try
+        {
+            descriptor = reminderService.Create(new AltaReminderCreateRequest
+            {
+                TargetSessionId = infoResult.Info!.Session.SessionId,
+                Content = contentResult.Prompt!,
+                Duration = duration,
+                RepeatCount = repeat,
+                SourceSessionId = context.Caller.SourceSessionId,
+                SourceAgentId = context.Caller.SourceAgentId,
+                SourceProjectId = context.Caller.SourceProjectId,
+                PluginRuntimeKey = context.Caller.PluginRuntimeKey,
+                Cwd = context.Cwd,
+            });
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return UsageError(context, "usage.invalidReminder", ex.Message, "alta reminder create");
+        }
+        catch (ArgumentException ex)
+        {
+            return UsageError(context, "usage.invalidReminder", ex.Message, "alta reminder create");
+        }
+
+        WriteReminder(context, "alta.reminder.created", descriptor);
+        return AltaExitCodes.Success;
+    }
+
+    private static int HandleReminderList(AltaCommandContext context, string? sessionId, bool includeCompleted)
+    {
+        if (!TryGetReminderService(context, out var reminderService))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var reminders = reminderService.List(sessionId, includeCompleted);
+        foreach (var reminder in reminders)
+        {
+            WriteReminder(context, "alta.reminder.item", reminder);
+        }
+
+        WriteSummary(context, "alta.reminder.summary", reminders.Count, truncated: false);
+        return AltaExitCodes.Success;
+    }
+
+    private static int HandleReminderDelete(AltaCommandContext context, string? reminderId)
+    {
+        if (string.IsNullOrWhiteSpace(reminderId))
+        {
+            return UsageError(context, "usage.missingReminder", "Reminder id is required.", "alta reminder delete");
+        }
+
+        if (!TryGetReminderService(context, out var reminderService))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (!reminderService.TryDelete(reminderId, out var descriptor))
+        {
+            return NotFound(context, "reminder.notFound", $"Reminder '{reminderId}' was not found.");
+        }
+
+        WriteReminder(context, "alta.reminder.deleted", descriptor!);
         return AltaExitCodes.Success;
     }
 
@@ -2603,6 +2762,30 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         return infos;
+    }
+
+    private static bool TryGetReminderService(AltaCommandContext context, out AltaReminderService reminderService)
+    {
+        reminderService = context.Services.Get<AltaReminderService>()!;
+        if (reminderService is not null)
+        {
+            return true;
+        }
+
+        if (context.Services is AltaServiceCollection services)
+        {
+            reminderService = new AltaReminderService(services);
+            services.Add(reminderService);
+            return true;
+        }
+
+        AltaJsonlWriter.WriteError(
+            context.Stderr,
+            context.CorrelationId,
+            "service.unavailable",
+            AltaExitCodes.ServiceUnavailable,
+            "Required in-process service 'AltaReminderService' is unavailable.");
+        return false;
     }
 
     private static async Task<SessionInfoResolutionResult> ResolveSessionInfoAsync(AltaCommandContext context, string sessionId, bool includeLocalState = false)
@@ -3462,6 +3645,90 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         return PromptReadResult.Fail(UsageError(context, "usage.missingMessage", "A message is required. Use --message <text> or --stdin.", CommandPathForPrompt(kind)));
     }
 
+    private static async Task<PromptReadResult> ReadReminderContentAsync(AltaCommandContext context, ReminderCreateOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.Content) && options.UseStdin)
+        {
+            return PromptReadResult.Fail(UsageError(context, "usage.contentConflict", "Use either --content or --stdin, not both.", "alta reminder create"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Content))
+        {
+            return PromptReadResult.Success(options.Content);
+        }
+
+        if (options.UseStdin)
+        {
+            var content = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
+            return string.IsNullOrWhiteSpace(content)
+                ? PromptReadResult.Fail(UsageError(context, "usage.missingContent", "Reminder content is required. Provide non-empty --content text or non-empty --stdin input.", "alta reminder create"))
+                : PromptReadResult.Success(content);
+        }
+
+        return PromptReadResult.Fail(UsageError(context, "usage.missingContent", "Reminder content is required. Use --content <text> or --stdin.", "alta reminder create"));
+    }
+
+    private static bool TryParseReminderDuration(string? value, out TimeSpan duration, out string error)
+    {
+        duration = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            error = "--duration is required.";
+            return false;
+        }
+
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+        {
+            if (seconds > 0 && !double.IsInfinity(seconds) && !double.IsNaN(seconds))
+            {
+                try
+                {
+                    duration = TimeSpan.FromSeconds(seconds);
+                    error = string.Empty;
+                    return true;
+                }
+                catch (OverflowException)
+                {
+                    error = "--duration is too large.";
+                    return false;
+                }
+            }
+
+            error = "--duration must be greater than zero seconds.";
+            return false;
+        }
+
+        if (TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var parsed) && parsed > TimeSpan.Zero)
+        {
+            duration = parsed;
+            error = string.Empty;
+            return true;
+        }
+
+        error = "--duration must be a positive number of seconds or a positive TimeSpan such as 00:01:00.";
+        return false;
+    }
+
+    private static bool TryParseReminderRepeat(string? value, out int repeat, out string error)
+    {
+        repeat = 1;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out repeat) && repeat > 0)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        repeat = 1;
+        error = "--repeat must be a positive integer.";
+        return false;
+    }
+
     private static string CommandPathForPrompt(PromptDispatchKind kind)
         => kind switch
         {
@@ -3558,6 +3825,9 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
     private static bool IsAgentCaller(AltaCommandContext context)
         => string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ShouldDetachPromptSubmission(AltaCommandContext context)
+        => IsAgentCaller(context) || string.Equals(context.Caller.Kind, "reminder", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<bool> WaitForAgentSubmissionAckAsync(
         SessionRuntimeService runtime,
@@ -4136,6 +4406,31 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         });
     }
 
+    private static void WriteReminder(AltaCommandContext context, string type, AltaReminderDescriptor reminder)
+    {
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type,
+            version = 1,
+            correlationId = context.CorrelationId,
+            reminderId = reminder.ReminderId,
+            sessionId = reminder.TargetSessionId,
+            sourceSessionId = reminder.SourceSessionId,
+            state = reminder.State,
+            durationSeconds = reminder.Duration.TotalSeconds,
+            repeat = reminder.RepeatCount,
+            firedCount = reminder.FiredCount,
+            createdAt = reminder.CreatedAt,
+            dueAt = reminder.DueAt,
+            lastFiredAt = reminder.LastFiredAt,
+            completedAt = reminder.CompletedAt,
+            lastExitCode = reminder.LastExitCode,
+            lastError = reminder.LastError,
+            contentPreview = reminder.ContentPreview,
+            lastTranscriptPreview = reminder.LastTranscriptPreview,
+        });
+    }
+
     private static object? CreatePromptNotificationPayload(AltaCommandContext context, SessionViewDescriptor session)
         => IsAgentCaller(context) && !string.IsNullOrWhiteSpace(session.ParentSessionId)
             ? new
@@ -4602,6 +4897,19 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         public string? MessageKind { get; set; }
 
         public bool ReplyRequested { get; set; }
+    }
+
+    private sealed class ReminderCreateOptions
+    {
+        public string? Duration { get; set; }
+
+        public string? Content { get; set; }
+
+        public bool UseStdin { get; set; }
+
+        public string? SessionId { get; set; }
+
+        public string? Repeat { get; set; }
     }
 
     private sealed class PromptManagementOptions

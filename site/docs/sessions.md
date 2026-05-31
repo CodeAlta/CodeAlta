@@ -62,7 +62,8 @@ Think of it as CodeAlta giving the agent a safe, scoped way to ask the host ques
 - what sessions already exist for this project;
 - which model providers and model refs are available;
 - whether a related session has finished and what its final result was;
-- how to create a child session for another project, provider, model, or reasoning effort.
+- how to create a child session for another project, provider, model, or reasoning effort;
+- how to schedule a later reminder prompt for itself or another session.
 
 ## Prompting for delegated work
 
@@ -91,6 +92,8 @@ summary back here.
 ```
 
 For parent/child delegated work, CodeAlta uses a notification-based pattern: the child final reply or child-run error is forwarded back to the parent session automatically. The parent agent should yield instead of repeatedly polling while waiting.
+
+Agents can also ask the live tool to schedule in-process reminder prompts with `alta reminder create --duration <seconds> --content ...`. Reminders default to the calling session, can target another session with `--session <session-id>`, can repeat with `--repeat <count>`, and can be inspected or removed with `alta reminder list` and `alta reminder delete <reminder-id>`.
 
 ## Prompting for CodeAlta self-inspection
 
