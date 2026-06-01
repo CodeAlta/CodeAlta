@@ -420,7 +420,7 @@ public sealed class CodeAltaConfigStore
             document.Chat.DefaultProvider = LoadEnabledProviderKeys(normalizedDefinitions.Values).FirstOrDefault();
         }
 
-        SaveDocument(_options.ConfigPath, document);
+        SaveDocument(_options.ConfigPath, document, preserveEmptyProvidersSection: normalizedDefinitions.Count == 0);
     }
 
     internal static AgentReasoningEffort? ParseReasoningEffort(string? value)
@@ -593,12 +593,17 @@ public sealed class CodeAltaConfigStore
         return null;
     }
 
-    private static void SaveDocument(string path, CodeAltaConfigDocument document)
+    private static void SaveDocument(string path, CodeAltaConfigDocument document, bool preserveEmptyProvidersSection = false)
     {
         var preservedAcpConfig = LoadPreservedAcpConfig(path);
         NormalizeDocument(document);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var content = TomlSerializer.Serialize(document);
+        if (preserveEmptyProvidersSection && !ContainsProvidersSection(content, path))
+        {
+            content += CreateAppendedBlock(content, "[providers]", DetectNewline(content));
+        }
+
         if (preservedAcpConfig is not null)
         {
             content = AppendPreservedAcpConfig(content, preservedAcpConfig.Value.Block, preservedAcpConfig.Value.Newline);
@@ -667,11 +672,17 @@ public sealed class CodeAltaConfigStore
             return existingContent;
         }
 
+        var hasProviderConfiguration = ContainsProvidersSection(existingSections.Keys);
         var newline = DetectNewline(existingContent);
         var edits = new List<ConfigTextEdit>();
         var appendedBlocks = new List<ConfigTextEdit>();
         foreach (var defaultSection in defaultSections.Values)
         {
+            if (IsProviderChildSection(defaultSection.Path) && hasProviderConfiguration)
+            {
+                continue;
+            }
+
             if (!existingSections.TryGetValue(defaultSection.Path, out var existingSection))
             {
                 if (defaultSection.KeyValues.Count == 0)
@@ -685,6 +696,11 @@ public sealed class CodeAltaConfigStore
                     appendedBlocks.Add(new ConfigTextEdit(existingContent.Length, CreateAppendedBlock(existingContent, block, newline)));
                 }
 
+                continue;
+            }
+
+            if (IsProviderChildSection(defaultSection.Path))
+            {
                 continue;
             }
 
@@ -726,6 +742,25 @@ public sealed class CodeAltaConfigStore
 
         return ApplyTextEdits(existingContent, edits);
     }
+
+    private static bool ContainsProvidersSection(string content, string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        var sections = GetConfigSections(content, ParseSyntaxDocument(content, sourcePath));
+        return ContainsProvidersSection(sections.Keys);
+    }
+
+    private static bool ContainsProvidersSection(IEnumerable<string> sectionPaths)
+        => sectionPaths.Any(static path =>
+            string.Equals(path, "providers", StringComparison.OrdinalIgnoreCase) ||
+            IsProviderChildSection(path));
+
+    private static bool IsProviderChildSection(string path)
+        => path.StartsWith("providers.", StringComparison.OrdinalIgnoreCase);
 
     private static DocumentSyntax ParseSyntaxDocument(string content, string sourcePath)
     {

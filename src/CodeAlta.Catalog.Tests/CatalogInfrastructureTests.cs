@@ -941,7 +941,7 @@ public sealed class CatalogInfrastructureTests
     }
 
     [TestMethod]
-    public void CodeAltaConfigStore_UpgradeGlobalConfigFromDefaults_AppendsMissingProviderEntriesWithBackup()
+    public void CodeAltaConfigStore_UpgradeGlobalConfigFromDefaults_DoesNotAppendMissingProviderEntriesWhenProvidersExist()
     {
         using var root = TempDirectory.Create();
         var configPath = Path.Combine(root.Path, "config.toml");
@@ -958,19 +958,40 @@ public sealed class CatalogInfrastructureTests
 
         var upgraded = store.UpgradeGlobalConfigFromDefaults(out var backupPath);
 
+        Assert.IsFalse(upgraded);
+        Assert.IsNull(backupPath);
+        var content = File.ReadAllText(configPath);
+        StringAssert.Contains(content, "display_name = \"Work OpenAI\"");
+        StringAssert.Contains(content, "model = \"work-model\"");
+        Assert.IsFalse(content.Contains("[providers.xai]", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("[providers.minimax]", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void CodeAltaConfigStore_UpgradeGlobalConfigFromDefaults_AppendsProviderEntriesWhenProvidersMissing()
+    {
+        using var root = TempDirectory.Create();
+        var configPath = Path.Combine(root.Path, "config.toml");
+        const string originalContent = """
+            [plugins.sample]
+            enabled = false
+            """;
+        File.WriteAllText(configPath, originalContent);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.Path });
+
+        var upgraded = store.UpgradeGlobalConfigFromDefaults(out var backupPath);
+
         Assert.IsTrue(upgraded);
         Assert.IsFalse(string.IsNullOrWhiteSpace(backupPath));
         Assert.IsTrue(File.Exists(backupPath));
         Assert.AreEqual(originalContent, File.ReadAllText(backupPath));
         var content = File.ReadAllText(configPath);
-        StringAssert.Contains(content, "display_name = \"Work OpenAI\"");
-        StringAssert.Contains(content, "model = \"work-model\"");
         StringAssert.Contains(content, "[providers.xai]");
         StringAssert.Contains(content, "[providers.minimax]");
     }
 
     [TestMethod]
-    public void CodeAltaConfigStore_UpgradeGlobalConfigFromDefaults_AddsMissingKeysWithoutChangingExistingValues()
+    public void CodeAltaConfigStore_UpgradeGlobalConfigFromDefaults_DoesNotEditExistingProviderSections()
     {
         using var root = TempDirectory.Create();
         var configPath = Path.Combine(root.Path, "config.toml");
@@ -984,20 +1005,37 @@ public sealed class CatalogInfrastructureTests
             """);
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.Path });
 
+        var originalContent = File.ReadAllText(configPath);
+
         var upgraded = store.UpgradeGlobalConfigFromDefaults(out var backupPath);
 
-        Assert.IsTrue(upgraded);
-        Assert.IsFalse(string.IsNullOrWhiteSpace(backupPath));
+        Assert.IsFalse(upgraded);
+        Assert.IsNull(backupPath);
         var content = File.ReadAllText(configPath);
-        var xaiSectionStart = content.IndexOf("[providers.xai]", StringComparison.Ordinal);
-        var xaiSectionEnd = content.IndexOf("\n[", xaiSectionStart + "[providers.xai]".Length, StringComparison.Ordinal);
-        var xaiSection = xaiSectionEnd < 0 ? content[xaiSectionStart..] : content[xaiSectionStart..xaiSectionEnd];
+        Assert.AreEqual(originalContent, content);
         StringAssert.Contains(content, "display_name = \"My Grok\"");
         StringAssert.Contains(content, "model = \"grok-custom\"");
-        Assert.IsFalse(xaiSection.Contains("enabled = false", StringComparison.Ordinal));
-        StringAssert.Contains(content, "reasoning_effort = \"high\"");
-        StringAssert.Contains(content, "auth_source = \"xai_browser_oauth\"");
-        StringAssert.Contains(content, "model_discovery = \"xai_endpoint_with_static_fallback\"");
+        Assert.IsFalse(content.Contains("enabled = false", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("reasoning_effort = \"high\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("auth_source = \"xai_browser_oauth\"", StringComparison.Ordinal));
+        Assert.IsFalse(content.Contains("model_discovery = \"xai_endpoint_with_static_fallback\"", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void CodeAltaConfigStore_SaveGlobalProviderDefinitions_EmptyListPersistsProvidersMarker()
+    {
+        using var root = TempDirectory.Create();
+        var configPath = Path.Combine(root.Path, "config.toml");
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.Path });
+
+        store.SaveGlobalProviderDefinitions([]);
+        var upgraded = store.UpgradeGlobalConfigFromDefaults(out var backupPath);
+
+        var content = File.ReadAllText(configPath);
+        StringAssert.Contains(content, "[providers]");
+        Assert.IsFalse(content.Contains("[providers.xai]", StringComparison.Ordinal));
+        Assert.IsFalse(upgraded);
+        Assert.IsNull(backupPath);
     }
 
     [TestMethod]
