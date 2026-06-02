@@ -49,6 +49,8 @@ internal sealed class AskFileReviewView
                 Importance = CommandImportance.Primary,
                 Execute = _ => InsertCommentAtCurrentLine(),
             });
+            Editor.AddCommand(CreateFocusAdjacentCommentCommand(forward: true));
+            Editor.AddCommand(CreateFocusAdjacentCommentCommand(forward: false));
             Editor.AddCommand(CreateSaveCommand());
             Body = new ScrollViewer(Editor.Stretch(), focusable: false)
                 .IsTabStop(false)
@@ -224,6 +226,20 @@ internal sealed class AskFileReviewView
             Execute = _ => FocusEditor(),
         };
 
+    public Command CreateFocusAdjacentCommentCommand(bool forward)
+        => new()
+        {
+            Id = forward ? "CodeAlta.Ask.FileComment.FocusNext" : "CodeAlta.Ask.FileComment.FocusPrevious",
+            LabelMarkup = forward ? "Next file comment" : "Previous file comment",
+            DescriptionMarkup = forward
+                ? "Move focus from the file editor to the next file comment."
+                : "Move focus from the file editor to the previous file comment.",
+            Gesture = new KeyGesture(forward ? TerminalChar.CtrlN : TerminalChar.CtrlP, TerminalModifiers.Ctrl),
+            Presentation = CommandPresentation.None,
+            CanExecute = _ => _comments.Count > 0,
+            Execute = _ => FocusAdjacentComment(GetCurrentEditorLineIndex(), forward),
+        };
+
     private CodeEditor CreateEditor(string text, string fullPath)
     {
         var editor = new CodeEditor(new CodeEditorConfig { GoToLine = CodeEditorGoToLineConfig.Disabled })
@@ -263,7 +279,7 @@ internal sealed class AskFileReviewView
         _lastEditorLine = lineIndex + 1;
         if (_comments.TryGetValue(lineIndex, out var existing))
         {
-            existing.TextArea.App?.Focus(existing.TextArea);
+            FocusComment(existing);
             return;
         }
 
@@ -271,19 +287,23 @@ internal sealed class AskFileReviewView
         _comments.Add(lineIndex, entry);
         Editor.SetLineVisual(lineIndex, entry.Group);
         TouchComments();
-        entry.TextArea.App?.Focus(entry.TextArea);
+        FocusComment(entry);
     }
 
     private AskFileCommentEntry CreateCommentEntry(int lineIndex)
     {
         var commentDocument = new TextDocument(string.Empty);
         var textArea = new TextArea()
-            .Placeholder("Enter a comment... Shift+Enter newline · Ctrl+Enter validate · Esc discard")
+            .Placeholder("Enter a comment... Enter newline · Esc done · Ctrl+D delete · Ctrl+N/P comments")
             .AutoSizeMode(TextEditorAutoSizeMode.Height)
             .MinHeight(1)
-            .MaxHeight(8)
             .HorizontalAlignment(Align.Stretch);
         textArea.TextDocument = commentDocument;
+        var textAreaScroller = new ScrollViewer(textArea, focusable: false)
+            .HorizontalScrollEnabled(false)
+            .VerticalScrollEnabled(true)
+            .MaxHeight(8)
+            .HorizontalAlignment(Align.Stretch);
 
         var entry = new AskFileCommentEntry(lineIndex, textArea);
         commentDocument.Changed += (_, _) =>
@@ -295,66 +315,72 @@ internal sealed class AskFileReviewView
                 TouchComments();
             }
 
-            Editor?.NotifyLineVisualChanged(lineIndex);
+            UpdateCommentHeight(entry);
+            Editor?.NotifyLineVisualChanged(entry.LineIndex);
         };
         var deleteButton = new Button("Delete") { Tone = ControlTone.Error };
-        deleteButton.Click(() => DeleteComment(lineIndex));
+        deleteButton.Click(() => DeleteComment(entry.LineIndex));
+
+        var helpText = new TextBlock("Ctrl+D delete · Esc done · Ctrl+N/P comments")
+        {
+            IsSelectable = false,
+        };
+        helpText.SetStyle(TextBlockStyle.Key, TextBlockStyle.Default with { Foreground = Colors.TerminalBrightBlack });
 
         var group = new Group(new Markup("[bold primary]Comment[/]"))
         {
             TopRightText = deleteButton,
-            BottomLeftText = new Markup("[dim]Esc discard · Shift+Enter newline · Ctrl+Enter validate[/]"),
+            BottomLeftText = helpText,
             Padding = new Thickness(1, 0, 1, 0),
             HorizontalAlignment = Align.Stretch,
-            Content = textArea,
+            Content = textAreaScroller,
         };
         entry.Group = group;
 
         textArea.AddCommand(new Command
         {
-            Id = $"CodeAlta.Ask.FileComment.Submit.{lineIndex}",
-            LabelMarkup = "Submit comment",
-            DescriptionMarkup = "Validate this line comment.",
-            Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl),
+            Id = $"CodeAlta.Ask.FileComment.Done.{lineIndex}",
+            LabelMarkup = "Done editing comment",
+            DescriptionMarkup = "Keep this line comment and return focus to the file editor.",
+            Gesture = new KeyGesture(TerminalKey.Escape),
             Presentation = CommandPresentation.None,
-            Execute = _ => SubmitComment(entry),
+            Execute = _ => FinishComment(entry),
         });
         textArea.AddCommand(new Command
         {
             Id = $"CodeAlta.Ask.FileComment.Discard.{lineIndex}",
             LabelMarkup = "Discard comment",
             DescriptionMarkup = "Discard this line comment.",
-            Gesture = new KeyGesture(TerminalKey.Escape),
+            Gesture = new KeyGesture(TerminalChar.CtrlD, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
-            Execute = _ => DeleteComment(lineIndex),
+            Execute = _ => DeleteComment(entry.LineIndex),
         });
         textArea.AddCommand(new Command
         {
-            Id = $"CodeAlta.Ask.FileComment.NewLine.{lineIndex}",
-            LabelMarkup = "Insert comment newline",
-            DescriptionMarkup = "Insert a new line in this line comment.",
-            Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Shift),
+            Id = $"CodeAlta.Ask.FileComment.Next.{lineIndex}",
+            LabelMarkup = "Next comment",
+            DescriptionMarkup = "Move focus to the next file comment.",
+            Gesture = new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
-            Execute = _ => InsertCommentNewLine(textArea),
+            Execute = _ => FocusAdjacentComment(entry.LineIndex, forward: true),
         });
+        textArea.AddCommand(new Command
+        {
+            Id = $"CodeAlta.Ask.FileComment.Previous.{lineIndex}",
+            LabelMarkup = "Previous comment",
+            DescriptionMarkup = "Move focus to the previous file comment.",
+            Gesture = new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl),
+            Presentation = CommandPresentation.None,
+            Execute = _ => FocusAdjacentComment(entry.LineIndex, forward: false),
+        });
+        UpdateCommentHeight(entry);
 
         return entry;
     }
 
-    private void SubmitComment(AskFileCommentEntry entry)
+    private void FinishComment(AskFileCommentEntry entry)
     {
-        var text = GetText(entry.TextArea.TextDocument).Trim();
-        if (text.Length == 0)
-        {
-            DeleteComment(entry.LineIndex);
-            return;
-        }
-
-        entry.IsSubmitted = true;
-        entry.SubmittedText = text;
-        entry.Group.BottomRightText = new Markup("[success]✅[/]");
-        Editor?.NotifyLineVisualChanged(entry.LineIndex);
-        TouchComments();
+        UpdateCommentSubmission(entry);
         if (Editor is not null)
         {
             _lastEditorLine = Math.Min(entry.LineIndex + 2, Math.Max(1, Editor.TextDocument.CurrentSnapshot.LineCount));
@@ -377,12 +403,81 @@ internal sealed class AskFileReviewView
         TouchComments();
     }
 
-    private void InsertCommentNewLine(TextArea textArea)
+    private void UpdateCommentSubmission(AskFileCommentEntry entry)
     {
-        var position = Math.Clamp(textArea.CaretIndex, 0, textArea.TextDocument.CurrentSnapshot.Length);
-        textArea.TextDocument.Insert(position, "\n");
-        textArea.CaretIndex = position + 1;
+        var text = GetText(entry.TextArea.TextDocument).Trim();
+        if (text.Length > 0)
+        {
+            entry.IsSubmitted = true;
+            entry.SubmittedText = text;
+            entry.Group.BottomRightText = new Markup("[success]✅[/]");
+        }
+        else
+        {
+            entry.IsSubmitted = false;
+            entry.SubmittedText = string.Empty;
+            entry.Group.BottomRightText = null;
+        }
+
+        Editor?.NotifyLineVisualChanged(entry.LineIndex);
+        TouchComments();
     }
+
+    private static void UpdateCommentHeight(AskFileCommentEntry entry)
+    {
+        var lineCount = Math.Max(1, entry.TextArea.TextDocument.CurrentSnapshot.LineCount);
+        entry.TextArea.MinHeight = Math.Min(8, lineCount);
+    }
+
+    private void FocusAdjacentComment(int lineIndex, bool forward)
+    {
+        if (_comments.Count == 0)
+        {
+            return;
+        }
+
+        if (_comments.TryGetValue(lineIndex, out var current))
+        {
+            UpdateCommentSubmission(current);
+        }
+
+        var ordered = _comments.Keys.Order().ToArray();
+        var index = Array.BinarySearch(ordered, lineIndex);
+        if (index < 0)
+        {
+            index = ~index;
+            if (!forward)
+            {
+                index--;
+            }
+        }
+        else
+        {
+            index += forward ? 1 : -1;
+        }
+
+        if (index < 0)
+        {
+            index = ordered.Length - 1;
+        }
+        else if (index >= ordered.Length)
+        {
+            index = 0;
+        }
+
+        var target = _comments[ordered[index]];
+        FocusComment(target);
+    }
+
+    private void FocusComment(AskFileCommentEntry entry)
+    {
+        _lastEditorLine = entry.LineIndex + 1;
+        Editor?.GoToLine(_lastEditorLine);
+        (Editor?.App ?? entry.TextArea.App)?.Focus(entry.TextArea);
+    }
+
+    private int GetCurrentEditorLineIndex()
+        => Math.Max(0, (Editor?.Line ?? _lastEditorLine) - 1);
 
     private void OnDocumentChanged(object? sender, TextDocumentChangedEventArgs e)
     {
@@ -489,7 +584,7 @@ internal sealed class AskFileReviewView
     {
         _ = _fileStateVersion.Value;
         var status = _saveError is null ? string.Empty : $" · [error]Save failed: {AnsiMarkup.Escape(_saveError)}[/]";
-        return $"[dim]Ctrl+K comment · Ctrl+S save · Ctrl+G Ctrl+N questions · Ctrl+L Ctrl+K clear comments · Ctrl+F find[/]{status}";
+        return $"[dim]Ctrl+K comment · Ctrl+N/P comments · Ctrl+S save · Ctrl+G Ctrl+N questions · Ctrl+L Ctrl+K clear comments · Ctrl+F find[/]{status}";
     }
 
     private Rune? GetCommentMarker(int lineIndex)

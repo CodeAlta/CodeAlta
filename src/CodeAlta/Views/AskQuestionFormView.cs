@@ -16,9 +16,11 @@ internal sealed class AskQuestionFormView
     private const string LastQuestionGlyph = "✓";
 
     private readonly AltaAskRequest _request;
+    private readonly State<int> _helpVersion = new(0);
     private readonly bool[] _visited;
     private readonly OptionList<AskChoiceOption>?[] _choiceLists;
     private readonly TextBox?[] _freeformBoxes;
+    private bool _hasFileReviewCommands;
 
     public AskQuestionFormView(AltaQueuedAsk ask)
     {
@@ -76,6 +78,8 @@ internal sealed class AskQuestionFormView
     public void AddFileReviewCommands(AskFileReviewView fileReview)
     {
         ArgumentNullException.ThrowIfNull(fileReview);
+        _hasFileReviewCommands = true;
+        _helpVersion.Value++;
         Root.AddCommand(fileReview.CreateSaveCommand());
         Root.AddCommand(fileReview.CreateClearCommentsCommand());
         Root.AddCommand(fileReview.CreateFocusEditorCommand());
@@ -146,7 +150,7 @@ internal sealed class AskQuestionFormView
     private Visual BuildBottomBar()
     {
         return new VStack(
-            new Markup("[dim]LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel[/]") { Wrap = true },
+            new Markup(BuildHelpMarkup) { Wrap = true },
             new HStack(
             [
                 new Button(new TextBlock("Submit"))
@@ -164,6 +168,14 @@ internal sealed class AskQuestionFormView
             Spacing = 1,
             HorizontalAlignment = Align.Stretch,
         };
+    }
+
+    private string BuildHelpMarkup()
+    {
+        _ = _helpVersion.Value;
+        return _hasFileReviewCommands
+            ? "[dim]LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel · Ctrl+G Ctrl+E file editor[/]"
+            : "[dim]LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel[/]";
     }
 
     private Visual BuildQuestionPage(AltaAskQuestion question, int index)
