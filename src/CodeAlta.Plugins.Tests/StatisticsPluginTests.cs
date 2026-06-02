@@ -74,14 +74,15 @@ public sealed class StatisticsPluginTests
 
         Assert.AreEqual(1, result.Count);
         Assert.AreEqual("statistics:session-1:run-run-1", result[0].EventId);
-        StringAssert.Contains(result[0].Markdown, "computing");
+        Assert.IsNull(result[0].DynamicContent);
+        Assert.IsFalse(result[0].Markdown?.Contains("computing", StringComparison.OrdinalIgnoreCase) == true);
         var completed = await WaitForDynamicProjectionAsync(result[0]);
         StringAssert.Contains(completed.Markdown, "**Turn statistics**");
         StringAssert.Contains(completed.Markdown, "estimated heuristic");
         Assert.AreEqual(1, completed.DetailSections.Count);
         StringAssert.Contains(completed.DetailSections[0].Markdown, "shell");
         StringAssert.Contains(completed.DetailSections[0].Markdown, "Assistant | 11 chars");
-        var cardVisualFactory = result[0].DynamicContent?.VisualFactory;
+        var cardVisualFactory = result[0].VisualFactory;
         Assert.IsNotNull(cardVisualFactory);
         var cardVisual = cardVisualFactory(new PluginSessionEventVisualContext
         {
@@ -135,6 +136,90 @@ public sealed class StatisticsPluginTests
         StringAssert.Contains(completed.Markdown, "provider aggregate");
         StringAssert.Contains(completed.Markdown, "1,354 in (provider aggregate) / 567 out (provider aggregate; ≈7 observed generated)");
         StringAssert.Contains(completed.DetailSections.Single().Markdown, "Cached input (provider aggregate)");
+    }
+
+    [TestMethod]
+    public async Task Projection_AttachesRunlessIdleUpdateToPreviousTurn()
+    {
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        var providerId = new ModelProviderId("provider-1");
+        var events = CreateTurnEvents(startedAt, includeCompletedAssistant: true, includeUsage: false, runId: new AgentRunId("run-idle"))
+            .ToList();
+        events.Add(new AgentSessionUpdateEvent(
+            providerId,
+            "session-1",
+            startedAt.AddSeconds(8),
+            null,
+            AgentSessionUpdateKind.Idle,
+            "idle"));
+
+        var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual("statistics:session-1:run-run-idle", result[0].EventId);
+    }
+
+    [TestMethod]
+    public async Task Projection_DoesNotEmitCardBeforeTurnIsIdle()
+    {
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var providerId = new ModelProviderId("provider-1");
+        var runId = new AgentRunId("run-task-completed");
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        var events = new List<AgentEvent>
+        {
+            new AgentActivityEvent(providerId, "session-1", startedAt, runId, AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1", null, "turn", null),
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt.AddMilliseconds(100), runId, AgentContentKind.User, "user-1", "turn-1", "prompt"),
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt.AddSeconds(1), runId, AgentContentKind.Assistant, "assistant-1", "turn-1", "response"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(2), runId, AgentSessionUpdateKind.TaskCompleted, "task completed"),
+        };
+
+        var incompleteResult = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        Assert.AreEqual(0, incompleteResult.Count);
+
+        events.Add(new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(3), null, AgentSessionUpdateKind.Idle, "idle"));
+        var completeResult = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        Assert.AreEqual(1, completeResult.Count);
+        Assert.AreEqual("statistics:session-1:run-run-task-completed", completeResult[0].EventId);
+    }
+
+    [TestMethod]
+    public async Task Projection_ReusesReadyCardForUnchangedCompletedTurn()
+    {
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        var events = CreateTurnEvents(startedAt, includeCompletedAssistant: true, includeUsage: false, runId: new AgentRunId("run-stable"));
+
+        var firstResult = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+        var secondResult = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        Assert.AreSame(firstResult.Single(), secondResult.Single());
+    }
+
+    [TestMethod]
+    public async Task Projection_DoesNotReemitCompletedTurnWhileNextTurnIsRunning()
+    {
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        var providerId = new ModelProviderId("provider-1");
+        var events = CreateTurnEvents(startedAt, includeCompletedAssistant: true, includeUsage: false, runId: new AgentRunId("run-complete"))
+            .ToList();
+        var firstResult = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        events.Add(new AgentActivityEvent(providerId, "session-1", startedAt.AddSeconds(10), new AgentRunId("run-next"), AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-2", null, "turn", null));
+        events.Add(new AgentContentCompletedEvent(providerId, "session-1", startedAt.AddSeconds(11), new AgentRunId("run-next"), AgentContentKind.User, "user-2", "turn-2", "follow up"));
+        events.Add(new AgentContentDeltaEvent(providerId, "session-1", startedAt.AddSeconds(12), new AgentRunId("run-next"), AgentContentKind.Reasoning, "reasoning-2", "turn-2", "thinking"));
+        var secondResult = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        Assert.AreEqual(1, secondResult.Count);
+        Assert.AreSame(firstResult.Single(), secondResult.Single());
     }
 
     [TestMethod]

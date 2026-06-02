@@ -23,7 +23,7 @@ public sealed class StatisticsPlugin : PluginBase
 {
     private const string ProjectionName = "statistics";
     private const string RenderTarget = "codealta.statistics.turn.v1";
-    private readonly ConcurrentDictionary<string, AsyncTurnStatisticsProjection> _turnProjections = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, PluginDerivedSessionEvent> _turnProjectionCache = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
     public override IEnumerable<PluginSessionEventProjectionContribution> GetSessionEventProjections()
@@ -112,31 +112,58 @@ public sealed class StatisticsPlugin : PluginBase
         var projected = new List<PluginDerivedSessionEvent>(turns.Length);
         foreach (var turn in turns.Where(static item => item.IsComplete))
         {
-            var state = GetOrCreateProjectionState(context.SessionId, turn);
-            projected.Add(new PluginDerivedSessionEvent
-            {
-                EventId = $"statistics:{EscapeEventId(context.SessionId)}:{EscapeEventId(turn.Key)}",
-                Timestamp = turn.Timestamp,
-                Markdown = state.Markdown,
-                DetailSections = state.DetailSections,
-                DynamicContent = state,
-                RenderTarget = RenderTarget,
-                Payload = state.Payload,
-            });
+            projected.Add(GetOrCreateProjection(context.SessionId, turn));
         }
 
         return ValueTask.FromResult<IReadOnlyList<PluginDerivedSessionEvent>>(projected);
     }
 
-    private AsyncTurnStatisticsProjection GetOrCreateProjectionState(string sessionId, PendingTurn turn)
+    private PluginDerivedSessionEvent GetOrCreateProjection(string sessionId, PendingTurn turn)
     {
         var cacheKey = FormattableString.Invariant($"{sessionId}:{turn.Key}:{turn.Fingerprint}");
-        return _turnProjections.GetOrAdd(cacheKey, _ =>
+        return _turnProjectionCache.GetOrAdd(cacheKey, _ => CreateProjection(sessionId, turn));
+    }
+
+    private static PluginDerivedSessionEvent CreateProjection(string sessionId, PendingTurn turn)
+    {
+        var statistics = TurnStatisticsBuilder.BuildTurn(turn.Key, turn.SessionId, turn.RunId, turn.Events);
+        return new PluginDerivedSessionEvent
         {
-            var state = new AsyncTurnStatisticsProjection(turn);
-            state.Start();
-            return state;
-        });
+            EventId = $"statistics:{EscapeEventId(sessionId)}:{EscapeEventId(turn.Key)}",
+            Timestamp = turn.Timestamp,
+            Markdown = StatisticsMarkdownRenderer.RenderTurnSummary(statistics),
+            DetailSections =
+            [
+                new PluginDerivedSessionEventDetailSection
+                {
+                    Header = "Detailed statistics",
+                    Markdown = StatisticsMarkdownRenderer.RenderTurnDetails(statistics),
+                    VisualFactory = _ => StatisticsVisualRenderer.RenderTurnDetails(statistics),
+                },
+            ],
+            VisualFactory = _ => StatisticsVisualRenderer.RenderTurnCard(statistics),
+            RenderTarget = RenderTarget,
+            Payload = new
+            {
+                statistics.Key,
+                statistics.SessionId,
+                statistics.RunId,
+                statistics.Duration,
+                ToolCalls = statistics.Tools.Count,
+                statistics.ReportedOperationCount,
+                statistics.ReportedInputTokens,
+                statistics.ReportedFreshInputTokens,
+                statistics.ReportedOutputTokens,
+                statistics.ReportedReasoningTokens,
+                statistics.EstimatedInputTokens,
+                statistics.EstimatedOutputTokens,
+                ToolInputCharacters = statistics.ToolInput.Characters,
+                GeneratedOutputCharacters = statistics.GeneratedOutput.Characters,
+                statistics.CompactionCount,
+                statistics.CompactionDuration,
+                Status = "ready",
+            },
+        };
     }
 
     /// <summary>
@@ -257,6 +284,7 @@ public sealed class StatisticsPlugin : PluginBase
     {
         private readonly Dictionary<string, TurnBuilder> _turns = new(StringComparer.Ordinal);
         private TurnBuilder? _fallbackTurn;
+        private TurnBuilder? _lastTurn;
         private int _fallbackOrdinal;
 
         public static IReadOnlyList<TurnStatistics> BuildTurns(IReadOnlyList<AgentEvent> events)
@@ -300,7 +328,13 @@ public sealed class StatisticsPlugin : PluginBase
             if (@event.RunId is { } runId)
             {
                 var key = "run-" + runId.Value;
-                return GetOrCreate(key, @event.SessionId, runId.Value);
+                _lastTurn = GetOrCreate(key, @event.SessionId, runId.Value);
+                return _lastTurn;
+            }
+
+            if (ShouldAttachRunlessEventToLatestTurn(@event) && _lastTurn is not null)
+            {
+                return _lastTurn;
             }
 
             if (_fallbackTurn is null || StartsFallbackTurn(@event, _fallbackTurn))
@@ -309,7 +343,8 @@ public sealed class StatisticsPlugin : PluginBase
                 _fallbackTurn = GetOrCreate(key, @event.SessionId, null);
             }
 
-            return _fallbackTurn;
+            _lastTurn = _fallbackTurn;
+            return _lastTurn;
         }
 
         private TurnBuilder GetOrCreate(string key, string sessionId, string? runId)
@@ -332,6 +367,7 @@ public sealed class StatisticsPlugin : PluginBase
     {
         private readonly Dictionary<string, PendingTurnAccumulator> _turns = new(StringComparer.Ordinal);
         private PendingTurnAccumulator? _fallbackTurn;
+        private PendingTurnAccumulator? _lastTurn;
         private int _fallbackOrdinal;
 
         public static IReadOnlyList<PendingTurn> BuildTurns(IReadOnlyList<AgentEvent> events)
@@ -360,7 +396,13 @@ public sealed class StatisticsPlugin : PluginBase
             if (@event.RunId is { } runId)
             {
                 var key = "run-" + runId.Value;
-                return GetOrCreate(key, @event.SessionId, runId.Value);
+                _lastTurn = GetOrCreate(key, @event.SessionId, runId.Value);
+                return _lastTurn;
+            }
+
+            if (ShouldAttachRunlessEventToLatestTurn(@event) && _lastTurn is not null)
+            {
+                return _lastTurn;
             }
 
             if (_fallbackTurn is null || StartsFallbackTurn(@event, _fallbackTurn))
@@ -369,7 +411,8 @@ public sealed class StatisticsPlugin : PluginBase
                 _fallbackTurn = GetOrCreate(key, @event.SessionId, null);
             }
 
-            return _fallbackTurn;
+            _lastTurn = _fallbackTurn;
+            return _lastTurn;
         }
 
         private PendingTurnAccumulator GetOrCreate(string key, string sessionId, string? runId)
@@ -387,6 +430,9 @@ public sealed class StatisticsPlugin : PluginBase
         private static bool StartsFallbackTurn(AgentEvent @event, PendingTurnAccumulator current)
             => @event is AgentActivityEvent { Kind: AgentActivityKind.Turn, Phase: AgentActivityPhase.Started } && current.HasEvents;
     }
+
+    private static bool ShouldAttachRunlessEventToLatestTurn(AgentEvent @event)
+        => @event.RunId is null && @event is AgentSessionUpdateEvent or AgentErrorEvent;
 
     private sealed class PendingTurnAccumulator(string key, string sessionId, string? runId)
     {
@@ -414,7 +460,7 @@ public sealed class StatisticsPlugin : PluginBase
                 case AgentActivityEvent { Kind: AgentActivityKind.Turn } activity when IsTerminalPhase(activity.Phase):
                     _endedAt = Max(_endedAt, activity.Timestamp);
                     break;
-                case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown or AgentSessionUpdateKind.TaskCompleted } update:
+                case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown } update:
                     _endedAt = Max(_endedAt, update.Timestamp);
                     break;
                 case AgentErrorEvent error:
@@ -485,171 +531,6 @@ public sealed class StatisticsPlugin : PluginBase
         string Fingerprint,
         IReadOnlyList<AgentEvent> Events);
 
-    private sealed class AsyncTurnStatisticsProjection : PluginDynamicDerivedSessionEventContent
-    {
-        private readonly object _gate = new();
-        private readonly PendingTurn _turn;
-        private string _markdown;
-        private IReadOnlyList<PluginDerivedSessionEventDetailSection> _detailSections = [];
-        private PluginSessionEventVisualFactory? _visualFactory;
-        private object? _payload;
-        private bool _started;
-
-        public AsyncTurnStatisticsProjection(PendingTurn turn)
-        {
-            _turn = turn;
-            _markdown = "**Turn statistics** · computing...";
-            _payload = new
-            {
-                turn.Key,
-                turn.SessionId,
-                turn.RunId,
-                Status = "computing",
-            };
-            _detailSections =
-            [
-                new PluginDerivedSessionEventDetailSection
-                {
-                    Header = "Detailed statistics",
-                    Markdown = "Computing detailed statistics...",
-                },
-            ];
-            _visualFactory = _ => StatisticsVisualRenderer.RenderComputingTurnCard();
-        }
-
-        public override string Markdown
-        {
-            get
-            {
-                lock (_gate)
-                {
-                    return _markdown;
-                }
-            }
-        }
-
-        public override IReadOnlyList<PluginDerivedSessionEventDetailSection> DetailSections
-        {
-            get
-            {
-                lock (_gate)
-                {
-                    return _detailSections;
-                }
-            }
-        }
-
-        public override PluginSessionEventVisualFactory? VisualFactory
-        {
-            get
-            {
-                lock (_gate)
-                {
-                    return _visualFactory;
-                }
-            }
-        }
-
-        public object? Payload
-        {
-            get
-            {
-                lock (_gate)
-                {
-                    return _payload;
-                }
-            }
-        }
-
-        public void Start()
-        {
-            lock (_gate)
-            {
-                if (_started)
-                {
-                    return;
-                }
-
-                _started = true;
-            }
-
-            _ = Task.Run(Compute);
-        }
-
-        private void Compute()
-        {
-            try
-            {
-                var turn = TurnStatisticsBuilder.BuildTurn(_turn.Key, _turn.SessionId, _turn.RunId, _turn.Events);
-                UpdateCompleted(turn);
-            }
-            catch (Exception ex)
-            {
-                UpdateFailed(ex);
-            }
-        }
-
-        private void UpdateCompleted(TurnStatistics turn)
-        {
-            lock (_gate)
-            {
-                _markdown = StatisticsMarkdownRenderer.RenderTurnSummary(turn);
-                _detailSections =
-                [
-                    new PluginDerivedSessionEventDetailSection
-                    {
-                        Header = "Detailed statistics",
-                        Markdown = StatisticsMarkdownRenderer.RenderTurnDetails(turn),
-                        VisualFactory = _ => StatisticsVisualRenderer.RenderTurnDetails(turn),
-                    },
-                ];
-                _visualFactory = _ => StatisticsVisualRenderer.RenderTurnCard(turn);
-                _payload = new
-                {
-                    turn.Key,
-                    turn.SessionId,
-                    turn.RunId,
-                    turn.Duration,
-                    ToolCalls = turn.Tools.Count,
-                    turn.ReportedOperationCount,
-                    turn.ReportedInputTokens,
-                    turn.ReportedFreshInputTokens,
-                    turn.ReportedOutputTokens,
-                    turn.ReportedReasoningTokens,
-                    turn.EstimatedInputTokens,
-                    turn.EstimatedOutputTokens,
-                    ToolInputCharacters = turn.ToolInput.Characters,
-                    GeneratedOutputCharacters = turn.GeneratedOutput.Characters,
-                    turn.CompactionCount,
-                    turn.CompactionDuration,
-                    Status = "ready",
-                };
-            }
-
-            NotifyChanged();
-        }
-
-        private void UpdateFailed(Exception ex)
-        {
-            lock (_gate)
-            {
-                _markdown = $"**Turn statistics** · failed: {ex.Message}";
-                _detailSections = [];
-                _visualFactory = null;
-                _payload = new
-                {
-                    _turn.Key,
-                    _turn.SessionId,
-                    _turn.RunId,
-                    Status = "failed",
-                    Error = ex.Message,
-                };
-            }
-
-            NotifyChanged();
-        }
-    }
-
     private sealed class TurnBuilder(string key, string sessionId, string? runId)
     {
         private readonly Dictionary<string, ContentBuilder> _content = new(StringComparer.Ordinal);
@@ -692,7 +573,7 @@ public sealed class StatisticsPlugin : PluginBase
 
                     _compactions.Add(update);
 
-                    if (update.Kind is AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown or AgentSessionUpdateKind.TaskCompleted)
+                    if (update.Kind is AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown)
                     {
                         IsComplete = true;
                         EndedAt = update.Timestamp;
@@ -1689,14 +1570,6 @@ public sealed class StatisticsPlugin : PluginBase
 
     private static class StatisticsVisualRenderer
     {
-        public static Visual RenderComputingTurnCard()
-            => new Collapsible(
-                CreateHeaderMarkup("[bold]Turn statistics[/] · computing..."),
-                new Markup("[dim]Computing detailed statistics...[/]") { Wrap = false })
-            {
-                IsExpanded = false,
-            };
-
         public static Visual RenderTurnCard(TurnStatistics turn)
             => new Collapsible(
                 CreateHeaderMarkup(StatisticsMarkdownRenderer.RenderTurnSummaryMarkup(turn)),
