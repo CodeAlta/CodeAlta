@@ -696,7 +696,7 @@ public sealed class ArchitectureGuardrailTests
             "App/ShellSessionStateCoordinator.cs:383:_ = PersistViewStateAsync();",
             "App/ShellSessionStateCoordinator.cs:523:_ = PersistViewStateAsync();",
             "App/ShellSessionStateCoordinator.cs:573:_ = PersistViewStateAsync();",
-            "App/SidebarCoordinator.cs:308:_ = CommitInlineRenameAsync(row, projectId, displayName, previousTitle);",
+            "App/SidebarCoordinator.cs:312:_ = CommitInlineRenameAsync(row, projectId, displayName, previousTitle);",
             "App/SessionPromptDispatchCoordinator.cs:178:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
             "App/SessionPromptDraftPersistenceCoordinator.cs:83:_ = PersistPromptDraftAsync(sessionId, normalizedPrompt, cancellationSource);",
             "App/SessionHistoryCoordinator.cs:103:await Task.Run(",

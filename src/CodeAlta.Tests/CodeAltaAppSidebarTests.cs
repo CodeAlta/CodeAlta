@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.LiveTool;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.ViewModels;
@@ -396,7 +397,9 @@ public sealed class CodeAltaAppSidebarTests
     public void SidebarView_SetCollapsedShowsOnlyNavigatorIconAndExpandButton()
     {
         var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, new CapturingSidebarRowCommandDispatcher(), static _ => { });
-        var group = Assert.IsInstanceOfType<Group>(view.Root);
+        var splitter = Assert.IsInstanceOfType<VSplitter>(view.Root);
+        var group = Assert.IsInstanceOfType<Group>(view.NavigatorRoot);
+        var notesGroup = Assert.IsInstanceOfType<Group>(view.NotesRoot);
         var title = Assert.IsInstanceOfType<Markup>(group.TopLeftText);
         var toggleHost = Assert.IsInstanceOfType<TooltipHost>(group.TopRightText);
         var toggleButton = Assert.IsInstanceOfType<Button>(toggleHost.Content);
@@ -404,6 +407,9 @@ public sealed class CodeAltaAppSidebarTests
         bool? observedCollapsed = null;
         view.CollapsedChanged += isCollapsed => observedCollapsed = isCollapsed;
 
+        Assert.AreSame(group, splitter.First);
+        Assert.AreSame(notesGroup, splitter.Second);
+        Assert.AreEqual(0.75, splitter.Ratio);
         Assert.IsNotNull(group.Content);
         StringAssert.Contains(title.Text ?? string.Empty, "Navigator");
         Assert.AreEqual("\u25E8", toggleIcon.Text);
@@ -413,8 +419,28 @@ public sealed class CodeAltaAppSidebarTests
         Assert.IsTrue(view.IsCollapsed);
         Assert.AreEqual(true, observedCollapsed);
         Assert.IsNull(group.Content);
+        Assert.IsNull(splitter.Second);
         Assert.IsFalse(title.Text?.Contains("Navigator", StringComparison.Ordinal) ?? true);
         Assert.AreEqual("\u25E7", toggleIcon.Text);
+    }
+
+    [TestMethod]
+    public void SidebarView_NotesGroupUsesMarkdownControlAndUpdatesMarkdown()
+    {
+        var notesService = new AltaNotesService();
+        notesService.SetMarkdownAsync("# Initial", AltaCallerIdentity.Host).GetAwaiter().GetResult();
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, new CapturingSidebarRowCommandDispatcher(), static _ => { }, notesService: notesService);
+        var notesGroup = Assert.IsInstanceOfType<Group>(view.NotesRoot);
+        var scrollViewer = Assert.IsInstanceOfType<ScrollViewer>(notesGroup.Content);
+        var markdown = Assert.IsInstanceOfType<MarkdownControl>(scrollViewer.Content);
+
+        Assert.AreEqual("# Initial", markdown.Markdown);
+        Assert.IsFalse(scrollViewer.HorizontalScrollEnabled);
+        Assert.IsTrue(markdown.Options.WrapCodeBlocks);
+
+        view.SetNotesMarkdown("- [x] Done");
+
+        Assert.AreEqual("- [x] Done", markdown.Markdown);
     }
 
     [TestMethod]

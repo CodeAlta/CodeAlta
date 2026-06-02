@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.LiveTool;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.ViewModels;
@@ -30,7 +31,8 @@ internal sealed class SidebarCoordinator
         Action openNavigatorSettings,
         Func<string, string, Task> renameProjectDisplayNameAsync,
         ISidebarRowCommandDispatcher rowCommandDispatcher,
-        Action openLogs)
+        Action openLogs,
+        IAltaNotesService notesService)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(catalogOptions);
@@ -40,6 +42,7 @@ internal sealed class SidebarCoordinator
         ArgumentNullException.ThrowIfNull(renameProjectDisplayNameAsync);
         ArgumentNullException.ThrowIfNull(rowCommandDispatcher);
         ArgumentNullException.ThrowIfNull(openLogs);
+        ArgumentNullException.ThrowIfNull(notesService);
 
         _viewModel = viewModel;
         _catalogOptions = catalogOptions;
@@ -57,7 +60,8 @@ internal sealed class SidebarCoordinator
             CancelInlineRename,
             rowCommandDispatcher,
             OnSelectedTargetChanged,
-            openLogs);
+            openLogs,
+            notesService);
     }
 
     public SidebarView View => _view;

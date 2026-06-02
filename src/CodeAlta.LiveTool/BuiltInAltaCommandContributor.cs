@@ -38,6 +38,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     [
         Read("version", supportsCatalogOnlyContext: true),
         Mutating("ask"),
+        Read("notes get"),
+        Mutating("notes set"),
+        Mutating("notes clear"),
+        Read("note get"),
+        Mutating("note set"),
+        Mutating("note clear"),
         Read("project list", supportsCatalogOnlyContext: true),
         Read("project show", supportsCatalogOnlyContext: true),
         Read("project resolve", supportsCatalogOnlyContext: true),
@@ -91,6 +97,8 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         ArgumentNullException.ThrowIfNull(context);
         yield return CreateVersionCommand(context.Invocation);
         yield return CreateAskCommand(context.Invocation);
+        yield return CreateNotesCommand(context.Invocation, "notes");
+        yield return CreateNotesCommand(context.Invocation, "note");
         yield return CreateProjectCommand(context.Invocation);
         yield return CreateSessionCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
@@ -204,6 +212,45 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             group,
             "Examples: `alta project current`; `alta project list`; `alta project show CodeAlta`; `alta project resolve --path C:/code/CodeAlta`.");
         return group;
+    }
+
+    private static Command CreateNotesCommand(AltaCommandContext context, string name)
+    {
+        var group = Group(name, name == "note"
+            ? "Compatibility alias for `notes`."
+            : "Read and update the active sticky Markdown notes shown in the sidebar.");
+        group.Add(CreateNotesGetCommand(context));
+        group.Add(CreateNotesSetCommand(context));
+        group.Add(CreateNotesClearCommand(context));
+        AddHelpText(
+            group,
+            "Examples: `alta notes get`; `alta notes set --stdin`; `alta notes clear`.",
+            "Use notes for sticky Markdown status, plans, and checklists intended to remain visible to the user.");
+        return group;
+    }
+
+    private static Command CreateNotesGetCommand(AltaCommandContext context)
+    {
+        var command = Leaf("get", "Get the current sticky notes Markdown.");
+        command.Add((_, _) => ValueTask.FromResult(HandleNotesGet(context)));
+        return command;
+    }
+
+    private static Command CreateNotesSetCommand(AltaCommandContext context)
+    {
+        var useStdin = false;
+        var command = Leaf("set", "Replace the current sticky notes Markdown from stdin.");
+        command.Add("stdin", "Read replacement Markdown from stdin. Accepted for consistency; stdin is read by default.", value => useStdin = value is not null);
+        command.Add(async (_, _) => await HandleNotesSetAsync(context, useStdin).ConfigureAwait(false));
+        AddHelpText(command, "Example: `alta notes set --stdin` with Markdown content on stdin.");
+        return command;
+    }
+
+    private static Command CreateNotesClearCommand(AltaCommandContext context)
+    {
+        var command = Leaf("clear", "Clear the current sticky notes Markdown.");
+        command.Add(async (_, _) => await HandleNotesClearAsync(context).ConfigureAwait(false));
+        return command;
     }
 
     private static Command CreateProjectListCommand(AltaCommandContext context)
@@ -2839,6 +2886,56 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         return ValueTask.FromResult(AltaExitCodes.Success);
     }
 
+    private static int HandleNotesGet(AltaCommandContext context)
+    {
+        if (!TryGetNotesService(context, out var notesService))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        WriteNotesRecord(context, "alta.notes.current", notesService.GetMarkdown());
+        return AltaExitCodes.Success;
+    }
+
+    private static async ValueTask<int> HandleNotesSetAsync(AltaCommandContext context, bool useStdin)
+    {
+        _ = useStdin;
+        if (!TryGetNotesService(context, out var notesService))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var markdown = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
+        await notesService.SetMarkdownAsync(markdown, context.Caller, context.CancellationToken).ConfigureAwait(false);
+        WriteNotesRecord(context, "alta.notes.updated", markdown);
+        return AltaExitCodes.Success;
+    }
+
+    private static async ValueTask<int> HandleNotesClearAsync(AltaCommandContext context)
+    {
+        if (!TryGetNotesService(context, out var notesService))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        await notesService.ClearAsync(context.Caller, context.CancellationToken).ConfigureAwait(false);
+        WriteNotesRecord(context, "alta.notes.updated", string.Empty);
+        return AltaExitCodes.Success;
+    }
+
+    private static void WriteNotesRecord(AltaCommandContext context, string type, string markdown)
+    {
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type,
+            version = 1,
+            correlationId = context.CorrelationId,
+            markdown,
+            length = markdown.Length,
+            empty = markdown.Length == 0,
+        });
+    }
+
     private static async Task<IReadOnlyList<AltaSessionInfo>?> LoadSessionInfosAsync(AltaCommandContext context)
     {
         var queryService = context.Services.Get<IAltaSessionQueryService>();
@@ -2901,6 +2998,23 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             "service.unavailable",
             AltaExitCodes.ServiceUnavailable,
             "Required in-process service 'IAltaAskService' is unavailable.");
+        return false;
+    }
+
+    private static bool TryGetNotesService(AltaCommandContext context, out IAltaNotesService notesService)
+    {
+        notesService = context.Services.Get<IAltaNotesService>()!;
+        if (notesService is not null)
+        {
+            return true;
+        }
+
+        AltaJsonlWriter.WriteError(
+            context.Stderr,
+            context.CorrelationId,
+            "service.unavailable",
+            AltaExitCodes.ServiceUnavailable,
+            "Required in-process service 'IAltaNotesService' is unavailable.");
         return false;
     }
 

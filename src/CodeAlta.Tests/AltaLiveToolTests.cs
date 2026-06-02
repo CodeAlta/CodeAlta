@@ -568,6 +568,50 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task NotesCommand_SetGetClearRoundTripsMarkdown()
+    {
+        var notesService = new AltaNotesService();
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add<IAltaNotesService>(notesService));
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-notes" };
+        const string markdown = "## Plan\n- [ ] Implement notes\n- [ ] Verify";
+
+        var set = await dispatcher.InvokeAsync(["notes", "set", "--stdin"], caller: caller, stdin: markdown).ConfigureAwait(false);
+        var get = await dispatcher.InvokeAsync(["notes", "get"], caller: caller).ConfigureAwait(false);
+        var clear = await dispatcher.InvokeAsync(["note", "clear"], caller: caller).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, set.ExitCode, set.Stderr);
+        var setRecord = ReadJsonLines(set.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.notes.updated");
+        Assert.AreEqual(markdown, setRecord.GetProperty("markdown").GetString());
+        Assert.AreEqual(markdown.Length, setRecord.GetProperty("length").GetInt32());
+
+        Assert.AreEqual(AltaExitCodes.Success, get.ExitCode, get.Stderr);
+        var getRecord = ReadJsonLines(get.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.notes.current");
+        Assert.AreEqual(markdown, getRecord.GetProperty("markdown").GetString());
+        Assert.IsFalse(getRecord.GetProperty("empty").GetBoolean());
+
+        Assert.AreEqual(AltaExitCodes.Success, clear.ExitCode, clear.Stderr);
+        var clearRecord = ReadJsonLines(clear.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.notes.updated");
+        Assert.AreEqual(string.Empty, clearRecord.GetProperty("markdown").GetString());
+        Assert.IsTrue(clearRecord.GetProperty("empty").GetBoolean());
+        Assert.AreEqual(string.Empty, notesService.GetMarkdown());
+    }
+
+    [TestMethod]
+    public void AltaNotesService_ReplacesClearsAndRaisesChangedEvents()
+    {
+        var service = new AltaNotesService();
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-notes" };
+        var markdownChanges = new List<string>();
+        service.Changed += (_, args) => markdownChanges.Add(args.Markdown);
+
+        service.SetMarkdownAsync("# Status", caller).GetAwaiter().GetResult();
+        service.ClearAsync(caller).GetAwaiter().GetResult();
+
+        Assert.AreEqual(string.Empty, service.GetMarkdown());
+        CollectionAssert.AreEqual(new[] { "# Status", string.Empty }, markdownChanges);
+    }
+
+    [TestMethod]
     public async Task AskCommand_RequiresExplicitSessionOutsideAgentCaller()
     {
         var dispatcher = CreateDispatcher(new AltaServiceCollection().Add<IAltaAskService>(new AltaAskService()));
@@ -618,6 +662,21 @@ public sealed class AltaLiveToolTests
         AssertJsonArrayContains(capability.GetProperty("paths"), "ask");
         AssertJsonArrayContains(capability.GetProperty("mutating"), "ask");
         Assert.IsFalse(capability.GetProperty("outOfProcess").EnumerateArray().Any(static item => item.GetString() == "ask"));
+    }
+
+    [TestMethod]
+    public async Task ToolCapabilityList_ReportsNotesCommandsAsRuntimeCommands()
+    {
+        var result = await CreateDispatcher().InvokeAsync(["tool", "capability", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
+        var capability = ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.capabilities");
+        AssertJsonArrayContains(capability.GetProperty("paths"), "notes get");
+        AssertJsonArrayContains(capability.GetProperty("paths"), "notes set");
+        AssertJsonArrayContains(capability.GetProperty("paths"), "notes clear");
+        AssertJsonArrayContains(capability.GetProperty("paths"), "note get");
+        AssertJsonArrayContains(capability.GetProperty("mutating"), "notes set");
+        AssertJsonArrayContains(capability.GetProperty("mutating"), "notes clear");
     }
 
     [TestMethod]

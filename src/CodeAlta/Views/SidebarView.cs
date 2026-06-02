@@ -1,5 +1,6 @@
 using System.Text;
 using CodeAlta.Catalog;
+using CodeAlta.LiveTool;
 using CodeAlta.Presentation.Sidebar;
 using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
@@ -8,6 +9,7 @@ using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
@@ -38,6 +40,8 @@ internal sealed class SidebarView
     private readonly Markup _title;
     private readonly TextBlock _collapseToggleIcon;
     private readonly Group _group;
+    private readonly VSplitter _rootSplitter;
+    private readonly SidebarNotesView _notesView;
     private bool _isCollapsed;
 
     public SidebarView(
@@ -50,7 +54,8 @@ internal sealed class SidebarView
         Action<SidebarNodeViewModel> cancelInlineRename,
         ISidebarRowCommandDispatcher rowCommandDispatcher,
         Action<SidebarSelectionTarget?> onSelectedTargetChanged,
-        Action? openLogs = null)
+        Action? openLogs = null,
+        IAltaNotesService? notesService = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(refreshCatalog);
@@ -151,10 +156,23 @@ internal sealed class SidebarView
         group.TopRightText = collapseToggle;
 
         _group = group;
-        Root = _group;
+        _notesView = new SidebarNotesView(notesService ?? new AltaNotesService());
+        _rootSplitter = new VSplitter
+        {
+            First = _group,
+            Second = _notesView.Root,
+            Ratio = 0.75,
+            MinFirst = 6,
+            MinSecond = 4,
+        };
+        Root = _rootSplitter;
     }
 
     public Visual Root { get; }
+
+    public Visual NavigatorRoot => _group;
+
+    public Visual NotesRoot => _notesView.Root;
 
     public TreeView Tree { get; }
 
@@ -213,8 +231,12 @@ internal sealed class SidebarView
         _title.Text = BuildTitleMarkup();
         _collapseToggleIcon.Text = isCollapsed ? ExpandNavigatorIcon : CollapseNavigatorIcon;
         _group.Content = isCollapsed ? null : _contentGrid;
+        _rootSplitter.Second = isCollapsed ? null : _notesView.Root;
         CollapsedChanged?.Invoke(isCollapsed);
     }
+
+    public void SetNotesMarkdown(string markdown)
+        => _notesView.SetMarkdown(markdown);
 
     private string BuildTitleMarkup() => _isCollapsed ? "" :
         $"[bold]{NerdFont.FaFolderTree} Navigator[/]";
@@ -336,6 +358,63 @@ internal sealed class SidebarView
         Action<SidebarNodeViewModel> submitInlineRename,
         Action<SidebarNodeViewModel> cancelInlineRename)
         => new SidebarNodeHeaderView(row, submitInlineRename, cancelInlineRename);
+
+    private sealed class SidebarNotesView
+    {
+        private readonly IAltaNotesService _notesService;
+        private readonly MarkdownControl _markdown;
+
+        public SidebarNotesView(IAltaNotesService notesService)
+        {
+            ArgumentNullException.ThrowIfNull(notesService);
+
+            _notesService = notesService;
+            _markdown = new MarkdownControl(notesService.GetMarkdown())
+            {
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Start,
+                Options = MarkdownRenderOptions.Default with
+                {
+                    WrapCodeBlocks = true,
+                    MaxCodeBlockHeight = 8,
+                },
+            };
+
+            var copyButton = new Button(new TextBlock(NerdFont.MdContentCopy.ToString()) { Wrap = false, IsSelectable = false })
+                .Style(TitleButtonStyle);
+            copyButton.Click(() => copyButton.App?.Terminal.Clipboard.TrySetText(_markdown.Markdown ?? string.Empty));
+            var copyButtonHost = copyButton.Tooltip(new TextBlock("Copy notes as Markdown"));
+            var clearButton = new Button(new TextBlock($"{NerdFont.MdTrashCanOutline} Clear") { Wrap = false, IsSelectable = false })
+                .Style(TitleButtonStyle);
+            clearButton.Click(ClearNotes);
+            var clearButtonHost = clearButton.Tooltip(new TextBlock("Clear notes"));
+            var notesScroll = new ScrollViewer(_markdown)
+                .HorizontalScrollEnabled(false)
+                .VerticalScrollEnabled(true);
+
+            Group? notesGroup = null;
+            notesGroup = new Group($"{NerdFont.MdNoteTextOutline} Notes", notesScroll)
+            {
+                HorizontalAlignment = Align.Stretch,
+                VerticalAlignment = Align.Stretch,
+            }
+            .TopRightText(copyButtonHost)
+            .BottomRightText(clearButtonHost)
+            .Style(() => UiPalette.GetSidebarGroupStyle(notesGroup!.GetTheme()));
+            Root = notesGroup;
+        }
+
+        public Visual Root { get; }
+
+        public void SetMarkdown(string markdown)
+        {
+            ArgumentNullException.ThrowIfNull(markdown);
+            _markdown.Markdown = markdown;
+        }
+
+        private void ClearNotes()
+            => _notesService.ClearAsync(AltaCallerIdentity.Host).GetAwaiter().GetResult();
+    }
 
     private sealed class TitleButton : Button
     {

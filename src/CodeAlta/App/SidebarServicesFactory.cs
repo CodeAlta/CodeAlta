@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.LiveTool;
 using CodeAlta.Models;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal.UI;
@@ -13,6 +14,7 @@ internal static class SidebarServicesFactory
         CatalogOptions catalogOptions,
         CodeAltaShellController shellController,
         ShellSessionStateCoordinator sessionStateCoordinator,
+        IAltaNotesService notesService,
         Func<string?, string> resolveProviderDisplayName,
         Func<Visual?> getPromptFocusTarget,
         Action refreshCatalogAndSessionWorkspace,
@@ -23,6 +25,7 @@ internal static class SidebarServicesFactory
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(shellController);
         ArgumentNullException.ThrowIfNull(sessionStateCoordinator);
+        ArgumentNullException.ThrowIfNull(notesService);
         ArgumentNullException.ThrowIfNull(resolveProviderDisplayName);
         ArgumentNullException.ThrowIfNull(getPromptFocusTarget);
         ArgumentNullException.ThrowIfNull(refreshCatalogAndSessionWorkspace);
@@ -56,7 +59,8 @@ internal static class SidebarServicesFactory
             navigatorSettings.Open,
             navigatorActions.RenameProjectDisplayNameAsync,
             new SidebarRowCommandDispatcher(navigatorActions),
-            applicationLogs.Open);
+            applicationLogs.Open,
+            notesService);
         return (navigatorActions, sidebar);
     }
 

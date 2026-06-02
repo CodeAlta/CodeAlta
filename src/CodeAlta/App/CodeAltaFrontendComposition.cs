@@ -109,6 +109,7 @@ internal sealed class CodeAltaFrontendComposition
         var altaToolProviderIds = ResolveAltaToolProviderIds(configStore);
         var askService = new AltaAskService();
         askService.QueueChanged += (_, args) => frontendEvents.Publish(new AskQueueChangedEvent(args.SessionId));
+        var notesService = new AltaNotesService();
         var altaServices = new AltaServiceCollection()
             .Add(catalogOptions)
             .Add(projectCatalog)
@@ -119,6 +120,7 @@ internal sealed class CodeAltaFrontendComposition
             .Add(modelProviderInitializationService)
             .Add(projectFileSearchService)
             .Add<IAltaAskService>(askService)
+            .Add<IAltaNotesService>(notesService)
             .Add<IReadOnlyList<ModelProviderDescriptor>>(providerDescriptors)
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy(altaToolProviderIds));
         if (modelProviderRegistry is not null)
@@ -214,11 +216,13 @@ internal sealed class CodeAltaFrontendComposition
             catalogOptions,
             shellController,
             sessionStateCoordinator,
+            notesService,
             resolveProviderDisplayName,
             () => frontend.SessionInput,
             () => frontendEvents.Publish(new CatalogChangedEvent()),
             frontend.SetStatus,
             frontend.SetReadyStatusForCurrentSelection);
+        notesService.Changed += (_, args) => UiDispatch.Post(uiDispatcher, () => sidebarCoordinator.View.SetNotesMarkdown(args.Markdown));
         var reminderUiCoordinator = new ReminderUiCoordinator(
             reminderService,
             new ReminderUiCoordinatorPort

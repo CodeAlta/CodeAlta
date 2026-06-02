@@ -80,6 +80,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | --- | --- |
 | `version` | Report host/live-tool version metadata. |
 | `ask` | Queue structured user questions for the calling session and return yield guidance. |
+| `notes` | Get, replace, or clear the active sticky Markdown notes shown in the sidebar. |
 | `project` | List, show, resolve, upsert, and inspect current project context. |
 | `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions. |
 | `reminder` | Schedule delayed prompt content for the current or another session, and list/delete reminders. |
@@ -89,7 +90,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `model` | List, show, and resolve model refs. |
 | `plugin` | Inspect active plugin runtime state. |
 
-`skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
+`note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
 
 ## Common discovery commands
 
@@ -97,6 +98,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 alta --help
 alta tool status
 alta tool capability list
+alta notes get
 alta project current
 alta project list
 alta provider list
@@ -181,6 +183,18 @@ Successful output is JSONL headed by `alta.result` followed by one `alta.ask.que
 ```
 
 After receiving `alta.ask.queued`, an LLM should stop the turn: do not call another tool, sleep, poll, or inspect status while waiting. CodeAlta presents the ask when the target session is idle, collects answers in ask mode, and submits a normal user prompt back to the same session. The formatted prompt omits the ask id from user-visible Markdown; CodeAlta carries the optional ask id on the prompt/journal event for correlation.
+
+## Notes
+
+Use `alta notes` for short-lived sticky Markdown that should remain visible while an agent works, such as a checklist, plan status, or next actions. There is one active notes document per running CodeAlta frontend; it starts empty and is shown in the left sidebar below Navigator. The sidebar Notes panel renders Markdown in a scrollable view, wraps horizontally, offers a copy-to-Markdown button, and has a clear action.
+
+```text
+alta notes get
+alta notes set --stdin
+alta notes clear
+```
+
+`alta notes get` emits the current Markdown as `alta.notes.current`. `alta notes set` replaces the entire notes document with Markdown read from stdin and emits `alta.notes.updated`; `--stdin` is accepted for consistency with other text commands. `alta notes clear` sets the document back to empty. Prefer `notes` over the singular `note` alias in new prompts and documentation.
 
 ## Reminders
 
