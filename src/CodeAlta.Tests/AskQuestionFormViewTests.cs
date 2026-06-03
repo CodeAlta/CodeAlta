@@ -1,7 +1,10 @@
+using System.Collections;
+using System.Reflection;
 using CodeAlta.LiveTool;
 using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.Text;
 
 namespace CodeAlta.Tests;
 
@@ -148,6 +151,43 @@ public sealed class AskQuestionFormViewTests
         StringAssert.Contains(fileReviewSource, "Clear comments");
         StringAssert.Contains(fileReviewSource, "TrySave");
         StringAssert.Contains(fileReviewSource, "CreateReviewSnapshot");
+    }
+
+    [TestMethod]
+    public void FileAsk_CreateReviewSnapshotIncludesActiveCommentText()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "CodeAlta.Tests." + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            File.WriteAllText(path, "line 1" + Environment.NewLine + "line 2");
+            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, []);
+
+            Assert.IsNotNull(view);
+            typeof(AskFileReviewView)
+                .GetMethod("InsertCommentAtCurrentLine", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(view, null);
+
+            var comments = (IDictionary)typeof(AskFileReviewView)
+                .GetField("_comments", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(view)!;
+            Assert.AreEqual(1, comments.Count);
+            var entry = comments.Values.Cast<object>().Single();
+            var textArea = (TextArea)entry.GetType().GetProperty("TextArea", BindingFlags.Instance | BindingFlags.Public)!.GetValue(entry)!;
+            textArea.TextDocument = new TextDocument("Consider this line.");
+
+            var snapshot = view.CreateReviewSnapshot();
+
+            Assert.AreEqual(1, snapshot.Comments.Count);
+            Assert.AreEqual(1, snapshot.Comments[0].Line);
+            Assert.AreEqual("Consider this line.", snapshot.Comments[0].Text);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
     }
 
     private static AltaQueuedAsk CreateQueuedAsk(AltaAskRequest request)

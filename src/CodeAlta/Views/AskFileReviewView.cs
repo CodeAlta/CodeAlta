@@ -187,7 +187,13 @@ internal sealed class AskFileReviewView
     }
 
     public AltaAskFileReview CreateReviewSnapshot()
-        => new()
+    {
+        foreach (var comment in _comments.Values)
+        {
+            UpdateCommentSubmission(comment);
+        }
+
+        return new AltaAskFileReview
         {
             FileModifiedAndSaved = _hasSavedUserChanges,
             Comments = _comments.Values
@@ -200,6 +206,7 @@ internal sealed class AskFileReviewView
                 })
                 .ToArray(),
         };
+    }
 
     public Command CreateClearCommentsCommand()
         => new()
