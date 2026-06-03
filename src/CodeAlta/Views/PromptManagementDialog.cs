@@ -1227,6 +1227,7 @@ internal sealed class PromptManagementDialog
     {
         _bodyEditor.TextDocument.Changed -= OnEditorChanged;
         _bodyEditor.TextDocument = new TextDocument(text ?? string.Empty);
+        _bodyEditor.SyntaxHighlighter = CreateMarkdownSyntaxHighlighter();
         _bodyEditor.TextDocument.Changed += OnEditorChanged;
     }
 

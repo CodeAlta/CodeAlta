@@ -29,6 +29,41 @@ public sealed class PromptManagementDialogTests
     }
 
     [TestMethod]
+    public void BodyEditorRefreshesMarkdownSyntaxHighlighterWhenPromptBodyLoads()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        WritePrompt(tempDirectory.Path, body: "# Heading\n\n```csharp\nvar value = 1;\n```");
+        var promptDialog = CreatePromptDialog(tempDirectory.Path);
+        var editor = GetPrivateField<CodeEditor>(promptDialog, "_bodyEditor");
+        var initialHighlighter = Assert.IsInstanceOfType<TextMateCodeEditorSyntaxHighlighter>(editor.SyntaxHighlighter);
+
+        using var terminalSession = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(120, 40)), new TerminalOptions { ImplicitStartInput = true }, force: true);
+        var app = new TerminalApp(
+            new TextBlock("Host"),
+            terminalSession.Instance,
+            new TerminalAppOptions
+            {
+                HostKind = TerminalHostKind.Fullscreen,
+            });
+
+        InvokeTerminalApp(app, "BeginRun");
+        try
+        {
+            promptDialog.Show();
+            TickTerminalApp(app);
+
+            var loadedHighlighter = Assert.IsInstanceOfType<TextMateCodeEditorSyntaxHighlighter>(editor.SyntaxHighlighter);
+            Assert.AreNotSame(initialHighlighter, loadedHighlighter);
+            Assert.AreEqual("markdown", loadedHighlighter.Options.LanguageId);
+            StringAssert.Contains(GetEditorText(editor), "```csharp");
+        }
+        finally
+        {
+            InvokeTerminalApp(app, "EndRun");
+        }
+    }
+
+    [TestMethod]
     public void DeleteKeyInsideBodyEditorDeletesTextInsteadOfPrompt()
     {
         using var tempDirectory = TempDirectory.Create();
