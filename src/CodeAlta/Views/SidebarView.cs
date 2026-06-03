@@ -5,6 +5,7 @@ using CodeAlta.Presentation.Sidebar;
 using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
 using XenoAtom.Ansi;
+using XenoAtom.Logging;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
@@ -413,13 +414,20 @@ internal sealed class SidebarView
         }
 
         private void ClearNotes()
+            => _ = ClearNotesAsync();
+
+        private async Task ClearNotesAsync()
         {
             try
             {
-                _notesService.ClearAsync(AltaCallerIdentity.Host).GetAwaiter().GetResult();
+                await _notesService.ClearAsync(AltaCallerIdentity.Host);
             }
             catch (AltaNotesSessionRequiredException)
             {
+            }
+            catch (Exception ex)
+            {
+                CodeAltaApp.UiLogger.Error(ex, "Failed to clear sidebar notes.");
             }
         }
 

@@ -445,6 +445,33 @@ public sealed class CodeAltaAppSidebarTests
     }
 
     [TestMethod]
+    public async Task SidebarView_ClearNotesButtonDoesNotBlockOnAsyncClear()
+    {
+        var notesService = new BlockingNotesService();
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, new CapturingSidebarRowCommandDispatcher(), static _ => { }, notesService: notesService);
+        var notesGroup = Assert.IsInstanceOfType<Group>(view.NotesRoot);
+        var clearButtonHost = Assert.IsInstanceOfType<TooltipHost>(notesGroup.BottomRightText);
+        var clearButton = Assert.IsInstanceOfType<Button>(clearButtonHost.Content);
+        var clickTask = Task.Run(() => RaiseButtonClick(clearButton));
+
+        try
+        {
+            var started = await Task.WhenAny(notesService.ClearStarted.Task, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
+            Assert.AreSame(notesService.ClearStarted.Task, started, "The clear button did not invoke the notes service.");
+
+            var completedBeforeClearFinished = await Task.WhenAny(clickTask, Task.Delay(TimeSpan.FromMilliseconds(100))).ConfigureAwait(false);
+
+            Assert.AreSame(clickTask, completedBeforeClearFinished, "The clear button must not synchronously wait for notes persistence on the UI thread.");
+        }
+        finally
+        {
+            notesService.ClearRelease.TrySetResult();
+            await clickTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            await notesService.ClearCompleted.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public void CodeAltaShellView_SetSidebarCollapsedShrinksAndRestoresSplitter()
     {
         var view = new CodeAltaShellView(
@@ -801,6 +828,13 @@ public sealed class CodeAltaAppSidebarTests
         method.Invoke(app, null);
     }
 
+    private static void RaiseButtonClick(Button button)
+    {
+        var raiseEventMethod = typeof(Visual).GetMethod("RaiseEvent", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.IsNotNull(raiseEventMethod);
+        raiseEventMethod.MakeGenericMethod(typeof(ClickEventArgs)).Invoke(button, [Button.ClickEvent, new ClickEventArgs()]);
+    }
+
     private sealed class CapturingSidebarRowCommandDispatcher : ISidebarRowCommandDispatcher
     {
         public SidebarRowCommand? LastCommand { get; private set; }
@@ -808,6 +842,30 @@ public sealed class CodeAltaAppSidebarTests
         public void Dispatch(SidebarRowCommand command)
         {
             LastCommand = command;
+        }
+    }
+
+    private sealed class BlockingNotesService : IAltaNotesService
+    {
+        public TaskCompletionSource ClearStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ClearRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ClearCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public event EventHandler<AltaNotesChangedEventArgs>? Changed;
+
+        public string GetMarkdown(AltaCallerIdentity caller) => "# Initial";
+
+        public ValueTask SetMarkdownAsync(string markdown, AltaCallerIdentity caller, CancellationToken cancellationToken = default)
+            => ValueTask.CompletedTask;
+
+        public async ValueTask ClearAsync(AltaCallerIdentity caller, CancellationToken cancellationToken = default)
+        {
+            ClearStarted.TrySetResult();
+            await ClearRelease.Task.ConfigureAwait(false);
+            Changed?.Invoke(this, new AltaNotesChangedEventArgs("session-notes", string.Empty, caller));
+            ClearCompleted.TrySetResult();
         }
     }
 }
