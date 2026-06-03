@@ -17,6 +17,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentActivityEvent), "activity")]
 [JsonDerivedType(typeof(AgentSystemPromptEvent), "system_prompt")]
 [JsonDerivedType(typeof(AgentSessionUpdateEvent), "sessionUpdate")]
+[JsonDerivedType(typeof(AgentNotesEvent), "notes")]
 [JsonDerivedType(typeof(AgentPlanSnapshotEvent), "planSnapshot")]
 [JsonDerivedType(typeof(AgentInteractionEvent), "interaction")]
 [JsonDerivedType(typeof(AgentErrorEvent), "error")]
@@ -301,6 +302,22 @@ public enum AgentSessionUpdateKind
 }
 
 /// <summary>
+/// Identifies the kind of a session notes update.
+/// </summary>
+public enum AgentNotesUpdateKind
+{
+    /// <summary>
+    /// The session notes Markdown was replaced.
+    /// </summary>
+    Set,
+
+    /// <summary>
+    /// The session notes Markdown was cleared.
+    /// </summary>
+    Cleared,
+}
+
+/// <summary>
 /// Identifies the kind of a generic interaction lifecycle event.
 /// </summary>
 public enum AgentInteractionKind
@@ -531,6 +548,24 @@ public sealed record AgentSessionUpdateEvent(
     string? Message,
     JsonElement? Details = null,
     AgentSessionUsage? Usage = null)
+    : AgentEvent(ProviderId, SessionId, Timestamp, RunId);
+
+/// <summary>
+/// Session-scoped sticky notes state update.
+/// </summary>
+/// <param name="ProviderId">The model provider identifier.</param>
+/// <param name="SessionId">The session identifier.</param>
+/// <param name="Timestamp">Event timestamp.</param>
+/// <param name="RunId">Optional run identifier.</param>
+/// <param name="Kind">The notes update kind.</param>
+/// <param name="Markdown">The notes Markdown after the update.</param>
+public sealed record AgentNotesEvent(
+    ModelProviderId ProviderId,
+    string SessionId,
+    DateTimeOffset Timestamp,
+    AgentRunId? RunId,
+    AgentNotesUpdateKind Kind,
+    string Markdown)
     : AgentEvent(ProviderId, SessionId, Timestamp, RunId);
 
 /// <summary>

@@ -630,22 +630,31 @@ public sealed class AltaLiveToolTests
         var clearRecord = ReadJsonLines(clear.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.notes.updated");
         Assert.AreEqual(string.Empty, clearRecord.GetProperty("markdown").GetString());
         Assert.IsTrue(clearRecord.GetProperty("empty").GetBoolean());
-        Assert.AreEqual(string.Empty, notesService.GetMarkdown());
+        Assert.AreEqual(string.Empty, notesService.GetMarkdown(caller));
     }
 
     [TestMethod]
-    public void AltaNotesService_ReplacesClearsAndRaisesChangedEvents()
+    public void AltaNotesService_ReplacesClearsAndRaisesChangedEventsPerSession()
     {
         var service = new AltaNotesService();
         var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-notes" };
+        var otherCaller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-other" };
         var markdownChanges = new List<string>();
-        service.Changed += (_, args) => markdownChanges.Add(args.Markdown);
+        var changedSessionIds = new List<string>();
+        service.Changed += (_, args) =>
+        {
+            changedSessionIds.Add(args.SessionId);
+            markdownChanges.Add(args.Markdown);
+        };
 
         service.SetMarkdownAsync("# Status", caller).GetAwaiter().GetResult();
+        service.SetMarkdownAsync("# Other", otherCaller).GetAwaiter().GetResult();
         service.ClearAsync(caller).GetAwaiter().GetResult();
 
-        Assert.AreEqual(string.Empty, service.GetMarkdown());
-        CollectionAssert.AreEqual(new[] { "# Status", string.Empty }, markdownChanges);
+        Assert.AreEqual(string.Empty, service.GetMarkdown(caller));
+        Assert.AreEqual("# Other", service.GetMarkdown(otherCaller));
+        CollectionAssert.AreEqual(new[] { "# Status", "# Other", string.Empty }, markdownChanges);
+        CollectionAssert.AreEqual(new[] { "session-notes", "session-other", "session-notes" }, changedSessionIds);
     }
 
     [TestMethod]

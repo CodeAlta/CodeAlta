@@ -369,7 +369,7 @@ internal sealed class SidebarView
             ArgumentNullException.ThrowIfNull(notesService);
 
             _notesService = notesService;
-            _markdown = new MarkdownControl(notesService.GetMarkdown())
+            _markdown = new MarkdownControl(ReadInitialNotesMarkdown(notesService))
             {
                 HorizontalAlignment = Align.Stretch,
                 VerticalAlignment = Align.Start,
@@ -413,7 +413,27 @@ internal sealed class SidebarView
         }
 
         private void ClearNotes()
-            => _notesService.ClearAsync(AltaCallerIdentity.Host).GetAwaiter().GetResult();
+        {
+            try
+            {
+                _notesService.ClearAsync(AltaCallerIdentity.Host).GetAwaiter().GetResult();
+            }
+            catch (AltaNotesSessionRequiredException)
+            {
+            }
+        }
+
+        private static string ReadInitialNotesMarkdown(IAltaNotesService notesService)
+        {
+            try
+            {
+                return notesService.GetMarkdown(AltaCallerIdentity.Host);
+            }
+            catch (AltaNotesSessionRequiredException)
+            {
+                return string.Empty;
+            }
+        }
     }
 
     private sealed class TitleButton : Button

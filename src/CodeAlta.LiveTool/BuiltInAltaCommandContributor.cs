@@ -219,14 +219,14 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     {
         var group = Group(name, name == "note"
             ? "Compatibility alias for `notes`."
-            : "Read and update the active sticky Markdown notes shown in the sidebar.");
+            : "Read and update the current session's sticky Markdown notes shown in the sidebar.");
         group.Add(CreateNotesGetCommand(context));
         group.Add(CreateNotesSetCommand(context));
         group.Add(CreateNotesClearCommand(context));
         AddHelpText(
             group,
             "Examples: `alta notes get`; `alta notes set --stdin`; `alta notes clear`.",
-            "Use notes for sticky Markdown status, plans, and checklists intended to remain visible to the user.");
+            "Use notes for session-specific sticky Markdown status, plans, and checklists intended to remain visible to the user.");
         return group;
     }
 
@@ -2925,8 +2925,15 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
-        WriteNotesRecord(context, "alta.notes.current", notesService.GetMarkdown());
-        return AltaExitCodes.Success;
+        try
+        {
+            WriteNotesRecord(context, "alta.notes.current", notesService.GetMarkdown(context.Caller));
+            return AltaExitCodes.Success;
+        }
+        catch (AltaNotesSessionRequiredException)
+        {
+            return MissingNotesSession(context);
+        }
     }
 
     private static async ValueTask<int> HandleNotesSetAsync(AltaCommandContext context, bool useStdin)
@@ -2938,9 +2945,16 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         var markdown = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
-        await notesService.SetMarkdownAsync(markdown, context.Caller, context.CancellationToken).ConfigureAwait(false);
-        WriteNotesRecord(context, "alta.notes.updated", markdown);
-        return AltaExitCodes.Success;
+        try
+        {
+            await notesService.SetMarkdownAsync(markdown, context.Caller, context.CancellationToken).ConfigureAwait(false);
+            WriteNotesRecord(context, "alta.notes.updated", markdown);
+            return AltaExitCodes.Success;
+        }
+        catch (AltaNotesSessionRequiredException)
+        {
+            return MissingNotesSession(context);
+        }
     }
 
     private static async ValueTask<int> HandleNotesClearAsync(AltaCommandContext context)
@@ -2950,9 +2964,16 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
-        await notesService.ClearAsync(context.Caller, context.CancellationToken).ConfigureAwait(false);
-        WriteNotesRecord(context, "alta.notes.updated", string.Empty);
-        return AltaExitCodes.Success;
+        try
+        {
+            await notesService.ClearAsync(context.Caller, context.CancellationToken).ConfigureAwait(false);
+            WriteNotesRecord(context, "alta.notes.updated", string.Empty);
+            return AltaExitCodes.Success;
+        }
+        catch (AltaNotesSessionRequiredException)
+        {
+            return MissingNotesSession(context);
+        }
     }
 
     private static void WriteNotesRecord(AltaCommandContext context, string type, string markdown)
@@ -2967,6 +2988,13 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             empty = markdown.Length == 0,
         });
     }
+
+    private static int MissingNotesSession(AltaCommandContext context)
+        => UsageError(
+            context,
+            "usage.missingSession",
+            "A current session is required for alta notes.",
+            "Run `alta notes` from an agent/session context.");
 
     private static async Task<IReadOnlyList<AltaSessionInfo>?> LoadSessionInfosAsync(AltaCommandContext context)
     {

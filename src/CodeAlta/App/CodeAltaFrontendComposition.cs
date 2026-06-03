@@ -107,9 +107,14 @@ internal sealed class CodeAltaFrontendComposition
         var modelProviderPreferences = new ModelProviderPreferenceCoordinator(configStore, CodeAlta.Views.CodeAltaApp.UiLogger);
         var userPromptPreferences = new UserPromptPreferenceCoordinator();
         var altaToolProviderIds = ResolveAltaToolProviderIds(configStore);
+        ShellSessionStateCoordinator? sessionStateCoordinator = null;
         var askService = new AltaAskService();
         askService.QueueChanged += (_, args) => frontendEvents.Publish(new AskQueueChangedEvent(args.SessionId));
-        var notesService = new AltaNotesService();
+        var notesService = new SessionAltaNotesService(
+            uiDispatcher,
+            runtimeService,
+            () => sessionStateCoordinator?.GetSelectedSession() is { } session ? sessionStateCoordinator.FindOpenSession(session.SessionId) : null,
+            sessionId => sessionStateCoordinator?.FindOpenSession(sessionId));
         var altaServices = new AltaServiceCollection()
             .Add(catalogOptions)
             .Add(projectCatalog)
@@ -160,7 +165,7 @@ internal sealed class CodeAltaFrontendComposition
             runtimeEventPump,
             uiDispatcher,
             frontend.ApplyPendingSidebarSelection);
-        var sessionStateCoordinator = new ShellSessionStateCoordinator(
+        sessionStateCoordinator = new ShellSessionStateCoordinator(
             projectCatalog,
             sessionCatalog,
             uiDispatcher,
@@ -222,7 +227,16 @@ internal sealed class CodeAltaFrontendComposition
             () => frontendEvents.Publish(new CatalogChangedEvent()),
             frontend.SetStatus,
             frontend.SetReadyStatusForCurrentSelection);
-        notesService.Changed += (_, args) => UiDispatch.Post(uiDispatcher, () => sidebarCoordinator.View.SetNotesMarkdown(args.Markdown));
+        notesService.Changed += (_, args) => UiDispatch.Post(
+            uiDispatcher,
+            () =>
+            {
+                if (sessionStateCoordinator.GetSelectedSession() is { } selectedSession &&
+                    string.Equals(selectedSession.SessionId, args.SessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    sidebarCoordinator.View.SetNotesMarkdown(args.Markdown);
+                }
+            });
         var reminderUiCoordinator = new ReminderUiCoordinator(
             reminderService,
             new ReminderUiCoordinatorPort

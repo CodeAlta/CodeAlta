@@ -96,7 +96,7 @@ For parent/child delegated work, CodeAlta uses a notification-based pattern: the
 
 Agents can also ask the live tool to schedule in-process reminder prompts with `alta reminder create --duration <seconds> --content ...`. Reminders default to the calling session, can target another session with `--session <session-id>`, can repeat with `--repeat <count>`, and can be inspected or removed with `alta reminder list` and `alta reminder delete <reminder-id>`. In the TUI, use the compact clock button in the prompt bar or `/reminder` (`Ctrl+G Ctrl+D`) to create, delete, and edit reminder messages for the selected session.
 
-Agents can update the left-sidebar Notes panel with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are a single active Markdown document intended for sticky plans, checklists, and progress summaries; they start empty and remain visible below Navigator until replaced or cleared.
+Agents can update the left-sidebar Notes panel for the current session with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are session-scoped sticky Markdown for plans, checklists, and progress summaries; switching tabs shows the selected session's notes, and reopening a session restores the latest notes set/clear event from that session's journal.
 
 ## Prompting for CodeAlta self-inspection
 

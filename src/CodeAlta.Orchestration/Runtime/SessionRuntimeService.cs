@@ -75,6 +75,41 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         => _events.ReadAllAsync(cancellationToken);
 
     /// <summary>
+    /// Appends a CodeAlta-authored session event to the session journal and publishes it to runtime subscribers.
+    /// </summary>
+    /// <param name="session">The session descriptor.</param>
+    /// <param name="event">The event to append.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes after the event is appended.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="event"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the event session id does not match <paramref name="session"/>.</exception>
+    public async Task AppendSessionEventAsync(
+        SessionViewDescriptor session,
+        AgentEvent @event,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(@event);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!string.Equals(session.SessionId, @event.SessionId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("The event session id must match the target session.", nameof(@event));
+        }
+
+        await _sessionViewCatalog.JournalStore.EnsureHeaderAsync(session, cancellationToken).ConfigureAwait(false);
+        var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        await store.AppendEventsAsync(
+                session.ProviderId,
+                session.ResolvedProviderKey,
+                session.SessionId,
+                [@event],
+                cancellationToken)
+            .ConfigureAwait(false);
+        await _agentSessionCatalog.InvalidateAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        _events.TryPublish(new SessionAgentEvent(session.SessionId, @event));
+    }
+
+    /// <summary>
     /// Gets the approximate number of runtime events dropped because event consumers fell behind.
     /// </summary>
     public long DroppedRuntimeEventCount => _events.DroppedCount;

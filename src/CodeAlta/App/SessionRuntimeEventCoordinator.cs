@@ -105,6 +105,11 @@ internal sealed class SessionRuntimeEventCoordinator
             switch (runtimeEvent)
             {
                 case SessionAgentEvent agentEvent:
+                    if (agentEvent.Event is AgentNotesEvent notesEvent)
+                    {
+                        tab.NotesMarkdown = notesEvent.Markdown;
+                    }
+
                     tab.HistoryEvents ??= [];
                     tab.HistoryEvents.Add(agentEvent.Event);
                     tab.RenderedHistoryEvents.Add(agentEvent.Event);
@@ -141,6 +146,11 @@ internal sealed class SessionRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(@event);
 
         var reduction = _stateReducer.ReduceAgentEvent(session, tab, @event, _isSelectedSession(session.SessionId));
+        if (!tab.HistoryLoading && @event is AgentNotesEvent notesEvent)
+        {
+            tab.NotesMarkdown = notesEvent.Markdown;
+        }
+
         IReadOnlyList<AgentEvent> projectionEvents;
         if (!tab.HistoryLoading)
         {
@@ -174,6 +184,11 @@ internal sealed class SessionRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(@event);
 
         var reduction = _stateReducer.ReduceAgentEvent(session, tab, @event, _isSelectedSession(session.SessionId));
+        if (!tab.HistoryLoading && @event is AgentNotesEvent notesEvent)
+        {
+            tab.NotesMarkdown = notesEvent.Markdown;
+        }
+
         IReadOnlyList<AgentEvent> projectionEvents;
         if (!tab.HistoryLoading)
         {
@@ -208,6 +223,7 @@ internal sealed class SessionRuntimeEventCoordinator
         ArgumentNullException.ThrowIfNull(events);
 
         ProjectPluginSessionEvents(session, tab, events, isReplay: true);
+        _frontendEvents?.Publish(new SelectionChangedEvent());
         _frontendEvents?.Publish(new RuntimeTimelineChangedEvent(session.SessionId));
     }
 

@@ -427,8 +427,9 @@ public sealed class CodeAltaAppSidebarTests
     [TestMethod]
     public void SidebarView_NotesGroupUsesMarkdownControlAndUpdatesMarkdown()
     {
-        var notesService = new AltaNotesService();
-        notesService.SetMarkdownAsync("# Initial", AltaCallerIdentity.Host).GetAwaiter().GetResult();
+        var notesService = new AltaNotesService(static () => "session-notes");
+        var caller = new AltaCallerIdentity { Kind = "host", SourceSessionId = "session-notes" };
+        notesService.SetMarkdownAsync("# Initial", caller).GetAwaiter().GetResult();
         var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, new CapturingSidebarRowCommandDispatcher(), static _ => { }, notesService: notesService);
         var notesGroup = Assert.IsInstanceOfType<Group>(view.NotesRoot);
         var scrollViewer = Assert.IsInstanceOfType<ScrollViewer>(notesGroup.Content);

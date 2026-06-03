@@ -178,6 +178,21 @@ internal sealed class SessionHistoryCoordinator
         return null;
     }
 
+    public static string RecoverNotesMarkdownFromHistory(IReadOnlyList<AgentEvent> history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+
+        for (var index = history.Count - 1; index >= 0; index--)
+        {
+            if (history[index] is AgentNotesEvent notesEvent)
+            {
+                return notesEvent.Markdown;
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static bool ApplyRecoveredModelProviderPreference(
         SessionViewDescriptor session,
         OpenSessionState tab,
@@ -531,6 +546,7 @@ internal sealed class SessionHistoryCoordinator
             await _persistSessionLocalStateAsync(session).ConfigureAwait(false);
             var recoveredUsage = RecoverUsageFromHistory(history);
             var recoveredModelPreference = RecoverModelProviderPreferenceFromHistory(history);
+            var recoveredNotesMarkdown = RecoverNotesMarkdownFromHistory(history);
             var plan = loadOnlyFromLastUserPrompt
                 ? CreateInitialLoadPlan(history)
                 : new SessionHistoryLoadPlan(history, OmittedMessageCount: 0);
@@ -543,6 +559,7 @@ internal sealed class SessionHistoryCoordinator
                         var previousUsage = tab.Usage;
                         _resetSessionTab(tab);
                         tab.Usage = recoveredUsage;
+                        tab.NotesMarkdown = recoveredNotesMarkdown;
                         var usageChanged = !Equals(previousUsage, recoveredUsage);
 
                         tab.Session.LastRenderedSystemPromptEvent = FindPriorSystemPromptForFirstRenderedSystemPrompt(history, plan.EventsToRender);
@@ -573,7 +590,6 @@ internal sealed class SessionHistoryCoordinator
                         {
                             _notifySessionUsageChanged(tab);
                         }
-
                         _clearSessionStatus(tab);
                     })
                 .ConfigureAwait(false);

@@ -1,11 +1,17 @@
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Presentation.Prompting;
+using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Models;
 
-internal sealed class SessionState
+internal sealed partial class SessionState
 {
+    public SessionState()
+    {
+        NotesMarkdown = string.Empty;
+    }
+
     public ModelProviderId ProviderId { get; set; } = ModelProviderIds.Codex;
 
     public string? ModelId { get; set; }
@@ -39,6 +45,9 @@ internal sealed class SessionState
     public List<QueuedSessionPrompt> QueuedPrompts { get; } = [];
 
     public List<PendingSteerPrompt> PendingSteers { get; } = [];
+
+    [Bindable]
+    public partial string NotesMarkdown { get; set; }
 
     public string? LastObservedPendingSteerUserContentId { get; set; }
 

@@ -104,6 +104,12 @@ internal sealed class OpenSessionState
 
     public List<PendingSteerPrompt> PendingSteers => Session.PendingSteers;
 
+    public string NotesMarkdown
+    {
+        get => Session.NotesMarkdown;
+        set => Session.NotesMarkdown = value;
+    }
+
     public string? LastObservedPendingSteerUserContentId
     {
         get => Session.LastObservedPendingSteerUserContentId;

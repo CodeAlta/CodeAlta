@@ -778,6 +778,23 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void RecoverNotesMarkdownFromHistory_UsesLatestSetOrClearEvent()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        AgentEvent[] history =
+        [
+            new AgentNotesEvent(ModelProviderIds.OpenAIResponses, "session-1", timestamp, null, AgentNotesUpdateKind.Set, "# First"),
+            new AgentContentCompletedEvent(ModelProviderIds.OpenAIResponses, "session-1", timestamp.AddSeconds(1), null, AgentContentKind.User, "user-1", null, "Prompt"),
+            new AgentNotesEvent(ModelProviderIds.OpenAIResponses, "session-1", timestamp.AddSeconds(2), null, AgentNotesUpdateKind.Set, "# Latest"),
+            new AgentNotesEvent(ModelProviderIds.OpenAIResponses, "session-1", timestamp.AddSeconds(3), null, AgentNotesUpdateKind.Cleared, string.Empty),
+        ];
+
+        var recovered = SessionHistoryCoordinator.RecoverNotesMarkdownFromHistory(history);
+
+        Assert.AreEqual(string.Empty, recovered);
+    }
+
+    [TestMethod]
     public void FindPriorSystemPromptForFirstRenderedSystemPrompt_SeedsPinnedPromptDiff()
     {
         var timestamp = DateTimeOffset.UtcNow;

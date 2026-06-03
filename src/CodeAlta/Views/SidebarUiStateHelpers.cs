@@ -63,5 +63,9 @@ internal static class SidebarUiStateHelpers
                 : new SessionVisualState(isRuntimeSessionRunning(sessionId), promptDraftUiCoordinator.HasPersistedPromptDraft(sessionId), hasActiveReminder(sessionId)),
             promptDraftUiCoordinator.HasDraftPrompt,
             verifyBindableAccess);
+        var markdown = sessionStateCoordinator.GetSelectedSession() is { } session && findOpenSession(session.SessionId) is { } tab
+            ? tab.NotesMarkdown
+            : string.Empty;
+        sidebarCoordinator.View.SetNotesMarkdown(markdown);
     }
 }

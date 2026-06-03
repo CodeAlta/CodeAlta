@@ -80,7 +80,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | --- | --- |
 | `version` | Report host/live-tool version metadata. |
 | `ask` | Queue structured user questions for the calling session and return yield guidance. |
-| `notes` | Get, replace, or clear the active sticky Markdown notes shown in the sidebar. |
+| `notes` | Get, replace, or clear the current session's sticky Markdown notes shown in the sidebar. |
 | `project` | List, show, resolve, upsert, and inspect current project context. |
 | `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions. |
 | `reminder` | Schedule delayed prompt content for the current or another session, and list/delete reminders. |
@@ -190,7 +190,7 @@ After receiving `alta.ask.queued`, an LLM should stop the turn: do not call anot
 
 ## Notes
 
-Use `alta notes` for short-lived sticky Markdown that should remain visible while an agent works, such as a checklist, plan status, or next actions. There is one active notes document per running CodeAlta frontend; it starts empty and is shown in the left sidebar below Navigator. The sidebar Notes panel renders Markdown in a scrollable view, wraps horizontally, offers a copy-to-Markdown button, and has a clear action.
+Use `alta notes` for short-lived sticky Markdown that should remain visible while an agent works in the current session, such as a checklist, plan status, or next actions. Notes are session-scoped: `get`, `set`, and `clear` operate on the caller/current tab's session, switching tabs shows that session's notes, and reopening a session restores the latest `alta notes set` or `alta notes clear` event from the session journal. The sidebar Notes panel renders Markdown in a scrollable view, wraps horizontally, offers a copy-to-Markdown button, and has a clear action.
 
 ```text
 alta notes get
