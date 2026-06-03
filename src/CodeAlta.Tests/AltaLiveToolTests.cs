@@ -2961,6 +2961,48 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionSend_FromAgentCallerToOwnRunningSessionFailsFast()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var ProviderId = new ModelProviderId("self-send-denied");
+        var sendBlocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerRuntime = new StatefulProviderRuntime(ProviderId) { SendBlocker = sendBlocker, PublishRunEventOnSend = true };
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", ProviderId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var runningSend = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "current turn"], caller: AltaCallerIdentity.Cli).AsTask();
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId };
+
+        try
+        {
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+
+            var selfSendTask = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "send to myself"], caller: caller).AsTask();
+            var completed = await Task.WhenAny(selfSendTask, Task.Delay(TimeSpan.FromMilliseconds(1800))).ConfigureAwait(false);
+
+            Assert.AreSame(selfSendTask, completed, "Self-targeted agent sends should fail fast instead of waiting on the current run.");
+            var selfSend = await selfSendTask.ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, selfSend.ExitCode, selfSend.Stderr);
+            var error = ReadJsonLines(selfSend.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error");
+            Assert.AreEqual("session.selfSendDenied", error.GetProperty("code").GetString());
+            StringAssert.Contains(error.GetProperty("message").GetString(), "cannot send a new prompt to itself");
+            Assert.AreEqual(1, providerRuntime.SentOptions.Count);
+        }
+        finally
+        {
+            sendBlocker.TrySetResult();
+            await runningSend.ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public async Task SessionSend_FromAgentCallerToParentedSessionReturnsNotificationFollowUpContract()
     {
         using var root = TempDirectory.Create();

@@ -2139,6 +2139,16 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return UsageError(context, "usage.missingSession", "Session id is required.", "alta session send");
         }
 
+        var targetSessionId = sessionId.Trim();
+        var targetsCallingAgentSession = IsTargetingCallingAgentSession(context, targetSessionId);
+        if (targetsCallingAgentSession && kind != PromptDispatchKind.Queue && !options.QueueIfBusy)
+        {
+            return PermissionDenied(
+                context,
+                "session.selfSendDenied",
+                "A running agent session cannot send a new prompt to itself. Use `alta session queue <session-id> ...` or `alta session send <session-id> --queue-if-busy ...` to enqueue follow-up work, or send to a child/peer session.");
+        }
+
         var promptResult = await ReadPromptAsync(context, options, kind).ConfigureAwait(false);
         if (promptResult.ExitCode != AltaExitCodes.Success)
         {
@@ -2150,7 +2160,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
-        var infoResult = await ResolveSessionInfoAsync(context, sessionId).ConfigureAwait(false);
+        var infoResult = await ResolveSessionInfoAsync(context, targetSessionId).ConfigureAwait(false);
         if (infoResult.ExitCode != AltaExitCodes.Success)
         {
             return infoResult.ExitCode;
@@ -2186,7 +2196,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 return AltaExitCodes.Success;
             }
 
-            if (options.QueueIfBusy && await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false))
+            if (options.QueueIfBusy && (targetsCallingAgentSession || await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false)))
             {
                 var queueItem = await runtime.QueuePromptAsync(
                     info.Session,
@@ -4253,6 +4263,11 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
     private static bool IsAgentCaller(AltaCommandContext context)
         => string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTargetingCallingAgentSession(AltaCommandContext context, string sessionId)
+        => IsAgentCaller(context) &&
+           !string.IsNullOrWhiteSpace(context.Caller.SourceSessionId) &&
+           string.Equals(context.Caller.SourceSessionId.Trim(), sessionId.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private static bool ShouldDetachPromptSubmission(AltaCommandContext context)
         => IsAgentCaller(context) || string.Equals(context.Caller.Kind, "reminder", StringComparison.OrdinalIgnoreCase);
