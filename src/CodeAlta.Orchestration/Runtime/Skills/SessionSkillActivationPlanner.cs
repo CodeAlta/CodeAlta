@@ -1,5 +1,3 @@
-using CodeAlta.Agent;
-
 namespace CodeAlta.Orchestration.Runtime.Skills;
 
 /// <summary>
@@ -24,14 +22,6 @@ public sealed class SessionSkillActivationPlanner
             return new SessionViewSkillActivationDecision(
                 SessionViewSkillActivationDecisionKind.RejectNoSession,
                 "Open a local/raw model-provider session before activating a CodeAlta-managed skill.");
-        }
-
-        var ProviderId = new ModelProviderId(session.ProviderId);
-        if (ProviderId == ModelProviderIds.Codex || ProviderId == ModelProviderIds.Copilot)
-        {
-            return new SessionViewSkillActivationDecision(
-                SessionViewSkillActivationDecisionKind.RejectNativeSkillProvider,
-                "Codex and Copilot manage their own native skills; CodeAlta-managed skill activation is unavailable for this session.");
         }
 
         if (!isModelProviderReady)
@@ -62,9 +52,6 @@ public enum SessionViewSkillActivationDecisionKind
 
     /// <summary>Reject because no explicit session is available.</summary>
     RejectNoSession,
-
-    /// <summary>Reject because the provider manages native skills itself.</summary>
-    RejectNativeSkillProvider,
 
     /// <summary>Reject because the provider/runtime is not ready.</summary>
     RejectProviderNotReady,

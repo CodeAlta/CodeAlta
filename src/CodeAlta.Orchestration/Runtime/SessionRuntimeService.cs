@@ -606,14 +606,9 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         var effectiveAgentPromptId = pendingAgentPromptId
             ?? NormalizeOptionalText(options.AgentPromptId)
             ?? NormalizeOptionalText(session.AgentPromptId);
-        var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         session.AgentPromptId = effectiveAgentPromptId;
-        var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(
-            session,
-            project,
-            options.Model,
-            session.AgentPromptId,
-            includeAvailableSkills: !UsesProviderManagedSkills(providerProviderId));
+        var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, session.AgentPromptId);
+        var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         var developerInstructions = instructions.DeveloperInstructions;
         var additionalDeveloperInstructions = AppendPromptPart(BuildParentNotificationGuidance(session), options.AdditionalDeveloperInstructions);
         var tools = options.Tools;
@@ -885,7 +880,6 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <returns>The run identifier that received the activated skill content.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the model provider owns its native skills.</exception>
     /// <exception cref="KeyNotFoundException">Thrown when the requested skill cannot be resolved.</exception>
     public async Task<AgentRunId> ActivateSkillAsync(
         SessionViewDescriptor session,
@@ -896,12 +890,6 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(skillName);
-
-        if (UsesProviderManagedSkills(new ModelProviderId(options.ProviderId.Value)))
-        {
-            throw new InvalidOperationException(
-                $"Provider '{options.ProviderId.Value}' manages its own native skills; CodeAlta-managed skill activation is not injected into that session.");
-        }
 
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
         var query = BuildSkillCatalogQuery(project, options.ProjectRoots);
@@ -1040,9 +1028,6 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 result.Exception);
         }
     }
-
-    private static bool UsesProviderManagedSkills(ModelProviderId ProviderId)
-        => ProviderId == ModelProviderIds.Codex || ProviderId == ModelProviderIds.Copilot;
 
     private static string? BuildParentNotificationGuidance(SessionViewDescriptor session)
         => string.IsNullOrWhiteSpace(session.ParentSessionId)

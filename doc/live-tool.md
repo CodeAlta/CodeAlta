@@ -255,7 +255,7 @@ alta skill show <skill-name>
 alta skill activate <skill-name> --session <session-id>
 ```
 
-Activation uses the same runtime path as the UI. It succeeds only when CodeAlta can inject skill context into the target agent-runtime session; provider-managed native skill sessions return an unsupported-capability diagnostic.
+Activation uses the same runtime path as the UI. It injects skill context into the target agent-runtime session when the session and skill are available.
 
 ## Plugin command roots
 

@@ -2363,9 +2363,10 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
-    public async Task SessionSetAgent_InjectsAgentPromptForProviderManagedSkillProviders()
+    public async Task SessionSetAgent_InjectsAgentPromptAndAvailableSkillsForCodexSession()
     {
         using var root = TempDirectory.Create();
+        await WriteSkillAsync(Path.Combine(root.Path, "skills", "sample-skill"), "sample-skill", "Codex-visible skill.").ConfigureAwait(false);
         var globalPromptDirectory = Path.Combine(root.Path, "prompts", "agents");
         Directory.CreateDirectory(globalPromptDirectory);
         await File.WriteAllTextAsync(
@@ -2373,10 +2374,10 @@ public sealed class AltaLiveToolTests
             """
             ---
             name: Custom Prompt
-            description: Used by session set-agent for native providers.
+            description: Used by session set-agent for Codex sessions.
             system: default
             ---
-            Custom native-provider prompt body selected by set-agent.
+            Custom Codex prompt body selected by set-agent.
             """).ConfigureAwait(false);
         var options = new CatalogOptions { GlobalRoot = root.Path };
         var providerRuntime = new StatefulProviderRuntime(ModelProviderIds.Codex);
@@ -2395,9 +2396,11 @@ public sealed class AltaLiveToolTests
 
         Assert.AreEqual(AltaExitCodes.Success, setAgent.ExitCode, setAgent.Stderr);
         Assert.AreEqual(AltaExitCodes.Success, send.ExitCode, send.Stderr);
-        Assert.AreEqual(1, providerRuntime.ResumedOptions.Count, "Switching a native provider session prompt must recreate the provider session with refreshed instructions.");
+        Assert.AreEqual(1, providerRuntime.ResumedOptions.Count, "Switching a Codex session prompt must recreate the provider session with refreshed instructions.");
         Assert.IsNotNull(providerRuntime.ResumedOptions.Last().DeveloperInstructions);
-        StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Custom native-provider prompt body selected by set-agent.");
+        StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Custom Codex prompt body selected by set-agent.");
+        StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "sample-skill");
+        StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Codex-visible skill.");
     }
 
     [TestMethod]
@@ -3161,9 +3164,10 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
-    public async Task SkillActivate_ProviderManagedSessionReturnsUnsupportedDiagnostic()
+    public async Task SkillActivate_CodexSessionActivatesSkill()
     {
         using var root = TempDirectory.Create();
+        await WriteSkillAsync(Path.Combine(root.Path, "skills", "sample-skill"), "sample-skill", "Codex activation skill.").ConfigureAwait(false);
         var options = new CatalogOptions { GlobalRoot = root.Path };
         var providerRuntime = new StatefulProviderRuntime(ModelProviderIds.Codex);
         var runtime = CreateRuntime(options, providerRuntime);
@@ -3178,8 +3182,14 @@ public sealed class AltaLiveToolTests
 
         var result = await dispatcher.InvokeAsync(["skill", "activate", "sample-skill", "--session", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
 
-        Assert.AreEqual(AltaExitCodes.Unsupported, result.ExitCode);
-        Assert.AreEqual("skill.activationUnsupported", ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+        Assert.AreEqual("alta.skill.activated", ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.skill.activated").GetProperty("type").GetString());
+        Assert.AreEqual(1, providerRuntime.SentOptions.Count);
+        var input = providerRuntime.SentOptions.Single().Input;
+        var skill = input.Items.OfType<AgentInputItem.Skill>().Single();
+        Assert.AreEqual("sample-skill", skill.Name);
+        StringAssert.Contains(skill.Path, "sample-skill");
+        StringAssert.Contains(input.Items.OfType<AgentInputItem.Text>().Single().Value, "Codex activation skill.");
     }
 
     [TestMethod]
@@ -3457,13 +3467,15 @@ public sealed class AltaLiveToolTests
         var projectCatalog = new ProjectCatalog(options);
         var sessionViewCatalog = new SessionViewCatalog(options);
         var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
+        var skillCatalog = new SkillCatalog();
         return new SessionRuntimeService(
             hub,
             agentSessionCatalog,
             projectCatalog,
             sessionViewCatalog,
-            new AgentInstructionTemplateProvider(catalogOptions: options),
-            options);
+            new AgentInstructionTemplateProvider(skillCatalog, options),
+            options,
+            skillCatalog);
     }
 
     private static string AssertTextItem(AgentToolResult result)

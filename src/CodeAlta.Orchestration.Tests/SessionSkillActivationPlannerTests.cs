@@ -31,15 +31,14 @@ public sealed class SessionSkillActivationPlannerTests
     }
 
     [TestMethod]
-    public void Plan_RejectsNativeSkillProvider()
+    public void Plan_ActivatesForReadyIdleCodexSession()
     {
         var decision = new SessionSkillActivationPlanner().Plan(
             CreateSession(ModelProviderIds.Codex.Value),
             isModelProviderReady: true,
             isSessionBusy: false);
 
-        Assert.AreEqual(SessionViewSkillActivationDecisionKind.RejectNativeSkillProvider, decision.Kind);
-        StringAssert.Contains(decision.Message, "native skills");
+        Assert.AreEqual(SessionViewSkillActivationDecisionKind.Activate, decision.Kind);
     }
 
     [TestMethod]

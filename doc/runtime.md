@@ -146,11 +146,11 @@ System prompts carry the invariant host/agent behavior. Agent prompts are select
 - native system prompt content selected from `prompts/system`;
 - the selected agent prompt body from `prompts/agents`;
 - generated runtime/tool guidance;
-- skills metadata when CodeAlta can manage skill activation for the selected session;
+- skills metadata when skills are available for the selected session;
 - project-context sections and file/reference context;
 - plugin-contributed prompt parts.
 
-`AgentInstructionComposer` then adds agent-runtime context and project instruction files unless equivalent content is already present. Provider-managed skill sessions may omit CodeAlta-managed skill advertisements while still receiving parent/additional developer guidance that orchestration explicitly supplies.
+`AgentInstructionComposer` then adds agent-runtime context and project instruction files unless equivalent content is already present. Available-skill guidance is included uniformly when the selected session has visible skills, along with parent/additional developer guidance that orchestration explicitly supplies.
 
 Instruction composition should remain deterministic and file-backed. Avoid embedding large static prompt strings directly in orchestration code when they belong in prompt resources.
 

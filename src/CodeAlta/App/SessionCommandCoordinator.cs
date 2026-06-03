@@ -399,15 +399,6 @@ internal sealed class SessionCommandCoordinator
         }
 
         var providerId = new ModelProviderId(session.ResolvedProviderKey);
-        if (providerId == ModelProviderIds.Codex || providerId == ModelProviderIds.Copilot)
-        {
-            _commandContext.SetShellStatus(
-                "Codex and Copilot manage their own native skills; CodeAlta-managed skill activation is unavailable for this session.",
-                false,
-                StatusTone.Warning);
-            return;
-        }
-
         if (!IsModelProviderReady(providerId))
         {
             _commandContext.SetReadyStatusForCurrentSelection();

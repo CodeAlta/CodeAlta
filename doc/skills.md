@@ -60,8 +60,6 @@ Activation:
 4. injects skill context into the selected agent-runtime session;
 5. emits visible activity/session updates.
 
-Provider-managed native skill sessions return an unsupported-capability diagnostic when CodeAlta cannot inject a CodeAlta-managed skill payload into that session.
-
 Activated agent-runtime skills are replayed from the session journal after resume. Before compaction, activated payloads remain ordinary replayed context. After compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions retain skill guidance without duplicating current context. If a compacted skill payload references a missing on-disk skill, CodeAlta preserves history and reports the missing path.
 
 ## UI
