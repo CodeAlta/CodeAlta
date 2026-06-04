@@ -12,6 +12,9 @@ namespace CodeAlta.Views;
 
 internal sealed class SessionTabHostView
 {
+    private const double DefaultPromptSplitRatio = 0.75;
+    private const double AskPromptSplitRatio = 0.60;
+
     private readonly Dictionary<string, TabPage> _tabPages = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, VSplitter> _sessionTabContentSplitters = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SessionPromptPanel> _sessionPromptPanels = new(StringComparer.OrdinalIgnoreCase);
@@ -125,7 +128,7 @@ internal sealed class SessionTabHostView
         {
             First = primaryContent,
             Second = promptPanel.Root,
-            Ratio = 0.75,
+            Ratio = DefaultPromptSplitRatio,
             MinFirst = 6,
             MinSecond = 7,
         };
@@ -174,12 +177,13 @@ internal sealed class SessionTabHostView
             return true;
         }
 
-        _askProjectionStates[tabId] = new AskProjectionState(askForm, splitter.First, splitter.Second);
+        _askProjectionStates[tabId] = new AskProjectionState(askForm, splitter.First, splitter.Second, splitter.Ratio);
         if (fileReview is not null)
         {
             splitter.First = fileReview;
         }
 
+        splitter.Ratio = AskPromptSplitRatio;
         splitter.Second = askForm;
         return true;
     }
@@ -194,6 +198,7 @@ internal sealed class SessionTabHostView
 
         splitter.First = state.Primary;
         splitter.Second = state.Bottom;
+        splitter.Ratio = state.Ratio;
         return true;
     }
 
@@ -309,7 +314,7 @@ internal sealed class SessionTabHostView
         return null;
     }
 
-    private sealed record AskProjectionState(Visual AskForm, Visual? Primary, Visual? Bottom);
+    private sealed record AskProjectionState(Visual AskForm, Visual? Primary, Visual? Bottom, double Ratio);
 }
 
 internal sealed class SessionPromptPanel

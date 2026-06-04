@@ -89,6 +89,30 @@ public sealed class SessionWorkspaceViewTests
     }
 
     [TestMethod]
+    public void AskMode_ExpandsQuestionsAndRestoresPreviousSplitterRatio()
+    {
+        var view = CreateSessionWorkspaceView();
+        var primary = new TextBlock("Timeline");
+        var fileReview = new TextBlock("File review");
+        var askForm = new TextBlock("Questions");
+        var content = (VSplitter)view.CreateSessionTabContent("session-1", primary);
+        var promptPanel = content.Second;
+        content.Ratio = 0.82;
+
+        Assert.IsTrue(view.EnterAskMode("session-1", askForm, fileReview));
+
+        Assert.AreEqual(0.60, content.Ratio);
+        Assert.AreSame(fileReview, content.First);
+        Assert.AreSame(askForm, content.Second);
+
+        Assert.IsTrue(view.ExitAskMode("session-1"));
+
+        Assert.AreEqual(0.82, content.Ratio);
+        Assert.AreSame(primary, content.First);
+        Assert.AreSame(promptPanel, content.Second);
+    }
+
+    [TestMethod]
     public void StatusBar_TextRegionsUseDynamicTextBindings()
     {
         var view = CreateSessionWorkspaceView();
