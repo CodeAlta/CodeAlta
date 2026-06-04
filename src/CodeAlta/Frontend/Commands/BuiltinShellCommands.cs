@@ -67,6 +67,8 @@ internal static class BuiltinShellCommands
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
         new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl));
 
+    public static readonly KeyGesture NextPromptShortcutGesture = new(TerminalChar.CtrlT, TerminalModifiers.Ctrl);
+
     internal static readonly ShellCommand OpenHelp = new()
     {
         Id = "CodeAlta.Shell.Help",
@@ -144,6 +146,20 @@ internal static class BuiltinShellCommands
     internal static readonly ShellCommand Plugins = Dialog("CodeAlta.Plugins.Manage", "Plugins", "Open plugin management and inspect plugin state, diagnostics, and contributions.", "plugins", ShellCommandHelpCategory.General, PluginsShortcutSequence, static context => context.Dialogs.OpenPluginsAsync(), searchText: "plugin");
     internal static readonly ShellCommand WorkspaceSettings = Dialog("CodeAlta.Workspace.Settings", "Workspace Settings", "Open workspace settings for the navigator and UI theme.", "settings", ShellCommandHelpCategory.General, WorkspaceSettingsShortcutSequence, static context => { context.Dialogs.OpenWorkspaceSettings(); return Task.CompletedTask; }, searchText: "workspace_settings");
     internal static readonly ShellCommand Prompts = Dialog("CodeAlta.Prompts.Manage", "Agent Prompts", "Create, edit, delete, and inspect agent prompts from built-in, global, and project prompt roots.", "prompt", ShellCommandHelpCategory.General, PromptsShortcutSequence, static context => context.Dialogs.OpenPromptsAsync(), searchText: "prompts agent_prompt instructions system_prompt");
+    internal static readonly ShellCommand NextPrompt = new()
+    {
+        Id = "CodeAlta.Prompts.Next",
+        Label = "Next Prompt",
+        Description = "Switch to the next available agent prompt, wrapping to the first prompt.",
+        HelpCategory = ShellCommandHelpCategory.Prompt,
+        Placement = ShellCommandPlacement.ShellRoot | ShellCommandPlacement.PromptEditor | ShellCommandPlacement.WorkspaceRoot,
+        Gesture = NextPromptShortcutGesture,
+        Name = "next_prompt",
+        SearchText = "agent prompt cycle switch next_agent_prompt",
+        ShowInCommandBar = false,
+        CanExecute = static (context, _) => context.AgentPrompts.CanSelectNextAgentPrompt(),
+        ExecuteAsync = static (context, _, _) => { context.AgentPrompts.SelectNextAgentPrompt(); return ValueTask.CompletedTask; },
+    };
     internal static readonly ShellCommand Providers = Dialog("CodeAlta.Providers.Manage", "Model Providers", "Configure enabled model providers, credentials, and connection details.", "model_providers", ShellCommandHelpCategory.General, ModelProvidersShortcutSequence, static context => context.Dialogs.OpenModelProvidersAsync(), searchText: "providers");
     internal static readonly ShellCommand ProvidersRefresh = new()
     {
@@ -329,6 +345,7 @@ internal static class BuiltinShellCommands
         yield return Plugins;
         yield return WorkspaceSettings;
         yield return Prompts;
+        yield return NextPrompt;
         yield return FocusSidebar;
         yield return ToggleNavigator;
         yield return FocusPrompt;

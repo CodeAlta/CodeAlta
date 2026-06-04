@@ -65,7 +65,7 @@ The file name supplies the prompt id. For example, `reviewer.prompt.md` creates 
 
 ## Selecting and editing prompts
 
-Use the **Agent:** selector below the prompt editor to choose the agent prompt for a draft or session. CodeAlta stores draft prompt preferences per global/project scope and session prompt selections in session-local state, alongside provider/model/reasoning preferences.
+Use the **Agent:** selector below the prompt editor to choose the agent prompt for a draft or session, or press `Ctrl+T` / run `/next_prompt` to cycle to the next available prompt and wrap back to the first. CodeAlta stores draft prompt preferences per global/project scope and session prompt selections in session-local state, alongside provider/model/reasoning preferences.
 
 Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt`. The default **Agent Prompts** view lists built-in, global, and project agent prompts; shows shadowed overrides; and lets you create, edit, save, or delete global/project prompt files. The **System Prompt** tab uses the same source precedence for system prompt files and lets you inspect built-ins while editing only global/project override files. Built-in prompt and system prompt files are visible for inspection but read-only. Creating a global or project prompt/system prompt with the same id as a lower-precedence resource overrides it.
 

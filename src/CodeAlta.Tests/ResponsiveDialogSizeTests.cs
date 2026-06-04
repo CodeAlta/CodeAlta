@@ -192,6 +192,14 @@ public sealed class ResponsiveDialogSizeTests
     }
 
     [TestMethod]
+    public void BuiltinShellCommands_UsesCtrlTForNextPromptShortcut()
+        => Assert.AreEqual(new KeyGesture(TerminalChar.CtrlT, TerminalModifiers.Ctrl), BuiltinShellCommands.NextPrompt.Gesture);
+
+    [TestMethod]
+    public void BuiltinShellCommands_RegistersNextPromptSlashCommandName()
+        => Assert.AreEqual("next_prompt", BuiltinShellCommands.NextPrompt.Name);
+
+    [TestMethod]
     public void SessionWorkspaceView_UsesCtrlGCtrlDForRemindersShortcut()
     {
         var sequence = SessionWorkspaceView.RemindersShortcutSequence;

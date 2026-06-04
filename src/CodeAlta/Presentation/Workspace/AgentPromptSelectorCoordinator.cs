@@ -2,6 +2,7 @@ using CodeAlta.App;
 using CodeAlta.App.Context;
 using CodeAlta.App.State;
 using CodeAlta.Catalog;
+using CodeAlta.Frontend.Commands;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
 using CodeAlta.Presentation.Chat;
@@ -9,7 +10,7 @@ using CodeAlta.ViewModels;
 
 namespace CodeAlta.Presentation.Workspace;
 
-internal sealed class AgentPromptSelectorCoordinator
+internal sealed class AgentPromptSelectorCoordinator : IShellAgentPromptCommandService
 {
     private readonly SessionWorkspaceViewModel _workspaceViewModel;
     private readonly CatalogOptions _catalogOptions;
@@ -161,6 +162,30 @@ internal sealed class AgentPromptSelectorCoordinator
 
         _workspaceRefresh.ApplyHeaderProjection();
         _setStatus($"Selected prompt '{selectedPrompt.Label}'.", false, StatusTone.Ready);
+    }
+
+    public bool CanSelectNextAgentPrompt()
+        => _workspaceViewModel.CanSelectAgentPrompt && _workspaceViewModel.AgentPromptOptions.Count > 0;
+
+    public void SelectNextAgentPrompt()
+    {
+        if (!_workspaceViewModel.CanSelectAgentPrompt || _workspaceViewModel.AgentPromptOptions.Count == 0)
+        {
+            _setStatus("No agent prompts are available.", false, StatusTone.Warning);
+            return;
+        }
+
+        if (_workspaceViewModel.AgentPromptOptions.Count == 1)
+        {
+            _setStatus($"Only prompt '{_workspaceViewModel.AgentPromptOptions[0].Label}' is available.", false, StatusTone.Ready);
+            return;
+        }
+
+        var selectedIndex = _workspaceViewModel.SelectedAgentPromptIndex;
+        var nextIndex = (uint)selectedIndex < (uint)_workspaceViewModel.AgentPromptOptions.Count
+            ? (selectedIndex + 1) % _workspaceViewModel.AgentPromptOptions.Count
+            : 0;
+        OnAgentPromptSelectionChanged(nextIndex);
     }
 
     public string? GetPreferredAgentPromptId()

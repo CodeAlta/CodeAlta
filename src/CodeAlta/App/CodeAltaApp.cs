@@ -274,10 +274,10 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             () => { _ = _sessionTabStripCoordinator.TrySelectRelativeTab(1); return Task.CompletedTask; },
             () => ScrollSelectedSessionMessageAsync(static tab => tab.Timeline.ScrollToPreviousMessage()), () => ScrollSelectedSessionMessageAsync(static tab => tab.Timeline.ScrollToNextMessage()),
             () => ScrollSelectedSessionMessageAsync(static tab => tab.Timeline.ScrollToFirstMessage()), () => ScrollSelectedSessionMessageAsync(static tab => tab.Timeline.ScrollToLastMessage()));
-        var tabCommands = new DelegatingShellTabCommandService(() => _sessionTabStripCoordinator.CloseSelectedTabAsync());
+        var tabs = new DelegatingShellTabCommandService(() => _sessionTabStripCoordinator.CloseSelectedTabAsync());
         var status = new DelegatingShellStatusService(SetStatus);
         var plugins = new PluginHostCommandService(_ownedServices?.PluginHostBridge);
-        _shellCommandSurfaceCoordinator = ShellCommandSurfaceComposition.Create(_promptComposerViewModel, _sessionWorkspaceViewModel, _sessionCommandCoordinator, input, sessionSvc, dialogs, navigation, tabCommands, status, plugins, ToggleTerminalLoopCallback, () => SessionInput is not null, () => _sessionWorkspaceView?.SessionCommandBar.MultiLine ?? false);
+        _shellCommandSurfaceCoordinator = ShellCommandSurfaceComposition.Create(_promptComposerViewModel, _sessionWorkspaceViewModel, _sessionCommandCoordinator, input, sessionSvc, dialogs, navigation, tabs, status, plugins, _agentPromptSelector, ToggleTerminalLoopCallback, () => SessionInput is not null, () => _sessionWorkspaceView?.SessionCommandBar.MultiLine ?? false);
         _sessionHistoryCoordinator = new SessionHistoryCoordinator(
             _runtimeService,
             EnsureSessionTab,

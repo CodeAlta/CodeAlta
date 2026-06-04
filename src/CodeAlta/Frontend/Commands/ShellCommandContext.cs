@@ -34,6 +34,8 @@ internal sealed class ShellCommandContext
 
     public required IShellDiagnosticsCommandService Diagnostics { get; init; }
 
+    public required IShellAgentPromptCommandService AgentPrompts { get; init; }
+
     public required Func<IReadOnlyList<ShellCommand>> GetCommands { get; init; }
 
     public required Func<bool> IsCommandBarMultiLine { get; init; }
@@ -42,6 +44,31 @@ internal sealed class ShellCommandContext
 internal interface IShellDiagnosticsCommandService
 {
     void ToggleTerminalLoop();
+}
+
+internal interface IShellAgentPromptCommandService
+{
+    bool CanSelectNextAgentPrompt();
+
+    void SelectNextAgentPrompt();
+}
+
+internal sealed class DelegatingShellAgentPromptCommandService : IShellAgentPromptCommandService
+{
+    private readonly Func<bool> _canSelectNextAgentPrompt;
+    private readonly Action _selectNextAgentPrompt;
+
+    public DelegatingShellAgentPromptCommandService(Func<bool> canSelectNextAgentPrompt, Action selectNextAgentPrompt)
+    {
+        ArgumentNullException.ThrowIfNull(canSelectNextAgentPrompt);
+        ArgumentNullException.ThrowIfNull(selectNextAgentPrompt);
+        _canSelectNextAgentPrompt = canSelectNextAgentPrompt;
+        _selectNextAgentPrompt = selectNextAgentPrompt;
+    }
+
+    public bool CanSelectNextAgentPrompt() => _canSelectNextAgentPrompt();
+
+    public void SelectNextAgentPrompt() => _selectNextAgentPrompt();
 }
 
 internal sealed class DelegatingShellDiagnosticsCommandService : IShellDiagnosticsCommandService

@@ -64,6 +64,7 @@ internal static class TestShellCommandSurface
             Plugins = new PluginCommands(),
             SessionActions = new DelegatingShellSessionActionService(static () => Task.CompletedTask, static () => Task.CompletedTask, static () => Task.CompletedTask),
             Diagnostics = new DelegatingShellDiagnosticsCommandService(static () => { }),
+            AgentPrompts = new DelegatingShellAgentPromptCommandService(static () => false, static () => { }),
             GetCommands = () => registry.Commands,
             IsCommandBarMultiLine = static () => false,
         };

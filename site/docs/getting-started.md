@@ -171,6 +171,7 @@ When the selected model supports image input, copy an image to the clipboard and
 | Open model providers | `Ctrl+G Ctrl+R` or `/model_providers` |
 | Refresh model providers | `/model_providers_refresh` |
 | Manage prompts | `Ctrl+G Ctrl+H` or `/prompt` |
+| Switch to next agent prompt | `Ctrl+T` or `/next_prompt` |
 | Browse models | `Ctrl+G Ctrl+O` or `/models` |
 | About / update status | `Ctrl+G Ctrl+A` or `/about` |
 | Open workspace settings | `Ctrl+G Ctrl+W` or `/settings` |

@@ -16,6 +16,7 @@ internal static class ShellCommandSurfaceComposition
         IShellTabCommandService tabCommandService,
         IShellStatusService statusService,
         IPluginCommandService pluginCommandService,
+        IShellAgentPromptCommandService agentPromptCommandService,
         Action toggleTerminalLoop,
         Func<bool> canUseCommandPalette,
         Func<bool> isCommandBarMultiLine)
@@ -30,6 +31,7 @@ internal static class ShellCommandSurfaceComposition
         ArgumentNullException.ThrowIfNull(tabCommandService);
         ArgumentNullException.ThrowIfNull(statusService);
         ArgumentNullException.ThrowIfNull(pluginCommandService);
+        ArgumentNullException.ThrowIfNull(agentPromptCommandService);
         ArgumentNullException.ThrowIfNull(toggleTerminalLoop);
         ArgumentNullException.ThrowIfNull(canUseCommandPalette);
         ArgumentNullException.ThrowIfNull(isCommandBarMultiLine);
@@ -62,6 +64,7 @@ internal static class ShellCommandSurfaceComposition
                 sessionCommandCoordinator.CompactSelectedSessionAsync,
                 sessionCommandCoordinator.ClearSelectedSessionQueueAsync),
             Diagnostics = new DelegatingShellDiagnosticsCommandService(toggleTerminalLoop),
+            AgentPrompts = agentPromptCommandService,
             GetCommands = () => registry?.Commands ?? [],
             IsCommandBarMultiLine = isCommandBarMultiLine,
         };
