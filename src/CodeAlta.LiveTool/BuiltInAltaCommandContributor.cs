@@ -3625,14 +3625,19 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         var roots = project is null ? [] : new[] { project.ProjectPath };
+        var catalogOptions = context.Services.Get<CatalogOptions>();
+        var globalRoot = catalogOptions?.GlobalRoot ?? GetGlobalRootOrCwd(context);
+        var configStore = context.Services.Get<CodeAltaConfigStore>() ?? new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = globalRoot });
         var query = new SkillCatalogQuery
         {
             Discovery = new SkillDiscoveryContext
             {
                 ProjectRoots = roots,
-                UserCodeAltaRoot = context.Services.Get<CatalogOptions>()?.GlobalRoot ?? GetGlobalRootOrCwd(context),
+                UserCodeAltaRoot = globalRoot,
                 UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             },
+            GlobalDisabledSkillNames = configStore.LoadGlobalDisabledSkillNames(),
+            ProjectDisabledSkillNames = configStore.LoadProjectDisabledSkillNames(project?.ProjectPath),
             IncludeInvalid = true,
             IncludeShadowed = true,
             IncludeUntrusted = true,

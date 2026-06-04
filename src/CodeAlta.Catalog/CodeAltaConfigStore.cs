@@ -204,6 +204,95 @@ public sealed class CodeAltaConfigStore
             : LoadDocument(GetProjectConfigPath(projectRoot));
 
     /// <summary>
+    /// Loads globally disabled skill names.
+    /// </summary>
+    /// <returns>The normalized disabled skill names.</returns>
+    public IReadOnlySet<string> LoadGlobalDisabledSkillNames()
+    {
+        var document = LoadGlobal();
+        return LoadDisabledSkillNames(document);
+    }
+
+    /// <summary>
+    /// Loads project-local disabled skill names.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory.</param>
+    /// <returns>The normalized disabled skill names.</returns>
+    public IReadOnlySet<string> LoadProjectDisabledSkillNames(string? projectRoot)
+    {
+        var document = LoadProject(projectRoot);
+        return LoadDisabledSkillNames(document);
+    }
+
+    /// <summary>
+    /// Loads the effective disabled skill names for a scope.
+    /// </summary>
+    /// <param name="projectRoot">Optional project root for project-local disablement.</param>
+    /// <returns>The normalized global/project disabled skill names.</returns>
+    public IReadOnlySet<string> LoadEffectiveDisabledSkillNames(string? projectRoot = null)
+    {
+        var disabled = new HashSet<string>(LoadGlobalDisabledSkillNames(), StringComparer.OrdinalIgnoreCase);
+        disabled.UnionWith(LoadProjectDisabledSkillNames(projectRoot));
+        return disabled;
+    }
+
+    /// <summary>
+    /// Persists the complete global disabled skill set.
+    /// </summary>
+    /// <param name="skillNames">The skill names to disable globally.</param>
+    public void SaveGlobalDisabledSkillNames(IEnumerable<string> skillNames)
+    {
+        ArgumentNullException.ThrowIfNull(skillNames);
+        var document = LoadGlobal();
+        SaveDisabledSkillNames(_options.ConfigPath, document, skillNames);
+    }
+
+    /// <summary>
+    /// Persists the complete project-local disabled skill set.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory.</param>
+    /// <param name="skillNames">The skill names to disable for the project.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> is empty.</exception>
+    public void SaveProjectDisabledSkillNames(string projectRoot, IEnumerable<string> skillNames)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        ArgumentNullException.ThrowIfNull(skillNames);
+        var path = GetProjectConfigPath(projectRoot);
+        var document = LoadDocument(path);
+        SaveDisabledSkillNames(path, document, skillNames);
+    }
+
+    /// <summary>
+    /// Persists a global skill enablement setting.
+    /// </summary>
+    /// <param name="skillName">The skill name.</param>
+    /// <param name="enabled">A value indicating whether the skill should be enabled globally.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty or invalid.</exception>
+    public void SaveGlobalSkillEnabled(string skillName, bool enabled)
+    {
+        var normalizedName = NormalizeSkillConfigNameForSave(skillName);
+        var disabled = new HashSet<string>(LoadGlobalDisabledSkillNames(), StringComparer.OrdinalIgnoreCase);
+        SetSkillEnabled(disabled, normalizedName, enabled);
+        SaveGlobalDisabledSkillNames(disabled);
+    }
+
+    /// <summary>
+    /// Persists a project-local skill enablement setting.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory.</param>
+    /// <param name="skillName">The skill name.</param>
+    /// <param name="enabled">A value indicating whether the skill should be enabled for the project.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> or <paramref name="skillName"/> is empty, or when the skill name is invalid.</exception>
+    public void SaveProjectSkillEnabled(string projectRoot, string skillName, bool enabled)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        var normalizedName = NormalizeSkillConfigNameForSave(skillName);
+        var disabled = new HashSet<string>(LoadProjectDisabledSkillNames(projectRoot), StringComparer.OrdinalIgnoreCase);
+        SetSkillEnabled(disabled, normalizedName, enabled);
+        SaveProjectDisabledSkillNames(projectRoot, disabled);
+    }
+
+    /// <summary>
     /// Persists a global plugin enablement override.
     /// </summary>
     /// <param name="pluginId">The built-in plugin id or source plugin package id.</param>
@@ -761,6 +850,37 @@ public sealed class CodeAltaConfigStore
         SaveDocument(path, document);
     }
 
+    private static void SaveDisabledSkillNames(string path, CodeAltaConfigDocument document, IEnumerable<string> skillNames)
+    {
+        ArgumentNullException.ThrowIfNull(skillNames);
+        NormalizeDocument(document);
+        var disabled = NormalizeSkillConfigNameList(skillNames);
+        document.Skills ??= new CodeAltaSkillSettingsDocument();
+        document.Skills.Disabled = disabled;
+        SaveDocument(path, document);
+    }
+
+    private static IReadOnlySet<string> LoadDisabledSkillNames(CodeAltaConfigDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        NormalizeDocument(document);
+        return document.Skills?.Disabled is { Count: > 0 } disabled
+            ? new HashSet<string>(disabled, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void SetSkillEnabled(HashSet<string> disabled, string skillName, bool enabled)
+    {
+        if (enabled)
+        {
+            disabled.Remove(skillName);
+        }
+        else
+        {
+            disabled.Add(skillName);
+        }
+    }
+
     private static void NormalizeDocument(CodeAltaConfigDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -787,6 +907,15 @@ public sealed class CodeAltaConfigStore
                     StringComparer.OrdinalIgnoreCase);
 
             document.Providers = providers.Count == 0 ? null : providers;
+        }
+
+        if (document.Skills is not null)
+        {
+            document.Skills.Disabled = NormalizeSkillConfigNameList(document.Skills.Disabled ?? []);
+            if (document.Skills.Disabled is null)
+            {
+                document.Skills = null;
+            }
         }
 
         if (document.Plugins is not null)
@@ -849,6 +978,64 @@ public sealed class CodeAltaConfigStore
 
     private static string? NormalizeText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static List<string>? NormalizeSkillConfigNameList(IEnumerable<string> values)
+    {
+        var normalized = values
+            .Select(NormalizeSkillConfigName)
+            .Where(static value => value is not null)
+            .Select(static value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static string NormalizeSkillConfigNameForSave(string? value)
+    {
+        try
+        {
+            return NormalizeSkillConfigName(value)
+                ?? throw new ArgumentException("Skill name is required.", nameof(value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ArgumentException(ex.Message, nameof(value), ex);
+        }
+    }
+
+    private static string? NormalizeSkillConfigName(string? value)
+    {
+        var normalized = NormalizeText(value)?.ToLowerInvariant();
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (normalized.Length > 64 ||
+            normalized.StartsWith("-", StringComparison.Ordinal) ||
+            normalized.EndsWith("-", StringComparison.Ordinal) ||
+            normalized.Contains("--", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"skills.disabled contains invalid skill name '{value}'.");
+        }
+
+        foreach (var rune in normalized.EnumerateRunes())
+        {
+            if (rune.Value == '-')
+            {
+                continue;
+            }
+
+            if (!Rune.IsLetterOrDigit(rune) ||
+                (Rune.IsLetter(rune) && Rune.ToLowerInvariant(rune) != rune))
+            {
+                throw new InvalidOperationException($"skills.disabled contains invalid skill name '{value}'.");
+            }
+        }
+
+        return normalized;
+    }
 
     private static string? NormalizeDomain(string? value)
     {

@@ -96,7 +96,7 @@ public sealed class SkillCatalog
             discovered.AddRange(await ScanRootAsync(root, cancellationToken).ConfigureAwait(false));
         }
 
-        var annotated = ApplyShadowing(discovered);
+        var annotated = ApplyEnablement(ApplyShadowing(discovered), query);
         return ApplyQuery(annotated, query);
     }
 
@@ -247,6 +247,11 @@ public sealed class SkillCatalog
     {
         var document = await GetAsync(query, skillName, cancellationToken).ConfigureAwait(false);
         if (document is null)
+        {
+            return null;
+        }
+
+        if (!document.Descriptor.IsEnabled)
         {
             return null;
         }
@@ -502,6 +507,7 @@ public sealed class SkillCatalog
             ShadowedBySkillFilePath = shadowedBySkillFilePath,
             IsTrusted = isTrusted,
             IsValid = !hasErrors && !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(description),
+            IsEnabled = true,
             IsModelVisible = !hasErrors && !isShadowed && isTrusted && !string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(description),
         };
     }
@@ -633,6 +639,43 @@ public sealed class SkillCatalog
             .ToArray();
     }
 
+    private static IReadOnlyList<SkillDescriptor> ApplyEnablement(
+        IReadOnlyList<SkillDescriptor> descriptors,
+        SkillCatalogQuery query)
+    {
+        var globallyDisabled = CreateDisabledSet(query.GlobalDisabledSkillNames);
+        var projectDisabled = CreateDisabledSet(query.ProjectDisabledSkillNames);
+        if (globallyDisabled.Count == 0 && projectDisabled.Count == 0)
+        {
+            return descriptors;
+        }
+
+        return descriptors
+            .Select(descriptor =>
+            {
+                var key = Normalize(descriptor.NormalizedName) ?? Normalize(descriptor.Name) ?? string.Empty;
+                var disabledGlobally = globallyDisabled.Contains(key);
+                var disabledForProject = projectDisabled.Contains(key);
+                var isEnabled = !disabledGlobally && !disabledForProject;
+                return descriptor with
+                {
+                    IsDisabledGlobally = disabledGlobally,
+                    IsDisabledForProject = disabledForProject,
+                    IsEnabled = isEnabled,
+                    IsModelVisible = descriptor.IsModelVisible && isEnabled,
+                };
+            })
+            .ToArray();
+    }
+
+    private static HashSet<string> CreateDisabledSet(IReadOnlyCollection<string>? names)
+        => names is null || names.Count == 0
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : names
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .Select(static name => name.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     private static IReadOnlyList<SkillDescriptor> ApplyQuery(
         IReadOnlyList<SkillDescriptor> descriptors,
         SkillCatalogQuery query)
@@ -643,6 +686,11 @@ public sealed class SkillCatalog
             filtered = filtered.Where(descriptor =>
                 string.Equals(descriptor.Name, query.SkillName, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(descriptor.NormalizedName, query.SkillName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!query.IncludeDisabled)
+        {
+            filtered = filtered.Where(static descriptor => descriptor.IsEnabled);
         }
 
         if (query.ModelVisibleOnly)

@@ -11,12 +11,14 @@ internal sealed class SkillsManagementService
 
     private readonly SkillCatalog _skillCatalog;
     private readonly CatalogOptions _catalogOptions;
+    private readonly CodeAltaConfigStore _configStore;
     private readonly Func<ProjectDescriptor?> _getSelectedProject;
 
     public SkillsManagementService(
         SkillCatalog skillCatalog,
         CatalogOptions catalogOptions,
-        Func<ProjectDescriptor?> getSelectedProject)
+        Func<ProjectDescriptor?> getSelectedProject,
+        CodeAltaConfigStore? configStore = null)
     {
         ArgumentNullException.ThrowIfNull(skillCatalog);
         ArgumentNullException.ThrowIfNull(catalogOptions);
@@ -24,8 +26,12 @@ internal sealed class SkillsManagementService
 
         _skillCatalog = skillCatalog;
         _catalogOptions = catalogOptions;
+        _configStore = configStore ?? new CodeAltaConfigStore(catalogOptions);
         _getSelectedProject = getSelectedProject;
     }
+
+    public bool HasSelectedProject
+        => !string.IsNullOrWhiteSpace(_getSelectedProject()?.ProjectPath);
 
     public async Task<IReadOnlyList<SkillDescriptor>> LoadAsync(
         SkillsManagementScope scope,
@@ -47,12 +53,42 @@ internal sealed class SkillsManagementService
                     ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                     : null,
             },
+            GlobalDisabledSkillNames = _configStore.LoadGlobalDisabledSkillNames(),
+            ProjectDisabledSkillNames = _configStore.LoadProjectDisabledSkillNames(selectedProject?.ProjectPath),
+            IncludeDisabled = true,
             IncludeInvalid = true,
             IncludeShadowed = true,
             IncludeUntrusted = true,
         };
 
         return await _skillCatalog.ListAsync(query, cancellationToken);
+    }
+
+    public SkillEnablementUpdateResult SetSkillEnabled(
+        SkillEnablementScope scope,
+        string skillName,
+        bool enabled)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(skillName);
+        var normalizedName = NormalizeEnablementSkillName(skillName);
+        return UpdateSkillEnablement(scope, [normalizedName], static (_, targetEnabled) => targetEnabled, enabled);
+    }
+
+    public SkillEnablementUpdateResult SetSkillsEnabled(
+        SkillEnablementScope scope,
+        IReadOnlyList<string> skillNames,
+        bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(skillNames);
+        return UpdateSkillEnablement(scope, skillNames, static (_, targetEnabled) => targetEnabled, enabled);
+    }
+
+    public SkillEnablementUpdateResult InvertSkillsEnabled(
+        SkillEnablementScope scope,
+        IReadOnlyList<string> skillNames)
+    {
+        ArgumentNullException.ThrowIfNull(skillNames);
+        return UpdateSkillEnablement(scope, skillNames, static (currentlyEnabled, _) => !currentlyEnabled, enabled: true);
     }
 
     public async Task<SkillCreationResult> CreateSkillAsync(
@@ -121,6 +157,90 @@ internal sealed class SkillsManagementService
             .ThenBy(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
             .Take(128)
             .ToArray();
+    }
+
+    private SkillEnablementUpdateResult UpdateSkillEnablement(
+        SkillEnablementScope scope,
+        IReadOnlyList<string> skillNames,
+        Func<bool, bool, bool> resolveEnabled,
+        bool enabled)
+    {
+        var normalizedNames = skillNames
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(NormalizeEnablementSkillName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedNames.Length == 0)
+        {
+            return new SkillEnablementUpdateResult(0, 0);
+        }
+
+        var globalChanged = 0;
+        var projectChanged = 0;
+        if (scope is SkillEnablementScope.Global or SkillEnablementScope.Both)
+        {
+            var disabled = new HashSet<string>(_configStore.LoadGlobalDisabledSkillNames(), StringComparer.OrdinalIgnoreCase);
+            globalChanged = ApplyEnablementChanges(disabled, normalizedNames, resolveEnabled, enabled);
+            if (globalChanged > 0)
+            {
+                _configStore.SaveGlobalDisabledSkillNames(disabled);
+            }
+        }
+
+        if (scope is SkillEnablementScope.Project or SkillEnablementScope.Both)
+        {
+            var projectRoot = ResolveSelectedProjectRoot();
+            var disabled = new HashSet<string>(_configStore.LoadProjectDisabledSkillNames(projectRoot), StringComparer.OrdinalIgnoreCase);
+            projectChanged = ApplyEnablementChanges(disabled, normalizedNames, resolveEnabled, enabled);
+            if (projectChanged > 0)
+            {
+                _configStore.SaveProjectDisabledSkillNames(projectRoot, disabled);
+            }
+        }
+
+        return new SkillEnablementUpdateResult(globalChanged, projectChanged);
+    }
+
+    private static int ApplyEnablementChanges(
+        HashSet<string> disabled,
+        IReadOnlyList<string> skillNames,
+        Func<bool, bool, bool> resolveEnabled,
+        bool enabled)
+    {
+        var changed = 0;
+        foreach (var skillName in skillNames)
+        {
+            var currentlyEnabled = !disabled.Contains(skillName);
+            var targetEnabled = resolveEnabled(currentlyEnabled, enabled);
+            if (targetEnabled == currentlyEnabled)
+            {
+                continue;
+            }
+
+            if (targetEnabled)
+            {
+                disabled.Remove(skillName);
+            }
+            else
+            {
+                disabled.Add(skillName);
+            }
+
+            changed++;
+        }
+
+        return changed;
+    }
+
+    private string ResolveSelectedProjectRoot()
+    {
+        var selectedProject = _getSelectedProject();
+        if (string.IsNullOrWhiteSpace(selectedProject?.ProjectPath))
+        {
+            throw new InvalidOperationException("Select a project before changing project skill enablement.");
+        }
+
+        return selectedProject.ProjectPath;
     }
 
     private static string? GetRelatedFileCategory(string relativePath)
@@ -214,6 +334,9 @@ internal sealed class SkillsManagementService
         return normalized;
     }
 
+    private static string NormalizeEnablementSkillName(string? name)
+        => NormalizeSkillName(name?.ToLowerInvariant());
+
     private static string NormalizeDescription(string? description)
     {
         if (string.IsNullOrWhiteSpace(description))
@@ -277,6 +400,18 @@ internal enum SkillCreationTargetKind
 {
     ProjectCodeAlta,
     UserCodeAlta,
+}
+
+internal enum SkillEnablementScope
+{
+    Global,
+    Project,
+    Both,
+}
+
+internal readonly record struct SkillEnablementUpdateResult(int GlobalChanged, int ProjectChanged)
+{
+    public int TotalChanged => GlobalChanged + ProjectChanged;
 }
 
 internal sealed record SkillCreationTarget(SkillCreationTargetKind Kind, string RootPath);

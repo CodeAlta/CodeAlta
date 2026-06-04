@@ -20,10 +20,28 @@ public sealed class CodeAltaConfigDocument
     public Dictionary<string, CodeAltaProviderDocument>? Providers { get; set; }
 
     /// <summary>
+    /// Gets or sets skill enablement settings.
+    /// </summary>
+    [JsonPropertyName("skills")]
+    public CodeAltaSkillSettingsDocument? Skills { get; set; }
+
+    /// <summary>
     /// Gets or sets plugin configuration keyed by plugin package id or built-in plugin id.
     /// </summary>
     [JsonPropertyName("plugins")]
     public Dictionary<string, CodeAltaPluginSettingsDocument>? Plugins { get; set; }
+}
+
+/// <summary>
+/// Represents skill enablement configuration settings.
+/// </summary>
+public sealed class CodeAltaSkillSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets normalized skill names disabled by this configuration scope.
+    /// </summary>
+    [JsonPropertyName("disabled")]
+    public List<string>? Disabled { get; set; }
 }
 
 /// <summary>

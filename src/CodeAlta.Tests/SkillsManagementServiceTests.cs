@@ -143,6 +143,67 @@ public sealed class SkillsManagementServiceTests
             () => service.CreateSkillAsync(SkillsManagementScope.User, name, "Description.")).ConfigureAwait(false);
     }
 
+    [TestMethod]
+    public async Task LoadAsync_IncludesDisabledSkillStateForManagement()
+    {
+        using var temp = TempDirectory.Create();
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        await WriteSkillAsync(Path.Combine(projectRoot, ".alta", "skills", "sample-skill"), "sample-skill", "Managed skill.").ConfigureAwait(false);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "home") };
+        var configStore = new CodeAltaConfigStore(options);
+        configStore.SaveGlobalSkillEnabled("sample-skill", enabled: false);
+        var service = new SkillsManagementService(
+            new SkillCatalog(),
+            options,
+            () => new ProjectDescriptor { ProjectPath = projectRoot },
+            configStore);
+
+        var descriptors = await service.LoadAsync(SkillsManagementScope.CurrentProject).ConfigureAwait(false);
+
+        var descriptor = descriptors.Single(static descriptor => descriptor.Name == "sample-skill");
+        Assert.IsFalse(descriptor.IsEnabled);
+        Assert.IsTrue(descriptor.IsDisabledGlobally);
+    }
+
+    [TestMethod]
+    public void SetSkillsEnabled_UpdatesRequestedScopesAndInvertRestoresThem()
+    {
+        using var temp = TempDirectory.Create();
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "home") };
+        var configStore = new CodeAltaConfigStore(options);
+        var service = new SkillsManagementService(
+            new SkillCatalog(),
+            options,
+            () => new ProjectDescriptor { ProjectPath = projectRoot },
+            configStore);
+
+        var disabled = service.SetSkillsEnabled(SkillEnablementScope.Both, ["sample-skill", "other-skill"], enabled: false);
+
+        Assert.AreEqual(2, disabled.GlobalChanged);
+        Assert.AreEqual(2, disabled.ProjectChanged);
+        CollectionAssert.AreEqual(new[] { "other-skill", "sample-skill" }, configStore.LoadGlobalDisabledSkillNames().OrderBy(static name => name, StringComparer.OrdinalIgnoreCase).ToArray());
+        CollectionAssert.AreEqual(new[] { "other-skill", "sample-skill" }, configStore.LoadProjectDisabledSkillNames(projectRoot).OrderBy(static name => name, StringComparer.OrdinalIgnoreCase).ToArray());
+
+        var inverted = service.InvertSkillsEnabled(SkillEnablementScope.Project, ["sample-skill"]);
+
+        Assert.AreEqual(0, inverted.GlobalChanged);
+        Assert.AreEqual(1, inverted.ProjectChanged);
+        CollectionAssert.AreEqual(new[] { "other-skill" }, configStore.LoadProjectDisabledSkillNames(projectRoot).ToArray());
+    }
+
+    [TestMethod]
+    public void SetSkillsEnabled_ProjectScopeRequiresSelectedProject()
+    {
+        using var temp = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "home") };
+        var service = new SkillsManagementService(new SkillCatalog(), options, () => null, new CodeAltaConfigStore(options));
+
+        Assert.ThrowsExactly<InvalidOperationException>(() => service.SetSkillsEnabled(SkillEnablementScope.Project, ["sample-skill"], enabled: false));
+    }
+
     private static SkillDescriptor CreateDescriptor(string skillRoot)
         => new()
         {
@@ -167,6 +228,20 @@ public sealed class SkillsManagementServiceTests
             new SkillCatalog(),
             new CatalogOptions { GlobalRoot = globalRoot },
             () => null);
+
+    private static async Task WriteSkillAsync(string skillRoot, string name, string description)
+    {
+        Directory.CreateDirectory(skillRoot);
+        await File.WriteAllTextAsync(
+            Path.Combine(skillRoot, "SKILL.md"),
+            $$"""
+            ---
+            name: {{name}}
+            description: {{description}}
+            ---
+            # {{name}}
+            """).ConfigureAwait(false);
+    }
 
     private sealed class TempDirectory(string path) : IDisposable
     {

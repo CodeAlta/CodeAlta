@@ -268,6 +268,61 @@ public sealed class SkillCatalogTests
         Assert.IsFalse(activation.Payload.Contains("ignored.svg", StringComparison.OrdinalIgnoreCase));
     }
 
+    [TestMethod]
+    public async Task SkillCatalog_DisabledSkillsRemainManageableButNotVisibleOrActivatable()
+    {
+        using var temp = TempDirectory.Create();
+        var skillsRoot = Path.Combine(temp.Path, ".alta", "skills");
+        var lowerPrecedenceRoot = Path.Combine(temp.Path, "user", "skills");
+        await WriteSkillAsync(Path.Combine(skillsRoot, "sample-skill"), "sample-skill", "Disabled skill.").ConfigureAwait(false);
+        await WriteSkillAsync(Path.Combine(lowerPrecedenceRoot, "sample-skill"), "sample-skill", "Shadowed disabled skill.").ConfigureAwait(false);
+        var catalog = new SkillCatalog();
+        var baseQuery = new SkillCatalogQuery
+        {
+            Discovery = new SkillDiscoveryContext
+            {
+                UseBuiltInRoots = false,
+                AdditionalRoots =
+                [
+                    new SkillRootRegistration
+                    {
+                        RootPath = skillsRoot,
+                        SourceKind = SkillSourceKind.Temporary,
+                        SourceId = "temporary-tests",
+                        Scope = SkillScopeKind.Temporary,
+                        Precedence = 0,
+                    },
+                    new SkillRootRegistration
+                    {
+                        RootPath = lowerPrecedenceRoot,
+                        SourceKind = SkillSourceKind.Temporary,
+                        SourceId = "temporary-tests-low",
+                        Scope = SkillScopeKind.Temporary,
+                        Precedence = 10,
+                    },
+                ],
+            },
+            GlobalDisabledSkillNames = ["sample-skill"],
+        };
+
+        var managementDescriptors = await catalog.ListAsync(baseQuery with { IncludeDisabled = true }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, managementDescriptors.Count);
+        Assert.IsTrue(managementDescriptors.All(static descriptor => !descriptor.IsEnabled));
+        Assert.IsTrue(managementDescriptors.All(static descriptor => descriptor.IsDisabledGlobally));
+        Assert.IsTrue(managementDescriptors.All(static descriptor => !descriptor.IsModelVisible));
+        Assert.AreEqual(1, managementDescriptors.Count(static descriptor => descriptor.IsShadowed));
+
+        var defaultDescriptors = await catalog.ListAsync(baseQuery).ConfigureAwait(false);
+        Assert.AreEqual(0, defaultDescriptors.Count);
+
+        var visibleDescriptors = await catalog.ListAsync(baseQuery with { ModelVisibleOnly = true }).ConfigureAwait(false);
+        Assert.AreEqual(0, visibleDescriptors.Count);
+
+        var activation = await catalog.ActivateAsync(baseQuery with { IncludeDisabled = true }, "sample-skill").ConfigureAwait(false);
+        Assert.IsNull(activation);
+    }
+
     private static async Task WriteSkillAsync(string skillRoot, string name, string description)
     {
         Directory.CreateDirectory(skillRoot);

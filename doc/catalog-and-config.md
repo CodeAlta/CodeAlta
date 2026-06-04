@@ -53,12 +53,16 @@ api_key_env = "MY_PROVIDER_API_KEY"
 
 [plugins.statistics]
 enabled = true
+
+[skills]
+disabled = ["ilspy-decompile"]
 ```
 
 `CodeAltaConfigDocument` maps these sections to:
 
 - `chat`: chat-level defaults, currently the default provider key;
 - `providers`: configured model-provider documents keyed by provider key;
+- `skills`: skill enablement settings, currently normalized disabled skill names;
 - `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`.
 
 Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them while preserving their TOML text when saving normalized config so existing user data is not deleted.
@@ -76,6 +80,8 @@ Provider registrations are skipped at startup when required credentials or provi
 ### Project overrides
 
 Project-local config can override effective chat/provider behavior for that project. The frontend also persists session-specific provider/model/reasoning selections in `ui-state.yaml`, so an existing session view can keep its selected runtime after global defaults change.
+
+Skill disablement is additive rather than an override: a skill named in global `[skills].disabled` is disabled everywhere, and a skill named in project `[skills].disabled` is disabled only for that project. A project config cannot re-enable a globally disabled skill.
 
 ## Project catalog
 
@@ -104,4 +110,4 @@ Unsent per-session prompts are stored under `~/.alta/saved_prompts/` so closing 
 
 Source plugins are discovered from user and project roots and are enabled by default unless disabled in config or safe mode is active. CodeAlta owns generated plugin-root build files and plugin build manifests under its roots; plugin package directories should contain only package-owned source/content files.
 
-Skills are plain directories containing `SKILL.md` plus optional helper files. Discovery validates metadata, applies precedence/shadowing, and reads resources without executing scripts.
+Skills are plain directories containing `SKILL.md` plus optional helper files. Discovery validates metadata, applies precedence/shadowing and config enablement, and reads resources without executing scripts. Disabled skills remain visible in the management UI, but are not advertised to models and cannot be activated through UI, runtime, or live-tool paths.

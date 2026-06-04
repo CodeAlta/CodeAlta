@@ -86,6 +86,21 @@ public sealed record SkillDescriptor
     public bool IsValid { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the skill is enabled for the current global/project scope.
+    /// </summary>
+    public bool IsEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Gets a value indicating whether global configuration disables this skill.
+    /// </summary>
+    public bool IsDisabledGlobally { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether project configuration disables this skill.
+    /// </summary>
+    public bool IsDisabledForProject { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the skill should be advertised to the model.
     /// </summary>
     public bool IsModelVisible { get; init; }

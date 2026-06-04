@@ -12,6 +12,7 @@ public sealed class AgentInstructionTemplateProvider
 {
     private readonly SkillCatalog? _skillCatalog;
     private readonly CatalogOptions? _catalogOptions;
+    private readonly CodeAltaConfigStore? _configStore;
     private readonly SystemPromptBuilder _promptBuilder;
 
     /// <summary>
@@ -23,10 +24,14 @@ public sealed class AgentInstructionTemplateProvider
     public AgentInstructionTemplateProvider(
         SkillCatalog? skillCatalog = null,
         CatalogOptions? catalogOptions = null,
-        ISystemPromptContentLocator? contentLocator = null)
+        ISystemPromptContentLocator? contentLocator = null,
+        CodeAltaConfigStore? configStore = null)
     {
         _skillCatalog = skillCatalog;
         _catalogOptions = catalogOptions;
+        _configStore = configStore ?? (catalogOptions is not null && !string.IsNullOrWhiteSpace(catalogOptions.GlobalRoot)
+            ? new CodeAltaConfigStore(catalogOptions)
+            : null);
         _promptBuilder = new SystemPromptBuilder(contentLocator);
     }
 
@@ -121,6 +126,8 @@ public sealed class AgentInstructionTemplateProvider
                 new SkillCatalogQuery
                 {
                     Discovery = CreateDiscoveryContext(session, project),
+                    GlobalDisabledSkillNames = _configStore?.LoadGlobalDisabledSkillNames() ?? (IReadOnlyCollection<string>)Array.Empty<string>(),
+                    ProjectDisabledSkillNames = _configStore?.LoadProjectDisabledSkillNames(project?.ProjectPath) ?? (IReadOnlyCollection<string>)Array.Empty<string>(),
                     IncludeInvalid = false,
                     IncludeShadowed = false,
                     IncludeUntrusted = false,

@@ -44,13 +44,24 @@ Rules enforced by `SkillCatalog`:
 
 ## Discovery and validation
 
-`SkillCatalog` resolves root providers, walks skill roots with gitignore-aware file walking, parses frontmatter, validates descriptors, applies shadowing, and returns descriptors with provenance and diagnostics.
+`SkillCatalog` resolves root providers, walks skill roots with gitignore-aware file walking, parses frontmatter, validates descriptors, applies shadowing, applies global/project enablement, and returns descriptors with provenance and diagnostics.
 
 Resource listing excludes VCS directories and respects ignore rules. Activation payloads include the canonical `SKILL.md` body and a bounded list of related files. Related files are made available for inspection; they are not run.
 
+## Enablement config
+
+Skills are enabled by default. Disable a skill by name in the relevant `.alta/config.toml` file:
+
+```toml
+[skills]
+disabled = ["ilspy-decompile"]
+```
+
+Global `~/.alta/config.toml` disablement applies everywhere. Project `<project>/.alta/config.toml` disablement is additive for that project; it cannot re-enable a globally disabled skill. Names are normalized case-insensitively, and a disabled name affects every discovered skill with that normalized name across sources.
+
 ## Runtime behavior
 
-For agent-runtime sessions, CodeAlta advertises compact skill metadata in instructions. The full skill body is loaded only when the user, UI, plugin, or agent activates a skill through the host-owned runtime path.
+For agent-runtime sessions, CodeAlta advertises compact skill metadata in instructions for enabled skills only. The full skill body is loaded only when the user, UI, plugin, or agent activates an enabled skill through the host-owned runtime path.
 
 Activation:
 
@@ -66,11 +77,11 @@ Activated agent-runtime skills are replayed from the session journal after resum
 
 Open the skills browser with `/skills`, `/skill`, the command palette entry, or `Ctrl+G Ctrl+K`.
 
-The browser can show combined, current-project, or user/global scopes. It displays source kind, validation state, model visibility, shadowing, provenance paths, diagnostics, and a refresh action.
+The browser can show combined, current-project, or user/global scopes. It displays source kind, validation state, model visibility, shadowing, enablement, provenance paths, diagnostics, and a refresh action. The compact `G` and `P` checkboxes control whether the global or selected-project config disables the skill; checked means enabled for that scope. Bulk actions can enable, disable, or invert the currently shown skills for Global, Project, or Both scopes.
 
 Available actions:
 
-- **Activate** loads a valid unshadowed skill into the selected CodeAlta session through `SessionRuntimeService`.
+- **Activate** loads an enabled, valid, unshadowed skill into the selected CodeAlta session through `SessionRuntimeService`.
 - **Open SKILL.md** opens the selected skill document in the editor.
 - **Open related** opens selected files under `scripts/`, `references/`, or `assets/` for inspection/editing.
 - **New skill** scaffolds a skill under `<project>/.alta/skills/<name>/` when a project is selected, otherwise under `~/.alta/skills/<name>/`.
@@ -87,7 +98,7 @@ alta skill show <skill-name> [--project <id|slug|path>]
 alta skill activate <skill-name> --session <session-id>
 ```
 
-`alta skills activate` and `alta skills_activate` remain aliases for existing prompt text; prefer `alta skill activate` in new guidance. Activation uses the same runtime path as the UI and records the activation in the session journal.
+`alta skills activate` and `alta skills_activate` remain aliases for existing prompt text; prefer `alta skill activate` in new guidance. Disabled skills are hidden from `list`/`show`, and activation uses the same enablement-enforced runtime path as the UI before recording the activation in the session journal.
 
 ## Plugin skill roots
 

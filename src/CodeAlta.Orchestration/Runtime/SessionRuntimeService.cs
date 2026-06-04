@@ -30,6 +30,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     private readonly SessionViewCatalog _sessionViewCatalog;
     private readonly AgentInstructionTemplateProvider _instructionTemplateProvider;
     private readonly CatalogOptions _catalogOptions;
+    private readonly CodeAltaConfigStore _configStore;
     private readonly SkillCatalog _skillCatalog;
     private readonly BoundedRuntimeEventStream<SessionRuntimeEvent> _events = new();
     private readonly SessionActorRegistry _sessionActors = new(mailboxCapacity: 128);
@@ -61,6 +62,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         _sessionViewCatalog = sessionViewCatalog;
         _instructionTemplateProvider = instructionTemplateProvider;
         _catalogOptions = catalogOptions;
+        _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
     }
 
@@ -1134,6 +1136,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 UserCodeAltaRoot = _catalogOptions.GlobalRoot,
                 UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             },
+            GlobalDisabledSkillNames = _configStore.LoadGlobalDisabledSkillNames(),
+            ProjectDisabledSkillNames = _configStore.LoadProjectDisabledSkillNames(project?.ProjectPath ?? resolvedProjectRoots.FirstOrDefault()),
             IncludeInvalid = true,
             IncludeShadowed = true,
             IncludeUntrusted = true,

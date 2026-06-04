@@ -16,6 +16,21 @@ public sealed record SkillCatalogQuery
     public string? SkillName { get; init; }
 
     /// <summary>
+    /// Gets normalized skill names disabled by global configuration.
+    /// </summary>
+    public IReadOnlyCollection<string> GlobalDisabledSkillNames { get; init; } = [];
+
+    /// <summary>
+    /// Gets normalized skill names disabled by project configuration.
+    /// </summary>
+    public IReadOnlyCollection<string> ProjectDisabledSkillNames { get; init; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether disabled skills should be returned.
+    /// </summary>
+    public bool IncludeDisabled { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether invalid skills should be returned.
     /// </summary>
     public bool IncludeInvalid { get; init; } = true;

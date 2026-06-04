@@ -233,7 +233,7 @@ Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The dialog shows discove
   <figcaption class="small text-secondary mt-2">Skills management shows discovered skill packages, descriptions, and activation state for providers that support injected skill context.</figcaption>
 </figure>
 
-CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. The skills dialog lets you inspect and activate skills when the selected provider supports injected skill context.
+CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. The skills dialog lets you inspect skills, open related files, activate enabled skills when the selected provider supports injected skill context, and manage enablement. Compact `G` and `P` checkboxes disable or enable a skill in global `~/.alta/config.toml` or the selected project's `.alta/config.toml`; bulk actions can enable, disable, or invert the currently shown skills for Global, Project, or Both scopes. Disabled skills remain inspectable in the dialog but are not advertised to models and cannot be activated.
 
 ## Logs viewer
 

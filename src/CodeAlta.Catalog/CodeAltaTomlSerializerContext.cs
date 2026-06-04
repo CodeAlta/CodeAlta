@@ -8,6 +8,7 @@ namespace CodeAlta.Catalog;
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     DefaultIgnoreCondition = TomlIgnoreCondition.WhenWritingNull)]
 [TomlSerializable(typeof(CodeAltaConfigDocument))]
+[TomlSerializable(typeof(CodeAltaSkillSettingsDocument))]
 internal partial class CodeAltaTomlSerializerContext : TomlSerializerContext
 {
 }

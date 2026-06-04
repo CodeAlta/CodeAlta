@@ -2367,6 +2367,7 @@ public sealed class AltaLiveToolTests
     {
         using var root = TempDirectory.Create();
         await WriteSkillAsync(Path.Combine(root.Path, "skills", "sample-skill"), "sample-skill", "Codex-visible skill.").ConfigureAwait(false);
+        await WriteSkillAsync(Path.Combine(root.Path, "skills", "disabled-skill"), "disabled-skill", "Disabled Codex skill.").ConfigureAwait(false);
         var globalPromptDirectory = Path.Combine(root.Path, "prompts", "agents");
         Directory.CreateDirectory(globalPromptDirectory);
         await File.WriteAllTextAsync(
@@ -2380,6 +2381,7 @@ public sealed class AltaLiveToolTests
             Custom Codex prompt body selected by set-agent.
             """).ConfigureAwait(false);
         var options = new CatalogOptions { GlobalRoot = root.Path };
+        new CodeAltaConfigStore(options).SaveGlobalSkillEnabled("disabled-skill", enabled: false);
         var providerRuntime = new StatefulProviderRuntime(ModelProviderIds.Codex);
         var runtime = CreateRuntime(options, providerRuntime);
         await using var _ = runtime.ConfigureAwait(false);
@@ -2401,6 +2403,7 @@ public sealed class AltaLiveToolTests
         StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Custom Codex prompt body selected by set-agent.");
         StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "sample-skill");
         StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Codex-visible skill.");
+        Assert.IsFalse(providerRuntime.ResumedOptions.Last().DeveloperInstructions!.Contains("disabled-skill", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -3283,6 +3286,31 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SkillActivate_DisabledSkillReturnsNotFoundAndDoesNotSend()
+    {
+        using var root = TempDirectory.Create();
+        await WriteSkillAsync(Path.Combine(root.Path, "skills", "sample-skill"), "sample-skill", "Disabled activation skill.").ConfigureAwait(false);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        new CodeAltaConfigStore(options).SaveGlobalSkillEnabled("sample-skill", enabled: false);
+        var providerRuntime = new StatefulProviderRuntime(ModelProviderIds.Codex);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", ModelProviderIds.Codex.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        var result = await dispatcher.InvokeAsync(["skill", "activate", "sample-skill", "--session", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.NotFound, result.ExitCode, result.Stderr);
+        Assert.AreEqual("skill.notFound", ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+        Assert.AreEqual(0, providerRuntime.SentOptions.Count);
+    }
+
+    [TestMethod]
     public async Task SessionVisibility_ProjectScopedAgentCanInspectAndMutateOtherProjectSessions()
     {
         using var root = TempDirectory.Create();
@@ -3403,6 +3431,38 @@ public sealed class AltaLiveToolTests
             .Select(static line => line.GetString())
             .ToArray();
         CollectionAssert.Contains(otherSkills, "project-b-skill");
+    }
+
+    [TestMethod]
+    public async Task SkillVisibility_DisabledSkillIsHiddenFromListAndShow()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        await WriteSkillAsync(Path.Combine(projectPath, ".alta", "skills", "disabled-skill"), "disabled-skill", "Disabled project skill.").ConfigureAwait(false);
+        await WriteSkillAsync(Path.Combine(projectPath, ".alta", "skills", "enabled-skill"), "enabled-skill", "Enabled project skill.").ConfigureAwait(false);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        new CodeAltaConfigStore(options).SaveGlobalSkillEnabled("disabled-skill", enabled: false);
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(new SkillCatalog()));
+
+        var list = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var showDisabled = await dispatcher.InvokeAsync(["skill", "show", "disabled-skill", "--project", project.Id], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, list.ExitCode);
+        var skills = ReadJsonLines(list.Stdout)
+            .Single(static line => line.GetProperty("type").GetString() == "alta.skill.refs")
+            .GetProperty("skills")
+            .EnumerateArray()
+            .Select(static line => line.GetString())
+            .ToArray();
+        CollectionAssert.Contains(skills, "enabled-skill");
+        CollectionAssert.DoesNotContain(skills, "disabled-skill");
+        Assert.AreEqual(AltaExitCodes.NotFound, showDisabled.ExitCode);
     }
 
     [TestMethod]
