@@ -1858,7 +1858,7 @@ public sealed class ArchitectureGuardrailTests
 
         Assert.IsTrue(dialogSource.Contains("_dialog.Dispatcher.InvokeAsync(", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("_ = Task.Run(", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains(".Click(() => StartReload(confirmWhenDirty: true));", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains(".Click(() => StartRefresh(confirmWhenDirty: true));", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains(".Click(StartSave);", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains(".Click(() => StartTest(item));", StringComparison.Ordinal));
         Assert.IsFalse(dialogSource.Contains("PostToUi(", StringComparison.Ordinal));

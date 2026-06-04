@@ -44,7 +44,8 @@ CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched
 | Open project | `Ctrl+O` or `/open` |
 | Attach project files | type `@` in the prompt |
 | Manage prompts | `Ctrl+G Ctrl+H` or `/prompt` |
-| Open model providers | `Ctrl+G Ctrl+R` |
+| Open model providers | `Ctrl+G Ctrl+R` or `/model_providers` |
+| Refresh model providers | `/model_providers_refresh` |
 | Browse models | `Ctrl+G Ctrl+O` or `/models` |
 | Open logs | `Ctrl+G Ctrl+L` or `/logs` |
 | Toggle navigator | `Ctrl+G Ctrl+G` |

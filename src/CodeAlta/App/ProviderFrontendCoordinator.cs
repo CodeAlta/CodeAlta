@@ -95,16 +95,29 @@ internal sealed class ProviderFrontendCoordinator
     }
 
     private async Task<ProviderConfigurationSaveResult> RefreshAfterProviderConfigurationSaveAsync(CancellationToken cancellationToken)
+        => await RefreshProviderConfigurationCoreAsync("Provider configuration saved.", "Provider configuration saved, but runtime refresh failed", cancellationToken);
+
+    public async Task<ProviderConfigurationSaveResult> RefreshProviderConfigurationAsync(CancellationToken cancellationToken = default)
+        => await RefreshProviderConfigurationCoreAsync("Model providers refreshed.", "Model provider refresh failed", cancellationToken);
+
+    private async Task<ProviderConfigurationSaveResult> RefreshProviderConfigurationCoreAsync(
+        string successStatus,
+        string failureStatusPrefix,
+        CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(successStatus);
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureStatusPrefix);
+
         _hasAnyEnabledProviders = null;
         if (_ownedServices is null)
         {
-            _setStatus("Provider configuration saved.", false, StatusTone.Info);
+            _setStatus(successStatus, false, StatusTone.Info);
             return ProviderConfigurationSaveResult.Success;
         }
 
         try
         {
+            _dispatchToUi(() => _setStatus("Refreshing model providers...", false, StatusTone.Info));
             await _ownedServices.RefreshModelProvidersAsync(cancellationToken);
             _dispatchToUi(
                 () =>
@@ -118,7 +131,7 @@ internal sealed class ProviderFrontendCoordinator
                 {
                     SyncModelProviderCatalog();
                     PublishModelProviderCatalogChanged();
-                    _setStatus("Model providers refreshed.", false, StatusTone.Info);
+                    _setStatus(successStatus, false, StatusTone.Info);
                 });
         }
         catch (Exception ex)
@@ -126,7 +139,7 @@ internal sealed class ProviderFrontendCoordinator
             var message = ex.GetBaseException().Message;
             _dispatchToUi(
                 () => _setStatus(
-                    $"Provider configuration saved, but runtime refresh failed: {message}",
+                    $"{failureStatusPrefix}: {message}",
                     false,
                     StatusTone.Error));
             return ProviderConfigurationSaveResult.RuntimeRefreshFailed(message);
@@ -171,29 +184,6 @@ internal sealed class ProviderFrontendCoordinator
                 state.StatusMessage,
                 state.Models.Count),
             StringComparer.OrdinalIgnoreCase);
-    }
-
-    public async Task<ProviderTestResult> RefreshProviderAsync(
-        CodeAltaProviderDocument definition,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-
-        if (definition.Enabled == false)
-        {
-            return new ProviderTestResult(false, "Enable and save this provider before refreshing it.", 0);
-        }
-
-        if (string.IsNullOrWhiteSpace(definition.ProviderKey))
-        {
-            return new ProviderTestResult(false, "Provider key is required before refreshing.", 0);
-        }
-
-        await _modelProviderInitializationCoordinator.RefreshProviderAsync(new ModelProviderId(definition.ProviderKey), cancellationToken);
-
-        return TryBuildActiveProviderTestResult(definition, _modelProviderStates, out var activeResult)
-            ? activeResult
-            : new ProviderTestResult(false, "Provider refresh completed, but no runtime status was published.", 0);
     }
 
     public async Task<ProviderModelListResult> ListProviderModelsAsync(

@@ -17,11 +17,11 @@ internal interface IModelProviderDialogService
 
     Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions, CancellationToken cancellationToken = default);
 
+    Task<ProviderConfigurationSaveResult> RefreshConfigurationAsync(CancellationToken cancellationToken = default);
+
     IReadOnlyDictionary<string, ProviderRuntimeStatus> GetRuntimeStatuses();
 
     Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
-
-    Task<ProviderTestResult> RefreshProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default);
 
     Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default);
 
@@ -87,14 +87,14 @@ internal sealed class ModelProviderDialogService : IModelProviderDialogService
     public Task<ProviderConfigurationSaveResult> SaveDefinitionsAsync(IReadOnlyList<CodeAltaProviderDocument> definitions, CancellationToken cancellationToken = default)
         => _providerUi.SaveProviderDefinitionsAsync(definitions, cancellationToken);
 
+    public Task<ProviderConfigurationSaveResult> RefreshConfigurationAsync(CancellationToken cancellationToken = default)
+        => _providerUi.RefreshProviderConfigurationAsync(cancellationToken);
+
     public IReadOnlyDictionary<string, ProviderRuntimeStatus> GetRuntimeStatuses()
         => _providerUi.GetProviderRuntimeStatuses();
 
     public Task<ProviderTestResult> TestProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
         => _providerUi.TestProviderAsync(definition, cancellationToken);
-
-    public Task<ProviderTestResult> RefreshProviderAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
-        => _providerUi.RefreshProviderAsync(definition, cancellationToken);
 
     public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
         => definition.ProviderType switch

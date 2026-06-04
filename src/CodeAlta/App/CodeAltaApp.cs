@@ -261,7 +261,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         var sessionSvc = new DelegatingShellSessionCommandService(GetSelectedSession, EnsureSessionTab);
         var dialogs = new DelegatingShellDialogCommandService(
             () => DialogBoundsResolver.ResolveAppBounds(SessionInput), () => SessionInput, () => _sessionStateCoordinator.Projects,
-            OpenFolderAsync, OpenModelProvidersAsync, OpenPromptsAsync, () => new AboutDialog(() => DialogBoundsResolver.ResolveAppBounds(GetDialogAnchor()), GetDialogAnchor, _shellAnimationRuntime.WelcomePhase01, updateService).Show(), composition.ModelCatalogCoordinator.Open, _sidebarCoordinator.OpenLogs, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
+            OpenFolderAsync, OpenModelProvidersAsync, _providerDialogCoordinator.RefreshAsync, OpenPromptsAsync, () => new AboutDialog(() => DialogBoundsResolver.ResolveAppBounds(GetDialogAnchor()), GetDialogAnchor, _shellAnimationRuntime.WelcomePhase01, updateService).Show(), composition.ModelCatalogCoordinator.Open, _sidebarCoordinator.OpenLogs, _fileEditorWorkspaceCoordinator.ShowOpenFilePickerAsync,
             SkillsManagementCoordinatorFactory.Create(_ownedServices, _catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync, _sessionCommandCoordinator.ActivateSelectedSkillAsync, SetStatus),
             PluginManagementCoordinatorFactory.Create(_catalogOptions, GetSelectedProject, GetDialogAnchor, _fileEditorWorkspaceCoordinator.OpenFilePathAsync),
             _sidebarCoordinator.OpenNavigatorSettings,

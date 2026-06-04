@@ -33,4 +33,15 @@ internal sealed class ProviderDialogCoordinator
             _getFocusTarget)).Show();
         return Task.CompletedTask;
     }
+
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        if (_dialog?.IsOpen == true)
+        {
+            _dialog.Refresh();
+            return;
+        }
+
+        await _modelProviders.RefreshConfigurationAsync(cancellationToken);
+    }
 }

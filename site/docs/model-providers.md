@@ -44,7 +44,7 @@ Project-local overrides can live in `<project>/.alta/config.toml`. Project files
 
 ## Provider dialog
 
-Open the dialog with `Ctrl+G Ctrl+R` or the provider summary in the footer.
+Open the dialog with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary in the footer. Use **Refresh** (or `/model_providers_refresh`) to reload the saved configuration from disk and retest provider availability, for example after starting a local LLM server that was offline earlier.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-model-providers.png" alt="CodeAlta Model Providers dialog with provider list and editable provider settings" loading="lazy">
@@ -59,6 +59,7 @@ The dialog can:
 - list and choose a provider model on demand when the Model field is not using its default;
 - run provider tests before applying changes; a successful test automatically enables that provider;
 - start and monitor Codex/Copilot browser or device login flows; successful login automatically enables that provider;
+- refresh saved providers from disk and retest runtime availability without reopening the app;
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
 - open an Advanced TOML editor with live validation.
 

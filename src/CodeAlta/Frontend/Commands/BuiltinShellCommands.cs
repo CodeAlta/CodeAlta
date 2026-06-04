@@ -145,6 +145,17 @@ internal static class BuiltinShellCommands
     internal static readonly ShellCommand WorkspaceSettings = Dialog("CodeAlta.Workspace.Settings", "Workspace Settings", "Open workspace settings for the navigator and UI theme.", "settings", ShellCommandHelpCategory.General, WorkspaceSettingsShortcutSequence, static context => { context.Dialogs.OpenWorkspaceSettings(); return Task.CompletedTask; }, searchText: "workspace_settings");
     internal static readonly ShellCommand Prompts = Dialog("CodeAlta.Prompts.Manage", "Agent Prompts", "Create, edit, delete, and inspect agent prompts from built-in, global, and project prompt roots.", "prompt", ShellCommandHelpCategory.General, PromptsShortcutSequence, static context => context.Dialogs.OpenPromptsAsync(), searchText: "prompts agent_prompt instructions system_prompt");
     internal static readonly ShellCommand Providers = Dialog("CodeAlta.Providers.Manage", "Model Providers", "Configure enabled model providers, credentials, and connection details.", "model_providers", ShellCommandHelpCategory.General, ModelProvidersShortcutSequence, static context => context.Dialogs.OpenModelProvidersAsync(), searchText: "providers");
+    internal static readonly ShellCommand ProvidersRefresh = new()
+    {
+        Id = "CodeAlta.Providers.Refresh",
+        Label = "Refresh Model Providers",
+        Description = "Reload model provider configuration from disk and retest provider availability.",
+        HelpCategory = ShellCommandHelpCategory.General,
+        Placement = ShellCommandPlacement.ShellRoot,
+        Name = "model_providers_refresh",
+        SearchText = "providers reload reconnect retest availability",
+        ExecuteAsync = static (context, _, cancellationToken) => new(context.Dialogs.RefreshModelProvidersAsync(cancellationToken)),
+    };
     internal static readonly ShellCommand Models = Dialog("CodeAlta.Models.Browse", "Models", "Browse provider models and enriched model metadata, then select one for the current prompt or session.", "models", ShellCommandHelpCategory.Inspection, ModelsShortcutSequence, static context => { context.Dialogs.OpenModels(); return Task.CompletedTask; }, ShellCommandPlacement.PromptEditor, searchText: "model_list");
     internal static readonly ShellCommand ApplicationLogs = Dialog("CodeAlta.ApplicationLogs.Open", "Show Logs", "Open application logs captured for the current UI thread.", "logs", ShellCommandHelpCategory.Inspection, ApplicationLogsShortcutSequence, static context => { context.Dialogs.OpenApplicationLogs(); return Task.CompletedTask; }, searchText: "show_logs");
 
@@ -323,6 +334,7 @@ internal static class BuiltinShellCommands
         yield return FocusPrompt;
         yield return FocusModelProvider;
         yield return Providers;
+        yield return ProvidersRefresh;
         yield return Models;
         yield return ApplicationLogs;
         yield return ToggleCommandBarMultiLine;

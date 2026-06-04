@@ -255,6 +255,8 @@ internal interface IShellDialogCommandService
 
     Task OpenModelProvidersAsync();
 
+    Task RefreshModelProvidersAsync(CancellationToken cancellationToken = default);
+
     Task OpenPromptsAsync();
 
     void OpenAbout();
@@ -291,6 +293,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
     private readonly Func<IReadOnlyList<ProjectDescriptor>> _getProjects;
     private readonly Func<string, bool, Task> _openFolderAsync;
     private readonly Func<Task> _openModelProvidersAsync;
+    private readonly Func<CancellationToken, Task> _refreshModelProvidersAsync;
     private readonly Func<Task> _openPromptsAsync;
     private readonly Action _openAbout;
     private readonly Action _openModels;
@@ -311,6 +314,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
         Func<IReadOnlyList<ProjectDescriptor>> getProjects,
         Func<string, bool, Task> openFolderAsync,
         Func<Task> openModelProvidersAsync,
+        Func<CancellationToken, Task> refreshModelProvidersAsync,
         Func<Task> openPromptsAsync,
         Action openAbout,
         Action openModels,
@@ -330,6 +334,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
         ArgumentNullException.ThrowIfNull(getProjects);
         ArgumentNullException.ThrowIfNull(openFolderAsync);
         ArgumentNullException.ThrowIfNull(openModelProvidersAsync);
+        ArgumentNullException.ThrowIfNull(refreshModelProvidersAsync);
         ArgumentNullException.ThrowIfNull(openPromptsAsync);
         ArgumentNullException.ThrowIfNull(openAbout);
         ArgumentNullException.ThrowIfNull(openModels);
@@ -348,6 +353,7 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
         _getProjects = getProjects;
         _openFolderAsync = openFolderAsync;
         _openModelProvidersAsync = openModelProvidersAsync;
+        _refreshModelProvidersAsync = refreshModelProvidersAsync;
         _openPromptsAsync = openPromptsAsync;
         _openAbout = openAbout;
         _openModels = openModels;
@@ -372,6 +378,8 @@ internal sealed class DelegatingShellDialogCommandService : IShellDialogCommandS
     public Task OpenFolderAsync(string path, bool trustFolder) => _openFolderAsync(path, trustFolder);
 
     public Task OpenModelProvidersAsync() => _openModelProvidersAsync();
+
+    public Task RefreshModelProvidersAsync(CancellationToken cancellationToken = default) => _refreshModelProvidersAsync(cancellationToken);
 
     public Task OpenPromptsAsync() => _openPromptsAsync();
 

@@ -133,7 +133,7 @@ Editor tabs support TextMate syntax highlighting, line/column status, dirty mark
   <figcaption class="small text-secondary mt-2">Provider setup, endpoint details, credential options, and tests live in one dialog.</figcaption>
 </figure>
 
-Open it with `Ctrl+G Ctrl+R` or the provider summary. Use it to enable providers, enter credentials, test endpoints, handle Codex/Copilot login flows, and edit advanced TOML safely.
+Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary. Use it to enable providers, enter credentials, test endpoints, handle Codex/Copilot login flows, refresh saved provider availability, and edit advanced TOML safely.
 
 ## Prompt manager
 

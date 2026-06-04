@@ -18,6 +18,10 @@ namespace CodeAlta.Views;
 
 internal sealed class ModelProvidersDialog
 {
+    private readonly record struct ProviderConfigurationRefreshDialogResult(
+        IReadOnlyList<CodeAltaProviderDocument> Definitions,
+        ProviderConfigurationSaveResult RefreshResult);
+
     private static readonly ProviderTypeOption[] ProviderTypes =
     [
         new("openai-chat", "OpenAI Chat"),
@@ -122,9 +126,9 @@ internal sealed class ModelProvidersDialog
         var deleteButton = new Button($"{NerdFont.MdDelete} Delete")
             .Tone(ControlTone.Error)
             .Click(DeleteSelectedProvider);
-        var reloadButton = new Button("Reload")
+        var refreshButton = new Button("Refresh")
             .Tone(ControlTone.Warning)
-            .Click(() => StartReload(confirmWhenDirty: true));
+            .Click(() => StartRefresh(confirmWhenDirty: true));
         var advancedButton = new Button($"{NerdFont.MdCodeBraces} Advanced TOML")
             .Tone(ControlTone.Default)
             .Click(OpenAdvancedEditor);
@@ -133,7 +137,7 @@ internal sealed class ModelProvidersDialog
             .IsEnabled(() => _activeOperationCount.Value == 0 && HasUnsavedChanges())
             .Click(StartSave);
 
-        var toolbar = new HStack(addButton, deleteButton, reloadButton, advancedButton, _saveButton)
+        var toolbar = new HStack(addButton, deleteButton, refreshButton, advancedButton, _saveButton)
         {
             HorizontalAlignment = Align.End,
             Spacing = 1,
@@ -274,6 +278,11 @@ internal sealed class ModelProvidersDialog
         }
     }
 
+    public bool IsOpen => _dialog.App is not null;
+
+    public void Refresh()
+        => StartRefresh(confirmWhenDirty: true);
+
     private void StartReload(bool confirmWhenDirty)
     {
         if (IsDialogOperationActive())
@@ -315,6 +324,78 @@ internal sealed class ModelProvidersDialog
                     emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
                     loadedStatusText: "[dim]Provider configuration loaded from disk.[/]"),
                 ex => SetStatus($"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]"));
+        }
+        catch
+        {
+            EndDialogOperation();
+            throw;
+        }
+    }
+
+    private void StartRefresh(bool confirmWhenDirty)
+    {
+        if (IsDialogOperationActive())
+        {
+            ReportActiveOperationBlock("refresh provider configuration");
+            return;
+        }
+
+        if (confirmWhenDirty && HasUnsavedChanges())
+        {
+            new ConfirmationDialog(
+                "Refresh Provider Configuration?",
+                ["Discard unsaved provider changes, reload from disk, and retest saved provider availability?"],
+                "Refresh",
+                ControlTone.Warning,
+                () =>
+                {
+                    StartRefresh(confirmWhenDirty: false);
+                    return Task.CompletedTask;
+                },
+                _getBounds,
+                _getFocusTarget)
+                .Show();
+            return;
+        }
+
+        if (!TryBeginDialogOperation("refresh provider configuration"))
+        {
+            return;
+        }
+
+        try
+        {
+            SetStatus("[primary]Refreshing provider configuration and testing availability...[/]");
+            MarkEnabledProvidersRefreshInProgress();
+            QueueBackgroundOperation(
+                async cancellationToken =>
+                {
+                    var refreshResult = await _modelProviders.RefreshConfigurationAsync(cancellationToken);
+                    var definitions = _modelProviders.LoadDefinitions();
+                    return new ProviderConfigurationRefreshDialogResult(definitions, refreshResult);
+                },
+                result =>
+                {
+                    var loadedStatusText = result.RefreshResult.RuntimeRefreshSucceeded
+                        ? "[success]Provider configuration refreshed from disk and availability tested.[/]"
+                        : $"[warning]Provider configuration refreshed from disk, but runtime refresh failed: {AnsiMarkup.Escape(result.RefreshResult.RuntimeRefreshErrorMessage ?? "unknown error")}[/]";
+                    LoadDefinitionsIntoDialog(
+                        result.Definitions,
+                        emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
+                        loadedStatusText);
+                },
+                ex =>
+                {
+                    if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
+                    {
+                        ClearProviderRefreshInProgress();
+                        SetStatus("[warning]Provider refresh canceled.[/]");
+                        return;
+                    }
+
+                    ClearProviderRefreshInProgress();
+                    SetStatus($"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]");
+                });
         }
         catch
         {
@@ -370,7 +451,7 @@ internal sealed class ModelProvidersDialog
         _providers.Remove(item);
         SetSelectedProviderIndex(Math.Clamp(_selectedProviderIndex.Value, 0, _providers.Count - 1));
         NotifyProviderDraftChanged();
-        SetStatus("[warning]Removed provider. Save to apply, or Reload to discard.[/]");
+        SetStatus("[warning]Removed provider. Save to apply, or Refresh to reload from disk.[/]");
     }
 
     private void StartSave()
@@ -425,7 +506,7 @@ internal sealed class ModelProvidersDialog
 
         if (HasUnsavedChanges())
         {
-            SetStatus("[warning]Save or Reload the form changes before opening Advanced TOML so the code editor starts from the on-disk config.[/]");
+            SetStatus("[warning]Save or Refresh the form changes before opening Advanced TOML so the code editor starts from the on-disk config.[/]");
             return;
         }
 
@@ -522,77 +603,6 @@ internal sealed class ModelProvidersDialog
                 {
                     item.ClearTestResult();
                     SetStatus("[warning]Provider test canceled.[/]");
-                    return;
-                }
-
-                var message = ex.GetBaseException().Message;
-                if (_providers.Contains(item))
-                {
-                    item.SetTestResult(success: false, message);
-                }
-
-                SetStatus($"[error]{AnsiMarkup.Escape(message)}[/]");
-            });
-    }
-
-    private void StartRefreshProvider(ModelProviderEditorItemViewModel item)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-
-        if (IsDialogOperationActive())
-        {
-            ReportActiveOperationBlock("refresh a provider");
-            return;
-        }
-
-        if (!_providers.Contains(item))
-        {
-            SetStatus("[warning]Select a provider to refresh.[/]");
-            return;
-        }
-
-        if (HasUnsavedChanges())
-        {
-            SetStatus("[warning]Save or Reload provider changes before refreshing runtime provider status.[/]");
-            return;
-        }
-
-        if (!TryBuildDefinition(item, out var definition, out var errorMessage))
-        {
-            SetStatus($"[warning]{AnsiMarkup.Escape(errorMessage)}[/]");
-            return;
-        }
-
-        if (!TryBeginDialogOperation("refresh a provider"))
-        {
-            return;
-        }
-
-        SetStatus($"[primary]Refreshing {AnsiMarkup.Escape(item.Label)} models...[/]");
-        item.SetTestInProgress("Refreshing runtime provider status and model list...");
-        QueueBackgroundOperation(
-            cancellationToken => _modelProviders.RefreshProviderAsync(definition, cancellationToken),
-            result =>
-            {
-                _runtimeStatuses = _modelProviders.GetRuntimeStatuses();
-                var effectiveResult = TryCreateResultFromRuntimeStatus(item, out var runtimeResult)
-                    ? runtimeResult
-                    : result;
-                if (_providers.Contains(item))
-                {
-                    item.SetTestResult(effectiveResult.Success, effectiveResult.Message);
-                }
-
-                SetStatus(effectiveResult.Success
-                    ? $"[success]{AnsiMarkup.Escape(effectiveResult.Message)}[/]"
-                    : $"[warning]{AnsiMarkup.Escape(effectiveResult.Message)}[/]");
-            },
-            ex =>
-            {
-                if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
-                {
-                    item.ClearTestResult();
-                    SetStatus("[warning]Provider refresh canceled.[/]");
                     return;
                 }
 
@@ -746,9 +756,6 @@ internal sealed class ModelProvidersDialog
         var testButton = new Button("Test Provider")
             .Tone(ControlTone.Primary)
             .Click(() => StartTest(item));
-        var refreshButton = new Button($"{NerdFont.MdRefresh} Refresh Provider")
-            .Tone(ControlTone.Warning)
-            .Click(() => StartRefreshProvider(item));
         var codexActions = item.ProviderType == "codex"
             ? CreateCodexSubscriptionActions(item)
             : null;
@@ -838,10 +845,7 @@ internal sealed class ModelProvidersDialog
             availability,
             CreateAvailabilityToggleButton(item),
             summary,
-            new HStack(testButton, refreshButton)
-            {
-                Spacing = 1,
-            },
+            testButton,
         };
         if (codexActions is not null)
         {
@@ -1530,30 +1534,6 @@ internal sealed class ModelProvidersDialog
         }
     }
 
-    private bool TryCreateResultFromRuntimeStatus(ModelProviderEditorItemViewModel item, out ProviderTestResult result)
-    {
-        ArgumentNullException.ThrowIfNull(item);
-
-        result = default;
-        if (!TryGetRuntimeStatus(item, out var status))
-        {
-            return false;
-        }
-
-        switch (status.Availability)
-        {
-            case ModelProviderAvailability.Ready:
-                result = new ProviderTestResult(true, FormatRuntimeStatusMessage(status), status.ModelCount);
-                return true;
-            case ModelProviderAvailability.Failed:
-            case ModelProviderAvailability.Unsupported:
-                result = new ProviderTestResult(false, status.StatusMessage, 0);
-                return true;
-            default:
-                return false;
-        }
-    }
-
     private bool TryGetRuntimeStatus(ModelProviderEditorItemViewModel item, out ProviderRuntimeStatus status)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -1565,6 +1545,22 @@ internal sealed class ModelProvidersDialog
 
         status = default;
         return false;
+    }
+
+    private void MarkEnabledProvidersRefreshInProgress()
+    {
+        foreach (var item in _providers.Where(static item => item.Enabled))
+        {
+            item.SetTestInProgress("Refreshing provider availability and model list...");
+        }
+    }
+
+    private void ClearProviderRefreshInProgress()
+    {
+        foreach (var item in _providers.Where(static item => item.LastTestState == ModelProviderLastTestState.Testing))
+        {
+            item.ClearTestResult();
+        }
     }
 
     private string BuildStatusMarkup()
@@ -1582,7 +1578,7 @@ internal sealed class ModelProvidersDialog
             return statusText;
         }
 
-        const string unsavedStatus = "[warning]Unsaved model provider changes. Save to refresh the runtime, or Reload to discard them.[/]";
+        const string unsavedStatus = "[warning]Unsaved model provider changes. Save applies them; Refresh reloads from disk and retests saved providers.[/]";
         return IsPersistentStatusText(statusText)
             ? unsavedStatus
             : $"{statusText}{Environment.NewLine}{unsavedStatus}";
@@ -1630,7 +1626,7 @@ internal sealed class ModelProvidersDialog
         }
 
         return HasUnsavedChanges()
-            ? "[warning]● Unsaved changes[/] [dim]Save applies them; Reload discards them.[/]"
+            ? "[warning]● Unsaved changes[/] [dim]Save applies them; Refresh reloads from disk.[/]"
             : "[success]✓ No unsaved changes[/] [dim]Configuration matches disk.[/]";
     }
 

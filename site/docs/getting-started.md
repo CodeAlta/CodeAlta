@@ -168,7 +168,8 @@ When the selected model supports image input, copy an image to the clipboard and
 | Open file editor | `Ctrl+E` or `/edit` |
 | Open full prompt editor | `F6` |
 | Focus provider/model selector | `/model` |
-| Open model providers | `Ctrl+G Ctrl+R` |
+| Open model providers | `Ctrl+G Ctrl+R` or `/model_providers` |
+| Refresh model providers | `/model_providers_refresh` |
 | Manage prompts | `Ctrl+G Ctrl+H` or `/prompt` |
 | Browse models | `Ctrl+G Ctrl+O` or `/models` |
 | About / update status | `Ctrl+G Ctrl+A` or `/about` |
