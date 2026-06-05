@@ -45,3 +45,18 @@ reasoning_input_field_name = "reasoning_content"
 
 [rules.openai]
 extra_body_defaults = { thinking = { type = "enabled" } }
+
+[[rules]]
+id = "xiaomi-openai-chat"
+display_name = "Xiaomi OpenAI Chat"
+types = ["openai-chat"]
+provider_keys = ["xiaomi"]
+host_suffixes = ["xiaomimimo.com"]
+
+[rules.profile]
+supports_developer_role = false
+supports_store = false
+supports_reasoning_effort = false
+supports_parallel_tool_calls = false
+supports_strict_tools = false
+max_tokens_field_name = "max_tokens"

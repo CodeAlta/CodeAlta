@@ -1,18 +1,20 @@
 #pragma warning disable OPENAI001
 #pragma warning disable SCME0001
 
-using System.ClientModel.Primitives;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Tools;
 using OpenAI.Chat;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.OpenAI;
 
 internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
+    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
+
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken = default)
@@ -46,8 +48,6 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
             await foreach (var update in client.CompleteChatStreamingAsync(messages, options, cancellationToken).ConfigureAwait(false))
             {
-                protocolTrace?.WriteLine("<<< stream update (sdk model JSON):");
-                protocolTrace?.WriteLine(SerializeModel(update));
                 completionId ??= update.CompletionId;
                 modelId ??= update.Model;
                 usage = update.Usage ?? usage;
@@ -146,7 +146,12 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 parts.Add(new AgentMessagePart.ToolCall(
                     toolState.CallId ?? $"tool:{Guid.CreateVersion7()}",
                     toolState.Name ?? string.Empty,
-                    DeserializeToolArguments(toolState.Arguments.ToString())));
+                    DeserializeToolArguments(
+                        toolState.Arguments.ToString(),
+                        toolState.Name,
+                        toolState.CallId,
+                        request,
+                        protocolTrace)));
                 assistantPartContentIds.Add(null);
             }
 
@@ -251,12 +256,16 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
         foreach (var tool in request.Tools)
         {
+            var supportsStrictTools = request.Provider.Profile?.SupportsStrictTools ?? provider.Profile?.SupportsStrictTools ?? true;
+            var inputSchema = supportsStrictTools
+                ? AgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema)
+                : tool.Spec.InputSchema;
             options.Tools.Add(
                 ChatTool.CreateFunctionTool(
                     AgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
                     tool.Spec.Description,
-                    BinaryData.FromString(AgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema).GetRawText()),
-                    functionSchemaIsStrict: true));
+                    BinaryData.FromString(inputSchema.GetRawText()),
+                    functionSchemaIsStrict: supportsStrictTools ? true : null));
         }
 
         return options;
@@ -467,7 +476,12 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         return new ToolChatMessage(toolResult.CallId, RenderToolResult(toolResult.Result));
     }
 
-    private static JsonElement DeserializeToolArguments(string arguments)
+    private static JsonElement DeserializeToolArguments(
+        string arguments,
+        string? toolName,
+        string? toolCallId,
+        AgentTurnRequest request,
+        OpenAIProtocolTraceLogger? protocolTrace)
     {
         if (string.IsNullOrWhiteSpace(arguments))
         {
@@ -479,9 +493,19 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             using var document = JsonDocument.Parse(arguments);
             return document.RootElement.Clone();
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return CreateObjectElement(writer => writer.WriteString("raw", arguments));
+            var diagnostic =
+                $"Malformed OpenAI chat tool-call arguments provider={request.Provider.ProviderKey} " +
+                $"session={request.SessionId} run={request.RunId.Value} " +
+                $"tool={FormatProtocolTraceValue(toolName)} call={FormatProtocolTraceValue(toolCallId)}";
+            protocolTrace?.WriteLine(
+                $"!!! {diagnostic} arguments={SanitizeProtocolTraceValue(arguments)} error={SanitizeProtocolTraceValue(ex.Message)}");
+            Logger.Error(ex, diagnostic);
+            throw new OpenAIChatProtocolException(
+                OpenAIChatProtocolErrorCode.InvalidToolCallArguments,
+                "OpenAI chat stream returned malformed tool-call arguments.",
+                ex);
         }
     }
 
@@ -634,11 +658,23 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             }).Where(static value => !string.IsNullOrWhiteSpace(value)));
     }
 
-    private static string SerializeModel<T>(T model)
-        where T : notnull
-        => model is IPersistableModel<T> persistable
-            ? persistable.Write(new ModelReaderWriterOptions("J")).ToString()
-            : model.ToString() ?? string.Empty;
+    private static string FormatProtocolTraceValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "<none>" : value.Trim();
+
+    private static string SanitizeProtocolTraceValue(string value)
+    {
+        const int maxChars = 4096;
+        var sanitized = value.Length <= maxChars
+            ? value
+            : value[..maxChars] + $"<truncated {value.Length - maxChars} chars>";
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStringValue(sanitized);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
     {
@@ -663,6 +699,8 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         {
             OpenAIChatProtocolErrorCode.StreamCompletedWithoutAssistantContent =>
                 "OpenAI chat stream completed without assistant content, refusal, reasoning, or tool calls.",
+            OpenAIChatProtocolErrorCode.InvalidToolCallArguments =>
+                "OpenAI chat stream returned malformed tool-call arguments.",
             _ => "OpenAI chat stream did not match the expected protocol.",
         };
 
@@ -685,6 +723,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 internal enum OpenAIChatProtocolErrorCode
 {
     StreamCompletedWithoutAssistantContent,
+    InvalidToolCallArguments,
 }
 
 internal sealed class OpenAIChatProtocolException : InvalidOperationException

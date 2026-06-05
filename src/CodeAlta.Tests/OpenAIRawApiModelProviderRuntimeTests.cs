@@ -8,7 +8,9 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
+using CodeAlta.App;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
@@ -411,6 +413,89 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIChatTurnExecutor_OmitsStrictToolSchemaWhenProfileDisablesStrictTools()
+    {
+        using var temp = TestTempDirectory.Create();
+        var handler = new StaticHttpMessageHandler(CreateChatStreamingResponse("chatcmpl-nonstrict", "OK"));
+        var profile = new AgentProviderProfile
+        {
+            SupportsDeveloperRole = true,
+            SupportsStore = false,
+            SupportsParallelToolCalls = false,
+            SupportsStrictTools = false,
+            SupportsReasoningEffort = true,
+            StreamsUsage = true,
+            MaxTokensFieldName = "max_tokens",
+            ReasoningFieldNames = ["reasoning_content"],
+        };
+
+        await using var providerRuntime = new OpenAIChatModelProviderRuntime(new OpenAIChatModelProviderRuntimeOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new OpenAIProviderOptions
+                {
+                    ProviderKey = "xiaomi",
+                    IsDefault = true,
+                    ApiKey = "test-key",
+                    BaseUri = new Uri("https://token-plan-ams.xiaomimimo.com/v1"),
+                    HttpClient = new HttpClient(handler),
+                    Profile = profile,
+                    ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
+                    [
+                        new AgentModelInfo("mimo-v2.5-pro", DisplayName: "MiMo Test"),
+                    ]),
+                },
+            },
+        });
+
+        await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "mimo-v2.5-pro",
+            WorkingDirectory = temp.Path,
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec(
+                        "inspect_file",
+                        "Inspect a file.",
+                        JsonDocument.Parse(
+                            """
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": { "type": "string", "minLength": 1 },
+                                "recursive": { "type": "boolean" }
+                              },
+                              "required": ["path"]
+                            }
+                            """).RootElement.Clone()),
+                    static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
+            ],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput([new AgentInputItem.Text("Hello")]),
+        }).ConfigureAwait(false);
+
+        var body = handler.RequestBodies.Single();
+        using var requestDocument = JsonDocument.Parse(body);
+        var inspectTool = requestDocument.RootElement.GetProperty("tools").EnumerateArray()
+            .Select(static tool => tool.GetProperty("function"))
+            .Single(static function => function.GetProperty("name").GetString() == "inspect_file");
+        Assert.IsFalse(inspectTool.TryGetProperty("strict", out _), "Non-strict providers must omit the OpenAI strict tool flag.");
+        var parameters = inspectTool.GetProperty("parameters");
+        Assert.AreEqual(1, parameters.GetProperty("properties").GetProperty("path").GetProperty("minLength").GetInt32());
+        CollectionAssert.AreEqual(
+            new[] { "path" },
+            parameters.GetProperty("required").EnumerateArray().Select(static item => item.GetString()).ToArray());
+        Assert.IsFalse(parameters.TryGetProperty("additionalProperties", out _), "Non-strict providers must keep the original schema instead of strict-normalizing it.");
+    }
+
+    [TestMethod]
     public async Task OpenAIChatTurnExecutor_RejectsEmptyStreamWithTypedProtocolError()
     {
         var chatClient = new RecordingOpenAIChatClient([]);
@@ -432,16 +517,84 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIChatModelProviderRuntime_ProtocolTracing_WritesSessionTrace()
+    public async Task OpenAIChatTurnExecutor_RejectsMalformedToolArgumentsAndTracesDiagnostic()
     {
         using var temp = TestTempDirectory.Create();
         var chatClient = new RecordingOpenAIChatClient(
         [
-            OpenAIChatModelFactory.StreamingChatCompletionUpdate(
-                completionId: "chatcmpl-trace",
-                contentUpdate: [ChatMessageContentPart.CreateTextPart("Trace answer.")],
-                model: "gpt-chat-test"),
+            DeserializeStreamingChatCompletionUpdate(
+                """
+                {
+                  "id": "chatcmpl-bad-tool",
+                  "object": "chat.completion.chunk",
+                  "created": 1744060800,
+                  "model": "gpt-test",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {
+                        "tool_calls": [
+                          {
+                            "index": 0,
+                            "id": "call-bad",
+                            "type": "function",
+                            "function": {
+                              "name": "inspect_file",
+                              "arguments": "<tool name=\"inspect_file\"><path>README.md</path></tool>"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """),
         ]);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ChatClientFactory = _ => chatClient,
+            ProtocolTracing = new OpenAIProtocolTraceOptions
+            {
+                Enabled = true,
+                StateRootPath = temp.Path,
+            },
+        };
+        var executor = new OpenAIChatTurnExecutor(provider);
+        var request = CreateChatTurnRequest() with
+        {
+            SessionId = "session-malformed-tool",
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec(
+                        "inspect_file",
+                        "Inspect a file.",
+                        JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""").RootElement.Clone()),
+                    static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
+            ],
+        };
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    request,
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        var protocolException = Assert.IsInstanceOfType<OpenAIChatProtocolException>(exception.InnerException);
+        Assert.AreEqual(OpenAIChatProtocolErrorCode.InvalidToolCallArguments, protocolException.ErrorCode);
+        var tracePath = new AgentRuntimePathLayout(temp.Path).GetSessionTraceFilePath(request.SessionId);
+        var trace = File.ReadAllText(tracePath);
+        StringAssert.Contains(trace, "!!! Malformed OpenAI chat tool-call arguments");
+        StringAssert.Contains(trace, "call=call-bad");
+        StringAssert.Contains(trace, "\\u003Ctool");
+    }
+
+    [TestMethod]
+    public async Task OpenAIChatModelProviderRuntime_ProtocolTracing_WritesSessionTrace()
+    {
+        using var temp = TestTempDirectory.Create();
+        var handler = new StaticHttpMessageHandler(CreateChatStreamingResponse("chatcmpl-trace", "Trace answer."));
 
         await using var providerRuntime = new OpenAIChatModelProviderRuntime(new OpenAIChatModelProviderRuntimeOptions
         {
@@ -452,7 +605,13 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 {
                     ProviderKey = "openai",
                     IsDefault = true,
-                    ChatClientFactory = _ => chatClient,
+                    ApiKey = "test-key",
+                    BaseUri = new Uri("https://api.openai.test/v1"),
+                    HttpClient = new HttpClient(handler),
+                    ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
+                    [
+                        new AgentModelInfo("gpt-chat-test", DisplayName: "GPT Chat Test"),
+                    ]),
                     ProtocolTracing = new OpenAIProtocolTraceOptions
                     {
                         Enabled = true,
@@ -477,10 +636,38 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(File.Exists(tracePath));
         var trace = File.ReadAllText(tracePath);
         StringAssert.Contains(trace, "### turn start provider=openai");
-        StringAssert.Contains(trace, "<<< stream update (sdk model JSON):");
+        StringAssert.Contains(trace, "<<< body: <streaming raw SSE lines>");
+        StringAssert.Contains(trace, "<<< sse: data: {");
         StringAssert.Contains(trace, "Trace answer.");
+        StringAssert.Contains(trace, "<<< sse: data: [DONE]");
+        Assert.IsFalse(trace.Contains("sdk model JSON", StringComparison.Ordinal));
         StringAssert.Contains(trace, "### turn end provider=openai");
         StringAssert.Contains(trace, "completion=chatcmpl-trace");
+    }
+
+    [TestMethod]
+    public void RawApiProviderDefaultsCatalog_AppliesXiaomiOpenAIChatCompatibilityProfile()
+    {
+        var profile = RawApiProviderDefaultsCatalog.ApplyProfileDefaults(
+            AgentTransportKind.OpenAIChatCompletions,
+            "xiaomi",
+            new Uri("https://token-plan-ams.xiaomimimo.com/v1"),
+            new AgentProviderProfile
+            {
+                SupportsDeveloperRole = true,
+                SupportsStore = true,
+                SupportsReasoningEffort = true,
+                SupportsParallelToolCalls = true,
+                SupportsStrictTools = true,
+                MaxTokensFieldName = "max_completion_tokens",
+            });
+
+        Assert.IsFalse(profile.SupportsDeveloperRole);
+        Assert.IsFalse(profile.SupportsStore);
+        Assert.IsFalse(profile.SupportsReasoningEffort);
+        Assert.IsFalse(profile.SupportsParallelToolCalls);
+        Assert.IsFalse(profile.SupportsStrictTools);
+        Assert.AreEqual("max_tokens", profile.MaxTokensFieldName);
     }
 
     [TestMethod]
@@ -3690,6 +3877,27 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     private static string SerializeJsonStringOrNull(string? value)
         => value is null ? "null" : JsonSerializer.Serialize(value);
 
+    private static HttpResponseMessage CreateChatStreamingResponse(string completionId, string content)
+    {
+        var escapedCompletionId = JsonSerializer.Serialize(completionId);
+        var escapedContent = JsonSerializer.Serialize(content);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                $$"""
+                data: {"id":{{escapedCompletionId}},"object":"chat.completion.chunk","created":1744060800,"model":"gpt-chat-test","choices":[{"index":0,"delta":{"role":"assistant","content":{{escapedContent}}},"finish_reason":null}]}
+
+                data: {"id":{{escapedCompletionId}},"object":"chat.completion.chunk","created":1744060800,"model":"gpt-chat-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """,
+                Encoding.UTF8,
+                "text/event-stream"),
+        };
+        return response;
+    }
+
     private static AgentTurnRequest CreateTurnRequest()
         => new()
         {
@@ -4288,10 +4496,15 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     {
         public List<Uri> Requests { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public List<string> RequestBodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(request.RequestUri ?? throw new InvalidOperationException("Request URI was not set."));
-            return Task.FromResult(response);
+            RequestBodies.Add(request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            return response;
         }
     }
 

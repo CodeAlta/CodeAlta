@@ -163,7 +163,14 @@ internal sealed class OpenAIProtocolTraceLogger
 
             if (!message.BufferResponse)
             {
-                log("<<< body: <not buffered; streaming body is traced as SDK stream updates when available>");
+                if (response.ContentStream is { } contentStream && IsEventStreamResponse(response))
+                {
+                    log("<<< body: <streaming raw SSE lines>");
+                    response.ContentStream = new RawSseTraceStream(contentStream, log, maxBodyBytes);
+                    return;
+                }
+
+                log("<<< body: <not buffered; streaming body is not an SSE response or is unavailable>");
                 return;
             }
 
@@ -220,6 +227,10 @@ internal sealed class OpenAIProtocolTraceLogger
                 : text[..maxChars] + $"\n<truncated {text.Length - maxChars} chars>";
         }
 
+        private static bool IsEventStreamResponse(PipelineResponse response)
+            => response.Headers.TryGetValue("Content-Type", out var contentType) &&
+               contentType?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
+
         private static bool IsSensitiveHeader(string name)
             => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
                || name.Equals("api-key", StringComparison.OrdinalIgnoreCase)
@@ -231,5 +242,153 @@ internal sealed class OpenAIProtocolTraceLogger
                || name.Contains("credential", StringComparison.OrdinalIgnoreCase)
                || name.Contains("password", StringComparison.OrdinalIgnoreCase)
                || name.EndsWith("-key", StringComparison.OrdinalIgnoreCase);
+
+        private sealed class RawSseTraceStream(Stream inner, Action<string> log, int maxBodyBytes) : Stream
+        {
+            private readonly StringBuilder _line = new();
+            private int _remainingBytes = Math.Max(1024, maxBodyBytes);
+            private bool _disposed;
+            private bool _truncated;
+
+            public override bool CanRead => inner.CanRead;
+
+            public override bool CanSeek => inner.CanSeek;
+
+            public override bool CanWrite => inner.CanWrite;
+
+            public override long Length => inner.Length;
+
+            public override long Position
+            {
+                get => inner.Position;
+                set => inner.Position = value;
+            }
+
+            public override void Flush() => inner.Flush();
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                var bytesRead = inner.Read(buffer, offset, count);
+                if (bytesRead > 0)
+                {
+                    TraceBytes(buffer.AsSpan(offset, bytesRead));
+                }
+
+                return bytesRead;
+            }
+
+            public override int Read(Span<byte> buffer)
+            {
+                var bytesRead = inner.Read(buffer);
+                if (bytesRead > 0)
+                {
+                    TraceBytes(buffer[..bytesRead]);
+                }
+
+                return bytesRead;
+            }
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                var bytesRead = await inner.ReadAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+                if (bytesRead > 0)
+                {
+                    TraceBytes(buffer.AsSpan(offset, bytesRead));
+                }
+
+                return bytesRead;
+            }
+
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                var bytesRead = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (bytesRead > 0)
+                {
+                    TraceBytes(buffer.Span[..bytesRead]);
+                }
+
+                return bytesRead;
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+
+            public override void SetLength(long value) => inner.SetLength(value);
+
+            public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+
+            protected override void Dispose(bool disposing)
+            {
+                if (!_disposed)
+                {
+                    if (disposing)
+                    {
+                        FlushPartialLine();
+                        inner.Dispose();
+                    }
+
+                    _disposed = true;
+                }
+
+                base.Dispose(disposing);
+            }
+
+            private void TraceBytes(ReadOnlySpan<byte> bytes)
+            {
+                if (_remainingBytes <= 0)
+                {
+                    TraceTruncation();
+                    return;
+                }
+
+                var bytesToTrace = Math.Min(bytes.Length, _remainingBytes);
+                var text = Encoding.UTF8.GetString(bytes[..bytesToTrace]);
+                _remainingBytes -= bytesToTrace;
+                TraceText(text);
+                if (bytesToTrace < bytes.Length)
+                {
+                    TraceTruncation();
+                }
+            }
+
+            private void TraceText(string text)
+            {
+                foreach (var ch in text)
+                {
+                    switch (ch)
+                    {
+                        case '\r':
+                            break;
+                        case '\n':
+                            log($"<<< sse: {_line}");
+                            _line.Clear();
+                            break;
+                        default:
+                            _line.Append(ch);
+                            break;
+                    }
+                }
+            }
+
+            private void FlushPartialLine()
+            {
+                if (_line.Length > 0)
+                {
+                    log($"<<< sse: {_line}");
+                    _line.Clear();
+                }
+            }
+
+            private void TraceTruncation()
+            {
+                if (_truncated)
+                {
+                    return;
+                }
+
+                FlushPartialLine();
+                log($"<<< sse: <truncated after {Math.Max(1024, maxBodyBytes)} bytes>");
+                _truncated = true;
+            }
+        }
     }
 }

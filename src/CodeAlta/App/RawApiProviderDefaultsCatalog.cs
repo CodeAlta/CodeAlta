@@ -189,6 +189,23 @@ internal static class RawApiProviderDefaultsCatalog
                     },
                 },
             },
+            new RawApiProviderDefaultsRule
+            {
+                Id = "xiaomi-openai-chat",
+                DisplayName = "Xiaomi OpenAI Chat",
+                Types = ["openai-chat"],
+                ProviderKeys = ["xiaomi"],
+                HostSuffixes = ["xiaomimimo.com"],
+                Profile = new RawApiProviderDefaultsProfile
+                {
+                    SupportsDeveloperRole = false,
+                    SupportsStore = false,
+                    SupportsReasoningEffort = false,
+                    SupportsParallelToolCalls = false,
+                    SupportsStrictTools = false,
+                    MaxTokensFieldName = "max_tokens",
+                },
+            },
         ];
 
     private static bool IsMatch(RawApiProviderDefaultsRule rule, RawApiProviderDefaultsContext context)
