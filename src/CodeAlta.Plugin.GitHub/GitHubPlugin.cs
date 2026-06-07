@@ -29,13 +29,19 @@ public sealed class GitHubPlugin : PluginBase
         };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CodeAlta-GitHub-Plugin");
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        _ghAvailable = await GitHubCli.TryGetVersionAsync(cancellationToken).ConfigureAwait(false) is not null;
+
         var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN") ?? Environment.GetEnvironmentVariable("GH_TOKEN");
+        if (string.IsNullOrWhiteSpace(token) && _ghAvailable)
+        {
+            token = await GitHubCli.TryGetAuthTokenAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (!string.IsNullOrWhiteSpace(token))
         {
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Trim());
         }
 
-        _ghAvailable = await GitHubCli.TryGetVersionAsync(cancellationToken).ConfigureAwait(false) is not null;
         if (!_ghAvailable)
         {
             Logger.Warn($"GitHub CLI 'gh' was not found. Install it from {InstallGhUrl} to enable the GitHub CLI agent tool.");
@@ -49,10 +55,10 @@ public sealed class GitHubPlugin : PluginBase
     /// <param name="projectPath">The selected project path.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns><see langword="true" /> when the project has a GitHub remote.</returns>
-    public ValueTask<bool> CanResolveIssueReferencesAsync(string? projectPath, CancellationToken cancellationToken = default)
+    public async ValueTask<bool> CanResolveIssueReferencesAsync(string? projectPath, CancellationToken cancellationToken = default)
     {
-        _ = cancellationToken;
-        return new ValueTask<bool>(GitHubRepositoryDetector.TryDetect(ResolveProjectPath(projectPath), out _));
+        var repository = await GitHubRepositoryDetector.DetectAsync(ResolveProjectPath(projectPath), cancellationToken).ConfigureAwait(false);
+        return repository is not null;
     }
 
     /// <summary>
@@ -65,7 +71,13 @@ public sealed class GitHubPlugin : PluginBase
     /// <returns>Issue references, or <see langword="null" /> when the project is not a GitHub repository.</returns>
     public async ValueTask<IReadOnlyList<GitHubIssueReferenceItem>?> QueryIssueReferencesAsync(string? projectPath, string queryText, int maximumResults, CancellationToken cancellationToken = default)
     {
-        if (!GitHubRepositoryDetector.TryDetect(ResolveProjectPath(projectPath), out var repository) || _httpClient is null)
+        if (_httpClient is null)
+        {
+            return null;
+        }
+
+        var repository = await GitHubRepositoryDetector.DetectAsync(ResolveProjectPath(projectPath), cancellationToken).ConfigureAwait(false);
+        if (repository is null)
         {
             return null;
         }
@@ -91,12 +103,27 @@ public sealed class GitHubPlugin : PluginBase
 
     private static async Task<IReadOnlyList<GitHubIssue>> QueryIssuesAsync(HttpClient client, GitHubRepository repository, string query, int resultLimit, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(query) || ShouldFilterRecentIssues(query))
+        if (string.IsNullOrWhiteSpace(query))
         {
             return FilterRecentIssues(
                 await GitHubIssueClient.SearchIssuesAsync(client, repository, string.Empty, 100, cancellationToken).ConfigureAwait(false),
                 query,
                 resultLimit);
+        }
+
+        if (ShouldFilterRecentIssues(query))
+        {
+            IReadOnlyList<GitHubIssue> exactMatches = [];
+            if (int.TryParse(query, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number > 0)
+            {
+                exactMatches = await GitHubIssueClient.GetIssueAsync(client, repository, number, cancellationToken).ConfigureAwait(false);
+            }
+
+            var recentMatches = FilterRecentIssues(
+                await GitHubIssueClient.SearchIssuesAsync(client, repository, string.Empty, 100, cancellationToken).ConfigureAwait(false),
+                query,
+                resultLimit);
+            return MergeIssueResults(exactMatches, recentMatches, resultLimit);
         }
 
         if (!IsPlainIssueWordQuery(query))
@@ -323,43 +350,42 @@ public sealed class GitHubPlugin : PluginBase
 
     private static class GitHubRepositoryDetector
     {
-        public static bool TryDetect(string? projectPath, out GitHubRepository repository)
+        public static async Task<GitHubRepository?> DetectAsync(string? projectPath, CancellationToken cancellationToken)
         {
-            repository = default!;
             if (string.IsNullOrWhiteSpace(projectPath))
             {
-                return false;
+                return null;
             }
 
             var gitPath = FindGitPath(projectPath);
             if (gitPath is null)
             {
-                return false;
+                return null;
             }
 
-            var configPath = Directory.Exists(gitPath)
-                ? Path.Combine(gitPath, "config")
-                : ResolveGitFileConfigPath(gitPath, projectPath);
-            if (configPath is null || !File.Exists(configPath))
+            var workingDirectory = Path.GetFullPath(projectPath);
+            var originUrl = await GitCli.TryGetRemoteUrlAsync(workingDirectory, "origin", cancellationToken).ConfigureAwait(false);
+            if (originUrl is not null && TryParseGitHubRemote(originUrl, out var originRepository))
             {
-                return false;
+                return originRepository;
             }
 
-            foreach (var line in File.ReadLines(configPath))
+            var remoteNames = await GitCli.GetRemoteNamesAsync(workingDirectory, cancellationToken).ConfigureAwait(false);
+            foreach (var remoteName in remoteNames)
             {
-                var trimmed = line.Trim();
-                if (!trimmed.StartsWith("url =", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(remoteName, "origin", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                if (TryParseGitHubRemote(trimmed[5..].Trim(), out repository))
+                var remoteUrl = await GitCli.TryGetRemoteUrlAsync(workingDirectory, remoteName, cancellationToken).ConfigureAwait(false);
+                if (remoteUrl is not null && TryParseGitHubRemote(remoteUrl, out var repository))
                 {
-                    return true;
+                    return repository;
                 }
             }
 
-            return false;
+            return null;
         }
 
         private static string? FindGitPath(string projectPath)
@@ -377,23 +403,6 @@ public sealed class GitHubPlugin : PluginBase
             }
 
             return null;
-        }
-
-        private static string? ResolveGitFileConfigPath(string gitFilePath, string projectPath)
-        {
-            var line = File.ReadLines(gitFilePath).FirstOrDefault();
-            if (line is null || !line.StartsWith("gitdir:", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            var gitDir = line[7..].Trim();
-            if (!Path.IsPathRooted(gitDir))
-            {
-                gitDir = Path.GetFullPath(Path.Combine(projectPath, gitDir));
-            }
-
-            return Path.Combine(gitDir, "config");
         }
 
         private static bool TryParseGitHubRemote(string remoteUrl, out GitHubRepository repository)
@@ -434,22 +443,53 @@ public sealed class GitHubPlugin : PluginBase
 
     private static class GitHubIssueClient
     {
+        private const int GitHubMaximumPageSize = 100;
+        private const int MaximumPages = 5;
+
         public static async Task<IReadOnlyList<GitHubIssue>> SearchIssuesAsync(HttpClient client, GitHubRepository repository, string query, int maximumResults, CancellationToken cancellationToken)
         {
-            var url = string.IsNullOrWhiteSpace(query)
-                ? FormattableString.Invariant($"https://api.github.com/repos/{Uri.EscapeDataString(repository.Owner)}/{Uri.EscapeDataString(repository.Name)}/issues?state=all&sort=updated&direction=desc&per_page={maximumResults}")
-                : FormattableString.Invariant($"https://api.github.com/search/issues?q={Uri.EscapeDataString($"repo:{repository.FullName} is:issue {query}")}&sort=updated&order=desc&per_page={maximumResults}");
-            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            var resultLimit = Math.Clamp(maximumResults, 1, GitHubMaximumPageSize);
+            var pageSize = GitHubMaximumPageSize;
+            var results = new List<GitHubIssue>(resultLimit);
+            for (var page = 1; page <= MaximumPages && results.Count < resultLimit; page++)
             {
-                return [];
+                var url = string.IsNullOrWhiteSpace(query)
+                    ? FormattableString.Invariant($"https://api.github.com/repos/{Uri.EscapeDataString(repository.Owner)}/{Uri.EscapeDataString(repository.Name)}/issues?state=all&sort=updated&direction=desc&per_page={pageSize}&page={page}")
+                    : FormattableString.Invariant($"https://api.github.com/search/issues?q={Uri.EscapeDataString($"repo:{repository.FullName} is:issue {query}")}&sort=updated&order=desc&per_page={pageSize}&page={page}");
+                using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return results.ToArray();
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                var root = document.RootElement;
+                var array = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array ? items : root;
+                var arrayItemCount = array.ValueKind == JsonValueKind.Array ? array.GetArrayLength() : 0;
+                if (arrayItemCount == 0)
+                {
+                    break;
+                }
+
+                var pageIssues = ReadIssues(array, repository.FullName).ToArray();
+                foreach (var issue in pageIssues)
+                {
+                    if (results.Count >= resultLimit)
+                    {
+                        break;
+                    }
+
+                    results.Add(issue);
+                }
+
+                if (arrayItemCount < pageSize)
+                {
+                    break;
+                }
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            var root = document.RootElement;
-            var array = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array ? items : root;
-            return ReadIssues(array, repository.FullName).ToArray();
+            return results.ToArray();
         }
 
         public static async Task<IReadOnlyList<GitHubIssue>> GetIssueAsync(HttpClient client, GitHubRepository repository, int number, CancellationToken cancellationToken)
@@ -571,7 +611,7 @@ public sealed class GitHubPlugin : PluginBase
         {
             try
             {
-                var result = await RunProcessAsync("gh", ["--version"], Environment.CurrentDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                var result = await CommandLine.RunAsync("gh", ["--version"], Environment.CurrentDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
                 return result.ExitCode == 0 ? result.Stdout : null;
             }
             catch
@@ -580,10 +620,70 @@ public sealed class GitHubPlugin : PluginBase
             }
         }
 
-        public static Task<ProcessResult> RunAsync(IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
-            => RunProcessAsync("gh", arguments, workingDirectory, timeout, cancellationToken);
+        public static async Task<string?> TryGetAuthTokenAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await CommandLine.RunAsync("gh", ["auth", "token"], Environment.CurrentDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                var token = result.ExitCode == 0 ? result.Stdout.Trim() : string.Empty;
+                return string.IsNullOrWhiteSpace(token) ? null : token;
+            }
+            catch
+            {
+                return null;
+            }
+        }
 
-        private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
+        public static Task<ProcessResult> RunAsync(IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
+            => CommandLine.RunAsync("gh", arguments, workingDirectory, timeout, cancellationToken);
+    }
+
+    private static class GitCli
+    {
+        public static async Task<string?> TryGetRemoteUrlAsync(string workingDirectory, string remoteName, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await CommandLine.RunAsync("git", ["-C", workingDirectory, "remote", "get-url", remoteName], workingDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                if (result.ExitCode != 0)
+                {
+                    return null;
+                }
+
+                var remoteUrl = result.Stdout.Trim();
+                return string.IsNullOrWhiteSpace(remoteUrl) ? null : remoteUrl;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return null;
+            }
+        }
+
+        public static async Task<IReadOnlyList<string>> GetRemoteNamesAsync(string workingDirectory, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await CommandLine.RunAsync("git", ["-C", workingDirectory, "remote"], workingDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                if (result.ExitCode != 0)
+                {
+                    return [];
+                }
+
+                return result.Stdout
+                    .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(static remoteName => !string.IsNullOrWhiteSpace(remoteName))
+                    .ToArray();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return [];
+            }
+        }
+    }
+
+    private static class CommandLine
+    {
+        public static async Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
         {
             using var process = new Process
             {
@@ -617,7 +717,7 @@ public sealed class GitHubPlugin : PluginBase
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 TryKill(process);
-                return new ProcessResult(-1, workingDirectory, string.Empty, "gh timed out.");
+                return new ProcessResult(-1, workingDirectory, string.Empty, fileName + " timed out.");
             }
         }
 
