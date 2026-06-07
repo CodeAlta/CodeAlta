@@ -416,10 +416,34 @@ internal static class OpenAIProviderSdkFactory
         }
     }
 
-    private static OpenAIClientOptions CreateResponsesClientOptions(
+    private static ResponsesClientOptions CreateResponsesClientOptions(
         OpenAIProviderOptions provider,
         OpenAIProtocolTraceLogger? protocolTrace = null)
-        => CreateClientOptionsCore(provider, protocolTrace);
+    {
+        var options = new ResponsesClientOptions
+        {
+            Endpoint = provider.BaseUri,
+            OrganizationId = provider.OrganizationId,
+            ProjectId = provider.ProjectId,
+            Transport = provider.HttpClient is null ? null : new HttpClientPipelineTransport(provider.HttpClient),
+            // Codex subscription responses can legitimately sit in model-side reasoning for longer than
+            // the SDK pipeline's default per-read timeout. Keep a finite watchdog, but avoid cutting off
+            // quiet long-running SSE streams too aggressively.
+            NetworkTimeout = provider.CodexSubscription is null ? null : CodexSubscriptionNetworkTimeout,
+        };
+
+        if (protocolTrace is not null)
+        {
+            options.AddPolicy(protocolTrace.CreateHttpPolicy(), PipelinePosition.BeforeTransport);
+        }
+
+        if (provider.ExtraHeaders is { Count: > 0 } || provider.RequestHeaderContext is not null)
+        {
+            options.AddPolicy(new OpenAIExtraHeadersPolicy(provider.ExtraHeaders, provider.RequestHeaderContext), PipelinePosition.BeforeTransport);
+        }
+
+        return options;
+    }
 
     private static AzureOpenAIClient CreateAzureOpenAIClient(
         OpenAIProviderOptions provider,
