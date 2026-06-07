@@ -27,8 +27,8 @@
     <PackageVersion Include="NuGet.Versioning" Version="7.6.0" />
     <PackageVersion Include="Google.GenAI" Version="1.9.0" />
     <PackageVersion Include="OpenAI" Version="2.11.0" />
-    <PackageVersion Include="SharpYaml" Version="3.8.0" />
-    <PackageVersion Include="Tomlyn" Version="2.4.2" />
+    <PackageVersion Include="SharpYaml" Version="3.9.0" />
+    <PackageVersion Include="Tomlyn" Version="2.5.0" />
     <PackageVersion Include="XenoAtom.CommandLine.Terminal" Version="2.0.3" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.2.0" />
     <PackageVersion Include="XenoAtom.Glob" Version="1.0.0" />
