@@ -85,7 +85,13 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : I
         }
 
         var normalized = modelId.ToLowerInvariant();
+        // The Anthropic MEAI adapter maps generic ReasoningOptions to legacy
+        // thinking.type=enabled. Newer Claude models reject that shape and require
+        // thinking.type=adaptive plus output_config.effort instead.
         return ContainsAny(normalized,
+            "fable-5",
+            "mythos-5",
+            "mythos-preview",
             "opus-4-6",
             "opus-4.6",
             "4-6-opus",
@@ -94,6 +100,10 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : I
             "opus-4.7",
             "4-7-opus",
             "4.7-opus",
+            "opus-4-8",
+            "opus-4.8",
+            "4-8-opus",
+            "4.8-opus",
             "sonnet-4-6",
             "sonnet-4.6",
             "4-6-sonnet",

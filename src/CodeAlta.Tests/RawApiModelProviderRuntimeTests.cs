@@ -299,6 +299,62 @@ public sealed class RawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    [DataRow("claude-fable-5", "Claude Fable 5")]
+    [DataRow("claude-mythos-5", "Claude Mythos 5")]
+    public async Task AnthropicModelProviderRuntime_UsesAdaptiveThinkingForClaude5Reasoning(string modelId, string displayName)
+    {
+        using var temp = TestTempDirectory.Create();
+        var client = new RecordingChatClient(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Anthropic answer.")])
+            {
+                MessageId = "anthropic-message",
+                ResponseId = "anthropic-response",
+                ConversationId = "anthropic-conversation",
+                ModelId = modelId,
+            },
+        ]);
+
+        await using var providerRuntime = new AnthropicModelProviderRuntime(new AnthropicModelProviderRuntimeOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new AnthropicProviderOptions
+                {
+                    ProviderKey = "anthropic",
+                    IsDefault = true,
+                    ChatClientFactory = () => client,
+                    ModelListAsync = _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
+                    [
+                        new AgentModelInfo(modelId, DisplayName: displayName),
+                    ]),
+                },
+            },
+        });
+
+        await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = modelId,
+            ReasoningEffort = AgentReasoningEffort.High,
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput([new AgentInputItem.Text("Hello")]),
+        }).ConfigureAwait(false);
+
+        Assert.IsNotNull(client.LastOptions?.RawRepresentationFactory);
+        var createParams = Assert.IsInstanceOfType<AnthropicMessageCreateParams>(client.LastOptions.RawRepresentationFactory(client));
+        Assert.IsNotNull(createParams.Thinking);
+        Assert.IsTrue(createParams.Thinking.TryPickAdaptive(out var adaptive));
+        Assert.IsNotNull(adaptive);
+        Assert.AreEqual(AnthropicDisplay.Summarized, adaptive.Display?.Value());
+        Assert.AreEqual(AnthropicEffort.High, createParams.OutputConfig?.Effort?.Value());
+    }
+
+    [TestMethod]
     public async Task GoogleGenAIModelProviderRuntime_PreservesThoughtSignaturesInSessionHistory()
     {
         using var temp = TestTempDirectory.Create();
