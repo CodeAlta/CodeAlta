@@ -1239,6 +1239,49 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         };
 
     /// <summary>
+    /// Gets sanitized history for a session, reusing an active coordinator session when present.
+    /// </summary>
+    /// <param name="session">The session descriptor.</param>
+    /// <param name="options">Execution options used to resume the coordinator session when it is not already active.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The sanitized session event history.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="session" /> or <paramref name="options" /> is <see langword="null" />.</exception>
+    /// <remarks>
+    /// History loading is a read operation. When a coordinator session is already attached, this method intentionally
+    /// does not compare or apply <paramref name="options" /> because replacing a live attachment can cancel in-flight work.
+    /// </remarks>
+    public async Task<IReadOnlyList<AgentEvent>> GetOrResumeHistoryAsync(
+        SessionViewDescriptor session,
+        SessionExecutionOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (string.IsNullOrWhiteSpace(session.SessionId))
+        {
+            await EnsureCoordinatorSessionCoreAsync(session, options, cancellationToken).ConfigureAwait(false);
+            var newEntry = await GetEntryAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+            return await GetProjectedHistoryAsync(newEntry, cancellationToken).ConfigureAwait(false);
+        }
+
+        var actor = _sessionActors.GetOrCreate(session.SessionId);
+        return await actor.QueryAsync(
+                async actorCancellationToken =>
+                {
+                    if (!_entries.TryGetValue(session.SessionId, out var entry) || entry.IsTerminated)
+                    {
+                        await EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken).ConfigureAwait(false);
+                        entry = await GetEntryAsync(session.SessionId, actorCancellationToken).ConfigureAwait(false);
+                    }
+
+                    return await GetProjectedHistoryAsync(entry, actorCancellationToken).ConfigureAwait(false);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Gets sanitized history for an active session.
     /// </summary>
     public async Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -1248,11 +1291,20 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 async actorCancellationToken =>
                 {
                     var entry = await GetEntryAsync(sessionId, actorCancellationToken).ConfigureAwait(false);
-                    var history = await _agentHub.GetSessionHistoryAsync(entry.SessionHandleId, actorCancellationToken).ConfigureAwait(false);
-                    return entry.Projector.ProjectHistory(history);
+                    return await GetProjectedHistoryAsync(entry, actorCancellationToken).ConfigureAwait(false);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<AgentEvent>> GetProjectedHistoryAsync(
+        RuntimeSessionEntry entry,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var history = await _agentHub.GetSessionHistoryAsync(entry.SessionHandleId, cancellationToken).ConfigureAwait(false);
+        return entry.Projector.ProjectHistory(history);
     }
 
     /// <inheritdoc />

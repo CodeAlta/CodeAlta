@@ -643,8 +643,7 @@ internal sealed class SessionHistoryCoordinator
         ArgumentNullException.ThrowIfNull(executionOptions);
         try
         {
-            await _runtimeService.EnsureCoordinatorSessionAsync(session, executionOptions, cancellationToken).ConfigureAwait(false);
-            return (await _runtimeService.GetHistoryAsync(session.SessionId, cancellationToken).ConfigureAwait(false)).ToList();
+            return (await _runtimeService.GetOrResumeHistoryAsync(session, executionOptions, cancellationToken).ConfigureAwait(false)).ToList();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

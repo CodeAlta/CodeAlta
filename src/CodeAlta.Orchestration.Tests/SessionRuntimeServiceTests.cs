@@ -245,6 +245,49 @@ public sealed class SessionRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task GetOrResumeHistoryAsync_ReusesActiveSessionWhenOptionsDiffer()
+    {
+        using var temp = new TempDirectory();
+        var providerId = new ModelProviderId("history-active-session");
+        var recorder = new BlockingProviderRuntime.Recorder();
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(
+            new ModelProviderDescriptor(new ModelProviderId(providerId.Value), "History Active Session") { DefaultModelId = "model-a" },
+            () => new BlockingProviderRuntime(providerId, recorder));
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var session = CreateSession("session-1", providerId, temp.Path);
+        session.ModelId = "model-a";
+
+        await runtime.EnsureCoordinatorSessionAsync(session, CreateOptions(providerId, temp.Path, model: "model-a")).ConfigureAwait(false);
+        var sendTask = runtime.SendAsync(
+            session,
+            CreateOptions(providerId, temp.Path, model: "model-a"),
+            new AgentSendOptions { Input = new AgentInput([new AgentInputItem.Text("hello")]) });
+        try
+        {
+            await recorder.SendStarted.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+
+            var history = await runtime.GetOrResumeHistoryAsync(
+                    session,
+                    CreateOptions(providerId, temp.Path, [CreateTool("mcp__changed__tool")], model: "model-b"))
+                .ConfigureAwait(false);
+
+            Assert.AreEqual(0, history.Count);
+            Assert.AreEqual(1, recorder.ResumeCount, "History loading must not recreate an already-active coordinator session.");
+            Assert.AreEqual(1, recorder.HistoryReadCount);
+            Assert.AreEqual(0, recorder.AbortCount, "History loading must not abort an in-flight run just because reconstructed options differ.");
+            Assert.IsFalse(sendTask.IsCompleted, "The in-flight send should still be running after history is loaded.");
+        }
+        finally
+        {
+            recorder.ReleaseSend.TrySetResult();
+        }
+
+        await sendTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+    }
+
+    [TestMethod]
     public async Task EnsureCoordinatorSessionAsync_UsesPendingAgentPromptFromLiveToolForStaleSessionState()
     {
         using var temp = new TempDirectory();
@@ -455,13 +498,15 @@ public sealed class SessionRuntimeServiceTests
         ModelProviderId ProviderId,
         string root,
         IReadOnlyList<AgentToolDefinition>? tools = null,
-        string? agentPromptId = null)
+        string? agentPromptId = null,
+        string? model = null)
         => new()
         {
             ProviderId = ProviderId,
             ProviderKey = ProviderId.Value,
             WorkingDirectory = root,
             ProjectRoots = [root],
+            Model = model,
             AgentPromptId = agentPromptId,
             Tools = tools,
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
@@ -540,6 +585,105 @@ public sealed class SessionRuntimeServiceTests
             => throw new InvalidOperationException("Provider models should not be listed while listing recoverable sessions.");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class BlockingProviderRuntime(ModelProviderId providerId, BlockingProviderRuntime.Recorder recorder) : IModelProviderSessionRuntime
+    {
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(providerId.Value), "History Active Session") { DefaultModelId = "model-a" };
+
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
+        {
+            recorder.RecordCreate();
+            return Task.FromResult<IAgentSession>(new BlockingAgentSession(providerId, options.SessionId ?? Guid.CreateVersion7().ToString(), recorder));
+        }
+
+        public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+        {
+            recorder.RecordResume();
+            return Task.FromResult<IAgentSession>(new BlockingAgentSession(providerId, sessionId, recorder));
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId, Availability = ModelProviderAvailability.Ready });
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => new NoOpTurnExecutor();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public sealed class Recorder
+        {
+            private int _abortCount;
+            private int _createCount;
+            private int _historyReadCount;
+            private int _resumeCount;
+
+            public TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public TaskCompletionSource ReleaseSend { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public int AbortCount => Volatile.Read(ref _abortCount);
+
+            public int CreateCount => Volatile.Read(ref _createCount);
+
+            public int HistoryReadCount => Volatile.Read(ref _historyReadCount);
+
+            public int ResumeCount => Volatile.Read(ref _resumeCount);
+
+            public void RecordAbort() => Interlocked.Increment(ref _abortCount);
+
+            public void RecordCreate() => Interlocked.Increment(ref _createCount);
+
+            public void RecordHistoryRead() => Interlocked.Increment(ref _historyReadCount);
+
+            public void RecordResume() => Interlocked.Increment(ref _resumeCount);
+        }
+
+        private sealed class BlockingAgentSession(ModelProviderId ProviderId, string sessionId, Recorder recorder) : IAgentSession
+        {
+            public ModelProviderId ProviderId { get; } = ProviderId;
+
+            public string SessionId { get; } = sessionId;
+
+            public string? WorkspacePath => null;
+
+            public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.CompletedTask.ConfigureAwait(false);
+                yield break;
+            }
+
+            public IDisposable Subscribe(Action<AgentEvent> handler) => new Subscription();
+
+            public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
+            {
+                recorder.SendStarted.TrySetResult();
+                await recorder.ReleaseSend.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return new AgentRunId("run-blocking");
+            }
+
+            public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
+                => throw new NotSupportedException();
+
+            public Task AbortAsync(CancellationToken cancellationToken = default)
+            {
+                recorder.RecordAbort();
+                return Task.CompletedTask;
+            }
+
+            public Task CompactAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+            public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
+            {
+                recorder.RecordHistoryRead();
+                return Task.FromResult<IReadOnlyList<AgentEvent>>([]);
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
     }
 
     private sealed class ToolSchemaRecordingProviderRuntime(ModelProviderId providerId, ToolSchemaRecordingProviderRuntime.Recorder recorder) : IModelProviderSessionRuntime
