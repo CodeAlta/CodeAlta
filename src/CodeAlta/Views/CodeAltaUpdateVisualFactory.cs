@@ -2,6 +2,7 @@ using System.Diagnostics;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 
@@ -43,12 +44,12 @@ internal static class CodeAltaUpdateVisualFactory
 
         return snapshot.Status switch
         {
-            CodeAltaUpdateCheckStatus.Checking => CreateCenteredStatusMarkup($"[info]{NerdFont.MdCloudSearchOutline} Checking for updates...[/]"),
-            CodeAltaUpdateCheckStatus.Latest => CreateCenteredStatusMarkup($"[success]{NerdFont.MdCheckCircleOutline} You are running the latest {CodeAltaApplicationInfo.ProductName} version.[/]"),
+            CodeAltaUpdateCheckStatus.Checking => CreateCenteredStatusMarkup($"[info]{TerminalIcons.MdCloudSearchOutline} Checking for updates...[/]"),
+            CodeAltaUpdateCheckStatus.Latest => CreateCenteredStatusMarkup($"[success]{TerminalIcons.MdCheckCircleOutline} You are running the latest {CodeAltaApplicationInfo.ProductName} version.[/]"),
             CodeAltaUpdateCheckStatus.UpdateAvailable => CreateUpdateAvailableAboutStatus(snapshot, copyUpdateCommand),
-            CodeAltaUpdateCheckStatus.PackageNotFound => CreateCenteredStatusMarkup($"[dim]{NerdFont.MdPackageVariantClosed} No published {AnsiMarkup.Escape(snapshot.PackageId)} package was found yet.[/]"),
-            CodeAltaUpdateCheckStatus.Failed => CreateCenteredStatusMarkup($"[warning]{NerdFont.MdAlertCircleOutline} Update check failed: {AnsiMarkup.Escape(snapshot.ErrorMessage ?? "unknown error")}[/]"),
-            _ => CreateCenteredStatusMarkup($"[info]{NerdFont.MdInformationOutline} Update status has not been checked yet.[/]"),
+            CodeAltaUpdateCheckStatus.PackageNotFound => CreateCenteredStatusMarkup($"[dim]{TerminalIcons.MdPackageVariantClosed} No published {AnsiMarkup.Escape(snapshot.PackageId)} package was found yet.[/]"),
+            CodeAltaUpdateCheckStatus.Failed => CreateCenteredStatusMarkup($"[warning]{TerminalIcons.MdAlertCircleOutline} Update check failed: {AnsiMarkup.Escape(snapshot.ErrorMessage ?? "unknown error")}[/]"),
+            _ => CreateCenteredStatusMarkup($"[info]{TerminalIcons.MdInformationOutline} Update status has not been checked yet.[/]"),
         };
     }
 
@@ -89,7 +90,7 @@ internal static class CodeAltaUpdateVisualFactory
     private static Visual CreateUpdateAvailableAboutStatus(CodeAltaUpdateCheckSnapshot snapshot, Action<string> copyUpdateCommand)
         => new VStack(
             [
-                CreateCenteredStatusMarkup($"[warning]{NerdFont.MdUpdate} Version {AnsiMarkup.Escape(snapshot.LatestVersionText ?? "?")} is available.[/]"),
+                CreateCenteredStatusMarkup($"[warning]{TerminalIcons.MdUpdate} Version {AnsiMarkup.Escape(snapshot.LatestVersionText ?? "?")} is available.[/]"),
                 CreateCenteredUpdateCommandRow(snapshot.UpdateCommand, copyUpdateCommand),
             ])
         {
@@ -131,7 +132,7 @@ internal static class CodeAltaUpdateVisualFactory
 
     private static Visual CreateCopyButton(Action onClick)
     {
-        var button = new Button(new TextBlock($"{NerdFont.MdContentCopy}")
+        var button = new Button(new TextBlock($"{TerminalIcons.MdContentCopy}")
             {
                 IsSelectable = false,
                 Wrap = false,

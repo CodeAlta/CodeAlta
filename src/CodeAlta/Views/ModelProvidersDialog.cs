@@ -6,6 +6,7 @@ using CodeAlta.ViewModels;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Collections;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
@@ -84,7 +85,7 @@ internal sealed class ModelProvidersDialog
         _getBounds = getBounds;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -120,16 +121,16 @@ internal sealed class ModelProvidersDialog
                     : BuildEmptyState();
             });
 
-        var addButton = new Button($"{NerdFont.MdPlus} Add")
+        var addButton = new Button($"{TerminalIcons.MdPlus} Add")
             .Tone(ControlTone.Primary)
             .Click(AddProvider);
-        var deleteButton = new Button($"{NerdFont.MdDelete} Delete")
+        var deleteButton = new Button($"{TerminalIcons.MdDelete} Delete")
             .Tone(ControlTone.Error)
             .Click(DeleteSelectedProvider);
         var refreshButton = new Button("Refresh")
             .Tone(ControlTone.Warning)
             .Click(() => StartRefresh(confirmWhenDirty: true));
-        var advancedButton = new Button($"{NerdFont.MdCodeBraces} Advanced TOML")
+        var advancedButton = new Button($"{TerminalIcons.MdCodeBraces} Advanced TOML")
             .Tone(ControlTone.Default)
             .Click(OpenAdvancedEditor);
         _saveButton = new Button("Save")
@@ -1102,8 +1103,8 @@ internal sealed class ModelProvidersDialog
 
     private Button CreateAvailabilityToggleButton(ModelProviderEditorItemViewModel item)
         => new Button(() => new TextBlock(item.Enabled
-                ? $"{NerdFont.MdPauseCircleOutline} Disable Provider"
-                : $"{NerdFont.MdCheckCircleOutline} Enable Provider"))
+                ? $"{TerminalIcons.MdPauseCircleOutline} Disable Provider"
+                : $"{TerminalIcons.MdCheckCircleOutline} Enable Provider"))
             .Tone(() => item.Enabled ? ControlTone.Warning : ControlTone.Success)
             .IsEnabled(!item.IsReserved)
             .Click(
@@ -1415,9 +1416,9 @@ internal sealed class ModelProvidersDialog
                     };
                     var icon = entry.Severity switch
                     {
-                        ValidationSeverity.Error => $"{NerdFont.MdCloseCircleOutline}",
-                        ValidationSeverity.Warning => $"{NerdFont.MdAlertOutline}",
-                        _ => $"{NerdFont.MdInformationOutline}",
+                        ValidationSeverity.Error => $"{TerminalIcons.MdCloseCircleOutline}",
+                        ValidationSeverity.Warning => $"{TerminalIcons.MdAlertOutline}",
+                        _ => $"{TerminalIcons.MdInformationOutline}",
                     };
                     return $"[{tone}]{icon} {AnsiMarkup.Escape(entry.Message)}[/]";
                 }));
@@ -1792,36 +1793,36 @@ internal sealed class ModelProvidersDialog
     private static (string Tone, string Icon) GetStatusToneAndIcon(ModelProviderUiStatusKind statusKind)
         => statusKind switch
         {
-            ModelProviderUiStatusKind.Success => ("success", $"{NerdFont.MdCheckCircleOutline}"),
-            ModelProviderUiStatusKind.Warning => ("warning", $"{NerdFont.MdAlertOutline}"),
-            ModelProviderUiStatusKind.Error => ("error", $"{NerdFont.MdCloseCircleOutline}"),
-            ModelProviderUiStatusKind.Disabled => ("muted", $"{NerdFont.MdPauseCircleOutline}"),
-            _ => ("primary", $"{NerdFont.MdTuneVariant}"),
+            ModelProviderUiStatusKind.Success => ("success", $"{TerminalIcons.MdCheckCircleOutline}"),
+            ModelProviderUiStatusKind.Warning => ("warning", $"{TerminalIcons.MdAlertOutline}"),
+            ModelProviderUiStatusKind.Error => ("error", $"{TerminalIcons.MdCloseCircleOutline}"),
+            ModelProviderUiStatusKind.Disabled => ("muted", $"{TerminalIcons.MdPauseCircleOutline}"),
+            _ => ("primary", $"{TerminalIcons.MdTuneVariant}"),
         };
 
     private static (string Tone, string Icon) GetAvailabilityToneAndIcon(bool enabled)
         => enabled
-            ? ("success", $"{NerdFont.MdCheckCircleOutline}")
-            : ("muted", $"{NerdFont.MdPauseCircleOutline}");
+            ? ("success", $"{TerminalIcons.MdCheckCircleOutline}")
+            : ("muted", $"{TerminalIcons.MdPauseCircleOutline}");
 
     private static (string Tone, string Icon, string Text) GetProviderListStatus(ModelProviderEditorItemViewModel item, ModelProviderDiagnosticsSnapshot diagnostics)
     {
         if (!item.Enabled)
         {
-            return ("muted", $"{NerdFont.MdPauseCircleOutline}", "OFF");
+            return ("muted", $"{TerminalIcons.MdPauseCircleOutline}", "OFF");
         }
 
         if (item.LastTestState == ModelProviderLastTestState.Testing)
         {
-            return ("primary", $"{NerdFont.MdTimerOutline}", "TEST");
+            return ("primary", $"{TerminalIcons.MdTimerOutline}", "TEST");
         }
 
         return diagnostics.StatusKind switch
         {
-            ModelProviderUiStatusKind.Success => ("success", $"{NerdFont.MdCheckCircleOutline}", "ON"),
-            ModelProviderUiStatusKind.Error => ("error", $"{NerdFont.MdCloseCircleOutline}", "ERR"),
-            ModelProviderUiStatusKind.Warning => ("warning", $"{NerdFont.MdAlertOutline}", "WARN"),
-            _ => ("primary", $"{NerdFont.MdHelpBox}", "TEST"),
+            ModelProviderUiStatusKind.Success => ("success", $"{TerminalIcons.MdCheckCircleOutline}", "ON"),
+            ModelProviderUiStatusKind.Error => ("error", $"{TerminalIcons.MdCloseCircleOutline}", "ERR"),
+            ModelProviderUiStatusKind.Warning => ("warning", $"{TerminalIcons.MdAlertOutline}", "WARN"),
+            _ => ("primary", $"{TerminalIcons.MdHelpBox}", "TEST"),
         };
     }
 

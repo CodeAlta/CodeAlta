@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using XenoAtom.Terminal.UI;
 
@@ -7,7 +8,7 @@ internal sealed partial class CodeAltaShellViewModel
 {
     public CodeAltaShellViewModel()
     {
-        StatusText = "Prompt ready";
+        StatusText = SR.T("Prompt ready");
         StatusIconMarkup = string.Empty;
         ProviderSessionLoadStatusText = string.Empty;
         StatusTone = StatusTone.Ready;

@@ -8,8 +8,8 @@ internal static class ShellTextFormatter
     public static string BuildDraftPromptMessage(bool globalScopeSelected)
     {
         return globalScopeSelected
-            ? "Send the first prompt to start a global session."
-            : "Send the first prompt to start a session for the selected project.";
+            ? SR.T("Send the first prompt to start a global session.")
+            : SR.T("Send the first prompt to start a session for the selected project.");
     }
 
     public static string BuildDraftTabTitle(
@@ -18,12 +18,12 @@ internal static class ShellTextFormatter
     {
         if (globalScopeSelected)
         {
-            return "Global draft";
+            return SR.T("Global draft");
         }
 
         return selectedProject is null
-            ? "Project draft"
-            : $"{SessionTabVisualFactory.CompactTitle(selectedProject.DisplayName)} draft";
+            ? SR.T("Project draft")
+            : SR.T("{0} draft", SessionTabVisualFactory.CompactTitle(selectedProject.DisplayName));
     }
 
     public static string BuildDraftTabBodyText(
@@ -32,24 +32,24 @@ internal static class ShellTextFormatter
     {
         if (globalScopeSelected)
         {
-            return "Draft scope selected. Send a prompt to start a global session.";
+            return SR.T("Draft scope selected. Send a prompt to start a global session.");
         }
 
         return selectedProject is null
-            ? "Draft scope selected. Choose a project or send a prompt to start a session."
-            : $"Draft scope selected for '{selectedProject.DisplayName}'. Send a prompt to start a session.";
+            ? SR.T("Draft scope selected. Choose a project or send a prompt to start a session.")
+            : SR.T("Draft scope selected for '{0}'. Send a prompt to start a session.", selectedProject.DisplayName);
     }
 
     public static string BuildWelcomeSubtitle(ProjectDescriptor? selectedProject, bool globalScopeSelected)
     {
         if (globalScopeSelected)
         {
-            return "Global workspace ready for a new session.";
+            return SR.T("Global workspace ready for a new session.");
         }
 
         return selectedProject is null
-            ? "Project draft selected. Choose a project or start typing below."
-            : $"Next session will start in {FormatProjectLaunchScope(selectedProject)}.";
+            ? SR.T("Project draft selected. Choose a project or start typing below.")
+            : SR.T("Next session will start in {0}.", FormatProjectLaunchScope(selectedProject));
     }
 
     public static IReadOnlyList<string> BuildWelcomeGuidanceLines(
@@ -60,9 +60,9 @@ internal static class ShellTextFormatter
         {
             return
             [
-                "Use the prompt below to start a new global session.",
-                "Pick a project in the sidebar before sending if you want repository context.",
-                "Reopen any session tab to continue previous work.",
+                SR.T("Use the prompt below to start a new global session."),
+                SR.T("Pick a project in the sidebar before sending if you want repository context."),
+                SR.T("Reopen any session tab to continue previous work."),
             ];
         }
 
@@ -70,17 +70,17 @@ internal static class ShellTextFormatter
         {
             return
             [
-                "Choose a project in the sidebar or keep typing below to prepare the next session.",
-                "Your first prompt will create the draft once a scope is selected.",
-                "Reopen any session tab to continue previous work.",
+                SR.T("Choose a project in the sidebar or keep typing below to prepare the next session."),
+                SR.T("Your first prompt will create the draft once a scope is selected."),
+                SR.T("Reopen any session tab to continue previous work."),
             ];
         }
 
         return
         [
-            $"Use the prompt below to start a new session for {selectedProject.DisplayName}.",
-            "Switch projects in the sidebar before sending if you want a different scope.",
-            "Reopen any session tab to continue previous work.",
+            SR.T("Use the prompt below to start a new session for {0}.", selectedProject.DisplayName),
+            SR.T("Switch projects in the sidebar before sending if you want a different scope."),
+            SR.T("Reopen any session tab to continue previous work."),
         ];
     }
 
@@ -92,7 +92,7 @@ internal static class ShellTextFormatter
         _ = session;
         _ = selectedProject;
         _ = globalScopeSelected;
-        return "Prompt ready";
+        return SR.T("Prompt ready");
     }
 
     private static string FormatProjectLaunchScope(ProjectDescriptor project)

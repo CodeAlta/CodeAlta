@@ -30,10 +30,12 @@ internal sealed class NavigatorSettingsDialog
             SortMode = settings.SortMode,
             RecentSessionsPerProject = settings.RecentSessionsPerProject,
             ThemeSchemeName = settings.ThemeSchemeName ?? string.Empty,
+            LanguageName = settings.LanguageName ?? string.Empty,
+            AutoApprove = settings.AutoApprove,
         };
         _dialogService = dialogService;
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -68,16 +70,39 @@ internal sealed class NavigatorSettingsDialog
 
         var recentSessionsBox = new NumberBox<int>()
             .Value(_viewModel.Bind.RecentSessionsPerProject)
-            .ValueValidator(static value => value is >= 1 and <= 50 ? null : "Use a value from 1 to 50.")
+            .ValueValidator(static value => value is >= 1 and <= 50 ? null : SR.T("Use a value from 1 to 50."))
             .MinWidth(6)
             .MaxWidth(8);
         recentSessionsBox.ShowValidationMessage = false;
-        recentSessionsBox.InvalidNumberMessage = "Enter a whole number.";
+        recentSessionsBox.InvalidNumberMessage = SR.T("Enter a whole number.");
         var recentSessionsField = recentSessionsBox.Validate(
             _viewModel.Bind.RecentSessionsPerProject,
             static value => value is >= 1 and <= 50
                 ? null
-                : new ValidationMessage(ValidationSeverity.Error, "Use a value from 1 to 50."));
+                : new ValidationMessage(ValidationSeverity.Error, SR.T("Use a value from 1 to 50.")));
+
+        // Language options
+        var languageOptions = CreateLanguageOptions();
+        var languageSelect = new Select<LanguageOption>()
+            .MinWidth(24);
+        foreach (var option in languageOptions)
+        {
+            languageSelect.Items.Add(option);
+        }
+
+        languageSelect.SelectedIndex = FindLanguageOptionIndex(languageOptions, _viewModel.LanguageName);
+        languageSelect.SelectionChanged(
+            (_, e) =>
+            {
+                if ((uint)e.NewIndex >= (uint)languageOptions.Count)
+                {
+                    return;
+                }
+
+                var code = languageOptions[e.NewIndex].LanguageCode ?? string.Empty;
+                _viewModel.LanguageName = code;
+                SR.Language = code;
+            });
 
         var form = new Grid
             {
@@ -87,30 +112,39 @@ internal sealed class NavigatorSettingsDialog
             .Rows(
                 new RowDefinition { Height = GridLength.Auto },
                 new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = GridLength.Auto },
                 new RowDefinition { Height = GridLength.Auto })
             .Columns(
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) });
-        form.Cell(new TextBlock("Sort mode") { VerticalAlignment = Align.Center }, 0, 0);
+        form.Cell(new TextBlock(SR.T("Sort mode")) { VerticalAlignment = Align.Center }, 0, 0);
         form.Cell(sortModeSelect, 0, 1);
-        form.Cell(new TextBlock("Theme") { VerticalAlignment = Align.Center }, 1, 0);
+        form.Cell(new TextBlock(SR.T("Theme")) { VerticalAlignment = Align.Center }, 1, 0);
         form.Cell(themeSelect, 1, 1);
-        form.Cell(new TextBlock("Recent sessions") { VerticalAlignment = Align.Center }, 2, 0);
+        form.Cell(new TextBlock(SR.T("Recent sessions")) { VerticalAlignment = Align.Center }, 2, 0);
         form.Cell(recentSessionsField, 2, 1);
+        form.Cell(new TextBlock(SR.T("Language")) { VerticalAlignment = Align.Center }, 3, 0);
+        form.Cell(languageSelect, 3, 1);
 
-        var cancelButton = new Button("Cancel")
+        var autoApproveCheckbox = new CheckBox(SR.T("Auto approve commands"))
+            .IsChecked(_viewModel.Bind.AutoApprove);
+
+        form.Cell(autoApproveCheckbox, 4, 0);
+
+        var cancelButton = new Button(SR.T("Cancel"))
         {
             Tone = ControlTone.Default,
         };
         cancelButton.Click(Close);
 
-        var saveButton = new Button("Save")
+        var saveButton = new Button(SR.T("Save"))
         {
             Tone = ControlTone.Primary,
         };
         saveButton.Click(() => _ = SaveAsync());
 
-        var description = new TextBlock("Configure workspace appearance and navigator behavior.")
+        var description = new TextBlock(SR.T("Configure workspace appearance and navigator behavior."))
         {
             Wrap = true,
         };
@@ -128,9 +162,9 @@ internal sealed class NavigatorSettingsDialog
             .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
-            .Title("Workspace Settings")
+            .Title(SR.T("Workspace Settings"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc")} {SR.T("Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -138,8 +172,8 @@ internal sealed class NavigatorSettingsDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.NavigatorSettings.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the navigator settings dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the navigator settings dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -156,6 +190,8 @@ internal sealed class NavigatorSettingsDialog
             SortMode = _viewModel.SortMode,
             RecentSessionsPerProject = _viewModel.RecentSessionsPerProject,
             ThemeSchemeName = NormalizeThemeSchemeName(_viewModel.ThemeSchemeName),
+            LanguageName = NormalizeLanguageName(_viewModel.LanguageName),
+            AutoApprove = _viewModel.AutoApprove,
         };
 
         try
@@ -166,6 +202,8 @@ internal sealed class NavigatorSettingsDialog
         {
             return;
         }
+
+        AppSettings.AutoApprove = _viewModel.AutoApprove;
 
         _isSaving = true;
         Close();
@@ -198,7 +236,7 @@ internal sealed class NavigatorSettingsDialog
     {
         var options = new List<ThemeOption>
         {
-            new("Default", null),
+            new(SR.T("Default"), null),
         };
 
         foreach (var scheme in CodeAltaThemeResolver.GetSelectableSchemes())
@@ -231,7 +269,38 @@ internal sealed class NavigatorSettingsDialog
     private static string? NormalizeThemeSchemeName(string? themeSchemeName)
         => string.IsNullOrWhiteSpace(themeSchemeName) ? null : themeSchemeName.Trim();
 
+    private static string? NormalizeLanguageName(string? languageName)
+        => string.IsNullOrWhiteSpace(languageName) ? null : languageName.Trim();
+
+    private static List<LanguageOption> CreateLanguageOptions()
+    {
+        return
+        [
+            new LanguageOption("English", null),
+            new LanguageOption("中文 (简体)", "zh-CN"),
+        ];
+    }
+
+    private static int FindLanguageOptionIndex(IReadOnlyList<LanguageOption> options, string? languageName)
+    {
+        var normalizedName = NormalizeLanguageName(languageName);
+        for (var i = 0; i < options.Count; i++)
+        {
+            if (string.Equals(options[i].LanguageCode, normalizedName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
     private sealed record ThemeOption(string Label, string? SchemeName)
+    {
+        public override string ToString() => Label;
+    }
+
+    private sealed record LanguageOption(string Label, string? LanguageCode)
     {
         public override string ToString() => Label;
     }

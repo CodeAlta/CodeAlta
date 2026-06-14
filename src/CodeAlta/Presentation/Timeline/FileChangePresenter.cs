@@ -231,7 +231,7 @@ internal sealed class FileChangePresenter
             _uiDispatcher,
             static timestampValue =>
             {
-                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{NerdFont.CodEdit}[/] [bold]Modified Files[/]");
+                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{TerminalIcons.CodEdit}[/] [bold]Modified Files[/]");
                 var summaryText = new Markup("[dim]Waiting for file changes...[/]");
                 var timestampText = new Markup(string.Empty);
                 var itemsHost = new WrapHStack { Spacing = 1, RunSpacing = 0 };
@@ -347,7 +347,7 @@ internal sealed class FileChangePresenter
             var detailsGroup = new Group("Details", metadata).Padding(new Thickness(1, 0, 1, 0)).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Start);
             var outputGroup = new Group("Diff", log).TopRightText(new CheckBox("Wrap").IsChecked(wrapText)).Padding(0).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Stretch);
             var bounds = _getDialogBounds() ?? entry.Button.GetAbsoluteBounds();
-            var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
+            var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
             closeButton.Click(() => CloseDialog(entry));
             var dialog = new Dialog()
                 .Title(entry.FilePath)

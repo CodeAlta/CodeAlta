@@ -5,6 +5,7 @@ using CodeAlta.Presentation.Editing;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -61,11 +62,11 @@ internal sealed class ConfigAdvancedEditorDialog
                 : null);
         _editor.LeftMargins.Insert(0, diagnosticMargin);
 
-        _saveButton = new Button($"{NerdFont.MdContentSaveCheckOutline} Save and Apply") { Tone = ControlTone.Success };
+        _saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save and Apply") { Tone = ControlTone.Success };
         _saveButton.IsEnabled(() => !_isSaving.Value && _validation.IsValid && HasUnsavedChanges());
         _saveButton.Click(SaveAndApply);
 
-        _closeButton = new Button($"{NerdFont.MdClose} Close") { Tone = ControlTone.Default };
+        _closeButton = new Button($"{TerminalIcons.MdClose} Close") { Tone = ControlTone.Default };
         _closeButton.Click(RequestClose);
     }
 
@@ -91,7 +92,7 @@ internal sealed class ConfigAdvancedEditorDialog
     private Dialog BuildDialog()
     {
         var heading = new VStack(
-            new Markup($"[bold primary]{NerdFont.MdCodeBraces} Advanced model provider TOML[/]"),
+            new Markup($"[bold primary]{TerminalIcons.MdCodeBraces} Advanced model provider TOML[/]"),
             new TextBlock(
                     "Edit the global CodeAlta configuration directly. Save and Apply is only available after the TOML parses and the provider configuration validates, so invalid edits are not written to disk.")
                 .Wrap(true),
@@ -177,7 +178,7 @@ internal sealed class ConfigAdvancedEditorDialog
 
         if (_saveError.Value is { } saveError)
         {
-            return $"[error]{NerdFont.MdAlertCircleOutline} {AnsiMarkup.Escape(saveError)}[/]";
+            return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(saveError)}[/]";
         }
 
         if (!_validation.IsValid)
@@ -185,7 +186,7 @@ internal sealed class ConfigAdvancedEditorDialog
             var location = _validation.Line is { } line
                 ? $"Line {line}, column {_validation.Column.GetValueOrDefault(1)}: "
                 : string.Empty;
-            return $"[error]{NerdFont.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? "Configuration is invalid."))}[/]";
+            return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? "Configuration is invalid."))}[/]";
         }
 
         if (!HasUnsavedChanges())
@@ -193,7 +194,7 @@ internal sealed class ConfigAdvancedEditorDialog
             return "[success]Configuration is valid and matches the loaded file.[/]";
         }
 
-        return $"[success]{NerdFont.MdCheckCircleOutline} Configuration can be loaded. Save and Apply is available.[/]";
+        return $"[success]{TerminalIcons.MdCheckCircleOutline} Configuration can be loaded. Save and Apply is available.[/]";
     }
 
     private void SaveAndApply()

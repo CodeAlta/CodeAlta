@@ -8,50 +8,50 @@ namespace CodeAlta.Presentation.Prompting;
 internal sealed class ProjectFileAppearanceRegistry : IProjectFileAppearanceRegistry
 {
     private static readonly ProjectFileAppearanceDescriptor DefaultDirectory = new(
-        $"{NerdFont.MdFolderOutline}",
+        $"{TerminalIcons.MdFolderOutline}",
         Color.Default,
         "directory");
 
     private static readonly ProjectFileAppearanceDescriptor DefaultFile = new(
-        $"{NerdFont.MdFileDocumentOutline}",
+        $"{TerminalIcons.MdFileDocumentOutline}",
         Color.Default,
         "file");
 
     private static readonly IReadOnlyDictionary<string, ProjectFileAppearanceDescriptor> BuiltInExtensions =
         new Dictionary<string, ProjectFileAppearanceDescriptor>(StringComparer.OrdinalIgnoreCase)
         {
-            [".cs"] = new($"{NerdFont.MdLanguageCsharp}", Color.Default, "csharp"),
-            [".csproj"] = new($"{NerdFont.MdLanguageCsharp}", Color.Default, "dotnet"),
-            [".sln"] = new($"{NerdFont.MdCodeBracesBox}", Color.Default, "dotnet"),
-            [".json"] = new($"{NerdFont.MdCodeJson}", Color.Default, "json"),
-            [".yml"] = new($"{NerdFont.MdFileCodeOutline}", Color.Default, "yaml"),
-            [".yaml"] = new($"{NerdFont.MdFileCodeOutline}", Color.Default, "yaml"),
-            [".md"] = new($"{NerdFont.MdLanguageMarkdown}", Color.Default, "markdown"),
-            [".ts"] = new($"{NerdFont.MdLanguageTypescript}", Color.Default, "typescript"),
-            [".tsx"] = new($"{NerdFont.MdLanguageTypescript}", Color.Default, "typescript"),
-            [".js"] = new($"{NerdFont.MdLanguageJavascript}", Color.Default, "javascript"),
-            [".jsx"] = new($"{NerdFont.MdLanguageJavascript}", Color.Default, "javascript"),
-            [".py"] = new($"{NerdFont.MdLanguagePython}", Color.Default, "python"),
-            [".go"] = new($"{NerdFont.MdLanguageGo}", Color.Default, "go"),
-            [".rs"] = new($"{NerdFont.MdLanguageRust}", Color.Default, "rust"),
-            [".java"] = new($"{NerdFont.MdLanguageJava}", Color.Default, "java"),
-            [".kt"] = new($"{NerdFont.MdLanguageKotlin}", Color.Default, "kotlin"),
-            [".cpp"] = new($"{NerdFont.MdLanguageCpp}", Color.Default, "cpp"),
-            [".h"] = new($"{NerdFont.MdLanguageCpp}", Color.Default, "cpp"),
-            [".html"] = new($"{NerdFont.MdLanguageHtml5}", Color.Default, "html"),
-            [".css"] = new($"{NerdFont.MdLanguageCss3}", Color.Default, "css"),
-            [".scss"] = new($"{NerdFont.MdLanguageCss3}", Color.Default, "scss"),
-            [".toml"] = new($"{NerdFont.MdCodeBraces}", Color.Default, "toml"),
-            [".xml"] = new($"{NerdFont.MdXml}", Color.Default, "xml"),
-            [".sh"] = new($"{NerdFont.MdBash}", Color.Default, "shell"),
-            [".ps1"] = new($"{NerdFont.MdPowershell}", Color.Default, "powershell"),
-            [".sql"] = new($"{NerdFont.MdDatabase}", Color.Default, "sql"),
+            [".cs"] = new($"{TerminalIcons.MdLanguageCsharp}", Color.Default, "csharp"),
+            [".csproj"] = new($"{TerminalIcons.MdLanguageCsharp}", Color.Default, "dotnet"),
+            [".sln"] = new($"{TerminalIcons.MdCodeBracesBox}", Color.Default, "dotnet"),
+            [".json"] = new($"{TerminalIcons.MdCodeJson}", Color.Default, "json"),
+            [".yml"] = new($"{TerminalIcons.MdFileCodeOutline}", Color.Default, "yaml"),
+            [".yaml"] = new($"{TerminalIcons.MdFileCodeOutline}", Color.Default, "yaml"),
+            [".md"] = new($"{TerminalIcons.MdLanguageMarkdown}", Color.Default, "markdown"),
+            [".ts"] = new($"{TerminalIcons.MdLanguageTypescript}", Color.Default, "typescript"),
+            [".tsx"] = new($"{TerminalIcons.MdLanguageTypescript}", Color.Default, "typescript"),
+            [".js"] = new($"{TerminalIcons.MdLanguageJavascript}", Color.Default, "javascript"),
+            [".jsx"] = new($"{TerminalIcons.MdLanguageJavascript}", Color.Default, "javascript"),
+            [".py"] = new($"{TerminalIcons.MdLanguagePython}", Color.Default, "python"),
+            [".go"] = new($"{TerminalIcons.MdLanguageGo}", Color.Default, "go"),
+            [".rs"] = new($"{TerminalIcons.MdLanguageRust}", Color.Default, "rust"),
+            [".java"] = new($"{TerminalIcons.MdLanguageJava}", Color.Default, "java"),
+            [".kt"] = new($"{TerminalIcons.MdLanguageKotlin}", Color.Default, "kotlin"),
+            [".cpp"] = new($"{TerminalIcons.MdLanguageCpp}", Color.Default, "cpp"),
+            [".h"] = new($"{TerminalIcons.MdLanguageCpp}", Color.Default, "cpp"),
+            [".html"] = new($"{TerminalIcons.MdLanguageHtml5}", Color.Default, "html"),
+            [".css"] = new($"{TerminalIcons.MdLanguageCss3}", Color.Default, "css"),
+            [".scss"] = new($"{TerminalIcons.MdLanguageCss3}", Color.Default, "scss"),
+            [".toml"] = new($"{TerminalIcons.MdCodeBraces}", Color.Default, "toml"),
+            [".xml"] = new($"{TerminalIcons.MdXml}", Color.Default, "xml"),
+            [".sh"] = new($"{TerminalIcons.MdBash}", Color.Default, "shell"),
+            [".ps1"] = new($"{TerminalIcons.MdPowershell}", Color.Default, "powershell"),
+            [".sql"] = new($"{TerminalIcons.MdDatabase}", Color.Default, "sql"),
         };
 
     private static readonly IReadOnlyDictionary<string, ProjectFileAppearanceDescriptor> BuiltInFiles =
         new Dictionary<string, ProjectFileAppearanceDescriptor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["dockerfile"] = new($"{NerdFont.MdDocker}", Color.Default, "docker"),
+            ["dockerfile"] = new($"{TerminalIcons.MdDocker}", Color.Default, "docker"),
         };
 
     public static ProjectFileAppearanceRegistry Default { get; } = new();

@@ -31,6 +31,20 @@ public sealed class NavigatorSettings
     public string? ThemeSchemeName { get; set; }
 
     /// <summary>
+    /// Gets or sets the preferred UI language name (e.g., "en", "zh-CN").
+    /// When null or empty, the system culture is used as a fallback.
+    /// </summary>
+    [JsonPropertyName("language_name")]
+    public string? LanguageName { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether shell command and file change permission requests
+    /// are automatically approved without showing an approval dialog.
+    /// </summary>
+    [JsonPropertyName("auto_approve")]
+    public bool AutoApprove { get; set; }
+
+    /// <summary>
     /// Validates the settings.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when a value is out of range.</exception>
@@ -55,6 +69,14 @@ public sealed class NavigatorSettings
                 nameof(ThemeSchemeName),
                 ThemeSchemeName,
                 "Navigator theme scheme name must be 256 characters or fewer.");
+        }
+
+        if (LanguageName is { Length: > 16 })
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(LanguageName),
+                LanguageName,
+                "Navigator language name must be 16 characters or fewer.");
         }
     }
 }

@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI;
@@ -7,40 +8,40 @@ namespace CodeAlta.Presentation.Shell;
 
 internal static class StatusVisualFormatter
 {
-    private const string ThinkingStatusMessage = "Thinking...";
-    private const string PromptEditedStatusMessage = "Draft edited...";
-    public static string BuildThinkingStatusText() => ThinkingStatusMessage;
+    public static string BuildThinkingStatusText() => SR.T("Thinking...");
 
     public static string BuildThinkingStatusText(TimeSpan elapsed)
     {
         if (elapsed < TimeSpan.FromSeconds(1))
         {
-            return ThinkingStatusMessage;
+            return SR.T("Thinking...");
         }
 
-        return $"Thinking for {FormatElapsedTime(elapsed)}...";
+        return SR.T("Thinking for {0}...", FormatElapsedTime(elapsed));
     }
 
     public static bool IsThinkingStatusText(string? message)
         => !string.IsNullOrWhiteSpace(message) &&
-           (string.Equals(message, ThinkingStatusMessage, StringComparison.Ordinal) ||
-            message.StartsWith("Thinking for ", StringComparison.Ordinal));
+           (string.Equals(message, SR.T("Thinking..."), StringComparison.Ordinal) ||
+            string.Equals(message, "Thinking...", StringComparison.Ordinal) ||
+            message.StartsWith("Thinking for ", StringComparison.Ordinal) ||
+            message.StartsWith("已思考 ", StringComparison.Ordinal));
 
-    public static string BuildPromptEditedStatusText() => PromptEditedStatusMessage;
+    public static string BuildPromptEditedStatusText() => SR.T("Draft edited...");
 
     public static string BuildStatusIconMarkup(StatusTone tone)
     {
         return tone switch
         {
-            StatusTone.Ready => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Ready)}]{NerdFont.MdCheckCircleOutline}[/]",
-            StatusTone.Warning => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Warning)}]{NerdFont.MdAlertOutline}[/]",
-            StatusTone.Error => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Error)}]{NerdFont.MdAlertCircleOutline}[/]",
-            _ => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Info)}]{NerdFont.OctInfo}[/]",
+            StatusTone.Ready => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Ready)}]{TerminalIcons.MdCheckCircleOutline}[/]",
+            StatusTone.Warning => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Warning)}]{TerminalIcons.MdAlertOutline}[/]",
+            StatusTone.Error => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Error)}]{TerminalIcons.MdAlertCircleOutline}[/]",
+            _ => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Info)}]{TerminalIcons.OctInfo}[/]",
         };
     }
 
     public static string BuildPromptEditedIconMarkup()
-        => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Info)}]{NerdFont.MdSquareEditOutline}[/]";
+        => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Info)}]{TerminalIcons.MdSquareEditOutline}[/]";
 
     public static TextBlockStyle BuildStatusTextStyle(Theme theme, string message, bool busy, StatusTone tone, float thinkingAnimationPhase01)
     {

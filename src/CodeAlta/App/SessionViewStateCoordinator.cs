@@ -149,6 +149,8 @@ internal sealed class SessionViewStateCoordinator
             SortMode = viewState.Navigator.SortMode,
             RecentSessionsPerProject = viewState.Navigator.RecentSessionsPerProject,
             ThemeSchemeName = viewState.Navigator.ThemeSchemeName,
+            LanguageName = viewState.Navigator.LanguageName,
+            AutoApprove = viewState.Navigator.AutoApprove,
         };
     }
 
@@ -163,10 +165,15 @@ internal sealed class SessionViewStateCoordinator
             SortMode = settings.SortMode,
             RecentSessionsPerProject = settings.RecentSessionsPerProject,
             ThemeSchemeName = NormalizeThemeSchemeName(settings.ThemeSchemeName),
+            LanguageName = NormalizeLanguageName(settings.LanguageName),
+            AutoApprove = settings.AutoApprove,
         };
         viewState.UpdatedAt = DateTimeOffset.UtcNow;
         await PersistViewStateAsync(viewState).ConfigureAwait(false);
     }
+
+    private static string? NormalizeLanguageName(string? languageName)
+        => string.IsNullOrWhiteSpace(languageName) ? null : languageName.Trim();
 
     private static SessionViewLocalState CreateSessionLocalState(SessionViewDescriptor session)
         => new()

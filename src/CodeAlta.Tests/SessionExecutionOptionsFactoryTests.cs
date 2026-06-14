@@ -99,7 +99,7 @@ public sealed class SessionExecutionOptionsFactoryTests
                 [ModelProviderIds.Codex.Value] = providerState,
             },
             selection,
-            new SessionPermissionRequestCoordinator(selection, CreateCommandContext(uiDispatcher)),
+            new SessionPermissionRequestCoordinator(selection, CreateCommandContext(uiDispatcher), uiDispatcher),
             new SessionUserInputRequestCoordinator(selection, CreateCommandContext(uiDispatcher)));
 
         var options = factory.BuildPreferredExecutionOptions(ModelProviderIds.Codex, temp.Path, []);
@@ -155,7 +155,7 @@ public sealed class SessionExecutionOptionsFactoryTests
             catalogOptions,
             new Dictionary<string, ModelProviderState>(StringComparer.OrdinalIgnoreCase),
             selection,
-            new SessionPermissionRequestCoordinator(selection, commandContext),
+            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher),
             new SessionUserInputRequestCoordinator(selection, commandContext));
 
         var options = factory.BuildExecutionOptions(session, tab);
@@ -214,7 +214,7 @@ public sealed class SessionExecutionOptionsFactoryTests
                 },
             },
             selection,
-            new SessionPermissionRequestCoordinator(selection, commandContext),
+            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher),
             new SessionUserInputRequestCoordinator(selection, commandContext),
             null,
             services);

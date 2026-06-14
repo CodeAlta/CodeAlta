@@ -1,6 +1,7 @@
 using CodeAlta.Presentation.Sidebar;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Input;
@@ -56,7 +57,7 @@ internal sealed class SidebarNodeHeaderView : Visual
         };
         _editor.KeyDown((_, e) => OnEditorKeyDown(e));
 
-        _validationIcon = new TextBlock(NerdFont.MdAlertCircleOutline.ToString());
+        _validationIcon = new TextBlock(TerminalIcons.MdAlertCircleOutline.ToString());
         _validationIcon.Style(() => TextBlockStyle.Default with { Foreground = _validationIcon.GetTheme().Error ?? _validationIcon.GetTheme().Foreground ?? Color.Default });
         _validationIndicator = new ComputedVisual(() => _row.InlineEditValidationMessage is null ? null : _validationIcon)
         {

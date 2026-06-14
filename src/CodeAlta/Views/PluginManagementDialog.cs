@@ -5,6 +5,7 @@ using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Collections;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
@@ -45,7 +46,7 @@ internal sealed class PluginManagementDialog
         _openFileAsync = openFileAsync;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -78,7 +79,7 @@ internal sealed class PluginManagementDialog
                     : BuildEmptyState();
             });
 
-        var refreshButton = new Button($"{NerdFont.MdRefresh} Refresh")
+        var refreshButton = new Button($"{TerminalIcons.MdRefresh} Refresh")
             .Tone(ControlTone.Primary)
             .Click(() => Reload(null));
 
@@ -214,17 +215,17 @@ internal sealed class PluginManagementDialog
             Spacing = 1,
         };
 
-        var sourceButton = new Button($"{NerdFont.MdFileDocumentEditOutline} Open plugin.cs")
+        var sourceButton = new Button($"{TerminalIcons.MdFileDocumentEditOutline} Open plugin.cs")
             .IsEnabled(!string.IsNullOrWhiteSpace(entry.SourcePath))
             .Click(() => _ = OpenFileAsync(entry.SourcePath, "plugin source"));
-        var readmeButton = new Button($"{NerdFont.MdFileDocumentOutline} Open README")
+        var readmeButton = new Button($"{TerminalIcons.MdFileDocumentOutline} Open README")
             .IsEnabled(!string.IsNullOrWhiteSpace(entry.ReadmePath))
             .Click(() => _ = OpenFileAsync(entry.ReadmePath, "plugin README"));
-        var rebuildButton = new Button($"{NerdFont.MdCogRefreshOutline} Rebuild")
+        var rebuildButton = new Button($"{TerminalIcons.MdCogRefreshOutline} Rebuild")
             .IsEnabled(false);
-        var reloadButton = new Button($"{NerdFont.MdReload} Reload")
+        var reloadButton = new Button($"{TerminalIcons.MdReload} Reload")
             .IsEnabled(false);
-        var cleanButton = new Button($"{NerdFont.MdDeleteSweepOutline} Clean")
+        var cleanButton = new Button($"{TerminalIcons.MdDeleteSweepOutline} Clean")
             .IsEnabled(false);
 
         var actionPane = new VStack(
@@ -455,13 +456,13 @@ internal sealed class PluginManagementDialog
     private static (string Tone, string Icon) GetStatusToneAndIcon(PluginManagementState state)
         => state switch
         {
-            PluginManagementState.Active => ("success", $"{NerdFont.MdCheckCircleOutline}"),
-            PluginManagementState.Enabled => ("primary", $"{NerdFont.MdPuzzleCheckOutline}"),
-            PluginManagementState.Disabled => ("muted", $"{NerdFont.MdPauseCircleOutline}"),
-            PluginManagementState.Failed => ("error", $"{NerdFont.MdCloseCircleOutline}"),
-            PluginManagementState.Changed => ("warning", $"{NerdFont.MdAlertOutline}"),
-            PluginManagementState.UnknownConfig => ("warning", $"{NerdFont.MdPuzzleRemoveOutline}"),
-            _ => ("primary", $"{NerdFont.MdPuzzleOutline}"),
+            PluginManagementState.Active => ("success", $"{TerminalIcons.MdCheckCircleOutline}"),
+            PluginManagementState.Enabled => ("primary", $"{TerminalIcons.MdPuzzleCheckOutline}"),
+            PluginManagementState.Disabled => ("muted", $"{TerminalIcons.MdPauseCircleOutline}"),
+            PluginManagementState.Failed => ("error", $"{TerminalIcons.MdCloseCircleOutline}"),
+            PluginManagementState.Changed => ("warning", $"{TerminalIcons.MdAlertOutline}"),
+            PluginManagementState.UnknownConfig => ("warning", $"{TerminalIcons.MdPuzzleRemoveOutline}"),
+            _ => ("primary", $"{TerminalIcons.MdPuzzleOutline}"),
         };
 
     private static string FormatStateText(PluginManagementState state)

@@ -260,13 +260,13 @@ internal static class ChatTimelineVisualFactory
     {
         return tone switch
         {
-            ChatTimelineTone.User => ($"{NerdFont.MdAccount}", "User Prompt", "accent"),
-            ChatTimelineTone.Assistant => ($"{NerdFont.MdRobot}", "Assistant", "success"),
-            ChatTimelineTone.Reasoning => ($"{NerdFont.CodLightbulb}", "Reasoning", "primary"),
-            ChatTimelineTone.Activity => ($"{NerdFont.CodTools}", "Activity", "muted"),
-            ChatTimelineTone.Notice => ($"{NerdFont.CodInfo}", "Notice", "success"),
-            ChatTimelineTone.Interaction => ($"{NerdFont.CodLock}", "Action Required", "warning"),
-            _ => ($"{NerdFont.MdMessageText}", "Message", "primary"),
+            ChatTimelineTone.User => ($"{TerminalIcons.MdAccount}", "User Prompt", "accent"),
+            ChatTimelineTone.Assistant => ($"{TerminalIcons.MdRobot}", "Assistant", "success"),
+            ChatTimelineTone.Reasoning => ($"{TerminalIcons.CodLightbulb}", "Reasoning", "primary"),
+            ChatTimelineTone.Activity => ($"{TerminalIcons.CodTools}", "Activity", "muted"),
+            ChatTimelineTone.Notice => ($"{TerminalIcons.CodInfo}", "Notice", "success"),
+            ChatTimelineTone.Interaction => ($"{TerminalIcons.CodLock}", "Action Required", "warning"),
+            _ => ($"{TerminalIcons.MdMessageText}", "Message", "primary"),
         };
     }
 
@@ -356,7 +356,7 @@ internal static class ChatTimelineVisualFactory
         }
 
         var copyState = new ChatMarkdownCopyState { DetailSections = collapsibleSections };
-        var copyButton = new Button(new TextBlock($"{NerdFont.MdContentCopy}"));
+        var copyButton = new Button(new TextBlock($"{TerminalIcons.MdContentCopy}"));
         copyButton.Click(() => copyButton.App?.Terminal.Clipboard.TrySetText(BuildCopyMarkdown(markdownControl.Markdown ?? string.Empty, ResolveCurrentCopySections(copyState.DetailSections, copyDetailMarkdownControls))));
 
         Visual groupContent = contentItems.Count == 1

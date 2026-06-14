@@ -4,6 +4,7 @@ using CodeAlta.Presentation.Editing;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -49,11 +50,11 @@ internal sealed class ConfigRecoveryDialog
                 : null);
         _editor.LeftMargins.Insert(0, diagnosticMargin);
 
-        _saveButton = new Button($"{NerdFont.MdContentSaveCheckOutline} Save and Continue") { Tone = ControlTone.Success };
+        _saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save and Continue") { Tone = ControlTone.Success };
         _saveButton.IsEnabled(CanSave);
         _saveButton.Click(SaveAndContinue);
 
-        _exitButton = new Button($"{NerdFont.MdExitRun} Exit") { Tone = ControlTone.Error };
+        _exitButton = new Button($"{TerminalIcons.MdExitRun} Exit") { Tone = ControlTone.Error };
         _exitButton.Click(Exit);
     }
 
@@ -100,7 +101,7 @@ internal sealed class ConfigRecoveryDialog
     private Dialog BuildDialog()
     {
         var heading = new VStack(
-            new Markup($"[bold warning]{NerdFont.MdAlertCircleOutline} CodeAlta could not load your configuration[/]"),
+            new Markup($"[bold warning]{TerminalIcons.MdAlertCircleOutline} CodeAlta could not load your configuration[/]"),
             new TextBlock(
                     "Fix the TOML below to continue startup. CodeAlta only parses and validates this file here; no providers, sessions, or background agent work are started until the configuration can be loaded.")
                 .Wrap(true),
@@ -181,13 +182,13 @@ internal sealed class ConfigRecoveryDialog
 
         if (_validation.IsValid)
         {
-            return $"[success]{NerdFont.MdCheckCircleOutline} Configuration can be loaded. Save and Continue is available.[/]";
+            return $"[success]{TerminalIcons.MdCheckCircleOutline} Configuration can be loaded. Save and Continue is available.[/]";
         }
 
         var location = _validation.Line is { } line
             ? $"Line {line}, column {_validation.Column.GetValueOrDefault(1)}: "
             : string.Empty;
-        return $"[error]{NerdFont.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? "Configuration is invalid."))}[/]";
+        return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? "Configuration is invalid."))}[/]";
     }
 
     internal bool CanSave()

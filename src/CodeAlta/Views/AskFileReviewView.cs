@@ -439,7 +439,7 @@ internal sealed class AskFileReviewView
     }
 
     private static Markup CreateUserCommentHeader(int lineIndex)
-        => new($"[accent]{NerdFont.MdAccount}[/] [bold]User Comment[/] [dim]- line {(lineIndex + 1).ToString(CultureInfo.InvariantCulture)}[/]");
+        => new($"[accent]{TerminalIcons.MdAccount}[/] [bold]User Comment[/] [dim]- line {(lineIndex + 1).ToString(CultureInfo.InvariantCulture)}[/]");
 
     private void FocusAdjacentComment(int lineIndex, bool forward)
     {

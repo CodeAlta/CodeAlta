@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.ViewModels;
@@ -126,8 +127,8 @@ internal sealed class PromptImageAttachmentStripView
             image,
             cellWidth: Math.Max(24, size.Width - 6),
             cellHeight: Math.Max(8, size.Height - 9));
-        var addButton = new Button(new TextBlock("Add To Prompt")) { Tone = ControlTone.Primary };
-        var cancelButton = new Button(new TextBlock("Cancel"));
+        var addButton = new Button(new TextBlock(SR.T("Add To Prompt"))) { Tone = ControlTone.Primary };
+        var cancelButton = new Button(new TextBlock(SR.T("Cancel")));
 
         void AddImage()
         {
@@ -160,8 +161,8 @@ internal sealed class PromptImageAttachmentStripView
             .Padding(1)
             .Content(content);
         dialog.Width(size.Width).Height(size.Height).MinWidth(64).MinHeight(22);
-        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Accept", LabelMarkup = "Add To Prompt", DescriptionMarkup = "Add the pasted image to the prompt.", Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), Importance = CommandImportance.Primary, Execute = _ => AddImage() });
-        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Cancel", LabelMarkup = "Cancel", DescriptionMarkup = "Cancel adding the pasted image.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => Cancel() });
+        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Accept", LabelMarkup = SR.T("Add To Prompt"), DescriptionMarkup = "Add the pasted image to the prompt.", Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), Importance = CommandImportance.Primary, Execute = _ => AddImage() });
+        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Cancel", LabelMarkup = SR.T("Cancel"), DescriptionMarkup = "Cancel adding the pasted image.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => Cancel() });
         dialog.Show();
         dialog.App?.Focus(titleBox);
     }
@@ -182,8 +183,8 @@ internal sealed class PromptImageAttachmentStripView
             image,
             cellWidth: Math.Max(24, size.Width - 8),
             cellHeight: Math.Max(8, size.Height - 10));
-        var saveButton = new Button(new TextBlock("Rename")) { Tone = ControlTone.Primary };
-        var deleteButton = new Button(new TextBlock("Delete")) { Tone = ControlTone.Error };
+        var saveButton = new Button(new TextBlock(SR.T("Rename"))) { Tone = ControlTone.Primary };
+        var deleteButton = new Button(new TextBlock(SR.T("Delete"))) { Tone = ControlTone.Error };
         var closeButton = new Button(new TextBlock("Close"));
 
         void Close()
@@ -244,7 +245,7 @@ internal sealed class PromptImageAttachmentStripView
         var titleEditor = new Grid()
             .Rows(new RowDefinition { Height = GridLength.Auto })
             .Columns(new ColumnDefinition { Width = GridLength.Auto }, new ColumnDefinition { Width = GridLength.Star(1) })
-            .Cell(new TextBlock("Title") { Wrap = false }, 0, 0)
+            .Cell(new TextBlock(SR.T("Title")) { Wrap = false }, 0, 0)
             .Cell(titleBox, 0, 1);
         var buttonRow = new HStack(buttons)
         {

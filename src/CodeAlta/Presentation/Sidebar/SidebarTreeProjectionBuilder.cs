@@ -70,7 +70,7 @@ internal static class SidebarTreeProjectionBuilder
             row.NodeId,
             SidebarNodeKind.Global,
             row,
-            NerdFont.MdHomeOutline,
+            TerminalIcons.MdHomeOutline,
             SidebarAccent.Global,
             SidebarSelectionTarget.Global(),
             true,
@@ -107,7 +107,7 @@ internal static class SidebarTreeProjectionBuilder
             row.NodeId,
             SidebarNodeKind.ProjectsRoot,
             row,
-            NerdFont.MdFolderMultipleOutline,
+            TerminalIcons.MdFolderMultipleOutline,
             SidebarAccent.Projects,
             null,
             true,
@@ -150,7 +150,7 @@ internal static class SidebarTreeProjectionBuilder
             row.NodeId,
             SidebarNodeKind.Project,
             row,
-            NerdFont.MdFolderOutline,
+            TerminalIcons.MdFolderOutline,
             SidebarAccent.Projects,
             SidebarSelectionTarget.Project(project.Id),
             expandedProjectIds.Contains(project.Id, StringComparer.OrdinalIgnoreCase),
@@ -171,10 +171,10 @@ internal static class SidebarTreeProjectionBuilder
 
         var icon = session.Kind switch
         {
-            SessionViewKind.GlobalSession => NerdFont.MdHomeOutline,
-            SessionViewKind.ProjectSession => NerdFont.MdChatProcessingOutline,
-            SessionViewKind.InternalSession => NerdFont.MdAccountCogOutline,
-            _ => NerdFont.MdChatProcessingOutline,
+            SessionViewKind.GlobalSession => TerminalIcons.MdHomeOutline,
+            SessionViewKind.ProjectSession => TerminalIcons.MdChatProcessingOutline,
+            SessionViewKind.InternalSession => TerminalIcons.MdAccountCogOutline,
+            _ => TerminalIcons.MdChatProcessingOutline,
         };
         var row = getOrCreateRow($"session:{session.SessionId}", SidebarNodeKind.Session, SidebarSelectionTarget.Session(session.SessionId));
         row.UpdateTitle(session.Title);
@@ -381,7 +381,7 @@ internal static class SidebarTreeProjectionBuilder
     }
 
     private static string BuildLineageDiagnosticIconMarkup()
-        => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Warning)}]{NerdFont.MdAlertCircleOutline}[/]";
+        => $"[{UiPalette.GetStatusToneMarkup(StatusTone.Warning)}]{TerminalIcons.MdAlertCircleOutline}[/]";
 
     private static string? ResolveLineageDiagnosticTooltip(SessionLineageDiagnostic diagnostic, SessionViewDescriptor session)
     {
@@ -407,19 +407,19 @@ internal static class SidebarTreeProjectionBuilder
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateProjectActions()
         =>
         [
-            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, NerdFont.MdFormatListBulleted, "Show all project sessions"),
-            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectDetails, NerdFont.MdInformationOutline, "Show project details"),
-            new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteProject, NerdFont.MdTrashCanOutline, "Delete project"),
+            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, TerminalIcons.MdFormatListBulleted, "Show all project sessions"),
+            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectDetails, TerminalIcons.MdInformationOutline, "Show project details"),
+            new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteProject, TerminalIcons.MdTrashCanOutline, "Delete project"),
         ];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateProjectsRootActions()
-        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenFolder, NerdFont.MdPlus, "Open folder", SidebarRowActionVisibility.Always)];
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenFolder, TerminalIcons.MdPlus, "Open folder", SidebarRowActionVisibility.Always)];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateGlobalActions()
-        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, NerdFont.MdFormatListBulleted, "Show all global sessions")];
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, TerminalIcons.MdFormatListBulleted, "Show all global sessions")];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateSessionActions()
-        => [new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteSession, NerdFont.MdTrashCanOutline, "Delete session")];
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteSession, TerminalIcons.MdTrashCanOutline, "Delete session")];
 
     private static IEnumerable<ProjectDescriptor> OrderProjectsByName(IEnumerable<ProjectDescriptor> projects)
     {

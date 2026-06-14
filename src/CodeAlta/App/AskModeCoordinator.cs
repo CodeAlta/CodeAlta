@@ -8,6 +8,7 @@ using CodeAlta.Views;
 using XenoAtom.Logging;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Input;
@@ -276,7 +277,7 @@ internal sealed class AskModeCoordinator : IDisposable
         Action discardAndContinue)
     {
         Dialog? dialog = null;
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"));
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"));
         closeButton.Click(Close);
 
         var keepButton = new Button("Keep answering");

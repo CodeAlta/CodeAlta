@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.ViewModels;
@@ -28,7 +29,7 @@ internal sealed class AgentPromptSelectorView
             .IsEnabled(workspaceViewModel.Bind.CanSelectAgentPrompt);
         PromptDialogButton = new Button(new TextBlock("Agent->") { Wrap = false, IsSelectable = false })
             .Click(controller.OpenPrompts);
-        var promptDialogButtonHost = PromptDialogButton.Tooltip(new TextBlock("Open the agent prompts dialog."));
+        var promptDialogButtonHost = PromptDialogButton.Tooltip(new TextBlock(SR.T("Open the agent prompts dialog.")));
 
         Root = new HStack(
         [

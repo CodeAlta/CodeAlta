@@ -45,12 +45,12 @@ internal static class SidebarSessionPresentation
     public static string BuildProviderMarkup(string? providerKey, string? displayName, SessionViewKind kind)
     {
         var accent = ResolveSessionAccent(providerKey, kind);
-        return $"[{UiPalette.GetSidebarAccentMarkup(accent)}]{NerdFont.MdCircleSmall}[/] {AnsiMarkup.Escape(ResolveProviderDisplayName(providerKey, displayName))}";
+        return $"[{UiPalette.GetSidebarAccentMarkup(accent)}]{TerminalIcons.MdCircleSmall}[/] {AnsiMarkup.Escape(ResolveProviderDisplayName(providerKey, displayName))}";
     }
 
     public static string BuildEditedPromptIconMarkup(SidebarAccent accent)
-        => $"[{UiPalette.GetSidebarAccentMarkup(accent)}]{NerdFont.MdSquareEditOutline}[/]";
+        => $"[{UiPalette.GetSidebarAccentMarkup(accent)}]{TerminalIcons.MdSquareEditOutline}[/]";
 
     public static string BuildReminderIconMarkup(SidebarAccent accent)
-        => $"[{UiPalette.GetSidebarAccentMarkup(accent)}]{NerdFont.MdTimerOutline}[/]";
+        => $"[{UiPalette.GetSidebarAccentMarkup(accent)}]{TerminalIcons.MdTimerOutline}[/]";
 }

@@ -69,7 +69,7 @@ internal sealed class PromptComposerView
         EditorView = Editor.Scrollable().IsTabStop(false);
         SendButton = CreatePromptActionButton(viewModel, controller.SendPrompt, controller.AbortSession);
         ExpandButton = CreateIconButton(
-            $"{NerdFont.MdSquareEditOutline}",
+            $"{TerminalIcons.MdSquareEditOutline}",
             "Open the current prompt in a large editor window (F6).",
             OpenExpandedPromptDialog,
             button => button.IsEnabled(viewModel.Bind.IsEnabled));
@@ -99,7 +99,7 @@ internal sealed class PromptComposerView
         editor.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Session.ExpandPrompt.Close", new KeyGesture(TerminalKey.Escape)));
         editor.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Session.ExpandPrompt.CloseWithCtrlEnter", new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), CommandPresentation.None));
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -271,7 +271,7 @@ internal sealed class PromptComposerView
         return new ComputedVisual(() =>
         {
             var isAbort = promptComposerViewModel.CanAbort;
-            var icon = isAbort ? $"{NerdFont.MdSquare}" : $"{NerdFont.MdSend}";
+            var icon = isAbort ? $"{TerminalIcons.MdSquare}" : $"{TerminalIcons.MdSend}";
             var tooltipText = isAbort ? "Abort the selected session run." : "Send the current prompt.";
             var action = isAbort ? abortSession : sendPrompt;
             var tone = isAbort ? ControlTone.Error : ControlTone.Success;

@@ -4,6 +4,8 @@ using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Plugin.Mcp;
+
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
@@ -209,7 +211,7 @@ public sealed class McpPlugin : PluginBase
         builder.Append('[')
             .Append(serverTone)
             .Append(']')
-            .Append(NerdFont.MdServerNetwork)
+            .Append(McpTerminalIcons.MdServerNetwork)
             .Append(" MCP[/] [")
             .Append(activeServerTone)
             .Append(']')

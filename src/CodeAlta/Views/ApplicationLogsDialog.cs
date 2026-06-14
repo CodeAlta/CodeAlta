@@ -1,5 +1,7 @@
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Catalog;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -36,7 +38,7 @@ internal sealed class ApplicationLogsDialog
             VerticalAlignment = Align.Stretch,
         }.WrapText(_wrapText);
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -44,7 +46,7 @@ internal sealed class ApplicationLogsDialog
         };
         closeButton.Click(Close);
 
-        var clearButton = new Button($"{NerdFont.MdDeleteOutline} Clear Logs")
+        var clearButton = new Button($"{TerminalIcons.MdDeleteOutline} {SR.T("Clear Logs")}")
         {
             Tone = ControlTone.Default,
         };
@@ -53,7 +55,7 @@ internal sealed class ApplicationLogsDialog
         var toolbar = new HStack(
         [
             clearButton,
-            new CheckBox("Wrap").IsChecked(_wrapText),
+            new CheckBox(SR.T("Wrap")).IsChecked(_wrapText),
         ])
         {
             HorizontalAlignment = Align.Stretch,
@@ -75,9 +77,9 @@ internal sealed class ApplicationLogsDialog
             .Cell(logHost.Stretch(), 1, 0);
 
         _dialog = new Dialog()
-            .Title("Application Logs")
+            .Title(SR.T("Application Logs"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Ctrl+F Search · Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Ctrl+F Search")} · {SR.T("Esc")} {SR.T("Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -85,8 +87,8 @@ internal sealed class ApplicationLogsDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ApplicationLogs.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the application logs dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the application logs dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),

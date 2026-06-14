@@ -1367,7 +1367,9 @@ public static class AgentBuiltInToolFactory
     {
         if (OperatingSystem.IsWindows())
         {
-            var fileName = "pwsh";
+            // Prefer pwsh (PowerShell Core) when available; fall back to the built-in
+            // powershell.exe so machines without pwsh can still run shell commands.
+            var fileName = File.Exists("pwsh.exe") ? "pwsh" : "powershell";
             // Always suppress the user profile on Windows so prompt theming and other profile-time output
             // cannot leak ANSI/control sequences into tool results. The login flag is Unix-oriented here.
             // Wrap the command so a failing final external command can propagate its native exit code

@@ -4,6 +4,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Diffing;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 
 namespace CodeAlta.Presentation.Formatting;
 
@@ -594,25 +595,25 @@ internal static class ChatMarkdownFormatter
     {
         return kind switch
         {
-            AgentSessionUpdateKind.Info => $"{NerdFont.CodInfo} Info",
-            AgentSessionUpdateKind.Warning => $"{NerdFont.CodWarning} Warning",
-            AgentSessionUpdateKind.Reconnecting => $"{NerdFont.MdServerNetwork} Reconnecting",
-            AgentSessionUpdateKind.ModelChanged => $"{NerdFont.MdChat} Model Used",
-            AgentSessionUpdateKind.ModeChanged => $"{NerdFont.MdCubeOutline} Mode Changed",
-            AgentSessionUpdateKind.TitleChanged => $"{NerdFont.MdRenameBox} Title Changed",
-            AgentSessionUpdateKind.ContextChanged => $"{NerdFont.MdFolder} Context Changed",
-            AgentSessionUpdateKind.PlanUpdated => $"{NerdFont.MdProgressWrench} Plan Updated",
-            AgentSessionUpdateKind.UsageUpdated => $"{NerdFont.MdPacMan} Usage Updated",
-            AgentSessionUpdateKind.CompactionStarted => $"{NerdFont.MdSelectCompare} Compaction Started",
-            AgentSessionUpdateKind.CompactionCompleted => $"{NerdFont.MdShieldPlusOutline} Compaction Completed",
-            AgentSessionUpdateKind.Handoff => $"{NerdFont.MdServerNetwork} Handoff",
-            AgentSessionUpdateKind.Truncated => $"{NerdFont.MdDelete} Session Truncated",
-            AgentSessionUpdateKind.Shutdown => $"{NerdFont.MdClose} Session Shutdown",
-            AgentSessionUpdateKind.TaskCompleted => $"{NerdFont.MdCheck} Task Completed",
-            AgentSessionUpdateKind.DiffUpdated => $"{NerdFont.CodEdit} Diff Updated",
-            AgentSessionUpdateKind.Started => $"{NerdFont.MdTimerOutline} Session Started",
-            AgentSessionUpdateKind.Resumed => $"{NerdFont.MdAccountArrowRight} Session Resumed",
-            AgentSessionUpdateKind.Idle => $"{NerdFont.MdCat} Agent Idle",
+            AgentSessionUpdateKind.Info => $"{TerminalIcons.CodInfo} Info",
+            AgentSessionUpdateKind.Warning => $"{TerminalIcons.CodWarning} Warning",
+            AgentSessionUpdateKind.Reconnecting => $"{TerminalIcons.MdServerNetwork} Reconnecting",
+            AgentSessionUpdateKind.ModelChanged => $"{TerminalIcons.MdChat} Model Used",
+            AgentSessionUpdateKind.ModeChanged => $"{TerminalIcons.MdCubeOutline} Mode Changed",
+            AgentSessionUpdateKind.TitleChanged => $"{TerminalIcons.MdRenameBox} Title Changed",
+            AgentSessionUpdateKind.ContextChanged => $"{TerminalIcons.MdFolder} Context Changed",
+            AgentSessionUpdateKind.PlanUpdated => $"{TerminalIcons.MdProgressWrench} Plan Updated",
+            AgentSessionUpdateKind.UsageUpdated => $"{TerminalIcons.MdPacMan} Usage Updated",
+            AgentSessionUpdateKind.CompactionStarted => $"{TerminalIcons.MdSelectCompare} Compaction Started",
+            AgentSessionUpdateKind.CompactionCompleted => $"{TerminalIcons.MdShieldPlusOutline} Compaction Completed",
+            AgentSessionUpdateKind.Handoff => $"{TerminalIcons.MdServerNetwork} Handoff",
+            AgentSessionUpdateKind.Truncated => $"{TerminalIcons.MdDelete} Session Truncated",
+            AgentSessionUpdateKind.Shutdown => $"{TerminalIcons.MdClose} Session Shutdown",
+            AgentSessionUpdateKind.TaskCompleted => $"{TerminalIcons.MdCheck} Task Completed",
+            AgentSessionUpdateKind.DiffUpdated => $"{TerminalIcons.CodEdit} Diff Updated",
+            AgentSessionUpdateKind.Started => $"{TerminalIcons.MdTimerOutline} Session Started",
+            AgentSessionUpdateKind.Resumed => $"{TerminalIcons.MdAccountArrowRight} Session Resumed",
+            AgentSessionUpdateKind.Idle => $"{TerminalIcons.MdCat} Agent Idle",
             _ => SplitPascalCase(kind.ToString()),
         };
     }
@@ -882,13 +883,13 @@ internal static class ChatMarkdownFormatter
         if (string.IsNullOrWhiteSpace(interaction.Message))
         {
             return string.IsNullOrWhiteSpace(detailsMarkdown)
-                ? $"**{NerdFont.CodArrowRight} {label}**"
-                : $"**{NerdFont.CodArrowRight} {label}**\n\n{detailsMarkdown}";
+                ? $"**{TerminalIcons.CodArrowRight} {label}**"
+                : $"**{TerminalIcons.CodArrowRight} {label}**\n\n{detailsMarkdown}";
         }
 
         return string.IsNullOrWhiteSpace(detailsMarkdown)
-            ? $"**{NerdFont.CodArrowRight} {label}**\n\n{interaction.Message}"
-            : $"**{NerdFont.CodArrowRight} {label}**\n\n{interaction.Message}\n\n{detailsMarkdown}";
+            ? $"**{TerminalIcons.CodArrowRight} {label}**\n\n{interaction.Message}"
+            : $"**{TerminalIcons.CodArrowRight} {label}**\n\n{interaction.Message}\n\n{detailsMarkdown}";
     }
 
     public static string FormatChatImmediatePermissionDecisionMarkdown(AgentPermissionDecision decision, bool autoApprove)

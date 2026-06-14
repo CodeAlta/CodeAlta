@@ -8,6 +8,7 @@ using CodeAlta.Presentation.Editing;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -151,7 +152,7 @@ internal sealed class PromptManagementDialog
 
     private Dialog BuildDialog()
     {
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -165,11 +166,11 @@ internal sealed class PromptManagementDialog
             .Tone(ControlTone.Primary)
             .IsEnabled(() => _getSelectedProject() is not null)
             .Click(() => ShowNewPromptDialog(PromptStorageScope.Project));
-        var saveButton = new Button($"{NerdFont.MdContentSaveCheckOutline} Save")
+        var saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save")
             .Tone(ControlTone.Success)
             .IsEnabled(CanSaveSelectedPrompt)
             .Click(SaveSelectedPrompt);
-        var deleteButton = new Button($"{NerdFont.MdTrashCanOutline} Delete")
+        var deleteButton = new Button($"{TerminalIcons.MdTrashCanOutline} Delete")
             .Tone(ControlTone.Error)
             .IsEnabled(() => !IsSelectedReadOnly() && GetSelectedPath() is not null)
             .Click(DeleteSelectedPrompt);

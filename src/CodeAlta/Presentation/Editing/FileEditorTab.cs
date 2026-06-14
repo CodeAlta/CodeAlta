@@ -506,7 +506,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(bodyLines);
         ArgumentNullException.ThrowIfNull(actions);
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,

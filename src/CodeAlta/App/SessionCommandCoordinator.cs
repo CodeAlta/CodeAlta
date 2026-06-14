@@ -39,6 +39,7 @@ internal sealed class SessionCommandCoordinator
         ShellSessionCommandContext commandContext,
         SessionPromptQueueCoordinator queueCoordinator,
         PromptComposerViewModel promptComposerViewModel,
+        IUiDispatcher uiDispatcher,
         IProjectFileSearchService? projectFileSearchService = null,
         PluginHostBridge? pluginHostBridge = null,
         IServiceProvider? altaServices = null,
@@ -56,6 +57,7 @@ internal sealed class SessionCommandCoordinator
             commandContext,
             queueCoordinator,
             promptComposerViewModel,
+            uiDispatcher,
             projectFileSearchService,
             pluginHostBridge,
             altaServices,
@@ -74,6 +76,7 @@ internal sealed class SessionCommandCoordinator
         ShellSessionCommandContext commandContext,
         SessionPromptQueueCoordinator queueCoordinator,
         PromptComposerViewModel promptComposerViewModel,
+        IUiDispatcher uiDispatcher,
         IProjectFileSearchService? projectFileSearchService = null,
         PluginHostBridge? pluginHostBridge = null,
         IServiceProvider? altaServices = null,
@@ -99,7 +102,7 @@ internal sealed class SessionCommandCoordinator
         _promptComposerViewModel = promptComposerViewModel;
         _getAlwaysEnqueue = getAlwaysEnqueue ?? (() => _promptComposerViewModel.AlwaysEnqueue);
         _pluginHostBridge = pluginHostBridge;
-        var permissionRequests = new SessionPermissionRequestCoordinator(sessionSelection, commandContext);
+        var permissionRequests = new SessionPermissionRequestCoordinator(sessionSelection, commandContext, uiDispatcher);
         var userInputRequests = new SessionUserInputRequestCoordinator(sessionSelection, commandContext);
         _executionOptionsFactory = new SessionExecutionOptionsFactory(catalogOptions, modelProviderStates, sessionSelection, permissionRequests, userInputRequests, getPreferredAgentPromptId, altaServices);
         _promptDispatchCoordinator = new SessionPromptDispatchCoordinator(

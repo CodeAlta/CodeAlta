@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Models;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.Presentation.Chat;
@@ -125,11 +126,11 @@ internal static class ModelProviderPresentation
                 };
                 var icon = state.Availability switch
                 {
-                    ModelProviderAvailability.Ready => $"{NerdFont.MdCheck}",
-                    ModelProviderAvailability.Unsupported => $"{NerdFont.CodWarning}",
-                    ModelProviderAvailability.Failed => $"{NerdFont.MdClose}",
-                    ModelProviderAvailability.Probing => $"{NerdFont.MdTimerOutline}",
-                    _ => $"{NerdFont.MdHelpBox}",
+                    ModelProviderAvailability.Ready => $"{TerminalIcons.MdCheck}",
+                    ModelProviderAvailability.Unsupported => $"{TerminalIcons.CodWarning}",
+                    ModelProviderAvailability.Failed => $"{TerminalIcons.MdClose}",
+                    ModelProviderAvailability.Probing => $"{TerminalIcons.MdTimerOutline}",
+                    _ => $"{TerminalIcons.MdHelpBox}",
                 };
                 var selected = string.Equals(state.ProviderId.Value, selectedProviderId.Value, StringComparison.OrdinalIgnoreCase)
                     ? "[bold]"
@@ -139,7 +140,7 @@ internal static class ModelProviderPresentation
             });
 
         var prefix = isInitializing
-            ? $"[primary]{NerdFont.MdTimerOutline} Detecting[/] "
+            ? $"[primary]{TerminalIcons.MdTimerOutline} Detecting[/] "
             : string.Empty;
         return prefix + string.Join("   ", items);
     }
@@ -155,7 +156,7 @@ internal static class ModelProviderPresentation
         var states = providerStates.ToArray();
         if (isInitializing)
         {
-            return $"[primary]{NerdFont.MdTimerOutline} Detecting providers[/]";
+            return $"[primary]{TerminalIcons.MdTimerOutline} Detecting providers[/]";
         }
 
         HashSet<string>? configuredKeySet = null;
@@ -177,8 +178,8 @@ internal static class ModelProviderPresentation
         var activeLabel = readyCount == 1 ? "active provider" : "active providers";
         var activeTone = readyCount > 0 ? "success" : "muted";
         var activeIcon = readyCount > 0
-            ? $"{NerdFont.MdCheckCircleOutline}"
-            : $"{NerdFont.MdTuneVariant}";
+            ? $"{TerminalIcons.MdCheckCircleOutline}"
+            : $"{TerminalIcons.MdTuneVariant}";
         var activeSegment = $"[{activeTone}]{activeIcon} {readyCount} {activeLabel}[/]";
         var errorSegment = errorCount > 0
             ? $" [warning]· {errorCount} error{(errorCount == 1 ? string.Empty : "s")}[/]"

@@ -1115,10 +1115,10 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void BuildStatusIconMarkup_ReturnsColoredIconsPerTone()
     {
-        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Ready), NerdFont.MdCheckCircleOutline.ToString());
-        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Warning), NerdFont.MdAlertOutline.ToString());
-        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Error), NerdFont.MdAlertCircleOutline.ToString());
-        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Info), NerdFont.OctInfo.ToString());
+        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Ready), TerminalIcons.MdCheckCircleOutline.ToString());
+        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Warning), TerminalIcons.MdAlertOutline.ToString());
+        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Error), TerminalIcons.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(StatusVisualFormatter.BuildStatusIconMarkup(StatusTone.Info), TerminalIcons.OctInfo.ToString());
     }
 
     [TestMethod]
@@ -2974,7 +2974,7 @@ public sealed class CodeAltaAppTests
 
         StringAssert.Contains(markup, UiPalette.GetSidebarAccentMarkup(SidebarAccent.ProjectSession));
         StringAssert.Contains(markup, "Copilot");
-        StringAssert.Contains(markup, NerdFont.MdCircleSmall.ToString());
+        StringAssert.Contains(markup, TerminalIcons.MdCircleSmall.ToString());
     }
 
     [TestMethod]

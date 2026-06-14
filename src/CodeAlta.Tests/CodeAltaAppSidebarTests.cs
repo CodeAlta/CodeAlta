@@ -8,6 +8,7 @@ using CodeAlta.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Hosting;
@@ -108,7 +109,7 @@ public sealed class CodeAltaAppSidebarTests
 
         var otherProjectNode = projection.Roots[1].Children.Single(node => node.SelectionTarget == SidebarSelectionTarget.Project("project-2"));
         Assert.AreEqual(SidebarSelectionTarget.Session(crossProjectChild.SessionId), otherProjectNode.Children[0].SelectionTarget);
-        StringAssert.Contains(otherProjectNode.Children[0].Row.StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(otherProjectNode.Children[0].Row.StateIconMarkup, TerminalIcons.MdAlertCircleOutline.ToString());
         StringAssert.Contains(otherProjectNode.Children[0].Row.StateTooltip, "another scope");
     }
 
@@ -141,11 +142,11 @@ public sealed class CodeAltaAppSidebarTests
             new[] { missingParent.SessionId, cycleParent.SessionId, cycleChild.SessionId },
             projectNode.Children.Select(static node => node.SelectionTarget!.Value.SessionId).ToArray());
         Assert.IsTrue(projectNode.Children.All(static node => node.Children.Count == 0));
-        StringAssert.Contains(rows[$"session:{missingParent.SessionId}"].StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(rows[$"session:{missingParent.SessionId}"].StateIconMarkup, TerminalIcons.MdAlertCircleOutline.ToString());
         StringAssert.Contains(rows[$"session:{missingParent.SessionId}"].StateTooltip, "missing");
-        StringAssert.Contains(rows[$"session:{cycleParent.SessionId}"].StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(rows[$"session:{cycleParent.SessionId}"].StateIconMarkup, TerminalIcons.MdAlertCircleOutline.ToString());
         StringAssert.Contains(rows[$"session:{cycleParent.SessionId}"].StateTooltip, "cycle");
-        StringAssert.Contains(rows[$"session:{cycleChild.SessionId}"].StateIconMarkup, NerdFont.MdAlertCircleOutline.ToString());
+        StringAssert.Contains(rows[$"session:{cycleChild.SessionId}"].StateIconMarkup, TerminalIcons.MdAlertCircleOutline.ToString());
         StringAssert.Contains(rows[$"session:{cycleChild.SessionId}"].StateTooltip, "cycle");
     }
 
@@ -536,7 +537,7 @@ public sealed class CodeAltaAppSidebarTests
             timestamp.AddMinutes(1));
 
         Assert.IsFalse(rows[$"session:{session.SessionId}"].ShowStateSpinner);
-        StringAssert.Contains(rows[$"session:{session.SessionId}"].StateIconMarkup, NerdFont.MdSquareEditOutline.ToString());
+        StringAssert.Contains(rows[$"session:{session.SessionId}"].StateIconMarkup, TerminalIcons.MdSquareEditOutline.ToString());
     }
 
     [TestMethod]
@@ -559,8 +560,8 @@ public sealed class CodeAltaAppSidebarTests
             timestamp.AddMinutes(1));
 
         Assert.IsFalse(rows[$"session:{session.SessionId}"].ShowStateSpinner);
-        StringAssert.Contains(rows[$"session:{session.SessionId}"].StateIconMarkup, NerdFont.MdTimerOutline.ToString());
-        StringAssert.Contains(rows[$"project:{project.Id}"].StateIconMarkup, NerdFont.MdTimerOutline.ToString());
+        StringAssert.Contains(rows[$"session:{session.SessionId}"].StateIconMarkup, TerminalIcons.MdTimerOutline.ToString());
+        StringAssert.Contains(rows[$"project:{project.Id}"].StateIconMarkup, TerminalIcons.MdTimerOutline.ToString());
         StringAssert.Contains(rows[$"project:{project.Id}"].StateTooltip, "reminder active");
     }
 
@@ -583,7 +584,7 @@ public sealed class CodeAltaAppSidebarTests
             timestamp.AddMinutes(1));
 
         Assert.IsFalse(rows[$"project:{project.Id}"].ShowStateSpinner);
-        StringAssert.Contains(rows[$"project:{project.Id}"].StateIconMarkup, NerdFont.MdSquareEditOutline.ToString());
+        StringAssert.Contains(rows[$"project:{project.Id}"].StateIconMarkup, TerminalIcons.MdSquareEditOutline.ToString());
         StringAssert.Contains(rows[$"project:{project.Id}"].StateTooltip, "Project draft");
     }
 
@@ -631,7 +632,7 @@ public sealed class CodeAltaAppSidebarTests
         try
         {
             TickTerminalApp(app);
-            row.UpdateStateIndicator(NerdFont.MdTimerOutline.ToString(), showSpinner: true, "reminder active");
+            row.UpdateStateIndicator(TerminalIcons.MdTimerOutline.ToString(), showSpinner: true, "reminder active");
 
             TickTerminalApp(app);
         }

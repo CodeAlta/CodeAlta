@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
@@ -15,8 +16,8 @@ internal static class CodeAltaGlobalCommandConfigurator
         app.AddGlobalCommand(new Command
         {
             Id = "CodeAlta.Shell.Exit",
-            LabelMarkup = "Exit",
-            DescriptionMarkup = "Quit CodeAlta.",
+            LabelMarkup = SR.T("Exit"),
+            DescriptionMarkup = SR.T("Quit CodeAlta."),
             Name = "exit",
             Presentation = CommandPresentation.CommandBar | CommandPresentation.CommandPalette,
             SearchText = "/exit quit",

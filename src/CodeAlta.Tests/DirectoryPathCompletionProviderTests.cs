@@ -4,6 +4,7 @@ using CodeAlta.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Hosting;
 
@@ -185,7 +186,7 @@ public sealed class DirectoryPathCompletionProviderTests
             var output = backend.GetOutText();
             StringAssert.Contains(output, "CodeAlta");
             StringAssert.Contains(output, projectPath);
-            StringAssert.Contains(output, NerdFont.MdFolderOutline.ToString());
+            StringAssert.Contains(output, TerminalIcons.MdFolderOutline.ToString());
             StringAssert.Contains(output, "╭");
             StringAssert.Contains(output, "Ctrl+I hidden");
         }

@@ -6,6 +6,7 @@ using CodeAlta.Presentation.Editing;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Collections;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
@@ -113,28 +114,28 @@ internal sealed class ReminderManagementDialog
 
     private Dialog BuildDialog()
     {
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
         };
         closeButton.Click(Close);
 
-        var createButton = new Button($"{NerdFont.MdTimerOutline} Create")
+        var createButton = new Button($"{TerminalIcons.MdTimerOutline} Create")
             .Tone(ControlTone.Success)
             .Click(CreateReminder);
-        var loadButton = new Button($"{NerdFont.MdFileEditOutline} Load Message")
+        var loadButton = new Button($"{TerminalIcons.MdFileEditOutline} Load Message")
             .IsEnabled(() => GetSelectedRow() is not null)
             .Click(LoadSelectedMessage);
-        var updateButton = new Button($"{NerdFont.MdContentSaveCheckOutline} Save Message")
+        var updateButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save Message")
             .Tone(ControlTone.Success)
             .IsEnabled(() => GetSelectedRow() is not null)
             .Click(UpdateSelectedMessage);
-        var deleteButton = new Button($"{NerdFont.MdTrashCanOutline} Delete")
+        var deleteButton = new Button($"{TerminalIcons.MdTrashCanOutline} Delete")
             .Tone(ControlTone.Error)
             .IsEnabled(() => GetSelectedRow() is not null)
             .Click(DeleteSelectedReminder);
-        var refreshButton = new Button($"{NerdFont.MdRefresh} Refresh")
+        var refreshButton = new Button($"{TerminalIcons.MdRefresh} Refresh")
             .Click(() => Reload(GetSelectedRow()?.Descriptor.ReminderId));
 
         var toolbar = new HStack(createButton, loadButton, updateButton, deleteButton, refreshButton)
@@ -419,7 +420,7 @@ internal sealed class ReminderManagementDialog
         _rows.AddRange(reminders);
         _summaryText = reminders.Length == 0
             ? "[dim]No active reminders for this session.[/]"
-            : $"[primary]{NerdFont.MdTimerOutline} {reminders.Length} active reminder{(reminders.Length == 1 ? string.Empty : "s")}[/]";
+            : $"[primary]{TerminalIcons.MdTimerOutline} {reminders.Length} active reminder{(reminders.Length == 1 ? string.Empty : "s")}[/]";
 
         var selectedIndex = -1;
         if (!string.IsNullOrWhiteSpace(preferredReminderId))
@@ -464,7 +465,7 @@ internal sealed class ReminderManagementDialog
             ? string.Empty
             : $" · {descriptor.FiredCount}/{descriptor.RepeatCount}";
         return new VStack(
-            new Markup($"[bold]{NerdFont.MdTimerOutline} {AnsiMarkup.Escape(due)}[/]") { Wrap = false },
+            new Markup($"[bold]{TerminalIcons.MdTimerOutline} {AnsiMarkup.Escape(due)}[/]") { Wrap = false },
             new Markup($"[dim]{AnsiMarkup.Escape(descriptor.ContentPreview)}[/]") { Wrap = false },
             new Markup($"[dim]{AnsiMarkup.Escape(descriptor.ReminderId)}{repeat}[/]") { Wrap = false });
     }

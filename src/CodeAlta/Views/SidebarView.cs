@@ -98,20 +98,20 @@ internal sealed class SidebarView
         var footer = new HStack(
         [
             CreateToolbarButton(
-                () => NerdFont.MdRefresh,
-                "Refresh projects and sessions",
+                () => TerminalIcons.MdRefresh,
+                SR.T("Refresh projects and sessions"),
                 refreshCatalog),
             CreateToolbarButton(
                 () => viewModel.SortMode == NavigatorProjectSortMode.Name
-                    ? NerdFont.MdSortAlphabeticalAscending
-                    : NerdFont.MdSortCalendarDescending,
+                    ? TerminalIcons.MdSortAlphabeticalAscending
+                    : TerminalIcons.MdSortCalendarDescending,
                 () => viewModel.SortMode == NavigatorProjectSortMode.Name
-                    ? "Sort projects by name"
-                    : "Sort projects by last activity",
+                    ? SR.T("Sort projects by name")
+                    : SR.T("Sort projects by last activity"),
                 cycleSortMode),
             CreateToolbarButton(
-                () => NerdFont.MdCogOutline,
-                "Workspace settings",
+                () => TerminalIcons.MdCogOutline,
+                SR.T("Workspace settings"),
                 openNavigatorSettings),
         ])
         {
@@ -121,10 +121,10 @@ internal sealed class SidebarView
         if (openLogs is not null)
         {
             footer.Children.Add(
-                new Button(new TextBlock($"{NerdFont.MdTextBoxSearchOutline} Show Logs"))
+                new Button(new TextBlock($"{TerminalIcons.MdTextBoxSearchOutline} {SR.T("Show Logs")}"))
                     .Style(ToolbarButtonStyle)
                     .Click(openLogs)
-                    .Tooltip(new TextBlock("Show application logs")));
+                    .Tooltip(new TextBlock(SR.T("Show application logs"))));
         }
 
         _contentGrid = new Grid
@@ -145,7 +145,7 @@ internal sealed class SidebarView
         var collapseToggle = new TitleButton(_collapseToggleIcon)
             .Style(TitleButtonStyle)
             .Click(() => SetCollapsed(!_isCollapsed))
-            .Tooltip(new TextBlock(() => _isCollapsed ? "Expand navigator" : "Collapse navigator"));
+            .Tooltip(new TextBlock(() => _isCollapsed ? SR.T("Expand navigator") : SR.T("Collapse navigator")));
 
         Group? group = null;
         group = new Group(_title, _contentGrid)
@@ -240,7 +240,7 @@ internal sealed class SidebarView
         => _notesView.SetMarkdown(markdown);
 
     private string BuildTitleMarkup() => _isCollapsed ? "" :
-        $"[bold]{NerdFont.FaFolderTree} Navigator[/]";
+        $"[bold]{TerminalIcons.FaFolderTree} {SR.T("Navigator")}[/]";
 
     private TreeNode CreateNode(SidebarTreeNodeProjection projection)
     {
@@ -381,21 +381,21 @@ internal sealed class SidebarView
                 },
             };
 
-            var copyButton = new Button(new TextBlock(NerdFont.MdContentCopy.ToString()) { Wrap = false, IsSelectable = false })
+            var copyButton = new Button(new TextBlock(TerminalIcons.MdContentCopy.ToString()) { Wrap = false, IsSelectable = false })
                 .Style(TitleButtonStyle);
             copyButton.Click(() => copyButton.App?.Terminal.Clipboard.TrySetText(_markdown.Markdown ?? string.Empty));
-            var copyButtonHost = copyButton.Tooltip(new TextBlock("Copy notes as Markdown"));
-            var clearButton = new Button(new TextBlock($"{NerdFont.MdTrashCanOutline} Clear") { Wrap = false, IsSelectable = false })
+            var copyButtonHost = copyButton.Tooltip(new TextBlock(SR.T("Copy notes as Markdown")));
+            var clearButton = new Button(new TextBlock($"{TerminalIcons.MdTrashCanOutline} {SR.T("Clear")}") { Wrap = false, IsSelectable = false })
                 .Style(TitleButtonStyle);
             clearButton.Click(ClearNotes);
-            var clearButtonHost = clearButton.Tooltip(new TextBlock("Clear notes"));
+            var clearButtonHost = clearButton.Tooltip(new TextBlock(SR.T("Clear notes")));
             var notesScroll = new ScrollViewer(_markdown)
                 .HorizontalScrollEnabled(false)
                 .VerticalScrollEnabled(true)
                 .Stretch();
 
             Group? notesGroup = null;
-            notesGroup = new Group($"{NerdFont.MdNoteTextOutline} Notes", notesScroll)
+            notesGroup = new Group($"{TerminalIcons.MdNoteTextOutline} {SR.T("Notes")}", notesScroll)
             {
                 HorizontalAlignment = Align.Stretch,
                 VerticalAlignment = Align.Stretch,

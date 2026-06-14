@@ -405,7 +405,7 @@ internal sealed class CodeAltaFrontendComposition
                 new SessionCommandUiPort(
                     uiDispatcher,
                     frontend.TrySetPromptUnavailableStatus,
-                    static () => true,
+                    () => AppSettings.AutoApprove,
                     frontend.ClearDraftPromptText,
                     frontend.SetReadyStatusForCurrentSelection,
                     () => frontendEvents.Publish(new HeaderChangedEvent()),
@@ -416,6 +416,7 @@ internal sealed class CodeAltaFrontendComposition
                 shellStatusPort),
             sessionPromptQueueCoordinator,
             promptComposerViewModel,
+            uiDispatcher,
             projectFileSearchService,
             pluginHostBridge,
             altaServices,

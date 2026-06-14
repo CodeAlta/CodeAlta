@@ -713,7 +713,9 @@ public sealed class ArchitectureGuardrailTests
             "Presentation/Tabs/SessionTabStripCoordinator.cs:710:_ = CloseTabFromViewAsync(CodeAltaApp.DraftTabId, ShellTabCloseReason.UserDetached);",
             "Presentation/Tabs/SessionTabStripCoordinator.cs:745:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.FileEditorClosed);",
             "Presentation/Tabs/SessionTabStripCoordinator.cs:786:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.UserDetached);",
-            "Presentation/Sessions/SessionInfoPresenter.cs:96:_ = LoadAsync(cancellationTokenSource.Token);",
+            "Presentation/Sessions/SessionInfoPresenter.cs:97:_ = LoadAsync(cancellationTokenSource.Token);",
+            "Presentation/Prompting/ProjectFileReferencePopupController.cs:153:var sessionCreateTask = Task.Run(",
+            "Presentation/Prompting/ProjectFileReferencePopupController.cs:164:_ = sessionCreateTask.ContinueWith(",
         };
         var violations = new[]
             {
@@ -1691,7 +1693,7 @@ public sealed class ArchitectureGuardrailTests
 
         Assert.IsTrue(workspaceSource.Contains("promptComposerView.SendButton", StringComparison.Ordinal));
         Assert.IsTrue(normalizedSource.Contains("usageIndicator,\n            reminderButton,\n            sessionInfoButton,\n            promptComposerView.ExpandButton,\n            promptComposerView.SendButton,", StringComparison.Ordinal));
-        Assert.IsTrue(promptComposerSource.Contains("var icon = isAbort ? $\"{NerdFont.MdSquare}\" : $\"{NerdFont.MdSend}\";", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("var icon = isAbort ? $\"{TerminalIcons.MdSquare}\" : $\"{TerminalIcons.MdSend}\";", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var tone = isAbort ? ControlTone.Error : ControlTone.Success;", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var tooltipText = isAbort ? \"Abort the selected session run.\" : \"Send the current prompt.\";", StringComparison.Ordinal));
     }

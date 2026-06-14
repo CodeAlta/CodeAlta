@@ -10,6 +10,7 @@ using CodeAlta.ViewModels;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Graphics;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -279,7 +280,7 @@ internal sealed class SessionWorkspaceView
 
         Visual? sessionInfoButton = null;
         sessionInfoButton = CreateIconButton(
-                $"{NerdFont.MdInformationOutline}",
+                $"{TerminalIcons.MdInformationOutline}",
                 $"Show information about the selected session ({SessionInfoShortcutSequence}).",
                 () => _chromeController.ToggleSessionInfoPopup(sessionInfoButton!),
                 button => button.IsEnabled(workspaceViewModel.Bind.CanShowSessionInfo));
@@ -308,8 +309,8 @@ internal sealed class SessionWorkspaceView
             {
                 var count = _chromeController.GetActiveReminderCount();
                 return count > 0
-                    ? $"{NerdFont.MdTimerOutline} {count}"
-                    : $"{NerdFont.MdTimerOutline}";
+                    ? $"{TerminalIcons.MdTimerOutline} {count}"
+                    : $"{TerminalIcons.MdTimerOutline}";
             })
             {
                 Wrap = false,

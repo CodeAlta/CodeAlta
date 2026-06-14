@@ -228,7 +228,7 @@ internal sealed class ToolCallPresenter
             _uiDispatcher,
             static timestampValue =>
             {
-                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{NerdFont.CodTools}[/] [bold]Tool Calls[/]");
+                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{TerminalIcons.CodTools}[/] [bold]Tool Calls[/]");
                 var summaryText = new Markup("[dim]Waiting for tool activity...[/]");
                 var timestampText = new Markup(string.Empty);
                 var itemsHost = new WrapHStack { Spacing = 1, RunSpacing = 0 };
@@ -313,7 +313,7 @@ internal sealed class ToolCallPresenter
             var detailsGroup = new Group("Details", metadata).Padding(new Thickness(1, 0, 1, 0)).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Start);
             var outputGroup = new Group("Diff / Output", log).TopRightText(new CheckBox("Wrap").IsChecked(wrapText)).Padding(0).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Stretch);
             var bounds = _getDialogBounds() ?? entry.Button.GetAbsoluteBounds();
-            var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
+            var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
             closeButton.Click(() => CloseDialog(entry));
             var dialog = new Dialog()
                 .Title(ToolCallEventInterpreter.ResolveToolDisplayName(entry.ActivityKind, entry.DisplayName))

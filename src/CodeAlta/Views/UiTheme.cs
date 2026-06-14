@@ -1,4 +1,5 @@
 using CodeAlta.App;
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Styling;
@@ -11,6 +12,20 @@ internal static class UiTheme
     {
         ArgumentNullException.ThrowIfNull(shellView);
         ArgumentNullException.ThrowIfNull(stateCoordinator);
+
+        // Apply language from settings, falling back to system locale
+        var languageName = stateCoordinator.NavigatorSettings.LanguageName;
+        if (!string.IsNullOrWhiteSpace(languageName))
+        {
+            SR.Language = languageName;
+        }
+        else
+        {
+            SR.AutoDetect();
+        }
+
+        // Apply auto-approve from saved settings
+        AppSettings.AutoApprove = stateCoordinator.NavigatorSettings.AutoApprove;
 
         string? cachedSchemeName = null;
         var cachedTheme = CodeAltaThemeResolver.Resolve(stateCoordinator.NavigatorSettings);

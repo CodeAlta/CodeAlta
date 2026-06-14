@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Shell;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
@@ -57,7 +59,7 @@ internal sealed class AboutDialog
     private Dialog BuildDialog()
     {
         var version = CodeAltaApplicationInfo.GetVersionInfo();
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -69,7 +71,7 @@ internal sealed class AboutDialog
 
         var versionLines = new List<Visual>
         {
-            new Markup($"[bold]Version[/] {AnsiMarkup.Escape(version.PackageVersion)}")
+            new Markup($"[bold]{SR.T("Version")}[/] {AnsiMarkup.Escape(version.PackageVersion)}")
             {
                 HorizontalAlignment = Align.Center,
                 Wrap = true,
@@ -77,7 +79,7 @@ internal sealed class AboutDialog
         };
         if (!string.IsNullOrWhiteSpace(version.BuildMetadata))
         {
-            versionLines.Add(new Markup($"[dim]Build {AnsiMarkup.Escape(ShortenBuildMetadata(version.BuildMetadata))}[/]")
+            versionLines.Add(new Markup($"[dim]{SR.T("Build")} {AnsiMarkup.Escape(ShortenBuildMetadata(version.BuildMetadata))}[/]")
             {
                 HorizontalAlignment = Align.Center,
                 Wrap = true,
@@ -108,9 +110,9 @@ internal sealed class AboutDialog
         });
 
         var dialog = new Dialog()
-            .Title("About CodeAlta")
+            .Title(SR.T("About CodeAlta"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc")} {SR.T("Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content)
@@ -119,8 +121,8 @@ internal sealed class AboutDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Shell.About.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the about dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the about dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -141,8 +143,8 @@ internal sealed class AboutDialog
     private static Visual BuildLinksRow()
     {
         return new HStack(
-            CreateExternalLink(GitHubProjectUri, $"{NerdFont.FaGithub} GitHub"),
-            CreateExternalLink(WebsiteUri, $"{NerdFont.MdWeb} Website"))
+            CreateExternalLink(GitHubProjectUri, $"{TerminalIcons.FaGithub} {SR.T("GitHub")}"),
+            CreateExternalLink(WebsiteUri, $"{TerminalIcons.MdWeb} {SR.T("Website")}"))
         {
             HorizontalAlignment = Align.Center,
             Spacing = 4,
@@ -157,7 +159,7 @@ internal sealed class AboutDialog
                 TryOpenBrowser(e.Uri);
                 e.Handled = true;
             })
-            .Tooltip(new TextBlock($"Open {uri}"));
+            .Tooltip(new TextBlock(SR.T("Open {0}", uri)));
     }
 
     private void Close()

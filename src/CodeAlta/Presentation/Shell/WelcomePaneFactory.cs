@@ -42,7 +42,7 @@ internal static class WelcomePaneFactory
                 Foreground = UiPalette.GetWelcomeGuidanceColor(firstGuidance!.GetTheme()),
             });
         TextBlock? nextGuidance = null;
-        nextGuidance = new TextBlock($"{NerdFont.MdArrowRightThinCircleOutline} {guidanceLines[1]}\n{NerdFont.MdTabPlus} {guidanceLines[2]}")
+        nextGuidance = new TextBlock($"{TerminalIcons.MdArrowRightThinCircleOutline} {guidanceLines[1]}\n{TerminalIcons.MdTabPlus} {guidanceLines[2]}")
             {
                 Wrap = true,
                 IsSelectable = false,

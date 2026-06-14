@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Styling;
@@ -46,11 +47,11 @@ internal sealed class ModelProviderSelectorView
             .IsEnabled(promptComposerViewModel.Bind.CanAlwaysEnqueue);
         ModelsDialogButton = new Button(new TextBlock("Model->") { Wrap = false, IsSelectable = false })
             .Click(controller.OpenModels);
-        var modelsDialogButtonHost = ModelsDialogButton.Tooltip(new TextBlock("Open the models dialog."));
-        var compactSessionButton = new Button(new TextBlock($"{NerdFont.MdSelectCompare}"))
+        var modelsDialogButtonHost = ModelsDialogButton.Tooltip(new TextBlock(SR.T("Open the models dialog.")));
+        var compactSessionButton = new Button(new TextBlock($"{TerminalIcons.MdSelectCompare}"))
             .Click(controller.CompactSession)
             .IsEnabled(promptComposerViewModel.Bind.CanCompact)
-            .Tooltip(new TextBlock("Compact the selected session when it is idle (Ctrl+F11)."));
+            .Tooltip(new TextBlock(SR.T("Compact the selected session when it is idle (Ctrl+F11).")));
 
         Root = new HStack(
         [

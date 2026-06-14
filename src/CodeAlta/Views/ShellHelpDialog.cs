@@ -1,7 +1,9 @@
+using CodeAlta.Catalog;
 using CodeAlta.Frontend.Commands;
 using CodeAlta.Frontend.Help;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Extensions.Markdown;
@@ -34,7 +36,7 @@ internal sealed class ShellHelpDialog
 
         var markdown = ShellHelpContentBuilder.BuildMarkdown(commands, filterText);
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -42,9 +44,9 @@ internal sealed class ShellHelpDialog
         closeButton.Click(Close);
 
         _dialog = new Dialog()
-            .Title("Shell Help")
+            .Title(SR.T("Shell Help"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc")} {SR.T("Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(new MarkdownControl(markdown)
@@ -61,8 +63,8 @@ internal sealed class ShellHelpDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Shell.Help.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close shell help.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close shell help."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),

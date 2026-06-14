@@ -3,6 +3,8 @@ using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Plugin.Mcp;
+
 using XenoAtom.Terminal.UI.Collections;
 using XenoAtom.Terminal.UI.Commands;
 using XenoAtom.Terminal.UI.Controls;
@@ -59,7 +61,7 @@ internal sealed class McpServersDialog
         _getBounds = getBounds;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{McpTerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -97,23 +99,23 @@ internal sealed class McpServersDialog
             VerticalAlignment = Align.Stretch,
         };
 
-        var refreshButton = new Button($"{NerdFont.MdRefresh} Refresh")
+        var refreshButton = new Button($"{McpTerminalIcons.MdRefresh} Refresh")
             .Tone(ControlTone.Primary)
             .Click(() => Reload(null));
-        var addButton = new Button($"{NerdFont.MdPlus} Add")
+        var addButton = new Button($"{McpTerminalIcons.MdPlus} Add")
             .Tone(ControlTone.Success)
             .Click(AddServerDraft);
-        var saveButton = new Button($"{NerdFont.MdContentSaveCheckOutline} Save")
+        var saveButton = new Button($"{McpTerminalIcons.MdContentSaveCheckOutline} Save")
             .Tone(ControlTone.Success)
             .IsEnabled(() => GetSelectedRow() is { } row && CanSaveServer(row))
             .Click(() => _ = SaveSelectedServerAsync());
-        var removeButton = new Button($"{NerdFont.MdTrashCanOutline} Remove")
+        var removeButton = new Button($"{McpTerminalIcons.MdTrashCanOutline} Remove")
             .Tone(ControlTone.Error)
             .IsEnabled(() => GetSelectedRow() is { } row && CanRemoveServer(row))
             .Click(RemoveSelectedServer);
-        var openJsonButton = new Button($"{NerdFont.MdCodeJson} Open JSON Config")
+        var openJsonButton = new Button($"{McpTerminalIcons.MdCodeJson} Open JSON Config")
             .Click(() => _ = OpenSelectedJsonConfigAsync());
-        var openPolicyButton = new Button($"{NerdFont.MdFileCogOutline} Open Policy TOML")
+        var openPolicyButton = new Button($"{McpTerminalIcons.MdFileCogOutline} Open Policy TOML")
             .Click(() => _ = OpenSelectedPolicyAsync());
 
         var header = new Grid { HorizontalAlignment = Align.Stretch }
@@ -431,13 +433,13 @@ internal sealed class McpServersDialog
             new Button("Test")
                 .IsEnabled(canTestServer)
                 .Click(() => _ = TestServerAsync(row, automatic: false)),
-            new Button($"{NerdFont.MdRefresh} Refresh")
+            new Button($"{McpTerminalIcons.MdRefresh} Refresh")
                 .Tone(ControlTone.Primary)
                 .Click(() => Reload(entry.Key)),
-            new Button($"{NerdFont.MdCodeJson} JSON")
+            new Button($"{McpTerminalIcons.MdCodeJson} JSON")
                 .IsEnabled(!string.IsNullOrWhiteSpace(entry.SourcePath))
                 .Click(() => _ = OpenFileAsync(entry.SourcePath, "MCP JSON config")),
-            new Button($"{NerdFont.MdFileCogOutline} Policy")
+            new Button($"{McpTerminalIcons.MdFileCogOutline} Policy")
                 .IsEnabled(_snapshot is not null)
                 .Click(() => _ = OpenSelectedPolicyAsync()),
             new Markup(() => !canEditPolicy
@@ -1513,12 +1515,12 @@ internal sealed class McpServersDialog
     private static (string Tone, string Icon) GetStatusToneAndIcon(McpManagementServerState state)
         => state switch
         {
-            McpManagementServerState.Configured => ("success", $"{NerdFont.MdCheckCircleOutline}"),
-            McpManagementServerState.Disabled => ("muted", $"{NerdFont.MdPauseCircleOutline}"),
-            McpManagementServerState.MissingConfig => ("muted", $"{NerdFont.MdFileQuestionOutline}"),
-            McpManagementServerState.InvalidConfig => ("error", $"{NerdFont.MdCloseCircleOutline}"),
-            McpManagementServerState.Shadowed => ("warning", $"{NerdFont.MdFileCompare}"),
-            _ => ("primary", $"{NerdFont.MdLan}"),
+            McpManagementServerState.Configured => ("success", $"{McpTerminalIcons.MdCheckCircleOutline}"),
+            McpManagementServerState.Disabled => ("muted", $"{McpTerminalIcons.MdPauseCircleOutline}"),
+            McpManagementServerState.MissingConfig => ("muted", $"{McpTerminalIcons.MdFileQuestionOutline}"),
+            McpManagementServerState.InvalidConfig => ("error", $"{McpTerminalIcons.MdCloseCircleOutline}"),
+            McpManagementServerState.Shadowed => ("warning", $"{McpTerminalIcons.MdFileCompare}"),
+            _ => ("primary", $"{McpTerminalIcons.MdLan}"),
         };
 
     private static string FormatStateText(McpManagementServerState state)

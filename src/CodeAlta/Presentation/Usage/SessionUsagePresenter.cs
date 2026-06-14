@@ -6,6 +6,7 @@ using CodeAlta.Presentation.Controls;
 using CodeAlta.Views;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Extensions.Markdown;
 using XenoAtom.Terminal.UI.Geometry;
@@ -117,9 +118,9 @@ internal sealed class SessionUsagePresenter
             Spacing = 1,
         };
 
-        var copyButton = new Button(new TextBlock($"{NerdFont.MdContentCopy}"))
+        var copyButton = new Button(new TextBlock($"{TerminalIcons.MdContentCopy}"))
             .Click(CopyMarkdown);
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose}"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose}"))
             .Click(ClosePopup);
         closeButton.Tone = ControlTone.Error;
 

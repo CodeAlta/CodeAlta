@@ -83,7 +83,7 @@ internal sealed class DirectoryPathDialog
             .VerticalAlignment(Align.Stretch)
             .MinHeight(5);
 
-        var closeButton = new Button(new TextBlock($"{NerdFont.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -483,7 +483,7 @@ internal sealed class DirectoryPathDialog
     {
         var icon = suggestion.Kind switch
         {
-            OpenProjectSuggestionKind.Project => CreateThemedSuggestionIcon(NerdFont.MdFolderOutline.ToString(), SidebarAccent.Projects),
+            OpenProjectSuggestionKind.Project => CreateThemedSuggestionIcon(TerminalIcons.MdFolderOutline.ToString(), SidebarAccent.Projects),
             _ => CreateThemedSuggestionIcon(ProjectFileAppearanceRegistry.Default.GetDirectoryAppearance().Icon, SidebarAccent.Fallback),
         };
 

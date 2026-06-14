@@ -3,6 +3,7 @@ using CodeAlta.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
+using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Hosting;
@@ -193,7 +194,7 @@ public sealed class AboutDialogInteractionTests
     }
 
     private static bool IsCopyButton(Button button)
-        => button.Content is TextBlock textBlock && textBlock.Text == $"{NerdFont.MdContentCopy}";
+        => button.Content is TextBlock textBlock && textBlock.Text == $"{TerminalIcons.MdContentCopy}";
 
     private static IEnumerable<Visual> EnumerateChildren(Visual visual)
     {
