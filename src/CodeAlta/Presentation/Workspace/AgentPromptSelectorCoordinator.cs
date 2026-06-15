@@ -145,7 +145,7 @@ internal sealed class AgentPromptSelectorCoordinator : IShellAgentPromptCommandS
             _preferences.RememberDraftAgentPromptId(_getViewState(), selectedPrompt.PromptName, project?.ProjectPath, project?.Id);
             _persistViewState();
             _workspaceRefresh.ApplySessionUsageProjection();
-            _setStatus($"Selected prompt '{selectedPrompt.Label}'.", false, StatusTone.Ready);
+            _setStatus(SR.T("Selected prompt '{0}'.", selectedPrompt.Label), false, StatusTone.Ready);
             return;
         }
 
@@ -161,7 +161,7 @@ internal sealed class AgentPromptSelectorCoordinator : IShellAgentPromptCommandS
         }
 
         _workspaceRefresh.ApplyHeaderProjection();
-        _setStatus($"Selected prompt '{selectedPrompt.Label}'.", false, StatusTone.Ready);
+        _setStatus(SR.T("Selected prompt '{0}'.", selectedPrompt.Label), false, StatusTone.Ready);
     }
 
     public bool CanSelectNextAgentPrompt()
@@ -171,13 +171,13 @@ internal sealed class AgentPromptSelectorCoordinator : IShellAgentPromptCommandS
     {
         if (!_workspaceViewModel.CanSelectAgentPrompt || _workspaceViewModel.AgentPromptOptions.Count == 0)
         {
-            _setStatus("No agent prompts are available.", false, StatusTone.Warning);
+            _setStatus(SR.T("No agent prompts are available."), false, StatusTone.Warning);
             return;
         }
 
         if (_workspaceViewModel.AgentPromptOptions.Count == 1)
         {
-            _setStatus($"Only prompt '{_workspaceViewModel.AgentPromptOptions[0].Label}' is available.", false, StatusTone.Ready);
+            _setStatus(SR.T("Only prompt '{0}' is available.", _workspaceViewModel.AgentPromptOptions[0].Label), false, StatusTone.Ready);
             return;
         }
 

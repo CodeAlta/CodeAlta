@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodeAlta.Catalog;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -17,7 +18,7 @@ internal static class CodeAltaUpdateVisualFactory
 
         var children = new List<Visual>
         {
-            new Markup($"CodeAlta {AnsiMarkup.Escape(snapshot.LatestVersionText ?? "?")} is available.")
+            new Markup(SR.T("CodeAlta {0} is available.", AnsiMarkup.Escape(snapshot.LatestVersionText ?? "?")))
             {
                 HorizontalAlignment = Align.Stretch,
                 Wrap = true,
@@ -44,12 +45,12 @@ internal static class CodeAltaUpdateVisualFactory
 
         return snapshot.Status switch
         {
-            CodeAltaUpdateCheckStatus.Checking => CreateCenteredStatusMarkup($"[info]{TerminalIcons.MdCloudSearchOutline} Checking for updates...[/]"),
-            CodeAltaUpdateCheckStatus.Latest => CreateCenteredStatusMarkup($"[success]{TerminalIcons.MdCheckCircleOutline} You are running the latest {CodeAltaApplicationInfo.ProductName} version.[/]"),
+            CodeAltaUpdateCheckStatus.Checking => CreateCenteredStatusMarkup($"[info]{TerminalIcons.MdCloudSearchOutline} {SR.T("Checking for updates...")}[/]"),
+            CodeAltaUpdateCheckStatus.Latest => CreateCenteredStatusMarkup($"[success]{TerminalIcons.MdCheckCircleOutline} {SR.T("You are running the latest {0} version.", CodeAltaApplicationInfo.ProductName)}[/]"),
             CodeAltaUpdateCheckStatus.UpdateAvailable => CreateUpdateAvailableAboutStatus(snapshot, copyUpdateCommand),
-            CodeAltaUpdateCheckStatus.PackageNotFound => CreateCenteredStatusMarkup($"[dim]{TerminalIcons.MdPackageVariantClosed} No published {AnsiMarkup.Escape(snapshot.PackageId)} package was found yet.[/]"),
-            CodeAltaUpdateCheckStatus.Failed => CreateCenteredStatusMarkup($"[warning]{TerminalIcons.MdAlertCircleOutline} Update check failed: {AnsiMarkup.Escape(snapshot.ErrorMessage ?? "unknown error")}[/]"),
-            _ => CreateCenteredStatusMarkup($"[info]{TerminalIcons.MdInformationOutline} Update status has not been checked yet.[/]"),
+            CodeAltaUpdateCheckStatus.PackageNotFound => CreateCenteredStatusMarkup($"[dim]{TerminalIcons.MdPackageVariantClosed} {SR.T("No published {0} package was found yet.", AnsiMarkup.Escape(snapshot.PackageId))}[/]"),
+            CodeAltaUpdateCheckStatus.Failed => CreateCenteredStatusMarkup($"[warning]{TerminalIcons.MdAlertCircleOutline} {SR.T("Update check failed: {0}", AnsiMarkup.Escape(snapshot.ErrorMessage ?? SR.T("unknown error")))}[/]"),
+            _ => CreateCenteredStatusMarkup($"[info]{TerminalIcons.MdInformationOutline} {SR.T("Update status has not been checked yet.")}[/]"),
         };
     }
 
@@ -90,7 +91,7 @@ internal static class CodeAltaUpdateVisualFactory
     private static Visual CreateUpdateAvailableAboutStatus(CodeAltaUpdateCheckSnapshot snapshot, Action<string> copyUpdateCommand)
         => new VStack(
             [
-                CreateCenteredStatusMarkup($"[warning]{TerminalIcons.MdUpdate} Version {AnsiMarkup.Escape(snapshot.LatestVersionText ?? "?")} is available.[/]"),
+                CreateCenteredStatusMarkup($"[warning]{TerminalIcons.MdUpdate} {SR.T("Version {0} is available.", AnsiMarkup.Escape(snapshot.LatestVersionText ?? "?"))}[/]"),
                 CreateCenteredUpdateCommandRow(snapshot.UpdateCommand, copyUpdateCommand),
             ])
         {
@@ -106,13 +107,13 @@ internal static class CodeAltaUpdateVisualFactory
         }
 
         var uri = $"{AboutDialog.GitHubProjectUri}/releases/tag/{Uri.EscapeDataString(versionText.Trim())}";
-        return new Link(uri, "View release notes")
+        return new Link(uri, SR.T("View release notes"))
             .Opened((_, e) =>
             {
                 TryOpenBrowser(e.Uri);
                 e.Handled = true;
             })
-            .Tooltip(new TextBlock($"Open {uri}"));
+            .Tooltip(new TextBlock(SR.T("Open {0}", uri)));
     }
 
     private static Markup CreateCenteredStatusMarkup(string markup)
@@ -142,7 +143,7 @@ internal static class CodeAltaUpdateVisualFactory
                 VerticalAlignment = Align.Start,
             }
             .Click(onClick);
-        return button.Tooltip(new TextBlock("Copy update command to the clipboard."));
+        return button.Tooltip(new TextBlock(SR.T("Copy update command to the clipboard.")));
     }
 
     private static void TryOpenBrowser(string uri)

@@ -126,7 +126,7 @@ internal sealed class SessionCommandCoordinator
         var prompt = _commandContext.CaptureSessionInput(promptText);
         if (prompt.Images.Count > 0 && session is null && !CurrentPromptModelSupportsImages(session, null))
         {
-            _commandContext.SetShellStatus("The selected model does not support image input; remove the prompt images or choose a vision-capable model.", false, StatusTone.Warning);
+            _commandContext.SetShellStatus(SR.T("The selected model does not support image input; remove the prompt images or choose a vision-capable model."), false, StatusTone.Warning);
             return;
         }
 
@@ -134,7 +134,7 @@ internal sealed class SessionCommandCoordinator
         {
             if (steer)
             {
-                _commandContext.SetShellStatus("Start the session before steering it.", false, StatusTone.Warning);
+                _commandContext.SetShellStatus(SR.T("Start the session before steering it."), false, StatusTone.Warning);
                 return;
             }
 
@@ -178,7 +178,7 @@ internal sealed class SessionCommandCoordinator
 
         if (prompt.Images.Count > 0 && !CurrentPromptModelSupportsImages(session, tab))
         {
-            _commandContext.SetShellStatus("The selected model does not support image input; remove the prompt images or choose a vision-capable model.", false, StatusTone.Warning);
+            _commandContext.SetShellStatus(SR.T("The selected model does not support image input; remove the prompt images or choose a vision-capable model."), false, StatusTone.Warning);
             return;
         }
 
@@ -235,12 +235,12 @@ internal sealed class SessionCommandCoordinator
         {
             await _runtimeService.AbortAsync(session.SessionId);
             var tab = _sessionSelection.EnsureSessionTab(session);
-            _commandContext.SetSessionStatus(tab, $"Stopped · {session.Title}", false, StatusTone.Warning);
+            _commandContext.SetSessionStatus(tab, SR.T("Stopped · {0}", session.Title), false, StatusTone.Warning);
         }
         catch (Exception ex)
         {
             var tab = _sessionSelection.EnsureSessionTab(session);
-            _commandContext.SetSessionStatus(tab, $"Failed to abort '{session.Title}': {ex.Message}", false, StatusTone.Error);
+            _commandContext.SetSessionStatus(tab, SR.T("Failed to abort '{0}': {1}", session.Title, ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -249,7 +249,7 @@ internal sealed class SessionCommandCoordinator
         var session = _sessionSelection.GetSelectedSession();
         if (session is null)
         {
-            _commandContext.SetShellStatus("Open a session before compacting it.", false, StatusTone.Warning);
+            _commandContext.SetShellStatus(SR.T("Open a session before compacting it."), false, StatusTone.Warning);
             return;
         }
 
@@ -262,20 +262,20 @@ internal sealed class SessionCommandCoordinator
         var tab = _sessionSelection.EnsureSessionTab(session);
         if (tab.StatusBusy)
         {
-            _commandContext.SetShellStatus($"Wait for '{session.Title}' to become idle before compacting it.", false, StatusTone.Warning);
+            _commandContext.SetShellStatus(SR.T("Wait for '{0}' to become idle before compacting it.", session.Title), false, StatusTone.Warning);
             return;
         }
 
         if (session.StartedAt is null)
         {
-            _commandContext.SetSessionStatus(tab, "Compaction is available after the session has completed at least one run.", false, StatusTone.Warning);
+            _commandContext.SetSessionStatus(tab, SR.T("Compaction is available after the session has completed at least one run."), false, StatusTone.Warning);
             return;
         }
 
         try
         {
             tab.PendingManualCompaction = true;
-            _commandContext.SetSessionStatus(tab, $"Compacting '{session.Title}'...", true, StatusTone.Info);
+            _commandContext.SetSessionStatus(tab, SR.T("Compacting '{0}'...", session.Title), true, StatusTone.Info);
             var options = BuildExecutionOptions(session, tab);
             var augmentation = _pluginHostBridge is null
                 ? new PluginCompactionAugmentation()
@@ -283,7 +283,7 @@ internal sealed class SessionCommandCoordinator
             if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
             {
                 tab.PendingManualCompaction = false;
-                _commandContext.SetSessionStatus(tab, $"Compaction cancelled by plugin: {augmentation.CancelReason}", false, StatusTone.Warning);
+                _commandContext.SetSessionStatus(tab, SR.T("Compaction cancelled by plugin: {0}", augmentation.CancelReason), false, StatusTone.Warning);
                 return;
             }
 
@@ -308,7 +308,7 @@ internal sealed class SessionCommandCoordinator
 
             CodeAltaApp.UiLogger.Error(ex, $"Failed to compact session {session.SessionId}");
 
-            _commandContext.SetSessionStatus(tab, $"Failed to compact '{session.Title}': {ex.Message}", false, StatusTone.Error);
+            _commandContext.SetSessionStatus(tab, SR.T("Failed to compact '{0}': {1}", session.Title, ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -370,8 +370,8 @@ internal sealed class SessionCommandCoordinator
 
         if (prompt.Images.Count > 0 && !CurrentPromptModelSupportsImages(tab.SessionView, tab))
         {
-            _commandContext.SetSessionStatus(tab, "The selected model does not support image input; the queued prompt was left in the queue.", false, StatusTone.Warning);
-            throw new InvalidOperationException("The selected model does not support image input.");
+            _commandContext.SetSessionStatus(tab, SR.T("The selected model does not support image input; the queued prompt was left in the queue."), false, StatusTone.Warning);
+            throw new InvalidOperationException(SR.T("The selected model does not support image input."));
         }
 
         return _promptDispatchCoordinator.DispatchPromptAsync(tab.SessionView, tab, prompt, steer, cancellationToken);
@@ -394,7 +394,7 @@ internal sealed class SessionCommandCoordinator
         var session = _sessionSelection.GetSelectedSession();
         if (session is null)
         {
-            _commandContext.SetShellStatus("Open a CodeAlta-managed session before activating a CodeAlta-managed skill.", false, StatusTone.Warning);
+            _commandContext.SetShellStatus(SR.T("Open a CodeAlta-managed session before activating a CodeAlta-managed skill."), false, StatusTone.Warning);
             return;
         }
 
@@ -408,7 +408,7 @@ internal sealed class SessionCommandCoordinator
         var tab = _sessionSelection.EnsureSessionTab(session);
         if (tab.StatusBusy)
         {
-            _commandContext.SetShellStatus($"Wait for '{session.Title}' to become idle before activating a skill.", false, StatusTone.Warning);
+            _commandContext.SetShellStatus(SR.T("Wait for '{0}' to become idle before activating a skill.", session.Title), false, StatusTone.Warning);
             return;
         }
 
@@ -416,19 +416,19 @@ internal sealed class SessionCommandCoordinator
         {
             await _sessionSelection.EnsureSessionHistoryLoadedAsync(session, cancellationToken);
             tab.Timeline.ReplaceTruncatedHistoryLoadButton();
-            _commandContext.SetSessionStatus(tab, $"Activating skill '{skillName}'...", true, StatusTone.Info);
+            _commandContext.SetSessionStatus(tab, SR.T("Activating skill '{0}'...", skillName), true, StatusTone.Info);
             _ = await _runtimeService.ActivateSkillAsync(
                     session,
                     BuildExecutionOptions(session, tab),
                     skillName,
                     cancellationToken)
                 ;
-            _commandContext.SetSessionStatus(tab, $"Activated skill '{skillName}'.", false, StatusTone.Ready);
+            _commandContext.SetSessionStatus(tab, SR.T("Activated skill '{0}'.", skillName), false, StatusTone.Ready);
         }
         catch (Exception ex)
         {
             CodeAltaApp.UiLogger.Error(ex, $"Failed to activate skill {skillName}.");
-            _commandContext.SetSessionStatus(tab, $"Failed to activate skill '{skillName}': {ex.Message}", false, StatusTone.Error);
+            _commandContext.SetSessionStatus(tab, SR.T("Failed to activate skill '{0}': {1}", skillName, ex.Message), false, StatusTone.Error);
         }
     }
 

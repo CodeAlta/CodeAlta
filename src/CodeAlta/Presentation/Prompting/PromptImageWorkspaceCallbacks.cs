@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 
 namespace CodeAlta.Presentation.Prompting;
@@ -6,12 +7,12 @@ internal sealed class PromptImageWorkspaceCallbacks
 {
     public static PromptImageWorkspaceCallbacks Empty { get; } = new(
         static () => [],
-        static () => "Image-1",
+        static () => SR.T("Image-1"),
         static _ => { },
         static (_, _) => { },
         static _ => { },
         static () => false,
-        static () => "The selected model does not support image input.",
+        static () => SR.T("The selected model does not support image input."),
         static (_, _) => { });
 
     public PromptImageWorkspaceCallbacks(

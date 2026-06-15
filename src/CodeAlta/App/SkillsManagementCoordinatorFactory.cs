@@ -18,7 +18,7 @@ internal static class SkillsManagementCoordinatorFactory
         {
             return () =>
             {
-                setStatus("Skills management is unavailable in this app instance.", false, StatusTone.Warning);
+                setStatus(SR.T("Skills management is unavailable in this app instance."), false, StatusTone.Warning);
                 return Task.CompletedTask;
             };
         }

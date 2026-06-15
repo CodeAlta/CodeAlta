@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Presentation.Sessions;
 
@@ -9,16 +10,16 @@ internal static class SessionInfoFormatter
     {
         if (isLoading)
         {
-            return "Loading session information from the active provider and history.";
+            return SR.T("Loading session information from the active provider and history.");
         }
 
         if (!string.IsNullOrWhiteSpace(errorMessage))
         {
-            return $"Failed to load session information: {errorMessage}";
+            return SR.T("Failed to load session information: {0}", errorMessage);
         }
 
         return report is null
-            ? "No session is currently selected."
+            ? SR.T("No session is currently selected.")
             : BuildMarkdown(report, includeTitle: false);
     }
 
@@ -31,7 +32,7 @@ internal static class SessionInfoFormatter
         {
             builder.Append("# ")
                 .Append(report.SessionTitle)
-                .AppendLine(" session info");
+                .AppendLine(SR.T(" session info"));
         }
 
         AppendOverview(builder, report);
@@ -52,8 +53,8 @@ internal static class SessionInfoFormatter
         }
 
         return isLoading
-            ? "Fetching current session details."
-            : "Current selected session.";
+            ? SR.T("Fetching current session details.")
+            : SR.T("Current selected session.");
     }
 
     public static string FormatTimestamp(DateTimeOffset timestamp)
@@ -99,29 +100,29 @@ internal static class SessionInfoFormatter
 
     private static void AppendOverview(StringBuilder builder, SessionInfoReport report)
     {
-        StartSection(builder, "Overview");
-        builder.Append("- Provider: ").AppendLine(report.ProviderName);
-        builder.Append("- Session ID: `").Append(report.SessionId).AppendLine("`");
-        builder.Append("- Working directory: `").Append(report.WorkingDirectory).AppendLine("`");
-        builder.Append("- Model: ").AppendLine(report.ModelName ?? "(default model)");
-        builder.Append("- Reasoning: ").AppendLine(report.ReasoningEffort?.ToString() ?? "(default)");
+        StartSection(builder, SR.T("Overview"));
+        AppendMarkdownLabel(builder, SR.T("Provider"), report.ProviderName);
+        builder.Append("- ").Append(SR.T("Session ID")).Append(": `").Append(report.SessionId).AppendLine("`");
+        builder.Append("- ").Append(SR.T("Working directory")).Append(": `").Append(report.WorkingDirectory).AppendLine("`");
+        AppendMarkdownLabel(builder, SR.T("Model"), report.ModelName ?? SR.T("(default model)"));
+        AppendMarkdownLabel(builder, SR.T("Reasoning"), report.ReasoningEffort?.ToString() ?? SR.T("(default)"));
     }
 
     private static void AppendTiming(StringBuilder builder, SessionInfoReport report)
     {
-        StartSection(builder, "Timing");
-        builder.Append("- Provider session created: ").AppendLine(FormatTimestamp(report.CreatedAt));
-        builder.Append("- Conversation started: ").AppendLine(FormatTimestamp(report.StartedAt));
-        builder.Append("- Last provider update: ").AppendLine(FormatTimestamp(report.LastUpdatedAt));
-        builder.Append("- Elapsed: ").AppendLine(FormatElapsed(report.Elapsed));
+        StartSection(builder, SR.T("Timing"));
+        AppendMarkdownLabel(builder, SR.T("Provider session created"), FormatTimestamp(report.CreatedAt));
+        AppendMarkdownLabel(builder, SR.T("Conversation started"), FormatTimestamp(report.StartedAt));
+        AppendMarkdownLabel(builder, SR.T("Last provider update"), FormatTimestamp(report.LastUpdatedAt));
+        AppendMarkdownLabel(builder, SR.T("Elapsed"), FormatElapsed(report.Elapsed));
     }
 
     private static void AppendConversation(StringBuilder builder, SessionInfoReport report)
     {
-        StartSection(builder, "Conversation");
-        builder.Append("- User prompts: ").AppendLine(FormatCount(report.UserMessageCount));
-        builder.Append("- Assistant messages: ").AppendLine(FormatCount(report.AssistantMessageCount));
-        builder.Append("- Total messages: ").AppendLine(
+        StartSection(builder, SR.T("Conversation"));
+        AppendMarkdownLabel(builder, SR.T("User prompts"), FormatCount(report.UserMessageCount));
+        AppendMarkdownLabel(builder, SR.T("Assistant messages"), FormatCount(report.AssistantMessageCount));
+        AppendMarkdownLabel(builder, SR.T("Total messages"),
             FormatCount(report.UserMessageCount is { } userCount && report.AssistantMessageCount is { } assistantCount
                 ? userCount + assistantCount
                 : null));
@@ -129,25 +130,25 @@ internal static class SessionInfoFormatter
 
     private static void AppendStorage(StringBuilder builder, SessionInfoStorageLocation? storageLocation)
     {
-        StartSection(builder, "Storage");
+        StartSection(builder, SR.T("Storage"));
         if (storageLocation is null)
         {
-            builder.AppendLine("- Session path: Not exposed by the provider.");
+            AppendMarkdownLabel(builder, SR.T("Session path"), SR.T("Not exposed by the provider."));
             return;
         }
 
-        builder.Append("- Session path: `").Append(storageLocation.Path).AppendLine("`");
-        builder.Append("- Path kind: ").AppendLine(storageLocation.Kind switch
+        builder.Append("- ").Append(SR.T("Session path")).Append(": `").Append(storageLocation.Path).AppendLine("`");
+        AppendMarkdownLabel(builder, SR.T("Path kind"), storageLocation.Kind switch
         {
-            SessionInfoStorageKind.File => "File",
-            SessionInfoStorageKind.Directory => "Directory",
-            SessionInfoStorageKind.MissingPath => "Missing on disk",
-            _ => "Unknown",
+            SessionInfoStorageKind.File => SR.T("File"),
+            SessionInfoStorageKind.Directory => SR.T("Directory"),
+            SessionInfoStorageKind.MissingPath => SR.T("Missing on disk"),
+            _ => SR.T("Unknown"),
         });
 
         if (storageLocation.SizeBytes is { } sizeBytes)
         {
-            builder.Append("- File size: ").AppendLine(FormatFileSize(sizeBytes));
+            AppendMarkdownLabel(builder, SR.T("File size"), FormatFileSize(sizeBytes));
         }
     }
 
@@ -158,7 +159,7 @@ internal static class SessionInfoFormatter
             return;
         }
 
-        StartSection(builder, "Loaded skills");
+        StartSection(builder, SR.T("Loaded skills"));
         foreach (var skill in loadedSkills)
         {
             builder.Append("- `")
@@ -169,14 +170,14 @@ internal static class SessionInfoFormatter
                 builder.Append(" · ").Append(skill.SourceKind);
             }
 
-            builder.Append(" · activated ")
+            builder.Append(" · ").Append(SR.T("activated")).Append(' ')
                 .AppendLine(FormatTimestamp(skill.ActivatedAt));
-            builder.Append("  - Path: `").Append(skill.SkillFilePath).AppendLine("`");
-            builder.Append("  - Mode: ").AppendLine(skill.ActivationMode);
-            builder.Append("  - Status: ").AppendLine(skill.IsAvailable ? "Available" : $"Missing ({skill.MissingReason})");
+            builder.Append("  - ").Append(SR.T("Path")).Append(": `").Append(skill.SkillFilePath).AppendLine("`");
+            builder.Append("  - ").Append(SR.T("Mode")).Append(": ").AppendLine(skill.ActivationMode);
+            builder.Append("  - ").Append(SR.T("Status")).Append(": ").AppendLine(skill.IsAvailable ? SR.T("Available") : SR.T("Missing ({0})", skill.MissingReason));
             if (skill.RestoredFromHistory)
             {
-                builder.AppendLine("  - Restore source: Session history");
+                builder.Append("  - ").Append(SR.T("Restore source")).Append(": ").AppendLine(SR.T("Session history"));
             }
         }
     }
@@ -188,7 +189,7 @@ internal static class SessionInfoFormatter
             return;
         }
 
-        StartSection(builder, "Provider-specific details");
+        StartSection(builder, SR.T("Provider-specific details"));
         foreach (var fact in providerFacts)
         {
             builder.Append("- ")
@@ -210,5 +211,8 @@ internal static class SessionInfoFormatter
     }
 
     private static string FormatCount(int? count)
-        => count?.ToString(CultureInfo.InvariantCulture) ?? "Unavailable";
+        => count?.ToString(CultureInfo.InvariantCulture) ?? SR.T("Unavailable");
+
+    private static void AppendMarkdownLabel(StringBuilder builder, string label, string value)
+        => builder.Append("- ").Append(label).Append(": ").AppendLine(value);
 }

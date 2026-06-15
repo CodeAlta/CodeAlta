@@ -38,7 +38,7 @@ internal static class SidebarSessionPresentation
         }
 
         return string.IsNullOrWhiteSpace(providerKey)
-            ? "Unknown"
+            ? SR.T("Unknown")
             : providerKey.Trim();
     }
 

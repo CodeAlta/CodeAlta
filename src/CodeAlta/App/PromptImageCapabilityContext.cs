@@ -39,8 +39,8 @@ internal sealed class PromptImageCapabilityContext
     public string BuildCurrentPromptImageUnsupportedMessage()
     {
         var (providerId, model) = ResolveCurrentPromptModel();
-        var modelName = model?.DisplayName ?? model?.Id ?? "the selected model";
-        return $"Image paste is not available because {modelName} on {providerId.Value} does not advertise image input support.";
+        var modelName = model?.DisplayName ?? model?.Id ?? SR.T("the selected model");
+        return SR.T("Image paste is not available because {0} on {1} does not advertise image input support.", modelName, providerId.Value);
     }
 
     private (ModelProviderId ProviderId, AgentModelInfo? Model) ResolveCurrentPromptModel()

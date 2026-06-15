@@ -41,8 +41,8 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
 
         // Build a synchronous placeholder shell first so Program can enter Terminal.RunAsync
         // without awaiting startup work before the UI claims the main session.
-        _sidebarHost = CreateStretchHost(BuildMessage("Loading sidebar..."));
-        _workspaceHost = CreateStretchHost(BuildWorkspacePlaceholder("Starting CodeAlta..."));
+        _sidebarHost = CreateStretchHost(BuildMessage(SR.T("Loading sidebar...")));
+        _workspaceHost = CreateStretchHost(BuildWorkspacePlaceholder(SR.T("Starting CodeAlta...")));
         _commandBarHost = CreateStretchHost(new Placeholder { IsVisible = false });
         _toastHost = new ToastHost(
             new CodeAltaShellView(
@@ -145,8 +145,8 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         catch (Exception ex)
         {
             _startupFailure = ex;
-            _sidebarHost.Content = BuildMessage("Startup failed.");
-            _workspaceHost.Content = BuildWorkspacePlaceholder($"CodeAlta startup failed: {ex.Message}");
+            _sidebarHost.Content = BuildMessage(SR.T("Startup failed."));
+            _workspaceHost.Content = BuildWorkspacePlaceholder(SR.T("CodeAlta startup failed: {0}", ex.Message));
             _commandBarHost.Content = new Placeholder { IsVisible = false };
             return TerminalLoopResult.Continue;
         }
@@ -167,7 +167,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         _updateToastShown = true;
         ToastService.Show(() => new Toast
         {
-            Title = "Update available",
+            Title = SR.T("Update available"),
             Content = CodeAltaUpdateVisualFactory.CreateToastContent(snapshot, CopyUpdateCommand),
             Severity = ToastSeverity.Info,
             Duration = TimeSpan.FromSeconds(10),
@@ -200,7 +200,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
             ShowConfigRecoveryDialog(
                 configPath,
                 string.Empty,
-                new CodeAltaConfigValidationResult(false, $"Unable to read config file: {ex.Message}", null, null));
+                new CodeAltaConfigValidationResult(false, SR.T("Unable to read config file: {0}", ex.Message), null, null));
             return false;
         }
 
@@ -218,13 +218,13 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     {
         if (_rootHost.App is not { } app)
         {
-            _workspaceHost.Content = BuildWorkspacePlaceholder("CodeAlta config needs repair. Waiting for the terminal UI...");
+            _workspaceHost.Content = BuildWorkspacePlaceholder(SR.T("CodeAlta config needs repair. Waiting for the terminal UI..."));
             _configRecoveryChecked = false;
             return;
         }
 
-        _sidebarHost.Content = BuildMessage("Config recovery");
-        _workspaceHost.Content = BuildWorkspacePlaceholder("Repair ~/.alta/config.toml to continue startup.");
+        _sidebarHost.Content = BuildMessage(SR.T("Config recovery"));
+        _workspaceHost.Content = BuildWorkspacePlaceholder(SR.T("Repair ~/.alta/config.toml to continue startup."));
         _commandBarHost.Content = new Placeholder { IsVisible = false };
         _configRecoveryDialog = new ConfigRecoveryDialog(
             configPath,

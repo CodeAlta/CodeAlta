@@ -72,14 +72,14 @@ internal sealed class PromptImageAttachmentStripView
 
         var children = new List<Visual>(images.Count + 1)
         {
-            new Markup($"[dim]Images ({images.Count})[/]") { Wrap = false },
+            new Markup($"[dim]{SR.T("Images ({0})", images.Count)}[/]") { Wrap = false },
         };
         foreach (var image in images)
         {
             var imageId = image.Id;
             children.Add(new Button(new TextBlock($"▧ {image.Title}") { Wrap = false })
                 .Click(() => OpenPromptImageDetailsDialog(imageId))
-                .Tooltip(new TextBlock($"Open pasted image {image.Title}")));
+                .Tooltip(new TextBlock(SR.T("Open pasted image {0}", image.Title))));
         }
 
         return new Border(new HStack([.. children]) { Spacing = 1, HorizontalAlignment = Align.Stretch })
@@ -111,7 +111,7 @@ internal sealed class PromptImageAttachmentStripView
             return string.Empty;
         }
 
-        _setPromptImageStatus(failureReason ?? "The clipboard does not contain a supported image payload.", StatusTone.Warning);
+        _setPromptImageStatus(failureReason ?? SR.T("The clipboard does not contain a supported image payload."), StatusTone.Warning);
         return string.Empty;
     }
 
@@ -136,7 +136,7 @@ internal sealed class PromptImageAttachmentStripView
             _addPromptImage(image.WithTitle(title));
             dialog?.Close();
             FocusPromptEditor();
-            _setPromptImageStatus($"Added image {title} to the prompt.", StatusTone.Ready);
+            _setPromptImageStatus(SR.T("Added image {0} to the prompt.", title), StatusTone.Ready);
         }
 
         void Cancel()
@@ -148,21 +148,21 @@ internal sealed class PromptImageAttachmentStripView
         addButton.Click(AddImage);
         cancelButton.Click(Cancel);
         var content = new DockLayout()
-            .Top(new Markup("[dim]Review the pasted image and choose a title before adding it to the prompt.[/]") { Wrap = true })
+            .Top(new Markup($"[dim]{SR.T("Review the pasted image and choose a title before adding it to the prompt.")}[/]") { Wrap = true })
             .Content(new Border(preview).Padding(1))
             .Bottom(CreatePromptImageDialogBottom(titleBox, addButton, cancelButton))
             .HorizontalAlignment(Align.Stretch)
             .VerticalAlignment(Align.Stretch);
 
         dialog = new Dialog()
-            .Title("Add Image To Prompt")
-            .BottomRightText(new Markup("[dim]Ctrl+Enter Add · Esc Cancel[/]"))
+            .Title(SR.T("Add Image To Prompt"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Ctrl+Enter Add · Esc Cancel")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
         dialog.Width(size.Width).Height(size.Height).MinWidth(64).MinHeight(22);
-        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Accept", LabelMarkup = SR.T("Add To Prompt"), DescriptionMarkup = "Add the pasted image to the prompt.", Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), Importance = CommandImportance.Primary, Execute = _ => AddImage() });
-        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Cancel", LabelMarkup = SR.T("Cancel"), DescriptionMarkup = "Cancel adding the pasted image.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => Cancel() });
+        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Accept", LabelMarkup = SR.T("Add To Prompt"), DescriptionMarkup = SR.T("Add the pasted image to the prompt."), Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), Importance = CommandImportance.Primary, Execute = _ => AddImage() });
+        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageAdd.Cancel", LabelMarkup = SR.T("Cancel"), DescriptionMarkup = SR.T("Cancel adding the pasted image."), Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => Cancel() });
         dialog.Show();
         dialog.App?.Focus(titleBox);
     }
@@ -185,7 +185,7 @@ internal sealed class PromptImageAttachmentStripView
             cellHeight: Math.Max(8, size.Height - 10));
         var saveButton = new Button(new TextBlock(SR.T("Rename"))) { Tone = ControlTone.Primary };
         var deleteButton = new Button(new TextBlock(SR.T("Delete"))) { Tone = ControlTone.Error };
-        var closeButton = new Button(new TextBlock("Close"));
+        var closeButton = new Button(new TextBlock(SR.T("Close")));
 
         void Close()
         {
@@ -198,7 +198,7 @@ internal sealed class PromptImageAttachmentStripView
             var title = PromptImageAttachment.NormalizeTitle(titleState.Value ?? string.Empty);
             _renamePromptImage(imageId, title);
             dialog?.Title(title);
-            _setPromptImageStatus($"Renamed image to {title}.", StatusTone.Ready);
+            _setPromptImageStatus(SR.T("Renamed image to {0}.", title), StatusTone.Ready);
         }
 
         void Delete()
@@ -206,14 +206,14 @@ internal sealed class PromptImageAttachmentStripView
             _deletePromptImage(imageId);
             dialog?.Close();
             FocusPromptEditor();
-            _setPromptImageStatus($"Deleted image {image.Title} from the prompt.", StatusTone.Ready);
+            _setPromptImageStatus(SR.T("Deleted image {0} from the prompt.", image.Title), StatusTone.Ready);
         }
 
         saveButton.Click(Rename);
         deleteButton.Click(Delete);
         closeButton.Click(Close);
         var content = new DockLayout()
-            .Top(new Markup("[dim]Preview, rename, or remove this prompt image attachment.[/]") { Wrap = true })
+            .Top(new Markup($"[dim]{SR.T("Preview, rename, or remove this prompt image attachment.")}[/]") { Wrap = true })
             .Content(new Border(preview).Padding(1))
             .Bottom(CreatePromptImageDialogBottom(titleBox, saveButton, deleteButton, closeButton))
             .HorizontalAlignment(Align.Stretch)
@@ -221,12 +221,12 @@ internal sealed class PromptImageAttachmentStripView
 
         dialog = new Dialog()
             .Title(image.Title)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
         dialog.Width(size.Width).Height(size.Height).MinWidth(64).MinHeight(20);
-        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageDetails.Close", LabelMarkup = "Close", DescriptionMarkup = "Close image preview.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => Close() });
+        dialog.AddCommand(new Command { Id = "CodeAlta.Prompt.ImageDetails.Close", LabelMarkup = SR.T("Close"), DescriptionMarkup = SR.T("Close image preview."), Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => Close() });
         dialog.Show();
         dialog.App?.Focus(titleBox);
     }

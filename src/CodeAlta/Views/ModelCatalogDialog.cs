@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Globalization;
 using System.Text.Json;
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using CodeAlta.Models;
 using CodeAlta.ViewModels;
@@ -69,19 +70,19 @@ internal sealed class ModelCatalogDialog
         {
             document
                 .AddColumn(new DataGridColumnInfo<string>("current", "", true, ModelCatalogRowViewModel.Accessor.CurrentMarker))
-                .AddColumn(new DataGridColumnInfo<string>("provider", "Provider", true, ModelCatalogRowViewModel.Accessor.ProviderDisplayName))
-                .AddColumn(new DataGridColumnInfo<string>("providerKey", "Provider Id", true, ModelCatalogRowViewModel.Accessor.ProviderKey))
-                .AddColumn(new DataGridColumnInfo<string>("model", "Model", true, ModelCatalogRowViewModel.Accessor.ModelDisplayName))
-                .AddColumn(new DataGridColumnInfo<string>("modelId", "Model Id", true, ModelCatalogRowViewModel.Accessor.ModelId))
-                .AddColumn(new DataGridColumnInfo<long?>("context", "Context", true, ModelCatalogRowViewModel.Accessor.ContextWindowTokens))
-                .AddColumn(new DataGridColumnInfo<long?>("input", "Input", true, ModelCatalogRowViewModel.Accessor.InputTokenLimit))
-                .AddColumn(new DataGridColumnInfo<long?>("output", "Output", true, ModelCatalogRowViewModel.Accessor.OutputTokenLimit))
-                .AddColumn(new DataGridColumnInfo<string>("reasoning", "Reason", true, ModelCatalogRowViewModel.Accessor.ReasoningText))
-                .AddColumn(new DataGridColumnInfo<string>("tools", "Tools", true, ModelCatalogRowViewModel.Accessor.ToolCallText))
-                .AddColumn(new DataGridColumnInfo<string>("structured", "Struct", true, ModelCatalogRowViewModel.Accessor.StructuredOutputText))
-                .AddColumn(new DataGridColumnInfo<string>("images", "Images", true, ModelCatalogRowViewModel.Accessor.ImageInputText))
-                .AddColumn(new DataGridColumnInfo<string>("modelsDev", "models.dev", true, ModelCatalogRowViewModel.Accessor.ModelsDevRef))
-                .AddColumn(new DataGridColumnInfo<string>("status", "Status", true, ModelCatalogRowViewModel.Accessor.Status));
+                .AddColumn(new DataGridColumnInfo<string>("provider", SR.T("Provider"), true, ModelCatalogRowViewModel.Accessor.ProviderDisplayName))
+                .AddColumn(new DataGridColumnInfo<string>("providerKey", SR.T("Provider Id"), true, ModelCatalogRowViewModel.Accessor.ProviderKey))
+                .AddColumn(new DataGridColumnInfo<string>("model", SR.T("Model"), true, ModelCatalogRowViewModel.Accessor.ModelDisplayName))
+                .AddColumn(new DataGridColumnInfo<string>("modelId", SR.T("Model Id"), true, ModelCatalogRowViewModel.Accessor.ModelId))
+                .AddColumn(new DataGridColumnInfo<long?>("context", SR.T("Context"), true, ModelCatalogRowViewModel.Accessor.ContextWindowTokens))
+                .AddColumn(new DataGridColumnInfo<long?>("input", SR.T("Input"), true, ModelCatalogRowViewModel.Accessor.InputTokenLimit))
+                .AddColumn(new DataGridColumnInfo<long?>("output", SR.T("Output"), true, ModelCatalogRowViewModel.Accessor.OutputTokenLimit))
+                .AddColumn(new DataGridColumnInfo<string>("reasoning", SR.T("Reason"), true, ModelCatalogRowViewModel.Accessor.ReasoningText))
+                .AddColumn(new DataGridColumnInfo<string>("tools", SR.T("Tools"), true, ModelCatalogRowViewModel.Accessor.ToolCallText))
+                .AddColumn(new DataGridColumnInfo<string>("structured", SR.T("Struct"), true, ModelCatalogRowViewModel.Accessor.StructuredOutputText))
+                .AddColumn(new DataGridColumnInfo<string>("images", SR.T("Images"), true, ModelCatalogRowViewModel.Accessor.ImageInputText))
+                .AddColumn(new DataGridColumnInfo<string>("modelsDev", SR.T("models.dev"), true, ModelCatalogRowViewModel.Accessor.ModelsDevRef))
+                .AddColumn(new DataGridColumnInfo<string>("status", SR.T("Status"), true, ModelCatalogRowViewModel.Accessor.Status));
 
             foreach (var row in _rows)
             {
@@ -102,7 +103,7 @@ internal sealed class ModelCatalogDialog
         ConfigureColumns(_grid);
         SelectInitialRow();
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -114,9 +115,9 @@ internal sealed class ModelCatalogDialog
         _grid.FilterRowVisible(filterRowVisible);
 
         var toolbar = new HStack(
-            new CheckBox("Filter row").IsChecked(filterRowVisible),
-            new Markup("[dim]Ctrl+F search · F4 filter · Enter select · Esc close[/]"),
-            new TextBlock(() => $"{_rows.Count.ToString(CultureInfo.InvariantCulture)} model(s)"))
+            new CheckBox(SR.T("Filter row")).IsChecked(filterRowVisible),
+            new Markup($"[dim]{SR.T("Ctrl+F search · F4 filter · Enter select · Esc close")}[/]"),
+            new TextBlock(() => SR.T("{0} model(s)", _rows.Count.ToString(CultureInfo.InvariantCulture))))
         {
             Spacing = 2,
         };
@@ -141,9 +142,9 @@ internal sealed class ModelCatalogDialog
             0);
 
         _dialog = new Dialog()
-            .Title("Models")
+            .Title(SR.T("Models"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Enter Select · Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Enter Select · Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -151,8 +152,8 @@ internal sealed class ModelCatalogDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Models.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the model catalog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the model catalog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(restoreFocus: true),
@@ -160,8 +161,8 @@ internal sealed class ModelCatalogDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Models.Select",
-            LabelMarkup = "Select",
-            DescriptionMarkup = "Select the highlighted provider/model for the current prompt or session.",
+            LabelMarkup = SR.T("Select"),
+            DescriptionMarkup = SR.T("Select the highlighted provider/model for the current prompt or session."),
             Gesture = new KeyGesture(TerminalKey.Enter),
             Importance = CommandImportance.Primary,
             Execute = _ => SelectHighlighted(),
@@ -282,19 +283,19 @@ internal sealed class ModelCatalogDialog
     private static void ConfigureColumns(DataGridControl grid)
     {
         grid.Columns.Add(new DataGridColumn<string> { Key = "current", TypedValueAccessor = ModelCatalogRowViewModel.Accessor.CurrentMarker, Width = GridLength.Fixed(2), Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "provider", Header = new TextBlock("Provider"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ProviderDisplayName, Width = GridLength.Star(1), Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "providerKey", Header = new TextBlock("Provider Id"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ProviderKey, Width = GridLength.Auto, Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "model", Header = new TextBlock("Model"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ModelDisplayName, Width = GridLength.Star(2), Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "modelId", Header = new TextBlock("Model Id"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ModelId, Width = GridLength.Star(2), Sortable = true });
-        grid.Columns.Add(CreateNullableLongColumn("context", "Context", ModelCatalogRowViewModel.Accessor.ContextWindowTokens));
-        grid.Columns.Add(CreateNullableLongColumn("input", "Input", ModelCatalogRowViewModel.Accessor.InputTokenLimit));
-        grid.Columns.Add(CreateNullableLongColumn("output", "Output", ModelCatalogRowViewModel.Accessor.OutputTokenLimit));
-        grid.Columns.Add(new DataGridColumn<string> { Key = "reasoning", Header = new TextBlock("Reason"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ReasoningText, Width = GridLength.Auto, Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "tools", Header = new TextBlock("Tools"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ToolCallText, Width = GridLength.Auto, Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "structured", Header = new TextBlock("Struct"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.StructuredOutputText, Width = GridLength.Auto, Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "images", Header = new TextBlock("Images"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ImageInputText, Width = GridLength.Auto, Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "modelsDev", Header = new TextBlock("models.dev"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ModelsDevRef, Width = GridLength.Star(1), Sortable = true });
-        grid.Columns.Add(new DataGridColumn<string> { Key = "status", Header = new TextBlock("Status"), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.Status, Width = GridLength.Auto, Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "provider", Header = new TextBlock(SR.T("Provider")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ProviderDisplayName, Width = GridLength.Star(1), Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "providerKey", Header = new TextBlock(SR.T("Provider Id")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ProviderKey, Width = GridLength.Auto, Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "model", Header = new TextBlock(SR.T("Model")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ModelDisplayName, Width = GridLength.Star(2), Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "modelId", Header = new TextBlock(SR.T("Model Id")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ModelId, Width = GridLength.Star(2), Sortable = true });
+        grid.Columns.Add(CreateNullableLongColumn("context", SR.T("Context"), ModelCatalogRowViewModel.Accessor.ContextWindowTokens));
+        grid.Columns.Add(CreateNullableLongColumn("input", SR.T("Input"), ModelCatalogRowViewModel.Accessor.InputTokenLimit));
+        grid.Columns.Add(CreateNullableLongColumn("output", SR.T("Output"), ModelCatalogRowViewModel.Accessor.OutputTokenLimit));
+        grid.Columns.Add(new DataGridColumn<string> { Key = "reasoning", Header = new TextBlock(SR.T("Reason")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ReasoningText, Width = GridLength.Auto, Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "tools", Header = new TextBlock(SR.T("Tools")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ToolCallText, Width = GridLength.Auto, Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "structured", Header = new TextBlock(SR.T("Struct")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.StructuredOutputText, Width = GridLength.Auto, Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "images", Header = new TextBlock(SR.T("Images")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ImageInputText, Width = GridLength.Auto, Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "modelsDev", Header = new TextBlock(SR.T("models.dev")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.ModelsDevRef, Width = GridLength.Star(1), Sortable = true });
+        grid.Columns.Add(new DataGridColumn<string> { Key = "status", Header = new TextBlock(SR.T("Status")), TypedValueAccessor = ModelCatalogRowViewModel.Accessor.Status, Width = GridLength.Auto, Sortable = true });
     }
 
     private static DataGridColumn<long?> CreateNullableLongColumn(string key, string header, BindingAccessor<long?> accessor)
@@ -316,8 +317,8 @@ internal sealed class ModelCatalogDialog
     private static string FormatBoolean(bool? value)
         => value switch
         {
-            true => "Yes",
-            false => "No",
+            true => SR.T("Yes"),
+            false => SR.T("No"),
             _ => "—",
         };
 

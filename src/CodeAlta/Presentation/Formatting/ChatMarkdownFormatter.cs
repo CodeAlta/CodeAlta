@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Diffing;
+using CodeAlta.Catalog;
 using XenoAtom.Terminal.UI;
 using CodeAlta.Presentation.Styling;
 
@@ -77,7 +78,9 @@ internal static class ChatMarkdownFormatter
         if (!string.IsNullOrWhiteSpace(displayName))
         {
             builder.AppendLine()
-                .Append("- Name: `")
+                .Append("- ")
+                .Append(SR.T("Name"))
+                .Append(": `")
                 .Append(displayName)
                 .Append('`');
         }
@@ -90,7 +93,9 @@ internal static class ChatMarkdownFormatter
             }
 
             builder
-                .Append("- Detail: ")
+                .Append("- ")
+                .Append(SR.T("Detail"))
+                .Append(": ")
                 .Append(SummarizeActivityMessage(activity));
         }
 
@@ -172,13 +177,20 @@ internal static class ChatMarkdownFormatter
     private static string FormatModelSelectionMarkdown(string providerKey, string? modelId, string? reasoningEffort)
     {
         var builder = new StringBuilder();
-        builder.Append("Model used: provider `")
+        builder.Append(SR.T("Model used"))
+            .Append(": ")
+            .Append(SR.T("provider"))
+            .Append(" `")
             .Append(providerKey)
-            .Append("`, model ")
-            .Append(string.IsNullOrWhiteSpace(modelId) ? "provider default" : $"`{modelId}`");
+            .Append("`, ")
+            .Append(SR.T("model"))
+            .Append(' ')
+            .Append(string.IsNullOrWhiteSpace(modelId) ? SR.T("provider default") : $"`{modelId}`");
         if (!string.IsNullOrWhiteSpace(reasoningEffort))
         {
-            builder.Append(", reasoning: `")
+            builder.Append(", ")
+                .Append(SR.T("reasoning"))
+                .Append(": `")
                 .Append(reasoningEffort)
                 .Append('`');
         }
@@ -191,23 +203,26 @@ internal static class ChatMarkdownFormatter
     {
         ArgumentNullException.ThrowIfNull(promptEvent);
         var builder = new StringBuilder();
-        builder.Append("System Prompt ")
-            .Append(promptEvent.Change.Kind == "initial" ? "recorded" : "changed")
+        builder.Append(SR.T("System Prompt"))
+            .Append(' ')
+            .Append(promptEvent.Change.Kind == "initial" ? SR.T("recorded") : SR.T("changed"))
             .Append(": `")
             .Append(promptEvent.EffectivePromptHash)
             .AppendLine("`");
-        builder.Append("- Mapping: ").AppendLine(promptEvent.ProviderPayloadSummary.ChannelMapping);
+        builder.Append("- ").Append(SR.T("Mapping")).Append(": ").AppendLine(promptEvent.ProviderPayloadSummary.ChannelMapping);
         AppendAgentPromptLine(builder, promptEvent);
-        builder.Append("- Tokens: ")
+        builder.Append("- ").Append(SR.T("Tokens")).Append(": ")
             .Append(promptEvent.Statistics.TotalApproxTokens)
-            .Append(" approx total (`system` ")
+            .Append(' ')
+            .Append(SR.T("approx total"))
+            .Append(" (`system` ")
             .Append(promptEvent.Statistics.SystemApproxTokens)
             .Append(", `developer` ")
             .Append(promptEvent.Statistics.DeveloperApproxTokens)
             .AppendLine(")");
         if (promptEvent.ProviderPayloadSummary.Lossy)
         {
-            builder.AppendLine("- Warning: provider mapping is lossy.");
+            builder.AppendLine("- " + SR.T("Warning: provider mapping is lossy."));
         }
 
         return builder.ToString();
@@ -222,7 +237,7 @@ internal static class ChatMarkdownFormatter
             return;
         }
 
-        builder.Append("- Agent Prompt: ").Append(EscapeMarkdownInlineText(promptName));
+        builder.Append("- ").Append(SR.T("Agent Prompt")).Append(": ").Append(EscapeMarkdownInlineText(promptName));
         var displayName = NormalizeOptionalText(promptEvent.AgentPromptUsage?.DisplayName);
         var sourcePath = NormalizeOptionalText(promptEvent.AgentPromptUsage?.SourcePath);
         if (displayName is not null || sourcePath is not null)
@@ -357,55 +372,57 @@ internal static class ChatMarkdownFormatter
             builder.AppendLine();
         }
 
-        builder.AppendLine("**Efficiency**");
+        builder.AppendLine("**" + SR.T("Efficiency") + "**");
         if (tokensBefore is not null && tokensAfter is not null)
         {
             var removedText = tokensRemoved is null
                 ? string.Empty
-                : $", removed {FormatCompactNumber(tokensRemoved.Value)}";
+                : SR.T(", removed {0}", FormatCompactNumber(tokensRemoved.Value));
             var ratioText = compressionRatio is null
                 ? string.Empty
-                : $", ratio {FormatPercent(compressionRatio.Value)}";
-            builder.Append("- Context: ")
+                : SR.T(", ratio {0}", FormatPercent(compressionRatio.Value));
+            builder.Append("- ").Append(SR.T("Context")).Append(": ")
                 .Append(FormatCompactNumber(tokensBefore.Value))
                 .Append(" → ")
                 .Append(FormatCompactNumber(tokensAfter.Value))
-                .Append(" tokens")
+                .Append(' ')
+                .Append(SR.T("tokens"))
                 .Append(removedText)
                 .AppendLine(ratioText);
         }
         else if (tokensBefore is not null)
         {
-            builder.Append("- Context before: ")
+            builder.Append("- ").Append(SR.T("Context before")).Append(": ")
                 .Append(FormatCompactNumber(tokensBefore.Value))
-                .AppendLine(" tokens");
+                .Append(' ')
+                .AppendLine(SR.T("tokens"));
         }
 
         if (targetTokens is not null || targetRatio is not null || targetMet is not null)
         {
-            builder.Append("- Target: ");
+            builder.Append("- ").Append(SR.T("Target")).Append(": ");
             if (targetTokens is not null)
             {
-                builder.Append(FormatCompactNumber(targetTokens.Value)).Append(" tokens");
+                builder.Append(FormatCompactNumber(targetTokens.Value)).Append(' ').Append(SR.T("tokens"));
             }
             else
             {
-                builder.Append("unknown tokens");
+                builder.Append(SR.T("unknown tokens"));
             }
 
             if (targetRatio is not null)
             {
-                builder.Append(" (").Append(FormatPercent(targetRatio.Value)).Append(" of input limit)");
+                builder.Append(" (").Append(SR.T("{0} of input limit", FormatPercent(targetRatio.Value))).Append(')');
             }
 
             if (postCompactionInputRatio is not null)
             {
-                builder.Append(", actual ").Append(FormatPercent(postCompactionInputRatio.Value)).Append(" of input limit");
+                builder.Append(", ").Append(SR.T("actual {0} of input limit", FormatPercent(postCompactionInputRatio.Value)));
             }
 
             if (targetMet is not null)
             {
-                builder.Append(targetMet.Value ? ", met" : ", missed");
+                builder.Append(targetMet.Value ? SR.T(", met") : SR.T(", missed"));
             }
 
             if (targetMet is false && !string.IsNullOrWhiteSpace(targetMissReason) && !string.Equals(targetMissReason, "none", StringComparison.OrdinalIgnoreCase))
@@ -415,95 +432,120 @@ internal static class ChatMarkdownFormatter
 
             if (planningAttemptCount is > 1)
             {
-                builder.Append(", ").Append(planningAttemptCount.Value).Append(" planning attempts");
+                builder.Append(", ").Append(SR.T("{0} planning attempts", planningAttemptCount.Value));
             }
 
             builder.AppendLine();
         }
 
-        builder.Append("- Messages: summarized ")
+        builder.Append("- ").Append(SR.T("Messages")).Append(": ").Append(SR.T("summarized"))
+            .Append(' ')
             .Append(FormatNullableNumber(summarizedMessages))
-            .Append(", kept ")
+            .Append(", ").Append(SR.T("kept")).Append(' ')
             .Append(FormatNullableNumber(keptMessages))
-            .Append(", after ")
+            .Append(", ").Append(SR.T("after"))
+            .Append(' ')
             .AppendLine(FormatNullableNumber(messagesAfter));
 
-        builder.Append("- Summarizer: ")
+        builder.Append("- ").Append(SR.T("Summarizer")).Append(": ")
             .Append(FormatNullableNumber(summaryCalls))
-            .Append(summaryCalls == 1 ? " call" : " calls")
+            .Append(' ')
+            .Append(summaryCalls == 1 ? SR.T("call") : SR.T("calls"))
             .Append(", ")
             .Append(FormatNullableNumber(chunkCount))
-            .Append(chunkCount == 1 ? " chunk" : " chunks")
-            .Append(", input ~")
+            .Append(' ')
+            .Append(chunkCount == 1 ? SR.T("chunk") : SR.T("chunks"))
+            .Append(", ").Append(SR.T("input ~"))
             .Append(FormatNullableNumber(summaryPromptTokens))
-            .Append(" tokens, output budget ")
+            .Append(' ').Append(SR.T("tokens")).Append(", ").Append(SR.T("output budget"))
+            .Append(' ')
             .Append(FormatNullableNumber(summaryMaxOutputTokens))
-            .AppendLine(" tokens");
+            .Append(' ')
+            .AppendLine(SR.T("tokens"));
         builder.AppendLine();
 
-        builder.AppendLine("**What fed the summarizer**");
-        builder.Append("- Messages serialized: ")
+        builder.AppendLine("**" + SR.T("What fed the summarizer") + "**");
+        builder.Append("- ").Append(SR.T("Messages serialized")).Append(": ")
             .Append(FormatNullableNumber(summaryIncludedMessages))
             .Append("/")
             .Append(FormatNullableNumber(summaryTotalMessages))
-            .Append(" considered");
+            .Append(' ')
+            .Append(SR.T("considered"));
         if (droppedMessages is > 0)
         {
-            builder.Append(", ").Append(droppedMessages.Value).Append(" dropped as empty/unserializable");
+            builder.Append(", ").Append(SR.T("{0} dropped as empty/unserializable", droppedMessages.Value));
         }
 
         builder.AppendLine();
-        builder.Append("- Tool calls: ")
+        builder.Append("- ").Append(SR.T("Tool calls")).Append(": ")
             .Append(FormatNullableNumber(serializedToolCalls))
             .Append("/")
             .Append(FormatNullableNumber(totalToolCalls))
-            .Append(" serialized");
+            .Append(' ')
+            .Append(SR.T("serialized"));
         if (collapsedToolCalls is > 0)
         {
-            builder.Append(", ").Append(collapsedToolCalls.Value).Append(" repeated calls collapsed");
+            builder.Append(", ").Append(SR.T("{0} repeated calls collapsed", collapsedToolCalls.Value));
         }
 
         builder.AppendLine();
-        builder.Append("- Tool outputs: ")
+        builder.Append("- ").Append(SR.T("Tool outputs")).Append(": ")
             .Append(FormatNullableNumber(toolResultExcerpts))
             .Append("/")
             .Append(FormatNullableNumber(totalToolResults))
-            .Append(" with excerpts, ")
+            .Append(' ')
+            .Append(SR.T("with excerpts"))
+            .Append(", ")
             .Append(FormatNullableNumber(serializedToolResults))
-            .Append(" result summaries, ")
+            .Append(' ')
+            .Append(SR.T("result summaries"))
+            .Append(", ")
             .Append(FormatNullableNumber(omittedToolResults))
-            .Append(" omitted/truncated bulk outputs, ")
+            .Append(' ')
+            .Append(SR.T("omitted/truncated bulk outputs"))
+            .Append(", ")
             .Append(FormatNullableNumber(toolResultCharacters))
-            .AppendLine(" chars included");
-        builder.Append("- Reasoning: ")
+            .Append(' ')
+            .AppendLine(SR.T("chars included"));
+        builder.Append("- ").Append(SR.T("Reasoning")).Append(": ")
             .Append(FormatNullableNumber(serializedReasoning))
             .Append("/")
             .Append(FormatNullableNumber(totalReasoning))
-            .Append(" excerpts, ")
+            .Append(' ')
+            .Append(SR.T("excerpts"))
+            .Append(", ")
             .Append(FormatNullableNumber(omittedReasoning))
-            .Append(" omitted, ")
+            .Append(' ')
+            .Append(SR.T("omitted"))
+            .Append(", ")
             .Append(FormatNullableNumber(reasoningCharacters))
-            .AppendLine(" chars included");
-        builder.Append("- Attachments/files: ")
+            .Append(' ')
+            .AppendLine(SR.T("chars included"));
+        builder.Append("- ").Append(SR.T("Attachments/files")).Append(": ")
             .Append(FormatNullableNumber(omittedAttachments))
-            .Append(" inline attachments omitted; ")
+            .Append(' ')
+            .Append(SR.T("inline attachments omitted"))
+            .Append("; ")
             .Append(modifiedFiles)
-            .Append(" modified files and ")
+            .Append(' ')
+            .Append(SR.T("modified files and"))
+            .Append(' ')
             .Append(readFiles)
-            .AppendLine(" read files tracked");
+            .Append(' ')
+            .AppendLine(SR.T("read files tracked"));
 
         if (GetBoolProperty(details, "oversizedAnchorReduced") is true || GetBoolProperty(details, "isSplitTurn") is true)
         {
             builder.AppendLine();
-            builder.AppendLine("**Special handling**");
+            builder.AppendLine("**" + SR.T("Special handling") + "**");
             if (GetBoolProperty(details, "isSplitTurn") is true)
             {
-                builder.AppendLine("- Compaction split an in-progress turn and retained a turn prefix.");
+                builder.AppendLine("- " + SR.T("Compaction split an in-progress turn and retained a turn prefix."));
             }
 
             if (GetBoolProperty(details, "oversizedAnchorReduced") is true)
             {
-                builder.AppendLine("- The oversized latest user message was reduced before summarization.");
+                builder.AppendLine("- " + SR.T("The oversized latest user message was reduced before summarization."));
             }
         }
 
@@ -566,10 +608,10 @@ internal static class ChatMarkdownFormatter
             : 0;
 
     private static string FormatNullableNumber(long? value)
-        => value is null ? "unknown" : FormatCompactNumber(value.Value);
+        => value is null ? SR.T("unknown") : FormatCompactNumber(value.Value);
 
     private static string FormatNullableNumber(int? value)
-        => value is null ? "unknown" : value.Value.ToString("N0", CultureInfo.InvariantCulture);
+        => value is null ? SR.T("unknown") : value.Value.ToString("N0", CultureInfo.InvariantCulture);
 
     private static string FormatCompactNumber(long value)
         => value.ToString("N0", CultureInfo.InvariantCulture);
@@ -581,12 +623,12 @@ internal static class ChatMarkdownFormatter
     {
         return reason switch
         {
-            "fixed_prompt" => "fixed prompt exceeded target",
-            "oversized_anchor_reduced" => "latest user anchor required reduction",
-            "latest_user_anchor" => "latest user anchor exceeded target",
-            "summary_size" => "checkpoint summary exceeded target",
-            "retained_suffix" => "retained suffix exceeded target",
-            "input_fit_only" => "accepted to fit the input limit",
+            "fixed_prompt" => SR.T("fixed prompt exceeded target"),
+            "oversized_anchor_reduced" => SR.T("latest user anchor required reduction"),
+            "latest_user_anchor" => SR.T("latest user anchor exceeded target"),
+            "summary_size" => SR.T("checkpoint summary exceeded target"),
+            "retained_suffix" => SR.T("retained suffix exceeded target"),
+            "input_fit_only" => SR.T("accepted to fit the input limit"),
             _ => reason.Replace('_', ' '),
         };
     }
@@ -595,25 +637,25 @@ internal static class ChatMarkdownFormatter
     {
         return kind switch
         {
-            AgentSessionUpdateKind.Info => $"{TerminalIcons.CodInfo} Info",
-            AgentSessionUpdateKind.Warning => $"{TerminalIcons.CodWarning} Warning",
-            AgentSessionUpdateKind.Reconnecting => $"{TerminalIcons.MdServerNetwork} Reconnecting",
-            AgentSessionUpdateKind.ModelChanged => $"{TerminalIcons.MdChat} Model Used",
-            AgentSessionUpdateKind.ModeChanged => $"{TerminalIcons.MdCubeOutline} Mode Changed",
-            AgentSessionUpdateKind.TitleChanged => $"{TerminalIcons.MdRenameBox} Title Changed",
-            AgentSessionUpdateKind.ContextChanged => $"{TerminalIcons.MdFolder} Context Changed",
-            AgentSessionUpdateKind.PlanUpdated => $"{TerminalIcons.MdProgressWrench} Plan Updated",
-            AgentSessionUpdateKind.UsageUpdated => $"{TerminalIcons.MdPacMan} Usage Updated",
-            AgentSessionUpdateKind.CompactionStarted => $"{TerminalIcons.MdSelectCompare} Compaction Started",
-            AgentSessionUpdateKind.CompactionCompleted => $"{TerminalIcons.MdShieldPlusOutline} Compaction Completed",
-            AgentSessionUpdateKind.Handoff => $"{TerminalIcons.MdServerNetwork} Handoff",
-            AgentSessionUpdateKind.Truncated => $"{TerminalIcons.MdDelete} Session Truncated",
-            AgentSessionUpdateKind.Shutdown => $"{TerminalIcons.MdClose} Session Shutdown",
-            AgentSessionUpdateKind.TaskCompleted => $"{TerminalIcons.MdCheck} Task Completed",
-            AgentSessionUpdateKind.DiffUpdated => $"{TerminalIcons.CodEdit} Diff Updated",
-            AgentSessionUpdateKind.Started => $"{TerminalIcons.MdTimerOutline} Session Started",
-            AgentSessionUpdateKind.Resumed => $"{TerminalIcons.MdAccountArrowRight} Session Resumed",
-            AgentSessionUpdateKind.Idle => $"{TerminalIcons.MdCat} Agent Idle",
+            AgentSessionUpdateKind.Info => $"{TerminalIcons.CodInfo} {SR.T("Info")}",
+            AgentSessionUpdateKind.Warning => $"{TerminalIcons.CodWarning} {SR.T("Warning")}",
+            AgentSessionUpdateKind.Reconnecting => $"{TerminalIcons.MdServerNetwork} {SR.T("Reconnecting")}",
+            AgentSessionUpdateKind.ModelChanged => $"{TerminalIcons.MdChat} {SR.T("Model Used")}",
+            AgentSessionUpdateKind.ModeChanged => $"{TerminalIcons.MdCubeOutline} {SR.T("Mode Changed")}",
+            AgentSessionUpdateKind.TitleChanged => $"{TerminalIcons.MdRenameBox} {SR.T("Title Changed")}",
+            AgentSessionUpdateKind.ContextChanged => $"{TerminalIcons.MdFolder} {SR.T("Context Changed")}",
+            AgentSessionUpdateKind.PlanUpdated => $"{TerminalIcons.MdProgressWrench} {SR.T("Plan Updated")}",
+            AgentSessionUpdateKind.UsageUpdated => $"{TerminalIcons.MdPacMan} {SR.T("Usage Updated")}",
+            AgentSessionUpdateKind.CompactionStarted => $"{TerminalIcons.MdSelectCompare} {SR.T("Compaction Started")}",
+            AgentSessionUpdateKind.CompactionCompleted => $"{TerminalIcons.MdShieldPlusOutline} {SR.T("Compaction Completed")}",
+            AgentSessionUpdateKind.Handoff => $"{TerminalIcons.MdServerNetwork} {SR.T("Handoff")}",
+            AgentSessionUpdateKind.Truncated => $"{TerminalIcons.MdDelete} {SR.T("Session Truncated")}",
+            AgentSessionUpdateKind.Shutdown => $"{TerminalIcons.MdClose} {SR.T("Session Shutdown")}",
+            AgentSessionUpdateKind.TaskCompleted => $"{TerminalIcons.MdCheck} {SR.T("Task Completed")}",
+            AgentSessionUpdateKind.DiffUpdated => $"{TerminalIcons.CodEdit} {SR.T("Diff Updated")}",
+            AgentSessionUpdateKind.Started => $"{TerminalIcons.MdTimerOutline} {SR.T("Session Started")}",
+            AgentSessionUpdateKind.Resumed => $"{TerminalIcons.MdAccountArrowRight} {SR.T("Session Resumed")}",
+            AgentSessionUpdateKind.Idle => $"{TerminalIcons.MdCat} {SR.T("Agent Idle")}",
             _ => SplitPascalCase(kind.ToString()),
         };
     }
@@ -622,14 +664,17 @@ internal static class ChatMarkdownFormatter
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var builder = new StringBuilder("_The agent is blocked until this permission request is resolved._");
+        var builder = new StringBuilder("_" + SR.T("The agent is blocked until this permission request is resolved.") + "_");
 
         switch (request)
         {
             case AgentCommandPermissionRequest command:
                 builder.AppendLine()
                     .AppendLine()
-                    .Append("- Kind: command execution");
+                    .Append("- ")
+                    .Append(SR.T("Kind"))
+                    .Append(": ")
+                    .Append(SR.T("command execution"));
 
                 if (!string.IsNullOrWhiteSpace(command.Command))
                 {
@@ -638,12 +683,12 @@ internal static class ChatMarkdownFormatter
                         .Append(FormatCodeFence(command.Command, "shell"));
                 }
 
-                AppendBullet(builder, "Working directory", command.WorkingDirectory, code: true);
-                AppendBullet(builder, "Reason", command.Reason);
+                AppendBullet(builder, SR.T("Working directory"), command.WorkingDirectory, code: true);
+                AppendBullet(builder, SR.T("Reason"), command.Reason);
 
                 if (command.Actions is { Count: > 0 } actions)
                 {
-                    builder.AppendLine().AppendLine().AppendLine("**Actions**");
+                    builder.AppendLine().AppendLine().AppendLine("**" + SR.T("Actions") + "**");
                     foreach (var action in actions)
                     {
                         builder.Append("- ")
@@ -664,7 +709,7 @@ internal static class ChatMarkdownFormatter
 
                 if (command.Network is { } network)
                 {
-                    AppendBullet(builder, "Network", $"{network.Protocol}://{network.Host}");
+                    AppendBullet(builder, SR.T("Network"), $"{network.Protocol}://{network.Host}");
                 }
 
                 break;
@@ -672,16 +717,19 @@ internal static class ChatMarkdownFormatter
             case AgentFileChangePermissionRequest fileChange:
                 builder.AppendLine()
                     .AppendLine()
-                    .Append("- Kind: file change");
-                AppendBullet(builder, "Grant root", fileChange.GrantRoot, code: true);
-                AppendBullet(builder, "Reason", fileChange.Reason);
+                    .Append("- ")
+                    .Append(SR.T("Kind"))
+                    .Append(": ")
+                    .Append(SR.T("file change"));
+                AppendBullet(builder, SR.T("Grant root"), fileChange.GrantRoot, code: true);
+                AppendBullet(builder, SR.T("Reason"), fileChange.Reason);
                 break;
 
             case AgentGenericPermissionRequest generic:
-                builder.AppendLine().AppendLine().Append("- Kind: ").Append(generic.Kind);
+                builder.AppendLine().AppendLine().Append("- ").Append(SR.T("Kind")).Append(": ").Append(generic.Kind);
                 if (TryGetStringProperty(generic.Raw, "toolName", out var toolName))
                 {
-                    builder.AppendLine().Append("- Tool: `").Append(toolName).Append('`');
+                    builder.AppendLine().Append("- ").Append(SR.T("Tool")).Append(": `").Append(toolName).Append('`');
                 }
 
                 builder.AppendLine()
@@ -690,7 +738,7 @@ internal static class ChatMarkdownFormatter
                 break;
 
             default:
-                builder.AppendLine().AppendLine().Append("- Kind: ").Append(request.Kind);
+                builder.AppendLine().AppendLine().Append("- ").Append(SR.T("Kind")).Append(": ").Append(request.Kind);
                 break;
         }
 
@@ -702,7 +750,7 @@ internal static class ChatMarkdownFormatter
         ArgumentNullException.ThrowIfNull(raw);
 
         var builder = new StringBuilder()
-            .AppendLine($"- Event: `{raw.BackendEventType}`");
+            .AppendLine($"- {SR.T("Event")}: `{raw.BackendEventType}`");
 
         var payload = raw.Raw.ValueKind == JsonValueKind.Undefined
             ? "{}"
@@ -808,29 +856,31 @@ internal static class ChatMarkdownFormatter
 
         var builder = new StringBuilder(
             autoApprove
-                ? "_The agent asked a question. CodeAlta will prefer continue/inspect-style choices or use a neutral fallback answer so the run can continue._"
-                : "_The agent asked a question. Terminal question prompts are not implemented yet, so CodeAlta returns empty answers for now._");
+                ? "_" + SR.T("The agent asked a question. CodeAlta will prefer continue/inspect-style choices or use a neutral fallback answer so the run can continue.") + "_"
+                : "_" + SR.T("The agent asked a question. Terminal question prompts are not implemented yet, so CodeAlta returns empty answers for now.") + "_");
 
         for (var index = 0; index < request.Form.Prompts.Count; index++)
         {
             var prompt = request.Form.Prompts[index];
             builder.AppendLine()
                 .AppendLine()
-                .Append("**Question ")
+                .Append("**")
+                .Append(SR.T("Question"))
+                .Append(' ')
                 .Append(index + 1)
                 .Append("**");
 
-            AppendBullet(builder, "Id", prompt.Id, code: true);
+            AppendBullet(builder, SR.T("Id"), prompt.Id, code: true);
             if (!string.IsNullOrWhiteSpace(prompt.Header))
             {
-                builder.AppendLine().Append("- Header: ").Append(prompt.Header);
+                builder.AppendLine().Append("- ").Append(SR.T("Header")).Append(": ").Append(prompt.Header);
             }
 
-            builder.AppendLine().Append("- Question: ").Append(prompt.Question);
+            builder.AppendLine().Append("- ").Append(SR.T("Question")).Append(": ").Append(prompt.Question);
 
             if (prompt.Options is { Count: > 0 } options)
             {
-                builder.AppendLine().AppendLine().Append("**Choices**");
+                builder.AppendLine().AppendLine().Append("**").Append(SR.T("Choices")).Append("**");
                 foreach (var option in options)
                 {
                     builder.AppendLine().Append("- ").Append(option.Label);
@@ -842,12 +892,12 @@ internal static class ChatMarkdownFormatter
             }
 
             builder.AppendLine()
-                .Append("- Freeform: ")
-                .Append(prompt.AllowFreeform ? "allowed" : "disabled");
+                .Append("- ").Append(SR.T("Freeform")).Append(": ")
+                .Append(prompt.AllowFreeform ? SR.T("allowed") : SR.T("disabled"));
 
             if (prompt.IsSecret)
             {
-                builder.AppendLine().Append("- Input: secret");
+                builder.AppendLine().Append("- ").Append(SR.T("Input")).Append(": ").Append(SR.T("secret"));
             }
         }
 
@@ -860,8 +910,8 @@ internal static class ChatMarkdownFormatter
 
         var label = interaction.Kind switch
         {
-            AgentInteractionKind.PermissionResolved => "Permission Resolved",
-            AgentInteractionKind.UserInputResolved => "User Input Resolved",
+            AgentInteractionKind.PermissionResolved => SR.T("Permission Resolved"),
+            AgentInteractionKind.UserInputResolved => SR.T("User Input Resolved"),
             _ => interaction.Kind.ToString(),
         };
         var detailsMarkdown = BuildChatInteractionResolutionDetailsMarkdown(interaction);
@@ -871,13 +921,13 @@ internal static class ChatMarkdownFormatter
             if (string.IsNullOrWhiteSpace(detailsMarkdown))
             {
                 return string.IsNullOrWhiteSpace(interaction.Message)
-                    ? "_Status:_ resolved"
-                    : $"_Status:_ {interaction.Message}";
+                    ? $"_{SR.T("Status")}:_ {SR.T("resolved")}"
+                    : $"_{SR.T("Status")}:_ {interaction.Message}";
             }
 
             return string.IsNullOrWhiteSpace(interaction.Message)
-                ? $"_Status:_ resolved\n\n{detailsMarkdown}"
-                : $"_Status:_ {interaction.Message}\n\n{detailsMarkdown}";
+                ? $"_{SR.T("Status")}:_ {SR.T("resolved")}\n\n{detailsMarkdown}"
+                : $"_{SR.T("Status")}:_ {interaction.Message}\n\n{detailsMarkdown}";
         }
 
         if (string.IsNullOrWhiteSpace(interaction.Message))
@@ -897,15 +947,15 @@ internal static class ChatMarkdownFormatter
         ArgumentNullException.ThrowIfNull(decision);
 
         var reason = autoApprove
-            ? "CodeAlta response: auto-approved this request."
+            ? SR.T("CodeAlta response: auto-approved this request.")
             : decision.Kind switch
             {
-                AgentPermissionDecisionKind.AllowOnce => "CodeAlta response: approved this request once.",
-                AgentPermissionDecisionKind.AllowForSession => "CodeAlta response: approved this request for the session.",
-                AgentPermissionDecisionKind.Deny => "CodeAlta response: denied this request.",
-                _ => "CodeAlta response: cancelled this request.",
+                AgentPermissionDecisionKind.AllowOnce => SR.T("CodeAlta response: approved this request once."),
+                AgentPermissionDecisionKind.AllowForSession => SR.T("CodeAlta response: approved this request for the session."),
+                AgentPermissionDecisionKind.Deny => SR.T("CodeAlta response: denied this request."),
+                _ => SR.T("CodeAlta response: cancelled this request."),
             };
-        return $"_Status:_ {reason}\n\n- Decision: {SplitPascalCase(decision.Kind.ToString())}";
+        return $"_{SR.T("Status")}:_ {reason}\n\n- {SR.T("Decision")}: {SplitPascalCase(decision.Kind.ToString())}";
     }
 
     public static string FormatChatImmediateUserInputResponseMarkdown(AgentUserInputResponse response, bool autoApprove)
@@ -915,8 +965,8 @@ internal static class ChatMarkdownFormatter
         var builder = new StringBuilder();
         builder.Append(
             autoApprove
-                ? "_Status:_ CodeAlta auto-answered the question."
-                : "_Status:_ CodeAlta returned an empty answer because terminal question prompts are not implemented yet.");
+                ? $"_{SR.T("Status")}:_ {SR.T("CodeAlta auto-answered the question.")}"
+                : $"_{SR.T("Status")}:_ {SR.T("CodeAlta returned an empty answer because terminal question prompts are not implemented yet.")}");
 
         foreach (var answer in response.Answers)
         {
@@ -927,7 +977,7 @@ internal static class ChatMarkdownFormatter
                 .Append("`: ");
             if (string.IsNullOrWhiteSpace(answer.Value))
             {
-                builder.Append("_empty_");
+                builder.Append('_').Append(SR.T("empty")).Append('_');
             }
             else
             {
@@ -943,13 +993,13 @@ internal static class ChatMarkdownFormatter
         var label = GetActivityKindLabel(kind);
         return phase switch
         {
-            AgentActivityPhase.Requested or AgentActivityPhase.Started => $"Calling {label}",
-            AgentActivityPhase.Completed => $"{label} Result",
-            AgentActivityPhase.Failed => $"{label} Failed",
-            AgentActivityPhase.Canceled => $"{label} Canceled",
-            AgentActivityPhase.Progressed => $"{label} Update",
-            AgentActivityPhase.Selected => $"{label} Selected",
-            AgentActivityPhase.Deselected => $"{label} Deselected",
+            AgentActivityPhase.Requested or AgentActivityPhase.Started => SR.T("Calling {0}", label),
+            AgentActivityPhase.Completed => SR.T("{0} Result", label),
+            AgentActivityPhase.Failed => SR.T("{0} Failed", label),
+            AgentActivityPhase.Canceled => SR.T("{0} Canceled", label),
+            AgentActivityPhase.Progressed => SR.T("{0} Update", label),
+            AgentActivityPhase.Selected => SR.T("{0} Selected", label),
+            AgentActivityPhase.Deselected => SR.T("{0} Deselected", label),
             _ => $"{label} · {GetActivityPhaseLabel(phase)}",
         };
     }
@@ -963,6 +1013,7 @@ internal static class ChatMarkdownFormatter
 
         var normalizedLines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var lines = new List<string>(normalizedLines.Length);
+        var inlineImageText = SR.T("Inline Image");
         var changed = false;
 
         foreach (var line in normalizedLines)
@@ -971,9 +1022,9 @@ internal static class ChatMarkdownFormatter
             if (string.Equals(trimmed, "<image>", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
             {
-                if (lines.Count == 0 || !string.Equals(lines[^1], "Inline Image", StringComparison.Ordinal))
+                if (lines.Count == 0 || !string.Equals(lines[^1], inlineImageText, StringComparison.Ordinal))
                 {
-                    lines.Add("Inline Image");
+                    lines.Add(inlineImageText);
                 }
 
                 changed = true;
@@ -1098,14 +1149,14 @@ internal static class ChatMarkdownFormatter
     {
         return phase switch
         {
-            AgentActivityPhase.Requested => "Requested",
-            AgentActivityPhase.Started => "Started",
-            AgentActivityPhase.Progressed => "In Progress",
-            AgentActivityPhase.Completed => "Completed",
-            AgentActivityPhase.Failed => "Failed",
-            AgentActivityPhase.Canceled => "Canceled",
-            AgentActivityPhase.Selected => "Selected",
-            AgentActivityPhase.Deselected => "Deselected",
+            AgentActivityPhase.Requested => SR.T("Requested"),
+            AgentActivityPhase.Started => SR.T("Started"),
+            AgentActivityPhase.Progressed => SR.T("In Progress"),
+            AgentActivityPhase.Completed => SR.T("Completed"),
+            AgentActivityPhase.Failed => SR.T("Failed"),
+            AgentActivityPhase.Canceled => SR.T("Canceled"),
+            AgentActivityPhase.Selected => SR.T("Selected"),
+            AgentActivityPhase.Deselected => SR.T("Deselected"),
             _ => phase.ToString(),
         };
     }
@@ -1114,19 +1165,19 @@ internal static class ChatMarkdownFormatter
     {
         return kind switch
         {
-            AgentActivityKind.Turn => "Turn",
-            AgentActivityKind.ToolCall => "Tool Call",
-            AgentActivityKind.CommandExecution => "Command Execution",
-            AgentActivityKind.FileChange => "File Change",
-            AgentActivityKind.McpToolCall => "MCP Tool Call",
-            AgentActivityKind.DynamicToolCall => "Dynamic Tool Call",
-            AgentActivityKind.CollabAgentToolCall => "Collab Agent Tool Call",
-            AgentActivityKind.Subagent => "Subagent",
-            AgentActivityKind.Hook => "Hook",
-            AgentActivityKind.Skill => "Skill",
-            AgentActivityKind.Compaction => "Compaction",
-            AgentActivityKind.WebSearch => "Web Search",
-            AgentActivityKind.ImageGeneration => "Image Generation",
+            AgentActivityKind.Turn => SR.T("Turn"),
+            AgentActivityKind.ToolCall => SR.T("Tool Call"),
+            AgentActivityKind.CommandExecution => SR.T("Command Execution"),
+            AgentActivityKind.FileChange => SR.T("File Change"),
+            AgentActivityKind.McpToolCall => SR.T("MCP Tool Call"),
+            AgentActivityKind.DynamicToolCall => SR.T("Dynamic Tool Call"),
+            AgentActivityKind.CollabAgentToolCall => SR.T("Collab Agent Tool Call"),
+            AgentActivityKind.Subagent => SR.T("Subagent"),
+            AgentActivityKind.Hook => SR.T("Hook"),
+            AgentActivityKind.Skill => SR.T("Skill"),
+            AgentActivityKind.Compaction => SR.T("Compaction"),
+            AgentActivityKind.WebSearch => SR.T("Web Search"),
+            AgentActivityKind.ImageGeneration => SR.T("Image Generation"),
             _ => SplitPascalCase(kind.ToString()),
         };
     }
@@ -1163,8 +1214,8 @@ internal static class ChatMarkdownFormatter
             }
 
             return string.IsNullOrWhiteSpace(firstLine)
-                ? $"Output omitted ({lineCount} lines, {normalized.Length} chars)."
-                : $"{firstLine} _(output omitted: {lineCount} lines, {normalized.Length} chars)_";
+                ? SR.T("Output omitted ({0} lines, {1} chars).", lineCount, normalized.Length)
+                : $"{firstLine} _({SR.T("output omitted: {0} lines, {1} chars", lineCount, normalized.Length)})_";
         }
 
         return normalized;
@@ -1174,7 +1225,7 @@ internal static class ChatMarkdownFormatter
     {
         return kind switch
         {
-            AgentCommandPreviewKind.ListFiles => "List Files",
+            AgentCommandPreviewKind.ListFiles => SR.T("List Files"),
             _ => SplitPascalCase(kind.ToString()),
         };
     }
@@ -1255,7 +1306,7 @@ internal static class ChatMarkdownFormatter
             case AgentInteractionKind.PermissionResolved:
                 if (TryGetStringProperty(details, "decisionKind", out var decisionKind))
                 {
-                    builder.Append("- Decision: ").Append(SplitPascalCase(decisionKind!));
+                    builder.Append("- ").Append(SR.T("Decision")).Append(": ").Append(SplitPascalCase(decisionKind!));
                 }
                 break;
 
@@ -1269,13 +1320,13 @@ internal static class ChatMarkdownFormatter
                     {
                         answerLines.Add(
                             string.IsNullOrWhiteSpace(answer.Value.GetString())
-                                ? $"- `{answer.Name}`: _empty_"
+                                ? $"- `{answer.Name}`: _{SR.T("empty")}_"
                                 : $"- `{answer.Name}`: `{answer.Value.GetString()}`");
                     }
 
                     if (answerLines.Count == 0)
                     {
-                        builder.Append("- Answers: _empty_");
+                        builder.Append("- ").Append(SR.T("Answers")).Append(": _").Append(SR.T("empty")).Append('_');
                     }
                     else
                     {
@@ -1289,7 +1340,7 @@ internal static class ChatMarkdownFormatter
                             builder.AppendLine();
                         }
 
-                        builder.Append("- Note: Terminal question prompts are not implemented yet.");
+                        builder.Append("- ").Append(SR.T("Note: Terminal question prompts are not implemented yet."));
                     }
                 }
                 break;

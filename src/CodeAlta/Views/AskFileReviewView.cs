@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Editing;
@@ -46,8 +47,8 @@ internal sealed class AskFileReviewView
             Editor.AddCommand(new Command
             {
                 Id = "CodeAlta.Ask.FileComment.Insert",
-                LabelMarkup = "Add line comment",
-                DescriptionMarkup = "Insert a user comment below the current file line without changing the file text.",
+                LabelMarkup = SR.T("Add line comment"),
+                DescriptionMarkup = SR.T("Insert a user comment below the current file line without changing the file text."),
                 Gesture = new KeyGesture(TerminalChar.CtrlK, TerminalModifiers.Ctrl),
                 Importance = CommandImportance.Primary,
                 Execute = _ => InsertCommentAtCurrentLine(),
@@ -62,7 +63,7 @@ internal sealed class AskFileReviewView
             Body = CreateUnavailableContent(loadError);
         }
 
-        var clearButton = new Button("Clear comments");
+        var clearButton = new Button(SR.T("Clear comments"));
         clearButton.Click(ClearComments);
         var header = new Footer()
             .Left(new Markup(BuildHeaderMarkup))
@@ -118,8 +119,8 @@ internal sealed class AskFileReviewView
         Root.AddCommand(new Command
         {
             Id = "CodeAlta.Ask.FocusQuestions",
-            LabelMarkup = "Focus ask questions",
-            DescriptionMarkup = "Move focus from the attached file editor back to the ask questions.",
+            LabelMarkup = SR.T("Focus ask questions"),
+            DescriptionMarkup = SR.T("Move focus from the attached file editor back to the ask questions."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl)),
@@ -160,7 +161,7 @@ internal sealed class AskFileReviewView
         error = string.Empty;
         if (Editor is null)
         {
-            error = "The attached file is not available for editing.";
+            error = SR.T("The attached file is not available for editing.");
             return false;
         }
 
@@ -209,8 +210,8 @@ internal sealed class AskFileReviewView
         => new()
         {
             Id = "CodeAlta.Ask.FileComment.Clear",
-            LabelMarkup = "Clear file comments",
-            DescriptionMarkup = "Clear all comments attached to the ask file.",
+            LabelMarkup = SR.T("Clear file comments"),
+            DescriptionMarkup = SR.T("Clear all comments attached to the ask file."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlL, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlK, TerminalModifiers.Ctrl)),
@@ -223,8 +224,8 @@ internal sealed class AskFileReviewView
         => new()
         {
             Id = "CodeAlta.Ask.FocusFileEditor",
-            LabelMarkup = "Focus file editor",
-            DescriptionMarkup = "Move focus to the attached ask file editor.",
+            LabelMarkup = SR.T("Focus file editor"),
+            DescriptionMarkup = SR.T("Move focus to the attached ask file editor."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlE, TerminalModifiers.Ctrl)),
@@ -237,10 +238,10 @@ internal sealed class AskFileReviewView
         => new()
         {
             Id = forward ? "CodeAlta.Ask.FileComment.FocusNext" : "CodeAlta.Ask.FileComment.FocusPrevious",
-            LabelMarkup = forward ? "Next file comment" : "Previous file comment",
+            LabelMarkup = forward ? SR.T("Next file comment") : SR.T("Previous file comment"),
             DescriptionMarkup = forward
-                ? "Move focus from the file editor to the next file comment."
-                : "Move focus from the file editor to the previous file comment.",
+                ? SR.T("Move focus from the file editor to the next file comment.")
+                : SR.T("Move focus from the file editor to the previous file comment."),
             Gesture = new KeyGesture(forward ? TerminalChar.CtrlN : TerminalChar.CtrlP, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
             CanExecute = _ => _comments.Count > 0,
@@ -265,8 +266,8 @@ internal sealed class AskFileReviewView
         => new()
         {
             Id = "CodeAlta.Ask.File.Save",
-            LabelMarkup = "Save ask file",
-            DescriptionMarkup = "Save user edits to the attached ask file.",
+            LabelMarkup = SR.T("Save ask file"),
+            DescriptionMarkup = SR.T("Save user edits to the attached ask file."),
             Gesture = new KeyGesture(TerminalChar.CtrlS, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
             CanExecute = _ => HasUnsavedChanges,
@@ -302,7 +303,7 @@ internal sealed class AskFileReviewView
     {
         var commentDocument = new TextDocument(string.Empty);
         var textArea = new TextArea()
-            .Placeholder("Enter a user comment... Enter newline · Esc done · Ctrl+D delete · Ctrl+N/P comments")
+            .Placeholder(SR.T("Enter a user comment... Enter newline · Esc done · Ctrl+D delete · Ctrl+N/P comments"))
             .AutoSizeMode(TextEditorAutoSizeMode.Height)
             .MinHeight(1)
             .HorizontalAlignment(Align.Stretch);
@@ -326,10 +327,10 @@ internal sealed class AskFileReviewView
             UpdateCommentHeight(entry);
             Editor?.NotifyLineVisualChanged(entry.LineIndex);
         };
-        var deleteButton = new Button("Delete") { Tone = ControlTone.Error };
+        var deleteButton = new Button(SR.T("Delete")) { Tone = ControlTone.Error };
         deleteButton.Click(() => DeleteComment(entry.LineIndex));
 
-        var helpText = new TextBlock("Ctrl+D delete · Esc done · Ctrl+N/P comments")
+        var helpText = new TextBlock(SR.T("Ctrl+D delete · Esc done · Ctrl+N/P comments"))
         {
             IsSelectable = false,
         };
@@ -349,8 +350,8 @@ internal sealed class AskFileReviewView
         textArea.AddCommand(new Command
         {
             Id = $"CodeAlta.Ask.FileComment.Done.{lineIndex}",
-            LabelMarkup = "Done editing comment",
-            DescriptionMarkup = "Keep this line comment and return focus to the file editor.",
+            LabelMarkup = SR.T("Done editing comment"),
+            DescriptionMarkup = SR.T("Keep this line comment and return focus to the file editor."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Presentation = CommandPresentation.None,
             Execute = _ => FinishComment(entry),
@@ -358,8 +359,8 @@ internal sealed class AskFileReviewView
         textArea.AddCommand(new Command
         {
             Id = $"CodeAlta.Ask.FileComment.Discard.{lineIndex}",
-            LabelMarkup = "Discard comment",
-            DescriptionMarkup = "Discard this line comment.",
+            LabelMarkup = SR.T("Discard comment"),
+            DescriptionMarkup = SR.T("Discard this line comment."),
             Gesture = new KeyGesture(TerminalChar.CtrlD, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
             Execute = _ => DeleteComment(entry.LineIndex),
@@ -367,8 +368,8 @@ internal sealed class AskFileReviewView
         textArea.AddCommand(new Command
         {
             Id = $"CodeAlta.Ask.FileComment.Next.{lineIndex}",
-            LabelMarkup = "Next comment",
-            DescriptionMarkup = "Move focus to the next file comment.",
+            LabelMarkup = SR.T("Next comment"),
+            DescriptionMarkup = SR.T("Move focus to the next file comment."),
             Gesture = new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
             Execute = _ => FocusAdjacentComment(entry.LineIndex, forward: true),
@@ -376,8 +377,8 @@ internal sealed class AskFileReviewView
         textArea.AddCommand(new Command
         {
             Id = $"CodeAlta.Ask.FileComment.Previous.{lineIndex}",
-            LabelMarkup = "Previous comment",
-            DescriptionMarkup = "Move focus to the previous file comment.",
+            LabelMarkup = SR.T("Previous comment"),
+            DescriptionMarkup = SR.T("Move focus to the previous file comment."),
             Gesture = new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.None,
             Execute = _ => FocusAdjacentComment(entry.LineIndex, forward: false),
@@ -439,7 +440,7 @@ internal sealed class AskFileReviewView
     }
 
     private static Markup CreateUserCommentHeader(int lineIndex)
-        => new($"[accent]{TerminalIcons.MdAccount}[/] [bold]User Comment[/] [dim]- line {(lineIndex + 1).ToString(CultureInfo.InvariantCulture)}[/]");
+        => new($"[accent]{TerminalIcons.MdAccount}[/] [bold]{SR.T("User Comment")}[/] [dim]- {SR.T("line")} {(lineIndex + 1).ToString(CultureInfo.InvariantCulture)}[/]");
 
     private void FocusAdjacentComment(int lineIndex, bool forward)
     {
@@ -582,21 +583,21 @@ internal sealed class AskFileReviewView
     {
         _ = _fileStateVersion.Value;
         var modified = HasUnsavedChanges ? " [warning]*[/]" : string.Empty;
-        return $"[bold]File context:[/] {AnsiMarkup.Escape(_displayPath)}{modified}";
+        return $"[bold]{SR.T("File context")}:[/] {AnsiMarkup.Escape(_displayPath)}{modified}";
     }
 
     private string BuildCommentCountMarkup()
     {
         _ = _commentVersion.Value;
         var count = _comments.Count;
-        return count == 1 ? "[dim]1 comment[/]" : $"[dim]{count} comments[/]";
+        return count == 1 ? $"[dim]{SR.T("1 comment")}[/]" : $"[dim]{SR.T("{0} comments", count)}[/]";
     }
 
     private string BuildFooterMarkup()
     {
         _ = _fileStateVersion.Value;
-        var status = _saveError is null ? string.Empty : $" · [error]Save failed: {AnsiMarkup.Escape(_saveError)}[/]";
-        return $"[dim]Ctrl+K comment · Ctrl+N/P comments · Ctrl+S save · Ctrl+G Ctrl+N questions · Ctrl+L Ctrl+K clear comments · Ctrl+F find[/]{status}";
+        var status = _saveError is null ? string.Empty : $" · [error]{SR.T("Save failed")}: {AnsiMarkup.Escape(_saveError)}[/]";
+        return $"[dim]{SR.T("Ctrl+K comment · Ctrl+N/P comments · Ctrl+S save · Ctrl+G Ctrl+N questions · Ctrl+L Ctrl+K clear comments · Ctrl+F find")}[/]{status}";
     }
 
     private Rune? GetCommentMarker(int lineIndex)
@@ -638,7 +639,7 @@ internal sealed class AskFileReviewView
             if (!File.Exists(fullPath))
             {
                 text = string.Empty;
-                error = $"Attached ask file was not found: {fullPath}";
+                error = SR.T("Attached ask file was not found: {0}", fullPath);
                 return false;
             }
 
@@ -649,7 +650,7 @@ internal sealed class AskFileReviewView
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
             text = string.Empty;
-            error = $"Attached ask file could not be loaded: {ex.Message}";
+            error = SR.T("Attached ask file could not be loaded: {0}", ex.Message);
             return false;
         }
     }

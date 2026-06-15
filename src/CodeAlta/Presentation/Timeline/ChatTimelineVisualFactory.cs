@@ -1,6 +1,7 @@
 using CodeAlta.Threading;
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Models;
@@ -41,13 +42,13 @@ internal static class ChatTimelineVisualFactory
 
     public static string BuildTruncatedHistoryLoadButtonText(int omittedMessageCount)
         => omittedMessageCount == 1
-            ? "Load 1 previous message"
-            : $"Load {omittedMessageCount} previous messages";
+            ? SR.T("Load 1 previous message")
+            : SR.T("Load {0} previous messages", omittedMessageCount);
 
     public static string BuildTruncatedHistorySummaryText(int omittedMessageCount)
         => omittedMessageCount == 1
-            ? "1 previous message..."
-            : $"{omittedMessageCount} previous messages...";
+            ? SR.T("1 previous message...")
+            : SR.T("{0} previous messages...", omittedMessageCount);
 
     public static string FormatTimestamp(DateTimeOffset timestamp)
         => timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
@@ -189,15 +190,15 @@ internal static class ChatTimelineVisualFactory
     {
         return kind switch
         {
-            AgentContentKind.User => "User Prompt",
+            AgentContentKind.User => SR.T("User Prompt"),
             AgentContentKind.Assistant => null,
-            AgentContentKind.Reasoning => "Reasoning",
-            AgentContentKind.ReasoningSummary => "Reasoning Summary",
-            AgentContentKind.Plan => "Plan",
-            AgentContentKind.CommandOutput => "Command Output",
-            AgentContentKind.FileChangeOutput => "File Change Output",
-            AgentContentKind.ToolOutput => "Tool Output",
-            AgentContentKind.Notice => "Notice",
+            AgentContentKind.Reasoning => SR.T("Reasoning"),
+            AgentContentKind.ReasoningSummary => SR.T("Reasoning Summary"),
+            AgentContentKind.Plan => SR.T("Plan"),
+            AgentContentKind.CommandOutput => SR.T("Command Output"),
+            AgentContentKind.FileChangeOutput => SR.T("File Change Output"),
+            AgentContentKind.ToolOutput => SR.T("Tool Output"),
+            AgentContentKind.Notice => SR.T("Notice"),
             _ => SplitPascalCase(kind.ToString()),
         };
     }
@@ -213,7 +214,7 @@ internal static class ChatTimelineVisualFactory
         => CreateMarkdownItem(
             markdown,
             ChatTimelineTone.User,
-            headerOverride: "User Prompt",
+            headerOverride: SR.T("User Prompt"),
             maxCodeBlockHeight: 10,
             localFileRootPath: localFileRootPath).Item;
 
@@ -260,13 +261,13 @@ internal static class ChatTimelineVisualFactory
     {
         return tone switch
         {
-            ChatTimelineTone.User => ($"{TerminalIcons.MdAccount}", "User Prompt", "accent"),
-            ChatTimelineTone.Assistant => ($"{TerminalIcons.MdRobot}", "Assistant", "success"),
-            ChatTimelineTone.Reasoning => ($"{TerminalIcons.CodLightbulb}", "Reasoning", "primary"),
-            ChatTimelineTone.Activity => ($"{TerminalIcons.CodTools}", "Activity", "muted"),
-            ChatTimelineTone.Notice => ($"{TerminalIcons.CodInfo}", "Notice", "success"),
-            ChatTimelineTone.Interaction => ($"{TerminalIcons.CodLock}", "Action Required", "warning"),
-            _ => ($"{TerminalIcons.MdMessageText}", "Message", "primary"),
+            ChatTimelineTone.User => ($"{TerminalIcons.MdAccount}", SR.T("User Prompt"), "accent"),
+            ChatTimelineTone.Assistant => ($"{TerminalIcons.MdRobot}", SR.T("Assistant"), "success"),
+            ChatTimelineTone.Reasoning => ($"{TerminalIcons.CodLightbulb}", SR.T("Reasoning"), "primary"),
+            ChatTimelineTone.Activity => ($"{TerminalIcons.CodTools}", SR.T("Activity"), "muted"),
+            ChatTimelineTone.Notice => ($"{TerminalIcons.CodInfo}", SR.T("Notice"), "success"),
+            ChatTimelineTone.Interaction => ($"{TerminalIcons.CodLock}", SR.T("Action Required"), "warning"),
+            _ => ($"{TerminalIcons.MdMessageText}", SR.T("Message"), "primary"),
         };
     }
 
@@ -469,14 +470,14 @@ internal static class ChatTimelineVisualFactory
     {
         var children = new List<Visual>(imageAttachments.Count + 1)
         {
-            new Markup($"[dim]Images ({imageAttachments.Count})[/]") { Wrap = false },
+            new Markup($"[dim]{SR.T("Images ({0})", imageAttachments.Count)}[/]") { Wrap = false },
         };
         foreach (var attachment in imageAttachments)
         {
             var current = attachment;
             var button = new Button(new TextBlock($"▧ {current.Title}") { Wrap = false });
             button.Click(() => OpenImageAttachmentDialog(current, button, getDialogBounds));
-            children.Add(button.Tooltip(new TextBlock($"Open attached image {current.Title}")));
+            children.Add(button.Tooltip(new TextBlock(SR.T("Open attached image {0}", current.Title))));
         }
 
         return new HStack([.. children]) { Spacing = 1, HorizontalAlignment = Align.Stretch };
@@ -491,17 +492,17 @@ internal static class ChatTimelineVisualFactory
         var bounds = getDialogBounds?.Invoke() ?? anchor?.GetAbsoluteBounds();
         var size = ResponsiveDialogSize.Resolve(bounds, minWidth: 64, minHeight: 20, widthFactor: 0.8, heightFactor: 0.8);
         var preview = CreateImageAttachmentPreview(attachment, Math.Max(24, size.Width - 6), Math.Max(8, size.Height - 8));
-        var closeButton = new Button(new TextBlock("Close")) { HorizontalAlignment = Align.End };
+        var closeButton = new Button(new TextBlock(SR.T("Close"))) { HorizontalAlignment = Align.End };
         closeButton.Click(() => dialog?.Close());
         var bottom = CreateImageAttachmentDialogBottom(attachment, closeButton);
         dialog = new Dialog()
             .Title(attachment.Title)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(new DockLayout(top: null, content: new Border(preview).Padding(1), bottom: bottom));
         dialog.Width(size.Width).Height(size.Height).MinWidth(64).MinHeight(20);
-        dialog.AddCommand(new Command { Id = "CodeAlta.Timeline.Image.Close", LabelMarkup = "Close", DescriptionMarkup = "Close image preview.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => dialog?.Close() });
+        dialog.AddCommand(new Command { Id = "CodeAlta.Timeline.Image.Close", LabelMarkup = SR.T("Close"), DescriptionMarkup = SR.T("Close image preview."), Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => dialog?.Close() });
         dialog.Show();
     }
 
@@ -511,7 +512,7 @@ internal static class ChatTimelineVisualFactory
         ArgumentNullException.ThrowIfNull(closeButton);
 
         return new VStack(
-            new TextBlock($"Path: {attachment.Path}")
+            new TextBlock(SR.T("Path: {0}", attachment.Path))
             {
                 Wrap = true,
                 HorizontalAlignment = Align.Stretch,

@@ -1,4 +1,5 @@
 using CodeAlta.App.State;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Presentation.Prompting;
 
@@ -93,10 +94,10 @@ internal static class QueuedPromptListProjectionBuilder
         var text = BuildPreviewText(submission.Text);
         if (submission.Images.Count == 0)
         {
-            return string.IsNullOrWhiteSpace(text) ? "Prompt" : text;
+            return string.IsNullOrWhiteSpace(text) ? SR.T("Prompt") : text;
         }
 
-        var imageSuffix = submission.Images.Count == 1 ? "1 image" : $"{submission.Images.Count} images";
+        var imageSuffix = submission.Images.Count == 1 ? SR.T("1 image") : SR.T("{0} images", submission.Images.Count);
         return string.IsNullOrWhiteSpace(text) ? imageSuffix : $"{text} · {imageSuffix}";
     }
 }

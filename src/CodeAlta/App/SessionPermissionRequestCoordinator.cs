@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.App.Context;
 using CodeAlta.App.State;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Formatting;
 using CodeAlta.Threading;
@@ -100,13 +101,13 @@ internal sealed class SessionPermissionRequestCoordinator
                     ChatTimelineTone.Interaction,
                     decision.Kind switch
                     {
-                        AgentPermissionDecisionKind.AllowOnce => "Approved (Once)",
-                        AgentPermissionDecisionKind.AllowForSession => "Approved (Session)",
-                        AgentPermissionDecisionKind.Deny => "Denied",
-                        _ => "Cancelled",
+                        AgentPermissionDecisionKind.AllowOnce => SR.T("Approved (Once)"),
+                        AgentPermissionDecisionKind.AllowForSession => SR.T("Approved (Session)"),
+                        AgentPermissionDecisionKind.Deny => SR.T("Denied"),
+                        _ => SR.T("Cancelled"),
                     },
-                    "Permission Request");
+                    SR.T("Permission Request"));
             },
-            "permission request");
+            SR.T("permission request"));
     }
 }

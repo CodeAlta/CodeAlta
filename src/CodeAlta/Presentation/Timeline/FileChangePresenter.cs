@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Formatting;
@@ -231,8 +232,8 @@ internal sealed class FileChangePresenter
             _uiDispatcher,
             static timestampValue =>
             {
-                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{TerminalIcons.CodEdit}[/] [bold]Modified Files[/]");
-                var summaryText = new Markup("[dim]Waiting for file changes...[/]");
+                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{TerminalIcons.CodEdit}[/] [bold]{SR.T("Modified Files")}[/]");
+                var summaryText = new Markup($"[dim]{SR.T("Waiting for file changes...")}[/]");
                 var timestampText = new Markup(string.Empty);
                 var itemsHost = new WrapHStack { Spacing = 1, RunSpacing = 0 };
                 Group? card = null;
@@ -344,16 +345,16 @@ internal sealed class FileChangePresenter
                 VerticalAlignment = Align.Stretch,
             }.WrapText(wrapText);
             var statsText = new Markup(string.Empty);
-            var detailsGroup = new Group("Details", metadata).Padding(new Thickness(1, 0, 1, 0)).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Start);
-            var outputGroup = new Group("Diff", log).TopRightText(new CheckBox("Wrap").IsChecked(wrapText)).Padding(0).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Stretch);
+            var detailsGroup = new Group(SR.T("Details"), metadata).Padding(new Thickness(1, 0, 1, 0)).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Start);
+            var outputGroup = new Group(SR.T("Diff"), log).TopRightText(new CheckBox(SR.T("Wrap")).IsChecked(wrapText)).Padding(0).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Stretch);
             var bounds = _getDialogBounds() ?? entry.Button.GetAbsoluteBounds();
-            var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
+            var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
             closeButton.Click(() => CloseDialog(entry));
             var dialog = new Dialog()
                 .Title(entry.FilePath)
                 .TopRightText(closeButton)
                 .BottomLeftText(statsText)
-                .BottomRightText(new Markup("[dim]Ctrl+F Search[/]"))
+                .BottomRightText(new Markup($"[dim]{SR.T("Ctrl+F Search")}[/]"))
                 .IsModal(true)
                 .Padding(1)
                 .Content(new Grid()
@@ -362,7 +363,7 @@ internal sealed class FileChangePresenter
                     .Cell(detailsGroup, 0, 0)
                     .Cell(outputGroup, 1, 0));
             ResponsiveDialogSize.Apply(dialog, bounds, minWidth: 60, minHeight: 18, widthFactor: 0.85, heightFactor: 0.85);
-            dialog.AddCommand(new Command { Id = "FileChangeDialog.Close", LabelMarkup = "Close", DescriptionMarkup = "Close file change details.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => CloseDialog(entry) });
+            dialog.AddCommand(new Command { Id = "FileChangeDialog.Close", LabelMarkup = SR.T("Close"), DescriptionMarkup = SR.T("Close file change details."), Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => CloseDialog(entry) });
             dialog.KeyDown((_, e) => { if (e.Key == TerminalKey.Escape) { CloseDialog(entry); e.Handled = true; } });
             entry.DetailDialog = dialog;
             entry.DetailMetadata = metadata;
@@ -387,7 +388,7 @@ internal sealed class FileChangePresenter
             entry.DetailLog.Clear();
             if (string.IsNullOrWhiteSpace(entry.DiffText))
             {
-                entry.DetailLog.AppendMarkupLine($"[{UiPalette.MutedMarkup}]Diff unavailable.[/]");
+                entry.DetailLog.AppendMarkupLine($"[{UiPalette.MutedMarkup}]{SR.T("Diff unavailable for this file.")}[/]");
             }
             else
             {

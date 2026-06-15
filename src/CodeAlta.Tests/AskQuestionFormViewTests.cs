@@ -173,7 +173,7 @@ public sealed class AskQuestionFormViewTests
         StringAssert.Contains(fileReviewSource, "CodeAlta.Ask.FileComment.Insert");
         StringAssert.Contains(fileReviewSource, "CodeAlta.Ask.FileComment.Clear");
         StringAssert.Contains(fileReviewSource, "TextEditorAutoSizeMode.Height");
-        StringAssert.Contains(fileReviewSource, "File context:");
+        StringAssert.Contains(fileReviewSource, "SR.T(\"File context\")");
         StringAssert.Contains(fileReviewSource, "User Comment");
         StringAssert.Contains(fileReviewSource, "UiPalette.GetChatGroupStyle");
         StringAssert.Contains(fileReviewSource, "ChatTimelineTone.User");

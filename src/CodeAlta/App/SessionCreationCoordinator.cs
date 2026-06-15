@@ -70,7 +70,7 @@ internal sealed class SessionCreationCoordinator
     {
         try
         {
-            _setStatus("Creating global session...", true, StatusTone.Info);
+            _setStatus(SR.T("Creating global session..."), true, StatusTone.Info);
             var title = ResolveTitle(titleOverride);
             string? createdSessionId = null;
             var executionOptions = _buildPreferredExecutionOptions(
@@ -91,7 +91,7 @@ internal sealed class SessionCreationCoordinator
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to create global session: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to create global session: {0}", ex.Message), false, StatusTone.Error);
             return null;
         }
     }
@@ -101,13 +101,13 @@ internal sealed class SessionCreationCoordinator
         var project = _getSelectedProject();
         if (project is null)
         {
-            _setStatus("Select a project before creating a project session.", false, StatusTone.Warning);
+            _setStatus(SR.T("Select a project before creating a project session."), false, StatusTone.Warning);
             return null;
         }
 
         try
         {
-            _setStatus($"Creating session for '{project.DisplayName}'...", true, StatusTone.Info);
+            _setStatus(SR.T("Creating session for '{0}'...", project.DisplayName), true, StatusTone.Info);
             var title = ResolveTitle(titleOverride);
             string? createdSessionId = null;
             var executionOptions = _buildPreferredExecutionOptions(
@@ -130,7 +130,7 @@ internal sealed class SessionCreationCoordinator
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to create project session: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to create project session: {0}", ex.Message), false, StatusTone.Error);
             return null;
         }
     }

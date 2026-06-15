@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.App;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.ViewModels;
@@ -23,16 +24,16 @@ internal sealed class SkillsManagementDialog
 {
     private static readonly ScopeOption[] ScopeOptions =
     [
-        new(SkillsManagementScope.Combined, "Combined"),
-        new(SkillsManagementScope.CurrentProject, "Current Project"),
-        new(SkillsManagementScope.User, "User"),
+        new(SkillsManagementScope.Combined, SR.T("Combined")),
+        new(SkillsManagementScope.CurrentProject, SR.T("Current Project")),
+        new(SkillsManagementScope.User, SR.T("User")),
     ];
 
     private static readonly BulkScopeOption[] BulkScopeOptions =
     [
-        new(SkillEnablementScope.Global, "Global"),
-        new(SkillEnablementScope.Project, "Project"),
-        new(SkillEnablementScope.Both, "Both"),
+        new(SkillEnablementScope.Global, SR.T("Global")),
+        new(SkillEnablementScope.Project, SR.T("Project")),
+        new(SkillEnablementScope.Both, SR.T("Both")),
     ];
 
     private const int SkillGridColumnCount = 5;
@@ -55,7 +56,7 @@ internal sealed class SkillsManagementDialog
     private IReadOnlyList<SkillManagementRowViewModel> _allRows = [];
     private IReadOnlyList<SkillManagementRowViewModel> _rows = [];
     private int _skillDocumentRowCount;
-    private string _summaryText = "[dim]Open, activate, and author filesystem skills.[/]";
+    private string _summaryText = $"[dim]{SR.T("Open, activate, and author filesystem skills.")}[/]";
 
     public SkillsManagementDialog(
         SkillsManagementService service,
@@ -76,7 +77,7 @@ internal sealed class SkillsManagementDialog
         _getBounds = getBounds;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -103,7 +104,7 @@ internal sealed class SkillsManagementDialog
         _bulkScopeSelect.SelectedIndex = 0;
 
         _filterBox = new TextBox()
-            .Placeholder("Filter by name, description, source, or path")
+            .Placeholder(SR.T("Filter by name, description, source, or path"))
             .HorizontalAlignment(Align.Stretch);
         _filterBox.TextDocument.Changed += OnFilterTextChanged;
 
@@ -111,11 +112,11 @@ internal sealed class SkillsManagementDialog
         using (_skillDocument.BeginUpdate())
         {
             _skillDocument
-                .AddColumn(new DataGridColumnInfo<bool>("global", "G", false, SkillManagementRowViewModel.Accessor.GlobalEnabled))
-                .AddColumn(new DataGridColumnInfo<bool>("project", "P", !_service.HasSelectedProject, SkillManagementRowViewModel.Accessor.ProjectEnabled))
-                .AddColumn(new DataGridColumnInfo<string>("builtin", "Built-in", true, SkillManagementRowViewModel.Accessor.BuiltIn))
-                .AddColumn(new DataGridColumnInfo<string>("name", "Skill", true, SkillManagementRowViewModel.Accessor.Name))
-                .AddColumn(new DataGridColumnInfo<string>("status", "Status", true, SkillManagementRowViewModel.Accessor.Status));
+                .AddColumn(new DataGridColumnInfo<bool>("global", SR.T("G"), false, SkillManagementRowViewModel.Accessor.GlobalEnabled))
+                .AddColumn(new DataGridColumnInfo<bool>("project", SR.T("P"), !_service.HasSelectedProject, SkillManagementRowViewModel.Accessor.ProjectEnabled))
+                .AddColumn(new DataGridColumnInfo<string>("builtin", SR.T("Built-in"), true, SkillManagementRowViewModel.Accessor.BuiltIn))
+                .AddColumn(new DataGridColumnInfo<string>("name", SR.T("Skill"), true, SkillManagementRowViewModel.Accessor.Name))
+                .AddColumn(new DataGridColumnInfo<string>("status", SR.T("Status"), true, SkillManagementRowViewModel.Accessor.Status));
         }
 
         _skillGrid = new DataGridControl(_skillDocument)
@@ -136,27 +137,27 @@ internal sealed class SkillsManagementDialog
             Wrap = true,
         };
 
-        var refreshButton = new Button("Refresh")
+        var refreshButton = new Button(SR.T("Refresh"))
             .Tone(ControlTone.Primary)
             .Click(StartReload);
-        var newSkillButton = new Button("New skill")
+        var newSkillButton = new Button(SR.T("New skill"))
             .Tone(ControlTone.Primary)
             .Click(ShowNewSkillDialog);
-        var activateButton = new Button("Activate")
+        var activateButton = new Button(SR.T("Activate"))
             .Tone(ControlTone.Success)
             .Click(() => _ = ActivateSelectedSkillAsync());
-        var openSkillButton = new Button("Open SKILL.md")
+        var openSkillButton = new Button(SR.T("Open SKILL.md"))
             .Click(() => _ = OpenSelectedSkillAsync());
-        var openRelatedButton = new Button("Open related")
+        var openRelatedButton = new Button(SR.T("Open related"))
             .Click(() => _ = OpenSelectedRelatedFileAsync());
 
-        var enableAllButton = new Button("Enable")
+        var enableAllButton = new Button(SR.T("Enable"))
             .Tone(ControlTone.Success)
             .Click(() => _ = ApplyBulkEnablementAsync(enabled: true));
-        var disableAllButton = new Button("Disable")
+        var disableAllButton = new Button(SR.T("Disable"))
             .Tone(ControlTone.Warning)
             .Click(() => _ = ApplyBulkEnablementAsync(enabled: false));
-        var invertButton = new Button("Invert")
+        var invertButton = new Button(SR.T("Invert"))
             .Click(() => _ = InvertBulkEnablementAsync());
 
         var toolbar = new Grid
@@ -170,17 +171,17 @@ internal sealed class SkillsManagementDialog
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) },
                 new ColumnDefinition { Width = GridLength.Auto });
-        toolbar.Cell(new TextBlock("Scope") { VerticalAlignment = Align.Center }, 0, 0);
+        toolbar.Cell(new TextBlock(SR.T("Scope")) { VerticalAlignment = Align.Center }, 0, 0);
         toolbar.Cell(_scopeSelect, 0, 1);
-        toolbar.Cell(new TextBlock("Filter") { VerticalAlignment = Align.Center }, 0, 2);
+        toolbar.Cell(new TextBlock(SR.T("Filter")) { VerticalAlignment = Align.Center }, 0, 2);
         toolbar.Cell(_filterBox, 0, 3);
         toolbar.Cell(
             new HStack(
-                Tooltip(newSkillButton, "Create a new filesystem skill template."),
-                Tooltip(activateButton, "Activate the selected valid, unshadowed skill in the current session."),
-                Tooltip(openSkillButton, "Open the selected skill's SKILL.md file."),
-                Tooltip(openRelatedButton, "Open the selected related script, reference, or asset file."),
-                Tooltip(refreshButton, "Reload discovered skills for the selected scope."))
+                Tooltip(newSkillButton, SR.T("Create a new filesystem skill template.")),
+                Tooltip(activateButton, SR.T("Activate the selected valid, unshadowed skill in the current session.")),
+                Tooltip(openSkillButton, SR.T("Open the selected skill's SKILL.md file.")),
+                Tooltip(openRelatedButton, SR.T("Open the selected related script, reference, or asset file.")),
+                Tooltip(refreshButton, SR.T("Reload discovered skills for the selected scope.")))
             {
                 HorizontalAlignment = Align.End,
                 Spacing = 1,
@@ -188,7 +189,7 @@ internal sealed class SkillsManagementDialog
             0,
             4);
 
-        var introText = new Markup("[dim]Browse skills, manage global/project enablement for the shown list, activate enabled skills, or open SKILL.md and related files. G/P are editable enablement columns; Built-in marks built-in skills.[/]")
+        var introText = new Markup($"[dim]{SR.T("Browse skills, manage global/project enablement for the shown list, activate enabled skills, or open SKILL.md and related files. G/P are editable enablement columns; Built-in marks built-in skills.")}[/]")
         {
             Wrap = true,
         };
@@ -211,8 +212,8 @@ internal sealed class SkillsManagementDialog
             VerticalAlignment = Align.Stretch,
         };
         var rightPane = new TabControl(
-            new TabPage("Summary", detailPane),
-            new TabPage("Related files", relatedPane))
+            new TabPage(SR.T("Summary"), detailPane),
+            new TabPage(SR.T("Related files"), relatedPane))
         {
             AllowTabDragReorder = false,
             HorizontalAlignment = Align.Stretch,
@@ -220,11 +221,11 @@ internal sealed class SkillsManagementDialog
         };
 
         var bulkActions = new WrapHStack(
-            new TextBlock("Bulk") { VerticalAlignment = Align.Center },
+            new TextBlock(SR.T("Bulk")) { VerticalAlignment = Align.Center },
             _bulkScopeSelect,
-            Tooltip(enableAllButton, "Enable the currently shown skills for the selected config scope."),
-            Tooltip(disableAllButton, "Disable the currently shown skills for the selected config scope."),
-            Tooltip(invertButton, "Invert the currently shown skills for the selected config scope."))
+            Tooltip(enableAllButton, SR.T("Enable the currently shown skills for the selected config scope.")),
+            Tooltip(disableAllButton, SR.T("Disable the currently shown skills for the selected config scope.")),
+            Tooltip(invertButton, SR.T("Invert the currently shown skills for the selected config scope.")))
         {
             HorizontalAlignment = Align.Stretch,
             Spacing = 1,
@@ -268,9 +269,9 @@ internal sealed class SkillsManagementDialog
         contentGrid.Cell(splitter, 3, 0);
 
         _dialog = new Dialog()
-            .Title("Skills")
+            .Title(SR.T("Skills"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(contentGrid);
@@ -278,8 +279,8 @@ internal sealed class SkillsManagementDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Skills.Manage.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the skills browser.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the skills browser."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -298,7 +299,7 @@ internal sealed class SkillsManagementDialog
 
     private async Task ReloadAsync(string? preferredSkillName = null, bool selectFirst = false)
     {
-        _summaryText = "[primary]Loading skills...[/]";
+        _summaryText = $"[primary]{SR.T("Loading skills...")}[/]";
         var scope = GetSelectedScope();
         preferredSkillName ??= GetSelectedDescriptor()?.Name;
         try
@@ -325,7 +326,7 @@ internal sealed class SkillsManagementDialog
                     _rows = [];
                     SyncSkillItems(_rows);
                     SetSelectedSkillIndex(-1);
-                    _summaryText = $"[error]Failed to load skills: {AnsiMarkup.Escape(ex.Message)}[/]";
+                    _summaryText = $"[error]{SR.T("Failed to load skills: {0}", AnsiMarkup.Escape(ex.Message))}[/]";
                     InvalidateSkillDetails();
                 });
         }
@@ -462,7 +463,7 @@ internal sealed class SkillsManagementDialog
             : -1;
         if ((uint)index >= (uint)relatedFiles.Count)
         {
-            _summaryText = "[warning]Select a related file before opening.[/]";
+            _summaryText = $"[warning]{SR.T("Select a related file before opening.")}[/]";
             return;
         }
 
@@ -472,9 +473,9 @@ internal sealed class SkillsManagementDialog
     private void ShowNewSkillDialog()
     {
         var nameBox = new TextBox()
-            .Placeholder("lowercase-name");
+            .Placeholder(SR.T("lowercase-name"));
         var descriptionBox = new TextBox()
-            .Placeholder("Describe when this skill should be used")
+            .Placeholder(SR.T("Describe when this skill should be used"))
             .HorizontalAlignment(Align.Stretch);
         TextBlock? validationText = null;
         validationText = new TextBlock(string.Empty)
@@ -494,17 +495,17 @@ internal sealed class SkillsManagementDialog
             .Columns(
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) });
-        form.Cell(new TextBlock("Name"), 0, 0);
+        form.Cell(new TextBlock(SR.T("Name")), 0, 0);
         form.Cell(nameBox.Stretch(), 0, 1);
-        form.Cell(new TextBlock("Description"), 1, 0);
+        form.Cell(new TextBlock(SR.T("Description")), 1, 0);
         form.Cell(descriptionBox.Stretch(), 1, 1);
         form.Cell(validationText, 2, 0, columnSpan: 2);
 
         Dialog? createDialog = null;
-        var createButton = new Button("Create")
+        var createButton = new Button(SR.T("Create"))
             .Tone(ControlTone.Success)
             .Click(() => _ = CreateSkillFromDialogAsync(createDialog, nameBox, descriptionBox, validationText));
-        var cancelButton = new Button("Cancel")
+        var cancelButton = new Button(SR.T("Cancel"))
             .Click(() => createDialog?.Close());
         var content = new VStack(
             new Markup(BuildNewSkillTargetHint()) { Wrap = true },
@@ -521,8 +522,8 @@ internal sealed class SkillsManagementDialog
         };
 
         createDialog = new Dialog()
-            .Title("New Skill")
-            .BottomRightText(new Markup("[dim]Esc Cancel[/]"))
+            .Title(SR.T("New Skill"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Cancel")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -530,8 +531,8 @@ internal sealed class SkillsManagementDialog
         createDialog.AddCommand(new Command
         {
             Id = "CodeAlta.Skills.New.Close",
-            LabelMarkup = "Cancel",
-            DescriptionMarkup = "Close the new skill dialog.",
+            LabelMarkup = SR.T("Cancel"),
+            DescriptionMarkup = SR.T("Close the new skill dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => createDialog.Close(),
@@ -552,7 +553,7 @@ internal sealed class SkillsManagementDialog
             var result = await _service.CreateSkillAsync(GetSelectedScope(), nameBox.Text, descriptionBox.Text);
             createDialog?.Close();
             await ReloadAsync(result.Name);
-            _summaryText = $"[success]Created skill '{AnsiMarkup.Escape(result.Name)}' at {AnsiMarkup.Escape(result.SkillRootPath)}.[/]";
+            _summaryText = $"[success]{SR.T("Created skill '{0}' at {1}.", AnsiMarkup.Escape(result.Name), AnsiMarkup.Escape(result.SkillRootPath))}[/]";
             await _openFileAsync(result.SkillFilePath, CancellationToken.None);
         }
         catch (Exception ex)
@@ -564,9 +565,9 @@ internal sealed class SkillsManagementDialog
     private string BuildNewSkillTargetHint()
     {
         var target = GetSelectedScope() == SkillsManagementScope.User
-            ? "user CodeAlta skills (`~/.alta/skills/`)"
-            : "project CodeAlta skills (`<project>/.alta/skills/`) when a project is selected, otherwise user CodeAlta skills";
-        return $"[dim]Creates a scaffolded Agent Skills-compatible `SKILL.md` plus `scripts/`, `references/`, and `assets/` folders under {target}.[/]";
+            ? SR.T("user CodeAlta skills (`~/.alta/skills/`)")
+            : SR.T("project CodeAlta skills (`<project>/.alta/skills/`) when a project is selected, otherwise user CodeAlta skills");
+        return $"[dim]{SR.T("Creates a scaffolded Agent Skills-compatible `SKILL.md` plus `scripts/`, `references/`, and `assets/` folders under {0}.", target)}[/]";
     }
 
     private async Task ActivateSelectedSkillAsync()
@@ -578,25 +579,25 @@ internal sealed class SkillsManagementDialog
 
         if (!descriptor.IsEnabled)
         {
-            _summaryText = "[warning]Enable the selected skill globally and for the project before activating.[/]";
+            _summaryText = $"[warning]{SR.T("Enable the selected skill globally and for the project before activating.")}[/]";
             return;
         }
 
         if (!descriptor.IsValid || descriptor.IsShadowed)
         {
-            _summaryText = "[warning]Select a valid, unshadowed skill before activating.[/]";
+            _summaryText = $"[warning]{SR.T("Select a valid, unshadowed skill before activating.")}[/]";
             return;
         }
 
         try
         {
-            _summaryText = $"[primary]Activating skill '{AnsiMarkup.Escape(descriptor.Name)}'...[/]";
+            _summaryText = $"[primary]{SR.T("Activating skill '{0}'...", AnsiMarkup.Escape(descriptor.Name))}[/]";
             await _activateSkillAsync(descriptor.Name, CancellationToken.None);
-            _summaryText = $"[success]Activation requested for skill '{AnsiMarkup.Escape(descriptor.Name)}'.[/]";
+            _summaryText = $"[success]{SR.T("Activation requested for skill '{0}'.", AnsiMarkup.Escape(descriptor.Name))}[/]";
         }
         catch (Exception ex)
         {
-            _summaryText = $"[error]Failed to activate skill '{AnsiMarkup.Escape(descriptor.Name)}': {AnsiMarkup.Escape(ex.Message)}[/]";
+            _summaryText = $"[error]{SR.T("Failed to activate skill '{0}': {1}", AnsiMarkup.Escape(descriptor.Name), AnsiMarkup.Escape(ex.Message))}[/]";
         }
     }
 
@@ -610,12 +611,12 @@ internal sealed class SkillsManagementDialog
         {
             var result = await Task.Run(() => _service.SetSkillEnabled(scope, skillName, enabled));
             await ReloadAsync(skillName);
-            _summaryText = BuildEnablementUpdateMarkup(result, enabled ? "enabled" : "disabled", skillName);
+            _summaryText = BuildEnablementUpdateMarkup(result, enabled ? SR.T("enabled") : SR.T("disabled"), skillName);
         }
         catch (Exception ex)
         {
             await ReloadAsync(skillName);
-            _summaryText = $"[error]Failed to update skill enablement: {AnsiMarkup.Escape(ex.Message)}[/]";
+            _summaryText = $"[error]{SR.T("Failed to update skill enablement: {0}", AnsiMarkup.Escape(ex.Message))}[/]";
         }
     }
 
@@ -624,7 +625,7 @@ internal sealed class SkillsManagementDialog
         var names = GetShownSkillNames();
         if (names.Count == 0)
         {
-            _summaryText = "[warning]No shown skills to update.[/]";
+            _summaryText = $"[warning]{SR.T("No shown skills to update.")}[/]";
             return;
         }
 
@@ -634,11 +635,11 @@ internal sealed class SkillsManagementDialog
             var selectedName = GetSelectedDescriptor()?.Name;
             var result = await Task.Run(() => _service.SetSkillsEnabled(scope, names, enabled));
             await ReloadAsync(selectedName);
-            _summaryText = BuildEnablementUpdateMarkup(result, enabled ? "enabled" : "disabled", $"{names.Count} shown skill(s)");
+            _summaryText = BuildEnablementUpdateMarkup(result, enabled ? SR.T("enabled") : SR.T("disabled"), SR.T("{0} shown skill(s)", names.Count));
         }
         catch (Exception ex)
         {
-            _summaryText = $"[error]Failed to update skill enablement: {AnsiMarkup.Escape(ex.Message)}[/]";
+            _summaryText = $"[error]{SR.T("Failed to update skill enablement: {0}", AnsiMarkup.Escape(ex.Message))}[/]";
         }
     }
 
@@ -647,7 +648,7 @@ internal sealed class SkillsManagementDialog
         var names = GetShownSkillNames();
         if (names.Count == 0)
         {
-            _summaryText = "[warning]No shown skills to update.[/]";
+            _summaryText = $"[warning]{SR.T("No shown skills to update.")}[/]";
             return;
         }
 
@@ -657,11 +658,11 @@ internal sealed class SkillsManagementDialog
             var selectedName = GetSelectedDescriptor()?.Name;
             var result = await Task.Run(() => _service.InvertSkillsEnabled(scope, names));
             await ReloadAsync(selectedName);
-            _summaryText = BuildEnablementUpdateMarkup(result, "inverted", $"{names.Count} shown skill(s)");
+            _summaryText = BuildEnablementUpdateMarkup(result, SR.T("inverted"), SR.T("{0} shown skill(s)", names.Count));
         }
         catch (Exception ex)
         {
-            _summaryText = $"[error]Failed to update skill enablement: {AnsiMarkup.Escape(ex.Message)}[/]";
+            _summaryText = $"[error]{SR.T("Failed to update skill enablement: {0}", AnsiMarkup.Escape(ex.Message))}[/]";
         }
     }
 
@@ -674,8 +675,8 @@ internal sealed class SkillsManagementDialog
 
     private static string BuildEnablementUpdateMarkup(SkillEnablementUpdateResult result, string action, string target)
         => result.TotalChanged == 0
-            ? $"[muted]No skill enablement changes were needed for {AnsiMarkup.Escape(target)}.[/]"
-            : $"[success]{AnsiMarkup.Escape(action)} {AnsiMarkup.Escape(target)}: {result.GlobalChanged} global, {result.ProjectChanged} project change(s).[/]";
+            ? $"[muted]{SR.T("No skill enablement changes were needed for {0}.", AnsiMarkup.Escape(target))}[/]"
+            : $"[success]{SR.T("{0} {1}: {2} global, {3} project change(s).", AnsiMarkup.Escape(action), AnsiMarkup.Escape(target), result.GlobalChanged, result.ProjectChanged)}[/]";
 
     private SkillDescriptor? GetSelectedDescriptor()
     {
@@ -720,7 +721,7 @@ internal sealed class SkillsManagementDialog
         _ = _skillDetailsVersion.Value;
         return GetSelectedDescriptor() is { } descriptor
             ? BuildRelatedFilesHeaderMarkup(GetSelectedRelatedFiles(descriptor).Count)
-            : "[dim]Select a skill to inspect related files.[/]";
+            : $"[dim]{SR.T("Select a skill to inspect related files.")}[/]";
     }
 
     private IReadOnlyList<SkillRelatedFile> GetSelectedRelatedFiles()
@@ -770,7 +771,7 @@ internal sealed class SkillsManagementDialog
     {
         if (descriptor is null)
         {
-            return "_No skills were discovered for the selected scope._";
+            return "_" + EscapeMarkdownText(SR.T("No skills were discovered for the selected scope.")) + "_";
         }
 
         var builder = new StringBuilder();
@@ -780,38 +781,38 @@ internal sealed class SkillsManagementDialog
         builder.AppendLine(EscapeMarkdownText(descriptor.Description));
         builder.AppendLine();
 
-        builder.AppendLine("## Summary");
+        builder.Append("## ").AppendLine(EscapeMarkdownText(SR.T("Summary")));
         builder.AppendLine();
-        builder.AppendLine("| Field | Value |");
+        builder.Append("| ").Append(EscapeMarkdownTableCell(SR.T("Field"))).Append(" | ").Append(EscapeMarkdownTableCell(SR.T("Value"))).AppendLine(" |");
         builder.AppendLine("| --- | --- |");
-        AppendTableRow(builder, "Status", FormatStatus(descriptor));
-        AppendTableRow(builder, "Enabled", descriptor.IsEnabled ? "yes" : "no");
-        AppendTableRow(builder, "Disabled by", FormatDisabledBy(descriptor));
-        AppendTableRow(builder, "Source", FormatSource(descriptor.SourceKind));
-        AppendTableRow(builder, "Scope", descriptor.Scope.ToString());
-        AppendTableRow(builder, "Trusted for model advertisement", descriptor.IsTrusted ? "yes" : "no");
-        AppendTableRow(builder, "Model visible", descriptor.IsModelVisible ? "yes" : "no");
-        AppendTableRow(builder, "Related files", relatedFileCount.ToString(CultureInfo.InvariantCulture));
+        AppendTableRow(builder, SR.T("Status"), FormatStatus(descriptor));
+        AppendTableRow(builder, SR.T("Enabled"), descriptor.IsEnabled ? SR.T("yes") : SR.T("no"));
+        AppendTableRow(builder, SR.T("Disabled by"), FormatDisabledBy(descriptor));
+        AppendTableRow(builder, SR.T("Source"), FormatSource(descriptor.SourceKind));
+        AppendTableRow(builder, SR.T("Scope"), descriptor.Scope.ToString());
+        AppendTableRow(builder, SR.T("Trusted for model advertisement"), descriptor.IsTrusted ? SR.T("yes") : SR.T("no"));
+        AppendTableRow(builder, SR.T("Model visible"), descriptor.IsModelVisible ? SR.T("yes") : SR.T("no"));
+        AppendTableRow(builder, SR.T("Related files"), relatedFileCount.ToString(CultureInfo.InvariantCulture));
         if (descriptor.IsShadowed)
         {
-            AppendMarkdownTableRow(builder, "Shadowed by", Code(descriptor.ShadowedBySkillFilePath));
+            AppendMarkdownTableRow(builder, SR.T("Shadowed by"), Code(descriptor.ShadowedBySkillFilePath));
         }
 
         builder.AppendLine();
-        builder.AppendLine("## Paths");
+        builder.Append("## ").AppendLine(EscapeMarkdownText(SR.T("Paths")));
         builder.AppendLine();
-        builder.AppendLine("| Path | Value |");
+        builder.Append("| ").Append(EscapeMarkdownTableCell(SR.T("Path"))).Append(" | ").Append(EscapeMarkdownTableCell(SR.T("Value"))).AppendLine(" |");
         builder.AppendLine("| --- | --- |");
         AppendMarkdownTableRow(builder, "SKILL.md", Code(descriptor.SkillFilePath));
-        AppendMarkdownTableRow(builder, "Root", Code(descriptor.SkillRootPath));
-        AppendMarkdownTableRow(builder, "Source id", Code(descriptor.SourceId));
+        AppendMarkdownTableRow(builder, SR.T("Root"), Code(descriptor.SkillRootPath));
+        AppendMarkdownTableRow(builder, SR.T("Source id"), Code(descriptor.SourceId));
 
         if (descriptor.Diagnostics.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("## Diagnostics");
+            builder.Append("## ").AppendLine(EscapeMarkdownText(SR.T("Diagnostics")));
             builder.AppendLine();
-            builder.AppendLine("| Severity | Code | Message |");
+            builder.Append("| ").Append(EscapeMarkdownTableCell(SR.T("Severity"))).Append(" | ").Append(EscapeMarkdownTableCell(SR.T("Code"))).Append(" | ").Append(EscapeMarkdownTableCell(SR.T("Message"))).AppendLine(" |");
             builder.AppendLine("| --- | --- | --- |");
             foreach (var diagnostic in descriptor.Diagnostics)
             {
@@ -827,7 +828,7 @@ internal sealed class SkillsManagementDialog
         else
         {
             builder.AppendLine();
-            builder.AppendLine("> No validation diagnostics for this skill.");
+            builder.Append("> ").AppendLine(EscapeMarkdownText(SR.T("No validation diagnostics for this skill.")));
         }
 
         return builder.ToString();
@@ -836,8 +837,8 @@ internal sealed class SkillsManagementDialog
     private static string BuildRelatedFilesHeaderMarkup(int count)
     {
         return count == 0
-            ? "[dim]No related files for the selected skill.[/]"
-            : $"[dim]{count.ToString(CultureInfo.InvariantCulture)} related file(s): scripts, references, and assets.[/]";
+            ? $"[dim]{SR.T("No related files for the selected skill.")}[/]"
+            : $"[dim]{SR.T("{0} related file(s): scripts, references, and assets.", count.ToString(CultureInfo.InvariantCulture))}[/]";
     }
 
     private static string BuildSummaryMarkup(
@@ -852,8 +853,8 @@ internal sealed class SkillsManagementDialog
         var visible = descriptors.Count(static descriptor => descriptor.IsModelVisible);
         var filterSuffix = string.IsNullOrWhiteSpace(filterText)
             ? string.Empty
-            : $"   [muted]{shownCount} shown for '{AnsiMarkup.Escape(filterText)}'[/]";
-        return $"[primary]{descriptors.Count} discovered[/]   [success]{valid} valid[/]   [warning]{invalid} invalid[/]   [muted]{shadowed} shadowed[/]   [warning]{disabled} disabled[/]   [accent]{visible} model-visible[/]{filterSuffix}";
+            : $"   [muted]{SR.T("{0} shown for '{1}'", shownCount, AnsiMarkup.Escape(filterText))}[/]";
+        return $"[primary]{SR.T("{0} discovered", descriptors.Count)}[/]   [success]{SR.T("{0} valid", valid)}[/]   [warning]{SR.T("{0} invalid", invalid)}[/]   [muted]{SR.T("{0} shadowed", shadowed)}[/]   [warning]{SR.T("{0} disabled", disabled)}[/]   [accent]{SR.T("{0} model-visible", visible)}[/]{filterSuffix}";
     }
 
     private static void ConfigureSkillGridColumns(DataGridControl grid, bool hasSelectedProject)
@@ -861,7 +862,7 @@ internal sealed class SkillsManagementDialog
         grid.Columns.Add(new DataGridColumn<bool>
         {
             Key = "global",
-            Header = new TextBlock("G"),
+            Header = new TextBlock(SR.T("G")),
             TypedValueAccessor = SkillManagementRowViewModel.Accessor.GlobalEnabled,
             Width = GridLength.Fixed(3),
             CellActivationMode = DataGridCellActivationMode.DirectActivate,
@@ -869,7 +870,7 @@ internal sealed class SkillsManagementDialog
         grid.Columns.Add(new DataGridColumn<bool>
         {
             Key = "project",
-            Header = new TextBlock("P"),
+            Header = new TextBlock(SR.T("P")),
             TypedValueAccessor = SkillManagementRowViewModel.Accessor.ProjectEnabled,
             Width = GridLength.Fixed(3),
             ReadOnly = !hasSelectedProject,
@@ -878,7 +879,7 @@ internal sealed class SkillsManagementDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "builtin",
-            Header = new TextBlock("Built-in"),
+            Header = new TextBlock(SR.T("Built-in")),
             TypedValueAccessor = SkillManagementRowViewModel.Accessor.BuiltIn,
             Width = GridLength.Auto,
             ReadOnly = true,
@@ -887,7 +888,7 @@ internal sealed class SkillsManagementDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "name",
-            Header = new TextBlock("Skill"),
+            Header = new TextBlock(SR.T("Skill")),
             TypedValueAccessor = SkillManagementRowViewModel.Accessor.Name,
             Width = GridLength.Star(1),
             ReadOnly = true,
@@ -895,7 +896,7 @@ internal sealed class SkillsManagementDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "status",
-            Header = new TextBlock("Status"),
+            Header = new TextBlock(SR.T("Status")),
             TypedValueAccessor = SkillManagementRowViewModel.Accessor.Status,
             Width = GridLength.Auto,
             ReadOnly = true,
@@ -925,7 +926,7 @@ internal sealed class SkillsManagementDialog
 
     private static string Code(string? value)
         => string.IsNullOrWhiteSpace(value)
-            ? "_none_"
+            ? "_" + EscapeMarkdownText(SR.T("none")) + "_"
             : $"`{value.Replace("`", "\\`", StringComparison.Ordinal).Replace("|", "\\|", StringComparison.Ordinal)}`";
 
     private static string EscapeMarkdownText(string value)
@@ -947,25 +948,25 @@ internal sealed class SkillsManagementDialog
     {
         if (!descriptor.IsEnabled)
         {
-            return "disabled";
+            return SR.T("disabled");
         }
 
         if (descriptor.IsShadowed)
         {
-            return "shadowed";
+            return SR.T("shadowed");
         }
 
-        return descriptor.IsValid ? "valid" : "invalid";
+        return descriptor.IsValid ? SR.T("valid") : SR.T("invalid");
     }
 
     private static string FormatDisabledBy(SkillDescriptor descriptor)
     {
         return (descriptor.IsDisabledGlobally, descriptor.IsDisabledForProject) switch
         {
-            (true, true) => "global and project config",
-            (true, false) => "global config",
-            (false, true) => "project config",
-            _ => "none",
+            (true, true) => SR.T("global and project config"),
+            (true, false) => SR.T("global config"),
+            (false, true) => SR.T("project config"),
+            _ => SR.T("none"),
         };
     }
 
@@ -973,13 +974,13 @@ internal sealed class SkillsManagementDialog
     {
         return sourceKind switch
         {
-            SkillSourceKind.ProjectAlta => "project .alta/skills",
-            SkillSourceKind.ProjectCommon => "project .agents/skills",
-            SkillSourceKind.UserAlta => "user ~/.alta/skills",
-            SkillSourceKind.UserCommon => "user ~/.agents/skills",
-            SkillSourceKind.Plugin => "plugin",
-            SkillSourceKind.Builtin => "builtin",
-            _ => "temporary",
+            SkillSourceKind.ProjectAlta => SR.T("project .alta/skills"),
+            SkillSourceKind.ProjectCommon => SR.T("project .agents/skills"),
+            SkillSourceKind.UserAlta => SR.T("user ~/.alta/skills"),
+            SkillSourceKind.UserCommon => SR.T("user ~/.agents/skills"),
+            SkillSourceKind.Plugin => SR.T("plugin"),
+            SkillSourceKind.Builtin => SR.T("builtin"),
+            _ => SR.T("temporary"),
         };
     }
 

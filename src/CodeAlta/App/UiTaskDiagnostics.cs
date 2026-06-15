@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Shell;
 using CodeAlta.Views;
@@ -65,7 +66,7 @@ internal static class UiTaskDiagnostics
         }
         catch (Exception ex)
         {
-            var message = $"Unexpected failure while trying to {operation}.";
+            var message = SR.T("Unexpected failure while trying to {0}.", operation);
             CodeAltaApp.UiLogger.Error(ex, message);
 
             try
@@ -78,7 +79,7 @@ internal static class UiTaskDiagnostics
 
             try
             {
-                setStatus($"{message} {ex.Message}", false, StatusTone.Error);
+                setStatus(SR.T("{0} {1}", message, ex.Message), false, StatusTone.Error);
             }
             catch
             {

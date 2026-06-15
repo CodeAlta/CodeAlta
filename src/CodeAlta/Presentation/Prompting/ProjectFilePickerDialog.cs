@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Styling;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
@@ -29,15 +30,15 @@ internal sealed class ProjectFilePickerDialog
     private bool _suppressListSelectionChanged;
     private bool _suppressQueryDocumentChanged;
 
-    public ProjectFilePickerDialog(string hintText = "Arrows move · Enter insert link · Esc close")
+    public ProjectFilePickerDialog(string? hintText = null)
     {
         _headerTextBlock = CreateLabel(string.Empty, static theme => theme.Foreground?.ToRgb() ?? Color.Default);
         _statisticsTextBlock = CreateLabel(string.Empty, UiPalette.GetPromptPlaceholderColor);
         _statusTextBlock = CreateLabel(string.Empty, UiPalette.GetPromptPlaceholderColor);
-        _hintTextBlock = CreateLabel(hintText, UiPalette.GetPromptPlaceholderColor);
+        _hintTextBlock = CreateLabel(hintText ?? SR.T("Arrows move · Enter insert link · Esc close"), UiPalette.GetPromptPlaceholderColor);
 
         _queryBox = new TextBox()
-            .Placeholder("Search files and folders…")
+            .Placeholder(SR.T("Search files and folders…"))
             .HorizontalAlignment(Align.Stretch);
         _queryBox.TextDocument.Changed += OnQueryDocumentChanged;
         _queryBox.KeyDown((_, e) => HandleQueryKeyDown(e));

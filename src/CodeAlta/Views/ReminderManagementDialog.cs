@@ -41,7 +41,7 @@ internal sealed class ReminderManagementDialog
     private readonly Markup _detailMarkup;
     private readonly Markup _statusMarkup;
     private string _summaryText = string.Empty;
-    private string _statusText = "[dim]Create schedules a delayed prompt for this session. Delete cancels the selected reminder.[/]";
+    private string _statusText = $"[dim]{SR.T("Create schedules a delayed prompt for this session. Delete cancels the selected reminder.")}[/]";
 
     public ReminderManagementDialog(
         AltaReminderService reminders,
@@ -76,8 +76,8 @@ internal sealed class ReminderManagementDialog
         _reminderList.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Reminders.DeleteSelected",
-            LabelMarkup = "Delete Reminder",
-            DescriptionMarkup = "Delete the selected reminder.",
+            LabelMarkup = SR.T("Delete Reminder"),
+            DescriptionMarkup = SR.T("Delete the selected reminder."),
             Gesture = new KeyGesture(TerminalKey.Delete),
             CanExecute = _ => GetSelectedRow() is not null,
             Execute = _ => DeleteSelectedReminder(),
@@ -87,18 +87,18 @@ internal sealed class ReminderManagementDialog
         {
             Text = "300",
             HorizontalAlignment = Align.Stretch,
-        }.Placeholder("seconds or TimeSpan, e.g. 300 or 00:05:00");
+        }.Placeholder(SR.T("seconds or TimeSpan, e.g. 300 or 00:05:00"));
         _repeatBox = new TextBox
         {
             Text = "1",
             HorizontalAlignment = Align.Stretch,
-        }.Placeholder("repeat count");
-        _contentEditor = CreateMarkdownEditor("Check on this session.");
+        }.Placeholder(SR.T("repeat count"));
+        _contentEditor = CreateMarkdownEditor(SR.T("Check on this session."));
 
         _summaryMarkup = new Markup(() => _summaryText) { Wrap = true };
         _detailMarkup = new Markup(() => GetSelectedRow() is { } row
             ? BuildDetailMarkup(row.Descriptor)
-            : "[dim]Select a reminder to inspect its schedule.[/]") { Wrap = true };
+            : $"[dim]{SR.T("Select a reminder to inspect its schedule.")}[/]") { Wrap = true };
         _statusMarkup = new Markup(() => _statusText) { Wrap = true };
 
         _dialog = BuildDialog();
@@ -114,28 +114,28 @@ internal sealed class ReminderManagementDialog
 
     private Dialog BuildDialog()
     {
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
         };
         closeButton.Click(Close);
 
-        var createButton = new Button($"{TerminalIcons.MdTimerOutline} Create")
+        var createButton = new Button($"{TerminalIcons.MdTimerOutline} {SR.T("Create")}")
             .Tone(ControlTone.Success)
             .Click(CreateReminder);
-        var loadButton = new Button($"{TerminalIcons.MdFileEditOutline} Load Message")
+        var loadButton = new Button($"{TerminalIcons.MdFileEditOutline} {SR.T("Load Message")}")
             .IsEnabled(() => GetSelectedRow() is not null)
             .Click(LoadSelectedMessage);
-        var updateButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save Message")
+        var updateButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} {SR.T("Save Message")}")
             .Tone(ControlTone.Success)
             .IsEnabled(() => GetSelectedRow() is not null)
             .Click(UpdateSelectedMessage);
-        var deleteButton = new Button($"{TerminalIcons.MdTrashCanOutline} Delete")
+        var deleteButton = new Button($"{TerminalIcons.MdTrashCanOutline} {SR.T("Delete")}")
             .Tone(ControlTone.Error)
             .IsEnabled(() => GetSelectedRow() is not null)
             .Click(DeleteSelectedReminder);
-        var refreshButton = new Button($"{TerminalIcons.MdRefresh} Refresh")
+        var refreshButton = new Button($"{TerminalIcons.MdRefresh} {SR.T("Refresh")}")
             .Click(() => Reload(GetSelectedRow()?.Descriptor.ReminderId));
 
         var toolbar = new HStack(createButton, loadButton, updateButton, deleteButton, refreshButton)
@@ -145,7 +145,7 @@ internal sealed class ReminderManagementDialog
         };
 
         var intro = new Markup(() =>
-            $"[dim]Managing active reminders for session [bold]{AnsiMarkup.Escape(_session.Title)}[/] ([bold]{AnsiMarkup.Escape(_session.SessionId)}[/]).[/]")
+            $"[dim]{SR.T("Managing active reminders for session {0} ({1}).", $"[bold]{AnsiMarkup.Escape(_session.Title)}[/]", $"[bold]{AnsiMarkup.Escape(_session.SessionId)}[/]")}[/]")
         {
             Wrap = true,
         };
@@ -160,9 +160,9 @@ internal sealed class ReminderManagementDialog
             .Columns(
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) });
-        form.Cell(new TextBlock("Delay") { VerticalAlignment = Align.Center }, 0, 0);
+        form.Cell(new TextBlock(SR.T("Delay")) { VerticalAlignment = Align.Center }, 0, 0);
         form.Cell(_durationBox.Stretch(), 0, 1);
-        form.Cell(new TextBlock("Repeat") { VerticalAlignment = Align.Center }, 1, 0);
+        form.Cell(new TextBlock(SR.T("Repeat")) { VerticalAlignment = Align.Center }, 1, 0);
         form.Cell(_repeatBox.Stretch(), 1, 1);
 
         var editorFrame = new Border(
@@ -175,7 +175,7 @@ internal sealed class ReminderManagementDialog
         };
 
         var leftPane = new VStack(
-            new Group("Active Reminders")
+            new Group(SR.T("Active Reminders"))
                 .Style(GroupStyle.Rounded)
                 .Content(_reminderList.Stretch())
                 .Padding(new Thickness(1, 0, 1, 0))
@@ -200,8 +200,8 @@ internal sealed class ReminderManagementDialog
                 new RowDefinition { Height = GridLength.Star(1) })
             .Columns(new ColumnDefinition { Width = GridLength.Star(1) });
         rightPane.Cell(form, 0, 0);
-        rightPane.Cell(new TextBlock("Reminder prompt (Markdown)"), 1, 0);
-        rightPane.Cell(new Markup("[dim]The prompt is sent to this session when the reminder fires.[/]") { Wrap = true }, 2, 0);
+        rightPane.Cell(new TextBlock(SR.T("Reminder prompt (Markdown)")), 1, 0);
+        rightPane.Cell(new Markup($"[dim]{SR.T("The prompt is sent to this session when the reminder fires.")}[/]") { Wrap = true }, 2, 0);
         rightPane.Cell(editorFrame, 3, 0);
 
         var splitter = new HSplitter(leftPane, rightPane)
@@ -230,17 +230,17 @@ internal sealed class ReminderManagementDialog
         content.Cell(_statusMarkup, 4, 0);
 
         var dialog = new Dialog()
-            .Title("Reminders")
+            .Title(SR.T("Reminders"))
             .TopRightText(closeButton)
-            .BottomLeftText(new Markup("[dim]Ctrl+Enter Create · Ctrl+E Load · Ctrl+S Save message · Delete Remove · Ctrl+R Refresh · Esc Close[/]"))
+            .BottomLeftText(new Markup($"[dim]{SR.T("Ctrl+Enter Create · Ctrl+E Load · Ctrl+S Save message · Delete Remove · Ctrl+R Refresh · Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
         dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Reminders.Create",
-            LabelMarkup = "Create Reminder",
-            DescriptionMarkup = "Create a reminder for the current session.",
+            LabelMarkup = SR.T("Create Reminder"),
+            DescriptionMarkup = SR.T("Create a reminder for the current session."),
             Gesture = new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl),
             Importance = CommandImportance.Primary,
             Execute = _ => CreateReminder(),
@@ -248,8 +248,8 @@ internal sealed class ReminderManagementDialog
         dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Reminders.LoadSelectedMessage",
-            LabelMarkup = "Load Reminder Message",
-            DescriptionMarkup = "Load the selected reminder message into the editor.",
+            LabelMarkup = SR.T("Load Reminder Message"),
+            DescriptionMarkup = SR.T("Load the selected reminder message into the editor."),
             Gesture = new KeyGesture(TerminalChar.CtrlE, TerminalModifiers.Ctrl),
             CanExecute = _ => GetSelectedRow() is not null,
             Execute = _ => LoadSelectedMessage(),
@@ -257,8 +257,8 @@ internal sealed class ReminderManagementDialog
         dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Reminders.UpdateSelectedMessage",
-            LabelMarkup = "Save Reminder Message",
-            DescriptionMarkup = "Save the editor text as the selected reminder message.",
+            LabelMarkup = SR.T("Save Reminder Message"),
+            DescriptionMarkup = SR.T("Save the editor text as the selected reminder message."),
             Gesture = new KeyGesture(TerminalChar.CtrlS, TerminalModifiers.Ctrl),
             CanExecute = _ => GetSelectedRow() is not null,
             Execute = _ => UpdateSelectedMessage(),
@@ -266,16 +266,16 @@ internal sealed class ReminderManagementDialog
         dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Reminders.Refresh",
-            LabelMarkup = "Refresh Reminders",
-            DescriptionMarkup = "Reload reminders for this session.",
+            LabelMarkup = SR.T("Refresh Reminders"),
+            DescriptionMarkup = SR.T("Reload reminders for this session."),
             Gesture = new KeyGesture(TerminalChar.CtrlR, TerminalModifiers.Ctrl),
             Execute = _ => Reload(GetSelectedRow()?.Descriptor.ReminderId),
         });
         dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Reminders.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the reminders dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the reminders dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -293,14 +293,14 @@ internal sealed class ReminderManagementDialog
 
         if (!_reminders.TryGetContent(row.Descriptor.ReminderId, out var content))
         {
-            SetDialogStatus("[warning]Reminder was not found.[/]", "Reminder was not found.", StatusTone.Warning);
+            SetDialogStatus($"[warning]{SR.T("Reminder was not found.")}[/]", SR.T("Reminder was not found."), StatusTone.Warning);
             Reload(null);
             _onRemindersChanged();
             return;
         }
 
         SetEditorText(content ?? string.Empty);
-        SetDialogStatus("[success]Reminder message loaded.[/]", "Reminder message loaded.", StatusTone.Info);
+        SetDialogStatus($"[success]{SR.T("Reminder message loaded.")}[/]", SR.T("Reminder message loaded."), StatusTone.Info);
         _dialog.App?.Focus(_contentEditor);
     }
 
@@ -315,7 +315,7 @@ internal sealed class ReminderManagementDialog
         var content = GetEditorText(_contentEditor).Trim();
         if (string.IsNullOrWhiteSpace(content))
         {
-            SetDialogStatus("[warning]Reminder prompt content is required.[/]", "Reminder prompt content is required.", StatusTone.Warning);
+            SetDialogStatus($"[warning]{SR.T("Reminder prompt content is required.")}[/]", SR.T("Reminder prompt content is required."), StatusTone.Warning);
             _dialog.App?.Focus(_contentEditor);
             return;
         }
@@ -324,13 +324,13 @@ internal sealed class ReminderManagementDialog
         {
             if (!_reminders.TryUpdateContent(row.Descriptor.ReminderId, content, out var descriptor))
             {
-                SetDialogStatus("[warning]Reminder was not found.[/]", "Reminder was not found.", StatusTone.Warning);
+                SetDialogStatus($"[warning]{SR.T("Reminder was not found.")}[/]", SR.T("Reminder was not found."), StatusTone.Warning);
                 Reload(null);
                 _onRemindersChanged();
                 return;
             }
 
-            SetDialogStatus("[success]Reminder message updated.[/]", "Reminder message updated.", StatusTone.Info);
+            SetDialogStatus($"[success]{SR.T("Reminder message updated.")}[/]", SR.T("Reminder message updated."), StatusTone.Info);
             Reload(descriptor!.ReminderId);
             _onRemindersChanged();
         }
@@ -345,7 +345,7 @@ internal sealed class ReminderManagementDialog
         var content = GetEditorText(_contentEditor).Trim();
         if (string.IsNullOrWhiteSpace(content))
         {
-            SetDialogStatus("[warning]Reminder prompt content is required.[/]", "Reminder prompt content is required.", StatusTone.Warning);
+            SetDialogStatus($"[warning]{SR.T("Reminder prompt content is required.")}[/]", SR.T("Reminder prompt content is required."), StatusTone.Warning);
             _dialog.App?.Focus(_contentEditor);
             return;
         }
@@ -376,7 +376,7 @@ internal sealed class ReminderManagementDialog
                 SourceProjectId = _session.ProjectRef,
                 Cwd = string.IsNullOrWhiteSpace(_session.WorkingDirectory) ? null : _session.WorkingDirectory,
             });
-            SetDialogStatus("[success]Reminder created.[/]", "Reminder created.", StatusTone.Info);
+            SetDialogStatus($"[success]{SR.T("Reminder created.")}[/]", SR.T("Reminder created."), StatusTone.Info);
             Reload(descriptor.ReminderId);
             _onRemindersChanged();
         }
@@ -400,13 +400,13 @@ internal sealed class ReminderManagementDialog
 
         if (_reminders.TryDelete(row.Descriptor.ReminderId, out _))
         {
-            SetDialogStatus("[success]Reminder deleted.[/]", "Reminder deleted.", StatusTone.Info);
+            SetDialogStatus($"[success]{SR.T("Reminder deleted.")}[/]", SR.T("Reminder deleted."), StatusTone.Info);
             Reload(null);
             _onRemindersChanged();
             return;
         }
 
-        SetDialogStatus("[warning]Reminder was not found.[/]", "Reminder was not found.", StatusTone.Warning);
+        SetDialogStatus($"[warning]{SR.T("Reminder was not found.")}[/]", SR.T("Reminder was not found."), StatusTone.Warning);
         Reload(null);
         _onRemindersChanged();
     }
@@ -419,8 +419,8 @@ internal sealed class ReminderManagementDialog
         _rows.Clear();
         _rows.AddRange(reminders);
         _summaryText = reminders.Length == 0
-            ? "[dim]No active reminders for this session.[/]"
-            : $"[primary]{TerminalIcons.MdTimerOutline} {reminders.Length} active reminder{(reminders.Length == 1 ? string.Empty : "s")}[/]";
+            ? $"[dim]{SR.T("No active reminders for this session.")}[/]"
+            : $"[primary]{TerminalIcons.MdTimerOutline} {SR.T("{0} active reminder(s)", reminders.Length)}[/]";
 
         var selectedIndex = -1;
         if (!string.IsNullOrWhiteSpace(preferredReminderId))
@@ -460,7 +460,7 @@ internal sealed class ReminderManagementDialog
     private static Visual BuildReminderListItem(ReminderRow row)
     {
         var descriptor = row.Descriptor;
-        var due = descriptor.DueAt is null ? "not scheduled" : FormatDue(descriptor.DueAt.Value);
+        var due = descriptor.DueAt is null ? SR.T("not scheduled") : FormatDue(descriptor.DueAt.Value);
         var repeat = descriptor.RepeatCount == 1
             ? string.Empty
             : $" · {descriptor.FiredCount}/{descriptor.RepeatCount}";
@@ -472,15 +472,15 @@ internal sealed class ReminderManagementDialog
 
     private static string BuildDetailMarkup(AltaReminderDescriptor descriptor)
     {
-        var due = descriptor.DueAt is null ? "not scheduled" : FormatDue(descriptor.DueAt.Value);
+        var due = descriptor.DueAt is null ? SR.T("not scheduled") : FormatDue(descriptor.DueAt.Value);
         var created = descriptor.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
         var builder = new System.Text.StringBuilder();
         builder.Append("[bold]").Append(AnsiMarkup.Escape(descriptor.ReminderId)).AppendLine("[/]");
-        builder.Append("[dim]Due:[/] ").Append(AnsiMarkup.Escape(due)).AppendLine();
-        builder.Append("[dim]Delay:[/] ").Append(AnsiMarkup.Escape(FormatDuration(descriptor.Duration))).AppendLine();
-        builder.Append("[dim]Repeat:[/] ").Append(descriptor.FiredCount.ToString(CultureInfo.InvariantCulture)).Append('/').Append(descriptor.RepeatCount.ToString(CultureInfo.InvariantCulture)).AppendLine();
-        builder.Append("[dim]Created:[/] ").Append(AnsiMarkup.Escape(created)).AppendLine();
-        builder.AppendLine("[dim]Prompt preview:[/]");
+        builder.Append("[dim]").Append(SR.T("Due")).Append(":[/] ").Append(AnsiMarkup.Escape(due)).AppendLine();
+        builder.Append("[dim]").Append(SR.T("Delay")).Append(":[/] ").Append(AnsiMarkup.Escape(FormatDuration(descriptor.Duration))).AppendLine();
+        builder.Append("[dim]").Append(SR.T("Repeat")).Append(":[/] ").Append(descriptor.FiredCount.ToString(CultureInfo.InvariantCulture)).Append('/').Append(descriptor.RepeatCount.ToString(CultureInfo.InvariantCulture)).AppendLine();
+        builder.Append("[dim]").Append(SR.T("Created")).Append(":[/] ").Append(AnsiMarkup.Escape(created)).AppendLine();
+        builder.Append("[dim]").Append(SR.T("Prompt preview")).AppendLine(":[/]");
         builder.Append(AnsiMarkup.Escape(descriptor.ContentPreview));
         return builder.ToString();
     }
@@ -490,7 +490,7 @@ internal sealed class ReminderManagementDialog
         duration = default;
         if (string.IsNullOrWhiteSpace(value))
         {
-            error = "Delay is required.";
+            error = SR.T("Delay is required.");
             return false;
         }
 
@@ -506,12 +506,12 @@ internal sealed class ReminderManagementDialog
                 }
                 catch (OverflowException)
                 {
-                    error = "Delay is too large.";
+                    error = SR.T("Delay is too large.");
                     return false;
                 }
             }
 
-            error = "Delay must be greater than zero seconds.";
+            error = SR.T("Delay must be greater than zero seconds.");
             return false;
         }
 
@@ -522,7 +522,7 @@ internal sealed class ReminderManagementDialog
             return true;
         }
 
-        error = "Delay must be a positive number of seconds or a positive TimeSpan such as 00:05:00.";
+        error = SR.T("Delay must be a positive number of seconds or a positive TimeSpan such as 00:05:00.");
         return false;
     }
 
@@ -542,7 +542,7 @@ internal sealed class ReminderManagementDialog
         }
 
         repeat = 1;
-        error = "Repeat must be a positive integer.";
+        error = SR.T("Repeat must be a positive integer.");
         return false;
     }
 
@@ -555,7 +555,7 @@ internal sealed class ReminderManagementDialog
             return local.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
         }
 
-        return $"in {FormatDuration(remaining)} ({local.ToString("HH:mm:ss", CultureInfo.InvariantCulture)})";
+        return SR.T("in {0} ({1})", FormatDuration(remaining), local.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
     }
 
     private static string FormatDuration(TimeSpan duration)

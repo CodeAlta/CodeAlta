@@ -77,12 +77,12 @@ internal sealed class ModelCatalogCoordinator
         var selected = await _modelProviderSelectorCoordinator.SelectProviderModelAsync(new ModelProviderId(row.ProviderKey), row.ModelId);
         if (!selected)
         {
-            _setStatus($"Could not select model '{row.ModelId}' from provider '{row.ProviderKey}'.", StatusTone.Warning);
+            _setStatus(SR.T("Could not select model '{0}' from provider '{1}'.", row.ModelId, row.ProviderKey), StatusTone.Warning);
             _focusPrompt();
             return;
         }
 
-        _setStatus($"Selected {row.ProviderDisplayName}: {row.ModelDisplayName}.", StatusTone.Ready);
+        _setStatus(SR.T("Selected {0}: {1}.", row.ProviderDisplayName, row.ModelDisplayName), StatusTone.Ready);
         _focusReasoning();
     }
 

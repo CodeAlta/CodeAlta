@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.App;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Terminal.UI;
@@ -113,7 +114,7 @@ internal static class PluginShellCommandAdapter
         var result = await context.Plugins.ExecuteCommandAsync(contribution, cancellationToken);
         if (result.Disposition == PluginCommandDisposition.NotHandled)
         {
-            context.Status.SetStatus($"Plugin command '{contribution.Name}' was not handled.", tone: StatusTone.Warning);
+            context.Status.SetStatus(SR.T("Plugin command '{0}' was not handled.", contribution.Name), tone: StatusTone.Warning);
             return;
         }
 

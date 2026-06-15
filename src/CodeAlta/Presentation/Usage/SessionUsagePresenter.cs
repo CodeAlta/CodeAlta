@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Presentation.Formatting;
@@ -59,7 +60,7 @@ internal sealed class SessionUsagePresenter
             Padding = Thickness.Zero,
         });
         button.Click(() => TogglePopup(button));
-        var buttonHost = button.Tooltip(new TextBlock($"Show context usage ({SessionWorkspaceView.SessionUsageShortcutSequence})."));
+        var buttonHost = button.Tooltip(new TextBlock(SR.T("Show context usage ({0}).", SessionWorkspaceView.SessionUsageShortcutSequence)));
         _indicatorAnchor = buttonHost;
         return buttonHost;
     }
@@ -126,8 +127,8 @@ internal sealed class SessionUsagePresenter
 
         stack.Add(new StatusBar()
             .LeftText(new VStack(
-                new Markup($"[bold]{AnsiMarkup.Escape(providerName)} context usage[/]"),
-                new Markup($"[dim]{AnsiMarkup.Escape(modelName ?? "(default model)")}[/]"))
+                new Markup($"[bold]{AnsiMarkup.Escape(providerName)} {SR.T("context usage")}[/]"),
+                new Markup($"[dim]{AnsiMarkup.Escape(modelName ?? SR.T("(default model)"))}[/]"))
             {
                 Spacing = 0,
             })
@@ -138,7 +139,7 @@ internal sealed class SessionUsagePresenter
 
         if (usage is null)
         {
-            stack.Add(new TextBlock("Waiting for usage data from the active session."));
+            stack.Add(new TextBlock(SR.T("Waiting for usage data from the active session.")));
             return BuildPopupContainer(stack);
         }
 
@@ -173,8 +174,8 @@ internal sealed class SessionUsagePresenter
         return new BreakdownChart()
             .ShowValues(true)
             .ShowPercentages(true)
-            .Segment(used, new TextBlock("Active context"))
-            .Segment(remaining, new TextBlock("Input headroom"))
+            .Segment(used, new TextBlock(SR.T("Active context")))
+            .Segment(remaining, new TextBlock(SR.T("Input headroom")))
             .Style(new BreakdownStyle { SegmentGap = 1 });
     }
 
@@ -186,12 +187,12 @@ internal sealed class SessionUsagePresenter
         }
 
         var sectionTitle = usage.MessageCount is { } messageCount
-            ? FormattableString.Invariant($"Context usage: {messageCount} messages")
-            : "Context usage";
+            ? SR.T("Context usage: {0} messages", messageCount)
+            : SR.T("Context usage");
         AddSectionHeader(stack, sectionTitle);
         if (usage.Window is not null)
         {
-            stack.Add(new Markup($"[bold]Compaction pressure[/] [dim]{AnsiMarkup.Escape(SessionUsageFormatter.FormatSummary(usage))}[/]"));
+            stack.Add(new Markup($"[bold]{SR.T("Compaction pressure")}[/] [dim]{AnsiMarkup.Escape(SessionUsageFormatter.FormatSummary(usage))}[/]"));
             if (BuildInputContextPressureChart(usage) is { } pressureChart)
             {
                 stack.Add(pressureChart);
@@ -199,13 +200,13 @@ internal sealed class SessionUsagePresenter
 
             if (SessionUsageFormatter.TryFormatModelEnvelope(usage.Window, out var modelEnvelope))
             {
-                stack.Add(new Markup($"[dim]Indicative model limits: {AnsiMarkup.Escape(modelEnvelope)}[/]"));
+                stack.Add(new Markup($"[dim]{SR.T("Indicative model limits")}: {AnsiMarkup.Escape(modelEnvelope)}[/]"));
             }
         }
 
         if (usage.LastOperation is { } operation)
         {
-            stack.Add(new Markup($"[bold]{AnsiMarkup.Escape(operation.Label ?? "Last operation")}[/]"));
+            stack.Add(new Markup($"[bold]{AnsiMarkup.Escape(operation.Label ?? SR.T("Last operation"))}[/]"));
             if (BuildOperationUsageChart(operation) is { } operationChart)
             {
                 stack.Add(operationChart);
@@ -241,32 +242,32 @@ internal sealed class SessionUsagePresenter
         }
 
         var sectionTitle = usage.RateLimits is not null && (requestQuotas is { Length: > 0 } || opaqueQuotas is { Length: > 0 })
-            ? "Limits and quotas"
+            ? SR.T("Limits and quotas")
             : usage.RateLimits is not null
-                ? "Limits"
-                : "Quotas";
+                ? SR.T("Limits")
+                : SR.T("Quotas");
         AddSectionHeader(stack, sectionTitle);
         if (usage.RateLimits is { } rateLimits)
         {
             if (!string.IsNullOrWhiteSpace(rateLimits.Name) || !string.IsNullOrWhiteSpace(rateLimits.PlanType))
             {
-                stack.Add(new Markup($"[bold]{AnsiMarkup.Escape($"{rateLimits.Name ?? "Rate limits"} · {rateLimits.PlanType ?? "plan unknown"}")}[/]"));
+                stack.Add(new Markup($"[bold]{AnsiMarkup.Escape($"{rateLimits.Name ?? SR.T("Rate limits")} · {rateLimits.PlanType ?? SR.T("plan unknown")}")}[/]"));
             }
 
             if (rateLimits.Primary is not null)
             {
-                stack.Add(new Markup(AnsiMarkup.Escape($"Primary: {SessionUsageFormatter.FormatAgentRateLimitWindow(rateLimits.Primary)}")));
+                stack.Add(new Markup(AnsiMarkup.Escape($"{SR.T("Primary")}: {SessionUsageFormatter.FormatAgentRateLimitWindow(rateLimits.Primary)}")));
             }
 
             if (rateLimits.Secondary is not null)
             {
-                stack.Add(new Markup(AnsiMarkup.Escape($"Secondary: {SessionUsageFormatter.FormatAgentRateLimitWindow(rateLimits.Secondary)}")));
+                stack.Add(new Markup(AnsiMarkup.Escape($"{SR.T("Secondary")}: {SessionUsageFormatter.FormatAgentRateLimitWindow(rateLimits.Secondary)}")));
             }
         }
 
         if (requestQuotas is { Length: > 0 })
         {
-            stack.Add(new Markup("[bold]Copilot quota snapshots[/]"));
+            stack.Add(new Markup($"[bold]{SR.T("Copilot quota snapshots")}[/]"));
             stack.Add(BuildCopilotQuotaTable(requestQuotas));
         }
 
@@ -285,7 +286,7 @@ internal sealed class SessionUsagePresenter
         if (usage.Details is CodexSessionUsageDetails codex &&
             codex.TotalUsage is not null)
         {
-            AddSectionHeader(stack, "Provider-specific details");
+            AddSectionHeader(stack, SR.T("Provider-specific details"));
             AddCodexUsageContent(stack, codex);
             added = true;
         }
@@ -295,7 +296,7 @@ internal sealed class SessionUsagePresenter
         {
             if (!added)
             {
-                AddSectionHeader(stack, "Provider-specific details");
+                AddSectionHeader(stack, SR.T("Provider-specific details"));
             }
 
             AddCopilotUsageContent(stack, copilot);
@@ -309,7 +310,7 @@ internal sealed class SessionUsagePresenter
             return;
         }
 
-        AddSectionHeader(stack, "Plugin statistics");
+        AddSectionHeader(stack, SR.T("Plugin statistics"));
         foreach (var projection in projections)
         {
             if (string.IsNullOrWhiteSpace(projection.Markdown))
@@ -325,7 +326,7 @@ internal sealed class SessionUsagePresenter
     {
         if (details.TotalUsage is not null)
         {
-            stack.Add(new Markup("[bold]Session total[/]"));
+            stack.Add(new Markup($"[bold]{SR.T("Session total")}[/]"));
             if (BuildCodexUsageChart(details.TotalUsage) is { } totalChart)
             {
                 stack.Add(totalChart);
@@ -337,7 +338,7 @@ internal sealed class SessionUsagePresenter
     {
         if (details.LastCompaction is { } compaction)
         {
-            stack.Add(new Markup("[bold]Last compaction[/]"));
+            stack.Add(new Markup($"[bold]{SR.T("Last compaction")}[/]"));
             stack.Add(new Markup(AnsiMarkup.Escape(SessionUsageFormatter.FormatCopilotCompaction(compaction))));
             if (BuildCopilotCompactionChart(compaction) is { } compactionChart)
             {
@@ -354,7 +355,7 @@ internal sealed class SessionUsagePresenter
 
             if (assistantUsage.TokenDetails is { Length: > 0 } tokenDetails)
             {
-                stack.Add(new Markup("[bold]Copilot token details[/]"));
+                stack.Add(new Markup($"[bold]{SR.T("Copilot token details")}[/]"));
                 foreach (var tokenDetail in tokenDetails)
                 {
                     stack.Add(new Markup(AnsiMarkup.Escape($"{tokenDetail.TokenType}: {SessionUsageFormatter.FormatNumber(tokenDetail.TokenCount)}")));
@@ -394,7 +395,7 @@ internal sealed class SessionUsagePresenter
     private static Table BuildCopilotQuotaTable(IEnumerable<CopilotQuotaSnapshot> quotas)
     {
         var table = new Table()
-            .Headers("Quota", "Usage", "Status")
+            .Headers(SR.T("Quota"), SR.T("Usage"), SR.T("Status"))
             .Style(TableStyle.RoundedGrid with { ShowRowSeparators = false });
 
         foreach (var quota in quotas)
@@ -417,12 +418,12 @@ internal sealed class SessionUsagePresenter
         var chart = new BreakdownChart().ShowValues(true).ShowPercentages(true);
         var added = 0;
 
-        added += AddSegment(chart, usage.InputTokens, "Input");
-        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningTokens), "Output");
-        added += AddSegment(chart, usage.CacheReadTokens, "Cache Read");
-        added += AddSegment(chart, usage.CacheWriteTokens, "Cache Write");
-        added += AddSegment(chart, usage.CachedInputTokens, "Cache");
-        added += AddSegment(chart, usage.ReasoningTokens, "Reasoning");
+        added += AddSegment(chart, usage.InputTokens, SR.T("Input"));
+        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningTokens), SR.T("Output"));
+        added += AddSegment(chart, usage.CacheReadTokens, SR.T("Cache Read"));
+        added += AddSegment(chart, usage.CacheWriteTokens, SR.T("Cache Write"));
+        added += AddSegment(chart, usage.CachedInputTokens, SR.T("Cache"));
+        added += AddSegment(chart, usage.ReasoningTokens, SR.T("Reasoning"));
 
         return added > 0
             ? chart.Style(new BreakdownStyle { SegmentGap = 1 })
@@ -434,10 +435,10 @@ internal sealed class SessionUsagePresenter
         var chart = new BreakdownChart().ShowValues(true).ShowPercentages(true);
         var added = 0;
 
-        added += AddSegment(chart, usage.InputTokens, "Input");
-        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningOutputTokens), "Output");
-        added += AddSegment(chart, usage.CachedInputTokens, "Cache");
-        added += AddSegment(chart, usage.ReasoningOutputTokens, "Reasoning");
+        added += AddSegment(chart, usage.InputTokens, SR.T("Input"));
+        added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningOutputTokens), SR.T("Output"));
+        added += AddSegment(chart, usage.CachedInputTokens, SR.T("Cache"));
+        added += AddSegment(chart, usage.ReasoningOutputTokens, SR.T("Reasoning"));
 
         return added > 0
             ? chart.Style(new BreakdownStyle { SegmentGap = 1 })
@@ -456,9 +457,9 @@ internal sealed class SessionUsagePresenter
             .ShowPercentages(true);
 
         var added = 0;
-        added += AddSegment(chart, tokens.InputTokens, "Input");
-        added += AddSegment(chart, tokens.OutputTokens, "Output");
-        added += AddSegment(chart, tokens.CachedInputTokens, "Cache");
+        added += AddSegment(chart, tokens.InputTokens, SR.T("Input"));
+        added += AddSegment(chart, tokens.OutputTokens, SR.T("Output"));
+        added += AddSegment(chart, tokens.CachedInputTokens, SR.T("Cache"));
 
         return added > 0
             ? chart.Style(new BreakdownStyle { SegmentGap = 1 })

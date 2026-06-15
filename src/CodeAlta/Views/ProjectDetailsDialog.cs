@@ -42,7 +42,7 @@ internal sealed class ProjectDetailsDialog
             Archived = project.Archived,
         };
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -78,50 +78,50 @@ internal sealed class ProjectDetailsDialog
         var descriptionBox = new TextBox().Text(_viewModel.Bind.Description);
         var tagsBox = new TextBox().Text(_viewModel.Bind.TagsText);
 
-        form.Cell(new TextBlock("Id"), 0, 0);
+        form.Cell(new TextBlock(SR.T("Id")), 0, 0);
         form.Cell(new TextBlock(() => _viewModel.Id), 0, 1);
-        form.Cell(new TextBlock("Slug"), 1, 0);
+        form.Cell(new TextBlock(SR.T("Slug")), 1, 0);
         form.Cell(new TextBlock(() => _viewModel.Slug), 1, 1);
-        form.Cell(new TextBlock("Display Name"), 2, 0);
+        form.Cell(new TextBlock(SR.T("Display Name")), 2, 0);
         form.Cell(displayNameBox.Validate(
             _viewModel.Bind.DisplayName,
             static value => string.IsNullOrWhiteSpace(value)
-                ? new ValidationMessage(ValidationSeverity.Error, "Display name is required.")
+                ? new ValidationMessage(ValidationSeverity.Error, SR.T("Display name is required."))
                 : null), 2, 1);
-        form.Cell(new TextBlock("Name"), 3, 0);
+        form.Cell(new TextBlock(SR.T("Name")), 3, 0);
         form.Cell(nameBox.Validate(
             _viewModel.Bind.Name,
             static value => ValidateProjectName(value)), 3, 1);
-        form.Cell(new TextBlock("Project Path"), 4, 0);
+        form.Cell(new TextBlock(SR.T("Project Path")), 4, 0);
         form.Cell(pathBox.Validate(
             _viewModel.Bind.ProjectPath,
             static value => string.IsNullOrWhiteSpace(value)
-                ? new ValidationMessage(ValidationSeverity.Error, "Project path is required.")
+                ? new ValidationMessage(ValidationSeverity.Error, SR.T("Project path is required."))
                 : null), 4, 1);
-        form.Cell(new TextBlock("Default Branch"), 5, 0);
+        form.Cell(new TextBlock(SR.T("Default Branch")), 5, 0);
         form.Cell(branchBox.Validate(
             _viewModel.Bind.DefaultBranch,
             static value => string.IsNullOrWhiteSpace(value)
-                ? new ValidationMessage(ValidationSeverity.Error, "Default branch is required.")
+                ? new ValidationMessage(ValidationSeverity.Error, SR.T("Default branch is required."))
                 : null), 5, 1);
-        form.Cell(new TextBlock("Description"), 6, 0);
+        form.Cell(new TextBlock(SR.T("Description")), 6, 0);
         form.Cell(descriptionBox, 6, 1);
-        form.Cell(new TextBlock("Tags"), 7, 0);
+        form.Cell(new TextBlock(SR.T("Tags")), 7, 0);
         form.Cell(tagsBox, 7, 1);
-        form.Cell(new TextBlock("Checkout Template"), 8, 0);
+        form.Cell(new TextBlock(SR.T("Checkout Template")), 8, 0);
         form.Cell(new TextBlock(() => _viewModel.CheckoutPathTemplate), 8, 1);
-        form.Cell(new TextBlock("Metadata File"), 9, 0);
-        form.Cell(new TextBlock(() => string.IsNullOrWhiteSpace(_viewModel.SourcePath) ? "Unavailable" : _viewModel.SourcePath).Wrap(true), 9, 1);
-        form.Cell(new TextBlock("Archived"), 10, 0);
-        form.Cell(new TextBlock(() => _viewModel.Archived ? "Yes" : "No"), 10, 1);
+        form.Cell(new TextBlock(SR.T("Metadata File")), 9, 0);
+        form.Cell(new TextBlock(() => string.IsNullOrWhiteSpace(_viewModel.SourcePath) ? SR.T("Unavailable") : _viewModel.SourcePath).Wrap(true), 9, 1);
+        form.Cell(new TextBlock(SR.T("Archived")), 10, 0);
+        form.Cell(new TextBlock(() => _viewModel.Archived ? SR.T("Yes") : SR.T("No")), 10, 1);
 
-        var cancelButton = new Button("Cancel")
+        var cancelButton = new Button(SR.T("Cancel"))
         {
             Tone = ControlTone.Default,
         };
         cancelButton.Click(Close);
 
-        var saveButton = new Button("Save")
+        var saveButton = new Button(SR.T("Save"))
         {
             Tone = ControlTone.Primary,
         };
@@ -140,9 +140,9 @@ internal sealed class ProjectDetailsDialog
             .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
-            .Title($"Project Details · {project.DisplayName}")
+            .Title($"{SR.T("Project Details")} · {project.DisplayName}")
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -150,8 +150,8 @@ internal sealed class ProjectDetailsDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ProjectDetails.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the project details dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the project details dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -201,14 +201,14 @@ internal sealed class ProjectDetailsDialog
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Project name is required.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Project name is required."));
         }
 
         if (value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
             value.Contains(Path.DirectorySeparatorChar) ||
             value.Contains(Path.AltDirectorySeparatorChar))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Use a single valid directory name.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Use a single valid directory name."));
         }
 
         return null;

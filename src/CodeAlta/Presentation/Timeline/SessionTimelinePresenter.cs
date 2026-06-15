@@ -2,6 +2,7 @@ using CodeAlta.Threading;
 using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.App;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Formatting;
 using CodeAlta.Presentation.Prompting;
@@ -376,7 +377,7 @@ internal sealed class SessionTimelinePresenter
         detailSections ??= [];
         if (!_pluginProjectionStates.TryGetValue(key, out var stateEntry))
         {
-            stateEntry = CreateChatStatusStateOnUi(markdown, ChatTimelineTone.Notice, timestamp, "Plugin", headerSecondary, detailSections, visualFactory, shouldApply);
+            stateEntry = CreateChatStatusStateOnUi(markdown, ChatTimelineTone.Notice, timestamp, SR.T("Plugin"), headerSecondary, detailSections, visualFactory, shouldApply);
             if (stateEntry is null)
             {
                 return;
@@ -388,7 +389,7 @@ internal sealed class SessionTimelinePresenter
         else if (RequiresPluginProjectionRecreate(stateEntry, detailSections, visualFactory))
         {
             var previousItem = stateEntry.Item;
-            stateEntry = CreateChatStatusStateOnUi(markdown, ChatTimelineTone.Notice, timestamp, "Plugin", headerSecondary, detailSections, visualFactory, shouldApply);
+            stateEntry = CreateChatStatusStateOnUi(markdown, ChatTimelineTone.Notice, timestamp, SR.T("Plugin"), headerSecondary, detailSections, visualFactory, shouldApply);
             if (stateEntry is null)
             {
                 return;
@@ -544,7 +545,7 @@ internal sealed class SessionTimelinePresenter
             return;
         }
 
-        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(message, ChatTimelineTone.Interaction, headerOverride: "Error", localFileRootPath: _localFileRootPath);
+        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(message, ChatTimelineTone.Interaction, headerOverride: SR.T("Error"), localFileRootPath: _localFileRootPath);
         ChatTimelineVisualFactory.ApplyTimestamp(entry.TimestampText, timestamp);
         UiDispatch.Invoke(
             _uiDispatcher,
@@ -574,7 +575,7 @@ internal sealed class SessionTimelinePresenter
             return;
         }
 
-        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(markdown, ChatTimelineTone.Interaction, headerOverride: "Error", localFileRootPath: _localFileRootPath);
+        var entry = ChatTimelineVisualFactory.CreateMarkdownItem(markdown, ChatTimelineTone.Interaction, headerOverride: SR.T("Error"), localFileRootPath: _localFileRootPath);
         UiDispatch.Invoke(
             _uiDispatcher,
             static state =>

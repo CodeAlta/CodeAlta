@@ -89,15 +89,15 @@ internal static class SessionInfoReportBuilder
         switch (details)
         {
             case CodexSessionMetadataDetails codex:
-                AddFact(facts, "Model provider", codex.ModelProvider);
-                AddFact(facts, "Source", codex.Source);
-                AddFact(facts, "Status", codex.Status);
-                AddFact(facts, "Persistence", codex.IsEphemeral ? "Ephemeral" : "Persisted on disk");
-                AddFact(facts, "Session name", codex.SessionName);
+                AddFact(facts, SR.T("Model provider"), codex.ModelProvider);
+                AddFact(facts, SR.T("Source"), codex.Source);
+                AddFact(facts, SR.T("Status"), codex.Status);
+                AddFact(facts, SR.T("Persistence"), codex.IsEphemeral ? SR.T("Ephemeral") : SR.T("Persisted on disk"));
+                AddFact(facts, SR.T("Session name"), codex.SessionName);
                 break;
 
             case CopilotSessionMetadataDetails copilot:
-                AddFact(facts, "Remote session", copilot.IsRemote ? "Yes" : "No");
+                AddFact(facts, SR.T("Remote session"), copilot.IsRemote ? SR.T("Yes") : SR.T("No"));
                 break;
         }
 

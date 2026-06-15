@@ -49,11 +49,11 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
         Editor = CreateEditor(item, snapshot.Text);
         Editor.TextDocument.Changed += OnEditorDocumentChanged;
-        _saveButton = new Button("Save") { Tone = ControlTone.Success };
+        _saveButton = new Button(SR.T("Save")) { Tone = ControlTone.Success };
         _saveButton.Click(() => _ = SaveAsync());
         _saveButton.IsEnabled(() => IsDirty);
 
-        _reloadButton = new Button("Reload") { Tone = ControlTone.Warning };
+        _reloadButton = new Button(SR.T("Reload")) { Tone = ControlTone.Warning };
         _reloadButton.Click(() => _ = ReloadAsync(confirmWhenDirty: true));
         _reloadButton.IsVisible(() => HasExternalChanges && ExistsOnDisk);
         _reloadButton.IsEnabled(() => HasExternalChanges && ExistsOnDisk);
@@ -133,16 +133,16 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         }
 
         ShowActionDialog(
-            "Unsaved changes",
+            SR.T("Unsaved changes"),
             [
-                $"Save changes to '{Item.Basename}' before closing?",
-                "Choose Save to keep your edits, or Discard to close the tab without saving."
+                SR.T("Save changes to '{0}' before closing?", Item.Basename),
+                SR.T("Choose Save to keep your edits, or Discard to close the tab without saving.")
             ],
             [
-                new DialogAction("Cancel", ControlTone.Default, static () => Task.CompletedTask),
-                new DialogAction("Discard", ControlTone.Error, closeTabAsync),
+                new DialogAction(SR.T("Cancel"), ControlTone.Default, static () => Task.CompletedTask),
+                new DialogAction(SR.T("Discard"), ControlTone.Error, closeTabAsync),
                 new DialogAction(
-                    "Save",
+                    SR.T("Save"),
                     ControlTone.Success,
                     async () =>
                     {
@@ -231,15 +231,15 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             if (HasExternalChanges)
             {
                 ShowActionDialog(
-                    "File changed on disk",
+                    SR.T("File changed on disk"),
                     [
-                        $"'{Item.Basename}' has changed on disk since it was opened or last saved.",
-                        "Overwrite keeps your editor changes. Reload discards them and loads the latest file from disk."
+                        SR.T("'{0}' has changed on disk since it was opened or last saved.", Item.Basename),
+                        SR.T("Overwrite keeps your editor changes. Reload discards them and loads the latest file from disk.")
                     ],
                     [
-                        new DialogAction("Cancel", ControlTone.Default, static () => Task.CompletedTask),
-                        new DialogAction("Reload", ControlTone.Warning, () => ReloadAsync(confirmWhenDirty: false)),
-                        new DialogAction("Overwrite", ControlTone.Success, SaveCurrentTextAsync)
+                        new DialogAction(SR.T("Cancel"), ControlTone.Default, static () => Task.CompletedTask),
+                        new DialogAction(SR.T("Reload"), ControlTone.Warning, () => ReloadAsync(confirmWhenDirty: false)),
+                        new DialogAction(SR.T("Overwrite"), ControlTone.Success, SaveCurrentTextAsync)
                     ]);
                 return false;
             }
@@ -249,7 +249,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to save '{Item.Basename}': {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to save '{0}': {1}", Item.Basename, ex.Message), false, StatusTone.Error);
             return false;
         }
     }
@@ -266,7 +266,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         _hasByteOrderMark = snapshot.HasByteOrderMark;
         _sessionState.MarkSaved(snapshot.Text, snapshot.LastWriteTimeUtc);
         UpdateUiState();
-        _setStatus($"Saved '{Item.Basename}'.", false, StatusTone.Ready);
+        _setStatus(SR.T("Saved '{0}'.", Item.Basename), false, StatusTone.Ready);
     }
 
     private async Task ReloadAsync(bool confirmWhenDirty)
@@ -274,13 +274,13 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         if (confirmWhenDirty && IsDirty)
         {
             ShowActionDialog(
-                "Reload from disk",
+                SR.T("Reload from disk"),
                 [
-                    $"Discard the unsaved edits in '{Item.Basename}' and reload the latest copy from disk?"
+                    SR.T("Discard the unsaved edits in '{0}' and reload the latest copy from disk?", Item.Basename)
                 ],
                 [
-                    new DialogAction("Cancel", ControlTone.Default, static () => Task.CompletedTask),
-                    new DialogAction("Reload", ControlTone.Warning, () => ReloadAsync(confirmWhenDirty: false))
+                    new DialogAction(SR.T("Cancel"), ControlTone.Default, static () => Task.CompletedTask),
+                    new DialogAction(SR.T("Reload"), ControlTone.Warning, () => ReloadAsync(confirmWhenDirty: false))
                 ]);
             return;
         }
@@ -293,11 +293,11 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             ReplaceEditorDocument(snapshot.Text);
             _sessionState.MarkReloaded(snapshot.Text, snapshot.LastWriteTimeUtc);
             UpdateUiState();
-            _setStatus($"Reloaded '{Item.Basename}'.", false, StatusTone.Ready);
+            _setStatus(SR.T("Reloaded '{0}'.", Item.Basename), false, StatusTone.Ready);
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to reload '{Item.Basename}': {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to reload '{0}': {1}", Item.Basename, ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -363,7 +363,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
     private Visual BuildRoot()
     {
-        var locationText = new TextBlock(() => $"{StatusText} · Ln {Editor.Line}, Col {Editor.Column}")
+        var locationText = new TextBlock(() => SR.T("{0} · Ln {1}, Col {2}", StatusText, Editor.Line, Editor.Column))
         {
             Wrap = false,
             IsSelectable = false,
@@ -373,11 +373,11 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             Wrap = false,
             IsSelectable = false,
         };
-        var shortcutText = new Markup("[dim]Ctrl+S Save · Ctrl+F Find · Ctrl+H Replace · Ctrl+G Go to line[/]")
+        var shortcutText = new Markup($"[dim]{SR.T("Ctrl+S Save · Ctrl+F Find · Ctrl+H Replace · Ctrl+G Go to line")}[/]")
         {
             Wrap = false,
         };
-        var wrapCheckBox = new CheckBox("Wrap").IsChecked(_wordWrap);
+        var wrapCheckBox = new CheckBox(SR.T("Wrap")).IsChecked(_wordWrap);
 
         var actions = new HStack(
         [
@@ -417,8 +417,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             new Command
             {
                 Id = "CodeAlta.File.Save",
-                LabelMarkup = "Save",
-                DescriptionMarkup = "Save the current file.",
+                LabelMarkup = SR.T("Save"),
+                DescriptionMarkup = SR.T("Save the current file."),
                 Gesture = new KeyGesture(TerminalChar.CtrlS, TerminalModifiers.Ctrl),
                 Presentation = CommandPresentation.CommandBar,
                 Importance = CommandImportance.Primary,
@@ -432,8 +432,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             new Command
             {
                 Id = "CodeAlta.File.Reload",
-                LabelMarkup = "Reload",
-                DescriptionMarkup = "Reload the current file from disk.",
+                LabelMarkup = SR.T("Reload"),
+                DescriptionMarkup = SR.T("Reload the current file from disk."),
                 Presentation = CommandPresentation.CommandBar,
                 Importance = CommandImportance.Secondary,
                 Execute = _ =>
@@ -480,18 +480,18 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         if (!ExistsOnDisk)
         {
             return IsDirty
-                ? "Deleted on disk · save recreates"
-                : "Deleted on disk";
+                ? SR.T("Deleted on disk · save recreates")
+                : SR.T("Deleted on disk");
         }
 
         if (HasExternalChanges)
         {
             return IsDirty
-                ? "Changed on disk · save asks before overwrite"
-                : "Changed on disk · reload available";
+                ? SR.T("Changed on disk · save asks before overwrite")
+                : SR.T("Changed on disk · reload available");
         }
 
-        return IsDirty ? "Modified" : "Saved";
+        return IsDirty ? SR.T("Modified") : SR.T("Saved");
     }
 
     private string BuildPathText()
@@ -506,7 +506,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(bodyLines);
         ArgumentNullException.ThrowIfNull(actions);
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -543,7 +543,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         dialog = new Dialog()
             .Title(title)
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(new VStack(body, buttons)
@@ -557,8 +557,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             new Command
             {
                 Id = "CodeAlta.FileEditor.Dialog.Close",
-                LabelMarkup = "Close",
-                DescriptionMarkup = "Close the dialog.",
+                LabelMarkup = SR.T("Close"),
+                DescriptionMarkup = SR.T("Close the dialog."),
                 Gesture = new KeyGesture(TerminalKey.Escape),
                 Importance = CommandImportance.Primary,
                 Execute = _ => CloseDialog(dialog),

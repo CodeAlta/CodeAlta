@@ -92,18 +92,18 @@ namespace CodeAlta.Presentation.Prompting
             if (session is not null)
             {
                 return availability == ModelProviderAvailability.Probing
-                    ? $"Waiting for {providerDisplayName} to reconnect..."
-                    : $"'{session.Title}' is unavailable until {providerDisplayName} is connected.";
+                    ? SR.T("Waiting for {0} to reconnect...", providerDisplayName)
+                    : SR.T("'{0}' is unavailable until {1} is connected.", session.Title, providerDisplayName);
             }
 
             if (availability == ModelProviderAvailability.Probing)
             {
-                return $"Connecting to {providerDisplayName}...";
+                return SR.T("Connecting to {0}...", providerDisplayName);
             }
 
             return anyProviderReady
-                ? "Select a connected provider to start a session..."
-                : "Configure model providers (Ctrl+G Ctrl+R) to start a session...";
+                ? SR.T("Select a connected provider to start a session...")
+                : SR.T("Configure model providers (Ctrl+G Ctrl+R) to start a session...");
         }
 
         internal static string BuildPromptUnavailableStatusText(
@@ -115,18 +115,18 @@ namespace CodeAlta.Presentation.Prompting
             if (session is not null)
             {
                 return availability == ModelProviderAvailability.Probing
-                    ? $"Reconnecting session '{session.Title}' to {providerDisplayName}. Prompt sending is temporarily unavailable."
-                    : $"'{session.Title}' is unavailable because {providerDisplayName} is not connected.";
+                    ? SR.T("Reconnecting session '{0}' to {1}. Prompt sending is temporarily unavailable.", session.Title, providerDisplayName)
+                    : SR.T("'{0}' is unavailable because {1} is not connected.", session.Title, providerDisplayName);
             }
 
             if (availability == ModelProviderAvailability.Probing)
             {
-                return $"Connecting to {providerDisplayName}. Prompt sending will be available once the provider is ready.";
+                return SR.T("Connecting to {0}. Prompt sending will be available once the provider is ready.", providerDisplayName);
             }
 
             return anyProviderReady
-                ? "Select a connected provider to send prompts."
-                : "No model provider is ready. Open Model Providers (Ctrl+G Ctrl+R) to configure one.";
+                ? SR.T("Select a connected provider to send prompts.")
+                : SR.T("No model provider is ready. Open Model Providers (Ctrl+G Ctrl+R) to configure one.");
         }
 
         private static string BuildReadyPromptPlaceholder(
@@ -135,8 +135,8 @@ namespace CodeAlta.Presentation.Prompting
             IReadOnlyList<string>? promptPlaceholderContributions = null)
         {
             var action = isContinuation
-                ? "Continue the selected session."
-                : "Start a session.";
+                ? SR.T("Continue the selected session.")
+                : SR.T("Start a session.");
 
             return $"{action} {BuildReadyPromptGuidance(hasProjectContext, promptPlaceholderContributions)}";
         }
@@ -149,19 +149,19 @@ namespace CodeAlta.Presentation.Prompting
                 .ToArray() ?? [];
             var segments = new List<string>(6 + contributionSegments.Length)
             {
-                "[/] commands",
-                "[?] help",
+                SR.T("[/] commands"),
+                SR.T("[?] help"),
             };
             if (hasProjectContext)
             {
-                segments.Add("[@] to reference a project file");
+                segments.Add(SR.T("[@] to reference a project file"));
             }
 
             segments.AddRange(contributionSegments);
 
-            segments.Add("[ENTER] to send");
-            segments.Add("[SHIFT+ENTER] for new line");
-            segments.Add("[CTRL+ENTER] to steer");
+            segments.Add(SR.T("[ENTER] to send"));
+            segments.Add(SR.T("[SHIFT+ENTER] for new line"));
+            segments.Add(SR.T("[CTRL+ENTER] to steer"));
             return string.Join(", ", segments) + ".";
         }
     }

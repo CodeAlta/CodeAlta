@@ -52,7 +52,7 @@ internal static class OpenProjectRequestResolver
         }
 
         throw new InvalidOperationException(
-            $"Project '{trimmedReference}' was not found. Enter a rooted path or use an existing project name from the sidebar.");
+            SR.T("Project '{0}' was not found. Enter a rooted path or use an existing project name from the sidebar.", trimmedReference));
     }
 
     private static bool TryResolveSingle(
@@ -81,7 +81,7 @@ internal static class OpenProjectRequestResolver
                 ", ",
                 matches.Select(static candidate => $"{candidate.DisplayName} ({candidate.ProjectPath})"));
             throw new InvalidOperationException(
-                $"Project '{projectReference}' matched multiple entries: {matchList}. Enter the rooted folder path instead.");
+                SR.T("Project '{0}' matched multiple entries: {1}. Enter the rooted folder path instead.", projectReference, matchList));
         }
 
         project = matches[0];
@@ -96,13 +96,13 @@ internal static class OpenProjectRequestResolver
             !path.StartsWith("~/", StringComparison.Ordinal) &&
             !path.StartsWith("~\\", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Only '~', '~/' and '~\\' are supported for home-relative paths.");
+            throw new InvalidOperationException(SR.T("Only '~', '~/' and '~\\' are supported for home-relative paths."));
         }
 
         var homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(homePath))
         {
-            throw new InvalidOperationException("The current user's home directory could not be resolved.");
+            throw new InvalidOperationException(SR.T("The current user's home directory could not be resolved."));
         }
 
         if (path.Length == 1)

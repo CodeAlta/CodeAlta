@@ -35,10 +35,15 @@ internal sealed class ConfirmationDialog
         ArgumentNullException.ThrowIfNull(getFocusTarget);
         ArgumentException.ThrowIfNullOrWhiteSpace(cancelText);
 
+        var translatedTitle = SR.T(title);
+        var translatedConfirmText = SR.T(confirmText);
+        var translatedCancelText = SR.T(cancelText);
+        var translatedNoteText = noteText is null ? null : SR.T(noteText);
+
         _onConfirmAsync = onConfirmAsync;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -46,13 +51,13 @@ internal sealed class ConfirmationDialog
         };
         closeButton.Click(Close);
 
-        var cancelButton = new Button(cancelText)
+        var cancelButton = new Button(translatedCancelText)
         {
             Tone = ControlTone.Default,
         };
         cancelButton.Click(Close);
 
-        var confirmButton = new Button(confirmText)
+        var confirmButton = new Button(translatedConfirmText)
         {
             Tone = confirmTone,
         };
@@ -61,7 +66,7 @@ internal sealed class ConfirmationDialog
         var body = new VStack(
             bodyLines
                 .Where(static line => !string.IsNullOrWhiteSpace(line))
-                .Select(static line => (Visual)new TextBlock(line).Wrap(true))
+                .Select(static line => (Visual)new TextBlock(SR.T(line)).Wrap(true))
                 .ToArray())
         {
             HorizontalAlignment = Align.Stretch,
@@ -74,7 +79,7 @@ internal sealed class ConfirmationDialog
         };
 
         Visual bottom = buttonRow;
-        if (CreateNote(noteText) is { } note)
+        if (CreateNote(translatedNoteText) is { } note)
         {
             bottom = new VStack(note, buttonRow)
             {
@@ -90,7 +95,7 @@ internal sealed class ConfirmationDialog
             .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
-            .Title(title)
+            .Title(translatedTitle)
             .TopRightText(closeButton)
             .IsModal(true)
             .Padding(1)
@@ -99,8 +104,8 @@ internal sealed class ConfirmationDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ConfirmationDialog.Close",
-            LabelMarkup = cancelText,
-            DescriptionMarkup = "Close the confirmation dialog.",
+            LabelMarkup = translatedCancelText,
+            DescriptionMarkup = SR.T("Close the confirmation dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),

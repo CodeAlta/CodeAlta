@@ -42,10 +42,10 @@ internal sealed class ModelProviderSelectorView
             .MinWidth(12)
             .MaxWidth(22)
             .IsEnabled(workspaceViewModel.Bind.CanSelectReasoning);
-        AlwaysEnqueueCheckBox = new CheckBox("AlwaysQueue")
+        AlwaysEnqueueCheckBox = new CheckBox(SR.T("AlwaysQueue"))
             .IsChecked(promptComposerViewModel.Bind.AlwaysEnqueue)
             .IsEnabled(promptComposerViewModel.Bind.CanAlwaysEnqueue);
-        ModelsDialogButton = new Button(new TextBlock("Model->") { Wrap = false, IsSelectable = false })
+        ModelsDialogButton = new Button(new TextBlock(SR.T("Model->")) { Wrap = false, IsSelectable = false })
             .Click(controller.OpenModels);
         var modelsDialogButtonHost = ModelsDialogButton.Tooltip(new TextBlock(SR.T("Open the models dialog.")));
         var compactSessionButton = new Button(new TextBlock($"{TerminalIcons.MdSelectCompare}"))

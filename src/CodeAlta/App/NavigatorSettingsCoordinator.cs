@@ -51,7 +51,7 @@ internal sealed class NavigatorSettingsCoordinator : INavigatorSettingsDialogSer
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to save workspace settings: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to save workspace settings: {0}", ex.Message), false, StatusTone.Error);
         }
     }
 

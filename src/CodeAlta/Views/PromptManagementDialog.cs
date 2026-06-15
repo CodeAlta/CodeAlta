@@ -89,8 +89,8 @@ internal sealed class PromptManagementDialog
         _promptList.AddCommand(new Command
         {
             Id = "CodeAlta.Prompts.Delete",
-            LabelMarkup = "Delete Prompt",
-            DescriptionMarkup = "Delete the selected non-built-in prompt.",
+            LabelMarkup = SR.T("Delete Prompt"),
+            DescriptionMarkup = SR.T("Delete the selected non-built-in prompt."),
             Gesture = new KeyGesture(TerminalKey.Delete),
             CanExecute = _ => !IsSelectedReadOnly() && _selectedRow is not null,
             Execute = _ => DeleteSelectedPrompt(),
@@ -107,19 +107,19 @@ internal sealed class PromptManagementDialog
         _systemPromptList.AddCommand(new Command
         {
             Id = "CodeAlta.SystemPrompts.Delete",
-            LabelMarkup = "Delete System Prompt",
-            DescriptionMarkup = "Delete the selected non-built-in system prompt.",
+            LabelMarkup = SR.T("Delete System Prompt"),
+            DescriptionMarkup = SR.T("Delete the selected non-built-in system prompt."),
             Gesture = new KeyGesture(TerminalKey.Delete),
             CanExecute = _ => !IsSelectedReadOnly() && _selectedSystemRow is not null,
             Execute = _ => DeleteSelectedPrompt(),
         });
 
         _nameBox = new TextBox()
-            .Placeholder("Display name")
+            .Placeholder(SR.T("Display name"))
             .HorizontalAlignment(Align.Stretch)
             .IsEnabled(() => _activeTab == PromptResourceTab.AgentPrompt && !IsSelectedReadOnly());
         _descriptionBox = new TextBox()
-            .Placeholder("Optional description")
+            .Placeholder(SR.T("Optional description"))
             .HorizontalAlignment(Align.Stretch)
             .IsEnabled(() => _activeTab == PromptResourceTab.AgentPrompt && !IsSelectedReadOnly());
         _systemBox = new TextBox()
@@ -152,29 +152,29 @@ internal sealed class PromptManagementDialog
 
     private Dialog BuildDialog()
     {
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
         };
         closeButton.Click(RequestClose);
 
-        var newGlobalButton = new Button("New global")
+        var newGlobalButton = new Button(SR.T("New global"))
             .Tone(ControlTone.Primary)
             .Click(() => ShowNewPromptDialog(PromptStorageScope.Global));
-        var newProjectButton = new Button("New project")
+        var newProjectButton = new Button(SR.T("New project"))
             .Tone(ControlTone.Primary)
             .IsEnabled(() => _getSelectedProject() is not null)
             .Click(() => ShowNewPromptDialog(PromptStorageScope.Project));
-        var saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save")
+        var saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} {SR.T("Save")}")
             .Tone(ControlTone.Success)
             .IsEnabled(CanSaveSelectedPrompt)
             .Click(SaveSelectedPrompt);
-        var deleteButton = new Button($"{TerminalIcons.MdTrashCanOutline} Delete")
+        var deleteButton = new Button($"{TerminalIcons.MdTrashCanOutline} {SR.T("Delete")}")
             .Tone(ControlTone.Error)
             .IsEnabled(() => !IsSelectedReadOnly() && GetSelectedPath() is not null)
             .Click(DeleteSelectedPrompt);
-        var refreshButton = new Button("Refresh")
+        var refreshButton = new Button(SR.T("Refresh"))
             .Click(() => ReloadActivePrompts(GetSelectedPath()));
 
         var toolbar = new HStack(newGlobalButton, newProjectButton, saveButton, deleteButton, refreshButton)
@@ -183,13 +183,13 @@ internal sealed class PromptManagementDialog
             HorizontalAlignment = Align.Stretch,
         };
 
-        var intro = new Markup("[dim]Agent prompts are Markdown files under built-in content, ~/.alta/prompts/agents, or project .alta/prompts/agents. Later sources override earlier ids; built-ins are read-only. Use the System Prompt tab to edit only global/project system prompt overrides.[/]")
+        var intro = new Markup($"[dim]{SR.T("Agent prompts are Markdown files under built-in content, ~/.alta/prompts/agents, or project .alta/prompts/agents. Later sources override earlier ids; built-ins are read-only. Use the System Prompt tab to edit only global/project system prompt overrides.")}[/]")
         {
             Wrap = true,
         };
 
         var leftPane = new VStack(
-            new TextBlock("Agent Prompts"),
+            new TextBlock(SR.T("Agent Prompts")),
             new Border(new ScrollViewer(_promptList, focusable: false).Stretch())
                 .Style(BorderStyle.Rounded)
                 .Padding(new Thickness(1, 0, 1, 0))
@@ -202,7 +202,7 @@ internal sealed class PromptManagementDialog
         };
 
         var systemLeftPane = new VStack(
-            new TextBlock("System Prompts"),
+            new TextBlock(SR.T("System Prompts")),
             new Border(new ScrollViewer(_systemPromptList, focusable: false).Stretch())
                 .Style(BorderStyle.Rounded)
                 .Padding(new Thickness(1, 0, 1, 0))
@@ -225,11 +225,11 @@ internal sealed class PromptManagementDialog
             .Columns(
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) });
-        form.Cell(new TextBlock("Name") { VerticalAlignment = Align.Center }, 0, 0);
+        form.Cell(new TextBlock(SR.T("Name")) { VerticalAlignment = Align.Center }, 0, 0);
         form.Cell(_nameBox.Stretch(), 0, 1);
-        form.Cell(new TextBlock("Description") { VerticalAlignment = Align.Center }, 1, 0);
+        form.Cell(new TextBlock(SR.T("Description")) { VerticalAlignment = Align.Center }, 1, 0);
         form.Cell(_descriptionBox.Stretch(), 1, 1);
-        form.Cell(new TextBlock("System") { VerticalAlignment = Align.Center }, 2, 0);
+        form.Cell(new TextBlock(SR.T("System")) { VerticalAlignment = Align.Center }, 2, 0);
         form.Cell(_systemBox.Stretch(), 2, 1);
 
         var sourceSummary = new Markup(BuildSelectionSummaryMarkup)
@@ -265,13 +265,13 @@ internal sealed class PromptManagementDialog
             .Columns(new ColumnDefinition { Width = GridLength.Star(1) });
         rightPane.Cell(form, 0, 0);
         rightPane.Cell(sourceSummary, 1, 0);
-        rightPane.Cell(new TextBlock("Markdown body"), 2, 0);
+        rightPane.Cell(new TextBlock(SR.T("Markdown body")), 2, 0);
         rightPane.Cell(editorFrame, 3, 0);
         rightPane.Cell(status, 4, 0);
 
         var tabs = new TabControl(
-            new TabPage("Agent Prompt", leftPane),
-            new TabPage("System Prompt", systemLeftPane));
+            new TabPage(SR.T("Agent Prompt"), leftPane),
+            new TabPage(SR.T("System Prompt"), systemLeftPane));
         tabs.SelectionChanged((sender, e) =>
         {
             if (sender is TabControl tabControl)
@@ -298,17 +298,17 @@ internal sealed class PromptManagementDialog
             .VerticalAlignment(Align.Stretch);
 
         var dialog = new Dialog()
-            .Title("Agent Prompts")
+            .Title(SR.T("Agent Prompts"))
             .TopRightText(closeButton)
-            .BottomLeftText(new Markup("[dim]Ctrl+S Save · Ctrl+N New global · Ctrl+P New project · Delete Remove · Esc Close[/]"))
+            .BottomLeftText(new Markup($"[dim]{SR.T("Ctrl+S Save · Ctrl+N New global · Ctrl+P New project · Delete Remove · Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Prompts.Save",
-            LabelMarkup = "Save",
-            DescriptionMarkup = "Save the selected prompt.",
+            LabelMarkup = SR.T("Save"),
+            DescriptionMarkup = SR.T("Save the selected prompt."),
             Gesture = new KeyGesture(TerminalChar.CtrlS, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.CommandBar,
             Importance = CommandImportance.Primary,
@@ -318,16 +318,16 @@ internal sealed class PromptManagementDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Prompts.NewGlobal",
-            LabelMarkup = "New Global Prompt",
-            DescriptionMarkup = "Create a user-global prompt override.",
+            LabelMarkup = SR.T("New Global Prompt"),
+            DescriptionMarkup = SR.T("Create a user-global prompt override."),
             Gesture = new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl),
             Execute = _ => ShowNewPromptDialog(PromptStorageScope.Global),
         });
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Prompts.NewProject",
-            LabelMarkup = "New Project Prompt",
-            DescriptionMarkup = "Create a project-local prompt override.",
+            LabelMarkup = SR.T("New Project Prompt"),
+            DescriptionMarkup = SR.T("Create a project-local prompt override."),
             Gesture = new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl),
             CanExecute = _ => _getSelectedProject() is not null,
             Execute = _ => ShowNewPromptDialog(PromptStorageScope.Project),
@@ -335,8 +335,8 @@ internal sealed class PromptManagementDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Prompts.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the prompt manager.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the prompt manager."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => RequestClose(),
@@ -499,9 +499,9 @@ internal sealed class PromptManagementDialog
             }
 
             new ConfirmationDialog(
-                "Discard Prompt Changes?",
-                ["The selected prompt has unsaved changes.", "Discard those changes and switch to the other prompt?"],
-                "Discard",
+                SR.T("Discard Prompt Changes?"),
+                [SR.T("The selected prompt has unsaved changes."), SR.T("Discard those changes and switch to the other prompt?")],
+                SR.T("Discard"),
                 ControlTone.Error,
                 () =>
                 {
@@ -547,9 +547,9 @@ internal sealed class PromptManagementDialog
             }
 
             new ConfirmationDialog(
-                "Discard Prompt Changes?",
-                ["The selected system prompt has unsaved changes.", "Discard those changes and switch to the other system prompt?"],
-                "Discard",
+                SR.T("Discard Prompt Changes?"),
+                [SR.T("The selected system prompt has unsaved changes."), SR.T("Discard those changes and switch to the other system prompt?")],
+                SR.T("Discard"),
                 ControlTone.Error,
                 () =>
                 {
@@ -604,9 +604,9 @@ internal sealed class PromptManagementDialog
 
             _dialog?.App?.Focus(_bodyEditor);
             new ConfirmationDialog(
-                "Discard Prompt Changes?",
-                ["The selected prompt has unsaved changes.", "Discard those changes and switch tabs?"],
-                "Discard",
+                SR.T("Discard Prompt Changes?"),
+                [SR.T("The selected prompt has unsaved changes."), SR.T("Discard those changes and switch tabs?")],
+                SR.T("Discard"),
                 ControlTone.Error,
                 () =>
                 {
@@ -664,7 +664,7 @@ internal sealed class PromptManagementDialog
                 _descriptionBox.Text = string.Empty;
                 _systemBox.Text = AgentPromptCatalog.DefaultPromptName;
                 SetBodyText(string.Empty);
-                _statusMessage.Value = "No prompts were discovered.";
+                _statusMessage.Value = SR.T("No prompts were discovered.");
                 return;
             }
 
@@ -678,7 +678,7 @@ internal sealed class PromptManagementDialog
             _systemBox.Text = descriptor.SystemPromptName;
             SetBodyText(descriptor.Body);
             _statusMessage.Value = descriptor.IsBuiltIn
-                ? "Built-in prompts are read-only. Create a global or project prompt with the same file id to override one."
+                ? SR.T("Built-in prompts are read-only. Create a global or project prompt with the same file id to override one.")
                 : null;
         }
         finally
@@ -705,7 +705,7 @@ internal sealed class PromptManagementDialog
                 _descriptionBox.Text = string.Empty;
                 _systemBox.Text = string.Empty;
                 SetBodyText(string.Empty);
-                _statusMessage.Value = "No system prompts were discovered.";
+                _statusMessage.Value = SR.T("No system prompts were discovered.");
                 return;
             }
 
@@ -717,7 +717,7 @@ internal sealed class PromptManagementDialog
             _systemBox.Text = string.Empty;
             SetBodyText(descriptor.Body);
             _statusMessage.Value = descriptor.IsBuiltIn
-                ? "Built-in system prompts are read-only. Create a global or project system prompt with the same file id to override one."
+                ? SR.T("Built-in system prompts are read-only. Create a global or project system prompt with the same file id to override one.")
                 : null;
         }
         finally
@@ -773,7 +773,7 @@ internal sealed class PromptManagementDialog
 
         if (_selectedRow is not { } row || row.Descriptor.IsBuiltIn)
         {
-            SetDialogStatus("Built-in prompts are read-only.", StatusTone.Warning);
+            SetDialogStatus(SR.T("Built-in prompts are read-only."), StatusTone.Warning);
             return;
         }
 
@@ -787,14 +787,14 @@ internal sealed class PromptManagementDialog
         {
             Directory.CreateDirectory(Path.GetDirectoryName(row.Descriptor.SourcePath)!);
             File.WriteAllText(row.Descriptor.SourcePath, BuildPromptFile(values));
-            SetDialogStatus($"Saved prompt '{values.Name}'.", StatusTone.Ready);
-            _setStatus($"Saved prompt '{values.Name}'.", StatusTone.Ready);
+            SetDialogStatus(SR.T("Saved prompt '{0}'.", values.Name), StatusTone.Ready);
+            _setStatus(SR.T("Saved prompt '{0}'.", values.Name), StatusTone.Ready);
             _onPromptsChanged();
             ReloadAgentPrompts(row.Descriptor.SourcePath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            SetDialogStatus($"Failed to save prompt: {ex.Message}", StatusTone.Error);
+            SetDialogStatus(SR.T("Failed to save prompt: {0}", ex.Message), StatusTone.Error);
         }
     }
 
@@ -802,14 +802,14 @@ internal sealed class PromptManagementDialog
     {
         if (_selectedSystemRow is not { } row || row.Descriptor.IsBuiltIn)
         {
-            SetDialogStatus("Built-in system prompts are read-only.", StatusTone.Warning);
+            SetDialogStatus(SR.T("Built-in system prompts are read-only."), StatusTone.Warning);
             return;
         }
 
         var body = GetEditorText(_bodyEditor).Trim();
         if (string.IsNullOrWhiteSpace(body))
         {
-            SetDialogStatus("System prompt body is required.", StatusTone.Error);
+            SetDialogStatus(SR.T("System prompt body is required."), StatusTone.Error);
             return;
         }
 
@@ -817,14 +817,14 @@ internal sealed class PromptManagementDialog
         {
             Directory.CreateDirectory(Path.GetDirectoryName(row.Descriptor.SourcePath)!);
             File.WriteAllText(row.Descriptor.SourcePath, BuildSystemPromptFile(body));
-            SetDialogStatus($"Saved system prompt '{row.Descriptor.PromptName}'.", StatusTone.Ready);
-            _setStatus($"Saved system prompt '{row.Descriptor.PromptName}'.", StatusTone.Ready);
+            SetDialogStatus(SR.T("Saved system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
+            _setStatus(SR.T("Saved system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
             _onPromptsChanged();
             ReloadSystemPrompts(row.Descriptor.SourcePath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            SetDialogStatus($"Failed to save system prompt: {ex.Message}", StatusTone.Error);
+            SetDialogStatus(SR.T("Failed to save system prompt: {0}", ex.Message), StatusTone.Error);
         }
     }
 
@@ -843,28 +843,28 @@ internal sealed class PromptManagementDialog
 
         if (row.Descriptor.IsBuiltIn)
         {
-            SetDialogStatus("Built-in prompts are read-only and cannot be deleted.", StatusTone.Warning);
+            SetDialogStatus(SR.T("Built-in prompts are read-only and cannot be deleted."), StatusTone.Warning);
             return;
         }
 
         new ConfirmationDialog(
-            "Delete Prompt?",
-            [$"Delete '{row.Descriptor.DisplayName}' from {row.Descriptor.SourcePath}?", "This removes only the selected global/project prompt file."],
-            "Delete",
+            SR.T("Delete Prompt?"),
+            [SR.T("Delete '{0}' from {1}?", row.Descriptor.DisplayName, row.Descriptor.SourcePath), SR.T("This removes only the selected global/project prompt file.")],
+            SR.T("Delete"),
             ControlTone.Error,
             () =>
             {
                 try
                 {
                     File.Delete(row.Descriptor.SourcePath);
-                    SetDialogStatus($"Deleted prompt '{row.Descriptor.DisplayName}'.", StatusTone.Ready);
-                    _setStatus($"Deleted prompt '{row.Descriptor.DisplayName}'.", StatusTone.Ready);
+                    SetDialogStatus(SR.T("Deleted prompt '{0}'.", row.Descriptor.DisplayName), StatusTone.Ready);
+                    _setStatus(SR.T("Deleted prompt '{0}'.", row.Descriptor.DisplayName), StatusTone.Ready);
                     _onPromptsChanged();
                     ReloadAgentPrompts(selectPath: null);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    SetDialogStatus($"Failed to delete prompt: {ex.Message}", StatusTone.Error);
+                    SetDialogStatus(SR.T("Failed to delete prompt: {0}", ex.Message), StatusTone.Error);
                 }
 
                 return Task.CompletedTask;
@@ -883,28 +883,28 @@ internal sealed class PromptManagementDialog
 
         if (row.Descriptor.IsBuiltIn)
         {
-            SetDialogStatus("Built-in system prompts are read-only and cannot be deleted.", StatusTone.Warning);
+            SetDialogStatus(SR.T("Built-in system prompts are read-only and cannot be deleted."), StatusTone.Warning);
             return;
         }
 
         new ConfirmationDialog(
-            "Delete System Prompt?",
-            [$"Delete system prompt '{row.Descriptor.PromptName}' from {row.Descriptor.SourcePath}?", "This removes only the selected global/project system prompt file."],
-            "Delete",
+            SR.T("Delete System Prompt?"),
+            [SR.T("Delete system prompt '{0}' from {1}?", row.Descriptor.PromptName, row.Descriptor.SourcePath), SR.T("This removes only the selected global/project system prompt file.")],
+            SR.T("Delete"),
             ControlTone.Error,
             () =>
             {
                 try
                 {
                     File.Delete(row.Descriptor.SourcePath);
-                    SetDialogStatus($"Deleted system prompt '{row.Descriptor.PromptName}'.", StatusTone.Ready);
-                    _setStatus($"Deleted system prompt '{row.Descriptor.PromptName}'.", StatusTone.Ready);
+                    SetDialogStatus(SR.T("Deleted system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
+                    _setStatus(SR.T("Deleted system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
                     _onPromptsChanged();
                     ReloadSystemPrompts(selectPath: null);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    SetDialogStatus($"Failed to delete system prompt: {ex.Message}", StatusTone.Error);
+                    SetDialogStatus(SR.T("Failed to delete system prompt: {0}", ex.Message), StatusTone.Error);
                 }
 
                 return Task.CompletedTask;
@@ -919,13 +919,13 @@ internal sealed class PromptManagementDialog
         var resourceTab = _activeTab;
         if (scope == PromptStorageScope.Project && _getSelectedProject() is null)
         {
-            SetDialogStatus($"Select a project before creating a project {ResourceLabel(resourceTab)}.", StatusTone.Warning);
+            SetDialogStatus(SR.T("Select a project before creating a project {0}.", ResourceLabel(resourceTab)), StatusTone.Warning);
             return;
         }
 
         var idBox = new TextBox().Placeholder(resourceTab == PromptResourceTab.SystemPrompt ? "system-prompt-id" : "prompt-id").HorizontalAlignment(Align.Stretch);
-        var nameBox = new TextBox().Placeholder("Display name").HorizontalAlignment(Align.Stretch);
-        var descriptionBox = new TextBox().Placeholder("Optional description").HorizontalAlignment(Align.Stretch);
+        var nameBox = new TextBox().Placeholder(SR.T("Display name")).HorizontalAlignment(Align.Stretch);
+        var descriptionBox = new TextBox().Placeholder(SR.T("Optional description")).HorizontalAlignment(Align.Stretch);
         var systemBox = new TextBox(AgentPromptCatalog.DefaultPromptName).Placeholder(AgentPromptCatalog.DefaultPromptName).HorizontalAlignment(Align.Stretch);
         TextBlock? validationText = null;
         validationText = new TextBlock(string.Empty)
@@ -947,27 +947,27 @@ internal sealed class PromptManagementDialog
             .Columns(
                 new ColumnDefinition { Width = GridLength.Auto },
                 new ColumnDefinition { Width = GridLength.Star(1) });
-        form.Cell(new TextBlock("File id"), 0, 0);
+        form.Cell(new TextBlock(SR.T("File id")), 0, 0);
         form.Cell(idBox, 0, 1);
         if (resourceTab == PromptResourceTab.AgentPrompt)
         {
-            form.Cell(new TextBlock("Name"), 1, 0);
+            form.Cell(new TextBlock(SR.T("Name")), 1, 0);
             form.Cell(nameBox, 1, 1);
-            form.Cell(new TextBlock("Description"), 2, 0);
+            form.Cell(new TextBlock(SR.T("Description")), 2, 0);
             form.Cell(descriptionBox, 2, 1);
-            form.Cell(new TextBlock("System"), 3, 0);
+            form.Cell(new TextBlock(SR.T("System")), 3, 0);
             form.Cell(systemBox, 3, 1);
         }
 
         form.Cell(validationText, 4, 0, columnSpan: 2);
 
         Dialog? createDialog = null;
-        var createButton = new Button("Create")
+        var createButton = new Button(SR.T("Create"))
             .Tone(ControlTone.Success)
             .Click(() => CreatePromptFromDialog(createDialog, scope, resourceTab, idBox, nameBox, descriptionBox, systemBox, validationText));
-        var cancelButton = new Button("Cancel").Click(() => createDialog?.Close());
+        var cancelButton = new Button(SR.T("Cancel")).Click(() => createDialog?.Close());
         var content = new VStack(
-            new Markup($"[dim]Create a {ScopeLabel(scope)} {ResourceLabel(resourceTab)} in {AnsiMarkup.Escape(targetDirectory)}. The file id becomes <id>{ResourceSuffix(resourceTab)}; use the same id as a built-in/global prompt to override it.[/]") { Wrap = true },
+            new Markup($"[dim]{SR.T("Create a {0} {1} in {2}. The file id becomes <id>{3}; use the same id as a built-in/global prompt to override it.", ScopeLabel(scope), ResourceLabel(resourceTab), AnsiMarkup.Escape(targetDirectory), ResourceSuffix(resourceTab))}[/]") { Wrap = true },
             form,
             new HStack(cancelButton, createButton)
             {
@@ -981,8 +981,8 @@ internal sealed class PromptManagementDialog
         };
 
         createDialog = new Dialog()
-            .Title($"New {ScopeTitle(scope)} {ResourceTitle(resourceTab)}")
-            .BottomRightText(new Markup("[dim]Esc Cancel[/]"))
+            .Title(SR.T("New {0} {1}", ScopeTitle(scope), ResourceTitle(resourceTab)))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Cancel")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -990,8 +990,8 @@ internal sealed class PromptManagementDialog
         createDialog.AddCommand(new Command
         {
             Id = "CodeAlta.Prompts.New.Close",
-            LabelMarkup = "Cancel",
-            DescriptionMarkup = "Close the new prompt dialog.",
+            LabelMarkup = SR.T("Cancel"),
+            DescriptionMarkup = SR.T("Close the new prompt dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => createDialog.Close(),
@@ -1018,14 +1018,14 @@ internal sealed class PromptManagementDialog
         var promptId = NormalizePromptId(idBox.Text, resourceTab);
         if (promptId is null)
         {
-            validationText.Text = "Enter a file id containing only letters, digits, '.', '_', or '-'.";
+            validationText.Text = SR.T("Enter a file id containing only letters, digits, '.', '_', or '-'.");
             return;
         }
 
         var name = resourceTab == PromptResourceTab.AgentPrompt ? NormalizeRequiredText(nameBox.Text) : promptId;
         if (resourceTab == PromptResourceTab.AgentPrompt && name is null)
         {
-            validationText.Text = "Enter the required prompt display name.";
+            validationText.Text = SR.T("Enter the required prompt display name.");
             return;
         }
 
@@ -1033,13 +1033,13 @@ internal sealed class PromptManagementDialog
         var path = Path.Combine(targetDirectory, promptId + ResourceSuffix(resourceTab));
         if (File.Exists(path))
         {
-            validationText.Text = $"A prompt file already exists at {path}.";
+            validationText.Text = SR.T("A prompt file already exists at {0}.", path);
             return;
         }
 
         var body = resourceTab == PromptResourceTab.SystemPrompt
-            ? "Describe the base system instructions CodeAlta should use for sessions that select this system prompt."
-            : "Describe how CodeAlta should handle sessions that use this prompt.";
+            ? SR.T("Describe the base system instructions CodeAlta should use for sessions that select this system prompt.")
+            : SR.T("Describe how CodeAlta should handle sessions that use this prompt.");
         var values = new PromptEditorValues(
             name!,
             NormalizeOptionalText(descriptionBox.Text),
@@ -1050,14 +1050,14 @@ internal sealed class PromptManagementDialog
             Directory.CreateDirectory(targetDirectory);
             File.WriteAllText(path, resourceTab == PromptResourceTab.SystemPrompt ? BuildSystemPromptFile(values.Body) : BuildPromptFile(values));
             createDialog.Close();
-            SetDialogStatus($"Created {ResourceLabel(resourceTab)} '{name}'.", StatusTone.Ready);
-            _setStatus($"Created {ResourceLabel(resourceTab)} '{name}'.", StatusTone.Ready);
+            SetDialogStatus(SR.T("Created {0} '{1}'.", ResourceLabel(resourceTab), name), StatusTone.Ready);
+            _setStatus(SR.T("Created {0} '{1}'.", ResourceLabel(resourceTab), name), StatusTone.Ready);
             _onPromptsChanged();
             ReloadActivePrompts(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            validationText.Text = $"Failed to create prompt: {ex.Message}";
+            validationText.Text = SR.T("Failed to create prompt: {0}", ex.Message);
         }
     }
 
@@ -1091,7 +1091,7 @@ internal sealed class PromptManagementDialog
             var systemBody = GetEditorText(_bodyEditor).Trim();
             if (string.IsNullOrWhiteSpace(systemBody))
             {
-                validationMessage = "System prompt body is required.";
+                validationMessage = SR.T("System prompt body is required.");
                 return false;
             }
 
@@ -1103,14 +1103,14 @@ internal sealed class PromptManagementDialog
         var name = NormalizeRequiredText(_nameBox.Text);
         if (name is null)
         {
-            validationMessage = "Prompt name is required.";
+            validationMessage = SR.T("Prompt name is required.");
             return false;
         }
 
         var body = GetEditorText(_bodyEditor).Trim();
         if (string.IsNullOrWhiteSpace(body))
         {
-            validationMessage = "Prompt body is required.";
+            validationMessage = SR.T("Prompt body is required.");
             return false;
         }
 
@@ -1130,28 +1130,28 @@ internal sealed class PromptManagementDialog
         {
             if (_selectedSystemRow is not { } systemRow)
             {
-                return "[dim]No system prompt selected.[/]";
+                return $"[dim]{SR.T("No system prompt selected.")}[/]";
             }
 
             var systemDescriptor = systemRow.Descriptor;
-            var systemReadOnly = systemDescriptor.IsBuiltIn ? " [warning]read-only[/]" : string.Empty;
+            var systemReadOnly = systemDescriptor.IsBuiltIn ? $" [warning]{SR.T("read-only")}[/]" : string.Empty;
             var systemShadowed = systemDescriptor.IsShadowed && systemDescriptor.ShadowedByPath is not null
-                ? $" [warning]shadowed by {AnsiMarkup.Escape(systemDescriptor.ShadowedByPath)}[/]"
+                ? $" [warning]{SR.T("shadowed by {0}", AnsiMarkup.Escape(systemDescriptor.ShadowedByPath))}[/]"
                 : string.Empty;
-            return $"[dim]id:[/] {AnsiMarkup.Escape(systemDescriptor.PromptName)}  [dim]source:[/] {AnsiMarkup.Escape(AgentPromptPresentation.ToSourceLabel(systemDescriptor.SourceKind))}{systemReadOnly}{systemShadowed}\n[dim]path:[/] {AnsiMarkup.Escape(systemDescriptor.SourcePath)}";
+            return $"[dim]{SR.T("id")}:[/] {AnsiMarkup.Escape(systemDescriptor.PromptName)}  [dim]{SR.T("source")}:[/] {AnsiMarkup.Escape(SR.T(AgentPromptPresentation.ToSourceLabel(systemDescriptor.SourceKind)))}{systemReadOnly}{systemShadowed}\n[dim]{SR.T("path")}:[/] {AnsiMarkup.Escape(systemDescriptor.SourcePath)}";
         }
 
         if (_selectedRow is not { } row)
         {
-            return "[dim]No prompt selected.[/]";
+            return $"[dim]{SR.T("No prompt selected.")}[/]";
         }
 
         var descriptor = row.Descriptor;
-        var readOnly = descriptor.IsBuiltIn ? " [warning]read-only[/]" : string.Empty;
+        var readOnly = descriptor.IsBuiltIn ? $" [warning]{SR.T("read-only")}[/]" : string.Empty;
         var shadowed = descriptor.IsShadowed && descriptor.ShadowedByPath is not null
-            ? $" [warning]shadowed by {AnsiMarkup.Escape(descriptor.ShadowedByPath)}[/]"
+            ? $" [warning]{SR.T("shadowed by {0}", AnsiMarkup.Escape(descriptor.ShadowedByPath))}[/]"
             : string.Empty;
-        return $"[dim]id:[/] {AnsiMarkup.Escape(descriptor.PromptName)}  [dim]source:[/] {AnsiMarkup.Escape(AgentPromptPresentation.ToSourceLabel(descriptor.SourceKind))}{readOnly}{shadowed}\n[dim]path:[/] {AnsiMarkup.Escape(descriptor.SourcePath)}";
+        return $"[dim]{SR.T("id")}:[/] {AnsiMarkup.Escape(descriptor.PromptName)}  [dim]{SR.T("source")}:[/] {AnsiMarkup.Escape(SR.T(AgentPromptPresentation.ToSourceLabel(descriptor.SourceKind)))}{readOnly}{shadowed}\n[dim]{SR.T("path")}:[/] {AnsiMarkup.Escape(descriptor.SourcePath)}";
     }
 
     private string BuildStatusMarkup()
@@ -1166,12 +1166,12 @@ internal sealed class PromptManagementDialog
         {
             if (_selectedSystemRow is null)
             {
-                return "[dim]Create a global or project system prompt override to get started.[/]";
+                return $"[dim]{SR.T("Create a global or project system prompt override to get started.")}[/]";
             }
 
             if (_selectedSystemRow.Descriptor.IsBuiltIn)
             {
-                return "[dim]Built-in system prompt content is read-only.[/]";
+                return $"[dim]{SR.T("Built-in system prompt content is read-only.")}[/]";
             }
 
             if (!ValidateEditor(out var systemValidationMessage, out _))
@@ -1180,18 +1180,18 @@ internal sealed class PromptManagementDialog
             }
 
             return HasUnsavedChanges()
-                ? "[warning]Unsaved system prompt changes.[/]"
-                : "[success]System prompt matches the loaded file.[/]";
+                ? $"[warning]{SR.T("Unsaved system prompt changes.")}[/]"
+                : $"[success]{SR.T("System prompt matches the loaded file.")}[/]";
         }
 
         if (_selectedRow is null)
         {
-            return "[dim]Create a global or project prompt to get started.[/]";
+            return $"[dim]{SR.T("Create a global or project prompt to get started.")}[/]";
         }
 
         if (_selectedRow.Descriptor.IsBuiltIn)
         {
-            return "[dim]Built-in prompt content is read-only.[/]";
+            return $"[dim]{SR.T("Built-in prompt content is read-only.")}[/]";
         }
 
         if (!ValidateEditor(out var validationMessage, out _))
@@ -1200,8 +1200,8 @@ internal sealed class PromptManagementDialog
         }
 
         return HasUnsavedChanges()
-            ? "[warning]Unsaved prompt changes.[/]"
-            : "[success]Prompt matches the loaded file.[/]";
+            ? $"[warning]{SR.T("Unsaved prompt changes.")}[/]"
+            : $"[success]{SR.T("Prompt matches the loaded file.")}[/]";
     }
 
     private void SetDialogStatus(string message, StatusTone tone)
@@ -1241,9 +1241,9 @@ internal sealed class PromptManagementDialog
         }
 
         new ConfirmationDialog(
-            "Discard Prompt Changes?",
-            ["The selected prompt has unsaved changes.", "Close the prompt manager without saving them?"],
-            "Discard",
+            SR.T("Discard Prompt Changes?"),
+            [SR.T("The selected prompt has unsaved changes."), SR.T("Close the prompt manager without saving them?")],
+            SR.T("Discard"),
             ControlTone.Error,
             () =>
             {
@@ -1269,16 +1269,16 @@ internal sealed class PromptManagementDialog
     private static Visual BuildPromptRowVisual(PromptRow row)
     {
         var descriptor = row.Descriptor;
-        var source = AgentPromptPresentation.ToSourceLabel(descriptor.SourceKind);
+        var source = SR.T(AgentPromptPresentation.ToSourceLabel(descriptor.SourceKind));
         var title = descriptor.IsShadowed
             ? $"[dim]{AnsiMarkup.Escape(descriptor.DisplayName)}[/]"
             : AnsiMarkup.Escape(descriptor.DisplayName);
 
-        var status = descriptor.IsShadowed ? " shadowed" : descriptor.IsBuiltIn ? " read-only" : string.Empty;
+        var status = descriptor.IsShadowed ? " " + SR.T("shadowed") : descriptor.IsBuiltIn ? " " + SR.T("read-only") : string.Empty;
         return new OptionListItem(
             new Markup(title) { Wrap = false },
             new Markup($"[dim]{AnsiMarkup.Escape(source)}{AnsiMarkup.Escape(status)}[/]") { Wrap = false },
-            new Markup($"[dim]{AnsiMarkup.Escape(descriptor.PromptName)} · system:{AnsiMarkup.Escape(descriptor.SystemPromptName)}[/]") { Wrap = false })
+            new Markup($"[dim]{AnsiMarkup.Escape(descriptor.PromptName)} · {SR.T("system")}:{AnsiMarkup.Escape(descriptor.SystemPromptName)}[/]") { Wrap = false })
         {
             SearchText = $"{descriptor.DisplayName} {descriptor.PromptName} {descriptor.Description} {source}",
         };
@@ -1287,12 +1287,12 @@ internal sealed class PromptManagementDialog
     private static Visual BuildSystemPromptRowVisual(SystemPromptRow row)
     {
         var descriptor = row.Descriptor;
-        var source = AgentPromptPresentation.ToSourceLabel(descriptor.SourceKind);
+        var source = SR.T(AgentPromptPresentation.ToSourceLabel(descriptor.SourceKind));
         var title = descriptor.IsShadowed
             ? $"[dim]{AnsiMarkup.Escape(descriptor.PromptName)}[/]"
             : AnsiMarkup.Escape(descriptor.PromptName);
 
-        var status = descriptor.IsShadowed ? " shadowed" : descriptor.IsBuiltIn ? " read-only" : string.Empty;
+        var status = descriptor.IsShadowed ? " " + SR.T("shadowed") : descriptor.IsBuiltIn ? " " + SR.T("read-only") : string.Empty;
         return new OptionListItem(
             new Markup(title) { Wrap = false },
             new Markup($"[dim]{AnsiMarkup.Escape(source)}{AnsiMarkup.Escape(status)}[/]") { Wrap = false },
@@ -1402,16 +1402,16 @@ internal sealed class PromptManagementDialog
         => NormalizeRequiredText(value) ?? AgentPromptCatalog.DefaultPromptName;
 
     private static string ScopeLabel(PromptStorageScope scope)
-        => scope == PromptStorageScope.Project ? "project" : "global";
+        => scope == PromptStorageScope.Project ? SR.T("project") : SR.T("global");
 
     private static string ScopeTitle(PromptStorageScope scope)
-        => scope == PromptStorageScope.Project ? "Project" : "Global";
+        => scope == PromptStorageScope.Project ? SR.T("Project") : SR.T("Global");
 
     private static string ResourceLabel(PromptResourceTab resourceTab)
-        => resourceTab == PromptResourceTab.SystemPrompt ? "system prompt" : "prompt";
+        => resourceTab == PromptResourceTab.SystemPrompt ? SR.T("system prompt") : SR.T("prompt");
 
     private static string ResourceTitle(PromptResourceTab resourceTab)
-        => resourceTab == PromptResourceTab.SystemPrompt ? "System Prompt" : "Prompt";
+        => resourceTab == PromptResourceTab.SystemPrompt ? SR.T("System Prompt") : SR.T("Prompt");
 
     private static string ResourceSuffix(PromptResourceTab resourceTab)
         => resourceTab == PromptResourceTab.SystemPrompt ? ".system-prompt.md" : ".prompt.md";

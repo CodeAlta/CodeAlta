@@ -84,7 +84,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
         var resolvedPath = Path.GetFullPath(fullPath);
         if (!File.Exists(resolvedPath))
         {
-            _setStatus($"Cannot open missing file '{resolvedPath}'.", false, StatusTone.Warning);
+            _setStatus(SR.T("Cannot open missing file '{0}'.", resolvedPath), false, StatusTone.Warning);
             return Task.CompletedTask;
         }
 
@@ -171,7 +171,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
                 }
 
                 _syncSessionTabControl();
-                _setStatus($"Closed '{fileTab.Item.Basename}'.", false, StatusTone.Info);
+                _setStatus(SR.T("Closed '{0}'.", fileTab.Item.Basename), false, StatusTone.Info);
             });
     }
 
@@ -216,11 +216,11 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
             });
             SelectFileTab(fileTab.TabId);
             _dispatchToUiDeferred(fileTab.Focus);
-            _setStatus($"Opened '{item.Basename}' for editing.", false, StatusTone.Ready);
+            _setStatus(SR.T("Opened '{0}' for editing.", item.Basename), false, StatusTone.Ready);
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to open '{item.RelativePath}': {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to open '{0}': {1}", item.RelativePath, ex.Message), false, StatusTone.Error);
         }
     }
 

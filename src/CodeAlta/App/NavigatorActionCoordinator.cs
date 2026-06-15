@@ -54,24 +54,24 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         var session = _sessionStateCoordinator.FindSession(sessionId);
         if (session is null)
         {
-            _setStatus($"Session '{sessionId}' was not found.", false, StatusTone.Warning);
+            _setStatus(SR.T("Session '{0}' was not found.", sessionId), false, StatusTone.Warning);
             return;
         }
 
         var project = _sessionStateCoordinator.GetProjectById(session.ProjectRef);
         var bodyLines = new List<string>
         {
-            $"Delete session '{session.Title}'?",
+            SR.T("Delete session '{0}'?", session.Title),
         };
         if (project is not null)
         {
-            bodyLines.Add($"Project: {project.DisplayName}");
+            bodyLines.Add(SR.T("Project: {0}", project.DisplayName));
         }
 
         new ConfirmationDialog(
-            "Delete Session",
+            SR.T("Delete Session"),
             bodyLines,
-            "Delete",
+            SR.T("Delete"),
             ControlTone.Error,
             () => DeleteSessionAsync(session),
             _getDialogBounds,
@@ -86,22 +86,22 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         var project = _sessionStateCoordinator.GetProjectById(projectId);
         if (project is null)
         {
-            _setStatus($"Project '{projectId}' was not found.", false, StatusTone.Warning);
+            _setStatus(SR.T("Project '{0}' was not found.", projectId), false, StatusTone.Warning);
             return;
         }
 
         new ConfirmationDialog(
-            "Delete Project",
+            SR.T("Delete Project"),
             [
-                $"Delete project '{project.DisplayName}' and all of its sessions?",
-                "The project catalog file will be removed from CodeAlta.",
+                SR.T("Delete project '{0}' and all of its sessions?", project.DisplayName),
+                SR.T("The project catalog file will be removed from CodeAlta."),
             ],
-            "Delete",
+            SR.T("Delete"),
             ControlTone.Error,
             () => DeleteProjectAsync(project),
             _getDialogBounds,
             _getFocusTarget,
-            noteText: "This deletes CodeAlta session history and the project file in ~/.alta. The project directory on disk is not deleted.")
+            noteText: SR.T("This deletes CodeAlta session history and the project file in ~/.alta. The project directory on disk is not deleted."))
             .Show();
     }
 
@@ -132,7 +132,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         var project = _sessionStateCoordinator.GetProjectById(projectId);
         if (project is null)
         {
-            _setStatus($"Project '{projectId}' was not found.", false, StatusTone.Warning);
+            _setStatus(SR.T("Project '{0}' was not found.", projectId), false, StatusTone.Warning);
             return;
         }
 
@@ -160,7 +160,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         var project = _sessionStateCoordinator.GetProjectById(projectId);
         if (project is null)
         {
-            _setStatus($"Project '{projectId}' was not found.", false, StatusTone.Warning);
+            _setStatus(SR.T("Project '{0}' was not found.", projectId), false, StatusTone.Warning);
             return;
         }
 
@@ -173,16 +173,16 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
     public void OpenFolder()
     {
         new DirectoryPathDialog(
-            "Open Project",
-            "Type a project name from the sidebar or a rooted folder path.",
-            "Open",
+            SR.T("Open Project"),
+            SR.T("Type a project name from the sidebar or a rooted folder path."),
+            SR.T("Open"),
             new DirectoryPathDialogService(
                 _getDialogBounds,
                 _getFocusTarget,
                 OpenFolderAsync,
                 _getPromptFocusTarget,
                 () => _sessionStateCoordinator.Projects),
-            placeholder: "CodeAlta or C:\\code\\SomeFolder")
+            placeholder: SR.T("CodeAlta or C:\\code\\SomeFolder"))
             .Show();
     }
 
@@ -206,7 +206,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
     {
         try
         {
-            _setStatus($"Deleting session '{session.Title}'...", true, StatusTone.Info);
+            _setStatus(SR.T("Deleting session '{0}'...", session.Title), true, StatusTone.Info);
             var result = await _shellController.DeleteSessionAsync(session, _sessionStateCoordinator.Sessions, CancellationToken.None);
             _sessionStateCoordinator.RemoveDeletedSessions(result.DeletedSessionIds, session.ProjectRef);
             await _sessionStateCoordinator.RemoveDeletedSessionArtifactsAsync(result.DeletedSessionIds);
@@ -214,7 +214,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to delete session: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to delete session: {0}", ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -222,7 +222,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
     {
         try
         {
-            _setStatus($"Deleting project '{project.DisplayName}'...", true, StatusTone.Info);
+            _setStatus(SR.T("Deleting project '{0}'...", project.DisplayName), true, StatusTone.Info);
             var sessions = _sessionStateCoordinator.Sessions
                 .Where(session => string.Equals(session.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
@@ -233,7 +233,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to delete project: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to delete project: {0}", ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -241,7 +241,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
     {
         try
         {
-            _setStatus($"Deleting {sessionIds.Count} session(s)...", true, StatusTone.Info);
+            _setStatus(SR.T("Deleting {0} session(s)...", sessionIds.Count), true, StatusTone.Info);
             var deletedSessionIds = new List<string>();
             var deletedSessionIdSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sessionId in sessionIds)
@@ -268,7 +268,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to delete selected sessions: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to delete selected sessions: {0}", ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -276,12 +276,12 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
     {
         try
         {
-            _setStatus($"Saving project '{project.DisplayName}'...", true, StatusTone.Info);
+            _setStatus(SR.T("Saving project '{0}'...", project.DisplayName), true, StatusTone.Info);
             await _shellController.SaveProjectAsync(project, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to save project: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to save project: {0}", ex.Message), false, StatusTone.Error);
             throw;
         }
     }
@@ -326,7 +326,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
             Id = "__global__",
             Slug = "global",
             Name = "Global",
-            DisplayName = "Global",
+            DisplayName = SR.T("Global"),
             ProjectPath = string.Empty,
             DefaultBranch = string.Empty,
         };

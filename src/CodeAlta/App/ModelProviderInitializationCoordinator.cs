@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using CodeAlta.Agent;
 using CodeAlta.App.Events;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Chat;
 using XenoAtom.Logging;
@@ -144,10 +145,10 @@ internal sealed class ModelProviderInitializationCoordinator
             .Take(2)
             .ToArray();
         var initializingText = initializingNames.Length == 0
-            ? "providers"
+            ? SR.T("providers")
             : string.Join(", ", initializingNames) + (initializingProviderDisplayNames.Count > initializingNames.Length ? ", …" : string.Empty);
 
-        return $"Initializing {initializingText} {BuildProgressBar(completed, totalProviderCount)} {completed}/{totalProviderCount}";
+        return SR.T("Initializing {0} {1} {2}/{3}", initializingText, BuildProgressBar(completed, totalProviderCount), completed, totalProviderCount);
     }
 
     private async Task RefreshAsync(ModelProviderId providerId, CancellationToken cancellationToken)
@@ -255,7 +256,7 @@ internal sealed class ModelProviderInitializationCoordinator
             () =>
             {
                 state.Availability = ModelProviderAvailability.Probing;
-                state.StatusMessage = "Detecting provider...";
+                state.StatusMessage = SR.T("Detecting provider...");
                 PublishProviderStateChanged(providerId);
             });
 
@@ -308,7 +309,7 @@ internal sealed class ModelProviderInitializationCoordinator
         state.Availability = providerState.Availability;
         state.StatusMessage = providerState.Availability == ModelProviderAvailability.Ready
             ? ModelProviderPresentation.BuildReadyStatusMessage(state)
-            : providerState.StatusMessage ?? $"{state.DisplayName} is {providerState.Availability.ToString().ToLowerInvariant()}.";
+            : providerState.StatusMessage ?? SR.T("{0} is {1}.", state.DisplayName, ModelProviderPresentation.FormatAvailability(providerState.Availability));
 
         if (providerState.Availability == ModelProviderAvailability.Ready)
         {

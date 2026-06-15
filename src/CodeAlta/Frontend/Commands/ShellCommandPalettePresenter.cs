@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -52,9 +53,9 @@ internal sealed class ShellCommandPalettePresenter : IShellCommandPresenter
 
     public void ShowOpenFolderDialog(string? initialPath = null)
         => new DirectoryPathDialog(
-            "Open Project",
-            "Type a project name from the sidebar or a rooted folder path.",
-            "Open",
+            SR.T("Open Project"),
+            SR.T("Type a project name from the sidebar or a rooted folder path."),
+            SR.T("Open"),
             new DirectoryPathDialogService(
                 _dialogCommandService.GetDialogBounds,
                 _dialogCommandService.GetDialogFocusTarget,
@@ -62,7 +63,7 @@ internal sealed class ShellCommandPalettePresenter : IShellCommandPresenter
                 _dialogCommandService.GetDialogFocusTarget,
                 _dialogCommandService.GetProjects),
             initialPath,
-            placeholder: "CodeAlta or C:\\code\\SomeFolder")
+            placeholder: SR.T("CodeAlta or C:\\code\\SomeFolder"))
             .Show();
 
     internal static CommandPaletteStyle ResolveCommandPalettePopupStyle(Visual? focusElement)

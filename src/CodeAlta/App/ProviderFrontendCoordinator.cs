@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
@@ -95,10 +96,10 @@ internal sealed class ProviderFrontendCoordinator
     }
 
     private async Task<ProviderConfigurationSaveResult> RefreshAfterProviderConfigurationSaveAsync(CancellationToken cancellationToken)
-        => await RefreshProviderConfigurationCoreAsync("Provider configuration saved.", "Provider configuration saved, but runtime refresh failed", cancellationToken);
+        => await RefreshProviderConfigurationCoreAsync(SR.T("Provider configuration saved."), SR.T("Provider configuration saved, but runtime refresh failed"), cancellationToken);
 
     public async Task<ProviderConfigurationSaveResult> RefreshProviderConfigurationAsync(CancellationToken cancellationToken = default)
-        => await RefreshProviderConfigurationCoreAsync("Model providers refreshed.", "Model provider refresh failed", cancellationToken);
+        => await RefreshProviderConfigurationCoreAsync(SR.T("Model providers refreshed."), SR.T("Model provider refresh failed"), cancellationToken);
 
     private async Task<ProviderConfigurationSaveResult> RefreshProviderConfigurationCoreAsync(
         string successStatus,
@@ -117,7 +118,7 @@ internal sealed class ProviderFrontendCoordinator
 
         try
         {
-            _dispatchToUi(() => _setStatus("Refreshing model providers...", false, StatusTone.Info));
+            _dispatchToUi(() => _setStatus(SR.T("Refreshing model providers..."), false, StatusTone.Info));
             await _ownedServices.RefreshModelProvidersAsync(cancellationToken);
             _dispatchToUi(
                 () =>
@@ -139,7 +140,7 @@ internal sealed class ProviderFrontendCoordinator
             var message = ex.GetBaseException().Message;
             _dispatchToUi(
                 () => _setStatus(
-                    $"{failureStatusPrefix}: {message}",
+                    SR.T("{0}: {1}", failureStatusPrefix, message),
                     false,
                     StatusTone.Error));
             return ProviderConfigurationSaveResult.RuntimeRefreshFailed(message);
@@ -165,13 +166,13 @@ internal sealed class ProviderFrontendCoordinator
 
         if (!TryCreateRuntime(definition, homeRoot, modelCatalog, out var runtime))
         {
-            return new ProviderTestResult(false, "Enter valid provider settings before testing.", 0);
+            return new ProviderTestResult(false, SR.T("Enter valid provider settings before testing."), 0);
         }
 
         await using var _ = runtime;
         var probe = await runtime.ProbeAsync(cancellationToken);
         var models = probe.Models;
-        return new ProviderTestResult(true, $"Connected successfully · {models.Count} model(s) discovered.", models.Count);
+        return new ProviderTestResult(true, SR.T("Connected successfully · {0} model(s) discovered.", models.Count), models.Count);
     }
 
     public IReadOnlyDictionary<string, ProviderRuntimeStatus> GetProviderRuntimeStatuses()
@@ -203,13 +204,13 @@ internal sealed class ProviderFrontendCoordinator
 
         if (!TryCreateRuntime(definition, homeRoot, modelCatalog, out var runtime))
         {
-            return new ProviderModelListResult(false, "Enter valid provider settings before listing models.", []);
+            return new ProviderModelListResult(false, SR.T("Enter valid provider settings before listing models."), []);
         }
 
         await using var _ = runtime;
         var probe = await runtime.ProbeAsync(cancellationToken);
         var models = probe.Models;
-        return new ProviderModelListResult(true, $"Model listing completed · {models.Count} model(s) available.", models);
+        return new ProviderModelListResult(true, SR.T("Model listing completed · {0} model(s) available.", models.Count), models);
     }
 
     public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync(
@@ -223,12 +224,12 @@ internal sealed class ProviderFrontendCoordinator
         var manager = CreateCodexSubscriptionLoginManager(definition);
         var login = manager.BeginBrowserLogin(definition.AccountId);
         var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, cancellationToken).AsTask();
-        reportStatus($"Open ChatGPT login in your browser: {login.AuthorizeUri}");
+        reportStatus(SR.T("Open ChatGPT login in your browser: {0}", login.AuthorizeUri));
         TryOpenBrowser(login.AuthorizeUri);
         var credential = await waitForCallbackTask;
         return new ProviderTestResult(
             true,
-            FormatCodexCredentialMessage("ChatGPT browser login completed", credential),
+            FormatCodexCredentialMessage(SR.T("ChatGPT browser login completed"), credential),
             0);
     }
 
@@ -245,13 +246,13 @@ internal sealed class ProviderFrontendCoordinator
                 (deviceCode, _) =>
                 {
                     reportStatus(
-                        $"Open {deviceCode.VerificationUri} and enter code {deviceCode.UserCode}. Waiting for ChatGPT authorization...");
+                        SR.T("Open {0} and enter code {1}. Waiting for ChatGPT authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
                     return ValueTask.CompletedTask;
                 },
                 cancellationToken: cancellationToken);
         return new ProviderTestResult(
             true,
-            FormatCodexCredentialMessage("ChatGPT device-code login completed", credential),
+            FormatCodexCredentialMessage(SR.T("ChatGPT device-code login completed"), credential),
             0);
     }
 
@@ -263,7 +264,7 @@ internal sealed class ProviderFrontendCoordinator
 
         var manager = CreateCodexSubscriptionLoginManager(definition);
         await manager.DeleteCredentialAsync(cancellationToken);
-        return new ProviderTestResult(true, "Deleted CodeAlta-owned ChatGPT/Codex credentials for this provider.", 0);
+        return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned ChatGPT/Codex credentials for this provider."), 0);
     }
 
     public async Task<ProviderTestResult> TestCodexSubscriptionAuthenticationAsync(
@@ -274,8 +275,8 @@ internal sealed class ProviderFrontendCoordinator
 
         var authManager = CreateCodexSubscriptionAuthManager(definition);
         var context = await authManager.GetAccountContextAsync(cancellationToken);
-        var account = string.IsNullOrWhiteSpace(context.AccountId) ? "no account/workspace id in token" : context.AccountId;
-        return new ProviderTestResult(true, $"Authenticated without sending a model turn · account/workspace: {account}.", 0);
+        var account = string.IsNullOrWhiteSpace(context.AccountId) ? SR.T("no account/workspace id in token") : context.AccountId;
+        return new ProviderTestResult(true, SR.T("Authenticated without sending a model turn · account/workspace: {0}.", account), 0);
     }
 
     public async Task<ProviderTestResult> ListCodexSubscriptionModelsAsync(
@@ -286,7 +287,7 @@ internal sealed class ProviderFrontendCoordinator
 
         var result = await TestProviderAsync(definition, cancellationToken);
         return result.Success
-            ? result with { Message = $"Model listing completed without sending a model turn · {result.ModelCount} model(s) available." }
+            ? result with { Message = SR.T("Model listing completed without sending a model turn · {0} model(s) available.", result.ModelCount) }
             : result;
     }
 
@@ -300,14 +301,14 @@ internal sealed class ProviderFrontendCoordinator
         var credential = await store.LoadAsync(definition.ProviderKey, cancellationToken);
         if (credential is null)
         {
-            return new ProviderTestResult(false, "Login required before account/workspace metadata can be listed.", 0);
+            return new ProviderTestResult(false, SR.T("Login required before account/workspace metadata can be listed."), 0);
         }
 
         var accountId = OpenAICodexSubscriptionAuthManager.ResolveAccountId(definition.AccountId, credential);
-        var accountLabel = string.IsNullOrWhiteSpace(credential.AccountLabel) ? "ChatGPT account/workspace" : credential.AccountLabel;
+        var accountLabel = string.IsNullOrWhiteSpace(credential.AccountLabel) ? SR.T("ChatGPT account/workspace") : credential.AccountLabel;
         var accountMessage = string.IsNullOrWhiteSpace(accountId)
-            ? $"{accountLabel}: token did not expose an account/workspace id; enter one in Account/Workspace Id if required."
-            : $"{accountLabel}: {accountId}";
+            ? SR.T("{0}: token did not expose an account/workspace id; enter one in Account/Workspace Id if required.", accountLabel)
+            : SR.T("{0}: {1}", accountLabel, accountId);
         return new ProviderTestResult(true, accountMessage, string.IsNullOrWhiteSpace(accountId) ? 0 : 1);
     }
 
@@ -324,12 +325,12 @@ internal sealed class ProviderFrontendCoordinator
             CreateCopilotDirectLoginOptions(definition),
             (deviceCode, _) =>
             {
-                reportStatus($"Opening Copilot login in your browser. Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri}. Waiting for authorization...");
+                reportStatus(SR.T("Opening Copilot login in your browser. Enter code {0} at {1}. Waiting for authorization...", deviceCode.UserCode, deviceCode.VerificationUri));
                 TryOpenBrowser(deviceCode.VerificationUri);
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
-        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Copilot login completed", result), 0);
+        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Copilot login completed"), result), 0);
     }
 
     public async Task<ProviderTestResult> LoginCopilotDirectWithDeviceCodeAsync(
@@ -345,11 +346,11 @@ internal sealed class ProviderFrontendCoordinator
             CreateCopilotDirectLoginOptions(definition),
             (deviceCode, _) =>
             {
-                reportStatus($"Open {deviceCode.VerificationUri} and enter code {deviceCode.UserCode}. Waiting for Copilot authorization...");
+                reportStatus(SR.T("Open {0} and enter code {1}. Waiting for Copilot authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
-        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Copilot device login completed", result), 0);
+        return new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Copilot device login completed"), result), 0);
     }
 
     public async Task<ProviderTestResult> LogoutCopilotDirectAsync(
@@ -360,7 +361,7 @@ internal sealed class ProviderFrontendCoordinator
 
         await CreateCopilotDirectLoginManager(definition)
             .DeleteCredentialAsync(CreateCopilotDirectLoginOptions(definition), cancellationToken);
-        return new ProviderTestResult(true, "Deleted CodeAlta-owned Copilot credentials for this provider.", 0);
+        return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned Copilot credentials for this provider."), 0);
     }
 
     public async Task<ProviderTestResult> TestCopilotDirectAuthenticationAsync(
@@ -372,8 +373,8 @@ internal sealed class ProviderFrontendCoordinator
         var status = await CreateCopilotDirectLoginManager(definition)
             .GetCredentialStatusAsync(CreateCopilotDirectLoginOptions(definition), cancellationToken);
         return status is null
-            ? new ProviderTestResult(false, "Login required before cached Copilot credentials can be used.", 0)
-            : new ProviderTestResult(true, FormatCopilotDirectLoginMessage("Authenticated with cached Copilot credentials", status), 0);
+            ? new ProviderTestResult(false, SR.T("Login required before cached Copilot credentials can be used."), 0)
+            : new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Authenticated with cached Copilot credentials"), status), 0);
     }
 
     public async Task<ProviderTestResult> ListCopilotDirectModelsAsync(
@@ -384,7 +385,7 @@ internal sealed class ProviderFrontendCoordinator
 
         var result = await TestProviderAsync(definition, cancellationToken);
         return result.Success
-            ? result with { Message = $"Copilot model listing completed without sending a model turn · {result.ModelCount} model(s) available." }
+            ? result with { Message = SR.T("Copilot model listing completed without sending a model turn · {0} model(s) available.", result.ModelCount) }
             : result;
     }
 
@@ -401,12 +402,12 @@ internal sealed class ProviderFrontendCoordinator
             CreateXaiDirectLoginOptions(definition),
             (authorization, _) =>
             {
-                reportStatus($"Opening xAI login in your browser: {authorization.AuthorizeUri}. Waiting for authorization...");
+                reportStatus(SR.T("Opening xAI login in your browser: {0}. Waiting for authorization...", authorization.AuthorizeUri));
                 TryOpenBrowser(authorization.AuthorizeUri);
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
-        return new ProviderTestResult(true, FormatXaiDirectLoginMessage("xAI login completed", result), 0);
+        return new ProviderTestResult(true, FormatXaiDirectLoginMessage(SR.T("xAI login completed"), result), 0);
     }
 
     public async Task<ProviderTestResult> LoginXaiDirectWithDeviceCodeAsync(
@@ -422,11 +423,11 @@ internal sealed class ProviderFrontendCoordinator
             CreateXaiDirectLoginOptions(definition),
             (deviceCode, _) =>
             {
-                reportStatus($"Open {deviceCode.VerificationUri} and enter code {deviceCode.UserCode}. Waiting for xAI authorization...");
+                reportStatus(SR.T("Open {0} and enter code {1}. Waiting for xAI authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
-        return new ProviderTestResult(true, FormatXaiDirectLoginMessage("xAI device login completed", result), 0);
+        return new ProviderTestResult(true, FormatXaiDirectLoginMessage(SR.T("xAI device login completed"), result), 0);
     }
 
     public async Task<ProviderTestResult> LogoutXaiDirectAsync(
@@ -437,7 +438,7 @@ internal sealed class ProviderFrontendCoordinator
 
         await CreateXaiDirectLoginManager(definition)
             .DeleteCredentialAsync(CreateXaiDirectLoginOptions(definition), cancellationToken);
-        return new ProviderTestResult(true, "Deleted CodeAlta-owned xAI credentials for this provider.", 0);
+        return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned xAI credentials for this provider."), 0);
     }
 
     public async Task<ProviderTestResult> TestXaiDirectAuthenticationAsync(
@@ -449,8 +450,8 @@ internal sealed class ProviderFrontendCoordinator
         var status = await CreateXaiDirectLoginManager(definition)
             .GetCredentialStatusAsync(CreateXaiDirectLoginOptions(definition), cancellationToken);
         return status is null
-            ? new ProviderTestResult(false, "Login required before cached xAI credentials can be used.", 0)
-            : new ProviderTestResult(true, FormatXaiDirectLoginMessage("Authenticated with cached xAI credentials", status), 0);
+            ? new ProviderTestResult(false, SR.T("Login required before cached xAI credentials can be used."), 0)
+            : new ProviderTestResult(true, FormatXaiDirectLoginMessage(SR.T("Authenticated with cached xAI credentials"), status), 0);
     }
 
     public async Task<ProviderTestResult> ListXaiDirectModelsAsync(
@@ -461,7 +462,7 @@ internal sealed class ProviderFrontendCoordinator
 
         var result = await TestProviderAsync(definition, cancellationToken);
         return result.Success
-            ? result with { Message = $"xAI model listing completed without sending a model turn · {result.ModelCount} model(s) available." }
+            ? result with { Message = SR.T("xAI model listing completed without sending a model turn · {0} model(s) available.", result.ModelCount) }
             : result;
     }
 
@@ -487,7 +488,7 @@ internal sealed class ProviderFrontendCoordinator
             case ModelProviderAvailability.Ready:
                 result = new ProviderTestResult(
                     true,
-                    $"Using active model provider · {state.Models.Count} model(s) discovered.",
+                    SR.T("Using active model provider · {0} model(s) discovered.", state.Models.Count),
                     state.Models.Count);
                 return true;
             case ModelProviderAvailability.Probing:
@@ -517,7 +518,7 @@ internal sealed class ProviderFrontendCoordinator
 
         result = new ProviderModelListResult(
             true,
-            $"Using active model provider · {state.Models.Count} model(s) available.",
+            SR.T("Using active model provider · {0} model(s) available.", state.Models.Count),
             state.Models);
         return true;
     }
@@ -545,7 +546,7 @@ internal sealed class ProviderFrontendCoordinator
     {
         if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select a Codex provider first.");
+            throw new InvalidOperationException(SR.T("Select a Codex provider first."));
         }
 
         return new OpenAICodexSubscriptionLoginManager(
@@ -558,7 +559,7 @@ internal sealed class ProviderFrontendCoordinator
     {
         if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select a Codex provider first.");
+            throw new InvalidOperationException(SR.T("Select a Codex provider first."));
         }
 
         return new OpenAICodexSubscriptionAuthManager(
@@ -574,7 +575,7 @@ internal sealed class ProviderFrontendCoordinator
     {
         if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select a Copilot provider first.");
+            throw new InvalidOperationException(SR.T("Select a Copilot provider first."));
         }
 
         return new CopilotDirectLoginManager(new HttpClient());
@@ -591,7 +592,7 @@ internal sealed class ProviderFrontendCoordinator
     {
         if (!string.Equals(definition.ProviderType, "xai", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Select an xAI provider first.");
+            throw new InvalidOperationException(SR.T("Select an xAI provider first."));
         }
 
         return new XaiDirectLoginManager(new HttpClient());
@@ -609,22 +610,22 @@ internal sealed class ProviderFrontendCoordinator
 
     private static string FormatCodexCredentialMessage(string prefix, OpenAICodexSubscriptionCredential credential)
     {
-        var account = string.IsNullOrWhiteSpace(credential.AccountId) ? "account/workspace unknown" : credential.AccountId;
-        return $"{prefix} · account/workspace: {account}.";
+        var account = string.IsNullOrWhiteSpace(credential.AccountId) ? SR.T("account/workspace unknown") : credential.AccountId;
+        return SR.T("{0} · account/workspace: {1}.", prefix, account);
     }
 
     private static string FormatCopilotDirectLoginMessage(string prefix, CopilotDirectLoginResult result)
     {
-        var expiry = result.ExpiresAt is null ? "expiry unknown" : $"expires {result.ExpiresAt.Value.LocalDateTime:g}";
+        var expiry = result.ExpiresAt is null ? SR.T("expiry unknown") : SR.T("expires {0}", result.ExpiresAt.Value.LocalDateTime.ToString("g", CultureInfo.CurrentCulture));
         var enterprise = string.IsNullOrWhiteSpace(result.EnterpriseDomain) ? "GitHub.com" : result.EnterpriseDomain.Trim();
-        return $"{prefix} · {enterprise} · API {result.BaseUri} · {expiry}.";
+        return SR.T("{0} · {1} · API {2} · {3}.", prefix, enterprise, result.BaseUri, expiry);
     }
 
     private static string FormatXaiDirectLoginMessage(string prefix, XaiDirectLoginResult result)
     {
-        var expiry = result.ExpiresAt is null ? "expiry unknown" : $"expires {result.ExpiresAt.Value.LocalDateTime:g}";
-        var scope = string.IsNullOrWhiteSpace(result.Scope) ? "scope unknown" : $"scope {result.Scope.Trim()}";
-        return $"{prefix} · API {result.BaseUri} · {expiry} · {scope}.";
+        var expiry = result.ExpiresAt is null ? SR.T("expiry unknown") : SR.T("expires {0}", result.ExpiresAt.Value.LocalDateTime.ToString("g", CultureInfo.CurrentCulture));
+        var scope = string.IsNullOrWhiteSpace(result.Scope) ? SR.T("scope unknown") : SR.T("scope {0}", result.Scope.Trim());
+        return SR.T("{0} · API {1} · {2} · {3}.", prefix, result.BaseUri, expiry, scope);
     }
 
     private static Uri? TryCreateUri(string? value)

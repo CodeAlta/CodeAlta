@@ -119,18 +119,18 @@ internal sealed class SessionRuntimeEventCoordinator
                     tab.HistoryEvents ??= [];
                     tab.HistoryEvents.Add(agentEvent.Event);
                     tab.RenderedHistoryEvents.Add(agentEvent.Event);
-                    TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, agentEvent.Event), "agent event");
+                    TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, agentEvent.Event), SR.T("agent event"));
                     ProjectPluginSessionEvents(session, tab, tab.RenderedHistoryEvents, isReplay: false);
                     PublishRuntimeTimelineChanged(session, tab);
                     break;
 
                 case SessionHostEvent hostEvent:
-                    TryRenderInteraction(tab, () => _timelineRenderer.RenderHostEvent(tab, hostEvent), "host event");
+                    TryRenderInteraction(tab, () => _timelineRenderer.RenderHostEvent(tab, hostEvent), SR.T("host event"));
                     PublishRuntimeTimelineChanged(session, tab);
                     break;
 
                 case SessionQueueRuntimeEvent queueEvent:
-                    TryRenderInteraction(tab, () => _timelineRenderer.RenderQueueEvent(tab, queueEvent), "queue event");
+                    TryRenderInteraction(tab, () => _timelineRenderer.RenderQueueEvent(tab, queueEvent), SR.T("queue event"));
                     PublishRuntimeTimelineChanged(session, tab);
                     break;
             }
@@ -171,7 +171,7 @@ internal sealed class SessionRuntimeEventCoordinator
             projectionEvents = tab.RenderedHistoryEvents;
         }
 
-        TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, @event), "agent event");
+        TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, @event), SR.T("agent event"));
         if (!tab.HistoryLoading)
         {
             ProjectPluginSessionEvents(session, tab, projectionEvents, isReplay: false);
@@ -209,7 +209,7 @@ internal sealed class SessionRuntimeEventCoordinator
             projectionEvents = tab.RenderedHistoryEvents;
         }
 
-        TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, @event), "agent event");
+        TryRenderInteraction(tab, () => _timelineRenderer.RenderAgentEvent(tab, @event), SR.T("agent event"));
         if (!tab.HistoryLoading)
         {
             ProjectPluginSessionEvents(session, tab, projectionEvents, isReplay: false);
@@ -255,7 +255,7 @@ internal sealed class SessionRuntimeEventCoordinator
         {
             CodeAltaApp.UiLogger.Error(ex, $"Failed to render session {context}");
 
-            _statusPort.SetShellStatus(new ShellStatusUpdate($"Failed to render session {context}: {ex.Message}", false, StatusTone.Error));
+            _statusPort.SetShellStatus(new ShellStatusUpdate(SR.T("Failed to render session {0}: {1}", context, ex.Message), false, StatusTone.Error));
             tab.Timeline.ClearPendingAssistant();
         }
     }
@@ -369,7 +369,7 @@ internal sealed class SessionRuntimeEventCoordinator
 
                 tab.Timeline.RemovePluginProjection(eventId, () => IsPluginProjectionVersionCurrent(tab, expectedVersion));
             },
-            "plugin projection");
+            SR.T("plugin projection"));
 
     private void RenderPluginProjection(OpenSessionState tab, PluginTransientEventProjection projection, long expectedVersion)
         => TryRenderInteraction(
@@ -396,7 +396,7 @@ internal sealed class SessionRuntimeEventCoordinator
                     CreatePluginVisualFactory(projection),
                     () => IsPluginProjectionVersionCurrent(tab, expectedVersion));
             },
-            "plugin projection");
+            SR.T("plugin projection"));
 
     private static bool IsPluginProjectionVersionCurrent(OpenSessionState tab, long expectedVersion)
         => Volatile.Read(ref tab.Session.PluginProjectionVersion) == expectedVersion;

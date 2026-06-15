@@ -281,7 +281,7 @@ internal sealed class SessionWorkspaceView
         Visual? sessionInfoButton = null;
         sessionInfoButton = CreateIconButton(
                 $"{TerminalIcons.MdInformationOutline}",
-                $"Show information about the selected session ({SessionInfoShortcutSequence}).",
+                SR.T("Show information about the selected session ({0}).", SessionInfoShortcutSequence),
                 () => _chromeController.ToggleSessionInfoPopup(sessionInfoButton!),
                 button => button.IsEnabled(workspaceViewModel.Bind.CanShowSessionInfo));
         var agentPromptSelectorView = new AgentPromptSelectorView(
@@ -302,7 +302,7 @@ internal sealed class SessionWorkspaceView
                 Padding = Thickness.Zero,
             })
             .Click(_chromeController.OpenModelProviders)
-            .Tooltip(new TextBlock($"Configure model providers ({ModelProvidersShortcutSequence})."));
+            .Tooltip(new TextBlock(SR.T("Configure model providers ({0}).", ModelProvidersShortcutSequence)));
 
         var usageIndicator = _chromeController.BuildSessionUsageIndicatorVisual();
         var reminderButton = new Button(new Markup(() =>
@@ -320,7 +320,7 @@ internal sealed class SessionWorkspaceView
                 Padding = Thickness.Zero,
             })
             .Click(_chromeController.OpenReminders)
-            .Tooltip(new TextBlock(() => $"Manage reminders for the selected session ({RemindersShortcutSequence})."));
+            .Tooltip(new TextBlock(() => SR.T("Manage reminders for the selected session ({0}).", RemindersShortcutSequence)));
         var statusLine = new SessionStatusLineView(shellViewModel, _thinkingAnimationPhase01, _chromeController.BuildPluginSessionStatusVisual).Root;
         var queuedPromptList = new QueuedPromptStripView(
             workspaceViewModel,

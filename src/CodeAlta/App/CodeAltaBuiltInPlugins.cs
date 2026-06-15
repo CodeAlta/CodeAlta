@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Plugin.GitHub;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Statistics;
@@ -16,7 +17,7 @@ internal static class CodeAltaBuiltInPlugins
         {
             Id = "github",
             DisplayName = "GitHub",
-            Description = "Adds a GitHub issue prompt picker and exposes the GitHub CLI when available.",
+            Description = SR.T("Adds a GitHub issue prompt picker and exposes the GitHub CLI when available."),
             EnabledByDefault = true,
             PluginType = typeof(GitHubPlugin),
             Factory = static () => new GitHubPlugin(),
@@ -25,7 +26,7 @@ internal static class CodeAltaBuiltInPlugins
         {
             Id = "mcp",
             DisplayName = "MCP",
-            Description = "Connects CodeAlta to configured Model Context Protocol servers.",
+            Description = SR.T("Connects CodeAlta to configured Model Context Protocol servers."),
             EnabledByDefault = true,
             PluginType = typeof(McpPlugin),
             Factory = static () => new McpPlugin(),
@@ -33,8 +34,8 @@ internal static class CodeAltaBuiltInPlugins
         registry.Add(new BuiltInPluginDefinition
         {
             Id = "statistics",
-            DisplayName = "Statistics",
-            Description = "Projects transient per-turn and session statistics from normalized agent events.",
+            DisplayName = SR.T("Statistics"),
+            Description = SR.T("Projects transient per-turn and session statistics from normalized agent events."),
             EnabledByDefault = true,
             PluginType = typeof(StatisticsPlugin),
             Factory = static () => new StatisticsPlugin(),

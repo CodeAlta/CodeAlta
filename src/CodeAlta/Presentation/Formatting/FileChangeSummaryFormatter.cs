@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Styling;
 using XenoAtom.Ansi;
@@ -53,7 +54,9 @@ internal static class FileChangeSummaryFormatter
             .Append(UiPalette.MutedMarkup)
             .Append(']')
             .Append(group.Files.Count.ToString(CultureInfo.InvariantCulture))
-            .Append(" file(s) · ");
+            .Append(' ')
+            .Append(SR.T("file(s)"))
+            .Append(" · ");
         DiffDisplayFormatter.AppendChangeCountsMarkup(builder, group.TotalAdditions, group.TotalDeletions);
         builder.Append("[/]");
         return builder.ToString();
@@ -64,16 +67,16 @@ internal static class FileChangeSummaryFormatter
         ArgumentNullException.ThrowIfNull(entry);
 
         var builder = new StringBuilder()
-            .Append("- File: `").Append(entry.FilePath).AppendLine("`")
-            .Append("- Operation: ").AppendLine(GetOperationLabel(entry.Operation))
-            .Append("- First Seen: `").Append(FormatTimestamp(entry.FirstSeenAt)).AppendLine("`")
-            .Append("- Last Updated: `").Append(FormatTimestamp(entry.LastUpdatedAt)).AppendLine("`")
-            .Append("- Additions: `").Append(entry.Additions.ToString(CultureInfo.InvariantCulture)).AppendLine("`")
-            .Append("- Deletions: `").Append(entry.Deletions.ToString(CultureInfo.InvariantCulture)).AppendLine("`");
+            .Append("- ").Append(SR.T("File")).Append(": `").Append(entry.FilePath).AppendLine("`")
+            .Append("- ").Append(SR.T("Operation")).Append(": ").AppendLine(GetOperationLabel(entry.Operation))
+            .Append("- ").Append(SR.T("First Seen")).Append(": `").Append(FormatTimestamp(entry.FirstSeenAt)).AppendLine("`")
+            .Append("- ").Append(SR.T("Last Updated")).Append(": `").Append(FormatTimestamp(entry.LastUpdatedAt)).AppendLine("`")
+            .Append("- ").Append(SR.T("Additions")).Append(": `").Append(entry.Additions.ToString(CultureInfo.InvariantCulture)).AppendLine("`")
+            .Append("- ").Append(SR.T("Deletions")).Append(": `").Append(entry.Deletions.ToString(CultureInfo.InvariantCulture)).AppendLine("`");
 
         if (string.IsNullOrWhiteSpace(entry.DiffText))
         {
-            builder.AppendLine().Append("_Diff unavailable for this file._");
+            builder.AppendLine().Append('_').Append(SR.T("Diff unavailable for this file.")).Append('_');
         }
 
         return builder.ToString();
@@ -96,10 +99,10 @@ internal static class FileChangeSummaryFormatter
     {
         return operation switch
         {
-            FileChangeOperation.Created => "Created",
-            FileChangeOperation.Deleted => "Deleted",
-            FileChangeOperation.Modified => "Modified",
-            _ => "Changed",
+            FileChangeOperation.Created => SR.T("Created"),
+            FileChangeOperation.Deleted => SR.T("Deleted"),
+            FileChangeOperation.Modified => SR.T("Modified"),
+            _ => SR.T("Changed"),
         };
     }
 

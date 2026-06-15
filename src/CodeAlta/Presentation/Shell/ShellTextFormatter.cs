@@ -102,6 +102,6 @@ internal static class ShellTextFormatter
             return project.DisplayName;
         }
 
-        return $"{project.DisplayName} from folder {project.ProjectPath}";
+        return SR.T("{0} from folder {1}", project.DisplayName, project.ProjectPath);
     }
 }

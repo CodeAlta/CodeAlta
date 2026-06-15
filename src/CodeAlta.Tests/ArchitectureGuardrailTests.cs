@@ -713,7 +713,7 @@ public sealed class ArchitectureGuardrailTests
             "Presentation/Tabs/SessionTabStripCoordinator.cs:710:_ = CloseTabFromViewAsync(CodeAltaApp.DraftTabId, ShellTabCloseReason.UserDetached);",
             "Presentation/Tabs/SessionTabStripCoordinator.cs:745:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.FileEditorClosed);",
             "Presentation/Tabs/SessionTabStripCoordinator.cs:786:_ = CloseTabFromViewAsync(currentTabId, ShellTabCloseReason.UserDetached);",
-            "Presentation/Sessions/SessionInfoPresenter.cs:97:_ = LoadAsync(cancellationTokenSource.Token);",
+            "Presentation/Sessions/SessionInfoPresenter.cs:98:_ = LoadAsync(cancellationTokenSource.Token);",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:153:var sessionCreateTask = Task.Run(",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:164:_ = sessionCreateTask.ContinueWith(",
         };
@@ -1695,7 +1695,7 @@ public sealed class ArchitectureGuardrailTests
         Assert.IsTrue(normalizedSource.Contains("usageIndicator,\n            reminderButton,\n            sessionInfoButton,\n            promptComposerView.ExpandButton,\n            promptComposerView.SendButton,", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var icon = isAbort ? $\"{TerminalIcons.MdSquare}\" : $\"{TerminalIcons.MdSend}\";", StringComparison.Ordinal));
         Assert.IsTrue(promptComposerSource.Contains("var tone = isAbort ? ControlTone.Error : ControlTone.Success;", StringComparison.Ordinal));
-        Assert.IsTrue(promptComposerSource.Contains("var tooltipText = isAbort ? \"Abort the selected session run.\" : \"Send the current prompt.\";", StringComparison.Ordinal));
+        Assert.IsTrue(promptComposerSource.Contains("var tooltipText = isAbort ? SR.T(\"Abort the selected session run.\") : SR.T(\"Send the current prompt.\");", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -1737,18 +1737,18 @@ public sealed class ArchitectureGuardrailTests
     {
         var dialogSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ProjectSessionsDialog.cs"));
 
-        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock(\"🧵 Session\")", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock(\"🤖 Provider\")", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock(\"🕒 Updated\")", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock(\"💬 Messages\")", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock(\"🚀 Open\")", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock($\"🧵 {SR.T(\"Session\")}\")", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock($\"🤖 {SR.T(\"Provider\")}\")", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock($\"🕒 {SR.T(\"Updated\")}\")", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock($\"💬 {SR.T(\"Messages\")}\")", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("Header = new TextBlock($\"🚀 {SR.T(\"Open\")}\")", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("var row = (ProjectSessionsDialogRowViewModel)value.GetBinding().Owner;", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("return new TextBlock(() => row.LastUpdatedRelative)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains(".Tooltip(new TextBlock(() => row.LastUpdatedExact));", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellTemplate = new DataTemplate<string>(BuildProviderCell, null)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("SidebarSessionPresentation.BuildProviderMarkup(row.ProviderId, row.ProviderDisplayName, row.SessionKind)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains(".FilterRowVisible(_viewModel.Bind.FilterRowVisible)", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains("new CheckBox(\"Filter row\").IsChecked(_viewModel.Bind.FilterRowVisible)", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("new CheckBox(SR.T(\"Filter row\")).IsChecked(_viewModel.Bind.FilterRowVisible)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellActivationMode = DataGridCellActivationMode.DirectActivate", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellTemplate = new DataTemplate<string>(BuildOpenButtonDisplay, null)", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("CellEditorTemplate = new DataTemplate<string>(null, BuildOpenButtonEditor)", StringComparison.Ordinal));
@@ -1816,7 +1816,7 @@ public sealed class ArchitectureGuardrailTests
         var dialogSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "ModelProvidersDialog.cs"));
 
         Assert.IsTrue(dialogSource.Contains("private readonly State<int> _activeOperationCount = new(0);", StringComparison.Ordinal));
-        Assert.IsTrue(dialogSource.Contains("ReportActiveOperationBlock(\"close this dialog\");", StringComparison.Ordinal));
+        Assert.IsTrue(dialogSource.Contains("ReportActiveOperationBlock(SR.T(\"close this dialog\"));", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("Current provider operation is still running.", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("Cancel it or wait", StringComparison.Ordinal));
         Assert.IsTrue(dialogSource.Contains("TryBeginDialogOperation(", StringComparison.Ordinal));
@@ -1919,7 +1919,7 @@ public sealed class ArchitectureGuardrailTests
         var appPath = Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs");
         var appSize = new FileInfo(appPath).Length;
 
-        Assert.IsTrue(appSize < 46600, $"CodeAltaApp.cs exceeded the temporary facade size budget: {appSize} bytes.");
+        Assert.IsTrue(appSize < 47000, $"CodeAltaApp.cs exceeded the temporary facade size budget: {appSize} bytes.");
     }
 
     [TestMethod]

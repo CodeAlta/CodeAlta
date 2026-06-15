@@ -143,7 +143,7 @@ internal sealed class SessionRuntimeStateReducer
         {
             if (hostEvent.Kind == AgentSessionUpdateKind.CompactionStarted && tab.PendingManualCompaction)
             {
-                sessionStatus = new SessionRuntimeStatusUpdate($"Compacting '{session.Title}'...", true, StatusTone.Info);
+                sessionStatus = new SessionRuntimeStatusUpdate(SR.T("Compacting '{0}'...", session.Title), true, StatusTone.Info);
             }
 
             if (hostEvent.Kind == AgentSessionUpdateKind.CompactionCompleted && tab.PendingManualCompaction)
@@ -228,7 +228,7 @@ internal sealed class SessionRuntimeStateReducer
 
                 if (update.Kind == AgentSessionUpdateKind.CompactionStarted && tab.PendingManualCompaction)
                 {
-                    sessionStatus = new SessionRuntimeStatusUpdate($"Compacting '{session.Title}'...", true, StatusTone.Info);
+                    sessionStatus = new SessionRuntimeStatusUpdate(SR.T("Compacting '{0}'...", session.Title), true, StatusTone.Info);
                 }
 
                 if (update.Kind == AgentSessionUpdateKind.Reconnecting && !string.IsNullOrWhiteSpace(update.Message))

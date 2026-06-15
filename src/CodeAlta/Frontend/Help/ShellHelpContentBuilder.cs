@@ -1,4 +1,5 @@
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.Frontend.Commands;
 
 namespace CodeAlta.Frontend.Help;
@@ -10,14 +11,14 @@ internal static class ShellHelpContentBuilder
         var sections = BuildSections(commands, filterText);
         var builder = new StringBuilder();
 
-        builder.AppendLine("# Shell Commands");
+        builder.Append("# ").AppendLine(SR.T("Shell Commands"));
         builder.AppendLine();
-        builder.AppendLine("Use `?`, `/`, or the shortcuts below to discover available shell actions.");
+        builder.AppendLine(SR.T("Use `?`, `/`, or the shortcuts below to discover available shell actions."));
         builder.AppendLine();
 
         if (sections.Count == 0)
         {
-            builder.AppendLine("_No commands matched that filter._");
+            builder.Append('_').Append(SR.T("No commands matched that filter.")).AppendLine("_");
             return builder.ToString();
         }
 
@@ -103,11 +104,11 @@ internal static class ShellHelpContentBuilder
     private static string GetCategoryTitle(ShellCommandHelpCategory category)
         => category switch
         {
-            ShellCommandHelpCategory.General => "General",
-            ShellCommandHelpCategory.Prompt => "Prompt",
-            ShellCommandHelpCategory.Session => "Session",
-            ShellCommandHelpCategory.Navigation => "Navigation",
-            ShellCommandHelpCategory.Inspection => "Inspection",
+            ShellCommandHelpCategory.General => SR.T("General"),
+            ShellCommandHelpCategory.Prompt => SR.T("Prompt"),
+            ShellCommandHelpCategory.Session => SR.T("Session"),
+            ShellCommandHelpCategory.Navigation => SR.T("Navigation"),
+            ShellCommandHelpCategory.Inspection => SR.T("Inspection"),
             _ => category.ToString(),
         };
 

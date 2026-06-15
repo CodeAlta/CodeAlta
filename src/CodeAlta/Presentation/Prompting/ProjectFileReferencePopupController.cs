@@ -508,7 +508,7 @@ internal sealed class ProjectFileReferencePopupController : IAsyncDisposable
         var projectRoot = _projectRoot;
         if (string.IsNullOrWhiteSpace(projectRoot))
         {
-            return "Project files";
+            return SR.T("Project files");
         }
 
         var projectName = Path.GetFileName(projectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -517,7 +517,7 @@ internal sealed class ProjectFileReferencePopupController : IAsyncDisposable
             projectName = "..." + projectName[^Math.Max(0, DialogProjectNameMaxLength - 3)..];
         }
 
-        return $"Project files · {projectName}";
+        return SR.T("Project files · {0}", projectName);
     }
 
     private string BuildStatisticsText()
@@ -530,20 +530,22 @@ internal sealed class ProjectFileReferencePopupController : IAsyncDisposable
 
             if (indexedCount == 0)
             {
-                return _isRefreshing ? "Indexing project..." : "0 indexed";
+                return _isRefreshing ? SR.T("Indexing project...") : SR.T("0 indexed");
             }
 
             if (!hasQuery)
             {
-                return $"{indexedCount} indexed";
+                return SR.T("{0} indexed", indexedCount);
             }
 
             if (visibleCount == 0)
             {
-                return $"0 matches · {indexedCount} indexed";
+                return SR.T("0 matches · {0} indexed", indexedCount);
             }
 
-            return $"{(indexedCount > visibleCount ? $"Top {visibleCount}" : visibleCount.ToString())} matches · {indexedCount} indexed";
+            return indexedCount > visibleCount
+                ? SR.T("Top {0} matches · {1} indexed", visibleCount, indexedCount)
+                : SR.T("{0} matches · {1} indexed", visibleCount, indexedCount);
         }
     }
 
@@ -555,18 +557,18 @@ internal sealed class ProjectFileReferencePopupController : IAsyncDisposable
             if (_isRefreshing)
             {
                 return indexedCount <= 0
-                    ? "Loading project files..."
-                    : "Refreshing results...";
+                    ? SR.T("Loading project files...")
+                    : SR.T("Refreshing results...");
             }
 
             if (indexedCount == 0)
             {
-                return "No project files available";
+                return SR.T("No project files available");
             }
 
             return _items.Count == 0
-                ? "No files or folders match the current search"
-                : "Enter inserts the selected link";
+                ? SR.T("No files or folders match the current search")
+                : SR.T("Enter inserts the selected link");
         }
     }
 

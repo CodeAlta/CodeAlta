@@ -49,7 +49,7 @@ internal static class SidebarTreeProjectionBuilder
             .OrderByDescending(static item => item.LastActiveAt)
             .ToArray();
         var row = getOrCreateRow("global", SidebarNodeKind.Global, SidebarSelectionTarget.Global());
-        row.UpdateTitle("Global");
+        row.UpdateTitle(SR.T("Global"));
         row.UpdateActivity(visibleSessions.FirstOrDefault()?.LastActiveAt, nowUtc);
         var hasRunningSession = visibleSessions.Any(session => getSessionVisualState(session.SessionId).IsRunning);
         var hasActiveReminder = visibleSessions.Any(session => getSessionVisualState(session.SessionId).HasActiveReminder);
@@ -89,7 +89,7 @@ internal static class SidebarTreeProjectionBuilder
         DateTimeOffset nowUtc)
     {
         var row = getOrCreateRow("projects", SidebarNodeKind.ProjectsRoot, null);
-        row.UpdateTitle("Projects");
+        row.UpdateTitle(SR.T("Projects"));
         row.UpdateActivity(activityAtUtc: null, nowUtc);
 
         var visibleProjects = projects
@@ -349,14 +349,14 @@ internal static class SidebarTreeProjectionBuilder
 
     private static string? ResolveDraftStateTooltip(bool hasPromptDraft, bool hasActiveReminder, bool isGlobal)
         => JoinTooltipParts(
-            hasPromptDraft ? isGlobal ? "Global draft prompt edited" : "Project draft prompt edited" : null,
-            hasActiveReminder ? isGlobal ? "Global session reminder active" : "Project session reminder active" : null);
+            hasPromptDraft ? isGlobal ? SR.T("Global draft prompt edited") : SR.T("Project draft prompt edited") : null,
+            hasActiveReminder ? isGlobal ? SR.T("Global session reminder active") : SR.T("Project session reminder active") : null);
 
     private static string? ResolveSessionStateTooltip(SessionVisualState visualState, SessionLineageDiagnostic diagnostic, SessionViewDescriptor session)
         => JoinTooltipParts(
             ResolveLineageDiagnosticTooltip(diagnostic, session),
-            visualState.HasPromptDraft ? "Prompt draft edited" : null,
-            visualState.HasActiveReminder ? "Reminder active" : null);
+            visualState.HasPromptDraft ? SR.T("Prompt draft edited") : null,
+            visualState.HasActiveReminder ? SR.T("Reminder active") : null);
 
     private static string? BuildStateIcons(bool hasPromptDraft, bool hasActiveReminder, SidebarAccent accent)
     {
@@ -387,9 +387,9 @@ internal static class SidebarTreeProjectionBuilder
     {
         return diagnostic switch
         {
-            SessionLineageDiagnostic.MissingParent => $"Parent session '{session.ParentSessionId}' is missing; rendering this session at the project root.",
-            SessionLineageDiagnostic.CrossProjectParent => $"Parent session '{session.ParentSessionId}' belongs to another scope; rendering this session at the project root while preserving provenance.",
-            SessionLineageDiagnostic.Cycle => "Session parent lineage contains a cycle; rendering this session at the project root.",
+            SessionLineageDiagnostic.MissingParent => SR.T("Parent session '{0}' is missing; rendering this session at the project root.", session.ParentSessionId),
+            SessionLineageDiagnostic.CrossProjectParent => SR.T("Parent session '{0}' belongs to another scope; rendering this session at the project root while preserving provenance.", session.ParentSessionId),
+            SessionLineageDiagnostic.Cycle => SR.T("Session parent lineage contains a cycle; rendering this session at the project root."),
             _ => null,
         };
     }
@@ -407,19 +407,19 @@ internal static class SidebarTreeProjectionBuilder
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateProjectActions()
         =>
         [
-            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, TerminalIcons.MdFormatListBulleted, "Show all project sessions"),
-            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectDetails, TerminalIcons.MdInformationOutline, "Show project details"),
-            new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteProject, TerminalIcons.MdTrashCanOutline, "Delete project"),
+            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, TerminalIcons.MdFormatListBulleted, SR.T("Show all project sessions")),
+            new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectDetails, TerminalIcons.MdInformationOutline, SR.T("Show project details")),
+            new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteProject, TerminalIcons.MdTrashCanOutline, SR.T("Delete project")),
         ];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateProjectsRootActions()
-        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenFolder, TerminalIcons.MdPlus, "Open folder", SidebarRowActionVisibility.Always)];
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenFolder, TerminalIcons.MdPlus, SR.T("Open folder"), SidebarRowActionVisibility.Always)];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateGlobalActions()
-        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, TerminalIcons.MdFormatListBulleted, "Show all global sessions")];
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.OpenProjectSessions, TerminalIcons.MdFormatListBulleted, SR.T("Show all global sessions"))];
 
     private static IReadOnlyList<SidebarRowActionDescriptor> CreateSessionActions()
-        => [new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteSession, TerminalIcons.MdTrashCanOutline, "Delete session")];
+        => [new SidebarRowActionDescriptor(SidebarRowActionKind.DeleteSession, TerminalIcons.MdTrashCanOutline, SR.T("Delete session"))];
 
     private static IEnumerable<ProjectDescriptor> OrderProjectsByName(IEnumerable<ProjectDescriptor> projects)
     {

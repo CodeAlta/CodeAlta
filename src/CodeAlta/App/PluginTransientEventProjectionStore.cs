@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.App;
@@ -100,8 +101,8 @@ internal sealed class PluginTransientEventProjectionStore
 
     private static string BuildDefaultMarkdown(PluginDerivedSessionEvent derivedEvent)
         => string.IsNullOrWhiteSpace(derivedEvent.RenderTarget)
-            ? $"Plugin event `{derivedEvent.EventId}`"
-            : $"Plugin event `{derivedEvent.EventId}` ({derivedEvent.RenderTarget})";
+            ? SR.T("Plugin event `{0}`", derivedEvent.EventId)
+            : SR.T("Plugin event `{0}` ({1})", derivedEvent.EventId, derivedEvent.RenderTarget);
 
     private static string ResolveMarkdown(PluginDerivedSessionEvent derivedEvent)
         => derivedEvent.DynamicContent is { } dynamicContent

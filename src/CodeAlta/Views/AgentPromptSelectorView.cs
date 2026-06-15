@@ -27,7 +27,7 @@ internal sealed class AgentPromptSelectorView
             .MinWidth(18)
             .MaxWidth(40)
             .IsEnabled(workspaceViewModel.Bind.CanSelectAgentPrompt);
-        PromptDialogButton = new Button(new TextBlock("Agent->") { Wrap = false, IsSelectable = false })
+        PromptDialogButton = new Button(new TextBlock(SR.T("Agent->")) { Wrap = false, IsSelectable = false })
             .Click(controller.OpenPrompts);
         var promptDialogButtonHost = PromptDialogButton.Tooltip(new TextBlock(SR.T("Open the agent prompts dialog.")));
 

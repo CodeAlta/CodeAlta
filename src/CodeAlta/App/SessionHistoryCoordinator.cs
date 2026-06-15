@@ -527,8 +527,8 @@ internal sealed class SessionHistoryCoordinator
                         _setSessionStatus(
                             tab,
                             loadOnlyFromLastUserPrompt
-                                ? $"Loading session '{session.Title}'..."
-                                : $"Loading previous messages from '{session.Title}'...",
+                                ? SR.T("Loading session '{0}'...", session.Title)
+                                : SR.T("Loading previous messages from '{0}'...", session.Title),
                             true,
                             StatusTone.Info);
                         if (preferCachedHistory && tab.HistoryEvents is { Count: > 0 } historyEvents)
@@ -609,8 +609,8 @@ internal sealed class SessionHistoryCoordinator
                     {
                         _resetSessionTab(tab);
                         tab.Timeline.FlushBufferedHistoryItems();
-                        tab.Timeline.RenderFailure($"Failed to load history: {ex.Message}");
-                        _setSessionStatus(tab, $"Failed to load '{session.Title}': {ex.Message}", false, StatusTone.Error);
+                        tab.Timeline.RenderFailure(SR.T("Failed to load history: {0}", ex.Message));
+                        _setSessionStatus(tab, SR.T("Failed to load '{0}': {1}", session.Title, ex.Message), false, StatusTone.Error);
                         return Task.CompletedTask;
                     })
                 .ConfigureAwait(false);

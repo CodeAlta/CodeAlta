@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.App.State;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Presentation.Formatting;
@@ -26,7 +27,7 @@ internal sealed class SessionRuntimeTimelineRenderer
             hostEvent.Timestamp,
             markdown: hostEvent.Message,
             tone: ChatTimelineTone.Notice,
-            headerOverride: "Notice",
+            headerOverride: SR.T("Notice"),
             headerSecondary: ChatMarkdownFormatter.GetSessionUpdateHeader(hostEvent.Kind));
     }
 
@@ -35,7 +36,7 @@ internal sealed class SessionRuntimeTimelineRenderer
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentNullException.ThrowIfNull(queueEvent);
 
-        var action = queueEvent.IsEnqueued ? "Queued prompt for later submission." : "Updated queued prompt state.";
+        var action = queueEvent.IsEnqueued ? SR.T("Queued prompt for later submission.") : SR.T("Updated queued prompt state.");
         var markdown = string.IsNullOrWhiteSpace(queueEvent.PromptPreview)
             ? action
             : string.Concat(action, Environment.NewLine, Environment.NewLine, "> ", queueEvent.PromptPreview.Trim().Replace("\n", "\n> ", StringComparison.Ordinal));
@@ -43,8 +44,8 @@ internal sealed class SessionRuntimeTimelineRenderer
             queueEvent.Timestamp,
             markdown,
             ChatTimelineTone.Notice,
-            headerOverride: "Notice",
-            headerSecondary: "Prompt Queue");
+            headerOverride: SR.T("Notice"),
+            headerSecondary: SR.T("Prompt Queue"));
     }
 
     public void RenderAgentEvent(OpenSessionState tab, AgentEvent @event)
@@ -98,7 +99,7 @@ internal sealed class SessionRuntimeTimelineRenderer
                     planEvent.Timestamp,
                     ChatMarkdownFormatter.FormatChatPlanMarkdown(planEvent.Snapshot),
                     ChatTimelineTone.Notice,
-                    headerOverride: "Plan");
+                    headerOverride: SR.T("Plan"));
                 break;
 
             case AgentActivityEvent activity:
@@ -126,7 +127,7 @@ internal sealed class SessionRuntimeTimelineRenderer
                     raw.Timestamp,
                     ChatMarkdownFormatter.FormatChatRawEventMarkdown(raw),
                     ChatTimelineTone.Activity,
-                    headerOverride: "Raw Event");
+                    headerOverride: SR.T("Raw Event"));
                 break;
 
             case AgentPermissionRequest permissionRequest:
@@ -141,8 +142,8 @@ internal sealed class SessionRuntimeTimelineRenderer
                     ChatMarkdownFormatter.FormatChatPermissionRequestMarkdown(permissionRequest),
                     null,
                     ChatTimelineTone.Interaction,
-                    "Action Required",
-                    "Permission Request");
+                    SR.T("Action Required"),
+                    SR.T("Permission Request"));
                 break;
 
             case AgentUserInputRequest userInputRequest:
@@ -153,8 +154,8 @@ internal sealed class SessionRuntimeTimelineRenderer
                     ChatMarkdownFormatter.FormatChatUserInputRequestMarkdown(userInputRequest, autoApproveEnabled),
                     null,
                     ChatTimelineTone.Interaction,
-                    "Action Required",
-                    "User Input Request");
+                    SR.T("Action Required"),
+                    SR.T("User Input Request"));
                 break;
 
             case AgentInteractionEvent interaction:
@@ -174,7 +175,7 @@ internal sealed class SessionRuntimeTimelineRenderer
             case AgentSystemPromptEvent systemPrompt:
                 var sections = new List<ChatCollapsibleMarkdownSection>
                 {
-                    new("Verbatim prompt", ChatMarkdownFormatter.FormatSystemPromptVerbatimMarkdown(systemPrompt)),
+                    new(SR.T("Verbatim prompt"), ChatMarkdownFormatter.FormatSystemPromptVerbatimMarkdown(systemPrompt)),
                 };
                 if (tab.Session.LastRenderedSystemPromptEvent is { } previousSystemPrompt &&
                     !string.Equals(systemPrompt.Change.Kind, "initial", StringComparison.OrdinalIgnoreCase))
@@ -182,7 +183,7 @@ internal sealed class SessionRuntimeTimelineRenderer
                     var promptDiffMarkdown = ChatMarkdownFormatter.FormatSystemPromptDiffMarkdown(previousSystemPrompt, systemPrompt);
                     if (!string.IsNullOrWhiteSpace(promptDiffMarkdown))
                     {
-                        sections.Add(new ChatCollapsibleMarkdownSection("Prompt diff", promptDiffMarkdown));
+                        sections.Add(new ChatCollapsibleMarkdownSection(SR.T("Prompt diff"), promptDiffMarkdown));
                     }
                 }
 
@@ -191,8 +192,8 @@ internal sealed class SessionRuntimeTimelineRenderer
                     ChatMarkdownFormatter.FormatSystemPromptSummaryMarkdown(systemPrompt),
                     sections,
                     ChatTimelineTone.Notice,
-                    headerOverride: "Notice",
-                    headerSecondary: "System Prompt");
+                    headerOverride: SR.T("Notice"),
+                    headerSecondary: SR.T("System Prompt"));
                 tab.Session.LastRenderedSystemPromptEvent = systemPrompt;
                 break;
 
@@ -212,10 +213,10 @@ internal sealed class SessionRuntimeTimelineRenderer
                     tab.Timeline.AddCollapsibleStatus(
                         update.Timestamp,
                         updateMarkdown,
-                        "Summarizer summary",
+                        SR.T("Summarizer summary"),
                         compactionSummaryMarkdown,
                         updateTone,
-                        headerOverride: "Notice",
+                        headerOverride: SR.T("Notice"),
                         headerSecondary: updateHeader);
                     break;
                 }
@@ -224,7 +225,7 @@ internal sealed class SessionRuntimeTimelineRenderer
                     update.Timestamp,
                     updateMarkdown,
                     updateTone,
-                    headerOverride: "Notice",
+                    headerOverride: SR.T("Notice"),
                     headerSecondary: updateHeader);
                 break;
 

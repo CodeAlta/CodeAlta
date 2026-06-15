@@ -50,11 +50,11 @@ internal sealed class ConfigRecoveryDialog
                 : null);
         _editor.LeftMargins.Insert(0, diagnosticMargin);
 
-        _saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save and Continue") { Tone = ControlTone.Success };
+        _saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} {SR.T("Save and Continue")}") { Tone = ControlTone.Success };
         _saveButton.IsEnabled(CanSave);
         _saveButton.Click(SaveAndContinue);
 
-        _exitButton = new Button($"{TerminalIcons.MdExitRun} Exit") { Tone = ControlTone.Error };
+        _exitButton = new Button($"{TerminalIcons.MdExitRun} {SR.T("Exit")}") { Tone = ControlTone.Error };
         _exitButton.Click(Exit);
     }
 
@@ -101,9 +101,9 @@ internal sealed class ConfigRecoveryDialog
     private Dialog BuildDialog()
     {
         var heading = new VStack(
-            new Markup($"[bold warning]{TerminalIcons.MdAlertCircleOutline} CodeAlta could not load your configuration[/]"),
+            new Markup($"[bold warning]{TerminalIcons.MdAlertCircleOutline} {SR.T("CodeAlta could not load your configuration")}[/]"),
             new TextBlock(
-                    "Fix the TOML below to continue startup. CodeAlta only parses and validates this file here; no providers, sessions, or background agent work are started until the configuration can be loaded.")
+                    SR.T("Fix the TOML below to continue startup. CodeAlta only parses and validates this file here; no providers, sessions, or background agent work are started until the configuration can be loaded."))
                 .Wrap(true),
             new Markup($"[dim]{AnsiMarkup.Escape(_configPath)}[/]") { Wrap = true })
         {
@@ -130,8 +130,8 @@ internal sealed class ConfigRecoveryDialog
         };
 
         var dialog = new Dialog()
-            .Title("Recover ~/.alta/config.toml")
-            .BottomLeftText(new Markup("[dim]Ctrl+S Save and Continue · Ctrl+Q Exit · Ctrl+F Find · Ctrl+G Go to line[/]"))
+            .Title(SR.T("Recover ~/.alta/config.toml"))
+            .BottomLeftText(new Markup($"[dim]{SR.T("Ctrl+S Save and Continue · Ctrl+Q Exit · Ctrl+F Find · Ctrl+G Go to line")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(new DockLayout()
@@ -147,8 +147,8 @@ internal sealed class ConfigRecoveryDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ConfigRecovery.SaveAndContinue",
-            LabelMarkup = "Save and Continue",
-            DescriptionMarkup = "Save the repaired config and continue CodeAlta startup.",
+            LabelMarkup = SR.T("Save and Continue"),
+            DescriptionMarkup = SR.T("Save the repaired config and continue CodeAlta startup."),
             Gesture = new KeyGesture(TerminalChar.CtrlS, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.CommandBar,
             Importance = CommandImportance.Primary,
@@ -158,8 +158,8 @@ internal sealed class ConfigRecoveryDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ConfigRecovery.Exit",
-            LabelMarkup = "Exit",
-            DescriptionMarkup = "Exit CodeAlta without changing the config.",
+            LabelMarkup = SR.T("Exit"),
+            DescriptionMarkup = SR.T("Exit CodeAlta without changing the config."),
             Gesture = new KeyGesture(TerminalChar.CtrlQ, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.CommandBar,
             Importance = CommandImportance.Primary,
@@ -182,13 +182,13 @@ internal sealed class ConfigRecoveryDialog
 
         if (_validation.IsValid)
         {
-            return $"[success]{TerminalIcons.MdCheckCircleOutline} Configuration can be loaded. Save and Continue is available.[/]";
+            return $"[success]{TerminalIcons.MdCheckCircleOutline} {SR.T("Configuration can be loaded. Save and Continue is available.")}[/]";
         }
 
         var location = _validation.Line is { } line
-            ? $"Line {line}, column {_validation.Column.GetValueOrDefault(1)}: "
+            ? SR.T("Line {0}, column {1}: ", line, _validation.Column.GetValueOrDefault(1))
             : string.Empty;
-        return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? "Configuration is invalid."))}[/]";
+        return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? SR.T("Configuration is invalid.")))}[/]";
     }
 
     internal bool CanSave()
@@ -211,7 +211,7 @@ internal sealed class ConfigRecoveryDialog
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _validation = new CodeAltaConfigValidationResult(false, $"Unable to save config file: {ex.Message}", null, null);
+            _validation = new CodeAltaConfigValidationResult(false, SR.T("Unable to save config file: {0}", ex.Message), null, null);
             _editVersion.Value++;
             return;
         }

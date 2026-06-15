@@ -14,12 +14,12 @@ internal static class SessionScopePresentation
 
         return session.Kind switch
         {
-            SessionViewKind.GlobalSession => $"Global session · {globalRoot}",
+            SessionViewKind.GlobalSession => SR.T("Global session · {0}", globalRoot),
             SessionViewKind.ProjectSession when projects.FirstOrDefault(project => string.Equals(project.Id, session.ProjectRef, StringComparison.OrdinalIgnoreCase)) is { } project
                 => $"{project.DisplayName} · {project.ProjectPath}",
             SessionViewKind.InternalSession when projects.FirstOrDefault(project => string.Equals(project.Id, session.ProjectRef, StringComparison.OrdinalIgnoreCase)) is { } internalProject
-                => $"Internal · {internalProject.DisplayName}",
-            SessionViewKind.InternalSession => "Internal session",
+                => SR.T("Internal · {0}", internalProject.DisplayName),
+            SessionViewKind.InternalSession => SR.T("Internal session"),
             _ => session.WorkingDirectory,
         };
     }

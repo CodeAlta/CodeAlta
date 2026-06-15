@@ -89,7 +89,7 @@ internal sealed class AskModeCoordinator : IDisposable
                 return false;
             }
 
-            _setStatus("Answer the queued ask, then submit to continue the session.", false, StatusTone.Info);
+            _setStatus(SR.T("Answer the queued ask, then submit to continue the session."), false, StatusTone.Info);
             _workspaceViewModel.FocusAskModeControl(form.InitialFocusTarget);
             return true;
         }
@@ -136,18 +136,18 @@ internal sealed class AskModeCoordinator : IDisposable
         if (fileReview?.HasUnsavedChanges == true)
         {
             ShowUnsavedFileDialog(
-                "Submit Ask",
-                "The attached file has unsaved edits. Save them before submitting the ask response?",
-                "Save and submit",
+                SR.T("Submit Ask"),
+                SR.T("The attached file has unsaved edits. Save them before submitting the ask response?"),
+                SR.T("Save and submit"),
                 ControlTone.Primary,
-                "Submit without saving",
+                SR.T("Submit without saving"),
                 ControlTone.Warning,
                 form.Tabs,
                 () =>
                 {
                     if (!fileReview.TrySave(out var error))
                     {
-                        _setStatus($"Failed to save attached ask file: {error}", false, StatusTone.Error);
+                        _setStatus(SR.T("Failed to save attached ask file: {0}", error), false, StatusTone.Error);
                         return;
                     }
 
@@ -163,7 +163,7 @@ internal sealed class AskModeCoordinator : IDisposable
     private void ObserveSubmit(AltaQueuedAsk ask, SessionViewDescriptor session, OpenSessionState tab, IReadOnlyList<AltaAskAnswer> answers, AskFileReviewView? fileReview)
         => _ = UiTaskDiagnostics.ObserveAsync(
             () => SubmitAsync(ask, session, tab, answers, fileReview?.CreateReviewSnapshot()),
-            "submit ask response",
+            SR.T("submit ask response"),
             _setStatus);
 
     private async Task SubmitAsync(AltaQueuedAsk ask, SessionViewDescriptor session, OpenSessionState tab, IReadOnlyList<AltaAskAnswer> answers, AltaAskFileReview? fileReview)
@@ -187,7 +187,7 @@ internal sealed class AskModeCoordinator : IDisposable
             CodeAltaApp.UiLogger.Error(ex, $"Failed to submit ask response for session {ask.SessionId}");
             _activeAskId = null;
             _activeSessionId = null;
-            _setStatus($"Failed to submit ask response: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to submit ask response: {0}", ex.Message), false, StatusTone.Error);
             _ = TryPresentPendingAsk(ask.SessionId);
         }
     }
@@ -202,18 +202,18 @@ internal sealed class AskModeCoordinator : IDisposable
         if (fileReview?.HasUnsavedChanges == true)
         {
             ShowUnsavedFileDialog(
-                "Cancel Ask",
-                "The attached file has unsaved edits. Save them before exiting ask mode?",
-                "Save and exit",
+                SR.T("Cancel Ask"),
+                SR.T("The attached file has unsaved edits. Save them before exiting ask mode?"),
+                SR.T("Save and exit"),
                 ControlTone.Primary,
-                "Exit without saving",
+                SR.T("Exit without saving"),
                 ControlTone.Error,
                 form.Tabs,
                 () =>
                 {
                     if (!fileReview.TrySave(out var error))
                     {
-                        _setStatus($"Failed to save attached ask file: {error}", false, StatusTone.Error);
+                        _setStatus(SR.T("Failed to save attached ask file: {0}", error), false, StatusTone.Error);
                         return;
                     }
 
@@ -236,7 +236,7 @@ internal sealed class AskModeCoordinator : IDisposable
         _ = _askService.Dequeue(ask.SessionId);
         RestoreNormalProjection(ask.SessionId);
         ClearActive();
-        _setStatus("Ask canceled; no response was sent.", false, StatusTone.Warning);
+        _setStatus(SR.T("Ask canceled; no response was sent."), false, StatusTone.Warning);
         _ = TryPresentPendingAsk(ask.SessionId);
     }
 
@@ -248,12 +248,12 @@ internal sealed class AskModeCoordinator : IDisposable
         }
 
         new ConfirmationDialog(
-            "Cancel Ask",
+            SR.T("Cancel Ask"),
             [
-                "Exit ask mode without sending a response?",
-                "The queued ask will be canceled locally and the session will return to the normal prompt editor.",
+                SR.T("Exit ask mode without sending a response?"),
+                SR.T("The queued ask will be canceled locally and the session will return to the normal prompt editor."),
             ],
-            "Exit without responding",
+            SR.T("Exit without responding"),
             ControlTone.Warning,
             () =>
             {
@@ -277,10 +277,10 @@ internal sealed class AskModeCoordinator : IDisposable
         Action discardAndContinue)
     {
         Dialog? dialog = null;
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"));
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"));
         closeButton.Click(Close);
 
-        var keepButton = new Button("Keep answering");
+        var keepButton = new Button(SR.T("Keep answering"));
         keepButton.Click(Close);
 
         var discardButton = new Button(discardText) { Tone = discardTone };
@@ -317,8 +317,8 @@ internal sealed class AskModeCoordinator : IDisposable
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Ask.UnsavedFile.Close",
-            LabelMarkup = "Keep answering",
-            DescriptionMarkup = "Close the save prompt and return to ask mode.",
+            LabelMarkup = SR.T("Keep answering"),
+            DescriptionMarkup = SR.T("Close the save prompt and return to ask mode."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),

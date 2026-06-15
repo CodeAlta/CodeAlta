@@ -764,7 +764,7 @@ internal sealed class ModelProviderSelectorCoordinator : IPromptAvailabilityProj
         var providerKey = string.IsNullOrWhiteSpace(session.ResolvedProviderKey)
             ? providerId.Value
             : session.ResolvedProviderKey.Trim();
-        return $"{providerKey} (not configured)";
+        return SR.T("{0} (not configured)", providerKey);
     }
 
     private IReadOnlyList<string>? GetConfiguredProviderKeys()

@@ -1,4 +1,5 @@
 using CodeAlta.App;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 
 namespace CodeAlta.Views;
@@ -61,7 +62,7 @@ internal sealed class InitialCatalogStateCoordinator
         }
         catch (Exception ex)
         {
-            _setStatus($"Failed to load saved state: {ex.Message}", false, StatusTone.Error);
+            _setStatus(SR.T("Failed to load saved state: {0}", ex.Message), false, StatusTone.Error);
         }
 
         _initialCatalogStateResolved = true;

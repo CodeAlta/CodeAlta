@@ -28,7 +28,7 @@ internal sealed class ReminderUiCoordinator : IDisposable
     {
         if (_port.GetSelectedSession() is not { } session)
         {
-            _port.SetStatus("Select a session before managing reminders.", StatusTone.Warning);
+            _port.SetStatus(SR.T("Select a session before managing reminders."), StatusTone.Warning);
             return;
         }
 

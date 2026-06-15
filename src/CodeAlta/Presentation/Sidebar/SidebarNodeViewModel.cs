@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Catalog;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 
@@ -153,7 +154,7 @@ internal sealed partial class SidebarNodeViewModel
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Display name is required.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Display name is required."));
         }
 
         return null;
@@ -166,7 +167,7 @@ internal static class SidebarRelativeTimeFormatter
     {
         if (activityAtUtc is null || activityAtUtc == default)
         {
-            return new SidebarRelativeTimeDisplay("never", "No recorded activity.", null);
+            return new SidebarRelativeTimeDisplay(SR.T("never"), SR.T("No recorded activity."), null);
         }
 
         var effectiveNow = nowUtc < activityAtUtc.Value ? activityAtUtc.Value : nowUtc;
@@ -175,14 +176,14 @@ internal static class SidebarRelativeTimeFormatter
 
         if (elapsed < TimeSpan.FromMinutes(1))
         {
-            return new SidebarRelativeTimeDisplay("just now", exact, activityAtUtc.Value.AddMinutes(1));
+            return new SidebarRelativeTimeDisplay(SR.T("just now"), exact, activityAtUtc.Value.AddMinutes(1));
         }
 
         if (elapsed < TimeSpan.FromHours(1))
         {
             var minutes = Math.Max(1, (int)Math.Floor(elapsed.TotalMinutes));
             return new SidebarRelativeTimeDisplay(
-                FormatUnit(minutes, "min"),
+                FormatUnit(minutes, SR.T("min")),
                 exact,
                 activityAtUtc.Value.AddMinutes(minutes + 1));
         }
@@ -191,7 +192,7 @@ internal static class SidebarRelativeTimeFormatter
         {
             var hours = Math.Max(1, (int)Math.Floor(elapsed.TotalHours));
             return new SidebarRelativeTimeDisplay(
-                FormatUnit(hours, "h"),
+                FormatUnit(hours, SR.T("h")),
                 exact,
                 activityAtUtc.Value.AddHours(hours + 1));
         }
@@ -200,7 +201,7 @@ internal static class SidebarRelativeTimeFormatter
         {
             var days = Math.Max(1, elapsed.Days);
             return new SidebarRelativeTimeDisplay(
-                FormatLongUnit(days, "day"),
+                FormatLongUnit(days, SR.T("day"), SR.T("days")),
                 exact,
                 activityAtUtc.Value.AddDays(days + 1));
         }
@@ -209,23 +210,23 @@ internal static class SidebarRelativeTimeFormatter
         {
             var months = Math.Max(1, elapsed.Days / 30);
             return new SidebarRelativeTimeDisplay(
-                FormatLongUnit(months, "month"),
+                FormatLongUnit(months, SR.T("month"), SR.T("months")),
                 exact,
                 activityAtUtc.Value.AddDays((months + 1) * 30));
         }
 
         var years = Math.Max(1, elapsed.Days / 365);
         return new SidebarRelativeTimeDisplay(
-            FormatLongUnit(years, "year"),
+            FormatLongUnit(years, SR.T("year"), SR.T("years")),
             exact,
             activityAtUtc.Value.AddDays((years + 1) * 365));
     }
 
     private static string FormatUnit(int value, string unit)
-        => value == 1 ? $"1 {unit} ago" : $"{value} {unit} ago";
+        => value == 1 ? SR.T("1 {0} ago", unit) : SR.T("{0} {1} ago", value, unit);
 
-    private static string FormatLongUnit(int value, string unit)
-        => value == 1 ? $"1 {unit} ago" : $"{value} {unit}s ago";
+    private static string FormatLongUnit(int value, string singular, string plural)
+        => value == 1 ? SR.T("1 {0} ago", singular) : SR.T("{0} {1} ago", value, plural);
 }
 
 internal readonly record struct SidebarRelativeTimeDisplay(

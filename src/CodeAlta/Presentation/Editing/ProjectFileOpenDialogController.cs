@@ -47,7 +47,7 @@ internal sealed class ProjectFileOpenDialogController : IAsyncDisposable
         _getFocusTarget = getFocusTarget;
         _openFile = openFile;
         _setStatus = setStatus;
-        _dialog = new ProjectFilePickerDialog("Arrows move · Enter open · Esc close");
+        _dialog = new ProjectFilePickerDialog(SR.T("Arrows move · Enter open · Esc close"));
         _dialog.QueryChanged += (_, queryText) => _ = OnDialogQueryChangedAsync(queryText);
         _dialog.SelectionChanged += (_, selectedIndex) => OnSelectionChanged(selectedIndex);
         _dialog.AcceptRequested += (_, _) => AcceptSelected();
@@ -63,14 +63,14 @@ internal sealed class ProjectFileOpenDialogController : IAsyncDisposable
         var app = focusTarget?.App;
         if (app is null)
         {
-            _setStatus("The file picker is unavailable until the workspace is initialized.", false, StatusTone.Warning);
+            _setStatus(SR.T("The file picker is unavailable until the workspace is initialized."), false, StatusTone.Warning);
             return;
         }
 
         var projectRoot = _getProjectRoot();
         if (string.IsNullOrWhiteSpace(projectRoot))
         {
-            _setStatus("Select a project or a project-backed session before opening a file.", false, StatusTone.Warning);
+            _setStatus(SR.T("Select a project or a project-backed session before opening a file."), false, StatusTone.Warning);
             return;
         }
 
@@ -283,7 +283,7 @@ internal sealed class ProjectFileOpenDialogController : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(_projectRoot))
         {
-            return "Open file";
+            return SR.T("Open file");
         }
 
         var projectName = Path.GetFileName(_projectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -292,7 +292,7 @@ internal sealed class ProjectFileOpenDialogController : IAsyncDisposable
             projectName = "..." + projectName[^Math.Max(0, DialogProjectNameMaxLength - 3)..];
         }
 
-        return $"Open file · {projectName}";
+        return SR.T("Open file · {0}", projectName);
     }
 
     private string BuildStatisticsText()
@@ -302,20 +302,22 @@ internal sealed class ProjectFileOpenDialogController : IAsyncDisposable
 
         if (indexedCount == 0)
         {
-            return _isRefreshing ? "Indexing project..." : "0 indexed";
+            return _isRefreshing ? SR.T("Indexing project...") : SR.T("0 indexed");
         }
 
         if (string.IsNullOrWhiteSpace(_activeQuery))
         {
-            return $"{indexedCount} indexed";
+            return SR.T("{0} indexed", indexedCount);
         }
 
         if (visibleCount == 0)
         {
-            return $"0 matches · {indexedCount} indexed";
+            return SR.T("0 matches · {0} indexed", indexedCount);
         }
 
-        return $"{(indexedCount > visibleCount ? $"Top {visibleCount}" : visibleCount.ToString())} matches · {indexedCount} indexed";
+        return indexedCount > visibleCount
+            ? SR.T("Top {0} matches · {1} indexed", visibleCount, indexedCount)
+            : SR.T("{0} matches · {1} indexed", visibleCount, indexedCount);
     }
 
     private string BuildStatusText()
@@ -324,17 +326,17 @@ internal sealed class ProjectFileOpenDialogController : IAsyncDisposable
         if (_isRefreshing)
         {
             return indexedCount <= 0
-                ? "Loading project files..."
-                : "Refreshing results...";
+                ? SR.T("Loading project files...")
+                : SR.T("Refreshing results...");
         }
 
         if (indexedCount == 0)
         {
-            return "No project files available";
+            return SR.T("No project files available");
         }
 
         return _items.Count == 0
-            ? "No files match the current search"
-            : "Enter opens the selected file";
+            ? SR.T("No files match the current search")
+            : SR.T("Enter opens the selected file");
     }
 }

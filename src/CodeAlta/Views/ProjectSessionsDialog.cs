@@ -64,11 +64,11 @@ internal sealed class ProjectSessionsDialog
         {
             _document
                 .AddColumn(new DataGridColumnInfo<bool>("select", "✅", false, ProjectSessionsDialogRowViewModel.Accessor.IsSelected))
-                .AddColumn(new DataGridColumnInfo<string>("provider", "🤖 Provider", true, ProjectSessionsDialogRowViewModel.Accessor.ProviderDisplayName))
-                .AddColumn(new DataGridColumnInfo<string>("title", "🧵 Session", false, ProjectSessionsDialogRowViewModel.Accessor.Title))
-                .AddColumn(new DataGridColumnInfo<DateTimeOffset?>("updated", "🕒 Updated", true, ProjectSessionsDialogRowViewModel.Accessor.LastUpdatedAt))
-                .AddColumn(new DataGridColumnInfo<int?>("messages", "💬 Messages", true, ProjectSessionsDialogRowViewModel.Accessor.MessageCount))
-                .AddColumn(new DataGridColumnInfo<string>("open", "🚀 Open", false, ProjectSessionsDialogRowViewModel.Accessor.SessionId));
+                .AddColumn(new DataGridColumnInfo<string>("provider", $"🤖 {SR.T("Provider")}", true, ProjectSessionsDialogRowViewModel.Accessor.ProviderDisplayName))
+                .AddColumn(new DataGridColumnInfo<string>("title", $"🧵 {SR.T("Session")}", false, ProjectSessionsDialogRowViewModel.Accessor.Title))
+                .AddColumn(new DataGridColumnInfo<DateTimeOffset?>("updated", $"🕒 {SR.T("Updated")}", true, ProjectSessionsDialogRowViewModel.Accessor.LastUpdatedAt))
+                .AddColumn(new DataGridColumnInfo<int?>("messages", $"💬 {SR.T("Messages")}", true, ProjectSessionsDialogRowViewModel.Accessor.MessageCount))
+                .AddColumn(new DataGridColumnInfo<string>("open", $"🚀 {SR.T("Open")}", false, ProjectSessionsDialogRowViewModel.Accessor.SessionId));
 
             foreach (var row in _state.Rows)
             {
@@ -109,7 +109,7 @@ internal sealed class ProjectSessionsDialog
         {
             _ = value;
             _ = context;
-            return new Button("Open")
+            return new Button(SR.T("Open"))
             {
                 IsHitTestVisible = false,
             }
@@ -119,7 +119,7 @@ internal sealed class ProjectSessionsDialog
         Visual BuildOpenButtonEditor(Binding<string> binding, in DataTemplateContext context)
         {
             _ = context;
-            return new Button("Open")
+            return new Button(SR.T("Open"))
                 .Tone(ControlTone.Primary)
                 .Click(() => _ = OpenSessionAsync(binding.GetValue()));
         }
@@ -135,7 +135,7 @@ internal sealed class ProjectSessionsDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "title",
-            Header = new TextBlock("🧵 Session"),
+            Header = new TextBlock($"🧵 {SR.T("Session")}"),
             TypedValueAccessor = ProjectSessionsDialogRowViewModel.Accessor.Title,
             Width = GridLength.Star(2),
             Sortable = true,
@@ -143,7 +143,7 @@ internal sealed class ProjectSessionsDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "provider",
-            Header = new TextBlock("🤖 Provider"),
+            Header = new TextBlock($"🤖 {SR.T("Provider")}"),
             TypedValueAccessor = ProjectSessionsDialogRowViewModel.Accessor.ProviderDisplayName,
             Width = GridLength.Auto,
             Sortable = true,
@@ -152,7 +152,7 @@ internal sealed class ProjectSessionsDialog
         grid.Columns.Add(new DataGridColumn<DateTimeOffset?>
         {
             Key = "updated",
-            Header = new TextBlock("🕒 Updated"),
+            Header = new TextBlock($"🕒 {SR.T("Updated")}"),
             TypedValueAccessor = ProjectSessionsDialogRowViewModel.Accessor.LastUpdatedAt,
             Width = GridLength.Auto,
             Sortable = true,
@@ -162,7 +162,7 @@ internal sealed class ProjectSessionsDialog
         grid.Columns.Add(new DataGridColumn<int?>
         {
             Key = "messages",
-            Header = new TextBlock("💬 Messages"),
+            Header = new TextBlock($"💬 {SR.T("Messages")}"),
             TypedValueAccessor = ProjectSessionsDialogRowViewModel.Accessor.MessageCount,
             Width = GridLength.Auto,
             CellAlignment = TextAlignment.Right,
@@ -191,7 +191,7 @@ internal sealed class ProjectSessionsDialog
         grid.Columns.Add(new DataGridColumn<string>
         {
             Key = "open",
-            Header = new TextBlock("🚀 Open"),
+            Header = new TextBlock($"🚀 {SR.T("Open")}"),
             TypedValueAccessor = ProjectSessionsDialogRowViewModel.Accessor.SessionId,
             Width = GridLength.Auto,
             CellActivationMode = DataGridCellActivationMode.DirectActivate,
@@ -199,7 +199,7 @@ internal sealed class ProjectSessionsDialog
             CellEditorTemplate = new DataTemplate<string>(null, BuildOpenButtonEditor),
         });
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -208,14 +208,14 @@ internal sealed class ProjectSessionsDialog
         closeButton.Click(Close);
 
         var toolbar = new HStack(
-            new Button("Select None").Click(_state.SelectNone),
-            new Button("Select All").Click(_state.SelectAll),
-            new Button("Invert").Click(_state.InvertSelection),
-            new Button("Delete Selected")
+            new Button(SR.T("Select None")).Click(_state.SelectNone),
+            new Button(SR.T("Select All")).Click(_state.SelectAll),
+            new Button(SR.T("Invert")).Click(_state.InvertSelection),
+            new Button(SR.T("Delete Selected"))
                 .Tone(ControlTone.Error)
                 .Click(() => _ = ConfirmDeleteSelectedAsync()),
-            new CheckBox("Filter row").IsChecked(_viewModel.Bind.FilterRowVisible),
-            new TextBlock(() => $"{_state.SelectedCount} selected"))
+            new CheckBox(SR.T("Filter row")).IsChecked(_viewModel.Bind.FilterRowVisible),
+            new TextBlock(() => SR.T("{0} selected", _state.SelectedCount)))
         {
             HorizontalAlignment = Align.Stretch,
             Spacing = 2,
@@ -230,9 +230,9 @@ internal sealed class ProjectSessionsDialog
         content.Cells.Add(new GridCell() { Column = 0, Row = 1, Content = new ScrollViewer(grid.Stretch()).Stretch() });
 
         _dialog = new Dialog()
-            .Title($"Sessions · {project.DisplayName}")
+            .Title($"{SR.T("Sessions")} · {project.DisplayName}")
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -240,8 +240,8 @@ internal sealed class ProjectSessionsDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.ProjectSessions.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the project session list dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the project session list dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -260,9 +260,9 @@ internal sealed class ProjectSessionsDialog
         }
 
         new ConfirmationDialog(
-            "Delete Selected Sessions",
-            [$"Delete {selectedSessionIds.Count} selected session(s)?"],
-            "Delete",
+            SR.T("Delete Selected Sessions"),
+            [SR.T("Delete {0} selected session(s)?", selectedSessionIds.Count)],
+            SR.T("Delete"),
             ControlTone.Error,
             async () =>
             {

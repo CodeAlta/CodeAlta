@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
@@ -58,7 +59,7 @@ internal static class ModelProviderPresentation
         if (providerState.Models.Count == 0)
         {
             return string.IsNullOrWhiteSpace(effectiveSelectedModelId)
-                ? [new ChatModelOption(null, "(default)")]
+                ? [new ChatModelOption(null, SR.T("(default)"))]
                 : [new ChatModelOption(effectiveSelectedModelId, effectiveSelectedModelId)];
         }
 
@@ -96,7 +97,7 @@ internal static class ModelProviderPresentation
 
         return efforts
             .Distinct()
-            .Select(static effort => new ChatReasoningOption(effort, SplitPascalCase(effort.ToString())))
+            .Select(static effort => new ChatReasoningOption(effort, FormatReasoningEffort(effort)))
             .ToList();
     }
 
@@ -140,7 +141,7 @@ internal static class ModelProviderPresentation
             });
 
         var prefix = isInitializing
-            ? $"[primary]{TerminalIcons.MdTimerOutline} Detecting[/] "
+            ? $"[primary]{TerminalIcons.MdTimerOutline} {SR.T("Detecting")}[/] "
             : string.Empty;
         return prefix + string.Join("   ", items);
     }
@@ -156,7 +157,7 @@ internal static class ModelProviderPresentation
         var states = providerStates.ToArray();
         if (isInitializing)
         {
-            return $"[primary]{TerminalIcons.MdTimerOutline} Detecting providers[/]";
+            return $"[primary]{TerminalIcons.MdTimerOutline} {SR.T("Detecting providers")}[/]";
         }
 
         HashSet<string>? configuredKeySet = null;
@@ -175,17 +176,17 @@ internal static class ModelProviderPresentation
             !states.Any(state => string.Equals(state.ProviderId.Value, key, StringComparison.OrdinalIgnoreCase))) ?? 0;
         var errorCount = stateErrorCount + missingConfiguredCount;
         var readyCount = states.Count(static state => state.Availability == ModelProviderAvailability.Ready);
-        var activeLabel = readyCount == 1 ? "active provider" : "active providers";
+        var activeLabel = readyCount == 1 ? SR.T("active provider") : SR.T("active providers");
         var activeTone = readyCount > 0 ? "success" : "muted";
         var activeIcon = readyCount > 0
             ? $"{TerminalIcons.MdCheckCircleOutline}"
             : $"{TerminalIcons.MdTuneVariant}";
         var activeSegment = $"[{activeTone}]{activeIcon} {readyCount} {activeLabel}[/]";
         var errorSegment = errorCount > 0
-            ? $" [warning]· {errorCount} error{(errorCount == 1 ? string.Empty : "s")}[/]"
+            ? $" [warning]· {(errorCount == 1 ? SR.T("1 error") : SR.T("{0} errors", errorCount))}[/]"
             : string.Empty;
         var configuredSegment = providerCount != readyCount
-            ? $" [dim]· {providerCount} configured[/]"
+            ? $" [dim]· {SR.T("{0} configured", providerCount)}[/]"
             : string.Empty;
 
         return $"{activeSegment}{configuredSegment}{errorSegment}";
@@ -249,15 +250,15 @@ internal static class ModelProviderPresentation
         var selectedModel = GetSelectedModel(providerState);
         if (selectedModel is not null)
         {
-            return $"Connected · {selectedModel.DisplayName ?? selectedModel.Id}";
+            return SR.T("Connected · {0}", selectedModel.DisplayName ?? selectedModel.Id);
         }
 
         var models = providerState.Models.ToArray();
         return models.Length switch
         {
-            0 => "Connected.",
-            1 => $"Connected · {models[0].DisplayName ?? models[0].Id}",
-            _ => $"Connected · {models.Length} models",
+            0 => SR.T("Connected."),
+            1 => SR.T("Connected · {0}", models[0].DisplayName ?? models[0].Id),
+            _ => SR.T("Connected · {0} models", models.Length),
         };
     }
 
@@ -265,17 +266,39 @@ internal static class ModelProviderPresentation
     {
         ArgumentNullException.ThrowIfNull(providerState);
 
-        var trimmed = string.IsNullOrWhiteSpace(message) ? "CLI not found." : message.Trim();
-        return $"{providerState.DisplayName} is unavailable: {trimmed}";
+        var trimmed = string.IsNullOrWhiteSpace(message) ? SR.T("CLI not found.") : message.Trim();
+        return SR.T("{0} is unavailable: {1}", providerState.DisplayName, trimmed);
     }
 
     public static string BuildFailedProviderMessage(ModelProviderState providerState, string message)
     {
         ArgumentNullException.ThrowIfNull(providerState);
 
-        var trimmed = string.IsNullOrWhiteSpace(message) ? "Failed to initialize provider." : message.Trim();
-        return $"{providerState.DisplayName} failed: {trimmed}";
+        var trimmed = string.IsNullOrWhiteSpace(message) ? SR.T("Failed to initialize provider.") : message.Trim();
+        return SR.T("{0} failed: {1}", providerState.DisplayName, trimmed);
     }
+
+    public static string FormatAvailability(ModelProviderAvailability availability)
+        => availability switch
+        {
+            ModelProviderAvailability.Ready => SR.T("ready"),
+            ModelProviderAvailability.Probing => SR.T("probing"),
+            ModelProviderAvailability.Failed => SR.T("failed"),
+            ModelProviderAvailability.Unsupported => SR.T("unsupported"),
+            _ => SR.T("unknown"),
+        };
+
+    public static string FormatReasoningEffort(AgentReasoningEffort effort)
+        => effort switch
+        {
+            AgentReasoningEffort.None => SR.T("None"),
+            AgentReasoningEffort.Minimal => SR.T("Minimal"),
+            AgentReasoningEffort.Low => SR.T("Low"),
+            AgentReasoningEffort.Medium => SR.T("Medium"),
+            AgentReasoningEffort.High => SR.T("High"),
+            AgentReasoningEffort.XHigh => SR.T("X High"),
+            _ => SR.T(SplitPascalCase(effort.ToString())),
+        };
 
     public static void ReplaceSelectItems<T>(Select<T> select, IReadOnlyList<T> items)
     {

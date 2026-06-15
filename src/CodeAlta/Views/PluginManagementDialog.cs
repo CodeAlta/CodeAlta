@@ -1,4 +1,5 @@
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.App;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
@@ -29,8 +30,8 @@ internal sealed class PluginManagementDialog
     private readonly Markup _summaryMarkup;
     private readonly Markup _statusMarkup;
     private readonly Visual _detailHost;
-    private string _summaryText = "[dim]Plugin configuration has not been loaded yet.[/]";
-    private string _statusText = "[dim]Use Refresh to reload plugin discovery and configuration.[/]";
+    private string _summaryText = $"[dim]{SR.T("Plugin configuration has not been loaded yet.")}[/]";
+    private string _statusText = $"[dim]{SR.T("Use Refresh to reload plugin discovery and configuration.")}[/]";
 
     public PluginManagementDialog(
         PluginManagementService service,
@@ -46,7 +47,7 @@ internal sealed class PluginManagementDialog
         _openFileAsync = openFileAsync;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -79,7 +80,7 @@ internal sealed class PluginManagementDialog
                     : BuildEmptyState();
             });
 
-        var refreshButton = new Button($"{TerminalIcons.MdRefresh} Refresh")
+        var refreshButton = new Button($"{TerminalIcons.MdRefresh} {SR.T("Refresh")}")
             .Tone(ControlTone.Primary)
             .Click(() => Reload(null));
 
@@ -94,26 +95,26 @@ internal sealed class PluginManagementDialog
         header.Cell(_summaryMarkup, 0, 0);
         header.Cell(refreshButton, 0, 1);
 
-        var intro = new Markup("[dim]Source plugins are trusted code: build and load operations can execute local plugin or package build logic. Use --no-plugins, --plugin-safe-mode, or CODEALTA_DISABLE_PLUGINS=1 if a plugin breaks startup.[/]")
+        var intro = new Markup($"[dim]{SR.T("Source plugins are trusted code: build and load operations can execute local plugin or package build logic. Use --no-plugins, --plugin-safe-mode, or CODEALTA_DISABLE_PLUGINS=1 if a plugin breaks startup.")}[/]")
         {
             Wrap = true,
         };
 
         var leftPane = new VStack(
-            new Group("Plugins")
+            new Group(SR.T("Plugins"))
                 .Style(GroupStyle.Rounded)
                 .Content(_pluginList.Stretch())
                 .Padding(new Thickness(1, 0, 1, 0))
                 .HorizontalAlignment(Align.Stretch)
                 .VerticalAlignment(Align.Stretch),
-            new Markup("[dim]Each row shows kind, scope, status, and a short description when available.[/]") { Wrap = true })
+            new Markup($"[dim]{SR.T("Each row shows kind, scope, status, and a short description when available.")}[/]") { Wrap = true })
         {
             HorizontalAlignment = Align.Stretch,
             VerticalAlignment = Align.Stretch,
             Spacing = 1,
         };
 
-        var rightPane = new Group("Plugin Details")
+        var rightPane = new Group(SR.T("Plugin Details"))
             .Style(GroupStyle.Rounded)
             .Content(new ScrollViewer(_detailHost).Stretch())
             .Padding(1)
@@ -144,9 +145,9 @@ internal sealed class PluginManagementDialog
         content.Cell(_statusMarkup, 3, 0);
 
         _dialog = new Dialog()
-            .Title("Plugins")
+            .Title(SR.T("Plugins"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -154,8 +155,8 @@ internal sealed class PluginManagementDialog
         _dialog.AddCommand(new UiCommand
         {
             Id = "CodeAlta.Plugins.Manage.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the plugins dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the plugins dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -179,8 +180,8 @@ internal sealed class PluginManagementDialog
             _plugins.AddRange(snapshot.Entries.Select(static entry => new PluginManagementRow(entry)));
             _summaryText = BuildSummaryMarkup(snapshot);
             _statusText = snapshot.Entries.Count == 0
-                ? "[warning]No built-in or source plugins were discovered for the current scope.[/]"
-                : "[dim]Select a plugin to inspect diagnostics, edit enablement, or open plugin files.[/]";
+                ? $"[warning]{SR.T("No built-in or source plugins were discovered for the current scope.")}[/]"
+                : $"[dim]{SR.T("Select a plugin to inspect diagnostics, edit enablement, or open plugin files.")}[/]";
 
             var selectedIndex = selectedKey is null ? -1 : FindPluginIndex(selectedKey);
             if (selectedIndex < 0 && _plugins.Count > 0)
@@ -194,7 +195,7 @@ internal sealed class PluginManagementDialog
         {
             _plugins.Clear();
             SetSelectedPluginIndex(-1);
-            _summaryText = "[error]Failed to load plugin management data.[/]";
+            _summaryText = $"[error]{SR.T("Failed to load plugin management data.")}[/]";
             _statusText = $"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]";
         }
     }
@@ -203,29 +204,29 @@ internal sealed class PluginManagementDialog
     {
         var entry = row.Entry;
         var enablement = new HStack(
-            new CheckBox("Enabled").IsChecked(row.EnabledState),
-            new Button("Apply")
+            new CheckBox(SR.T("Enabled")).IsChecked(row.EnabledState),
+            new Button(SR.T("Apply"))
                 .Tone(ControlTone.Success)
                 .IsEnabled(() => row.EnabledState.Value != entry.Enabled)
                 .Click(() => ApplyEnablement(row)),
             new Markup(() => row.EnabledState.Value == entry.Enabled
-                ? "[dim]Saved[/]"
-                : "[warning]Unsaved enablement change[/]") { Wrap = false })
+                ? $"[dim]{SR.T("Saved")}[/]"
+                : $"[warning]{SR.T("Unsaved enablement change")}[/]") { Wrap = false })
         {
             Spacing = 1,
         };
 
-        var sourceButton = new Button($"{TerminalIcons.MdFileDocumentEditOutline} Open plugin.cs")
+        var sourceButton = new Button($"{TerminalIcons.MdFileDocumentEditOutline} {SR.T("Open plugin.cs")}")
             .IsEnabled(!string.IsNullOrWhiteSpace(entry.SourcePath))
-            .Click(() => _ = OpenFileAsync(entry.SourcePath, "plugin source"));
-        var readmeButton = new Button($"{TerminalIcons.MdFileDocumentOutline} Open README")
+            .Click(() => _ = OpenFileAsync(entry.SourcePath, SR.T("plugin source")));
+        var readmeButton = new Button($"{TerminalIcons.MdFileDocumentOutline} {SR.T("Open README")}")
             .IsEnabled(!string.IsNullOrWhiteSpace(entry.ReadmePath))
-            .Click(() => _ = OpenFileAsync(entry.ReadmePath, "plugin README"));
-        var rebuildButton = new Button($"{TerminalIcons.MdCogRefreshOutline} Rebuild")
+            .Click(() => _ = OpenFileAsync(entry.ReadmePath, SR.T("plugin README")));
+        var rebuildButton = new Button($"{TerminalIcons.MdCogRefreshOutline} {SR.T("Rebuild")}")
             .IsEnabled(false);
-        var reloadButton = new Button($"{TerminalIcons.MdReload} Reload")
+        var reloadButton = new Button($"{TerminalIcons.MdReload} {SR.T("Reload")}")
             .IsEnabled(false);
-        var cleanButton = new Button($"{TerminalIcons.MdDeleteSweepOutline} Clean")
+        var cleanButton = new Button($"{TerminalIcons.MdDeleteSweepOutline} {SR.T("Clean")}")
             .IsEnabled(false);
 
         var actionPane = new VStack(
@@ -233,7 +234,7 @@ internal sealed class PluginManagementDialog
             {
                 Spacing = 1,
             },
-            new Markup("[dim]Open actions are available now. Rebuild, Reload, and Clean are shown in-place and will be enabled when runtime action handlers are connected.[/]") { Wrap = true })
+            new Markup($"[dim]{SR.T("Open actions are available now. Rebuild, Reload, and Clean are shown in-place and will be enabled when runtime action handlers are connected.")}[/]") { Wrap = true })
         {
             HorizontalAlignment = Align.Stretch,
             Spacing = 1,
@@ -242,11 +243,11 @@ internal sealed class PluginManagementDialog
         return new VStack(
             new Markup(BuildSelectedTitleMarkup(entry)) { Wrap = true },
             new Markup(BuildSelectedDescriptionMarkup(entry)) { Wrap = true },
-            CreateSection("Enablement", enablement),
-            CreateSection("Actions", actionPane),
-            CreateSection("Properties", BuildPropertiesGrid(entry)),
-            CreateSection("Diagnostics", new Markup(BuildDiagnosticsMarkup(entry)) { Wrap = true }),
-            CreateSection("Contributions", new Markup(BuildContributionsMarkup(entry)) { Wrap = true }))
+            CreateSection(SR.T("Enablement"), enablement),
+            CreateSection(SR.T("Actions"), actionPane),
+            CreateSection(SR.T("Properties"), BuildPropertiesGrid(entry)),
+            CreateSection(SR.T("Diagnostics"), new Markup(BuildDiagnosticsMarkup(entry)) { Wrap = true }),
+            CreateSection(SR.T("Contributions"), new Markup(BuildContributionsMarkup(entry)) { Wrap = true }))
         {
             HorizontalAlignment = Align.Stretch,
             VerticalAlignment = Align.Start,
@@ -259,7 +260,7 @@ internal sealed class PluginManagementDialog
         var enabled = row.EnabledState.Value;
         if (enabled == row.Entry.Enabled)
         {
-            _statusText = "[dim]No plugin enablement changes to save.[/]";
+            _statusText = $"[dim]{SR.T("No plugin enablement changes to save.")}[/]";
             return;
         }
 
@@ -267,8 +268,8 @@ internal sealed class PluginManagementDialog
         {
             _service.SetPluginEnabled(row.Entry, enabled);
             var statusText = enabled
-                ? "[success]Plugin enablement saved. Restart or reload plugins to apply runtime changes.[/]"
-                : "[success]Plugin disablement saved. Restart or reload plugins to unload active runtime contributions.[/]";
+                ? $"[success]{SR.T("Plugin enablement saved. Restart or reload plugins to apply runtime changes.")}[/]"
+                : $"[success]{SR.T("Plugin disablement saved. Restart or reload plugins to unload active runtime contributions.")}[/]";
             Reload(row.Entry.Key);
             _statusText = statusText;
         }
@@ -283,18 +284,18 @@ internal sealed class PluginManagementDialog
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            _statusText = $"[warning]This plugin does not have a {AnsiMarkup.Escape(label)} path.[/]";
+            _statusText = $"[warning]{SR.T("This plugin does not have a {0} path.", AnsiMarkup.Escape(label))}[/]";
             return;
         }
 
         try
         {
             await _openFileAsync(path, CancellationToken.None);
-            _statusText = $"[success]Opened {AnsiMarkup.Escape(label)}.[/]";
+            _statusText = $"[success]{SR.T("Opened {0}.", AnsiMarkup.Escape(label))}[/]";
         }
         catch (Exception ex)
         {
-            _statusText = $"[error]Failed to open {AnsiMarkup.Escape(label)}:[/] {AnsiMarkup.Escape(ex.GetBaseException().Message)}";
+            _statusText = $"[error]{SR.T("Failed to open {0}:", AnsiMarkup.Escape(label))}[/] {AnsiMarkup.Escape(ex.GetBaseException().Message)}";
         }
     }
 
@@ -338,7 +339,7 @@ internal sealed class PluginManagementDialog
         var description = GetDescription(entry);
         if (string.IsNullOrWhiteSpace(description))
         {
-            description = "No description was discovered for this plugin.";
+            description = SR.T("No description was discovered for this plugin.");
         }
 
         return AnsiMarkup.Escape(description);
@@ -348,16 +349,16 @@ internal sealed class PluginManagementDialog
     {
         var rows = new List<(string Label, string? Value)>
         {
-            ("Key", entry.Key),
-            ("Plugin Id", entry.PluginId),
-            ("Kind", entry.LoadUnitKind.ToString()),
-            ("Scope", entry.Scope.ToString()),
-            ("Configured", entry.Enabled ? "Enabled" : "Disabled"),
-            ("Source", entry.SourcePath),
+            (SR.T("Key"), entry.Key),
+            (SR.T("Plugin Id"), entry.PluginId),
+            (SR.T("Kind"), entry.LoadUnitKind.ToString()),
+            (SR.T("Scope"), entry.Scope.ToString()),
+            (SR.T("Configured"), entry.Enabled ? SR.T("Enabled") : SR.T("Disabled")),
+            (SR.T("Source"), entry.SourcePath),
             ("README", entry.ReadmePath),
-            ("Output", entry.OutputAssemblyPath),
-            ("Build", entry.LastBuildSummary?.ToString()),
-            ("Reason", TryGetMetadata(entry, "Reason")),
+            (SR.T("Output"), entry.OutputAssemblyPath),
+            (SR.T("Build"), entry.LastBuildSummary?.ToString()),
+            (SR.T("Reason"), TryGetMetadata(entry, "Reason")),
         };
 
         var grid = new Grid
@@ -380,7 +381,7 @@ internal sealed class PluginManagementDialog
 
         if (rowIndex == 0)
         {
-            return new TextBlock("No properties available.") { Wrap = true };
+            return new TextBlock(SR.T("No properties available.")) { Wrap = true };
         }
 
         return grid;
@@ -390,7 +391,7 @@ internal sealed class PluginManagementDialog
     {
         if (entry.Diagnostics.Count == 0)
         {
-            return "[success]No diagnostics.[/]";
+            return $"[success]{SR.T("No diagnostics.")}[/]";
         }
 
         var builder = new StringBuilder();
@@ -416,8 +417,8 @@ internal sealed class PluginManagementDialog
         if (entry.Contributions.Count == 0)
         {
             return entry.Enabled
-                ? "[dim]No active contributions were reported for this snapshot.[/]"
-                : "[dim]Disabled plugins do not contribute runtime features.[/]";
+                ? $"[dim]{SR.T("No active contributions were reported for this snapshot.")}[/]"
+                : $"[dim]{SR.T("Disabled plugins do not contribute runtime features.")}[/]";
         }
 
         var builder = new StringBuilder();
@@ -436,19 +437,19 @@ internal sealed class PluginManagementDialog
     private static string BuildSummaryMarkup(PluginManagementSnapshot snapshot)
     {
         var builder = new StringBuilder();
-        builder.Append("[bold]Status:[/] ");
-        builder.Append(snapshot.SafeMode ? "[warning]safe mode enabled[/]" : "[success]plugins enabled by policy[/]");
+        builder.Append("[bold]").Append(SR.T("Status")).Append(":[/] ");
+        builder.Append(snapshot.SafeMode ? $"[warning]{SR.T("safe mode enabled")}[/]" : $"[success]{SR.T("plugins enabled by policy")}[/]");
         if (!string.IsNullOrWhiteSpace(snapshot.ProjectPath))
         {
-            builder.Append("  [bold]Project root:[/] ").Append(AnsiMarkup.Escape(snapshot.ProjectPath));
+            builder.Append("  [bold]").Append(SR.T("Project root")).Append(":[/] ").Append(AnsiMarkup.Escape(snapshot.ProjectPath));
         }
 
-        builder.Append("  [bold]Plugins:[/] ").Append(snapshot.Entries.Count);
+        builder.Append("  [bold]").Append(SR.T("Plugins")).Append(":[/] ").Append(snapshot.Entries.Count);
         return builder.ToString();
     }
 
     private static Visual BuildEmptyState()
-        => new TextBlock("Select a plugin on the left to inspect diagnostics, edit enablement, and open source or README files.")
+        => new TextBlock(SR.T("Select a plugin on the left to inspect diagnostics, edit enablement, and open source or README files."))
         {
             Wrap = true,
         };
@@ -468,21 +469,21 @@ internal sealed class PluginManagementDialog
     private static string FormatStateText(PluginManagementState state)
         => state switch
         {
-            PluginManagementState.Active => "active",
-            PluginManagementState.Enabled => "enabled",
-            PluginManagementState.Disabled => "disabled",
-            PluginManagementState.Failed => "failed",
-            PluginManagementState.Changed => "changed",
-            PluginManagementState.UnknownConfig => "unknown config",
+            PluginManagementState.Active => SR.T("active"),
+            PluginManagementState.Enabled => SR.T("enabled"),
+            PluginManagementState.Disabled => SR.T("disabled"),
+            PluginManagementState.Failed => SR.T("failed"),
+            PluginManagementState.Changed => SR.T("changed"),
+            PluginManagementState.UnknownConfig => SR.T("unknown config"),
             _ => state.ToString(),
         };
 
     private static string FormatKind(PluginManagementEntry entry)
         => entry.LoadUnitKind == PluginLoadUnitKind.BuiltIn
-            ? "built-in"
+            ? SR.T("built-in")
             : entry.Scope == PluginScope.Project
-                ? "project source"
-                : "global source";
+                ? SR.T("project source")
+                : SR.T("global source");
 
     private static string GetDescription(PluginManagementEntry entry)
         => TryGetMetadata(entry, "Description") ?? string.Empty;

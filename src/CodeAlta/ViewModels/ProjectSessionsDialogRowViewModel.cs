@@ -11,8 +11,8 @@ public sealed partial class ProjectSessionsDialogRowViewModel
         Title = string.Empty;
         ProviderId = string.Empty;
         ProviderDisplayName = string.Empty;
-        LastUpdatedRelative = "never";
-        LastUpdatedExact = "Never";
+        LastUpdatedRelative = SR.T("never");
+        LastUpdatedExact = SR.T("Never");
     }
 
     [Bindable]

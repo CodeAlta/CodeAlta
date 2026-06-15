@@ -1,5 +1,6 @@
 using CodeAlta.Threading;
 using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using CodeAlta.App;
 using CodeAlta.Models;
@@ -228,8 +229,8 @@ internal sealed class ToolCallPresenter
             _uiDispatcher,
             static timestampValue =>
             {
-                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{TerminalIcons.CodTools}[/] [bold]Tool Calls[/]");
-                var summaryText = new Markup("[dim]Waiting for tool activity...[/]");
+                var headerText = new Markup($"[{UiPalette.MutedMarkup}]{TerminalIcons.CodTools}[/] [bold]{SR.T("Tool Calls")}[/]");
+                var summaryText = new Markup($"[dim]{SR.T("Waiting for tool activity...")}[/]");
                 var timestampText = new Markup(string.Empty);
                 var itemsHost = new WrapHStack { Spacing = 1, RunSpacing = 0 };
                 Group? card = null;
@@ -310,21 +311,21 @@ internal sealed class ToolCallPresenter
             var wrapText = new State<bool>(true);
             var log = new LogControl { MaxCapacity = ToolCallDialogLogCapacity, HorizontalAlignment = Align.Stretch, VerticalAlignment = Align.Stretch }.WrapText(wrapText);
             var statsText = new Markup(string.Empty);
-            var detailsGroup = new Group("Details", metadata).Padding(new Thickness(1, 0, 1, 0)).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Start);
-            var outputGroup = new Group("Diff / Output", log).TopRightText(new CheckBox("Wrap").IsChecked(wrapText)).Padding(0).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Stretch);
+            var detailsGroup = new Group(SR.T("Details"), metadata).Padding(new Thickness(1, 0, 1, 0)).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Start);
+            var outputGroup = new Group(SR.T("Diff / Output"), log).TopRightText(new CheckBox(SR.T("Wrap")).IsChecked(wrapText)).Padding(0).HorizontalAlignment(Align.Stretch).VerticalAlignment(Align.Stretch);
             var bounds = _getDialogBounds() ?? entry.Button.GetAbsoluteBounds();
-            var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
+            var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}")) { HorizontalAlignment = Align.End, VerticalAlignment = Align.Start, Tone = ControlTone.Error };
             closeButton.Click(() => CloseDialog(entry));
             var dialog = new Dialog()
                 .Title(ToolCallEventInterpreter.ResolveToolDisplayName(entry.ActivityKind, entry.DisplayName))
                 .TopRightText(closeButton)
                 .BottomLeftText(statsText)
-                .BottomRightText(new Markup("[dim]Ctrl+F Search[/]"))
+                .BottomRightText(new Markup($"[dim]{SR.T("Ctrl+F Search")}[/]"))
                 .IsModal(true)
                 .Padding(1)
                 .Content(new Grid().Rows(new RowDefinition { Height = GridLength.Auto }, new RowDefinition { Height = GridLength.Star(1) }).Columns(new ColumnDefinition { Width = GridLength.Star(1) }).Cell(detailsGroup, 0, 0).Cell(outputGroup, 1, 0));
             ResponsiveDialogSize.Apply(dialog, bounds, minWidth: 56, minHeight: 16);
-            dialog.AddCommand(new Command { Id = "ToolCallDialog.Close", LabelMarkup = "Close", DescriptionMarkup = "Close tool call details.", Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => CloseDialog(entry) });
+            dialog.AddCommand(new Command { Id = "ToolCallDialog.Close", LabelMarkup = SR.T("Close"), DescriptionMarkup = SR.T("Close tool call details."), Gesture = new KeyGesture(TerminalKey.Escape), Importance = CommandImportance.Primary, Execute = _ => CloseDialog(entry) });
             dialog.KeyDown((_, e) => { if (e.Key == TerminalKey.Escape) { CloseDialog(entry); e.Handled = true; } });
             entry.DetailDialog = dialog;
             entry.DetailMetadata = metadata;
@@ -349,7 +350,7 @@ internal sealed class ToolCallPresenter
             entry.DetailLog.Clear();
             if (!string.IsNullOrWhiteSpace(entry.DiffText))
             {
-                entry.DetailLog.AppendMarkupLine($"[{UiPalette.MutedMarkup}]Diff[/]");
+                entry.DetailLog.AppendMarkupLine($"[{UiPalette.MutedMarkup}]{SR.T("Diff")}[/]");
                 foreach (var line in ToolCallEventInterpreter.SplitToolOutputLines(entry.DiffText!))
                 {
                     entry.DetailLog.AppendMarkupLine(FileChangeSummaryFormatter.GetDiffLineMarkup(line));
@@ -358,7 +359,7 @@ internal sealed class ToolCallPresenter
                 if (entry.OutputBuffer.Length > 0)
                 {
                     entry.DetailLog.AppendLine(string.Empty);
-                    entry.DetailLog.AppendMarkupLine($"[{UiPalette.MutedMarkup}]Output[/]");
+                    entry.DetailLog.AppendMarkupLine($"[{UiPalette.MutedMarkup}]{SR.T("Output")}[/]");
                 }
             }
 

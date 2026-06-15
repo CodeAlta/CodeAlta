@@ -78,7 +78,7 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
         try
         {
             await UiDispatcher.InvokeAsync(
-                    () => _shell.SetStatus("Refreshing project and session catalog...", showSpinner: true),
+                    () => _shell.SetStatus(SR.T("Refreshing project and session catalog..."), showSpinner: true),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -100,7 +100,7 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
         catch (Exception ex)
         {
             await UiDispatcher.InvokeAsync(
-                    () => _shell.SetStatus($"Failed to refresh catalog: {ex.Message}", tone: StatusTone.Error))
+                    () => _shell.SetStatus(SR.T("Failed to refresh catalog: {0}", ex.Message), tone: StatusTone.Error))
                 .ConfigureAwait(false);
         }
     }
@@ -188,7 +188,7 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
         cancellationToken.ThrowIfCancellationRequested();
 
         await UiDispatcher.InvokeAsync(
-                () => _shell.SetStatus($"Opening '{folderPath}'...", showSpinner: true),
+                () => _shell.SetStatus(SR.T("Opening '{0}'...", folderPath), showSpinner: true),
                 cancellationToken)
             .ConfigureAwait(false);
 

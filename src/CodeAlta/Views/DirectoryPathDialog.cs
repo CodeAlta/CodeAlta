@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.App;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Sidebar;
@@ -41,14 +42,14 @@ internal sealed class DirectoryPathDialog
         ArgumentNullException.ThrowIfNull(dialogService);
 
         _dialogService = dialogService;
-        _includeHiddenCheckBox = new CheckBox("Include hidden", false);
+        _includeHiddenCheckBox = new CheckBox(SR.T("Include hidden"), false);
         _includeHiddenCheckBox.KeyDown((_, e) => RefreshSuggestionsAfterToggle(e));
         _includeHiddenCheckBox.PointerPressed((_, e) => RefreshSuggestionsAfterPointerToggle(e));
         _suggestionProvider = new DirectoryPathCompletionProvider(
             includeHidden: () => _includeHiddenCheckBox.IsChecked,
             projects: () => _dialogService.GetProjects() ?? []);
 
-        var placeholderText = placeholder ?? "Project name from the sidebar or C:\\code\\SomeFolder";
+        var placeholderText = placeholder ?? SR.T("Project name from the sidebar or C:\\code\\SomeFolder");
         TextBox? editor = null;
         editor = new TextBox()
             .Placeholder(placeholderText)
@@ -83,7 +84,7 @@ internal sealed class DirectoryPathDialog
             .VerticalAlignment(Align.Stretch)
             .MinHeight(5);
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -91,7 +92,7 @@ internal sealed class DirectoryPathDialog
         };
         closeButton.Click(Close);
 
-        var cancelButton = new Button("Cancel")
+        var cancelButton = new Button(SR.T("Cancel"))
         {
             Tone = ControlTone.Default,
         };
@@ -137,7 +138,7 @@ internal sealed class DirectoryPathDialog
         _dialog = new Dialog()
             .Title(title)
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Arrows select · Enter open · Tab complete · Ctrl+I hidden[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Arrows select · Enter open · Tab complete · Ctrl+I hidden")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content)
@@ -146,8 +147,8 @@ internal sealed class DirectoryPathDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.DirectoryPathDialog.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the directory input dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the directory input dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(),
@@ -155,8 +156,8 @@ internal sealed class DirectoryPathDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.DirectoryPathDialog.ToggleIncludeHidden",
-            LabelMarkup = "Toggle Include Hidden",
-            DescriptionMarkup = "Toggle archived projects in the open-project picker.",
+            LabelMarkup = SR.T("Toggle Include Hidden"),
+            DescriptionMarkup = SR.T("Toggle archived projects in the open-project picker."),
             Gesture = new KeyGesture(TerminalChar.CtrlI, TerminalModifiers.Ctrl),
             Importance = CommandImportance.Secondary,
             Execute = _ => ToggleIncludeHidden(),
@@ -393,7 +394,7 @@ internal sealed class DirectoryPathDialog
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "A project name or rooted path is required.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("A project name or rooted path is required."));
         }
 
         var trimmed = text.Trim();
@@ -401,7 +402,7 @@ internal sealed class DirectoryPathDialog
         {
             if (!OpenProjectRequestResolver.LooksLikePath(trimmed))
             {
-                return new ValidationMessage(ValidationSeverity.Error, "Folder paths must be rooted, for example C:\\code\\CodeAlta or ~/repo.");
+                return new ValidationMessage(ValidationSeverity.Error, SR.T("Folder paths must be rooted, for example C:\\code\\CodeAlta or ~/repo."));
             }
 
             string normalizedPath;
@@ -420,7 +421,7 @@ internal sealed class DirectoryPathDialog
                 return null;
             }
 
-            return new ValidationMessage(ValidationSeverity.Error, $"Folder '{normalizedPath}' was not found.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Folder '{0}' was not found.", normalizedPath));
         }
 
         var projects = _dialogService.GetProjects();
@@ -454,13 +455,13 @@ internal sealed class DirectoryPathDialog
         if (hasProjectPrefixMatch)
         {
             return requireExactProjectMatch
-                ? new ValidationMessage(ValidationSeverity.Error, "Choose a suggestion or enter the full project name.")
+                ? new ValidationMessage(ValidationSeverity.Error, SR.T("Choose a suggestion or enter the full project name."))
                 : null;
         }
 
         return new ValidationMessage(
             ValidationSeverity.Error,
-            $"Project '{trimmed}' was not found. Enter a rooted path or use an existing project name from the sidebar.");
+            SR.T("Project '{0}' was not found. Enter a rooted path or use an existing project name from the sidebar.", trimmed));
     }
 
     private static bool LooksLikePathAttempt(string text)

@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
@@ -54,7 +55,7 @@ internal sealed class ModelProviderModelSelectionDialog
         _modelList.Items.AddRange(_models);
         SelectInitialModel();
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -62,10 +63,10 @@ internal sealed class ModelProviderModelSelectionDialog
         };
         closeButton.Click(() => Close(restoreFocus: true));
 
-        var selectButton = new Button("Select")
+        var selectButton = new Button(SR.T("Select"))
             .Tone(ControlTone.Primary)
             .Click(SelectHighlighted);
-        var cancelButton = new Button("Cancel")
+        var cancelButton = new Button(SR.T("Cancel"))
             .Tone(ControlTone.Default)
             .Click(() => Close(restoreFocus: true));
 
@@ -79,7 +80,7 @@ internal sealed class ModelProviderModelSelectionDialog
                 new RowDefinition { Height = GridLength.Star(1) },
                 new RowDefinition { Height = GridLength.Auto })
             .Columns(new ColumnDefinition { Width = GridLength.Star(1) });
-        content.Cell(new Markup("[dim]Choose a model for this provider. No model turn is sent while listing or selecting models.[/]") { Wrap = true }, 0, 0);
+        content.Cell(new Markup($"[dim]{SR.T("Choose a model for this provider. No model turn is sent while listing or selecting models.")}[/]") { Wrap = true }, 0, 0);
         content.Cell(
             new Border(new ScrollViewer(_modelList.Stretch()).Stretch())
                 .Style(BorderStyle.Rounded)
@@ -95,9 +96,9 @@ internal sealed class ModelProviderModelSelectionDialog
         }, 2, 0);
 
         _dialog = new Dialog()
-            .Title($"Select Model · {providerLabel}")
+            .Title(SR.T("Select Model · {0}", providerLabel))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Enter Select · Esc Close[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Enter Select · Esc Close")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content)
@@ -106,8 +107,8 @@ internal sealed class ModelProviderModelSelectionDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.ModelSelector.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the provider model selector.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the provider model selector."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => Close(restoreFocus: true),
@@ -115,8 +116,8 @@ internal sealed class ModelProviderModelSelectionDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.ModelSelector.Select",
-            LabelMarkup = "Select",
-            DescriptionMarkup = "Select the highlighted model for this provider.",
+            LabelMarkup = SR.T("Select"),
+            DescriptionMarkup = SR.T("Select the highlighted model for this provider."),
             Gesture = new KeyGesture(TerminalKey.Enter),
             Importance = CommandImportance.Primary,
             Execute = _ => SelectHighlighted(),

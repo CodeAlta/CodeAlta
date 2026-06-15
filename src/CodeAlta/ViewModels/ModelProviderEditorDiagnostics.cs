@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.ViewModels;
@@ -53,21 +54,21 @@ internal static class ModelProviderEditorDiagnostics
         {
             entries.Add(new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Info,
-                "Vertex AI uses Google application-default credentials from the current environment."));
+                SR.T("Vertex AI uses Google application-default credentials from the current environment.")));
         }
 
         if (item.ProviderType == "azure-openai" && item.Enabled)
         {
             entries.Add(new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Info,
-                "Azure OpenAI uses deployment names as model IDs; set Model or Single Model Id to your deployment name."));
+                SR.T("Azure OpenAI uses deployment names as model IDs; set Model or Single Model Id to your deployment name.")));
         }
 
         if (ShouldShowCustomApiUrlGuidance(item))
         {
             entries.Add(new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Info,
-                "Custom API URL configured. Use Test Provider to verify endpoint reachability."));
+                SR.T("Custom API URL configured. Use Test Provider to verify endpoint reachability.")));
         }
 
         if (item.LastTestState == ModelProviderLastTestState.Success &&
@@ -75,21 +76,21 @@ internal static class ModelProviderEditorDiagnostics
         {
             entries.Insert(0, new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Info,
-                $"Last test succeeded: {item.LastTestMessage!.Trim()}"));
+                SR.T("Last test succeeded: {0}", item.LastTestMessage!.Trim())));
         }
         else if (item.LastTestState == ModelProviderLastTestState.Failed &&
                  !string.IsNullOrWhiteSpace(item.LastTestMessage))
         {
             entries.Insert(0, new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Error,
-                $"Last test failed: {item.LastTestMessage!.Trim()}"));
+                SR.T("Last test failed: {0}", item.LastTestMessage!.Trim())));
         }
         else if (item.LastTestState == ModelProviderLastTestState.Testing)
         {
             entries.Insert(0, new ModelProviderDiagnosticEntry(
                 ValidationSeverity.Info,
                 string.IsNullOrWhiteSpace(item.LastTestMessage)
-                    ? "Provider test is running."
+                    ? SR.T("Provider test is running.")
                     : item.LastTestMessage!.Trim()));
         }
 
@@ -115,19 +116,19 @@ internal static class ModelProviderEditorDiagnostics
 
         if (string.IsNullOrWhiteSpace(item.ProviderKey))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Provider key is required.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Provider key is required."));
         }
 
         var normalized = item.ProviderKey.Trim().ToLowerInvariant();
         if (normalized.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_')))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Use lowercase letters, numbers, '-' or '_'.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Use lowercase letters, numbers, '-' or '_'."));
         }
 
         if (providers.Any(other => !ReferenceEquals(other, item) &&
                                    string.Equals(other.ProviderKey, normalized, StringComparison.OrdinalIgnoreCase)))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Provider key is already used.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Provider key is already used."));
         }
 
         return null;
@@ -144,7 +145,7 @@ internal static class ModelProviderEditorDiagnostics
 
         return HasResolvedApiCredential(item)
             ? null
-            : new ValidationMessage(ValidationSeverity.Error, "Enter an API key or configure a non-empty API Key Env.");
+            : new ValidationMessage(ValidationSeverity.Error, SR.T("Enter an API key or configure a non-empty API Key Env."));
     }
 
     public static ValidationMessage? ValidateApiKeyEnv(ModelProviderEditorItemViewModel item)
@@ -158,7 +159,7 @@ internal static class ModelProviderEditorDiagnostics
         }
 
         return string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(envName))
-            ? new ValidationMessage(ValidationSeverity.Warning, $"Environment variable {envName} is empty in this CodeAlta process.")
+            ? new ValidationMessage(ValidationSeverity.Warning, SR.T("Environment variable {0} is empty in this CodeAlta process.", envName))
             : null;
     }
 
@@ -169,7 +170,7 @@ internal static class ModelProviderEditorDiagnostics
         if (item.ProviderType == "azure-openai" && item.Enabled &&
             (item.UseDefaultApiUrl || string.IsNullOrWhiteSpace(item.ApiUrl)))
         {
-            return new ValidationMessage(ValidationSeverity.Error, "Azure OpenAI requires the resource endpoint in API URL.");
+            return new ValidationMessage(ValidationSeverity.Error, SR.T("Azure OpenAI requires the resource endpoint in API URL."));
         }
 
         if (item.UseDefaultApiUrl || string.IsNullOrWhiteSpace(item.ApiUrl))
@@ -179,7 +180,7 @@ internal static class ModelProviderEditorDiagnostics
 
         return Uri.TryCreate(item.ApiUrl.Trim(), UriKind.Absolute, out _)
             ? null
-            : new ValidationMessage(ValidationSeverity.Error, "Use an absolute URL.");
+            : new ValidationMessage(ValidationSeverity.Error, SR.T("Use an absolute URL."));
     }
 
     public static ValidationMessage? ValidateVertexProject(ModelProviderEditorItemViewModel item)
@@ -192,7 +193,7 @@ internal static class ModelProviderEditorDiagnostics
         }
 
         return string.IsNullOrWhiteSpace(item.Project)
-            ? new ValidationMessage(ValidationSeverity.Error, "Project is required for enabled Vertex AI providers.")
+            ? new ValidationMessage(ValidationSeverity.Error, SR.T("Project is required for enabled Vertex AI providers."))
             : null;
     }
 
@@ -209,7 +210,7 @@ internal static class ModelProviderEditorDiagnostics
         var hasSingleModelId = !item.UseDefaultSingleModelId && !string.IsNullOrWhiteSpace(item.SingleModelId);
         return hasModel || hasSingleModelId
             ? null
-            : new ValidationMessage(ValidationSeverity.Error, "Azure OpenAI requires Model or Single Model Id to be a deployment name.");
+            : new ValidationMessage(ValidationSeverity.Error, SR.T("Azure OpenAI requires Model or Single Model Id to be a deployment name."));
     }
 
     public static ValidationMessage? ValidateVertexLocation(ModelProviderEditorItemViewModel item)
@@ -222,7 +223,7 @@ internal static class ModelProviderEditorDiagnostics
         }
 
         return string.IsNullOrWhiteSpace(item.Location)
-            ? new ValidationMessage(ValidationSeverity.Error, "Location is required for enabled Vertex AI providers.")
+            ? new ValidationMessage(ValidationSeverity.Error, SR.T("Location is required for enabled Vertex AI providers."))
             : null;
     }
 
@@ -316,12 +317,12 @@ internal static class ModelProviderEditorDiagnostics
 
         if (item.LastTestState == ModelProviderLastTestState.Success)
         {
-            return "Tested successfully";
+            return SR.T("Tested successfully");
         }
 
         if (item.LastTestState == ModelProviderLastTestState.Testing)
         {
-            return "Testing...";
+            return SR.T("Testing...");
         }
 
         if (item.ProviderType == "codex" &&
@@ -332,46 +333,46 @@ internal static class ModelProviderEditorDiagnostics
 
         if (item.LastTestState == ModelProviderLastTestState.Failed)
         {
-            return "Test failed";
+            return SR.T("Test failed");
         }
 
         if (entries.Any(entry => entry.Severity == ValidationSeverity.Error &&
                                  entry.Message.Contains("API key", StringComparison.OrdinalIgnoreCase)))
         {
-            return "Missing credentials";
+            return SR.T("Missing credentials");
         }
 
         if (entries.Any(entry => entry.Severity == ValidationSeverity.Warning &&
                                  entry.Message.Contains("Environment variable", StringComparison.OrdinalIgnoreCase)))
         {
-            return "Env var missing";
+            return SR.T("Env var missing");
         }
 
         if (entries.Any(entry => entry.Severity == ValidationSeverity.Error &&
                                  entry.Message.Contains("absolute URL", StringComparison.OrdinalIgnoreCase)))
         {
-            return "Invalid API URL";
+            return SR.T("Invalid API URL");
         }
 
         if (entries.Any(entry => entry.Severity == ValidationSeverity.Error &&
                                  entry.Message.Contains("Provider key", StringComparison.OrdinalIgnoreCase)))
         {
-            return "Invalid provider key";
+            return SR.T("Invalid provider key");
         }
 
         if (entries.Any(entry => entry.Severity == ValidationSeverity.Error &&
                                  entry.Message.Contains("Vertex AI", StringComparison.OrdinalIgnoreCase)))
         {
-            return "Missing Vertex settings";
+            return SR.T("Missing Vertex settings");
         }
 
         return statusKind switch
         {
-            ModelProviderUiStatusKind.Disabled => "Disabled",
-            ModelProviderUiStatusKind.Success => "Tested successfully",
-            ModelProviderUiStatusKind.Warning => "Needs review",
-            ModelProviderUiStatusKind.Error => "Needs attention",
-            _ => "Ready to test",
+            ModelProviderUiStatusKind.Disabled => SR.T("Disabled"),
+            ModelProviderUiStatusKind.Success => SR.T("Tested successfully"),
+            ModelProviderUiStatusKind.Warning => SR.T("Needs review"),
+            ModelProviderUiStatusKind.Error => SR.T("Needs attention"),
+            _ => SR.T("Ready to test"),
         };
     }
 
@@ -383,7 +384,7 @@ internal static class ModelProviderEditorDiagnostics
         statusText = string.Empty;
         if (!item.Enabled)
         {
-            statusText = "Not configured";
+            statusText = SR.T("Not configured");
             return true;
         }
 
@@ -395,7 +396,7 @@ internal static class ModelProviderEditorDiagnostics
             if (failure.Contains("expired", StringComparison.OrdinalIgnoreCase) &&
                 failure.Contains("refresh", StringComparison.OrdinalIgnoreCase))
             {
-                statusText = "Token expired; refresh available";
+                statusText = SR.T("Token expired; refresh available");
                 return true;
             }
 
@@ -403,7 +404,7 @@ internal static class ModelProviderEditorDiagnostics
                 failure.Contains("re-authentication", StringComparison.OrdinalIgnoreCase) ||
                 failure.Contains("authentication failed", StringComparison.OrdinalIgnoreCase))
             {
-                statusText = "Login required";
+                statusText = SR.T("Login required");
                 return true;
             }
 
@@ -412,14 +413,14 @@ internal static class ModelProviderEditorDiagnostics
                 failure.Contains("plan", StringComparison.OrdinalIgnoreCase) ||
                 failure.Contains("policy", StringComparison.OrdinalIgnoreCase))
             {
-                statusText = "Account/workspace selection required";
+                statusText = SR.T("Account/workspace selection required");
                 return true;
             }
 
             if (failure.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
                 failure.Contains("quota", StringComparison.OrdinalIgnoreCase))
             {
-                statusText = "Rate or quota limited";
+                statusText = SR.T("Rate or quota limited");
                 return true;
             }
 
@@ -427,11 +428,11 @@ internal static class ModelProviderEditorDiagnostics
                 failure.Contains("unsupported", StringComparison.OrdinalIgnoreCase) ||
                 failure.Contains("request shape", StringComparison.OrdinalIgnoreCase))
             {
-                statusText = "Unsupported provider/protocol drift";
+                statusText = SR.T("Unsupported provider/protocol drift");
                 return true;
             }
 
-            statusText = "Last action needs review";
+            statusText = SR.T("Last action needs review");
             return true;
         }
 
@@ -440,7 +441,7 @@ internal static class ModelProviderEditorDiagnostics
             return false;
         }
 
-        statusText = "Ready";
+        statusText = SR.T("Ready");
         return true;
     }
 

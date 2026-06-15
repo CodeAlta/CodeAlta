@@ -241,15 +241,15 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
                 build => CreateComputedVisual(build),
                 _uiDispatcher),
             new DelegatingSessionTabLifecyclePort(
-                () => ObserveUiTask(ActivateDraftTabAsync, "activate the draft tab"),
+                () => ObserveUiTask(ActivateDraftTabAsync, SR.T("activate the draft tab")),
                 ActivateSessionSurface,
-                sessionId => ObserveUiTask(() => CloseSessionTabAsync(sessionId), "close the session tab"),
-                () => ObserveUiTask(CloseDraftTabAsync, "close the draft tab"),
-                sessionId => ObserveUiTask(() => _shellController.OpenSessionAsync(sessionId, CancellationToken.None), "open the session tab")),
+                sessionId => ObserveUiTask(() => CloseSessionTabAsync(sessionId), SR.T("close the session tab")),
+                () => ObserveUiTask(CloseDraftTabAsync, SR.T("close the draft tab")),
+                sessionId => ObserveUiTask(() => _shellController.OpenSessionAsync(sessionId, CancellationToken.None), SR.T("open the session tab"))),
             new DelegatingFileEditorTabPort(
                 tabId => _fileEditorWorkspaceCoordinator.GetFileTab(tabId),
                 tabId => _fileEditorWorkspaceCoordinator.SelectFileTab(tabId),
-                tabId => ObserveUiTask(() => _fileEditorWorkspaceCoordinator.CloseFileTabAsync(tabId), "close the file tab")));
+                tabId => ObserveUiTask(() => _fileEditorWorkspaceCoordinator.CloseFileTabAsync(tabId), SR.T("close the file tab"))));
         _sessionTabStripCoordinator = new SessionTabStripCoordinator(
             _sessionSelectionContext, _sessionTabContext, _shellTabService, _shellAnimationRuntime.WelcomePhase01, () => _promptDraftUiCoordinator.HasCurrentPromptDraft, _sessionRuntimeEventCoordinator.IsSessionRunning);
         composition.DraftTabReplacement.Bind(_sessionTabStripCoordinator.ReplaceDraftTabWithSession);
@@ -386,7 +386,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void ApplyPendingSidebarSelection()
         => _sidebarCoordinator.ApplyPendingSelection();
 
-    public void PrepareForRun() => SetStatus("Connecting providers...", showSpinner: true);
+    public void PrepareForRun() => SetStatus(SR.T("Connecting providers..."), showSpinner: true);
     public Visual GetRoot() => EnsureShellView().Root;
 
     public TerminalLoopResult Tick(CancellationToken cancellationToken)
@@ -418,8 +418,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         _disableTerminalLoopCallback = !_disableTerminalLoopCallback;
         SetStatus(
             _disableTerminalLoopCallback
-                ? "Loop callback disabled."
-                : "Loop callback enabled.",
+                ? SR.T("Loop callback disabled.")
+                : SR.T("Loop callback enabled."),
             tone: _disableTerminalLoopCallback ? StatusTone.Warning : StatusTone.Info);
     }
 
@@ -430,8 +430,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
         SetStatus(
             _commandBarMultiLine
-                ? "Command bar expanded."
-                : "Command bar collapsed.",
+                ? SR.T("Command bar expanded.")
+                : SR.T("Command bar collapsed."),
             tone: StatusTone.Info);
     }
 
@@ -445,7 +445,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         if (!_startupProviderDialogHandled && !_providerUi.HasAnyEnabledProviders())
         {
             _startupProviderDialogHandled = true;
-            SetStatus("No model providers are enabled. Open Model Providers (Ctrl+G Ctrl+R) to configure one.", false, StatusTone.Warning);
+            SetStatus(SR.T("No model providers are enabled. Open Model Providers (Ctrl+G Ctrl+R) to configure one."), false, StatusTone.Warning);
             _ = OpenModelProvidersAsync();
         }
 
@@ -470,7 +470,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     internal void SyncModelProviderSelectorItems() => _sessionWorkspaceView?.SyncModelProviderSelectorItems(_sessionWorkspaceViewModel);
     internal void SyncAgentPromptSelectorItems() => _sessionWorkspaceView?.SyncAgentPromptSelectorItems(_sessionWorkspaceViewModel);
     private void OnAgentPromptSelectionChanged(int newIndex) => _agentPromptSelector.OnAgentPromptSelectionChanged(newIndex);
-    private void OnModelProviderSelectionChanged(int newIndex) => ObserveUiTask(() => _modelProviderSelectorCoordinator.OnModelProviderSelectionChangedAsync(newIndex), "change the selected provider");
+    private void OnModelProviderSelectionChanged(int newIndex) => ObserveUiTask(() => _modelProviderSelectorCoordinator.OnModelProviderSelectionChangedAsync(newIndex), SR.T("change the selected provider"));
     private void OnModelSelectionChanged(int newIndex) => _modelProviderSelectorCoordinator.OnModelSelectionChanged(newIndex);
     private void OnReasoningSelectionChanged(int newIndex) => _modelProviderSelectorCoordinator.OnReasoningSelectionChanged(newIndex);
     private ModelProviderId GetPreferredProviderId() => _modelProviderSelectorCoordinator.GetPreferredModelProviderId();
@@ -499,18 +499,18 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         var pb = _ownedServices?.PluginHostBridge;
         var pec = pb?.GetPromptEditorContributions() ?? [];
         var getPromptComposerSession = PromptComposerSessionBindingFactory.Create(_promptDraftUiCoordinator, new PromptImageCapabilityContext(GetSelectedSession, _sessionStateCoordinator.FindOpenSession, GetPreferredProviderId, _modelProviderStates), (message, tone) => SetStatus(message, tone: tone));
-        var openHelp = () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.ShowHelpAsync(), "show help");
+        var openHelp = () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.ShowHelpAsync(), SR.T("show help"));
         var showPalette = () => _shellCommandSurfaceCoordinator.ShowCommandPalette();
         var shellSurface = CodeAltaShellViewFactory.CreateSurface(new CodeAltaShellSurfaceOptions
         {
             ShellViewModel = _shellViewModel,
             WorkspaceViewModel = _sessionWorkspaceViewModel,
             PromptComposerViewModel = _promptComposerViewModel,
-            WorkspaceChromeController = SessionWorkspaceChromeController.Create(() => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual), () => ShellPluginFooterComposer.ComposeRegion(pb, PluginUiRegion.SessionStatus, GetSelectedSession()?.SessionId), anchor => EnsureSessionInfoPresenter().TogglePopup(anchor), () => ObserveUiTask(OpenModelProvidersAsync, "open model providers"), _reminderUiCoordinator.GetSelectedSessionReminderCount, _reminderUiCoordinator.Open),
-            PromptComposerController = PromptComposerViewController.Create(acceptedPrompt => ObserveUiTask(() => _shellCommandSurfaceCoordinator.HandleAcceptedPromptAsync(acceptedPrompt), "submit the current prompt"), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync(steer: false), "submit the current prompt"), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.AbortSelectedSessionAsync(), "abort the selected session"), openHelp, showPalette),
-            QueuedPromptController = QueuedPromptStripController.Create(markdown => (_sessionWorkspaceView?.SessionPaneLayout.App)?.Terminal.Clipboard.TrySetText(markdown), queuedPromptId => ObserveUiTask(() => _sessionCommandCoordinator.ConvertSelectedSessionQueuedPromptToSteerAsync(queuedPromptId), "convert the queued prompt to steer"), pendingSteerId => _sessionCommandCoordinator.DeleteSelectedSessionPendingSteer(pendingSteerId), queuedPromptId => _sessionCommandCoordinator.DeleteSelectedSessionQueuedPrompt(queuedPromptId), (queuedPromptId, remainingCount) => _sessionCommandCoordinator.UpdateSelectedSessionQueuedPromptCount(queuedPromptId, remainingCount), (queuedPromptId, text) => _sessionCommandCoordinator.UpdateSelectedSessionQueuedPromptText(queuedPromptId, text), (onAccepted, placeholder) => SessionWorkspaceView.CreateStyledPromptEditor(onAccepted, openHelp, showPalette, pfs, promptRoot, pec, placeholder)),
-            AgentPromptSelectorController = AgentPromptSelectorController.Create(OnAgentPromptSelectionChanged, () => ObserveUiTask(OpenPromptsAsync, "open prompts")),
-            ModelProviderSelectorController = ModelProviderSelectorController.Create(OnModelProviderSelectionChanged, OnModelSelectionChanged, OnReasoningSelectionChanged, () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.CompactSelectedSessionAsync(), "compact the selected session"), _openModels),
+            WorkspaceChromeController = SessionWorkspaceChromeController.Create(() => CreateUsageComputedVisual(EnsureSessionUsagePresenter().BuildIndicatorVisual), () => ShellPluginFooterComposer.ComposeRegion(pb, PluginUiRegion.SessionStatus, GetSelectedSession()?.SessionId), anchor => EnsureSessionInfoPresenter().TogglePopup(anchor), () => ObserveUiTask(OpenModelProvidersAsync, SR.T("open model providers")), _reminderUiCoordinator.GetSelectedSessionReminderCount, _reminderUiCoordinator.Open),
+            PromptComposerController = PromptComposerViewController.Create(acceptedPrompt => ObserveUiTask(() => _shellCommandSurfaceCoordinator.HandleAcceptedPromptAsync(acceptedPrompt), SR.T("submit the current prompt")), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.SubmitCurrentPromptAsync(steer: false), SR.T("submit the current prompt")), () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.AbortSelectedSessionAsync(), SR.T("abort the selected session")), openHelp, showPalette),
+            QueuedPromptController = QueuedPromptStripController.Create(markdown => (_sessionWorkspaceView?.SessionPaneLayout.App)?.Terminal.Clipboard.TrySetText(markdown), queuedPromptId => ObserveUiTask(() => _sessionCommandCoordinator.ConvertSelectedSessionQueuedPromptToSteerAsync(queuedPromptId), SR.T("convert the queued prompt to steer")), pendingSteerId => _sessionCommandCoordinator.DeleteSelectedSessionPendingSteer(pendingSteerId), queuedPromptId => _sessionCommandCoordinator.DeleteSelectedSessionQueuedPrompt(queuedPromptId), (queuedPromptId, remainingCount) => _sessionCommandCoordinator.UpdateSelectedSessionQueuedPromptCount(queuedPromptId, remainingCount), (queuedPromptId, text) => _sessionCommandCoordinator.UpdateSelectedSessionQueuedPromptText(queuedPromptId, text), (onAccepted, placeholder) => SessionWorkspaceView.CreateStyledPromptEditor(onAccepted, openHelp, showPalette, pfs, promptRoot, pec, placeholder)),
+            AgentPromptSelectorController = AgentPromptSelectorController.Create(OnAgentPromptSelectionChanged, () => ObserveUiTask(OpenPromptsAsync, SR.T("open prompts"))),
+            ModelProviderSelectorController = ModelProviderSelectorController.Create(OnModelProviderSelectionChanged, OnModelSelectionChanged, OnReasoningSelectionChanged, () => ObserveUiTask(() => _shellCommandSurfaceCoordinator.CompactSelectedSessionAsync(), SR.T("compact the selected session")), _openModels),
             SessionTabHostController = SessionTabHostController.Create(selectedIndex => _sessionTabStripCoordinator.ObserveBoundSelection(selectedIndex)),
             ProjectFileSearchService = pfs,
             GetPromptReferenceProjectRoot = promptRoot,
@@ -729,7 +729,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     {
         if (_sessionStateCoordinator.OpenSession(sessionId) == OpenSessionResult.NotFound)
         {
-            SetStatus($"Session '{sessionId}' was not found.", false, StatusTone.Warning);
+            SetStatus(SR.T("Session '{0}' was not found.", sessionId), false, StatusTone.Warning);
             return;
         }
 
@@ -749,14 +749,14 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             _sessionStateCoordinator.Selection.Target is not WorkspaceTarget.Session ||
             GetSelectedSession() is not { } session)
         {
-            SetStatus("Open a session tab before navigating messages.", false, StatusTone.Warning);
+            SetStatus(SR.T("Open a session tab before navigating messages."), false, StatusTone.Warning);
             return Task.CompletedTask;
         }
 
         var tab = EnsureSessionTab(session);
         if (!tab.Timeline.HasNavigableMessages)
         {
-            SetStatus("No user or assistant messages to navigate in this session.", false, StatusTone.Info);
+            SetStatus(SR.T("No user or assistant messages to navigate in this session."), false, StatusTone.Info);
             return Task.CompletedTask;
         }
 

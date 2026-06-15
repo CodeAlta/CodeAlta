@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Prompting;
 using CodeAlta.Presentation.Styling;
@@ -90,7 +91,7 @@ internal static partial class QueuedPromptListView
             Margin = new Thickness(0, 0, 1, 0),
         };
 
-        var status = new TextBlock("Steer pending")
+        var status = new TextBlock(SR.T("Steer pending"))
         {
             Wrap = false,
             IsSelectable = false,
@@ -98,13 +99,13 @@ internal static partial class QueuedPromptListView
 
         var copyButton = CreateIconButton(
             $"{TerminalIcons.MdContentCopy}",
-            "Copy pending steering prompt markdown to the clipboard",
+            SR.T("Copy pending steering prompt markdown to the clipboard"),
             () => copyQueuedPromptMarkdown(pendingSteer.Text));
         copyButton.Margin = new Thickness(0, 0, 1, 0);
 
         var deleteButton = CreateIconButton(
             $"{TerminalIcons.MdTrashCanOutline}",
-            "Delete pending steering prompt",
+            SR.T("Delete pending steering prompt"),
             () => deletePendingSteer(pendingSteer.Id));
 
         var row = new Grid
@@ -153,13 +154,13 @@ internal static partial class QueuedPromptListView
 
         var copyButton = CreateIconButton(
             $"{TerminalIcons.MdContentCopy}",
-            "Copy queued prompt markdown to the clipboard",
+            SR.T("Copy queued prompt markdown to the clipboard"),
             () => copyQueuedPromptMarkdown(queuedPrompt.Text));
         copyButton.Margin = new Thickness(0, 0, 1, 0);
 
         var editButton = CreateIconButton(
             $"{TerminalIcons.MdSquareEditOutline}",
-            "Edit queued prompt",
+            SR.T("Edit queued prompt"),
             () => ShowEditorDialog(queuedPrompt, updateQueuedPromptText, createPromptEditor));
         editButton.Margin = new Thickness(0, 0, 1, 0);
 
@@ -168,13 +169,13 @@ internal static partial class QueuedPromptListView
 
         var steerButton = CreateIconButton(
             $"{TerminalIcons.MdArrowRightThinCircleOutline}",
-            "Send immediately as a steering prompt",
+            SR.T("Send immediately as a steering prompt"),
             () => convertQueuedPromptToSteer(queuedPrompt.Id));
         steerButton.Margin = new Thickness(0, 0, 1, 0);
 
         var deleteButton = CreateIconButton(
             $"{TerminalIcons.MdTrashCanOutline}",
-            "Delete queued prompt",
+            SR.T("Delete queued prompt"),
             () => deleteQueuedPrompt(queuedPrompt.Id));
 
         var row = new Grid
@@ -209,23 +210,23 @@ internal static partial class QueuedPromptListView
             value => updateQueuedPromptCount(queuedPrompt.Id, value));
         var countBox = new NumberBox<int>()
             .Value(countState.Bind.Value)
-            .ValueValidator(static value => value >= 1 ? null : "Use >= 1.")
+            .ValueValidator(static value => value >= 1 ? null : SR.T("Use >= 1."))
             .MinWidth(3)
             .MaxWidth(5);
         countBox.ShowValidationMessage = false;
-        countBox.InvalidNumberMessage = "Enter a whole number.";
+        countBox.InvalidNumberMessage = SR.T("Enter a whole number.");
         countBox.TextAlignment = TextAlignment.Center;
 
         return new HStack(
             CreateIconButton(
                 "-",
-                "Decrease repeat count",
+                SR.T("Decrease repeat count"),
                 () => countState.Value = Math.Max(1, countState.Value - 1),
                 isEnabled: countState.Value > 1),
             countBox,
             CreateIconButton(
                 $"{TerminalIcons.MdPlus}",
-                "Increase repeat count",
+                SR.T("Increase repeat count"),
                 () => countState.Value++))
         {
             Spacing = 0,
@@ -255,11 +256,11 @@ internal static partial class QueuedPromptListView
         ArgumentNullException.ThrowIfNull(createPromptEditor);
 
         Dialog? dialog = null;
-        var editor = createPromptEditor(SaveQueuedPrompt, "Edit queued prompt...");
+        var editor = createPromptEditor(SaveQueuedPrompt, SR.T("Edit queued prompt..."));
         editor.Text = queuedPrompt.Text;
 
-        var saveButton = new Button("Save").Click(() => SaveQueuedPrompt(editor.Text ?? string.Empty));
-        var cancelButton = new Button("Cancel").Click(() => dialog?.Close());
+        var saveButton = new Button(SR.T("Save")).Click(() => SaveQueuedPrompt(editor.Text ?? string.Empty));
+        var cancelButton = new Button(SR.T("Cancel")).Click(() => dialog?.Close());
         var buttonRow = new HStack([saveButton, cancelButton])
         {
             Spacing = 1,
@@ -267,7 +268,7 @@ internal static partial class QueuedPromptListView
         };
 
         dialog = new Dialog(
-            new TextBlock($"{TerminalIcons.MdSquareEditOutline} Edit Queued Prompt"),
+            new TextBlock($"{TerminalIcons.MdSquareEditOutline} {SR.T("Edit Queued Prompt")}"),
             new DockLayout(
                 top: null,
                 content: editor.Scrollable().IsTabStop(false).MinHeight(8),
@@ -279,8 +280,8 @@ internal static partial class QueuedPromptListView
         dialog.AddCommand(new Command
         {
             Id = "QueuedPromptEditorDialog.Cancel",
-            LabelMarkup = "Cancel",
-            DescriptionMarkup = "Close the queued prompt editor.",
+            LabelMarkup = SR.T("Cancel"),
+            DescriptionMarkup = SR.T("Close the queued prompt editor."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => dialog?.Close(),

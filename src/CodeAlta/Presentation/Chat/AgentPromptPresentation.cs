@@ -1,5 +1,6 @@
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
+using CodeAlta.Catalog;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI.Controls;
 
@@ -36,11 +37,11 @@ internal static class AgentPromptPresentation
     {
         if (option is null)
         {
-            return "[gray]No prompts[/]";
+            return $"[gray]{SR.T("No prompts")}[/]";
         }
 
-        var color = option.IsBuiltIn ? "gray" : option.SourceLabel == "project" ? "lime" : "cyan";
-        return $"{AnsiMarkup.Escape(option.Label)} [dim][{color}]{AnsiMarkup.Escape(option.SourceLabel)}[/][/]";
+        var color = option.IsBuiltIn ? "gray" : option.SourceLabel == SR.T("project") ? "lime" : "cyan";
+        return $"{AnsiMarkup.Escape(option.Label)} [dim][{color}]{AnsiMarkup.Escape(SR.T(option.SourceLabel))}[/][/]";
     }
 
     public static void ReplaceSelectItems<T>(Select<T> select, IReadOnlyList<T> items)
@@ -57,9 +58,9 @@ internal static class AgentPromptPresentation
     public static string ToSourceLabel(AgentPromptSourceKind sourceKind)
         => sourceKind switch
         {
-            AgentPromptSourceKind.BuiltIn => "built-in",
-            AgentPromptSourceKind.UserGlobal => "global",
-            AgentPromptSourceKind.Project => "project",
-            _ => "unknown",
+            AgentPromptSourceKind.BuiltIn => SR.T("built-in"),
+            AgentPromptSourceKind.UserGlobal => SR.T("global"),
+            AgentPromptSourceKind.Project => SR.T("project"),
+            _ => SR.T("unknown"),
         };
 }

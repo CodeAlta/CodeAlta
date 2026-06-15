@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using CodeAlta.Catalog;
 using SkiaSharp;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI.Controls;
@@ -58,8 +59,8 @@ internal static class PromptImageClipboardReader
 
         image = null;
         failureReason = context.Formats.Count > 0
-            ? "The clipboard does not contain a supported image payload."
-            : "Clipboard image access is not supported by this terminal backend.";
+            ? SR.T("The clipboard does not contain a supported image payload.")
+            : SR.T("Clipboard image access is not supported by this terminal backend.");
         return false;
     }
 

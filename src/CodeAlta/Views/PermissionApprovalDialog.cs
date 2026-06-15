@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Agent;
 using CodeAlta.Presentation.Formatting;
 using CodeAlta.Presentation.Styling;
@@ -48,19 +49,19 @@ internal sealed class PermissionApprovalDialog
             },
         };
 
-        var allowOnceButton = new Button("Allow Once")
+        var allowOnceButton = new Button(SR.T("Allow Once"))
         {
             Tone = ControlTone.Primary,
         };
         allowOnceButton.Click(() => SetResult(AgentPermissionDecisionKind.AllowOnce));
 
-        var allowSessionButton = new Button("Allow for Session")
+        var allowSessionButton = new Button(SR.T("Allow for Session"))
         {
             Tone = ControlTone.Success,
         };
         allowSessionButton.Click(() => SetResult(AgentPermissionDecisionKind.AllowForSession));
 
-        var denyButton = new Button("Deny")
+        var denyButton = new Button(SR.T("Deny"))
         {
             Tone = ControlTone.Error,
         };
@@ -74,9 +75,9 @@ internal sealed class PermissionApprovalDialog
 
         var headerText = request switch
         {
-            AgentCommandPermissionRequest => "Shell Command",
-            AgentFileChangePermissionRequest => "File Change",
-            _ => "Permission Request",
+            AgentCommandPermissionRequest => SR.T("Shell Command"),
+            AgentFileChangePermissionRequest => SR.T("File Change"),
+            _ => SR.T("Permission Request"),
         };
 
         var header = new Markup($"[bold]{TerminalIcons.MdShieldPlusOutline} {headerText}[/]");
@@ -89,7 +90,7 @@ internal sealed class PermissionApprovalDialog
             .VerticalAlignment(Align.Stretch);
 
         _dialog = new Dialog()
-            .Title("Permission Required")
+            .Title(SR.T("Permission Required"))
             .IsModal(true)
             .Padding(1)
             .Content(content);
@@ -97,8 +98,8 @@ internal sealed class PermissionApprovalDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Permission.Cancel",
-            LabelMarkup = "Cancel",
-            DescriptionMarkup = "Cancel the permission request.",
+            LabelMarkup = SR.T("Cancel"),
+            DescriptionMarkup = SR.T("Cancel the permission request."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => SetResult(AgentPermissionDecisionKind.Cancel),

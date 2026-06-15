@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
@@ -87,8 +88,8 @@ internal sealed class AskQuestionFormView
         Root.AddCommand(new Command
         {
             Id = "CodeAlta.Ask.FocusQuestions",
-            LabelMarkup = "Focus ask questions",
-            DescriptionMarkup = "Move focus back to the active ask question.",
+            LabelMarkup = SR.T("Focus ask questions"),
+            DescriptionMarkup = SR.T("Move focus back to the active ask question."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl)),
@@ -143,7 +144,7 @@ internal sealed class AskQuestionFormView
 
     private Visual BuildQuestionTabHeader(AltaAskQuestion question, int index)
     {
-        var title = question.Title ?? $"Question {index + 1}";
+        var title = question.Title ?? SR.T("Question {0}", index + 1);
         var progressGlyph = index + 1 < _request.Questions.Count ? NextQuestionGlyph : LastQuestionGlyph;
         return new TextBlock($"{title} {progressGlyph}");
     }
@@ -154,10 +155,10 @@ internal sealed class AskQuestionFormView
             new Markup(BuildHelpMarkup) { Wrap = true },
             new HStack(
             [
-                new Button(new TextBlock("Submit"))
+                new Button(new TextBlock(SR.T("Submit")))
                     .Tone(ControlTone.Primary)
                     .Click(SubmitOrAdvance),
-                new Button(new TextBlock("Cancel"))
+                new Button(new TextBlock(SR.T("Cancel")))
                     .Tone(ControlTone.Error)
                     .Click(() => CancelRequested?.Invoke(this, EventArgs.Empty)),
             ])
@@ -175,15 +176,15 @@ internal sealed class AskQuestionFormView
     {
         _ = _helpVersion.Value;
         return _hasFileReviewCommands
-            ? "[dim]LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel · Ctrl+G Ctrl+E file editor[/]"
-            : "[dim]LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel[/]";
+            ? $"[dim]{SR.T("LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel · Ctrl+G Ctrl+E file editor")}[/]"
+            : $"[dim]{SR.T("LEFT/RIGHT questions · UP/DOWN choices · ENTER select/submit · ESC cancel")}[/]";
     }
 
     private Visual BuildQuestionPage(AltaAskQuestion question, int index)
     {
         var children = new List<Visual>
         {
-            new TextBlock(question.Question ?? question.Title ?? $"Question {index + 1}") { Wrap = true },
+            new TextBlock(question.Question ?? question.Title ?? SR.T("Question {0}", index + 1)) { Wrap = true },
         };
         if (!string.IsNullOrWhiteSpace(question.Description))
         {
@@ -252,10 +253,10 @@ internal sealed class AskQuestionFormView
 
     private void AddNavigationCommands(Visual visual)
     {
-        visual.AddCommand(new Command { Id = "CodeAlta.Ask.Next", LabelMarkup = "Next", DescriptionMarkup = "Next ask question.", Gesture = new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl), Execute = _ => Next() });
-        visual.AddCommand(new Command { Id = "CodeAlta.Ask.Previous", LabelMarkup = "Previous", DescriptionMarkup = "Previous ask question.", Gesture = new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl), Execute = _ => Previous() });
-        visual.AddCommand(new Command { Id = "CodeAlta.Ask.SubmitOrAdvance", LabelMarkup = "Submit", DescriptionMarkup = "Validate/advance or submit ask answers.", Gesture = new KeyGesture(TerminalKey.Enter), Execute = _ => SubmitOrAdvance() });
-        visual.AddCommand(new Command { Id = "CodeAlta.Ask.Cancel", LabelMarkup = "Cancel", DescriptionMarkup = "Cancel ask mode.", Gesture = new KeyGesture(TerminalKey.Escape), Execute = _ => CancelRequested?.Invoke(this, EventArgs.Empty) });
+        visual.AddCommand(new Command { Id = "CodeAlta.Ask.Next", LabelMarkup = SR.T("Next"), DescriptionMarkup = SR.T("Next ask question."), Gesture = new KeyGesture(TerminalChar.CtrlN, TerminalModifiers.Ctrl), Execute = _ => Next() });
+        visual.AddCommand(new Command { Id = "CodeAlta.Ask.Previous", LabelMarkup = SR.T("Previous"), DescriptionMarkup = SR.T("Previous ask question."), Gesture = new KeyGesture(TerminalChar.CtrlP, TerminalModifiers.Ctrl), Execute = _ => Previous() });
+        visual.AddCommand(new Command { Id = "CodeAlta.Ask.SubmitOrAdvance", LabelMarkup = SR.T("Submit"), DescriptionMarkup = SR.T("Validate/advance or submit ask answers."), Gesture = new KeyGesture(TerminalKey.Enter), Execute = _ => SubmitOrAdvance() });
+        visual.AddCommand(new Command { Id = "CodeAlta.Ask.Cancel", LabelMarkup = SR.T("Cancel"), DescriptionMarkup = SR.T("Cancel ask mode."), Gesture = new KeyGesture(TerminalKey.Escape), Execute = _ => CancelRequested?.Invoke(this, EventArgs.Empty) });
     }
 
     private static Markup CreateDimMarkup(string text)

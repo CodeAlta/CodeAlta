@@ -94,22 +94,22 @@ internal static class StatusVisualFormatter
         var parts = new List<string>(capacity: 3);
         if (hours > 0)
         {
-            parts.Add(FormatUnit(hours, "hour"));
+            parts.Add(FormatUnit(hours, SR.T("hour"), SR.T("hours")));
         }
 
         if (minutes > 0)
         {
-            parts.Add(FormatUnit(minutes, "minute"));
+            parts.Add(FormatUnit(minutes, SR.T("minute"), SR.T("minutes")));
         }
 
         if ((hours == 0 && seconds > 0) || parts.Count == 0)
         {
-            parts.Add(FormatUnit(seconds, "second"));
+            parts.Add(FormatUnit(seconds, SR.T("second"), SR.T("seconds")));
         }
 
         return string.Join(' ', parts);
     }
 
-    private static string FormatUnit(int value, string unit)
-        => value == 1 ? $"1 {unit}" : $"{value} {unit}s";
+    private static string FormatUnit(int value, string singular, string plural)
+        => value == 1 ? SR.T("1 {0}", singular) : SR.T("{0} {1}", value, plural);
 }

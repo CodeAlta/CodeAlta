@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Controls;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal.UI;
@@ -143,13 +144,13 @@ internal sealed class SessionInfoPresenter
 
         var copyButton = new Button(new TextBlock($"{TerminalIcons.MdContentCopy}"))
             .Click(CopyMarkdown);
-        var copyButtonHost = copyButton.Tooltip(new TextBlock("Copy this report as markdown."));
+        var copyButtonHost = copyButton.Tooltip(new TextBlock(SR.T("Copy this report as markdown.")));
         var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose}"))
         {
             Tone = ControlTone.Error,
         };
         closeButton.Click(ClosePopup);
-        var closeButtonHost = closeButton.Tooltip(new TextBlock("Close the session info popup."));
+        var closeButtonHost = closeButton.Tooltip(new TextBlock(SR.T("Close the session info popup.")));
 
         var content = new VStack
         {
@@ -157,7 +158,7 @@ internal sealed class SessionInfoPresenter
         };
         content.Add(new StatusBar()
             .LeftText(new VStack(
-                new Markup("[bold]Session info[/]"),
+                new Markup($"[bold]{SR.T("Session info")}[/]"),
                 new Markup($"[dim]{AnsiMarkup.Escape(SessionInfoFormatter.BuildSubtitle(_report, _isLoading))}[/]"))
             {
                 Spacing = 0,

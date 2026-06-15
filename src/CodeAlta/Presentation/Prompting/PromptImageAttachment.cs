@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Presentation.Prompting;
 
@@ -42,7 +43,7 @@ internal sealed record PromptImageAttachment(
     {
         ArgumentNullException.ThrowIfNull(title);
         var normalized = string.Join(" ", title.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return normalized.Length == 0 ? "Image" : normalized;
+        return normalized.Length == 0 ? SR.T("Image") : normalized;
     }
 
     public static string NormalizeFileExtension(string fileExtension)
@@ -102,9 +103,9 @@ internal sealed record PromptSubmission(string Text, IReadOnlyList<PromptImageAt
 
         return Images.Count switch
         {
-            0 => "Prompt",
+            0 => SR.T("Prompt"),
             1 => Images[0].Title,
-            _ => $"{Images.Count} images",
+            _ => SR.T("{0} images", Images.Count),
         };
     }
 

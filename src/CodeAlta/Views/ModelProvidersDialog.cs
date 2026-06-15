@@ -38,12 +38,12 @@ internal sealed class ModelProvidersDialog
 
     private static readonly ReasoningOption[] ReasoningOptions =
     [
-        new("none", "None"),
-        new("minimal", "Minimal"),
-        new("low", "Low"),
-        new("medium", "Medium"),
-        new("high", "High"),
-        new("xhigh", "XHigh"),
+        new("none", SR.T("None")),
+        new("minimal", SR.T("Minimal")),
+        new("low", SR.T("Low")),
+        new("medium", SR.T("Medium")),
+        new("high", SR.T("High")),
+        new("xhigh", SR.T("XHigh")),
     ];
 
     private readonly IModelProviderDialogService _modelProviders;
@@ -66,7 +66,7 @@ internal sealed class ModelProvidersDialog
     private readonly State<string?> _activeLoginDeviceCode = new(null);
     private readonly State<int> _activeLoginDialogRefreshVersion = new(0);
     private readonly State<bool> _hasLoadedDefinitions = new(false);
-    private readonly State<string> _statusText = new("[dim]Configure model providers and save to refresh the runtime.[/]");
+    private readonly State<string> _statusText = new($"[dim]{SR.T("Configure model providers and save to refresh the runtime.")}[/]");
     private IReadOnlyDictionary<string, ProviderRuntimeStatus> _runtimeStatuses = new Dictionary<string, ProviderRuntimeStatus>(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _activeOperationCancellation;
     private Dialog? _activeLoginDialog;
@@ -85,7 +85,7 @@ internal sealed class ModelProvidersDialog
         _getBounds = getBounds;
         _getFocusTarget = getFocusTarget;
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -121,19 +121,19 @@ internal sealed class ModelProvidersDialog
                     : BuildEmptyState();
             });
 
-        var addButton = new Button($"{TerminalIcons.MdPlus} Add")
+        var addButton = new Button($"{TerminalIcons.MdPlus} {SR.T("Add")}")
             .Tone(ControlTone.Primary)
             .Click(AddProvider);
-        var deleteButton = new Button($"{TerminalIcons.MdDelete} Delete")
+        var deleteButton = new Button($"{TerminalIcons.MdDelete} {SR.T("Delete")}")
             .Tone(ControlTone.Error)
             .Click(DeleteSelectedProvider);
-        var refreshButton = new Button("Refresh")
+        var refreshButton = new Button(SR.T("Refresh"))
             .Tone(ControlTone.Warning)
             .Click(() => StartRefresh(confirmWhenDirty: true));
-        var advancedButton = new Button($"{TerminalIcons.MdCodeBraces} Advanced TOML")
+        var advancedButton = new Button($"{TerminalIcons.MdCodeBraces} {SR.T("Advanced TOML")}")
             .Tone(ControlTone.Default)
             .Click(OpenAdvancedEditor);
-        _saveButton = new Button("Save")
+        _saveButton = new Button(SR.T("Save"))
             .Tone(ControlTone.Success)
             .IsEnabled(() => _activeOperationCount.Value == 0 && HasUnsavedChanges())
             .Click(StartSave);
@@ -156,7 +156,7 @@ internal sealed class ModelProvidersDialog
         header.Cell(toolbar, 0, 1);
 
         var leftPane = new VStack(
-            new Group("Providers")
+            new Group(SR.T("Providers"))
                 .Style(GroupStyle.Rounded)
                 .Content(_providerList.Stretch())
                 .Padding(new Thickness(1, 0, 1, 0))
@@ -170,7 +170,7 @@ internal sealed class ModelProvidersDialog
 
         var splitter = new HSplitter(
             leftPane,
-            new Group("Provider Details")
+            new Group(SR.T("Provider Details"))
                 .Style(GroupStyle.Rounded)
                 .Content(new ScrollViewer(_detailHost).Stretch())
                 .Padding(1)
@@ -182,7 +182,7 @@ internal sealed class ModelProvidersDialog
             MinSecond = 50,
         };
 
-        var intro = new Markup("[dim]Enable the providers you want available in CodeAlta. Warnings explain why a provider may not start, Test Provider verifies current settings before you save, and Advanced TOML opens the full config editor for provider settings not exposed here.[/]")
+        var intro = new Markup($"[dim]{SR.T("Enable the providers you want available in CodeAlta. Warnings explain why a provider may not start, Test Provider verifies current settings before you save, and Advanced TOML opens the full config editor for provider settings not exposed here.")}[/]")
         {
             Wrap = true,
         };
@@ -204,7 +204,7 @@ internal sealed class ModelProvidersDialog
         content.Cell(_statusMarkup, 3, 0);
 
         _dialog = new Dialog()
-            .Title("Model Providers")
+            .Title(SR.T("Model Providers"))
             .TopRightText(closeButton)
             .BottomRightText(new Markup(BuildBottomRightHintMarkup))
             .IsModal(true)
@@ -214,8 +214,8 @@ internal sealed class ModelProvidersDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Manage.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the model providers dialog.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the model providers dialog."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => RequestClose(),
@@ -223,8 +223,8 @@ internal sealed class ModelProvidersDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Manage.CancelOperation",
-            LabelMarkup = "Cancel Provider Operation",
-            DescriptionMarkup = "Cancel the current cancelable provider operation.",
+            LabelMarkup = SR.T("Cancel Provider Operation"),
+            DescriptionMarkup = SR.T("Cancel the current cancelable provider operation."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlC, TerminalModifiers.Ctrl)),
@@ -237,8 +237,8 @@ internal sealed class ModelProvidersDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Manage.CopyLoginUrl",
-            LabelMarkup = "Copy Login URL",
-            DescriptionMarkup = "Copy the current login URL to the clipboard.",
+            LabelMarkup = SR.T("Copy Login URL"),
+            DescriptionMarkup = SR.T("Copy the current login URL to the clipboard."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlU, TerminalModifiers.Ctrl)),
@@ -251,8 +251,8 @@ internal sealed class ModelProvidersDialog
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Manage.CopyDeviceCode",
-            LabelMarkup = "Copy Device Code",
-            DescriptionMarkup = "Copy the current device login code to the clipboard.",
+            LabelMarkup = SR.T("Copy Device Code"),
+            DescriptionMarkup = SR.T("Copy the current device login code to the clipboard."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlD, TerminalModifiers.Ctrl)),
@@ -288,16 +288,16 @@ internal sealed class ModelProvidersDialog
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("reload provider configuration");
+            ReportActiveOperationBlock(SR.T("reload provider configuration"));
             return;
         }
 
         if (confirmWhenDirty && HasUnsavedChanges())
         {
             new ConfirmationDialog(
-                "Reload Provider Configuration?",
-                ["Discard unsaved provider changes and reload from disk?"],
-                "Reload",
+                SR.T("Reload Provider Configuration?"),
+                [SR.T("Discard unsaved provider changes and reload from disk?")],
+                SR.T("Reload"),
                 ControlTone.Warning,
                 () =>
                 {
@@ -310,20 +310,20 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        if (!TryBeginDialogOperation("reload provider configuration"))
+        if (!TryBeginDialogOperation(SR.T("reload provider configuration")))
         {
             return;
         }
 
         try
         {
-            SetStatus("[primary]Loading provider configuration...[/]");
+            SetStatus($"[primary]{SR.T("Loading provider configuration...")}[/]");
             QueueBackgroundOperation(
                 _modelProviders.LoadDefinitions,
                 definitions => LoadDefinitionsIntoDialog(
                     definitions,
-                    emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
-                    loadedStatusText: "[dim]Provider configuration loaded from disk.[/]"),
+                    emptyStatusText: $"[warning]{SR.T("No providers are configured yet. Add one, or enable Codex/Copilot.")}[/]",
+                    loadedStatusText: $"[dim]{SR.T("Provider configuration loaded from disk.")}[/]"),
                 ex => SetStatus($"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]"));
         }
         catch
@@ -337,16 +337,16 @@ internal sealed class ModelProvidersDialog
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("refresh provider configuration");
+            ReportActiveOperationBlock(SR.T("refresh provider configuration"));
             return;
         }
 
         if (confirmWhenDirty && HasUnsavedChanges())
         {
             new ConfirmationDialog(
-                "Refresh Provider Configuration?",
-                ["Discard unsaved provider changes, reload from disk, and retest saved provider availability?"],
-                "Refresh",
+                SR.T("Refresh Provider Configuration?"),
+                [SR.T("Discard unsaved provider changes, reload from disk, and retest saved provider availability?")],
+                SR.T("Refresh"),
                 ControlTone.Warning,
                 () =>
                 {
@@ -359,14 +359,14 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        if (!TryBeginDialogOperation("refresh provider configuration"))
+        if (!TryBeginDialogOperation(SR.T("refresh provider configuration")))
         {
             return;
         }
 
         try
         {
-            SetStatus("[primary]Refreshing provider configuration and testing availability...[/]");
+            SetStatus($"[primary]{SR.T("Refreshing provider configuration and testing availability...")}[/]");
             MarkEnabledProvidersRefreshInProgress();
             QueueBackgroundOperation(
                 async cancellationToken =>
@@ -378,11 +378,11 @@ internal sealed class ModelProvidersDialog
                 result =>
                 {
                     var loadedStatusText = result.RefreshResult.RuntimeRefreshSucceeded
-                        ? "[success]Provider configuration refreshed from disk and availability tested.[/]"
-                        : $"[warning]Provider configuration refreshed from disk, but runtime refresh failed: {AnsiMarkup.Escape(result.RefreshResult.RuntimeRefreshErrorMessage ?? "unknown error")}[/]";
+                        ? $"[success]{SR.T("Provider configuration refreshed from disk and availability tested.")}[/]"
+                        : $"[warning]{SR.T("Provider configuration refreshed from disk, but runtime refresh failed: {0}", AnsiMarkup.Escape(result.RefreshResult.RuntimeRefreshErrorMessage ?? SR.T("unknown error")))}[/]";
                     LoadDefinitionsIntoDialog(
                         result.Definitions,
-                        emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
+                        emptyStatusText: $"[warning]{SR.T("No providers are configured yet. Add one, or enable Codex/Copilot.")}[/]",
                         loadedStatusText);
                 },
                 ex =>
@@ -390,7 +390,7 @@ internal sealed class ModelProvidersDialog
                     if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
                     {
                         ClearProviderRefreshInProgress();
-                        SetStatus("[warning]Provider refresh canceled.[/]");
+                        SetStatus($"[warning]{SR.T("Provider refresh canceled.")}[/]");
                         return;
                     }
 
@@ -409,7 +409,7 @@ internal sealed class ModelProvidersDialog
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("add a provider");
+            ReportActiveOperationBlock(SR.T("add a provider"));
             return;
         }
 
@@ -425,41 +425,41 @@ internal sealed class ModelProvidersDialog
         _providers.Add(item);
         SetSelectedProviderIndex(_providers.Count - 1);
         NotifyProviderDraftChanged();
-        SetStatus("[warning]Added provider. Configure required fields, then Save to apply.[/]");
+        SetStatus($"[warning]{SR.T("Added provider. Configure required fields, then Save to apply.")}[/]");
     }
 
     private void DeleteSelectedProvider()
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("delete a provider");
+            ReportActiveOperationBlock(SR.T("delete a provider"));
             return;
         }
 
         var item = GetSelectedItem();
         if (item is null)
         {
-            SetStatus("[warning]Select a provider to delete.[/]");
+            SetStatus($"[warning]{SR.T("Select a provider to delete.")}[/]");
             return;
         }
 
         if (item.IsReserved)
         {
-            SetStatus("[warning]Reserved providers cannot be deleted. Disable them instead.[/]");
+            SetStatus($"[warning]{SR.T("Reserved providers cannot be deleted. Disable them instead.")}[/]");
             return;
         }
 
         _providers.Remove(item);
         SetSelectedProviderIndex(Math.Clamp(_selectedProviderIndex.Value, 0, _providers.Count - 1));
         NotifyProviderDraftChanged();
-        SetStatus("[warning]Removed provider. Save to apply, or Refresh to reload from disk.[/]");
+        SetStatus($"[warning]{SR.T("Removed provider. Save to apply, or Refresh to reload from disk.")}[/]");
     }
 
     private void StartSave()
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("save provider changes");
+            ReportActiveOperationBlock(SR.T("save provider changes"));
             return;
         }
 
@@ -471,16 +471,16 @@ internal sealed class ModelProvidersDialog
 
         if (!HasUnsavedChanges())
         {
-            SetStatus("[dim]No provider changes to save.[/]");
+            SetStatus($"[dim]{SR.T("No provider changes to save.")}[/]");
             return;
         }
 
-        if (!TryBeginDialogOperation("save provider changes"))
+        if (!TryBeginDialogOperation(SR.T("save provider changes")))
         {
             return;
         }
 
-        SetStatus("[primary]Saving provider configuration...[/]");
+        SetStatus($"[primary]{SR.T("Saving provider configuration...")}[/]");
         QueueBackgroundOperation(
             async () =>
             {
@@ -491,7 +491,7 @@ internal sealed class ModelProvidersDialog
             {
                 LoadDefinitionsIntoDialog(
                     result.DefinitionsFromDisk,
-                    emptyStatusText: "[warning]No providers are configured yet. Add one, or enable Codex/Copilot.[/]",
+                    emptyStatusText: $"[warning]{SR.T("No providers are configured yet. Add one, or enable Codex/Copilot.")}[/]",
                     loadedStatusText: FormatProviderSaveStatus(result.SaveResult));
             },
             ex => SetStatus($"[error]{AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]"));
@@ -501,13 +501,13 @@ internal sealed class ModelProvidersDialog
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("open Advanced TOML");
+            ReportActiveOperationBlock(SR.T("open Advanced TOML"));
             return;
         }
 
         if (HasUnsavedChanges())
         {
-            SetStatus("[warning]Save or Refresh the form changes before opening Advanced TOML so the code editor starts from the on-disk config.[/]");
+            SetStatus($"[warning]{SR.T("Save or Refresh the form changes before opening Advanced TOML so the code editor starts from the on-disk config.")}[/]");
             return;
         }
 
@@ -534,12 +534,12 @@ internal sealed class ModelProvidersDialog
         {
             LoadDefinitionsIntoDialog(
                 _modelProviders.LoadDefinitions(),
-                emptyStatusText: "[warning]Provider configuration saved, but no providers are configured yet. Add one, or enable Codex/Copilot.[/]",
+                emptyStatusText: $"[warning]{SR.T("Provider configuration saved, but no providers are configured yet. Add one, or enable Codex/Copilot.")}[/]",
                 loadedStatusText: FormatProviderSaveStatus(saveResult));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            SetStatus($"[error]Saved TOML, but failed to reload provider configuration: {AnsiMarkup.Escape(ex.GetBaseException().Message)}[/]");
+            SetStatus($"[error]{SR.T("Saved TOML, but failed to reload provider configuration: {0}", AnsiMarkup.Escape(ex.GetBaseException().Message))}[/]");
         }
     }
 
@@ -549,13 +549,13 @@ internal sealed class ModelProvidersDialog
 
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("test a provider");
+            ReportActiveOperationBlock(SR.T("test a provider"));
             return;
         }
 
         if (!_providers.Contains(item))
         {
-            SetStatus("[warning]Select a provider to test.[/]");
+            SetStatus($"[warning]{SR.T("Select a provider to test.")}[/]");
             return;
         }
 
@@ -565,13 +565,13 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        if (!TryBeginDialogOperation("test a provider"))
+        if (!TryBeginDialogOperation(SR.T("test a provider")))
         {
             return;
         }
 
-        SetStatus($"[primary]Testing {AnsiMarkup.Escape(item.Label)}...[/]");
-        item.SetTestInProgress("Testing provider connectivity and model discovery...");
+        SetStatus($"[primary]{SR.T("Testing {0}...", AnsiMarkup.Escape(item.Label))}[/]");
+        item.SetTestInProgress(SR.T("Testing provider connectivity and model discovery..."));
         QueueBackgroundOperation(
             cancellationToken => _modelProviders.TestProviderAsync(definition, cancellationToken),
             result =>
@@ -585,7 +585,7 @@ internal sealed class ModelProvidersDialog
                     }
 
                     var statusSuffix = enabledAfterTest
-                        ? $"{Environment.NewLine}[warning]{AnsiMarkup.Escape(item.Label)} was enabled automatically after the successful test. Save to refresh the runtime with this provider.[/]"
+                        ? $"{Environment.NewLine}[warning]{SR.T("{0} was enabled automatically after the successful test. Save to refresh the runtime with this provider.", AnsiMarkup.Escape(item.Label))}[/]"
                         : string.Empty;
 
                     SetStatus(result.Success
@@ -603,7 +603,7 @@ internal sealed class ModelProvidersDialog
                 if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
                 {
                     item.ClearTestResult();
-                    SetStatus("[warning]Provider test canceled.[/]");
+                    SetStatus($"[warning]{SR.T("Provider test canceled.")}[/]");
                     return;
                 }
 
@@ -660,6 +660,9 @@ internal sealed class ModelProvidersDialog
         ArgumentException.ThrowIfNullOrWhiteSpace(progressMessage);
         ArgumentNullException.ThrowIfNull(actionAsync);
 
+        operationDescription = SR.T(operationDescription);
+        progressMessage = SR.T(progressMessage);
+
         if (IsDialogOperationActive())
         {
             ReportActiveOperationBlock(operationDescription);
@@ -668,7 +671,7 @@ internal sealed class ModelProvidersDialog
 
         if (!_providers.Contains(item))
         {
-            SetStatus($"[warning]Select a provider to {AnsiMarkup.Escape(operationDescription)}.[/]");
+            SetStatus($"[warning]{SR.T("Select a provider to {0}.", AnsiMarkup.Escape(operationDescription))}[/]");
             return;
         }
 
@@ -707,7 +710,7 @@ internal sealed class ModelProvidersDialog
                     }
 
                     var statusSuffix = enabledAfterLogin
-                        ? $"{Environment.NewLine}[warning]{AnsiMarkup.Escape(item.Label)} was enabled automatically after login. Save to refresh the runtime with this provider.[/]"
+                        ? $"{Environment.NewLine}[warning]{SR.T("{0} was enabled automatically after login. Save to refresh the runtime with this provider.", AnsiMarkup.Escape(item.Label))}[/]"
                         : string.Empty;
 
                     SetStatus(result.Success
@@ -724,7 +727,7 @@ internal sealed class ModelProvidersDialog
             {
                 if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
                 {
-                    SetStatus("[warning]Provider operation canceled.[/]");
+                    SetStatus($"[warning]{SR.T("Provider operation canceled.")}[/]");
                     return;
                 }
 
@@ -754,7 +757,7 @@ internal sealed class ModelProvidersDialog
             Wrap = true,
         };
 
-        var testButton = new Button("Test Provider")
+        var testButton = new Button(SR.T("Test Provider"))
             .Tone(ControlTone.Primary)
             .Click(() => StartTest(item));
         var codexActions = item.ProviderType == "codex"
@@ -779,62 +782,62 @@ internal sealed class ModelProvidersDialog
                 new ColumnDefinition { Width = GridLength.Auto });
 
         var row = 0;
-        AddTextRow(form, ref row, "Provider Key", CreateKeyField(item), CreateSpacer());
-        AddSelectRow(form, ref row, "Type", CreateTypeSelect(item), CreateSpacer());
-        AddCheckRow(form, ref row, "Available", CreateEnabledCheckBox(item), CreateSpacer());
-        AddTextRow(form, ref row, "Display Name", CreateDefaultTextField(bindings.DisplayName, () => item.UseDefaultDisplayName), CreateDefaultCheckBox("Default", bindings.UseDefaultDisplayName));
-        AddTextRow(form, ref row, "Model", CreateModelField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultModel));
-        AddSelectRow(form, ref row, "Reasoning", CreateReasoningSelect(item), CreateDefaultCheckBox("Default", bindings.UseDefaultReasoningEffort));
+        AddTextRow(form, ref row, SR.T("Provider Key"), CreateKeyField(item), CreateSpacer());
+        AddSelectRow(form, ref row, SR.T("Type"), CreateTypeSelect(item), CreateSpacer());
+        AddCheckRow(form, ref row, SR.T("Available"), CreateEnabledCheckBox(item), CreateSpacer());
+        AddTextRow(form, ref row, SR.T("Display Name"), CreateDefaultTextField(bindings.DisplayName, () => item.UseDefaultDisplayName), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultDisplayName));
+        AddTextRow(form, ref row, SR.T("Model"), CreateModelField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModel));
+        AddSelectRow(form, ref row, SR.T("Reasoning"), CreateReasoningSelect(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultReasoningEffort));
 
         if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai")
         {
-            AddTextRow(form, ref row, "API Key", CreateApiKeyBox(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKey));
-            AddTextRow(form, ref row, "API Key Env", CreateApiKeyEnvField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiKeyEnv));
+            AddTextRow(form, ref row, SR.T("API Key"), CreateApiKeyBox(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultApiKey));
+            AddTextRow(form, ref row, SR.T("API Key Env"), CreateApiKeyEnvField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultApiKeyEnv));
         }
 
         if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai")
         {
-            AddTextRow(form, ref row, "API URL", CreateApiUrlField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultApiUrl));
+            AddTextRow(form, ref row, SR.T("API URL"), CreateApiUrlField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultApiUrl));
         }
 
         if (item.ProviderType is "openai-chat" or "openai-responses")
         {
-            AddTextRow(form, ref row, "Organization", CreateDefaultTextField(bindings.OrganizationId, () => item.UseDefaultOrganizationId), CreateDefaultCheckBox("Default", bindings.UseDefaultOrganizationId));
-            AddTextRow(form, ref row, "Project Id", CreateDefaultTextField(bindings.ProjectId, () => item.UseDefaultProjectId), CreateDefaultCheckBox("Default", bindings.UseDefaultProjectId));
+            AddTextRow(form, ref row, SR.T("Organization"), CreateDefaultTextField(bindings.OrganizationId, () => item.UseDefaultOrganizationId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultOrganizationId));
+            AddTextRow(form, ref row, SR.T("Project Id"), CreateDefaultTextField(bindings.ProjectId, () => item.UseDefaultProjectId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultProjectId));
         }
 
         if (item.ProviderType == "vertex-ai")
         {
-            AddTextRow(form, ref row, "Project", CreateVertexProjectField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultProject));
-            AddTextRow(form, ref row, "Location", CreateVertexLocationField(item), CreateDefaultCheckBox("Default", bindings.UseDefaultLocation));
+            AddTextRow(form, ref row, SR.T("Project"), CreateVertexProjectField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultProject));
+            AddTextRow(form, ref row, SR.T("Location"), CreateVertexLocationField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultLocation));
         }
 
         if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai")
         {
-            AddTextRow(form, ref row, "Models.dev Id", CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox("Default", bindings.UseDefaultModelsDevProviderId));
-            AddTextRow(form, ref row, "Single Model Id", CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox("Default", bindings.UseDefaultSingleModelId));
+            AddTextRow(form, ref row, SR.T("Models.dev Id"), CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelsDevProviderId));
+            AddTextRow(form, ref row, SR.T("Single Model Id"), CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultSingleModelId));
         }
 
         if (item.ProviderType == "codex")
         {
-            AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
-            AddTextRow(form, ref row, "Account/Workspace Id", CreateDefaultTextField(bindings.AccountId, () => item.UseDefaultAccountId), CreateDefaultCheckBox("Default", bindings.UseDefaultAccountId));
-            AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
-            AddTextRow(form, ref row, "Response Transport", CreateDefaultTextField(bindings.ResponseTransport, () => item.UseDefaultResponseTransport), CreateDefaultCheckBox("Default", bindings.UseDefaultResponseTransport));
+            AddTextRow(form, ref row, SR.T("Auth Source"), CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultAuthSource));
+            AddTextRow(form, ref row, SR.T("Account/Workspace Id"), CreateDefaultTextField(bindings.AccountId, () => item.UseDefaultAccountId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultAccountId));
+            AddTextRow(form, ref row, SR.T("Model Discovery"), CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelDiscovery));
+            AddTextRow(form, ref row, SR.T("Response Transport"), CreateDefaultTextField(bindings.ResponseTransport, () => item.UseDefaultResponseTransport), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultResponseTransport));
         }
         else if (item.ProviderType == "copilot")
         {
-            AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
-            AddTextRow(form, ref row, "GitHub Enterprise", CreateDefaultTextField(bindings.GitHubEnterpriseUrl, () => item.UseDefaultGitHubEnterpriseUrl), CreateDefaultCheckBox("Default", bindings.UseDefaultGitHubEnterpriseUrl));
-            AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
+            AddTextRow(form, ref row, SR.T("Auth Source"), CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultAuthSource));
+            AddTextRow(form, ref row, SR.T("GitHub Enterprise"), CreateDefaultTextField(bindings.GitHubEnterpriseUrl, () => item.UseDefaultGitHubEnterpriseUrl), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultGitHubEnterpriseUrl));
+            AddTextRow(form, ref row, SR.T("Model Discovery"), CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelDiscovery));
         }
         else if (item.ProviderType == "xai")
         {
-            AddTextRow(form, ref row, "Auth Source", CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox("Default", bindings.UseDefaultAuthSource));
-            AddTextRow(form, ref row, "Model Discovery", CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox("Default", bindings.UseDefaultModelDiscovery));
+            AddTextRow(form, ref row, SR.T("Auth Source"), CreateDefaultTextField(bindings.AuthSource, () => item.UseDefaultAuthSource), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultAuthSource));
+            AddTextRow(form, ref row, SR.T("Model Discovery"), CreateDefaultTextField(bindings.ModelDiscovery, () => item.UseDefaultModelDiscovery), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelDiscovery));
         }
 
-        var advancedNotice = new Markup("[dim]Advanced provider TOML sections such as profile, compaction, extra_body, and model_overrides are preserved when you save from this form. Use Advanced TOML to edit them directly.[/]")
+        var advancedNotice = new Markup($"[dim]{SR.T("Advanced provider TOML sections such as profile, compaction, extra_body, and model_overrides are preserved when you save from this form. Use Advanced TOML to edit them directly.")}[/]")
         {
             Wrap = true,
         };
@@ -842,7 +845,7 @@ internal sealed class ModelProvidersDialog
         var detailContent = new List<Visual>
         {
             title,
-            CreateSectionRule("Availability"),
+            CreateSectionRule(SR.T("Availability")),
             availability,
             CreateAvailabilityToggleButton(item),
             summary,
@@ -922,51 +925,51 @@ internal sealed class ModelProvidersDialog
 
     private Visual CreateCodexSubscriptionActions(ModelProviderEditorItemViewModel item)
         => new VStack(
-            new Markup("[dim]ChatGPT/Codex subscription actions never send a model turn. Use Account/Workspace Id to pin a specific account when required.[/]") { Wrap = true },
+            new Markup($"[dim]{SR.T("ChatGPT/Codex subscription actions never send a model turn. Use Account/Workspace Id to pin a specific account when required.")}[/]") { Wrap = true },
             new HStack(
                 CreateCancelableProviderActionButton(
                     item,
-                    "Browser Login",
-                    "Cancel Browser Login",
+                    SR.T("Browser Login"),
+                    SR.T("Cancel Browser Login"),
                     ProviderDialogOperationKind.CodexBrowserLogin,
-                    "start ChatGPT browser login",
-                    "Starting ChatGPT browser login...",
+                    SR.T("start ChatGPT browser login"),
+                    SR.T("Starting ChatGPT browser login..."),
                     _modelProviders.LoginWithBrowserAsync),
                 CreateCancelableProviderActionButton(
                     item,
-                    "Device Login",
-                    "Cancel Device Login",
+                    SR.T("Device Login"),
+                    SR.T("Cancel Device Login"),
                     ProviderDialogOperationKind.CodexDeviceLogin,
-                    "start ChatGPT device-code login",
-                    "Requesting ChatGPT device code...",
+                    SR.T("start ChatGPT device-code login"),
+                    SR.T("Requesting ChatGPT device code..."),
                     _modelProviders.LoginWithDeviceCodeAsync),
-                new Button("Test Auth")
+                new Button(SR.T("Test Auth"))
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
-                        "test ChatGPT authentication",
-                        "Testing ChatGPT authentication without sending a model turn...",
+                        SR.T("test ChatGPT authentication"),
+                        SR.T("Testing ChatGPT authentication without sending a model turn..."),
                         definition => _modelProviders.TestAuthenticationAsync(definition))),
-                new Button("List Models")
+                new Button(SR.T("List Models"))
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
-                        "list Codex subscription models",
-                        "Listing Codex subscription models without sending a model turn...",
+                        SR.T("list Codex subscription models"),
+                        SR.T("Listing Codex subscription models without sending a model turn..."),
                         definition => _modelProviders.ListModelsAsync(definition))),
-                new Button("List Accounts")
+                new Button(SR.T("List Accounts"))
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
-                        "list ChatGPT accounts/workspaces",
-                        "Reading ChatGPT account/workspace metadata...",
+                        SR.T("list ChatGPT accounts/workspaces"),
+                        SR.T("Reading ChatGPT account/workspace metadata..."),
                         definition => _modelProviders.ListAccountsAsync(definition))),
-                new Button("Logout")
+                new Button(SR.T("Logout"))
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
-                        "logout ChatGPT credentials",
-                        "Deleting CodeAlta-owned ChatGPT/Codex credentials...",
+                        SR.T("logout ChatGPT credentials"),
+                        SR.T("Deleting CodeAlta-owned ChatGPT/Codex credentials..."),
                         definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
@@ -978,44 +981,44 @@ internal sealed class ModelProvidersDialog
 
     private Visual CreateCopilotDirectActions(ModelProviderEditorItemViewModel item)
         => new VStack(
-            new Markup("[dim]Copilot login opens GitHub's device authorization page, then stores CodeAlta-owned GitHub/Copilot tokens for this provider. No model turn is sent.[/]") { Wrap = true },
+            new Markup($"[dim]{SR.T("Copilot login opens GitHub's device authorization page, then stores CodeAlta-owned GitHub/Copilot tokens for this provider. No model turn is sent.")}[/]") { Wrap = true },
             new HStack(
                 CreateCancelableProviderActionButton(
                     item,
-                    "Browser Login",
-                    "Cancel Browser Login",
+                    SR.T("Browser Login"),
+                    SR.T("Cancel Browser Login"),
                     ProviderDialogOperationKind.CopilotBrowserLogin,
-                    "start Copilot browser login",
-                    "Requesting Copilot login code...",
+                    SR.T("start Copilot browser login"),
+                    SR.T("Requesting Copilot login code..."),
                     _modelProviders.LoginWithBrowserAsync),
                 CreateCancelableProviderActionButton(
                     item,
-                    "Device Login",
-                    "Cancel Device Login",
+                    SR.T("Device Login"),
+                    SR.T("Cancel Device Login"),
                     ProviderDialogOperationKind.CopilotDeviceLogin,
-                    "start Copilot device-code login",
-                    "Requesting Copilot device code...",
+                    SR.T("start Copilot device-code login"),
+                    SR.T("Requesting Copilot device code..."),
                     _modelProviders.LoginWithDeviceCodeAsync),
-                new Button("Test Auth")
+                new Button(SR.T("Test Auth"))
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
-                        "test Copilot authentication",
-                        "Checking cached Copilot credentials...",
+                        SR.T("test Copilot authentication"),
+                        SR.T("Checking cached Copilot credentials..."),
                         definition => _modelProviders.TestAuthenticationAsync(definition))),
-                new Button("List Models")
+                new Button(SR.T("List Models"))
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
-                        "list Copilot models",
-                        "Listing Copilot models without sending a model turn...",
+                        SR.T("list Copilot models"),
+                        SR.T("Listing Copilot models without sending a model turn..."),
                         definition => _modelProviders.ListModelsAsync(definition))),
-                new Button("Logout")
+                new Button(SR.T("Logout"))
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
-                        "logout Copilot credentials",
-                        "Deleting CodeAlta-owned Copilot credentials...",
+                        SR.T("logout Copilot credentials"),
+                        SR.T("Deleting CodeAlta-owned Copilot credentials..."),
                         definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
@@ -1027,44 +1030,44 @@ internal sealed class ModelProvidersDialog
 
     private Visual CreateXaiDirectActions(ModelProviderEditorItemViewModel item)
         => new VStack(
-            new Markup("[dim]xAI Grok login uses the public Grok-CLI OAuth client and stores CodeAlta-owned access + refresh tokens for this provider. Browser login opens auth.x.ai for PKCE; device login prints a code for headless hosts. No model turn is sent.[/]") { Wrap = true },
+            new Markup($"[dim]{SR.T("xAI Grok login uses the public Grok-CLI OAuth client and stores CodeAlta-owned access + refresh tokens for this provider. Browser login opens auth.x.ai for PKCE; device login prints a code for headless hosts. No model turn is sent.")}[/]") { Wrap = true },
             new HStack(
                 CreateCancelableProviderActionButton(
                     item,
-                    "Browser Login",
-                    "Cancel Browser Login",
+                    SR.T("Browser Login"),
+                    SR.T("Cancel Browser Login"),
                     ProviderDialogOperationKind.XaiBrowserLogin,
-                    "start xAI browser login",
-                    "Starting xAI browser login...",
+                    SR.T("start xAI browser login"),
+                    SR.T("Starting xAI browser login..."),
                     _modelProviders.LoginWithBrowserAsync),
                 CreateCancelableProviderActionButton(
                     item,
-                    "Device Login",
-                    "Cancel Device Login",
+                    SR.T("Device Login"),
+                    SR.T("Cancel Device Login"),
                     ProviderDialogOperationKind.XaiDeviceLogin,
-                    "start xAI device-code login",
-                    "Requesting xAI device code...",
+                    SR.T("start xAI device-code login"),
+                    SR.T("Requesting xAI device code..."),
                     _modelProviders.LoginWithDeviceCodeAsync),
-                new Button("Test Auth")
+                new Button(SR.T("Test Auth"))
                     .Tone(ControlTone.Primary)
                     .Click(() => StartProviderAction(
                         item,
-                        "test xAI authentication",
-                        "Checking cached xAI credentials...",
+                        SR.T("test xAI authentication"),
+                        SR.T("Checking cached xAI credentials..."),
                         definition => _modelProviders.TestAuthenticationAsync(definition))),
-                new Button("List Models")
+                new Button(SR.T("List Models"))
                     .Tone(ControlTone.Default)
                     .Click(() => StartProviderAction(
                         item,
-                        "list xAI models",
-                        "Listing xAI models without sending a model turn...",
+                        SR.T("list xAI models"),
+                        SR.T("Listing xAI models without sending a model turn..."),
                         definition => _modelProviders.ListModelsAsync(definition))),
-                new Button("Logout")
+                new Button(SR.T("Logout"))
                     .Tone(ControlTone.Error)
                     .Click(() => StartProviderAction(
                         item,
-                        "logout xAI credentials",
-                        "Deleting CodeAlta-owned xAI credentials...",
+                        SR.T("logout xAI credentials"),
+                        SR.T("Deleting CodeAlta-owned xAI credentials..."),
                         definition => _modelProviders.LogoutAsync(definition))))
             {
                 Spacing = 1,
@@ -1099,12 +1102,12 @@ internal sealed class ModelProvidersDialog
     }
 
     private CheckBox CreateEnabledCheckBox(ModelProviderEditorItemViewModel item)
-        => new CheckBox("Enable this provider").IsChecked(GetBindings(item).Enabled);
+        => new CheckBox(SR.T("Enable this provider")).IsChecked(GetBindings(item).Enabled);
 
     private Button CreateAvailabilityToggleButton(ModelProviderEditorItemViewModel item)
         => new Button(() => new TextBlock(item.Enabled
-                ? $"{TerminalIcons.MdPauseCircleOutline} Disable Provider"
-                : $"{TerminalIcons.MdCheckCircleOutline} Enable Provider"))
+                ? $"{TerminalIcons.MdPauseCircleOutline} {SR.T("Disable Provider")}"
+                : $"{TerminalIcons.MdCheckCircleOutline} {SR.T("Enable Provider")}"))
             .Tone(() => item.Enabled ? ControlTone.Warning : ControlTone.Success)
             .IsEnabled(!item.IsReserved)
             .Click(
@@ -1112,20 +1115,20 @@ internal sealed class ModelProvidersDialog
                 {
                     if (IsDialogOperationActive())
                     {
-                        ReportActiveOperationBlock(item.Enabled ? "disable this provider" : "enable this provider");
+                        ReportActiveOperationBlock(item.Enabled ? SR.T("disable this provider") : SR.T("enable this provider"));
                         return;
                     }
 
                     item.Enabled = !item.Enabled;
                     SetStatus(item.Enabled
-                        ? $"[warning]{AnsiMarkup.Escape(item.Label)} is enabled. Save to refresh the runtime with this provider.[/]"
-                        : $"[warning]{AnsiMarkup.Escape(item.Label)} is disabled. Save to remove it from runtime selection.[/]");
+                        ? $"[warning]{SR.T("{0} is enabled. Save to refresh the runtime with this provider.", AnsiMarkup.Escape(item.Label))}[/]"
+                        : $"[warning]{SR.T("{0} is disabled. Save to remove it from runtime selection.", AnsiMarkup.Escape(item.Label))}[/]");
                 });
 
     private Visual CreateModelField(ModelProviderEditorItemViewModel item)
     {
         var binding = GetBindings(item).Model;
-        var selectorButton = new Button("Models")
+        var selectorButton = new Button(SR.T("Models"))
             .Tone(ControlTone.Default)
             .IsEnabled(() => !item.UseDefaultModel && !IsDialogOperationActive())
             .Click(() => StartModelSelection(item));
@@ -1147,19 +1150,19 @@ internal sealed class ModelProvidersDialog
 
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("list provider models");
+            ReportActiveOperationBlock(SR.T("list provider models"));
             return;
         }
 
         if (item.UseDefaultModel)
         {
-            SetStatus("[warning]Uncheck Model Default before choosing a provider model.[/]");
+            SetStatus($"[warning]{SR.T("Uncheck Model Default before choosing a provider model.")}[/]");
             return;
         }
 
         if (!_providers.Contains(item))
         {
-            SetStatus("[warning]Select a provider before choosing a model.[/]");
+            SetStatus($"[warning]{SR.T("Select a provider before choosing a model.")}[/]");
             return;
         }
 
@@ -1175,12 +1178,12 @@ internal sealed class ModelProvidersDialog
             return;
         }
 
-        if (!TryBeginDialogOperation("list provider models", canCancel: true))
+        if (!TryBeginDialogOperation(SR.T("list provider models"), canCancel: true))
         {
             return;
         }
 
-        SetStatus($"[primary]Listing models for {AnsiMarkup.Escape(item.Label)}...[/]");
+        SetStatus($"[primary]{SR.T("Listing models for {0}...", AnsiMarkup.Escape(item.Label))}[/]");
         QueueBackgroundOperation(
             cancellationToken => _modelProviders.ListSelectableModelsAsync(definition, cancellationToken),
             result => CompleteModelSelectionListing(item, result),
@@ -1188,7 +1191,7 @@ internal sealed class ModelProvidersDialog
             {
                 if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)
                 {
-                    SetStatus("[warning]Model listing canceled.[/]");
+                    SetStatus($"[warning]{SR.T("Model listing canceled.")}[/]");
                     return;
                 }
 
@@ -1200,7 +1203,7 @@ internal sealed class ModelProvidersDialog
     {
         if (!_providers.Contains(item))
         {
-            SetStatus("[warning]The provider was removed before model listing completed.[/]");
+            SetStatus($"[warning]{SR.T("The provider was removed before model listing completed.")}[/]");
             return;
         }
 
@@ -1212,7 +1215,7 @@ internal sealed class ModelProvidersDialog
 
         if (result.Models.Count == 0)
         {
-            SetStatus("[warning]No models were returned for this provider.[/]");
+            SetStatus($"[warning]{SR.T("No models were returned for this provider.")}[/]");
             return;
         }
 
@@ -1224,7 +1227,7 @@ internal sealed class ModelProvidersDialog
             _getBounds,
             () => _dialog);
         _activeModelSelectionDialog.Show();
-        SetStatus($"[success]{AnsiMarkup.Escape(result.Message)} Select a model from the popup.[/]");
+        SetStatus($"[success]{AnsiMarkup.Escape(result.Message)} {SR.T("Select a model from the popup.")}[/]");
     }
 
     private void SelectModel(ModelProviderEditorItemViewModel item, string modelId)
@@ -1234,12 +1237,12 @@ internal sealed class ModelProvidersDialog
 
         if (!_providers.Contains(item))
         {
-            SetStatus("[warning]The provider was removed before the selected model could be applied.[/]");
+            SetStatus($"[warning]{SR.T("The provider was removed before the selected model could be applied.")}[/]");
             return;
         }
 
         item.Model = modelId;
-        SetStatus($"[warning]Selected model {AnsiMarkup.Escape(modelId)}. Save to apply the provider change.[/]");
+        SetStatus($"[warning]{SR.T("Selected model {0}. Save to apply the provider change.", AnsiMarkup.Escape(modelId))}[/]");
     }
 
     private Visual CreateReasoningSelect(ModelProviderEditorItemViewModel item)
@@ -1316,7 +1319,7 @@ internal sealed class ModelProvidersDialog
             .Stretch();
 
     private static CheckBox CreateDefaultCheckBox(string label, Binding<bool> binding)
-        => new CheckBox(label).IsChecked(binding);
+        => new CheckBox(SR.T(label)).IsChecked(binding);
 
     private static Visual CreateSpacer()
         => new TextBlock(string.Empty);
@@ -1365,7 +1368,7 @@ internal sealed class ModelProvidersDialog
     private static void AddTextRow(Grid form, ref int row, string label, Visual content, Visual trailing)
     {
         EnsureRow(form, row);
-        form.Cell(new TextBlock(label) { VerticalAlignment = Align.Center }, row, 0);
+        form.Cell(new TextBlock(SR.T(label)) { VerticalAlignment = Align.Center }, row, 0);
         form.Cell(content.Stretch(), row, 1);
         form.Cell(trailing, row, 2);
         row++;
@@ -1398,8 +1401,8 @@ internal sealed class ModelProvidersDialog
         if (diagnostics.Entries.Count == 0)
         {
             return item.Enabled
-                ? "[primary]Configured.[/] Use [bold]Test Provider[/] to confirm this provider works before saving."
-                : "This provider is disabled. Enable it when you are ready to use it.";
+                ? $"[primary]{SR.T("Configured.")}[/] {SR.T("Use [bold]Test Provider[/] to confirm this provider works before saving.")}"
+                : SR.T("This provider is disabled. Enable it when you are ready to use it.");
         }
 
         return string.Join(
@@ -1427,17 +1430,17 @@ internal sealed class ModelProvidersDialog
     private static string BuildAvailabilityMarkup(ModelProviderEditorItemViewModel item)
     {
         var (tone, icon) = GetAvailabilityToneAndIcon(item.Enabled);
-        var stateText = item.Enabled ? "Enabled" : "Disabled";
+        var stateText = item.Enabled ? SR.T("Enabled") : SR.T("Disabled");
         var guidance = item.Enabled
-            ? "This provider can appear in the provider picker after you save."
-            : "Disabled providers stay hidden from runtime provider selection until enabled and saved.";
-        return $"[{tone}]{icon} {stateText} in CodeAlta[/] [dim]· {AnsiMarkup.Escape(guidance)}[/]";
+            ? SR.T("This provider can appear in the provider picker after you save.")
+            : SR.T("Disabled providers stay hidden from runtime provider selection until enabled and saved.");
+        return $"[{tone}]{icon} {SR.T("{0} in CodeAlta", stateText)}[/] [dim]· {AnsiMarkup.Escape(guidance)}[/]";
     }
 
     private static Visual CreateSectionRule(string label)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
-        return new Markup($"[dim]──── {AnsiMarkup.Escape(label)} ────[/]")
+        return new Markup($"[dim]──── {AnsiMarkup.Escape(SR.T(label))} ────[/]")
         {
             Wrap = false,
         };
@@ -1487,7 +1490,8 @@ internal sealed class ModelProvidersDialog
     }
 
     private static bool IsSaveBlockingDiagnostic(ModelProviderDiagnosticEntry entry)
-        => !entry.Message.StartsWith("Last test failed:", StringComparison.Ordinal);
+        => !entry.Message.StartsWith("Last test failed:", StringComparison.Ordinal) &&
+           !entry.Message.StartsWith(SR.T("Last test failed:"), StringComparison.Ordinal);
 
     private void SetSelectedProviderIndex(int index)
     {
@@ -1552,7 +1556,7 @@ internal sealed class ModelProvidersDialog
     {
         foreach (var item in _providers.Where(static item => item.Enabled))
         {
-            item.SetTestInProgress("Refreshing provider availability and model list...");
+            item.SetTestInProgress(SR.T("Refreshing provider availability and model list..."));
         }
     }
 
@@ -1579,7 +1583,7 @@ internal sealed class ModelProvidersDialog
             return statusText;
         }
 
-        const string unsavedStatus = "[warning]Unsaved model provider changes. Save applies them; Refresh reloads from disk and retests saved providers.[/]";
+        var unsavedStatus = $"[warning]{SR.T("Unsaved model provider changes. Save applies them; Refresh reloads from disk and retests saved providers.")}[/]";
         return IsPersistentStatusText(statusText)
             ? unsavedStatus
             : $"{statusText}{Environment.NewLine}{unsavedStatus}";
@@ -1592,17 +1596,17 @@ internal sealed class ModelProvidersDialog
             var hints = new List<string>();
             if (IsCancelableOperationActive())
             {
-                hints.Add("Ctrl+G Ctrl+C cancel");
+                hints.Add(SR.T("Ctrl+G Ctrl+C cancel"));
             }
 
             if (!string.IsNullOrWhiteSpace(_activeLoginUrl.Value))
             {
-                hints.Add("Ctrl+G Ctrl+U copy URL");
+                hints.Add(SR.T("Ctrl+G Ctrl+U copy URL"));
             }
 
             if (!string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value))
             {
-                hints.Add("Ctrl+G Ctrl+D copy code");
+                hints.Add(SR.T("Ctrl+G Ctrl+D copy code"));
             }
 
             if (hints.Count > 0)
@@ -1611,24 +1615,24 @@ internal sealed class ModelProvidersDialog
             }
         }
 
-        return "[dim]Ctrl+G Ctrl+R reopen · Esc close[/]";
+        return $"[dim]{SR.T("Ctrl+G Ctrl+R reopen · Esc close")}[/]";
     }
 
     private string BuildChangeSummaryMarkup()
     {
         if (_activeOperationCount.Value > 0)
         {
-            return "[primary]Operation in progress...[/]";
+            return $"[primary]{SR.T("Operation in progress...")}[/]";
         }
 
         if (!_hasLoadedDefinitions.Value)
         {
-            return "[dim]Provider configuration not loaded yet.[/]";
+            return $"[dim]{SR.T("Provider configuration not loaded yet.")}[/]";
         }
 
         return HasUnsavedChanges()
-            ? "[warning]● Unsaved changes[/] [dim]Save applies them; Refresh reloads from disk.[/]"
-            : "[success]✓ No unsaved changes[/] [dim]Configuration matches disk.[/]";
+            ? $"[warning]● {SR.T("Unsaved changes")}[/] [dim]{SR.T("Save applies them; Refresh reloads from disk.")}[/]"
+            : $"[success]✓ {SR.T("No unsaved changes")}[/] [dim]{SR.T("Configuration matches disk.")}[/]";
     }
 
     private static bool IsPersistentStatusText(string statusText)
@@ -1638,8 +1642,8 @@ internal sealed class ModelProvidersDialog
 
     private static string FormatProviderSaveStatus(ProviderConfigurationSaveResult saveResult)
         => saveResult.RuntimeRefreshSucceeded
-            ? "[success]Provider configuration saved and runtime refreshed.[/]"
-            : $"[warning]Provider configuration saved, but runtime refresh failed: {AnsiMarkup.Escape(saveResult.RuntimeRefreshErrorMessage ?? "unknown error")}[/]";
+            ? $"[success]{SR.T("Provider configuration saved and runtime refreshed.")}[/]"
+            : $"[warning]{SR.T("Provider configuration saved, but runtime refresh failed: {0}", AnsiMarkup.Escape(saveResult.RuntimeRefreshErrorMessage ?? SR.T("unknown error")))}[/]";
 
     private static void TryOpenBrowser(string uri)
     {
@@ -1741,7 +1745,7 @@ internal sealed class ModelProvidersDialog
     {
         if (IsDialogOperationActive())
         {
-            ReportActiveOperationBlock("close this dialog");
+            ReportActiveOperationBlock(SR.T("close this dialog"));
             return;
         }
 
@@ -1752,9 +1756,9 @@ internal sealed class ModelProvidersDialog
         }
 
         new ConfirmationDialog(
-            "Discard Provider Changes?",
-            ["You have unsaved model provider changes.", "Close the dialog without saving?"],
-            "Discard",
+            SR.T("Discard Provider Changes?"),
+            [SR.T("You have unsaved model provider changes."), SR.T("Close the dialog without saving?")],
+            SR.T("Discard"),
             ControlTone.Error,
             () =>
             {
@@ -1782,7 +1786,7 @@ internal sealed class ModelProvidersDialog
             : null;
 
     private static Visual BuildEmptyState()
-        => new TextBlock("Add a provider on the left, or enable one of the reserved providers to get started.")
+        => new TextBlock(SR.T("Add a provider on the left, or enable one of the reserved providers to get started."))
         {
             Wrap = true,
         };
@@ -1809,29 +1813,29 @@ internal sealed class ModelProvidersDialog
     {
         if (!item.Enabled)
         {
-            return ("muted", $"{TerminalIcons.MdPauseCircleOutline}", "OFF");
+            return ("muted", $"{TerminalIcons.MdPauseCircleOutline}", SR.T("OFF"));
         }
 
         if (item.LastTestState == ModelProviderLastTestState.Testing)
         {
-            return ("primary", $"{TerminalIcons.MdTimerOutline}", "TEST");
+            return ("primary", $"{TerminalIcons.MdTimerOutline}", SR.T("TEST"));
         }
 
         return diagnostics.StatusKind switch
         {
-            ModelProviderUiStatusKind.Success => ("success", $"{TerminalIcons.MdCheckCircleOutline}", "ON"),
-            ModelProviderUiStatusKind.Error => ("error", $"{TerminalIcons.MdCloseCircleOutline}", "ERR"),
-            ModelProviderUiStatusKind.Warning => ("warning", $"{TerminalIcons.MdAlertOutline}", "WARN"),
-            _ => ("primary", $"{TerminalIcons.MdHelpBox}", "TEST"),
+            ModelProviderUiStatusKind.Success => ("success", $"{TerminalIcons.MdCheckCircleOutline}", SR.T("ON")),
+            ModelProviderUiStatusKind.Error => ("error", $"{TerminalIcons.MdCloseCircleOutline}", SR.T("ERR")),
+            ModelProviderUiStatusKind.Warning => ("warning", $"{TerminalIcons.MdAlertOutline}", SR.T("WARN")),
+            _ => ("primary", $"{TerminalIcons.MdHelpBox}", SR.T("TEST")),
         };
     }
 
     private static string FormatRuntimeStatusMessage(ProviderRuntimeStatus status)
         => status.ModelCount switch
         {
-            0 => "Runtime connected.",
-            1 => "Runtime connected · 1 model discovered.",
-            _ => $"Runtime connected · {status.ModelCount} models discovered.",
+            0 => SR.T("Runtime connected."),
+            1 => SR.T("Runtime connected · 1 model discovered."),
+            _ => SR.T("Runtime connected · {0} models discovered.", status.ModelCount),
         };
 
     private static ValidationMessage? BuildCustomApiUrlGuidance(ModelProviderEditorItemViewModel item)
@@ -1839,7 +1843,7 @@ internal sealed class ModelProvidersDialog
            !item.UseDefaultApiUrl &&
            !string.IsNullOrWhiteSpace(item.ApiUrl) &&
            ModelProviderEditorDiagnostics.ValidateApiUrl(item) is null
-            ? new ValidationMessage(ValidationSeverity.Info, "Use Test Provider to verify this custom endpoint is reachable.")
+            ? new ValidationMessage(ValidationSeverity.Info, SR.T("Use Test Provider to verify this custom endpoint is reachable."))
             : null;
 
     private static string GetValidationMessageText(ValidationMessage message)
@@ -1936,7 +1940,7 @@ internal sealed class ModelProvidersDialog
         var cancellation = _activeOperationCancellation;
         if (cancellation is null)
         {
-            ReportActiveOperationBlock("cancel the current operation");
+            ReportActiveOperationBlock(SR.T("cancel the current operation"));
             return;
         }
 
@@ -1945,7 +1949,7 @@ internal sealed class ModelProvidersDialog
             cancellation.Cancel();
         }
 
-        _activeOperationNoticeText.Value = "[warning]Cancel requested. Waiting for the provider operation to stop...[/]";
+        _activeOperationNoticeText.Value = $"[warning]{SR.T("Cancel requested. Waiting for the provider operation to stop...")}[/]";
         RefreshActiveLoginDialog();
     }
 
@@ -1975,7 +1979,7 @@ internal sealed class ModelProvidersDialog
         var dialog = new Dialog()
             .Title(labels.Title)
             .TopRightText(cancelButton)
-            .BottomRightText(new Markup("[dim]Esc cancel · Ctrl+G Ctrl+C cancel[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Esc cancel · Ctrl+G Ctrl+C cancel")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(content)
@@ -1985,7 +1989,7 @@ internal sealed class ModelProvidersDialog
         {
             Id = "CodeAlta.Providers.Login.Cancel",
             LabelMarkup = labels.CancelLabel,
-            DescriptionMarkup = "Cancel the active browser or device login.",
+            DescriptionMarkup = SR.T("Cancel the active browser or device login."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => CancelActiveOperation(),
@@ -1994,7 +1998,7 @@ internal sealed class ModelProvidersDialog
         {
             Id = "CodeAlta.Providers.Login.CancelSequence",
             LabelMarkup = labels.CancelLabel,
-            DescriptionMarkup = "Cancel the active browser or device login.",
+            DescriptionMarkup = SR.T("Cancel the active browser or device login."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlC, TerminalModifiers.Ctrl)),
@@ -2004,8 +2008,8 @@ internal sealed class ModelProvidersDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Login.CopyUrl",
-            LabelMarkup = "Copy Login URL",
-            DescriptionMarkup = "Copy the current login URL to the clipboard.",
+            LabelMarkup = SR.T("Copy Login URL"),
+            DescriptionMarkup = SR.T("Copy the current login URL to the clipboard."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlU, TerminalModifiers.Ctrl)),
@@ -2016,8 +2020,8 @@ internal sealed class ModelProvidersDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Login.CopyDeviceCode",
-            LabelMarkup = "Copy Device Code",
-            DescriptionMarkup = "Copy the current device login code to the clipboard.",
+            LabelMarkup = SR.T("Copy Device Code"),
+            DescriptionMarkup = SR.T("Copy the current device login code to the clipboard."),
             Sequence = new KeySequence(
                 new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
                 new KeyGesture(TerminalChar.CtrlD, TerminalModifiers.Ctrl)),
@@ -2033,7 +2037,7 @@ internal sealed class ModelProvidersDialog
 
     private Visual BuildActiveLoginDialogContent(LoginOperationLabels labels)
     {
-        var instructions = new Markup($"[dim]{AnsiMarkup.Escape(labels.Instruction)} This dialog closes automatically when login completes.[/]")
+        var instructions = new Markup($"[dim]{AnsiMarkup.Escape(labels.Instruction)} {SR.T("This dialog closes automatically when login completes.")}[/]")
         {
             Wrap = true,
         };
@@ -2055,11 +2059,11 @@ internal sealed class ModelProvidersDialog
         }
 
         sections.Add(new HStack(
-            new Button("Copy URL")
+            new Button(SR.T("Copy URL"))
                 .Tone(ControlTone.Default)
                 .IsEnabled(() => !string.IsNullOrWhiteSpace(_activeLoginUrl.Value))
                 .Click(CopyActiveLoginUrl),
-            new Button("Copy Code")
+            new Button(SR.T("Copy Code"))
                 .Tone(ControlTone.Default)
                 .IsEnabled(() => !string.IsNullOrWhiteSpace(_activeLoginDeviceCode.Value))
                 .Click(CopyActiveLoginDeviceCode),
@@ -2084,8 +2088,8 @@ internal sealed class ModelProvidersDialog
         if (string.IsNullOrWhiteSpace(_activeLoginUrl.Value))
         {
             return new VStack(
-                new Markup("[bold]URL[/]"),
-                new Markup("[dim]Waiting for the provider to return the login URL...[/]") { Wrap = true })
+                new Markup($"[bold]{SR.T("URL")}[/]"),
+                new Markup($"[dim]{SR.T("Waiting for the provider to return the login URL...")}[/]") { Wrap = true })
             {
                 HorizontalAlignment = Align.Stretch,
                 Spacing = 0,
@@ -2093,7 +2097,7 @@ internal sealed class ModelProvidersDialog
         }
 
         return new VStack(
-            new Markup("[bold]URL[/] [dim]Press Enter on any link line to open it.[/]"),
+            new Markup($"[bold]{SR.T("URL")}[/] [dim]{SR.T("Press Enter on any link line to open it.")}[/]"),
             CreateWrappedLoginLink(_activeLoginUrl.Value))
         {
             HorizontalAlignment = Align.Stretch,
@@ -2103,12 +2107,12 @@ internal sealed class ModelProvidersDialog
 
     private Visual CreateLoginDeviceCodeSection()
         => new VStack(
-            new Markup("[bold]Code[/] [dim]Copy it, then paste it in the browser.[/]"),
+            new Markup($"[bold]{SR.T("Code")}[/] [dim]{SR.T("Copy it, then paste it in the browser.")}[/]"),
             new HStack(
                 new TextBox(() => _activeLoginDeviceCode.Value ?? string.Empty)
                     .IsEnabled(false)
                     .Stretch(),
-                new Button("Copy Code")
+                new Button(SR.T("Copy Code"))
                     .Tone(ControlTone.Primary)
                     .Click(CopyActiveLoginDeviceCode))
             {
@@ -2129,7 +2133,7 @@ internal sealed class ModelProvidersDialog
                     TryOpenBrowser(e.Uri);
                     e.Handled = true;
                 })
-                .Tooltip(new TextBlock($"Open {uri}")));
+                .Tooltip(new TextBlock(SR.T("Open {0}", uri))));
         return new VStack(lines.ToArray())
         {
             HorizontalAlignment = Align.Stretch,
@@ -2212,57 +2216,57 @@ internal sealed class ModelProvidersDialog
         => operationKind switch
         {
             ProviderDialogOperationKind.CodexBrowserLogin => new LoginOperationLabels(
-                "ChatGPT Browser Login",
-                "Cancel Browser Login",
-                "Complete ChatGPT browser login in your browser, then return to CodeAlta."),
+                SR.T("ChatGPT Browser Login"),
+                SR.T("Cancel Browser Login"),
+                SR.T("Complete ChatGPT browser login in your browser, then return to CodeAlta.")),
             ProviderDialogOperationKind.CodexDeviceLogin => new LoginOperationLabels(
-                "ChatGPT Device Login",
-                "Cancel Device Login",
-                "Open the ChatGPT verification URL and enter the device code shown below."),
+                SR.T("ChatGPT Device Login"),
+                SR.T("Cancel Device Login"),
+                SR.T("Open the ChatGPT verification URL and enter the device code shown below.")),
             ProviderDialogOperationKind.CopilotBrowserLogin => new LoginOperationLabels(
-                "Copilot Browser Login",
-                "Cancel Browser Login",
-                "Complete Copilot browser login in your browser, then return to CodeAlta."),
+                SR.T("Copilot Browser Login"),
+                SR.T("Cancel Browser Login"),
+                SR.T("Complete Copilot browser login in your browser, then return to CodeAlta.")),
             ProviderDialogOperationKind.CopilotDeviceLogin => new LoginOperationLabels(
-                "Copilot Device Login",
-                "Cancel Device Login",
-                "Open the Copilot verification URL and enter the device code shown below."),
+                SR.T("Copilot Device Login"),
+                SR.T("Cancel Device Login"),
+                SR.T("Open the Copilot verification URL and enter the device code shown below.")),
             ProviderDialogOperationKind.XaiBrowserLogin => new LoginOperationLabels(
-                "xAI Grok Browser Login",
-                "Cancel Browser Login",
-                "Complete xAI Grok browser login in your browser, then return to CodeAlta."),
+                SR.T("xAI Grok Browser Login"),
+                SR.T("Cancel Browser Login"),
+                SR.T("Complete xAI Grok browser login in your browser, then return to CodeAlta.")),
             ProviderDialogOperationKind.XaiDeviceLogin => new LoginOperationLabels(
-                "xAI Grok Device Login",
-                "Cancel Device Login",
-                "Open the xAI verification URL and enter the device code shown below."),
+                SR.T("xAI Grok Device Login"),
+                SR.T("Cancel Device Login"),
+                SR.T("Open the xAI verification URL and enter the device code shown below.")),
             _ => new LoginOperationLabels(
-                "Provider Login",
-                "Cancel Login",
-                "Complete the provider login in your browser, then return to CodeAlta."),
+                SR.T("Provider Login"),
+                SR.T("Cancel Login"),
+                SR.T("Complete the provider login in your browser, then return to CodeAlta.")),
         };
 
     private void CopyActiveLoginUrl()
-        => CopyActiveLoginValue(_activeLoginUrl.Value, "login URL");
+        => CopyActiveLoginValue(_activeLoginUrl.Value, SR.T("login URL"));
 
     private void CopyActiveLoginDeviceCode()
-        => CopyActiveLoginValue(_activeLoginDeviceCode.Value, "device code");
+        => CopyActiveLoginValue(_activeLoginDeviceCode.Value, SR.T("device code"));
 
     private void CopyActiveLoginValue(string? value, string label)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         if (string.IsNullOrWhiteSpace(value))
         {
-            SetProviderOperationNotice($"[warning]No {AnsiMarkup.Escape(label)} is available to copy yet.[/]");
+            SetProviderOperationNotice($"[warning]{SR.T("No {0} is available to copy yet.", AnsiMarkup.Escape(label))}[/]");
             return;
         }
 
         if (_dialog.App?.Terminal.Clipboard.TrySetText(value) == true)
         {
-            SetProviderOperationNotice($"[success]Copied {AnsiMarkup.Escape(label)} to clipboard.[/]");
+            SetProviderOperationNotice($"[success]{SR.T("Copied {0} to clipboard.", AnsiMarkup.Escape(label))}[/]");
             return;
         }
 
-        SetProviderOperationNotice($"[warning]Could not copy {AnsiMarkup.Escape(label)} to the clipboard.[/]");
+        SetProviderOperationNotice($"[warning]{SR.T("Could not copy {0} to the clipboard.", AnsiMarkup.Escape(label))}[/]");
     }
 
     private void CaptureActiveLoginDetails(string message)
@@ -2371,8 +2375,8 @@ internal sealed class ModelProvidersDialog
     private void ReportActiveOperationBlock(string operationDescription)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operationDescription);
-        var nextStep = IsCancelableOperationActive() ? "Cancel it or wait" : "Wait for it to finish";
-        _activeOperationNoticeText.Value = $"[warning]Current provider operation is still running. {nextStep} before trying to {AnsiMarkup.Escape(operationDescription)}.[/]";
+        var nextStep = IsCancelableOperationActive() ? SR.T("Cancel it or wait") : SR.T("Wait for it to finish");
+        _activeOperationNoticeText.Value = $"[warning]{SR.T("Current provider operation is still running. {0} before trying to {1}.", nextStep, AnsiMarkup.Escape(operationDescription))}[/]";
         RefreshActiveLoginDialog();
     }
 

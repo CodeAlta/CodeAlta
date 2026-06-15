@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using CodeAlta.Catalog;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.ViewModels;
 using XenoAtom.Terminal;
@@ -207,7 +208,7 @@ internal sealed class SessionTabHostView
         SessionTabControl.AddCommand(new Command
         {
             Id = "CodeAlta.SessionTabs.AskPreviousQuestion",
-            LabelMarkup = "Previous ask question",
+            LabelMarkup = SR.T("Previous ask question"),
             Gesture = new KeyGesture(TerminalKey.Left),
             Presentation = CommandPresentation.None,
             ConsumesGestureWhenUnavailable = false,
@@ -217,7 +218,7 @@ internal sealed class SessionTabHostView
         SessionTabControl.AddCommand(new Command
         {
             Id = "CodeAlta.SessionTabs.AskNextQuestion",
-            LabelMarkup = "Next ask question",
+            LabelMarkup = SR.T("Next ask question"),
             Gesture = new KeyGesture(TerminalKey.Right),
             Presentation = CommandPresentation.None,
             ConsumesGestureWhenUnavailable = false,
@@ -227,7 +228,7 @@ internal sealed class SessionTabHostView
         SessionTabControl.AddCommand(new Command
         {
             Id = "CodeAlta.SessionTabs.AskConsumeUp",
-            LabelMarkup = "Keep ask focus",
+            LabelMarkup = SR.T("Keep ask focus"),
             Gesture = new KeyGesture(TerminalKey.Up),
             Presentation = CommandPresentation.None,
             ConsumesGestureWhenUnavailable = false,
@@ -237,7 +238,7 @@ internal sealed class SessionTabHostView
         SessionTabControl.AddCommand(new Command
         {
             Id = "CodeAlta.SessionTabs.AskConsumeDown",
-            LabelMarkup = "Keep ask focus",
+            LabelMarkup = SR.T("Keep ask focus"),
             Gesture = new KeyGesture(TerminalKey.Down),
             Presentation = CommandPresentation.None,
             ConsumesGestureWhenUnavailable = false,

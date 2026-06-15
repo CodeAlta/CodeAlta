@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.App.Context;
 using CodeAlta.App.State;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Chat;
 using CodeAlta.Presentation.Formatting;
@@ -46,10 +47,10 @@ internal sealed class SessionUserInputRequestCoordinator
                         ChatMarkdownFormatter.FormatChatUserInputRequestMarkdown(request, autoApproveEnabled),
                         ChatMarkdownFormatter.FormatChatImmediateUserInputResponseMarkdown(response, autoApproveEnabled),
                         ChatTimelineTone.Interaction,
-                        "Action Required",
-                        "User Input Request");
+                        SR.T("Action Required"),
+                        SR.T("User Input Request"));
                 },
-                "user input request");
+                SR.T("user input request"));
         }
 
         return Task.FromResult(response);

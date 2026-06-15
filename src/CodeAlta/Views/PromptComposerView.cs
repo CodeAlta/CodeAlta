@@ -70,7 +70,7 @@ internal sealed class PromptComposerView
         SendButton = CreatePromptActionButton(viewModel, controller.SendPrompt, controller.AbortSession);
         ExpandButton = CreateIconButton(
             $"{TerminalIcons.MdSquareEditOutline}",
-            "Open the current prompt in a large editor window (F6).",
+            SR.T("Open the current prompt in a large editor window (F6)."),
             OpenExpandedPromptDialog,
             button => button.IsEnabled(viewModel.Bind.IsEnabled));
     }
@@ -99,7 +99,7 @@ internal sealed class PromptComposerView
         editor.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Session.ExpandPrompt.Close", new KeyGesture(TerminalKey.Escape)));
         editor.AddCommand(CreateExpandedPromptDialogCloseCommand("CodeAlta.Session.ExpandPrompt.CloseWithCtrlEnter", new KeyGesture(TerminalKey.Enter, TerminalModifiers.Ctrl), CommandPresentation.None));
 
-        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} Close"))
+        var closeButton = new Button(new TextBlock($"{TerminalIcons.MdClose} {SR.T("Close")}"))
         {
             HorizontalAlignment = Align.End,
             VerticalAlignment = Align.Start,
@@ -108,9 +108,9 @@ internal sealed class PromptComposerView
         closeButton.Click(CloseExpandedPromptDialog);
 
         var dialog = new Dialog()
-            .Title("Edit Prompt")
+            .Title(SR.T("Edit Prompt"))
             .TopRightText(closeButton)
-            .BottomRightText(new Markup("[dim]Enter/Esc/Ctrl+Enter Close · Shift+Enter New line · draft preserved[/]"))
+            .BottomRightText(new Markup($"[dim]{SR.T("Enter/Esc/Ctrl+Enter Close · Shift+Enter New line · draft preserved")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(editor.Scrollable().IsTabStop(false));
@@ -126,8 +126,8 @@ internal sealed class PromptComposerView
             => new()
             {
                 Id = id,
-                LabelMarkup = "Close",
-                DescriptionMarkup = "Close the large prompt editor and keep the current draft.",
+                LabelMarkup = SR.T("Close"),
+                DescriptionMarkup = SR.T("Close the large prompt editor and keep the current draft."),
                 Gesture = gesture,
                 Importance = CommandImportance.Primary,
                 Presentation = presentation,
@@ -272,7 +272,7 @@ internal sealed class PromptComposerView
         {
             var isAbort = promptComposerViewModel.CanAbort;
             var icon = isAbort ? $"{TerminalIcons.MdSquare}" : $"{TerminalIcons.MdSend}";
-            var tooltipText = isAbort ? "Abort the selected session run." : "Send the current prompt.";
+            var tooltipText = isAbort ? SR.T("Abort the selected session run.") : SR.T("Send the current prompt.");
             var action = isAbort ? abortSession : sendPrompt;
             var tone = isAbort ? ControlTone.Error : ControlTone.Success;
             var isEnabled = isAbort ? promptComposerViewModel.CanAbort : promptComposerViewModel.CanSend;

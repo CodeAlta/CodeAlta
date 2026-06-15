@@ -1,4 +1,5 @@
 using CodeAlta.App;
+using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using XenoAtom.Terminal.UI;
 
@@ -95,14 +96,14 @@ internal sealed partial class SkillManagementRowViewModel
     {
         if (!descriptor.IsEnabled)
         {
-            return "disabled";
+            return SR.T("disabled");
         }
 
         if (descriptor.IsShadowed)
         {
-            return "shadowed";
+            return SR.T("shadowed");
         }
 
-        return descriptor.IsValid ? "valid" : "invalid";
+        return descriptor.IsValid ? SR.T("valid") : SR.T("invalid");
     }
 }

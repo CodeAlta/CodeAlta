@@ -147,7 +147,7 @@ internal sealed class SessionPromptDispatchCoordinator
                 if (processedPrompt is null)
                 {
                     tab.ActiveRunStartedAt = null;
-                    _commandContext.SetSessionStatus(tab, "Prompt submission was handled or cancelled by a plugin.", false, StatusTone.Warning);
+                    _commandContext.SetSessionStatus(tab, SR.T("Prompt submission was handled or cancelled by a plugin."), false, StatusTone.Warning);
                     return;
                 }
 
@@ -219,7 +219,7 @@ internal sealed class SessionPromptDispatchCoordinator
             _queueCoordinator.EnqueuePrompt(tab, prompt);
             _commandContext.SetSessionStatus(
                 tab,
-                $"Live steering is not supported by '{session.ProviderId}'; queued the prompt for the next turn.",
+                SR.T("Live steering is not supported by '{0}'; queued the prompt for the next turn.", session.ProviderId),
                 false,
                 StatusTone.Warning);
 
@@ -241,7 +241,7 @@ internal sealed class SessionPromptDispatchCoordinator
 
             tab.ActiveRunId = null;
             tab.ActiveRunStartedAt = null;
-            _commandContext.SetSessionStatus(tab, "Prompt cancelled.", false, StatusTone.Warning);
+            _commandContext.SetSessionStatus(tab, SR.T("Prompt cancelled."), false, StatusTone.Warning);
         }
         catch (Exception ex)
         {
@@ -266,7 +266,7 @@ internal sealed class SessionPromptDispatchCoordinator
 
             tab.Timeline.RenderFailure(BuildPromptDispatchFailureMarkdown(ex.Message, prompt, restoredToDraft));
             tab.ActiveRunStartedAt = null;
-            _commandContext.SetSessionStatus(tab, $"Failed to send prompt: {ex.Message}", false, StatusTone.Error);
+            _commandContext.SetSessionStatus(tab, SR.T("Failed to send prompt: {0}", ex.Message), false, StatusTone.Error);
         }
     }
 
@@ -345,14 +345,14 @@ internal sealed class SessionPromptDispatchCoordinator
 
         var normalizedPrompt = prompt.Text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
         var builder = new System.Text.StringBuilder();
-        builder.Append("Failed to send prompt: ").Append(errorMessage);
+        builder.Append(SR.T("Failed to send prompt: {0}", errorMessage));
         builder.AppendLine();
         builder.AppendLine();
         builder.AppendLine(restoredToDraft
-            ? "Prompt restored to the editor for retry."
-            : "Prompt preserved below because the current editor draft is no longer empty.");
+            ? SR.T("Prompt restored to the editor for retry.")
+            : SR.T("Prompt preserved below because the current editor draft is no longer empty."));
         builder.AppendLine();
-        builder.AppendLine("Prompt:");
+        builder.Append(SR.T("Prompt")).AppendLine(":");
 
         foreach (var line in (string.IsNullOrWhiteSpace(normalizedPrompt) ? prompt.CreateFallbackTitle() : normalizedPrompt).Split('\n'))
         {
@@ -363,7 +363,7 @@ internal sealed class SessionPromptDispatchCoordinator
         if (prompt.Images.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Images:");
+            builder.Append(SR.T("Images")).AppendLine(":");
             foreach (var image in prompt.Images)
             {
                 builder.Append("- ").Append(image.Title).Append(" (").Append(image.MediaType).AppendLine(")");

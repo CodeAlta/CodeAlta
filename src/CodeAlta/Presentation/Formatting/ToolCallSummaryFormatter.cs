@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Presentation.Styling;
 using XenoAtom.Ansi;
@@ -62,32 +63,32 @@ internal static class ToolCallSummaryFormatter
 
         var parts = new List<string>
         {
-            $"{total.ToString(CultureInfo.InvariantCulture)} call(s)",
+            SR.T("{0} call(s)", total.ToString(CultureInfo.InvariantCulture)),
         };
 
         if (running > 0)
         {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Running)}]{running.ToString(CultureInfo.InvariantCulture)} running[/]");
+            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Running)}]{SR.T("{0} running", running.ToString(CultureInfo.InvariantCulture))}[/]");
         }
 
         if (pending > 0)
         {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Pending)}]{pending.ToString(CultureInfo.InvariantCulture)} pending[/]");
+            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Pending)}]{SR.T("{0} pending", pending.ToString(CultureInfo.InvariantCulture))}[/]");
         }
 
         if (completed > 0)
         {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Completed)}]{completed.ToString(CultureInfo.InvariantCulture)} done[/]");
+            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Completed)}]{SR.T("{0} done", completed.ToString(CultureInfo.InvariantCulture))}[/]");
         }
 
         if (failed > 0)
         {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Failed)}]{failed.ToString(CultureInfo.InvariantCulture)} failed[/]");
+            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Failed)}]{SR.T("{0} failed", failed.ToString(CultureInfo.InvariantCulture))}[/]");
         }
 
         if (canceled > 0)
         {
-            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Canceled)}]{canceled.ToString(CultureInfo.InvariantCulture)} canceled[/]");
+            parts.Add($"[{UiPalette.GetToolStatusMarkup(ToolCallDisplayStatus.Canceled)}]{SR.T("{0} canceled", canceled.ToString(CultureInfo.InvariantCulture))}[/]");
         }
 
         return $"[{UiPalette.MutedMarkup}]" + string.Join(" · ", parts) + "[/]";
@@ -98,20 +99,20 @@ internal static class ToolCallSummaryFormatter
         ArgumentNullException.ThrowIfNull(entry);
 
         var builder = new StringBuilder();
-        builder.Append("- Tool: ").AppendLine(BuildPrimaryToolLabel(entry))
-            .Append("- Kind: ").AppendLine(GetActivityKindLabel(entry.ActivityKind))
-            .Append("- Status: ").AppendLine(SplitPascalCase(entry.Status.ToString()))
-            .Append("- First Seen: `").Append(FormatChatCardTimestamp(entry.FirstSeenAt)).AppendLine("`")
-            .Append("- Last Updated: `").Append(FormatChatCardTimestamp(entry.LastUpdatedAt)).AppendLine("`");
+        builder.Append("- ").Append(SR.T("Tool")).Append(": ").AppendLine(BuildPrimaryToolLabel(entry))
+            .Append("- ").Append(SR.T("Kind")).Append(": ").AppendLine(GetActivityKindLabel(entry.ActivityKind))
+            .Append("- ").Append(SR.T("Status")).Append(": ").AppendLine(GetToolStatusLabel(entry.Status))
+            .Append("- ").Append(SR.T("First Seen")).Append(": `").Append(FormatChatCardTimestamp(entry.FirstSeenAt)).AppendLine("`")
+            .Append("- ").Append(SR.T("Last Updated")).Append(": `").Append(FormatChatCardTimestamp(entry.LastUpdatedAt)).AppendLine("`");
 
         if (!string.IsNullOrWhiteSpace(entry.ParentToolCallId))
         {
-            builder.Append("- Parent: `").Append(entry.ParentToolCallId).AppendLine("`");
+            builder.Append("- ").Append(SR.T("Parent")).Append(": `").Append(entry.ParentToolCallId).AppendLine("`");
         }
 
         if (DiffDisplayFormatter.TryGetDiffStats(entry.DiffText, out var additions, out var deletions))
         {
-            builder.Append("- Changes: `+")
+            builder.Append("- ").Append(SR.T("Changes")).Append(": `+")
                 .Append(additions.ToString(CultureInfo.InvariantCulture))
                 .Append(" -")
                 .Append(deletions.ToString(CultureInfo.InvariantCulture))
@@ -121,7 +122,7 @@ internal static class ToolCallSummaryFormatter
         if (!string.IsNullOrWhiteSpace(entry.CommandText))
         {
             builder.AppendLine()
-                .AppendLine("**Command**")
+                .Append("**").Append(SR.T("Command")).AppendLine("**")
                 .AppendLine()
                 .AppendLine(FormatChatCodeFence(entry.CommandText, "text"));
         }
@@ -129,7 +130,7 @@ internal static class ToolCallSummaryFormatter
         if (!string.IsNullOrWhiteSpace(entry.ArgumentText))
         {
             builder.AppendLine()
-                .AppendLine("**Arguments**")
+                .Append("**").Append(SR.T("Arguments")).AppendLine("**")
                 .AppendLine()
                 .AppendLine(FormatChatCodeFence(entry.ArgumentText, IsJsonPayload(entry.ArgumentText) ? "json" : "text"));
         }
@@ -142,7 +143,7 @@ internal static class ToolCallSummaryFormatter
         ArgumentNullException.ThrowIfNull(entry);
 
         var duration = (entry.CompletedAt ?? entry.LastUpdatedAt) - entry.FirstSeenAt;
-        return $"[dim]{entry.OutputLineCount.ToString(CultureInfo.InvariantCulture)} lines · {FormatToolCallKilobytes(entry.OutputByteCount)} · {FormatToolCallDuration(duration)}[/]";
+        return $"[dim]{SR.T("{0} lines", entry.OutputLineCount.ToString(CultureInfo.InvariantCulture))} · {FormatToolCallKilobytes(entry.OutputByteCount)} · {FormatToolCallDuration(duration)}[/]";
     }
 
     private static string BuildPrimaryToolLabel(ToolCallEntryState entry)
@@ -724,20 +725,33 @@ internal static class ToolCallSummaryFormatter
     {
         return kind switch
         {
-            AgentActivityKind.Turn => "Turn",
-            AgentActivityKind.ToolCall => "Tool Call",
-            AgentActivityKind.CommandExecution => "Command Execution",
-            AgentActivityKind.FileChange => "File Change",
-            AgentActivityKind.McpToolCall => "MCP Tool Call",
-            AgentActivityKind.DynamicToolCall => "Dynamic Tool Call",
-            AgentActivityKind.CollabAgentToolCall => "Collab Agent Tool Call",
-            AgentActivityKind.Subagent => "Subagent",
-            AgentActivityKind.Hook => "Hook",
-            AgentActivityKind.Skill => "Skill",
-            AgentActivityKind.Compaction => "Compaction",
-            AgentActivityKind.WebSearch => "Web Search",
-            AgentActivityKind.ImageGeneration => "Image Generation",
+            AgentActivityKind.Turn => SR.T("Turn"),
+            AgentActivityKind.ToolCall => SR.T("Tool Call"),
+            AgentActivityKind.CommandExecution => SR.T("Command Execution"),
+            AgentActivityKind.FileChange => SR.T("File Change"),
+            AgentActivityKind.McpToolCall => SR.T("MCP Tool Call"),
+            AgentActivityKind.DynamicToolCall => SR.T("Dynamic Tool Call"),
+            AgentActivityKind.CollabAgentToolCall => SR.T("Collab Agent Tool Call"),
+            AgentActivityKind.Subagent => SR.T("Subagent"),
+            AgentActivityKind.Hook => SR.T("Hook"),
+            AgentActivityKind.Skill => SR.T("Skill"),
+            AgentActivityKind.Compaction => SR.T("Compaction"),
+            AgentActivityKind.WebSearch => SR.T("Web Search"),
+            AgentActivityKind.ImageGeneration => SR.T("Image Generation"),
             _ => SplitPascalCase(kind.ToString()),
+        };
+    }
+
+    private static string GetToolStatusLabel(ToolCallDisplayStatus status)
+    {
+        return status switch
+        {
+            ToolCallDisplayStatus.Pending => SR.T("Pending"),
+            ToolCallDisplayStatus.Running => SR.T("Running"),
+            ToolCallDisplayStatus.Completed => SR.T("Completed"),
+            ToolCallDisplayStatus.Failed => SR.T("Failed"),
+            ToolCallDisplayStatus.Canceled => SR.T("Canceled"),
+            _ => SplitPascalCase(status.ToString()),
         };
     }
 

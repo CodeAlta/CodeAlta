@@ -62,11 +62,11 @@ internal sealed class ConfigAdvancedEditorDialog
                 : null);
         _editor.LeftMargins.Insert(0, diagnosticMargin);
 
-        _saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} Save and Apply") { Tone = ControlTone.Success };
+        _saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} {SR.T("Save and Apply")}") { Tone = ControlTone.Success };
         _saveButton.IsEnabled(() => !_isSaving.Value && _validation.IsValid && HasUnsavedChanges());
         _saveButton.Click(SaveAndApply);
 
-        _closeButton = new Button($"{TerminalIcons.MdClose} Close") { Tone = ControlTone.Default };
+        _closeButton = new Button($"{TerminalIcons.MdClose} {SR.T("Close")}") { Tone = ControlTone.Default };
         _closeButton.Click(RequestClose);
     }
 
@@ -92,9 +92,9 @@ internal sealed class ConfigAdvancedEditorDialog
     private Dialog BuildDialog()
     {
         var heading = new VStack(
-            new Markup($"[bold primary]{TerminalIcons.MdCodeBraces} Advanced model provider TOML[/]"),
+            new Markup($"[bold primary]{TerminalIcons.MdCodeBraces} {SR.T("Advanced model provider TOML")}[/]"),
             new TextBlock(
-                    "Edit the global CodeAlta configuration directly. Save and Apply is only available after the TOML parses and the provider configuration validates, so invalid edits are not written to disk.")
+                    SR.T("Edit the global CodeAlta configuration directly. Save and Apply is only available after the TOML parses and the provider configuration validates, so invalid edits are not written to disk."))
                 .Wrap(true),
             new Markup($"[dim]{AnsiMarkup.Escape(_configPath)}[/]") { Wrap = true })
         {
@@ -121,8 +121,8 @@ internal sealed class ConfigAdvancedEditorDialog
         };
 
         var dialog = new Dialog()
-            .Title("Advanced Model Providers TOML")
-            .BottomLeftText(new Markup("[dim]Ctrl+S Save and Apply · Esc Close · Ctrl+F Find · Ctrl+G Go to line[/]"))
+            .Title(SR.T("Advanced Model Providers TOML"))
+            .BottomLeftText(new Markup($"[dim]{SR.T("Ctrl+S Save and Apply · Esc Close · Ctrl+F Find · Ctrl+G Go to line")}[/]"))
             .IsModal(true)
             .Padding(1)
             .Content(new DockLayout()
@@ -138,8 +138,8 @@ internal sealed class ConfigAdvancedEditorDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Advanced.SaveAndApply",
-            LabelMarkup = "Save and Apply",
-            DescriptionMarkup = "Save the TOML configuration and refresh model providers.",
+            LabelMarkup = SR.T("Save and Apply"),
+            DescriptionMarkup = SR.T("Save the TOML configuration and refresh model providers."),
             Gesture = new KeyGesture(TerminalChar.CtrlS, TerminalModifiers.Ctrl),
             Presentation = CommandPresentation.CommandBar,
             Importance = CommandImportance.Primary,
@@ -149,8 +149,8 @@ internal sealed class ConfigAdvancedEditorDialog
         dialog.AddCommand(new Command
         {
             Id = "CodeAlta.Providers.Advanced.Close",
-            LabelMarkup = "Close",
-            DescriptionMarkup = "Close the advanced TOML editor.",
+            LabelMarkup = SR.T("Close"),
+            DescriptionMarkup = SR.T("Close the advanced TOML editor."),
             Gesture = new KeyGesture(TerminalKey.Escape),
             Importance = CommandImportance.Primary,
             Execute = _ => RequestClose(),
@@ -173,7 +173,7 @@ internal sealed class ConfigAdvancedEditorDialog
 
         if (_isSaving.Value)
         {
-            return "[primary]Saving configuration and refreshing model providers...[/]";
+            return $"[primary]{SR.T("Saving configuration and refreshing model providers...")}[/]";
         }
 
         if (_saveError.Value is { } saveError)
@@ -184,17 +184,17 @@ internal sealed class ConfigAdvancedEditorDialog
         if (!_validation.IsValid)
         {
             var location = _validation.Line is { } line
-                ? $"Line {line}, column {_validation.Column.GetValueOrDefault(1)}: "
+                ? SR.T("Line {0}, column {1}: ", line, _validation.Column.GetValueOrDefault(1))
                 : string.Empty;
-            return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? "Configuration is invalid."))}[/]";
+            return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? SR.T("Configuration is invalid.")))}[/]";
         }
 
         if (!HasUnsavedChanges())
         {
-            return "[success]Configuration is valid and matches the loaded file.[/]";
+            return $"[success]{SR.T("Configuration is valid and matches the loaded file.")}[/]";
         }
 
-        return $"[success]{TerminalIcons.MdCheckCircleOutline} Configuration can be loaded. Save and Apply is available.[/]";
+        return $"[success]{TerminalIcons.MdCheckCircleOutline} {SR.T("Configuration can be loaded. Save and Apply is available.")}[/]";
     }
 
     private void SaveAndApply()
@@ -256,7 +256,7 @@ internal sealed class ConfigAdvancedEditorDialog
     {
         if (_isSaving.Value)
         {
-            _saveError.Value = "Please wait for the current save operation to complete before closing this editor.";
+            _saveError.Value = SR.T("Please wait for the current save operation to complete before closing this editor.");
             return;
         }
 
@@ -267,9 +267,9 @@ internal sealed class ConfigAdvancedEditorDialog
         }
 
         new ConfirmationDialog(
-            "Discard TOML Changes?",
-            ["You have unsaved TOML changes.", "Close the advanced editor without saving?"],
-            "Discard",
+            SR.T("Discard TOML Changes?"),
+            [SR.T("You have unsaved TOML changes."), SR.T("Close the advanced editor without saving?")],
+            SR.T("Discard"),
             ControlTone.Error,
             () =>
             {
