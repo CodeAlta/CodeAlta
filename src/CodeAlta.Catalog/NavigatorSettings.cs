@@ -31,7 +31,7 @@ public sealed class NavigatorSettings
     public string? ThemeSchemeName { get; set; }
 
     /// <summary>
-    /// Gets or sets the preferred UI language name (e.g., "en", "zh-CN").
+    /// Gets or sets the preferred UI language name (e.g., "en", "es", "fr", "de", "ja", "zh-CN").
     /// When null, empty, or "auto", the system UI culture is used as a fallback.
     /// </summary>
     [JsonPropertyName("language_name")]

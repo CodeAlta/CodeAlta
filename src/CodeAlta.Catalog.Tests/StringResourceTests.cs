@@ -11,22 +11,24 @@ namespace CodeAlta.Catalog.Tests;
 public sealed partial class StringResourceTests
 {
     [TestMethod]
-    public void ChineseResourcesCoverAllTranslatedStringKeys()
+    public void ResourcesCoverAllTranslatedStringKeys()
     {
         var sourceRoot = FindSourceRoot();
         var resourceKeys = ExtractTranslatedStringKeys(sourceRoot);
-        var translations = GetChineseTranslations();
-        var missing = resourceKeys
-            .Where(key => !translations.ContainsKey(key))
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        var empty = resourceKeys
-            .Where(key => translations.TryGetValue(key, out var translation) && string.IsNullOrWhiteSpace(translation))
-            .Order(StringComparer.Ordinal)
-            .ToArray();
+        foreach (var resource in GetTranslationResources())
+        {
+            var missing = resourceKeys
+                .Where(key => !resource.Translations.ContainsKey(key))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            var empty = resourceKeys
+                .Where(key => resource.Translations.TryGetValue(key, out var translation) && string.IsNullOrWhiteSpace(translation))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
 
-        Assert.AreEqual(0, missing.Length, "Missing zh-CN translations for: " + string.Join(", ", missing));
-        Assert.AreEqual(0, empty.Length, "Empty zh-CN translations for: " + string.Join(", ", empty));
+            Assert.AreEqual(0, missing.Length, $"Missing {resource.LanguageName} translations for: " + string.Join(", ", missing));
+            Assert.AreEqual(0, empty.Length, $"Empty {resource.LanguageName} translations for: " + string.Join(", ", empty));
+        }
     }
 
     [TestMethod]
@@ -48,6 +50,29 @@ public sealed partial class StringResourceTests
     }
 
     [TestMethod]
+    [DataRow("de-DE", "de")]
+    [DataRow("es-MX", "es")]
+    [DataRow("fr-CA", "fr")]
+    [DataRow("ja-JP", "ja")]
+    [DataRow("zh-Hans", "zh-CN")]
+    [DataRow("en-US", "en")]
+    [DataRow("it-IT", "en")]
+    public void LanguageSelectsSupportedCulture(string requestedLanguage, string expectedLanguage)
+    {
+        var originalCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            SR.Language = requestedLanguage;
+
+            Assert.AreEqual(expectedLanguage, SR.Language);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = originalCulture;
+        }
+    }
+
+    [TestMethod]
     public void AutoLanguageUsesInstalledUiCulture()
     {
         var originalCulture = CultureInfo.CurrentUICulture;
@@ -55,9 +80,7 @@ public sealed partial class StringResourceTests
         {
             SR.Language = "auto";
 
-            var expectedLanguage = CultureInfo.InstalledUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
-                ? "zh-CN"
-                : "en";
+            var expectedLanguage = GetExpectedLanguage(CultureInfo.InstalledUICulture.Name);
             Assert.AreEqual(expectedLanguage, SR.Language);
         }
         finally
@@ -112,14 +135,55 @@ public sealed partial class StringResourceTests
            || path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyDictionary<string, string> GetChineseTranslations()
+    private static IEnumerable<TranslationResource> GetTranslationResources()
     {
-        var field = typeof(SR).GetField("s_zhCn", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.IsNotNull(field, "Could not find the zh-CN translation table.");
+        yield return new TranslationResource("de", GetTranslations("s_de"));
+        yield return new TranslationResource("es", GetTranslations("s_es"));
+        yield return new TranslationResource("fr", GetTranslations("s_fr"));
+        yield return new TranslationResource("ja", GetTranslations("s_ja"));
+        yield return new TranslationResource("zh-CN", GetTranslations("s_zhCn"));
+    }
+
+    private static IReadOnlyDictionary<string, string> GetTranslations(string fieldName)
+    {
+        var field = typeof(SR).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.IsNotNull(field, $"Could not find the {fieldName} translation table.");
         var translations = field.GetValue(null) as IReadOnlyDictionary<string, string>;
-        Assert.IsNotNull(translations, "The zh-CN translation table has an unexpected type.");
+        Assert.IsNotNull(translations, $"The {fieldName} translation table has an unexpected type.");
         return translations;
     }
+
+    private static string GetExpectedLanguage(string languageName)
+    {
+        if (languageName.StartsWith("de", StringComparison.OrdinalIgnoreCase))
+        {
+            return "de";
+        }
+
+        if (languageName.StartsWith("es", StringComparison.OrdinalIgnoreCase))
+        {
+            return "es";
+        }
+
+        if (languageName.StartsWith("fr", StringComparison.OrdinalIgnoreCase))
+        {
+            return "fr";
+        }
+
+        if (languageName.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ja";
+        }
+
+        if (languageName.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return "zh-CN";
+        }
+
+        return "en";
+    }
+
+    private sealed record TranslationResource(string LanguageName, IReadOnlyDictionary<string, string> Translations);
 
     [GeneratedRegex("SR\\.T\\(\\\"((?:[^\\\"\\\\]|\\\\.)*)\\\"")]
     private static partial Regex SrTCallRegex();

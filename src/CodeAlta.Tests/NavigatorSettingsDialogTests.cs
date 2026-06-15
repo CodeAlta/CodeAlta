@@ -17,13 +17,21 @@ public sealed class NavigatorSettingsDialogTests
 
             var options = GetLanguageOptions();
 
-            Assert.AreEqual(3, options.Length);
+            Assert.AreEqual(7, options.Length);
             Assert.AreEqual("Auto", options[0].ToString());
             Assert.IsNull(GetLanguageCode(options[0]));
             Assert.AreEqual("English", options[1].ToString());
             Assert.AreEqual("en", GetLanguageCode(options[1]));
-            Assert.AreEqual("中文 (简体)", options[2].ToString());
-            Assert.AreEqual("zh-CN", GetLanguageCode(options[2]));
+            Assert.AreEqual("Español", options[2].ToString());
+            Assert.AreEqual("es", GetLanguageCode(options[2]));
+            Assert.AreEqual("Français", options[3].ToString());
+            Assert.AreEqual("fr", GetLanguageCode(options[3]));
+            Assert.AreEqual("Deutsch", options[4].ToString());
+            Assert.AreEqual("de", GetLanguageCode(options[4]));
+            Assert.AreEqual("日本語", options[5].ToString());
+            Assert.AreEqual("ja", GetLanguageCode(options[5]));
+            Assert.AreEqual("中文 (简体)", options[6].ToString());
+            Assert.AreEqual("zh-CN", GetLanguageCode(options[6]));
         }
         finally
         {
@@ -42,8 +50,16 @@ public sealed class NavigatorSettingsDialogTests
         Assert.AreEqual(0, InvokeFindLanguageOptionIndex(findMethod, options, "auto"));
         Assert.AreEqual(1, InvokeFindLanguageOptionIndex(findMethod, options, "en"));
         Assert.AreEqual(1, InvokeFindLanguageOptionIndex(findMethod, options, "en-US"));
-        Assert.AreEqual(2, InvokeFindLanguageOptionIndex(findMethod, options, "zh-CN"));
-        Assert.AreEqual(2, InvokeFindLanguageOptionIndex(findMethod, options, "zh-Hans"));
+        Assert.AreEqual(2, InvokeFindLanguageOptionIndex(findMethod, options, "es"));
+        Assert.AreEqual(2, InvokeFindLanguageOptionIndex(findMethod, options, "es-MX"));
+        Assert.AreEqual(3, InvokeFindLanguageOptionIndex(findMethod, options, "fr"));
+        Assert.AreEqual(3, InvokeFindLanguageOptionIndex(findMethod, options, "fr-FR"));
+        Assert.AreEqual(4, InvokeFindLanguageOptionIndex(findMethod, options, "de"));
+        Assert.AreEqual(4, InvokeFindLanguageOptionIndex(findMethod, options, "de-DE"));
+        Assert.AreEqual(5, InvokeFindLanguageOptionIndex(findMethod, options, "ja"));
+        Assert.AreEqual(5, InvokeFindLanguageOptionIndex(findMethod, options, "ja-JP"));
+        Assert.AreEqual(6, InvokeFindLanguageOptionIndex(findMethod, options, "zh-CN"));
+        Assert.AreEqual(6, InvokeFindLanguageOptionIndex(findMethod, options, "zh-Hans"));
     }
 
     private static object GetLanguageOptionsObject()

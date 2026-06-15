@@ -2457,7 +2457,7 @@ public sealed class CodeAltaAppTests
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
-            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("en-US");
 
             var usage = new AgentSessionUsage(
                 Window: new AgentWindowUsageSnapshot(50000, 120000, 12, "Active context window"),
@@ -2673,7 +2673,7 @@ public sealed class CodeAltaAppTests
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
-            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("en-US");
 
             var markdown = SessionUsageAggregator.BuildMarkdown(
                 new AgentSessionUsage(

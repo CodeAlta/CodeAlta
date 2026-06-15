@@ -10,11 +10,11 @@ namespace CodeAlta.Catalog;
 public static partial class SR
 {
     /// <summary>
-    /// Gets or sets the active language. Use "auto", "en", or "zh-CN".
+    /// Gets or sets the active language. Use "auto", "en", "es", "fr", "de", "ja", or "zh-CN".
     /// </summary>
     public static string Language
     {
-        get => IsChinese(CultureInfo.CurrentUICulture.Name) ? "zh-CN" : "en";
+        get => GetSupportedLanguage(CultureInfo.CurrentUICulture.Name);
         set => ApplyLanguage(value);
     }
 
@@ -23,12 +23,15 @@ public static partial class SR
     /// </summary>
     public static string T(string key)
     {
-        if (IsChinese(CultureInfo.CurrentUICulture.Name) && s_zhCn.TryGetValue(key, out var t))
+        return GetSupportedLanguage(CultureInfo.CurrentUICulture.Name) switch
         {
-            return t;
-        }
-
-        return key;
+            "de" when s_de.TryGetValue(key, out var t) => t,
+            "es" when s_es.TryGetValue(key, out var t) => t,
+            "fr" when s_fr.TryGetValue(key, out var t) => t,
+            "ja" when s_ja.TryGetValue(key, out var t) => t,
+            "zh-CN" when s_zhCn.TryGetValue(key, out var t) => t,
+            _ => key,
+        };
     }
 
     /// <summary>
@@ -58,7 +61,7 @@ public static partial class SR
                 languageName = CultureInfo.InstalledUICulture.Name;
             }
 
-            var cultureName = IsChinese(languageName) ? "zh-CN" : "en";
+            var cultureName = GetSupportedLanguage(languageName);
             CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(cultureName);
         }
         catch (CultureNotFoundException)
@@ -67,6 +70,39 @@ public static partial class SR
         }
     }
 
-    private static bool IsChinese(string? languageName)
-        => !string.IsNullOrWhiteSpace(languageName) && languageName.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+    private static string GetSupportedLanguage(string? languageName)
+    {
+        if (string.IsNullOrWhiteSpace(languageName))
+        {
+            return "en";
+        }
+
+        var trimmed = languageName.Trim();
+        if (trimmed.StartsWith("de", StringComparison.OrdinalIgnoreCase))
+        {
+            return "de";
+        }
+
+        if (trimmed.StartsWith("es", StringComparison.OrdinalIgnoreCase))
+        {
+            return "es";
+        }
+
+        if (trimmed.StartsWith("fr", StringComparison.OrdinalIgnoreCase))
+        {
+            return "fr";
+        }
+
+        if (trimmed.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ja";
+        }
+
+        if (trimmed.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return "zh-CN";
+        }
+
+        return "en";
+    }
 }

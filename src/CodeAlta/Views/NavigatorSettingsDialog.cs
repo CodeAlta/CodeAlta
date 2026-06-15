@@ -14,6 +14,10 @@ namespace CodeAlta.Views;
 internal sealed class NavigatorSettingsDialog
 {
     private const string EnglishLanguageCode = "en";
+    private const string SpanishLanguageCode = "es";
+    private const string FrenchLanguageCode = "fr";
+    private const string GermanLanguageCode = "de";
+    private const string JapaneseLanguageCode = "ja";
     private const string ChineseLanguageCode = "zh-CN";
 
     private readonly NavigatorSettingsDialogViewModel _viewModel;
@@ -291,6 +295,26 @@ internal sealed class NavigatorSettingsDialog
             return ChineseLanguageCode;
         }
 
+        if (trimmed.StartsWith("es", StringComparison.OrdinalIgnoreCase))
+        {
+            return SpanishLanguageCode;
+        }
+
+        if (trimmed.StartsWith("fr", StringComparison.OrdinalIgnoreCase))
+        {
+            return FrenchLanguageCode;
+        }
+
+        if (trimmed.StartsWith("de", StringComparison.OrdinalIgnoreCase))
+        {
+            return GermanLanguageCode;
+        }
+
+        if (trimmed.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+        {
+            return JapaneseLanguageCode;
+        }
+
         if (trimmed.StartsWith("en", StringComparison.OrdinalIgnoreCase))
         {
             return EnglishLanguageCode;
@@ -316,6 +340,10 @@ internal sealed class NavigatorSettingsDialog
         [
             new LanguageOption(SR.T("Auto"), null),
             new LanguageOption("English", EnglishLanguageCode),
+            new LanguageOption("Español", SpanishLanguageCode),
+            new LanguageOption("Français", FrenchLanguageCode),
+            new LanguageOption("Deutsch", GermanLanguageCode),
+            new LanguageOption("日本語", JapaneseLanguageCode),
             new LanguageOption("中文 (简体)", ChineseLanguageCode),
         ];
     }
