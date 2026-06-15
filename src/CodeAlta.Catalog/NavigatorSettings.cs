@@ -32,7 +32,7 @@ public sealed class NavigatorSettings
 
     /// <summary>
     /// Gets or sets the preferred UI language name (e.g., "en", "zh-CN").
-    /// When null or empty, the system culture is used as a fallback.
+    /// When null, empty, or "auto", the system UI culture is used as a fallback.
     /// </summary>
     [JsonPropertyName("language_name")]
     public string? LanguageName { get; set; }

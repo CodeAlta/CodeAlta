@@ -47,6 +47,25 @@ public sealed partial class StringResourceTests
         }
     }
 
+    [TestMethod]
+    public void AutoLanguageUsesInstalledUiCulture()
+    {
+        var originalCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            SR.Language = "auto";
+
+            var expectedLanguage = CultureInfo.InstalledUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                ? "zh-CN"
+                : "en";
+            Assert.AreEqual(expectedLanguage, SR.Language);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = originalCulture;
+        }
+    }
+
     private static DirectoryInfo FindSourceRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

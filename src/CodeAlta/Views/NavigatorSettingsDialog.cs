@@ -13,6 +13,9 @@ namespace CodeAlta.Views;
 
 internal sealed class NavigatorSettingsDialog
 {
+    private const string EnglishLanguageCode = "en";
+    private const string ChineseLanguageCode = "zh-CN";
+
     private readonly NavigatorSettingsDialogViewModel _viewModel;
     private readonly INavigatorSettingsDialogService _dialogService;
     private readonly string? _initialLanguageName;
@@ -101,9 +104,9 @@ internal sealed class NavigatorSettingsDialog
                     return;
                 }
 
-                var code = languageOptions[e.NewIndex].LanguageCode ?? string.Empty;
-                _viewModel.LanguageName = code;
-                SR.Language = code;
+                var code = NormalizeLanguageName(languageOptions[e.NewIndex].LanguageCode);
+                _viewModel.LanguageName = code ?? string.Empty;
+                ApplyLanguage(code);
             });
 
         var form = new Grid
@@ -222,7 +225,7 @@ internal sealed class NavigatorSettingsDialog
         if (!_isSaving)
         {
             _dialogService.ClearNavigatorThemePreview();
-            SR.Language = _initialLanguageName ?? string.Empty;
+            ApplyLanguage(_initialLanguageName);
         }
 
         var app = _dialog.App;
@@ -271,14 +274,49 @@ internal sealed class NavigatorSettingsDialog
         => string.IsNullOrWhiteSpace(themeSchemeName) ? null : themeSchemeName.Trim();
 
     private static string? NormalizeLanguageName(string? languageName)
-        => string.IsNullOrWhiteSpace(languageName) ? null : languageName.Trim();
+    {
+        if (string.IsNullOrWhiteSpace(languageName))
+        {
+            return null;
+        }
+
+        var trimmed = languageName.Trim();
+        if (string.Equals(trimmed, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (trimmed.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return ChineseLanguageCode;
+        }
+
+        if (trimmed.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+        {
+            return EnglishLanguageCode;
+        }
+
+        return trimmed;
+    }
+
+    private static void ApplyLanguage(string? languageName)
+    {
+        if (NormalizeLanguageName(languageName) is { } normalized)
+        {
+            SR.Language = normalized;
+            return;
+        }
+
+        SR.AutoDetect();
+    }
 
     private static List<LanguageOption> CreateLanguageOptions()
     {
         return
         [
-            new LanguageOption("English", null),
-            new LanguageOption("中文 (简体)", "zh-CN"),
+            new LanguageOption(SR.T("Auto"), null),
+            new LanguageOption("English", EnglishLanguageCode),
+            new LanguageOption("中文 (简体)", ChineseLanguageCode),
         ];
     }
 

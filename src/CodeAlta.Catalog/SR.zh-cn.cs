@@ -84,6 +84,7 @@ public static partial class SR
         ["Attached ask file could not be loaded: {0}"] = "无法加载附加的提问文件：{0}",
         ["Attached ask file was not found: {0}"] = "未找到附加的提问文件：{0}",
         ["Attachments/files"] = "附件/文件",
+        ["Auto"] = "自动",
         ["Auth Source"] = "认证来源",
         ["Authenticated with cached Copilot credentials"] = "已使用缓存的 Copilot 凭据认证",
         ["Authenticated with cached xAI credentials"] = "已使用缓存的 xAI 凭据认证",

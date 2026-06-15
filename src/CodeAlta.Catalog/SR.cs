@@ -10,7 +10,7 @@ namespace CodeAlta.Catalog;
 public static partial class SR
 {
     /// <summary>
-    /// Gets or sets the active language. Use "en" or "zh-CN".
+    /// Gets or sets the active language. Use "auto", "en", or "zh-CN".
     /// </summary>
     public static string Language
     {
@@ -52,7 +52,8 @@ public static partial class SR
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(languageName))
+            languageName = languageName?.Trim();
+            if (string.IsNullOrWhiteSpace(languageName) || string.Equals(languageName, "auto", StringComparison.OrdinalIgnoreCase))
             {
                 languageName = CultureInfo.InstalledUICulture.Name;
             }

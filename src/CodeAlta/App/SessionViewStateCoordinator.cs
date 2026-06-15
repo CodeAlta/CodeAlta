@@ -186,7 +186,15 @@ internal sealed class SessionViewStateCoordinator
     }
 
     private static string? NormalizeLanguageName(string? languageName)
-        => string.IsNullOrWhiteSpace(languageName) ? null : languageName.Trim();
+    {
+        if (string.IsNullOrWhiteSpace(languageName))
+        {
+            return null;
+        }
+
+        var trimmed = languageName.Trim();
+        return string.Equals(trimmed, "auto", StringComparison.OrdinalIgnoreCase) ? null : trimmed;
+    }
 
     private static SessionViewLocalState CreateSessionLocalState(SessionViewDescriptor session)
         => new()
