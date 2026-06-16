@@ -202,7 +202,12 @@ Open it with `Ctrl+G Ctrl+T` or the session info icon. The report summarizes sel
   </div>
 </div>
 
-Open it with `Ctrl+G Ctrl+W` or `/settings`. Workspace settings cover the selected workspace/project behavior and are separate from the model-provider editor.
+Open it with `Ctrl+G Ctrl+W` or `/settings`. Workspace settings cover the selected workspace/project behavior and are separate from the model-provider editor. You can also choose the UI language from **Auto**, English, Spanish, French, German, Japanese, and Simplified Chinese; language changes are saved with the workspace settings and fully apply after restarting CodeAlta.
+
+<figure class="my-4">
+  <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-workspace-settings-with-language.png" alt="CodeAlta Workspace Settings dialog showing theme, recent sessions, language, and auto-approve options" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Workspace Settings dialog includes the language selector and a restart notice for fully applying language changes.</figcaption>
+</figure>
 
 ## About and updates
 

@@ -30,6 +30,7 @@ CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched
 ## ✨ What it gives you
 
 - **Keyboard-first terminal workspace**: tabs, prompt editor, project sidebar, command discovery, model selectors, context status, and inspectable timeline cards stay in one TUI.
+- **Multilingual UI**: choose Auto, English, Spanish, French, German, Japanese, or Simplified Chinese from Workspace Settings.
 - **Provider-neutral model setup**: configure hosted APIs, subscription-backed Codex/Copilot/xAI Grok, cloud providers, and compatible endpoints with the same provider workflow.
 - **Context-aware prompts**: select reusable agent prompt profiles, edit global/project prompt and system-prompt overrides, attach files and folders with `@`, search GitHub issues with `#` in GitHub repositories, paste images when the selected model supports them, and inspect what context was sent.
 - **Durable agent sessions**: keep project-scoped history in CodeAlta-owned journals, reopen sessions independently of provider startup, queue prompts on busy sessions, steer running work where supported, and compact long agent-runtime conversations.
