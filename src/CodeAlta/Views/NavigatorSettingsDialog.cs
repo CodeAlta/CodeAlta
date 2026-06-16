@@ -1,6 +1,7 @@
 using CodeAlta.Catalog;
 using CodeAlta.Presentation.Styling;
 using CodeAlta.ViewModels;
+using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;
@@ -112,6 +113,10 @@ internal sealed class NavigatorSettingsDialog
                 _viewModel.LanguageName = code ?? string.Empty;
                 ApplyLanguage(code);
             });
+        var languageRestartWarning = new Markup($"[warning]{TerminalIcons.MdAlertOutline} {AnsiMarkup.Escape(SR.T("Language changes will fully apply after restarting CodeAlta."))}[/]")
+        {
+            Wrap = true,
+        };
 
         var form = new Grid
             {
@@ -119,6 +124,7 @@ internal sealed class NavigatorSettingsDialog
                 RowGap = 1,
             }
             .Rows(
+                new RowDefinition { Height = GridLength.Auto },
                 new RowDefinition { Height = GridLength.Auto },
                 new RowDefinition { Height = GridLength.Auto },
                 new RowDefinition { Height = GridLength.Auto },
@@ -135,11 +141,12 @@ internal sealed class NavigatorSettingsDialog
         form.Cell(recentSessionsField, 2, 1);
         form.Cell(new TextBlock(SR.T("Language")) { VerticalAlignment = Align.Center }, 3, 0);
         form.Cell(languageSelect, 3, 1);
+        form.Cell(languageRestartWarning, 4, 0, columnSpan: 2);
 
         var autoApproveCheckbox = new CheckBox(SR.T("Auto approve commands"))
             .IsChecked(_viewModel.Bind.AutoApprove);
 
-        form.Cell(autoApproveCheckbox, 4, 0);
+        form.Cell(autoApproveCheckbox, 5, 0);
 
         var cancelButton = new Button(SR.T("Cancel"))
         {
@@ -177,7 +184,7 @@ internal sealed class NavigatorSettingsDialog
             .IsModal(true)
             .Padding(1)
             .Content(content);
-        ResponsiveDialogSize.Apply(_dialog, _dialogService.GetDialogBounds(), minWidth: 58, minHeight: 14, widthFactor: 0.36, heightFactor: 0.34);
+        ResponsiveDialogSize.Apply(_dialog, _dialogService.GetDialogBounds(), minWidth: 58, minHeight: 15, widthFactor: 0.36, heightFactor: 0.34);
         _dialog.AddCommand(new Command
         {
             Id = "CodeAlta.NavigatorSettings.Close",

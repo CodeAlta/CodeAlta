@@ -3402,6 +3402,12 @@
   fr: "Langue"
   ja: "言語"
   zh: "语言"
+"Language changes will fully apply after restarting CodeAlta.":
+  de: "Sprachänderungen werden erst nach einem Neustart von CodeAlta vollständig angewendet."
+  es: "Los cambios de idioma se aplicarán completamente después de reiniciar CodeAlta."
+  fr: "Les changements de langue s’appliqueront complètement après le redémarrage de CodeAlta."
+  ja: "言語の変更は CodeAlta の再起動後に完全に適用されます。"
+  zh: "语言更改将在重启 CodeAlta 后完全生效。"
 "Last Message":
   de: "Letzte Nachricht"
   es: "Último mensaje"
