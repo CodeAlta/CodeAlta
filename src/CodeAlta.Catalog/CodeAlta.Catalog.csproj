@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Catalog.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration" />
   </ItemGroup>
 
@@ -22,6 +23,7 @@
   <ItemGroup>
     <Compile Remove="BuiltinSkills\**\*.cs" />
     <Content Include="BuiltinSkills\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="SR.yml" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="SR.yml" />
     <EmbeddedResource Include="DefaultConfig\config.toml" LogicalName="CodeAlta.Catalog.DefaultConfig.config.toml" />
   </ItemGroup>
 

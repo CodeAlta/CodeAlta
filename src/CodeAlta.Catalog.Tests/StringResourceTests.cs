@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
-using System.Reflection;
 using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
 
@@ -15,7 +14,7 @@ public sealed partial class StringResourceTests
     {
         var sourceRoot = FindSourceRoot();
         var resourceKeys = ExtractTranslatedStringKeys(sourceRoot);
-        foreach (var resource in GetTranslationResources())
+        foreach (var resource in GetTranslationResources(sourceRoot))
         {
             var missing = resourceKeys
                 .Where(key => !resource.Translations.ContainsKey(key))
@@ -154,22 +153,14 @@ public sealed partial class StringResourceTests
            || path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase);
 
-    private static IEnumerable<TranslationResource> GetTranslationResources()
+    private static IEnumerable<TranslationResource> GetTranslationResources(DirectoryInfo sourceRoot)
     {
-        yield return new TranslationResource("de", GetTranslations("s_de"));
-        yield return new TranslationResource("es", GetTranslations("s_es"));
-        yield return new TranslationResource("fr", GetTranslations("s_fr"));
-        yield return new TranslationResource("ja", GetTranslations("s_ja"));
-        yield return new TranslationResource("zh-CN", GetTranslations("s_zhCn"));
-    }
-
-    private static IReadOnlyDictionary<string, string> GetTranslations(string fieldName)
-    {
-        var field = typeof(SR).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.IsNotNull(field, $"Could not find the {fieldName} translation table.");
-        var translations = field.GetValue(null) as IReadOnlyDictionary<string, string>;
-        Assert.IsNotNull(translations, $"The {fieldName} translation table has an unexpected type.");
-        return translations;
+        var translationsByLanguage = SR.LoadTranslationsFromFile(Path.Combine(sourceRoot.FullName, "CodeAlta.Catalog", "SR.yml"));
+        yield return new TranslationResource("de", translationsByLanguage["de"]);
+        yield return new TranslationResource("es", translationsByLanguage["es"]);
+        yield return new TranslationResource("fr", translationsByLanguage["fr"]);
+        yield return new TranslationResource("ja", translationsByLanguage["ja"]);
+        yield return new TranslationResource("zh-CN", translationsByLanguage["zh"]);
     }
 
     private static string GetExpectedLanguage(string languageName)
