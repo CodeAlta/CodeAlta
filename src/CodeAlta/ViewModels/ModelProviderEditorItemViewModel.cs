@@ -198,7 +198,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.DisplayName = UseDefaultDisplayName ? null : NormalizeText(DisplayName);
         definition.Model = UseDefaultModel ? null : NormalizeText(Model);
         definition.ReasoningEffort = UseDefaultReasoningEffort ? null : NormalizeText(ReasoningEffort);
-        var supportsApiKeyField = ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai";
+        var supportsApiKeyField = ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral";
         definition.ApiKey = supportsApiKeyField && !UseDefaultApiKey ? NormalizeText(ApiKey) : null;
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);

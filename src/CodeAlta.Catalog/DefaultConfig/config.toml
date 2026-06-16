@@ -72,6 +72,13 @@ single_model_id = "MiniMax-M2.7"
 [providers.minimax.profile]
 supports_developer_role = false
 
+[providers.mistral]
+enabled = false
+display_name = "Mistral"
+type = "mistral"
+model = "mistral-small-latest"
+api_key_env = "CODEALTA_MISTRAL_API_KEY"
+
 [providers.openai]
 enabled = false
 display_name = "OpenAI"

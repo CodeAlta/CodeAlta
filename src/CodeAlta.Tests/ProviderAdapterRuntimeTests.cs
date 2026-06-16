@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.GoogleGenAI;
+using CodeAlta.Agent.Mistral;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.Xai;
 
@@ -156,12 +157,26 @@ public sealed class ProviderAdapterRuntimeTests
                 },
             },
         });
+        await using var mistral = new MistralModelProviderRuntime(new MistralModelProviderRuntimeOptions
+        {
+            ProviderIdOverride = new ModelProviderId("mistral-test"),
+            Providers =
+            {
+                new MistralProviderOptions
+                {
+                    ProviderKey = "mistral-test",
+                    ApiKey = "test-key",
+                    SingleModelId = "mistral-test-model",
+                },
+            },
+        });
 
         AssertProviderRuntime(anthropic, "anthropic", "anthropic-messages", "claude-test");
         AssertProviderRuntime(copilot, "copilot", "copilot", "gpt-test");
         AssertProviderRuntime(google, "google-genai", "google-genai", "gemini-test");
         AssertProviderRuntime(vertex, "vertex-ai", "vertex-ai", "gemini-vertex-test");
         AssertProviderRuntime(xai, "xai", "xai", "grok-test");
+        AssertProviderRuntime(mistral, "mistral", "mistral-chat", "mistral-test-model");
     }
 
     private static void AssertProviderRuntime(

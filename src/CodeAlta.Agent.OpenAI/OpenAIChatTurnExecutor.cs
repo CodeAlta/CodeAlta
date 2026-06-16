@@ -368,7 +368,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                             : ChatMessageContentPart.CreateFilePart(bytes, data.MediaType ?? "application/octet-stream", data.Name ?? "attachment"));
                     break;
                 case AgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value):
-                    contentParts.Add(ChatMessageContentPart.CreateTextPart($"<assistant_reasoning>{reasoning.Value}</assistant_reasoning>"));
+                    contentParts.Add(ChatMessageContentPart.CreateTextPart(CreateReasoningFallbackText(reasoning.Value)));
                     break;
             }
         }
@@ -411,7 +411,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                     reasoningInput.Append(reasoning.Value);
                     break;
                 case AgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value):
-                    contentParts.Add(ChatMessageContentPart.CreateTextPart($"<assistant_reasoning>{reasoning.Value}</assistant_reasoning>"));
+                    contentParts.Add(ChatMessageContentPart.CreateTextPart(CreateReasoningFallbackText(reasoning.Value)));
                     break;
                 case AgentMessagePart.ToolCall toolCall:
                     toolCalls.Add(
@@ -451,6 +451,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 
         return BinaryData.FromBytes(stream.ToArray());
     }
+
+    private static string CreateReasoningFallbackText(string value)
+        => $"Assistant reasoning:\n{value.Trim()}";
 
     private static string? NormalizeReasoningInputFieldName(string? reasoningInputFieldName)
     {

@@ -75,12 +75,13 @@ Important behavior:
 | `anthropic` | `CodeAlta.Agent.Anthropic` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
 | `google-genai` | `CodeAlta.Agent.GoogleGenAI` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
 | `vertex-ai` | `CodeAlta.Agent.GoogleGenAI` | Uses Vertex project/location settings instead of an API key. |
+| `mistral` | `CodeAlta.Agent.Mistral` | Requires API key. Uses Mistral chat completions with streaming, tool calls, multi-turn replay, and upstream model listing. |
 
 External ACP CLI adapters are no longer registered as model providers. Legacy `[acp]` config is ignored and preserved only as compatibility data.
 
 ## CodeAlta runtime provider behavior
 
-OpenAI-compatible, Anthropic, Google, direct HTTP, and subscription-backed providers attach to the agent session runtime. They share these properties:
+OpenAI-compatible, Anthropic, Google, Mistral, direct HTTP, and subscription-backed providers attach to the agent session runtime. They share these properties:
 
 - sessions are CodeAlta-owned, provider-independent, and journaled under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`;
 - provider/model switches are represented as events in the journal when history can be replayed safely;
@@ -183,11 +184,24 @@ The bundled static fallback catalog ships `grok-4.3`, `grok-4`, and `grok-4-fast
 
 Relevant config keys for `type = "xai"` include `auth_source`, `model_discovery`, `api_url`, `single_model_id`, `models_dev_provider_id`, `model_overrides`, `profile`, `compaction`, and `protocol_trace`.
 
-## Anthropic and Google providers
+## Anthropic, Google, and Mistral providers
 
-`anthropic`, `google-genai`, and `vertex-ai` are implemented CodeAlta-runtime providers, not placeholders. They wrap SDK chat streaming through `ChatClientTurnExecutor`, list upstream models when supported, and can be constrained with `single_model_id`.
+`anthropic`, `google-genai`, `vertex-ai`, and `mistral` are implemented CodeAlta-runtime providers, not placeholders. They use `Microsoft.Extensions.AI.IChatClient`-based turn execution, list upstream models when supported, and can be constrained with `single_model_id`.
 
 `vertex-ai` uses project/location configuration and application-default/environment credentials expected by the Google SDK. `google-genai` uses API-key configuration. Both can use `models_dev_provider_id` and `model_overrides` for context-window and output-limit metadata.
+
+`mistral` uses API-key configuration (`api_key` or `api_key_env`) and the Mistral `/v1/chat/completions` streaming endpoint for turns. CodeAlta serializes Mistral request roles and tool declarations directly so multi-turn user/assistant/tool replay and streamed tool-call fragments map into normalized CodeAlta messages. Model listing uses the Mistral SDK and can be enriched with `models_dev_provider_id = "mistral"` and `model_overrides`.
+
+Example:
+
+```toml
+[providers.mistral]
+type = "mistral"
+display_name = "Mistral"
+api_key_env = "CODEALTA_MISTRAL_API_KEY"
+model = "mistral-small-latest"
+models_dev_provider_id = "mistral"
+```
 
 ## Model metadata and context limits
 

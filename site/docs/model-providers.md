@@ -98,6 +98,7 @@ Provider-type-specific fields and restrictions:
 | `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
+| `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
@@ -348,6 +349,20 @@ location = "europe-west4"
 models_dev_provider_id = "google"
 model = "gemini-2.5-pro"
 reasoning_effort = "high"
+```
+
+### Mistral
+
+Use `mistral` for the Mistral chat-completions API. CodeAlta streams turns over Mistral's `/v1/chat/completions` endpoint, serializes user/assistant/tool roles directly, maps streamed tool-call fragments back into CodeAlta tool calls, and uses the Mistral SDK for model listing.
+
+```toml
+[providers.mistral]
+enabled = true
+display_name = "Mistral"
+type = "mistral"
+api_key_env = "CODEALTA_MISTRAL_API_KEY"
+model = "mistral-small-latest"
+models_dev_provider_id = "mistral"
 ```
 
 ### Codex subscription endpoint

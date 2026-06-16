@@ -18,6 +18,9 @@ public sealed record AgentReasoningProvenance(
 /// </summary>
 public static class AgentReasoningReplay
 {
+    private const string LegacyReasoningSummaryStartTag = "<assistant_reasoning_summary>";
+    private const string LegacyReasoningSummaryEndTag = "</assistant_reasoning_summary>";
+
     /// <summary>
     /// Creates reasoning provenance for a provider turn request.
     /// </summary>
@@ -126,6 +129,12 @@ public static class AgentReasoningReplay
         AgentTurnRequest request,
         out bool changed)
     {
+        if (part is AgentMessagePart.Text text && TryNormalizeLegacyReasoningSummaryText(text.Value, out var normalizedText))
+        {
+            changed = true;
+            return new AgentMessagePart.Text(normalizedText);
+        }
+
         if (part is not AgentMessagePart.Reasoning reasoning)
         {
             changed = false;
@@ -158,5 +167,27 @@ public static class AgentReasoningReplay
     }
 
     private static string CreateReasoningSummaryText(string value)
-        => $"<assistant_reasoning_summary>{value}</assistant_reasoning_summary>";
+        => $"Assistant reasoning summary:\n{value.Trim()}";
+
+    private static bool TryNormalizeLegacyReasoningSummaryText(string value, out string normalizedText)
+    {
+        normalizedText = value;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith(LegacyReasoningSummaryStartTag, StringComparison.Ordinal) ||
+            !trimmed.EndsWith(LegacyReasoningSummaryEndTag, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var summary = trimmed.Substring(
+            LegacyReasoningSummaryStartTag.Length,
+            trimmed.Length - LegacyReasoningSummaryStartTag.Length - LegacyReasoningSummaryEndTag.Length);
+        normalizedText = CreateReasoningSummaryText(summary);
+        return true;
+    }
 }

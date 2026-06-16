@@ -11,6 +11,7 @@
     <InternalsVisibleTo Include="CodeAlta.Agent.Anthropic" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
     <InternalsVisibleTo Include="CodeAlta.Agent.GoogleGenAI" />
+    <InternalsVisibleTo Include="CodeAlta.Agent.Mistral" />
     <InternalsVisibleTo Include="CodeAlta.Agent.OpenAI" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Xai" />
     <InternalsVisibleTo Include="CodeAlta.Catalog" />

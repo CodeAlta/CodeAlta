@@ -1177,6 +1177,7 @@ public sealed class CodeAltaConfigStore
             "anthropic" or "anthropic-messages" or "messages" or "message" => "anthropic",
             "google" or "google-genai" or "google_genai" or "gemini" or "genai" => "google-genai",
             "vertex" or "vertex-ai" or "google-vertex" or "google_vertex" => "vertex-ai",
+            "mistral" or "mistral-chat" or "mistral_chat" => "mistral",
             "codex" => CodexSubscriptionProviderType,
             "copilot" => CopilotDirectProviderType,
             "xai" or "xai-grok" or "grok" or "x-ai" => XaiDirectProviderType,
@@ -1202,7 +1203,7 @@ public sealed class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, xai.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyCodexSubscriptionDefaults(definition);
         ApplyCopilotDirectDefaults(definition);
@@ -1354,6 +1355,16 @@ public sealed class CodeAltaConfigStore
                 break;
 
             case "google-genai":
+                RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
+                RejectUnsupportedField(definition, "project_id", definition.ProjectId);
+                RejectUnsupportedField(definition, "project", definition.Project);
+                RejectUnsupportedField(definition, "location", definition.Location);
+                RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectRequestExtraBodyFields(definition);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
+                break;
+
+            case "mistral":
                 RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
                 RejectUnsupportedField(definition, "project_id", definition.ProjectId);
                 RejectUnsupportedField(definition, "project", definition.Project);

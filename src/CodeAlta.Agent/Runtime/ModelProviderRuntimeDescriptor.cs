@@ -83,6 +83,11 @@ public enum AgentTransportKind
     /// Google Vertex AI.
     /// </summary>
     GoogleVertexAI,
+
+    /// <summary>
+    /// Mistral chat completions.
+    /// </summary>
+    MistralChat,
 }
 
 /// <summary>

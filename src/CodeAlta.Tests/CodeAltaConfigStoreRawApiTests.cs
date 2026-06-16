@@ -337,6 +337,35 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_AcceptsMistralProvider()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.Mistral]
+            display_name = " Mistral "
+            type = " mistral-chat "
+            api_key_env = " CODEALTA_MISTRAL_API_KEY "
+            model = " mistral-small-latest "
+            models_dev_provider_id = " mistral "
+            single_model_id = " mistral-small-latest "
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var providers = store.LoadGlobalProviderDefinitions(includeDisabled: true)
+            .ToDictionary(static provider => provider.ProviderKey, StringComparer.OrdinalIgnoreCase);
+
+        var provider = providers["mistral"];
+        Assert.AreEqual("mistral", provider.ProviderType);
+        Assert.AreEqual("Mistral", provider.DisplayName);
+        Assert.AreEqual("CODEALTA_MISTRAL_API_KEY", provider.ApiKeyEnv);
+        Assert.AreEqual("mistral-small-latest", provider.Model);
+        Assert.AreEqual("mistral", provider.ModelsDevProviderId);
+        Assert.AreEqual("mistral-small-latest", provider.SingleModelId);
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_CodexSubscriptionAppliesDefaults()
     {
         using var temp = TempDirectory.Create();
@@ -557,6 +586,9 @@ public sealed class CodeAltaConfigStoreRawApiTests
         var content = File.ReadAllText(Path.Combine(temp.Path, "config.toml"));
         StringAssert.Contains(content, "[providers.alibaba]");
         StringAssert.Contains(content, "api_key_env = \"CODEALTA_ALIBABA_API_KEY\"");
+        StringAssert.Contains(content, "[providers.mistral]");
+        StringAssert.Contains(content, "type = \"mistral\"");
+        StringAssert.Contains(content, "api_key_env = \"CODEALTA_MISTRAL_API_KEY\"");
         StringAssert.Contains(content, "type = \"codex\"");
         StringAssert.Contains(content, "type = \"copilot\"");
         Assert.IsFalse(content.Contains("pc-ai", StringComparison.OrdinalIgnoreCase));

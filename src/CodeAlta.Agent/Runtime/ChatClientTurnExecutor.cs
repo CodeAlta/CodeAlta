@@ -11,21 +11,31 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
 {
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> _chatClientFactory;
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> _listModelsAsync;
+    private readonly Func<AgentTurnRequest, AgentReasoningEffort, bool>? _supportsReasoningEffort;
+    private readonly Action<AgentTurnRequest, ChatOptions>? _configureOptions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
     /// </summary>
     /// <param name="chatClientFactory">Factory that creates an <see cref="IChatClient"/> for a provider.</param>
     /// <param name="listModelsAsync">Delegate that lists models for a provider.</param>
+    /// <param name="supportsReasoningEffort">
+    /// Optional provider-specific fallback for reasoning-effort support when model metadata is unavailable.
+    /// </param>
+    /// <param name="configureOptions">Optional provider-specific chat options customizer.</param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
-        Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync)
+        Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
+        Func<AgentTurnRequest, AgentReasoningEffort, bool>? supportsReasoningEffort = null,
+        Action<AgentTurnRequest, ChatOptions>? configureOptions = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
 
         _chatClientFactory = chatClientFactory;
         _listModelsAsync = listModelsAsync;
+        _supportsReasoningEffort = supportsReasoningEffort;
+        _configureOptions = configureOptions;
     }
 
     /// <inheritdoc />
@@ -94,7 +104,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         }
     }
 
-    private static ChatOptions CreateOptions(AgentTurnRequest request)
+    private ChatOptions CreateOptions(AgentTurnRequest request)
     {
         var options = new ChatOptions
         {
@@ -104,16 +114,20 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             Tools = AgentToolBridge.CreateDeclarations(request.Tools).ToList(),
             ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
             AllowMultipleToolCalls = true,
-            Reasoning = CreateReasoningOptions(request),
+            Reasoning = CreateReasoningOptions(request, _supportsReasoningEffort),
         };
+
+        _configureOptions?.Invoke(request, options);
 
         return options;
     }
 
-    private static ReasoningOptions? CreateReasoningOptions(AgentTurnRequest request)
+    private static ReasoningOptions? CreateReasoningOptions(
+        AgentTurnRequest request,
+        Func<AgentTurnRequest, AgentReasoningEffort, bool>? supportsReasoningEffort)
     {
         if (request.ReasoningEffort is not { } reasoningEffort ||
-            !SupportsRequestedReasoningEffort(request, reasoningEffort))
+            !SupportsRequestedReasoningEffort(request, reasoningEffort, supportsReasoningEffort))
         {
             return null;
         }
@@ -133,15 +147,22 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         };
     }
 
-    private static bool SupportsRequestedReasoningEffort(AgentTurnRequest request, AgentReasoningEffort reasoningEffort)
+    private static bool SupportsRequestedReasoningEffort(
+        AgentTurnRequest request,
+        AgentReasoningEffort reasoningEffort,
+        Func<AgentTurnRequest, AgentReasoningEffort, bool>? supportsReasoningEffort)
     {
         if (reasoningEffort == AgentReasoningEffort.None)
         {
             return false;
         }
 
-        return request.ModelInfo?.SupportedReasoningEfforts is not { } supportedReasoningEfforts ||
-            supportedReasoningEfforts.Contains(reasoningEffort);
+        if (request.ModelInfo?.SupportedReasoningEfforts is { } supportedReasoningEfforts)
+        {
+            return supportedReasoningEfforts.Contains(reasoningEffort);
+        }
+
+        return supportsReasoningEffort?.Invoke(request, reasoningEffort) ?? true;
     }
 
     private static string? ComposeInstructions(AgentTurnRequest request)

@@ -671,6 +671,24 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public void RawApiProviderDefaultsCatalog_AppliesZaiReasoningReplayField()
+    {
+        var profile = RawApiProviderDefaultsCatalog.ApplyProfileDefaults(
+            AgentTransportKind.OpenAIChatCompletions,
+            "custom-glm",
+            new Uri("https://open.bigmodel.cn/api/paas/v4"),
+            new AgentProviderProfile
+            {
+                SupportsDeveloperRole = true,
+                SupportsStore = true,
+                SupportsReasoningEffort = true,
+                ReasoningFieldNames = ["reasoning_content", "reasoning"],
+            });
+
+        Assert.AreEqual("reasoning_content", profile.ReasoningInputFieldName);
+    }
+
+    [TestMethod]
     public async Task OpenAIChatModelProviderRuntime_MapsRefusalUpdatesToAssistantContent()
     {
         using var temp = TestTempDirectory.Create();
@@ -922,6 +940,101 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         {
             _ = SerializeModel(assistant);
         }
+    }
+
+    [TestMethod]
+    public async Task OpenAIChatModelProviderRuntime_ReplaysUnconfiguredReasoningAsPlainTextWithoutTags()
+    {
+        using var temp = TestTempDirectory.Create();
+        var chatClient = RecordingOpenAIChatClient.ForBatches(
+        [
+            [
+                DeserializeStreamingChatCompletionUpdate(
+                    """
+                    {
+                      "id": "chatcmpl-glm-1",
+                      "object": "chat.completion.chunk",
+                      "created": 1744060800,
+                      "model": "glm-4.7",
+                      "choices": [
+                        {
+                          "index": 0,
+                          "delta": {
+                            "reasoning_content": "Prior thinking.",
+                            "content": "First answer."
+                          }
+                        }
+                      ]
+                    }
+                    """),
+            ],
+            [
+                DeserializeStreamingChatCompletionUpdate(
+                    """
+                    {
+                      "id": "chatcmpl-glm-2",
+                      "object": "chat.completion.chunk",
+                      "created": 1744060801,
+                      "model": "glm-4.7",
+                      "choices": [
+                        {
+                          "index": 0,
+                          "delta": {
+                            "content": "Second answer."
+                          }
+                        }
+                      ]
+                    }
+                    """),
+            ],
+        ]);
+
+        await using var providerRuntime = new OpenAIChatModelProviderRuntime(new OpenAIChatModelProviderRuntimeOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new OpenAIProviderOptions
+                {
+                    ProviderKey = "glm",
+                    IsDefault = true,
+                    Profile = new AgentProviderProfile
+                    {
+                        SupportsDeveloperRole = true,
+                        SupportsReasoningEffort = true,
+                        SupportsStore = false,
+                        StreamsUsage = true,
+                        ReasoningFieldNames = ["reasoning_content"],
+                    },
+                    ChatClientFactory = _ => chatClient,
+                },
+            },
+        });
+
+        await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "glm-4.7",
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput([new AgentInputItem.Text("First")]),
+        }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions
+        {
+            Input = new AgentInput([new AgentInputItem.Text("Second")]),
+        }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, chatClient.Requests.Count);
+        var replayedAssistant = chatClient.Requests[1].Messages.OfType<AssistantChatMessage>().Single();
+        Assert.IsFalse(replayedAssistant.Patch.TryGetValue("$.reasoning_content"u8, out string? replayedReasoning));
+        Assert.IsNull(replayedReasoning);
+        var replayedText = string.Concat(replayedAssistant.Content.Select(static part => part.Text));
+        StringAssert.Contains(replayedText, "First answer.");
+        StringAssert.Contains(replayedText, "Assistant reasoning:\nPrior thinking.");
+        Assert.IsFalse(replayedText.Contains("<assistant_reasoning", StringComparison.Ordinal));
     }
 
     [TestMethod]

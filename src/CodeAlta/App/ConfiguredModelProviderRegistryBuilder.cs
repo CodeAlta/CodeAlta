@@ -3,6 +3,7 @@ using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Agent.GoogleGenAI;
+using CodeAlta.Agent.Mistral;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
@@ -114,6 +115,8 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case "vertex-ai":
                 return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+            case "mistral":
+                return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -691,6 +694,66 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return true;
     }
 
+    private static bool TryCreateMistralProvider(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        out ModelProviderDescriptor descriptor,
+        out Func<IModelProviderRuntime> createRuntime)
+    {
+        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            LogInfo(
+                $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
+            descriptor = null!;
+            createRuntime = null!;
+            return false;
+        }
+
+        var providerId = new ModelProviderId(definition.ProviderKey);
+        var displayName = ResolveProviderDisplayName(definition);
+        var baseUri = ParseUri(definition.ApiUrl);
+        var options = new MistralModelProviderRuntimeOptions
+        {
+            ProviderIdOverride = providerId,
+            DisplayNameOverride = displayName,
+            StateRootPath = stateRootPath,
+            Providers =
+            {
+                new MistralProviderOptions
+                {
+                    ProviderKey = definition.ProviderKey,
+                    DisplayName = displayName,
+                    ApiKey = apiKey,
+                    BaseUri = baseUri,
+                    IsDefault = true,
+                    Profile = CreateMistralProfile(definition.Profile),
+                    Compaction = CreateCompactionSettings(definition.Compaction),
+                    ModelsDevProviderId = ResolveModelsDevProviderId(
+                        definition.ModelsDevProviderId,
+                        definition.ProviderKey,
+                        "mistral",
+                        modelCatalog),
+                    SingleModelId = NormalizeText(definition.SingleModelId),
+                    ExtraHeaders = CreateRequestHeaders(
+                        AgentTransportKind.MistralChat,
+                        definition.ProviderKey,
+                        baseUri,
+                        definition.Request),
+                    ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+                    ModelCatalog = modelCatalog,
+                },
+            },
+        };
+
+        descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
+        createRuntime = () => new MistralModelProviderRuntime(options);
+        LogInfo(
+            $"Registered model provider key={providerId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
+        return true;
+    }
+
     private static string ResolveProviderDisplayName(CodeAltaProviderDocument definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -886,6 +949,24 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 SupportsReasoningEffort = true,
                 StreamsUsage = true,
                 SupportsThoughtSignatures = true,
+            },
+            document);
+    }
+
+    private static AgentProviderProfile? CreateMistralProfile(CodeAltaProviderProfileDocument? document)
+    {
+        if (document is null)
+        {
+            return null;
+        }
+
+        return ApplyProfileOverrides(
+            new AgentProviderProfile
+            {
+                SupportsDeveloperRole = true,
+                SupportsStore = false,
+                StreamsUsage = true,
+                MaxTokensFieldName = "max_tokens",
             },
             document);
     }

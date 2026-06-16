@@ -230,7 +230,7 @@ internal static class ModelProviderEditorDiagnostics
     public static bool RequiresApiKey(ModelProviderEditorItemViewModel item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        return item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai";
+        return item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral";
     }
 
     private static void Add(List<ModelProviderDiagnosticEntry> entries, ValidationMessage? message)

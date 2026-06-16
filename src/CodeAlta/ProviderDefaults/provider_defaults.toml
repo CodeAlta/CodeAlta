@@ -47,6 +47,16 @@ reasoning_input_field_name = "reasoning_content"
 extra_body_defaults = { thinking = { type = "enabled" } }
 
 [[rules]]
+id = "zai-openai-chat"
+display_name = "Z.AI OpenAI Chat"
+types = ["openai-chat"]
+provider_keys = ["zai", "z-ai", "zai-coding-cn", "zhipu", "zhipuai", "bigmodel"]
+host_suffixes = ["api.z.ai", "open.bigmodel.cn"]
+
+[rules.profile]
+reasoning_input_field_name = "reasoning_content"
+
+[[rules]]
 id = "xiaomi-openai-chat"
 display_name = "Xiaomi OpenAI Chat"
 types = ["openai-chat"]

@@ -125,7 +125,7 @@ public sealed class AgentRuntimeContractsTests
 
         Assert.AreNotSame(conversation, sanitized);
         Assert.IsInstanceOfType<AgentMessagePart.Text>(sanitized[0].Parts[0]);
-        Assert.AreEqual("<assistant_reasoning_summary>summary</assistant_reasoning_summary>", ((AgentMessagePart.Text)sanitized[0].Parts[0]).Value);
+        Assert.AreEqual("Assistant reasoning summary:\nsummary", ((AgentMessagePart.Text)sanitized[0].Parts[0]).Value);
         Assert.AreEqual("visible answer", ((AgentMessagePart.Text)sanitized[0].Parts[1]).Value);
     }
 
@@ -164,7 +164,25 @@ public sealed class AgentRuntimeContractsTests
         var sanitized = AgentReasoningReplay.SanitizeForRequest(conversation, target);
 
         Assert.IsInstanceOfType<AgentMessagePart.Text>(sanitized[0].Parts[0]);
-        Assert.AreEqual("<assistant_reasoning_summary>legacy summary</assistant_reasoning_summary>", ((AgentMessagePart.Text)sanitized[0].Parts[0]).Value);
+        Assert.AreEqual("Assistant reasoning summary:\nlegacy summary", ((AgentMessagePart.Text)sanitized[0].Parts[0]).Value);
+    }
+
+    [TestMethod]
+    public void AgentReasoningReplay_LegacyTaggedReasoningText_NormalizesToPlainText()
+    {
+        var target = CreateTurnRequest("mistral", "mistral", AgentTransportKind.MistralChat, "mistral-medium-latest");
+        var conversation = new[]
+        {
+            new AgentConversationMessage(
+                AgentConversationRole.Assistant,
+                [new AgentMessagePart.Text("<assistant_reasoning_summary>legacy summary</assistant_reasoning_summary>")]),
+        };
+
+        var sanitized = AgentReasoningReplay.SanitizeForRequest(conversation, target);
+
+        Assert.AreNotSame(conversation, sanitized);
+        Assert.IsInstanceOfType<AgentMessagePart.Text>(sanitized[0].Parts[0]);
+        Assert.AreEqual("Assistant reasoning summary:\nlegacy summary", ((AgentMessagePart.Text)sanitized[0].Parts[0]).Value);
     }
 
     private static AgentTurnRequest CreateTurnRequest(
