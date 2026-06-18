@@ -73,7 +73,8 @@ public sealed class AgentRuntime : IAsyncDisposable
             {
                 return _store ??= new FileSystemAgentSessionStore(
                     _layout,
-                    _journalFile);
+                    _journalFile,
+                    _options.SessionProjectionCache);
             }
         }
     }

@@ -15,4 +15,7 @@ internal sealed class RecoverableSessionSource : IRecoverableSessionSource
 
     public IAsyncEnumerable<SessionViewDescriptor> ListRecoverableSessionsAsync(CancellationToken cancellationToken)
         => _runtimeService.ListRecoverableSessionsAsync(cancellationToken);
+
+    public Task<bool> ReconcileRecoverableSessionsAsync(CancellationToken cancellationToken)
+        => _runtimeService.ReconcileRecoverableSessionCacheAsync(cancellationToken);
 }

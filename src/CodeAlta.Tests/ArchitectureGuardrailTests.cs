@@ -684,8 +684,8 @@ public sealed class ArchitectureGuardrailTests
         var codeAltaRoot = GetCodeAltaSourceRoot();
         var allowedLegacySites = new HashSet<string>(StringComparer.Ordinal)
         {
-            "App/CodeAltaShellController.cs:70:_initializationTask = Task.Run(",
-            "App/CodeAltaShellController.cs:437:var startupProviderLoadTask = Task.Run(",
+            "App/CodeAltaShellController.cs:71:_initializationTask = Task.Run(",
+            "App/CodeAltaShellController.cs:438:var startupProviderLoadTask = Task.Run(",
             "App/CodeAltaApp.cs:345:_ = PersistViewStateAsync();",
             "App/CodeAltaApp.cs:376:_ = PersistViewStateAsync();",
             "App/CodeAltaApp.cs:453:_ = OpenModelProvidersAsync();",

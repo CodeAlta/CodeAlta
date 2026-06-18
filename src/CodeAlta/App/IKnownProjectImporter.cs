@@ -2,5 +2,5 @@ namespace CodeAlta.App;
 
 internal interface IKnownProjectImporter
 {
-    Task ImportAsync(CancellationToken cancellationToken);
+    Task<bool> ImportAsync(CancellationToken cancellationToken);
 }

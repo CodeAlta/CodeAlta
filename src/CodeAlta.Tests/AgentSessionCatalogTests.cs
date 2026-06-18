@@ -33,6 +33,36 @@ public sealed class AgentSessionCatalogTests
     }
 
     [TestMethod]
+    public async Task ListSessionsAsync_YieldsDiscoveredSessionsBeforeStoreCompletes()
+    {
+        var first = new AgentSessionMetadata(
+            "session-first",
+            DateTimeOffset.Parse("2026-04-06T10:00:00+00:00"),
+            DateTimeOffset.Parse("2026-04-06T11:00:00+00:00"));
+        var second = new AgentSessionMetadata(
+            "session-second",
+            DateTimeOffset.Parse("2026-04-06T10:05:00+00:00"),
+            DateTimeOffset.Parse("2026-04-06T11:05:00+00:00"));
+        var store = new PartiallyBlockingSessionStore(first, second);
+        var catalog = new AgentSessionCatalog(store);
+
+        await using var enumerator = catalog.ListSessionsAsync().GetAsyncEnumerator();
+
+        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false));
+        Assert.AreEqual("session-first", enumerator.Current.SessionId);
+        await store.WaitingAfterFirst.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        Assert.AreEqual(1, store.LoadCount);
+
+        var secondMove = enumerator.MoveNextAsync().AsTask();
+        await Task.Delay(100).ConfigureAwait(false);
+        Assert.IsFalse(secondMove.IsCompleted, "The store is still blocked after the first yielded session.");
+
+        store.ReleaseRemaining.SetResult();
+        Assert.IsTrue(await secondMove.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false));
+        Assert.AreEqual("session-second", enumerator.Current.SessionId);
+    }
+
+    [TestMethod]
     public async Task ListSessionsAsync_StreamsCachedSnapshotUntilInvalidated()
     {
         var store = new BlockingSessionStore(
@@ -161,6 +191,42 @@ public sealed class AgentSessionCatalogTests
 
         public Task<AgentSessionMetadata?> GetSessionAsync(string sessionId, CancellationToken cancellationToken = default)
             => Task.FromResult(Sessions.FirstOrDefault(session => string.Equals(session.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)));
+
+        public Task<IReadOnlyList<AgentEvent>> ReadEventsAsync(string sessionId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
+
+        public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+    }
+
+    private sealed class PartiallyBlockingSessionStore(
+        AgentSessionMetadata first,
+        AgentSessionMetadata second) : IAgentSessionStore
+    {
+        public TaskCompletionSource WaitingAfterFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseRemaining { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int LoadCount { get; private set; }
+
+        public async IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
+            AgentSessionListFilter? filter = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            LoadCount++;
+            yield return first;
+            WaitingAfterFirst.TrySetResult();
+            await ReleaseRemaining.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            yield return second;
+        }
+
+        public Task<AgentSessionMetadata?> GetSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+            => Task.FromResult(
+                string.Equals(sessionId, first.SessionId, StringComparison.OrdinalIgnoreCase)
+                    ? first
+                    : string.Equals(sessionId, second.SessionId, StringComparison.OrdinalIgnoreCase)
+                        ? second
+                        : null);
 
         public Task<IReadOnlyList<AgentEvent>> ReadEventsAsync(string sessionId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AgentEvent>>([]);

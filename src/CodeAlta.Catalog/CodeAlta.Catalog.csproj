@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SharpYaml" />
     <PackageReference Include="Tomlyn" />
     <PackageReference Include="XenoAtom.Glob" />

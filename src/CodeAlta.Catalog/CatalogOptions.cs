@@ -47,6 +47,11 @@ public sealed class CatalogOptions
     public string CacheRoot => Path.Combine(GlobalRoot, "cache");
 
     /// <summary>
+    /// Gets the shared machine-local SQLite cache database path.
+    /// </summary>
+    public string SessionCacheDatabasePath => Path.Combine(CacheRoot, "cache.sqlite3");
+
+    /// <summary>
     /// Gets the session journals root path under the global catalog.
     /// </summary>
     public string SessionsRoot => Path.Combine(GlobalRoot, "sessions");

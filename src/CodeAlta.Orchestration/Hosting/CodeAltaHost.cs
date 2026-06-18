@@ -183,7 +183,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         var modelProviderRegistry = new ModelProviderRegistry();
         options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
         var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
-        var agentHub = new AgentHub(modelProviderRegistry, globalRoot);
+        var agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
         var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
         var runtimeService = new SessionRuntimeService(
             agentHub,

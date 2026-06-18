@@ -15,10 +15,12 @@ namespace CodeAlta.Agent;
 /// <param name="ProtocolFamily">Optional last-used protocol family.</param>
 /// <param name="ProviderKey">Optional last-used configured provider key.</param>
 /// <param name="ModelId">Optional last-used model identifier.</param>
+/// <param name="ReasoningEffort">Optional last-used reasoning effort.</param>
 /// <param name="AgentPromptId">Optional last-used agent prompt identifier.</param>
 /// <param name="ParentSessionId">Optional parent session identifier used only for lineage/orchestration metadata.</param>
 /// <param name="CreatedBySessionId">Optional session identifier that created this session.</param>
 /// <param name="CreatedByRunId">Optional run identifier that created this session.</param>
+/// <param name="ViewState">Optional cached session-view state projection.</param>
 public sealed record AgentSessionMetadata(
     string SessionId,
     DateTimeOffset CreatedAt,
@@ -30,10 +32,33 @@ public sealed record AgentSessionMetadata(
     string? ProtocolFamily = null,
     string? ProviderKey = null,
     string? ModelId = null,
+    AgentReasoningEffort? ReasoningEffort = null,
     string? AgentPromptId = null,
     string? ParentSessionId = null,
     string? CreatedBySessionId = null,
-    AgentRunId? CreatedByRunId = null);
+    AgentRunId? CreatedByRunId = null,
+    AgentSessionViewStateMetadata? ViewState = null);
+
+/// <summary>
+/// Describes cached CodeAlta-local session view state associated with a persisted agent session.
+/// </summary>
+/// <param name="ProviderKey">Optional locally selected provider key.</param>
+/// <param name="ModelId">Optional locally selected model identifier.</param>
+/// <param name="ReasoningEffort">Optional locally selected reasoning effort.</param>
+/// <param name="AgentPromptId">Optional locally selected agent prompt identifier.</param>
+/// <param name="Archived">Whether the session is locally archived.</param>
+/// <param name="MessageCount">Optional cached displayable message count.</param>
+/// <param name="ParentSessionId">Optional locally persisted parent session identifier.</param>
+/// <param name="CreatedByJson">Optional serialized CodeAlta actor provenance.</param>
+public sealed record AgentSessionViewStateMetadata(
+    string? ProviderKey = null,
+    string? ModelId = null,
+    AgentReasoningEffort? ReasoningEffort = null,
+    string? AgentPromptId = null,
+    bool Archived = false,
+    int? MessageCount = null,
+    string? ParentSessionId = null,
+    string? CreatedByJson = null);
 
 /// <summary>
 /// Base type for provider/runtime-specific session metadata details.

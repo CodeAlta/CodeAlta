@@ -6,11 +6,11 @@ namespace CodeAlta.Agent;
 public interface IAgentSessionCatalog
 {
     /// <summary>
-    /// Lists persisted sessions from the catalog snapshot, starting one shared load when needed.
+    /// Lists persisted sessions from the catalog, starting one shared progressive load when needed.
     /// </summary>
     /// <param name="filter">Optional session filter.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Session metadata streamed from the catalog snapshot.</returns>
+    /// <returns>Session metadata streamed from the catalog.</returns>
     IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(
         AgentSessionListFilter? filter = null,
         CancellationToken cancellationToken = default);

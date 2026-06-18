@@ -14,7 +14,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `checkouts/` | `ProjectCatalog` helpers | Default checkout root used by catalog planning APIs. |
 | `machines/` | Catalog model | Machine-specific override profile root. |
 | `agents/` | Catalog model | File-backed agent-definition root used by host-owned coordinator setup. |
-| `cache/` | Process/runtime services | Machine-local cache root, including refreshed model metadata and plugin build cache. |
+| `cache/` | Process/runtime services | Machine-local cache root, including `cache.sqlite3` session-listing projections, refreshed model metadata, and plugin build cache. |
 | `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
 | `saved_prompts/` | Frontend prompt draft service | Unsent per-session prompt drafts. |
 | `ui-state.yaml` | Frontend view-state service | Open/selected tabs, session/model preferences, theme, and shell view state. |
@@ -97,6 +97,8 @@ CodeAlta uses two related records for active work:
 - **Agent session journals** are CodeAlta-owned JSONL files under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. They contain replayable normalized `AgentEvent` records plus raw snapshot events for `local.sessionSummary`, `local.sessionState`, `codealta.sessionHeader`, and `codealta.sessionState`.
 
 `SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
+
+For fast startup/sidebar loading, CodeAlta also maintains a machine-local SQLite projection cache at `~/.alta/cache/cache.sqlite3`. The JSONL files under `~/.alta/sessions` remain authoritative: missing or corrupt cache databases are recreated from journals, stale rows whose journals were deleted are pruned, and externally added or changed journals are reconciled after the initial cached load. If the SQLite database is busy or locked during startup, CodeAlta reports a startup error instead of scanning journals or deleting the locked database.
 
 Optional protocol traces are written to `~/.alta/sessions/traces/<session-id>.trace` only when a provider has tracing enabled. Credential headers are redacted, but trace files can still contain sensitive prompts, outputs, tool arguments, and streamed protocol updates.
 

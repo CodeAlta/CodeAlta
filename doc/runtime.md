@@ -106,7 +106,7 @@ A local session:
 - can transfer replayable local history to another compatible configured provider when no exact provider continuation state exists;
 - persists session summary/state snapshots and legacy session-view headers/state into the same JSONL journal.
 
-The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
+The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Startup session listing reads a local projection cache at `~/.alta/cache/cache.sqlite3` first, then reconciles external journal additions/changes after the initial projection; journals remain the source of truth and are used to rebuild a missing or corrupt cache. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
 
 ## Built-in local tools
 
@@ -188,7 +188,7 @@ Agent-runtime session journals contain replayable normalized history plus raw st
 - `local.compactionCheckpoint` for compaction outcomes;
 - `codealta.sessionHeader` and `codealta.sessionState` for legacy session-view/session-view metadata.
 
-The runtime reads journals to restore recoverable sessions, session history, usage, modified-file summaries, activated-skill state, parent/sub-session lineage, provider/model/reasoning selections, and the selected agent prompt id. Unknown recovered agent prompt ids fall back to the default agent prompt. The frontend stores only view/prompt state outside the journal.
+The runtime reads journals to restore recoverable sessions, session history, usage, modified-file summaries, activated-skill state, parent/sub-session lineage, provider/model/reasoning selections, and the selected agent prompt id. Metadata-only recovery paths use the SQLite projection cache when healthy, but history/resume reads continue to replay JSONL. Unknown recovered agent prompt ids fall back to the default agent prompt. The frontend stores only view/prompt state outside the journal.
 
 ## Runtime events and plugins
 

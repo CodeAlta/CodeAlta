@@ -17,6 +17,11 @@ public sealed class AgentRuntimeOptions
     public IModelProviderInitializationService? ModelProviderInitializationService { get; init; }
 
     /// <summary>
+    /// Gets or initializes the optional session projection cache used for fast local session listings.
+    /// </summary>
+    public IAgentSessionProjectionCache? SessionProjectionCache { get; init; }
+
+    /// <summary>
     /// Gets or initializes the provider registrations available through this runtime.
     /// </summary>
     public required IReadOnlyList<AgentRuntimeProviderRegistration> Providers { get; init; }

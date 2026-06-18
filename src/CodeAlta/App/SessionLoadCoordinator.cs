@@ -5,6 +5,9 @@ namespace CodeAlta.App;
 
 internal sealed class SessionLoadCoordinator
 {
+    private const int ProgressiveSnapshotThreshold = 16;
+    private const int CoalescedSnapshotBatchSize = 16;
+
     private readonly IRecoverableSessionSource _recoverableSessionSource;
     private readonly Func<IUiDispatcher> _getUiDispatcher;
     private readonly ICodeAltaShell _shell;
@@ -31,11 +34,17 @@ internal sealed class SessionLoadCoordinator
 
         var recoveredSessions = new Dictionary<string, SessionViewDescriptor>(StringComparer.OrdinalIgnoreCase);
         var appliedAny = false;
+        var pendingSinceLastApply = 0;
         await foreach (var session in _recoverableSessionSource.ListRecoverableSessionsAsync(cancellationToken))
         {
             appliedAny = true;
             recoveredSessions[session.SessionId] = session;
-            await ApplySnapshotAsync(projects, recoveredSessions, pruneMissingSessions: false, cancellationToken);
+            pendingSinceLastApply++;
+            if (recoveredSessions.Count <= ProgressiveSnapshotThreshold || pendingSinceLastApply >= CoalescedSnapshotBatchSize)
+            {
+                pendingSinceLastApply = 0;
+                await ApplySnapshotAsync(projects, recoveredSessions, pruneMissingSessions: false, cancellationToken);
+            }
         }
 
         if (!appliedAny)
@@ -51,6 +60,16 @@ internal sealed class SessionLoadCoordinator
         }
 
         await ApplySnapshotAsync(projects, recoveredSessions, pruneMissingSessions: true, cancellationToken);
+        if (await _recoverableSessionSource.ReconcileRecoverableSessionsAsync(cancellationToken))
+        {
+            recoveredSessions.Clear();
+            await foreach (var session in _recoverableSessionSource.ListRecoverableSessionsAsync(cancellationToken))
+            {
+                recoveredSessions[session.SessionId] = session;
+            }
+
+            await ApplySnapshotAsync(projects, recoveredSessions, pruneMissingSessions: true, cancellationToken);
+        }
     }
 
     private Task ApplySnapshotAsync(

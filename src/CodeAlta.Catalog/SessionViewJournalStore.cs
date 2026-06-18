@@ -28,6 +28,7 @@ public sealed class SessionViewJournalStore
 
     private readonly AgentRuntimePathLayout _layout;
     private readonly AgentSessionJournalFile _journalFile;
+    private readonly SessionJournalSqliteCache _sessionCache;
     private readonly ConcurrentDictionary<string, CachedLatestState> _latestStateCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -46,6 +47,7 @@ public sealed class SessionViewJournalStore
         ArgumentNullException.ThrowIfNull(journalFile);
         _layout = new AgentRuntimePathLayout(options.GlobalRoot);
         _journalFile = journalFile;
+        _sessionCache = new SessionJournalSqliteCache(options);
     }
 
     /// <summary>
@@ -53,7 +55,9 @@ public sealed class SessionViewJournalStore
     /// </summary>
     /// <returns>A session store for the same agent-runtime layout.</returns>
     public FileSystemAgentSessionStore CreateSessionStore()
-        => new(_layout, _journalFile);
+        => new(_layout, _journalFile, _sessionCache);
+
+    internal IAgentSessionProjectionCache ProjectionCache => _sessionCache;
 
     /// <summary>
     /// Ensures a missing or empty session journal starts with a CodeAlta session header.
@@ -68,11 +72,18 @@ public sealed class SessionViewJournalStore
             return;
         }
 
+        var path = GetPath(session.SessionId, session.CreatedAt);
         await _journalFile.EnsureFirstLineAsync(
-                GetPath(session.SessionId, session.CreatedAt),
+                path,
                 CreateHeaderEvent(session).ToJson(),
                 Utf8WithoutBom,
                 IsSessionHeaderLine,
+                cancellationToken)
+            .ConfigureAwait(false);
+        await _sessionCache.UpsertSessionViewHeaderAsync(
+                session.SessionId,
+                path,
+                SessionViewJournalHeader.FromDescriptor(session),
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -102,6 +113,14 @@ public sealed class SessionViewJournalStore
                 cancellationToken)
             .ConfigureAwait(false);
         InvalidateLatestStateCache(path);
+        await _sessionCache.UpsertSessionViewHeaderAsync(
+                session.SessionId,
+                path,
+                SessionViewJournalHeader.FromDescriptor(session),
+                cancellationToken)
+            .ConfigureAwait(false);
+        await _sessionCache.UpsertSessionViewStateAsync(session.SessionId, path, state, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -176,7 +195,7 @@ public sealed class SessionViewJournalStore
             return CloneLocalState(cached.State);
         }
 
-        var latestState = await ReadLatestStateUncachedAsync(path, cancellationToken).ConfigureAwait(false);
+        var latestState = await ReadLatestStateFromPathAsync(path, cancellationToken).ConfigureAwait(false);
         var after = GetFileStamp(path);
         if (before == after)
         {
@@ -228,7 +247,7 @@ public sealed class SessionViewJournalStore
         };
     }
 
-    private static async Task<SessionViewLocalState?> ReadLatestStateUncachedAsync(string path, CancellationToken cancellationToken)
+    internal static async Task<SessionViewLocalState?> ReadLatestStateFromPathAsync(string path, CancellationToken cancellationToken)
     {
         var latestState = await TryReadLatestStateFromEndAsync(path, 64 * 1024, cancellationToken).ConfigureAwait(false);
         return HasLineage(latestState)
@@ -446,7 +465,7 @@ public sealed class SessionViewJournalStore
             SessionStateEventType,
             JsonSerializer.SerializeToElement(state, SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState));
 
-    private async Task<SessionViewJournalHeader?> ReadHeaderFromPathAsync(string path, CancellationToken cancellationToken)
+    internal static async Task<SessionViewJournalHeader?> ReadHeaderFromPathAsync(string path, CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
         {

@@ -2,6 +2,7 @@ using CodeAlta.Threading;
 using System.Collections.Concurrent;
 using System.Threading;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
 using CodeAlta.Orchestration.Runtime;
@@ -483,12 +484,20 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
     {
         try
         {
-            await _knownProjectImporter.ImportAsync(cancellationToken).ConfigureAwait(false);
             var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
             await _sessionLoadCoordinator.ApplyRecoverableSessionsProgressivelyAsync(projects, cancellationToken).ConfigureAwait(false);
+            if (await _knownProjectImporter.ImportAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var refreshedProjects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+                await _sessionLoadCoordinator.ApplyRecoverableSessionsProgressivelyAsync(refreshedProjects, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+        }
+        catch (AgentSessionCacheLockedException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

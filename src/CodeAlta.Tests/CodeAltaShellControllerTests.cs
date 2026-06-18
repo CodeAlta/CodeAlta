@@ -1,5 +1,6 @@
 using CodeAlta.Threading;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.App;
 using CodeAlta.Catalog;
 using CodeAlta.Models;
@@ -90,6 +91,22 @@ public sealed class CodeAltaShellControllerTests
     }
 
     [TestMethod]
+    public async Task InitializeAsync_RethrowsLockedSessionCacheFailure()
+    {
+        var log = new List<string>();
+        var shell = new FakeShell(log);
+        var controller = new CodeAltaShellController(
+            shell,
+            new FakeImporter(log) { ImportException = new AgentSessionCacheLockedException("locked") },
+            new FakeProjectCatalogStore(log, []),
+            new FakeRecoverableSessionSource(log, []),
+            new FakeSessionDeleter(log));
+        controller.AttachUiDispatcher(new FakeUiDispatcher());
+
+        await Assert.ThrowsExactlyAsync<AgentSessionCacheLockedException>(() => controller.InitializeAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task InitializeAsync_ShowsSessionsBeforeProviderInitializationCompletes()
     {
         var log = new List<string>();
@@ -116,6 +133,36 @@ public sealed class CodeAltaShellControllerTests
         CollectionAssert.Contains(log, "Shell.TrySchedulePendingStartupSessionRestore");
 
         shell.InitializeModelProvidersCompletion.SetResult(true);
+        await initializationTask.ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task InitializeAsync_ShowsSessionsBeforeKnownProjectImportCompletes()
+    {
+        var log = new List<string>();
+        var importer = new FakeImporter(log)
+        {
+            ImportCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var controller = new CodeAltaShellController(
+            new FakeShell(log),
+            importer,
+            new FakeProjectCatalogStore(log, [new ProjectDescriptor { Id = "project-1", DisplayName = "CodeAlta", ProjectPath = @"C:\repo", Slug = "codealta" }]),
+            new FakeRecoverableSessionSource(log, [CreateSession("session-1")]),
+            new FakeSessionDeleter(log));
+        controller.AttachUiDispatcher(new FakeUiDispatcher());
+
+        var initializationTask = controller.InitializeAsync(CancellationToken.None);
+
+        await WaitUntilAsync(() => log.Contains("Shell.ApplyRecoveredCatalogState:1:1")).ConfigureAwait(false);
+        await WaitUntilAsync(() => log.Contains("Importer.Import")).ConfigureAwait(false);
+
+        Assert.IsFalse(initializationTask.IsCompleted, "Startup should not wait for project import before applying recovered sessions.");
+        Assert.IsTrue(
+            log.IndexOf("Shell.ApplyRecoveredCatalogState:1:1") < log.IndexOf("Importer.Import"),
+            "Recovered sessions should be applied before known-project import begins.");
+
+        importer.ImportCompletion.SetResult(false);
         await initializationTask.ConfigureAwait(false);
     }
 
@@ -854,7 +901,11 @@ public sealed class CodeAltaShellControllerTests
     {
         public Exception? ImportException { get; set; }
 
-        public Task ImportAsync(CancellationToken cancellationToken)
+        public TaskCompletionSource<bool>? ImportCompletion { get; set; }
+
+        public bool Changed { get; set; }
+
+        public async Task<bool> ImportAsync(CancellationToken cancellationToken)
         {
             log.Add("Importer.Import");
             if (ImportException is not null)
@@ -862,7 +913,12 @@ public sealed class CodeAltaShellControllerTests
                 throw ImportException;
             }
 
-            return Task.CompletedTask;
+            if (ImportCompletion is not null)
+            {
+                await ImportCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return Changed;
         }
     }
 
@@ -937,6 +993,9 @@ public sealed class CodeAltaShellControllerTests
                 yield return session;
             }
         }
+
+        public Task<bool> ReconcileRecoverableSessionsAsync(CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 
     private sealed class BlockingRecoverableSessionSource(
@@ -963,6 +1022,9 @@ public sealed class CodeAltaShellControllerTests
 
         public void AllowCompletion()
             => _allowCompletion.TrySetResult(true);
+
+        public Task<bool> ReconcileRecoverableSessionsAsync(CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 
     private sealed class FakeSessionDeleter(List<string> log) : ISessionDeleter

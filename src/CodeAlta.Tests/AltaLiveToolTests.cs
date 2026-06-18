@@ -9,6 +9,7 @@ using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using Microsoft.Data.Sqlite;
 using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
 
@@ -4241,7 +4242,23 @@ public sealed class AltaLiveToolTests
         {
             if (Directory.Exists(Path))
             {
-                Directory.Delete(Path, recursive: true);
+                for (var attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        SqliteConnection.ClearAllPools();
+                        Directory.Delete(Path, recursive: true);
+                        return;
+                    }
+                    catch (IOException) when (attempt < 20)
+                    {
+                        Thread.Sleep(50);
+                    }
+                    catch (UnauthorizedAccessException) when (attempt < 20)
+                    {
+                        Thread.Sleep(50);
+                    }
+                }
             }
         }
     }

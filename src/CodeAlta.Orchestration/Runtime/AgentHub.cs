@@ -15,6 +15,7 @@ public sealed class AgentHub : IAsyncDisposable
 {
     private readonly ModelProviderRegistry _modelProviderRegistry;
     private readonly string? _stateRootPath;
+    private readonly IAgentSessionProjectionCache? _sessionProjectionCache;
     private readonly Dictionary<AgentSessionHandleId, SessionEntry> _sessions = new();
     private readonly BoundedRuntimeEventStream<OrchestrationEvent> _events = new();
     private readonly SemaphoreSlim _gate = new(initialCount: 1, maxCount: 1);
@@ -25,13 +26,18 @@ public sealed class AgentHub : IAsyncDisposable
     /// </summary>
     /// <param name="modelProviderRegistry">Model provider registry used to create provider runtimes.</param>
     /// <param name="stateRootPath">The agent runtime storage root path.</param>
+    /// <param name="sessionProjectionCache">Optional session projection cache shared with the session journal store.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="modelProviderRegistry"/> is <see langword="null"/>.</exception>
-    public AgentHub(ModelProviderRegistry modelProviderRegistry, string? stateRootPath = null)
+    public AgentHub(
+        ModelProviderRegistry modelProviderRegistry,
+        string? stateRootPath = null,
+        IAgentSessionProjectionCache? sessionProjectionCache = null)
     {
         ArgumentNullException.ThrowIfNull(modelProviderRegistry);
 
         _modelProviderRegistry = modelProviderRegistry;
         _stateRootPath = stateRootPath;
+        _sessionProjectionCache = sessionProjectionCache;
     }
 
     /// <summary>
@@ -380,6 +386,7 @@ public sealed class AgentHub : IAsyncDisposable
             new AgentRuntimeOptions
             {
                 StateRootPath = _stateRootPath,
+                SessionProjectionCache = _sessionProjectionCache,
                 Providers = [agentProviderRuntime.CreateProviderRegistration()],
             });
         try

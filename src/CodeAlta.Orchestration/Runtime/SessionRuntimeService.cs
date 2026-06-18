@@ -176,6 +176,24 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         => ListRecoverableSessionsAsync(shouldListProviderSessions: null, cancellationToken);
 
     /// <summary>
+    /// Reconciles the recoverable-session cache with external journal additions, changes, and deletions.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true" /> when cached visible session metadata changed.</returns>
+    public async Task<bool> ReconcileRecoverableSessionCacheAsync(CancellationToken cancellationToken = default)
+    {
+        var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        var result = await store.ReconcileCacheAsync(cancellationToken).ConfigureAwait(false);
+        if (!result.Changed)
+        {
+            return false;
+        }
+
+        await _agentSessionCatalog.InvalidateAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
     /// Lists recoverable user-facing sessions from the session catalog.
     /// </summary>
     /// <param name="shouldListProviderSessions">Optional predicate that returns whether a provider's sessions should be listed.</param>
@@ -200,7 +218,15 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 continue;
             }
 
-            await ApplyPersistedSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
+            if (metadata.ViewState is not null)
+            {
+                ApplyCachedSessionLocalState(session, metadata.ViewState);
+            }
+            else
+            {
+                await ApplyPersistedSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
             yield return session;
         }
     }
@@ -287,6 +313,41 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         if (localState.CreatedBy is not null)
         {
             session.CreatedBy = localState.CreatedBy;
+        }
+    }
+
+    private void ApplyCachedSessionLocalState(SessionViewDescriptor session, AgentSessionViewStateMetadata localState)
+    {
+        var viewState = new SessionViewLocalState
+        {
+            ProviderKey = localState.ProviderKey,
+            ModelId = localState.ModelId,
+            ReasoningEffort = localState.ReasoningEffort,
+            AgentPromptId = localState.AgentPromptId,
+            Archived = localState.Archived,
+            MessageCount = localState.MessageCount,
+            ParentSessionId = localState.ParentSessionId,
+            CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),
+        };
+        ApplyPersistedSessionLocalState(session, viewState);
+    }
+
+    private static AltaActorProvenance? DeserializeCachedCreatedBy(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize(
+                json,
+                SessionViewJournalJsonSerializerContext.Default.AltaActorProvenance);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
         }
     }
 
@@ -2196,6 +2257,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 LastActiveAt = session.UpdatedAt,
                 StartedAt = session.CreatedAt,
                 LatestSummary = session.Summary,
+                ModelId = session.ModelId,
+                ReasoningEffort = session.ReasoningEffort,
                 AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, projectRoot: null),
             };
         }
@@ -2223,6 +2286,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             LastActiveAt = session.UpdatedAt,
             StartedAt = session.CreatedAt,
             LatestSummary = session.Summary,
+            ModelId = session.ModelId,
+            ReasoningEffort = session.ReasoningEffort,
             AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, project.ProjectPath),
         };
     }
