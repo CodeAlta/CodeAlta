@@ -256,10 +256,33 @@ internal sealed class SessionTabHostView
     }
 
     private bool CanRouteSessionTabKeyToAsk()
-        => TryGetActiveAskProjection(out _) && SessionTabControl.App?.FocusedElement is not TextBox;
+    {
+        if (!TryGetActiveAskProjection(out var state))
+        {
+            return false;
+        }
+
+        var focusedElement = SessionTabControl.App?.FocusedElement;
+        return focusedElement is not null &&
+            focusedElement is not TextBox &&
+            IsVisualWithin(focusedElement, state.AskForm);
+    }
 
     private bool CanConsumeSplitterKeyDuringAsk()
         => TryGetActiveAskProjection(out _) && SessionTabControl.App?.FocusedElement is VSplitter;
+
+    private static bool IsVisualWithin(Visual visual, Visual ancestor)
+    {
+        for (var current = visual; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private bool ExecuteActiveAskCommand(string commandId)
     {

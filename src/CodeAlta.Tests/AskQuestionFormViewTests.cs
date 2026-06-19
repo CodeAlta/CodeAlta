@@ -150,6 +150,8 @@ public sealed class AskQuestionFormViewTests
         StringAssert.Contains(source, "ConsumesGestureWhenUnavailable = false");
         StringAssert.Contains(source, "ExecuteActiveAskCommand(\"CodeAlta.Ask.Previous\")");
         StringAssert.Contains(source, "ExecuteActiveAskCommand(\"CodeAlta.Ask.Next\")");
+        StringAssert.Contains(source, "IsVisualWithin(focusedElement, state.AskForm)");
+        StringAssert.Contains(source, "focusedElement is not TextBox");
         StringAssert.Contains(source, "TryGetSelectedTabId()");
         StringAssert.Contains(source, "ReferenceEquals(e.OriginalSource, SessionTabControl)");
     }
