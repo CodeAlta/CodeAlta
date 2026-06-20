@@ -208,6 +208,53 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_CodeFormatsPathsInGeneratedMarkdown()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var projectRoot = Path.Combine(temp.Path, "project");
+        var workingDirectory = Path.Combine(projectRoot, ".alta");
+        var projectContextFile = Path.Combine(projectRoot, "AGENTS.md");
+        Directory.CreateDirectory(workingDirectory);
+        File.WriteAllText(projectContextFile, "Project instructions.");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+        var bundle = builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            ProviderType = "codex",
+            ProtocolFamily = "codex",
+            Session = new SessionViewDescriptor
+            {
+                SessionId = "session-1",
+                ProviderId = "codex",
+                ProviderKey = "codex",
+                WorkingDirectory = workingDirectory,
+                Kind = SessionViewKind.ProjectSession,
+            },
+            Project = new ProjectDescriptor
+            {
+                Id = "project-1",
+                Slug = "project-1",
+                DisplayName = "Project 1",
+                ProjectPath = projectRoot,
+            },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(
+                Skills: false,
+                ProjectContext: true,
+                RuntimeContext: true,
+                ToolGuidance: false),
+        });
+
+        var developerInstructions = bundle.DeveloperInstructions!;
+        StringAssert.Contains(developerInstructions, $"- Current working directory: `{Path.GetFullPath(workingDirectory)}`");
+        StringAssert.Contains(developerInstructions, $"- Project root: `{Path.GetFullPath(projectRoot)}`");
+        StringAssert.Contains(developerInstructions, $"File: `{Path.GetFullPath(projectContextFile)}`");
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_AppendsSystemAndAgentPromptResources()
     {
         using var temp = TempDirectory.Create();

@@ -537,12 +537,12 @@ public sealed class SystemPromptBuilder
         var workingDirectory = NormalizeOptionalRoot(request.Session.WorkingDirectory) ?? NormalizeOptionalRoot(request.WorkingDirectory);
         if (workingDirectory is not null)
         {
-            lines.Add($"- Current working directory: {workingDirectory}");
+            lines.Add($"- Current working directory: {MarkdownCode(workingDirectory)}");
         }
 
         if (projectRoot is not null)
         {
-            lines.Add($"- Project root: {projectRoot}");
+            lines.Add($"- Project root: {MarkdownCode(projectRoot)}");
         }
 
         if (!string.IsNullOrWhiteSpace(request.Session.ParentSessionId))
@@ -648,7 +648,7 @@ public sealed class SystemPromptBuilder
                 builder.AppendLine().AppendLine();
             }
 
-            builder.AppendLine($"File: {path}");
+            builder.AppendLine($"File: {MarkdownCode(path)}");
             builder.AppendLine();
             builder.AppendLine("<INSTRUCTIONS>");
             builder.AppendLine();
@@ -848,6 +848,29 @@ public sealed class SystemPromptBuilder
 
     private static string EscapeBackticks(string value)
         => value.Replace("`", "'", StringComparison.Ordinal);
+
+    private static string MarkdownCode(string value)
+    {
+        var maxBacktickRun = 0;
+        var currentRun = 0;
+        foreach (var ch in value)
+        {
+            if (ch == '`')
+            {
+                currentRun++;
+                maxBacktickRun = Math.Max(maxBacktickRun, currentRun);
+            }
+            else
+            {
+                currentRun = 0;
+            }
+        }
+
+        var delimiter = new string('`', maxBacktickRun + 1);
+        return value.StartsWith('`') || value.EndsWith('`')
+            ? $"{delimiter} {value} {delimiter}"
+            : $"{delimiter}{value}{delimiter}";
+    }
 
     private static string GetPlatformLabel()
     {
