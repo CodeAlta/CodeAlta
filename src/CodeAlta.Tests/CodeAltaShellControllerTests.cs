@@ -343,7 +343,7 @@ public sealed class CodeAltaShellControllerTests
     }
 
     [TestMethod]
-    public void QueueRuntimeEvent_AutoDrainAppliesQueuedEventsWhenDispatcherIsAttached()
+    public void QueueRuntimeEvent_PostsWakeAndDrainsOnUiFrame()
     {
         var log = new List<string>();
         var shell = new FakeShell(log);
@@ -359,6 +359,49 @@ public sealed class CodeAltaShellControllerTests
         controller.QueueRuntimeEvent(CreateHostEvent("session-1"), CancellationToken.None);
         controller.QueueRuntimeEvent(CreateHostEvent("session-2"), CancellationToken.None);
         Assert.AreEqual(0, dispatcher.InvokeCallCount);
+        Assert.AreEqual(1, dispatcher.PostCallCount);
+        Assert.AreEqual(0, log.Count);
+
+        var drained = controller.DrainPendingRuntimeEventsForUiFrame();
+
+        Assert.AreEqual(2, drained);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "Shell.HandleRuntimeEvent:session-1",
+                "Shell.HandleRuntimeEvent:session-2",
+            },
+            log);
+    }
+
+    [TestMethod]
+    public void DrainPendingRuntimeEventsForUiFrame_LimitsBatchAndSchedulesRemaining()
+    {
+        var log = new List<string>();
+        var shell = new FakeShell(log);
+        var dispatcher = new FakeUiDispatcher();
+        var controller = new CodeAltaShellController(
+            shell,
+            new FakeImporter(log),
+            new FakeProjectCatalogStore(log, []),
+            new FakeRecoverableSessionSource(log, []),
+            new FakeSessionDeleter(log));
+        controller.AttachUiDispatcher(dispatcher);
+
+        controller.QueueRuntimeEvent(CreateHostEvent("session-1"), CancellationToken.None);
+        controller.QueueRuntimeEvent(CreateHostEvent("session-2"), CancellationToken.None);
+
+        Assert.AreEqual(1, dispatcher.PostCallCount);
+        var firstDrain = controller.DrainPendingRuntimeEventsForUiFrame(maxEvents: 1);
+
+        Assert.AreEqual(1, firstDrain);
+        Assert.AreEqual(2, dispatcher.PostCallCount);
+        CollectionAssert.AreEqual(new[] { "Shell.HandleRuntimeEvent:session-1" }, log);
+
+        var secondDrain = controller.DrainPendingRuntimeEventsForUiFrame(maxEvents: 1);
+
+        Assert.AreEqual(1, secondDrain);
+        Assert.AreEqual(2, dispatcher.PostCallCount);
         CollectionAssert.AreEqual(
             new[]
             {
@@ -1047,12 +1090,15 @@ public sealed class CodeAltaShellControllerTests
     {
         public int InvokeCallCount { get; private set; }
 
+        public int PostCallCount { get; private set; }
+
         public bool CheckAccess()
             => true;
 
         public void Post(Action action)
         {
             ArgumentNullException.ThrowIfNull(action);
+            PostCallCount++;
             action();
         }
 

@@ -395,6 +395,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     public TerminalLoopResult Tick(CancellationToken cancellationToken)
     {
+        _shellController.DrainPendingRuntimeEventsForUiFrame();
         if (_disableTerminalLoopCallback)
         {
             DrainDeferredUiActions();

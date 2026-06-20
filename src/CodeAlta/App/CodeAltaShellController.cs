@@ -13,6 +13,8 @@ namespace CodeAlta.App;
 
 internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, IAsyncDisposable
 {
+    private const int UiFrameRuntimeEventDrainBatchSize = 64;
+
     private readonly ICodeAltaShell _shell;
     private readonly IKnownProjectImporter _knownProjectImporter;
     private readonly IProjectCatalogStore _projectCatalog;
@@ -119,6 +121,21 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
         cancellationToken.ThrowIfCancellationRequested();
         _pendingRuntimeEvents.Enqueue(runtimeEvent);
         ScheduleRuntimeEventDrain();
+    }
+
+    public int DrainPendingRuntimeEventsForUiFrame()
+        => DrainPendingRuntimeEventsForUiFrame(UiFrameRuntimeEventDrainBatchSize);
+
+    public int DrainPendingRuntimeEventsForUiFrame(int maxEvents)
+    {
+        var drainedEvents = DrainPendingRuntimeEvents(maxEvents);
+        Interlocked.Exchange(ref _runtimeEventDrainScheduled, 0);
+        if (!_pendingRuntimeEvents.IsEmpty)
+        {
+            ScheduleRuntimeEventDrain();
+        }
+
+        return drainedEvents;
     }
 
     public int DrainPendingRuntimeEvents(int maxEvents = 512)
@@ -380,17 +397,10 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
             return;
         }
 
-        UiDispatch.Post(uiDispatcher, DrainPendingRuntimeEventsOnUi);
-    }
-
-    private void DrainPendingRuntimeEventsOnUi()
-    {
-        _ = DrainPendingRuntimeEvents();
-        Interlocked.Exchange(ref _runtimeEventDrainScheduled, 0);
-        if (!_pendingRuntimeEvents.IsEmpty)
-        {
-            ScheduleRuntimeEventDrain();
-        }
+        // Runtime events are drained by CodeAltaApp.Tick, after terminal input has been handled for
+        // the frame. The posted no-op only wakes the terminal loop; draining directly from the posted
+        // action would run before input and can make pointer clicks feel dropped during busy sessions.
+        uiDispatcher.Post(static () => { });
     }
 
     internal Task InitializeAsync(CancellationToken cancellationToken)
