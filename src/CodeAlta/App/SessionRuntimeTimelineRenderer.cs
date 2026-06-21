@@ -36,6 +36,11 @@ internal sealed class SessionRuntimeTimelineRenderer
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentNullException.ThrowIfNull(queueEvent);
 
+        if (!ShouldRenderQueueEvent(queueEvent))
+        {
+            return;
+        }
+
         var action = queueEvent.IsEnqueued ? SR.T("Queued prompt for later submission.") : SR.T("Updated queued prompt state.");
         var markdown = string.IsNullOrWhiteSpace(queueEvent.PromptPreview)
             ? action
@@ -46,6 +51,13 @@ internal sealed class SessionRuntimeTimelineRenderer
             ChatTimelineTone.Notice,
             headerOverride: SR.T("Notice"),
             headerSecondary: SR.T("Prompt Queue"));
+    }
+
+    public static bool ShouldRenderQueueEvent(SessionQueueRuntimeEvent queueEvent)
+    {
+        ArgumentNullException.ThrowIfNull(queueEvent);
+
+        return !string.Equals(queueEvent.QueueKind, "parent-notify", StringComparison.OrdinalIgnoreCase);
     }
 
     public void RenderAgentEvent(OpenSessionState tab, AgentEvent @event)

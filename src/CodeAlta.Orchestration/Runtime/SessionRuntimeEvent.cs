@@ -94,4 +94,10 @@ public sealed record SessionQueueRuntimeEvent(
     string? QueueItemId,
     string? PromptPreview,
     bool IsEnqueued)
-    : SessionRuntimeEvent(SessionId, Timestamp);
+    : SessionRuntimeEvent(SessionId, Timestamp)
+{
+    /// <summary>
+    /// Gets the queue item kind, when known.
+    /// </summary>
+    public string? QueueKind { get; init; }
+}

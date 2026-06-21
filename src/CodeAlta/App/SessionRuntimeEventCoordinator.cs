@@ -130,8 +130,12 @@ internal sealed class SessionRuntimeEventCoordinator
                     break;
 
                 case SessionQueueRuntimeEvent queueEvent:
-                    TryRenderInteraction(tab, () => _timelineRenderer.RenderQueueEvent(tab, queueEvent), SR.T("queue event"));
-                    PublishRuntimeTimelineChanged(session, tab);
+                    if (SessionRuntimeTimelineRenderer.ShouldRenderQueueEvent(queueEvent))
+                    {
+                        TryRenderInteraction(tab, () => _timelineRenderer.RenderQueueEvent(tab, queueEvent), SR.T("queue event"));
+                        PublishRuntimeTimelineChanged(session, tab);
+                    }
+
                     break;
             }
         }

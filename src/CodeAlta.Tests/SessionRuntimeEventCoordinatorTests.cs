@@ -550,6 +550,30 @@ public sealed class SessionRuntimeEventCoordinatorTests
     }
 
     [TestMethod]
+    public void ApplyRuntimeEvent_ParentNotificationQueueEventSkipsTimelineNotice()
+    {
+        var session = CreateSession();
+        var tab = CreateOpenSessionState(session);
+        var publisher = new FrontendEventPublisher(new InlineUiDispatcher());
+        var events = new List<ShellFrontendEvent>();
+        publisher.Subscribe(events.Add);
+        var coordinator = CreateCoordinator(session, tab, frontendEvents: publisher);
+
+        coordinator.ApplyRuntimeEvent(new SessionQueueRuntimeEvent(
+            session.SessionId,
+            DateTimeOffset.UtcNow,
+            QueuedPromptCount: 1,
+            QueueItemId: "queue-1",
+            PromptPreview: "[CodeAlta delegated-agent message]",
+            IsEnqueued: true)
+        { QueueKind = "parent-notify" });
+
+        Assert.AreEqual(0, tab.Timeline.Flow.Items.Count);
+        Assert.IsFalse(events.OfType<RuntimeTimelineChangedEvent>().Any(@event => @event.SessionId == session.SessionId));
+        Assert.IsTrue(events.OfType<ShellChromeChangedEvent>().Any());
+    }
+
+    [TestMethod]
     public void ApplyRuntimeEvent_CatalogEventUpsertsRuntimeSession()
     {
         var session = CreateSession();

@@ -932,7 +932,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                         QueuedPromptCount(localState),
                         item.QueueItemId,
                         item.PromptPreview,
-                        IsEnqueued: true));
+                        IsEnqueued: true)
+                    { QueueKind = item.Kind });
                     return item;
                 },
                 cancellationToken)
@@ -1784,7 +1785,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             QueuedPromptCount(localState),
             item.QueueItemId,
             item.PromptPreview,
-            isEnqueued));
+            isEnqueued)
+        { QueueKind = item.Kind });
     }
 
     private static SessionViewQueuedPrompt CloneQueuedPrompt(SessionViewQueuedPrompt item)
