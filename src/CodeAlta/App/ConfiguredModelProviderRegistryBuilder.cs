@@ -356,7 +356,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 MaxConcurrentRequests = definition.MaxConcurrentRequests ?? 16,
                 TextVerbosity = NormalizeText(definition.TextVerbosity) ?? "medium",
                 IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning ?? true,
-                ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? "static",
+                ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? "codex_endpoint_with_static_fallback",
                 ResponseTransport = NormalizeText(definition.ResponseTransport) ?? "websocket_with_http_fallback",
                 SendResponsesBetaHeader = definition.SendResponsesBetaHeader ?? true,
                 SendInstallationId = definition.SendInstallationId ?? false,

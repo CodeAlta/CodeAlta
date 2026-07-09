@@ -46,7 +46,7 @@ public sealed class CodeAltaConfigStore
     private const string CodexSubscriptionDefaultApiUrl = "https://chatgpt.com/backend-api/codex";
     private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
     private const string CodexSubscriptionDefaultTextVerbosity = "medium";
-    private const string CodexSubscriptionDefaultModelDiscovery = "static";
+    private const string CodexSubscriptionDefaultModelDiscovery = "codex_endpoint_with_static_fallback";
     private const string CodexSubscriptionDefaultResponseTransport = "websocket_with_http_fallback";
     private const string CodexSubscriptionDefaultInstallationIdSource = "codealta_state";
     private const int CodexSubscriptionDefaultMaxConcurrentRequests = 16;

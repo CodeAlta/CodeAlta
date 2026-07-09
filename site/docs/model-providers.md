@@ -104,7 +104,7 @@ Provider-type-specific fields and restrictions:
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 
-Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"`, `"codex_auth_import"`, `"codex_auth_file_readonly"`, or `"external_token_command"`; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"`, `"codex_endpoint"`, or `"static"`; `response_transport = "websocket_with_http_fallback"` or `"http"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`.
+Codex accepts these values for constrained fields: `auth_source = "codealta_oauth"`, `"codex_auth_import"`, `"codex_auth_file_readonly"`, or `"external_token_command"`; `text_verbosity = "low"`, `"medium"`, or `"high"`; `model_discovery = "codex_endpoint_with_static_fallback"` (default), `"codex_endpoint"`, or `"static"`; `response_transport = "websocket_with_http_fallback"` or `"http"`; and `installation_id_source = "codealta_state"`, `"codex_home_import"`, or `"codex_home_readonly"`.
 
 Copilot accepts `auth_source = "github_device_flow"`, `"github_token_env"`, or `"copilot_token_env"`; `model_discovery = "copilot_endpoint_with_static_fallback"`, `"copilot_endpoint"`, or `"static"`. `github_token_env` is required when using GitHub-token auth, and `copilot_token_env` is required when using Copilot-token auth.
 
@@ -377,6 +377,7 @@ display_name = "Codex"
 type = "codex"
 model = "gpt-5.5"
 reasoning_effort = "high"
+model_discovery = "codex_endpoint_with_static_fallback"
 ```
 
 Codex credentials are stored in CodeAlta-owned state through its login flow. It does not accept `api_key`, `api_key_env`, or arbitrary `extra_body`.

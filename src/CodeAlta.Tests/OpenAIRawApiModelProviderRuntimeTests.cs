@@ -3045,6 +3045,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     {
                         Experimental = true,
                         ResponseTransport = "http",
+                        ModelDiscovery = "static",
                     },
                     ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [

@@ -170,6 +170,7 @@ public sealed class ModelProviderEditorDiagnosticsTests
     public void CodexSubscriptionEditor_RoundTripsAccountAuthAndModelDiscoveryFields()
     {
         var item = CreateCodexSubscriptionItem(enabled: true, experimental: true);
+        Assert.AreEqual("codex_endpoint_with_static_fallback", item.ModelDiscovery);
         item.UseDefaultAuthSource = false;
         item.AuthSource = "codex_auth_import";
         item.UseDefaultAccountId = false;

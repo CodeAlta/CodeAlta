@@ -49,7 +49,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         UseDefaultAuthSource = source.AuthSource is null;
         AccountId = source.AccountId;
         UseDefaultAccountId = source.AccountId is null;
-        ModelDiscovery = source.ModelDiscovery ?? "static";
+        ModelDiscovery = source.ModelDiscovery ?? ResolveDefaultModelDiscovery(ProviderType);
         UseDefaultModelDiscovery = source.ModelDiscovery is null;
         ResponseTransport = source.ResponseTransport ?? "websocket_with_http_fallback";
         UseDefaultResponseTransport = source.ResponseTransport is null;
@@ -66,6 +66,15 @@ internal sealed partial class ModelProviderEditorItemViewModel
     public partial string? ProviderKey { get; set; }
 
     public bool IsReserved => false;
+
+    private static string ResolveDefaultModelDiscovery(string? providerType)
+        => providerType?.Trim().ToLowerInvariant() switch
+        {
+            "codex" => "codex_endpoint_with_static_fallback",
+            "copilot" => "copilot_endpoint_with_static_fallback",
+            "xai" => "xai_endpoint_with_static_fallback",
+            _ => "static",
+        };
 
     [Bindable]
     public partial bool Enabled { get; set; }

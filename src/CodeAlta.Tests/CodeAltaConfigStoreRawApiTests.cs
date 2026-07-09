@@ -412,7 +412,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual(16, provider.MaxConcurrentRequests);
         Assert.AreEqual("medium", provider.TextVerbosity);
         Assert.IsTrue(provider.IncludeEncryptedReasoning);
-        Assert.AreEqual("static", provider.ModelDiscovery);
+        Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
         Assert.AreEqual("websocket_with_http_fallback", provider.ResponseTransport);
         Assert.IsTrue(provider.SendResponsesBetaHeader);
         Assert.IsFalse(provider.SendInstallationId);
@@ -517,7 +517,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             .Single(static provider => provider.ProviderKey == "codex");
 
         Assert.IsNull(provider.Model);
-        Assert.AreEqual("static", provider.ModelDiscovery);
+        Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
     }
 
     [TestMethod]

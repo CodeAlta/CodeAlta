@@ -116,7 +116,7 @@ Current behavior:
 - default response transport: WebSocket with HTTP fallback;
 - `response_transport = "http"` or `"sse"` forces the HTTP/SSE SDK path;
 - encrypted reasoning is included by default;
-- model discovery defaults to a static allow-list unless configured for endpoint discovery;
+- model discovery defaults to `codex_endpoint_with_static_fallback`, which reads the subscription `/models` endpoint and falls back to the static allow-list if discovery fails;
 - `send_installation_id` defaults to `false` and sends a CodeAlta-owned stable id only when explicitly enabled;
 - requests use CodeAlta-owned stored subscription credentials and do not convert subscription tokens into platform API keys.
 
