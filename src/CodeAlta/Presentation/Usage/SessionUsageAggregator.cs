@@ -151,6 +151,7 @@ internal static class SessionUsageAggregator
                 TotalUsage = incomingCodex.TotalUsage ?? currentCodex.TotalUsage,
                 ModelContextWindow = incomingCodex.ModelContextWindow ?? currentCodex.ModelContextWindow,
                 RateLimits = incomingCodex.RateLimits ?? currentCodex.RateLimits,
+                NamedRateLimits = incomingCodex.NamedRateLimits ?? currentCodex.NamedRateLimits,
             },
             (CopilotSessionUsageDetails currentCopilot, CopilotSessionUsageDetails incomingCopilot) => currentCopilot with
             {

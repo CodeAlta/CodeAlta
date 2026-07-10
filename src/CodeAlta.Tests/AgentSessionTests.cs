@@ -11,6 +11,68 @@ namespace CodeAlta.Tests;
 public sealed class AgentSessionTests
 {
     [TestMethod]
+    public async Task AgentSession_SendAsync_ContinuesProviderFollowUpWithAndWithoutDurableOutput()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-provider-follow-up");
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var callCount = 0;
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                (request, _, _) =>
+                {
+                    callCount++;
+                    Assert.AreEqual(1, request.Conversation.Count, "An empty intermediate assistant message must not enter replay.");
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, []),
+                        RequiresProviderFollowUp = true,
+                    });
+                },
+                (request, _, _) =>
+                {
+                    callCount++;
+                    Assert.AreEqual(1, request.Conversation.Count);
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(
+                            AgentConversationRole.Assistant,
+                            [new AgentMessagePart.Text("Intermediate durable output.")]),
+                        RequiresProviderFollowUp = true,
+                    });
+                },
+                (request, _, _) =>
+                {
+                    callCount++;
+                    Assert.AreEqual(2, request.Conversation.Count, "Durable intermediate output must enter replay.");
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(
+                            AgentConversationRole.Assistant,
+                            [new AgentMessagePart.Text("Follow-up complete.")]),
+                    });
+                }),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Continue until done") }).ConfigureAwait(false);
+
+        Assert.AreEqual(3, callCount);
+        var persisted = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.AreEqual(2, persisted.OfType<AgentRawEvent>().Count(static evt => evt.BackendEventType == "local.assistantMessage"));
+        Assert.AreEqual(2, persisted.OfType<AgentContentCompletedEvent>().Count(static evt => evt.Kind == AgentContentKind.Assistant));
+    }
+
+    [TestMethod]
     public void AgentInstructionComposer_ComposesDeveloperInstructionsAndLargestContextFilesPerDirectory()
     {
         using var temp = TestTempDirectory.Create();

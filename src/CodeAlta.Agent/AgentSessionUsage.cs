@@ -237,11 +237,13 @@ public abstract record AgentSessionUsageDetails;
 /// <param name="TotalUsage">Cumulative session token usage when available.</param>
 /// <param name="ModelContextWindow">The model context-window size reported by Codex when available.</param>
 /// <param name="RateLimits">The latest Codex account rate-limit snapshot when available.</param>
+/// <param name="NamedRateLimits">The latest Codex rate-limit snapshots keyed by provider limit identifier.</param>
 public sealed record CodexSessionUsageDetails(
     CodexTokenUsage? LastTurnUsage = null,
     CodexTokenUsage? TotalUsage = null,
     long? ModelContextWindow = null,
-    CodexRateLimitSnapshot? RateLimits = null)
+    CodexRateLimitSnapshot? RateLimits = null,
+    CodexRateLimitSnapshot[]? NamedRateLimits = null)
     : AgentSessionUsageDetails;
 
 /// <summary>
@@ -279,12 +281,25 @@ public sealed record CodexTokenUsage(
 /// <param name="PlanType">The active Codex plan type when known.</param>
 /// <param name="Primary">The primary rate-limit window when available.</param>
 /// <param name="Secondary">The secondary rate-limit window when available.</param>
+/// <param name="Credits">The optional account-credit snapshot.</param>
 public sealed record CodexRateLimitSnapshot(
     string? LimitId,
     string? LimitName,
     string? PlanType,
     CodexRateLimitWindow? Primary,
-    CodexRateLimitWindow? Secondary);
+    CodexRateLimitWindow? Secondary,
+    CodexCreditsSnapshot? Credits = null);
+
+/// <summary>
+/// Represents the allowlisted Codex account-credit snapshot.
+/// </summary>
+/// <param name="HasCredits">Whether credits are available.</param>
+/// <param name="Unlimited">Whether credit use is unlimited.</param>
+/// <param name="Balance">The provider-formatted balance when available.</param>
+public sealed record CodexCreditsSnapshot(
+    bool HasCredits,
+    bool Unlimited,
+    string? Balance = null);
 
 /// <summary>
 /// Codex rate-limit window details.

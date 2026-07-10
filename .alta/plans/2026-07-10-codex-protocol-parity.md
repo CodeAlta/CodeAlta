@@ -109,12 +109,12 @@
 
 ### 6. Surface selected metadata and honor `end_turn`
 
-- [ ] Parse and normalize allowlisted initial/event metadata: `x-request-id`, `OpenAI-Model`, `x-models-etag`, `x-reasoning-included`, all named `x-*-primary/secondary-*` rate-limit families, credits, verification recommendations, turn moderation, and safety buffering.
-- [ ] Extend `AgentTurnSessionUpdate` with optional usage and pass it through `AgentSession.OnSessionUpdateAsync`; emit transient `UsageUpdated`, `ModelChanged`, `Info`, or `Warning` updates with stable, size-capped details for rate limits, reroutes, safety buffering, verification, and moderation.
-- [ ] Extend Codex usage details additively to retain named rate-limit snapshots while preserving the current singular/default projection; update JSON source generation, usage aggregation/presentation, and serialization tests.
-- [ ] Merge the latest rate-limit/effective-model data into final `AgentTurnResponse.Usage` and bounded provider state, but explicitly exclude raw headers, raw moderation blobs, turn state, credentials, and unrecognized metadata from persistence.
-- [ ] Add `RequiresProviderFollowUp` (or equivalently explicit name) to `AgentTurnResponse`, set it only for `end_turn:false`, and update `AgentSession` to continue inference without idling when there are no tool calls; avoid appending an empty intermediate assistant message.
-- [ ] Add tests for `end_turn` false/true/absent, follow-up with and without durable output, usage persistence, metadata event ordering, safety retry-model precedence, effective-model mismatch, and proof that sensitive/raw metadata is not serialized into session state.
+- [x] Parse and normalize allowlisted initial/event metadata: `x-request-id`, `OpenAI-Model`, `x-models-etag`, `x-reasoning-included`, all named `x-*-primary/secondary-*` rate-limit families, credits, verification recommendations, turn moderation, and safety buffering.
+- [x] Extend `AgentTurnSessionUpdate` with optional usage and pass it through `AgentSession.OnSessionUpdateAsync`; emit transient `UsageUpdated`, `ModelChanged`, `Info`, or `Warning` updates with stable, size-capped details for rate limits, reroutes, safety buffering, verification, and moderation.
+- [x] Extend Codex usage details additively to retain named rate-limit snapshots while preserving the current singular/default projection; update JSON source generation, usage aggregation/presentation, and serialization tests.
+- [x] Merge the latest rate-limit/effective-model data into final `AgentTurnResponse.Usage` and bounded provider state, but explicitly exclude raw headers, raw moderation blobs, turn state, credentials, and unrecognized metadata from persistence.
+- [x] Add `RequiresProviderFollowUp` (or equivalently explicit name) to `AgentTurnResponse`, set it only for `end_turn:false`, and update `AgentSession` to continue inference without idling when there are no tool calls; avoid appending an empty intermediate assistant message.
+- [x] Add tests for `end_turn` false/true/absent, follow-up with and without durable output, usage persistence, metadata event ordering, safety retry-model precedence, effective-model mismatch, and proof that sensitive/raw metadata is not serialized into session state.
 
 ### 7. Align headers, transport construction, discovery, config, and docs
 

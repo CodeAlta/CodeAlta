@@ -3198,7 +3198,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketSideChannelsSurfaceInProviderState()
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketSideChannelsDoNotPersistRawPayloads()
     {
         var webSocketSession = new RecordingOpenAIResponsesWebSocketSession(
         [
@@ -3278,24 +3278,83 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(response.ProviderState.HasValue);
         var providerState = response.ProviderState.Value;
         Assert.AreEqual("response-side-channel", providerState.GetProperty("responseId").GetString());
-        var sideChannels = providerState.GetProperty("codexWebSocketSideChannels");
-        Assert.AreEqual(4, sideChannels.GetArrayLength());
-        Assert.AreEqual("codex.rate_limits", sideChannels[0].GetProperty("type").GetString());
-        Assert.AreEqual("gpt-5", sideChannels[0].GetProperty("limitId").GetString());
-        Assert.AreEqual("ChatGPT Plus", sideChannels[0].GetProperty("limitName").GetString());
-        Assert.AreEqual(12.5, sideChannels[0].GetProperty("primary").GetProperty("usedPercent").GetDouble());
-        Assert.AreEqual(1234567890, sideChannels[0].GetProperty("primary").GetProperty("resetsAt").GetInt64());
-        Assert.AreEqual(300, sideChannels[0].GetProperty("primary").GetProperty("windowDurationMins").GetInt32());
-        Assert.IsTrue(sideChannels[0].GetProperty("credits").GetProperty("hasCredits").GetBoolean());
-        Assert.AreEqual("websocket.handshake", sideChannels[1].GetProperty("type").GetString());
-        Assert.AreEqual("gpt-5.3-codex", sideChannels[1].GetProperty("model").GetString());
-        Assert.AreEqual("models-etag-handshake", sideChannels[1].GetProperty("modelsEtag").GetString());
-        Assert.AreEqual("true", sideChannels[1].GetProperty("serverReasoning").GetString());
-        Assert.AreEqual("server_model", sideChannels[2].GetProperty("type").GetString());
-        Assert.AreEqual("gpt-5.3-codex", sideChannels[2].GetProperty("model").GetString());
-        Assert.AreEqual("models-etag-123", sideChannels[2].GetProperty("modelsEtag").GetString());
-        Assert.AreEqual("response.metadata", sideChannels[3].GetProperty("type").GetString());
-        Assert.AreEqual("trustedAccessForCyber", sideChannels[3].GetProperty("verifications")[0].GetString());
+        Assert.IsFalse(providerState.TryGetProperty("codexWebSocketSideChannels", out _));
+        Assert.IsFalse(providerState.ToString().Contains("trustedAccessForCyber", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ProjectsMetadataBeforeCompletionAndPersistsOnlyAllowlistedSummary()
+    {
+        var completed = CreateTextOnlyAssistantResponseUpdate(
+            responseId: "response-metadata",
+            modelId: "gpt-5.3-codex-reroute",
+            text: "Metadata answer.");
+        var session = new ProtocolEventOpenAIResponsesWebSocketSession(
+        [
+            new CodexProtocolEvent(
+                CodexProtocolTransport.WebSocket,
+                Type: null,
+                Update: null,
+                new CodexResponseMetadata(
+                    RequestId: "request-allowlisted",
+                    EffectiveModel: "gpt-5.3-codex-reroute",
+                    ModelsETag: "models-v3",
+                    ReasoningIncluded: true,
+                    SafetyBuffering: new CodexSafetyBuffering(false, null, "true", "gpt-5.3-codex-fast"),
+                    RateLimits:
+                    [
+                        new CodexNamedRateLimitSnapshot(
+                            "codex",
+                            Primary: new CodexNamedRateLimitWindow(12.5, 300, DateTimeOffset.FromUnixTimeSeconds(1770000000))),
+                    ])),
+            new CodexProtocolEvent(
+                CodexProtocolTransport.WebSocket,
+                "response.metadata",
+                null,
+                new CodexResponseMetadata(
+                    SafetyBuffering: new CodexSafetyBuffering(false, null, null, Message: "Safety check"),
+                    VerificationRecommendation: "trusted_access_for_cyber",
+                    TurnModeration: "{\"flagged\":true,\"secret\":\"transient-only\"}",
+                    TurnState: "never-persist-turn-state")),
+            new CodexProtocolEvent(
+                CodexProtocolTransport.WebSocket,
+                "response.completed",
+                completed,
+                new CodexResponseMetadata(),
+                new CodexTerminalMetadata(false)),
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(session),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+        });
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask,
+                (update, _) =>
+                {
+                    updates.Add(update);
+                    return ValueTask.CompletedTask;
+                })
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(response.RequiresProviderFollowUp);
+        Assert.AreEqual(AgentSessionUpdateKind.ModelChanged, updates[0].Kind);
+        Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.UsageUpdated && update.Usage is not null));
+        Assert.IsTrue(updates.Any(update => update.Details?.ToString().Contains("gpt-5.3-codex-fast", StringComparison.Ordinal) == true));
+        var details = Assert.IsInstanceOfType<CodexSessionUsageDetails>(response.Usage?.Details);
+        Assert.AreEqual("codex", details.NamedRateLimits?[0].LimitId);
+        Assert.AreEqual(13, details.RateLimits?.Primary?.UsedPercent);
+        var providerState = response.ProviderState?.ToString() ?? string.Empty;
+        StringAssert.Contains(providerState, "request-allowlisted");
+        StringAssert.Contains(providerState, "gpt-5.3-codex-reroute");
+        Assert.IsFalse(providerState.Contains("transient-only", StringComparison.Ordinal));
+        Assert.IsFalse(providerState.Contains("never-persist-turn-state", StringComparison.Ordinal));
+        Assert.IsFalse(providerState.Contains("authorization", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -4857,6 +4916,41 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     update.GetType().Name,
                     update,
                     new CodexResponseMetadata());
+                await Task.Yield();
+            }
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ProtocolEventOpenAIResponsesWebSocketSession(IReadOnlyList<CodexProtocolEvent> events)
+        : IOpenAIResponsesWebSocketSession
+    {
+        public bool HasOpenConnection => true;
+
+        public Action<OpenAIResponsesWebSocketSideChannelEvent>? SideChannelReceived { get; set; }
+
+        public AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+            CreateResponseOptions options,
+            CreateResponseOptions? reconnectOptions = null,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("The protocol event path should be used.");
+
+        public async IAsyncEnumerable<CodexProtocolEvent> CreateProtocolEventsAsync(
+            CreateResponseOptions options,
+            CreateResponseOptions? reconnectOptions,
+            CodexSubscriptionRequestContext requestContext,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            _ = options;
+            _ = reconnectOptions;
+            _ = requestContext;
+            foreach (var protocolEvent in events)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return protocolEvent;
                 await Task.Yield();
             }
         }

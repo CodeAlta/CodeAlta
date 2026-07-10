@@ -498,13 +498,35 @@ internal static class SessionUsageFormatter
     {
         var appended = false;
         if (usage.Details is CodexSessionUsageDetails codex &&
-            codex.TotalUsage is not null)
+            (codex.TotalUsage is not null || codex.NamedRateLimits is { Length: > 1 }))
         {
             builder.AppendLine()
                 .Append("## ").AppendLine(SR.T("Provider-specific details"));
             appended = true;
-            builder.Append("- ").Append(SR.T("Session total")).Append(": ")
-                .AppendLine(FormatCodexTokenUsage(codex.TotalUsage));
+            if (codex.TotalUsage is not null)
+            {
+                builder.Append("- ").Append(SR.T("Session total")).Append(": ")
+                    .AppendLine(FormatCodexTokenUsage(codex.TotalUsage));
+            }
+            foreach (var rateLimit in codex.NamedRateLimits?.Skip(1) ?? [])
+            {
+                builder.Append("- ").Append(rateLimit.LimitName ?? rateLimit.LimitId ?? SR.T("Rate limit")).Append(": ");
+                if (rateLimit.Primary is { } primary)
+                {
+                    builder.Append(SR.T("Primary")).Append(' ').Append(FormatAgentRateLimitWindow(
+                        new AgentRateLimitWindow(primary.UsedPercent, primary.ResetsAt, primary.WindowDurationMinutes)));
+                }
+                if (rateLimit.Secondary is { } secondary)
+                {
+                    if (rateLimit.Primary is not null)
+                    {
+                        builder.Append("; ");
+                    }
+                    builder.Append(SR.T("Secondary")).Append(' ').Append(FormatAgentRateLimitWindow(
+                        new AgentRateLimitWindow(secondary.UsedPercent, secondary.ResetsAt, secondary.WindowDurationMinutes)));
+                }
+                builder.AppendLine();
+            }
         }
 
         if (usage.Details is CopilotSessionUsageDetails copilot &&

@@ -33,11 +33,21 @@ internal sealed record CodexResponseMetadata(
 internal sealed record CodexSafetyBuffering(
     bool RetryModelPresent,
     string? RetryModel,
-    string? Treatment);
+    string? Treatment,
+    string? FallbackRetryModel = null,
+    string? Message = null);
 
 internal sealed record CodexNamedRateLimitSnapshot(
     string Name,
+    CodexNamedRateLimitWindow? Primary = null,
+    CodexNamedRateLimitWindow? Secondary = null,
+    string? LimitName = null,
+    string? PlanType = null,
+    CodexNamedCreditsSnapshot? Credits = null);
+
+internal sealed record CodexNamedRateLimitWindow(
     double? UsedPercent,
-    long? Limit,
-    long? Remaining,
+    long? WindowDurationMinutes,
     DateTimeOffset? ResetAt);
+
+internal sealed record CodexNamedCreditsSnapshot(bool HasCredits, bool Unlimited, string? Balance);

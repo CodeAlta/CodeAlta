@@ -245,6 +245,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 var toolCalls = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().ToArray();
                 if (toolCalls.Length == 0)
                 {
+                    if (response.RequiresProviderFollowUp)
+                    {
+                        continue;
+                    }
+
                     if (await AppendPendingSteerInputsAsync(runId, linkedCts.Token).ConfigureAwait(false))
                     {
                         continue;
@@ -918,7 +923,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentModelInfo? modelInfo,
         CancellationToken cancellationToken)
     {
-        _conversation.Add(response.AssistantMessage);
+        var hasDurableAssistantOutput = response.AssistantMessage.Parts.Count > 0 || !response.RequiresProviderFollowUp;
+        if (hasDurableAssistantOutput)
+        {
+            _conversation.Add(response.AssistantMessage);
+        }
         var providerConversation = CreateProviderConversation();
         var effectiveUsage = CreateConversationUsageSnapshot(
             systemMessage,
@@ -946,16 +955,17 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        var events = new List<AgentEvent>
+        var events = new List<AgentEvent>();
+        if (hasDurableAssistantOutput)
         {
-            new AgentRawEvent(
+            events.Add(new AgentRawEvent(
                 ProviderId,
                 SessionId,
                 DateTimeOffset.UtcNow,
                 AssistantMessageEventType,
                 SerializeLocalMessage(response.AssistantMessage),
-                runId),
-        };
+                runId));
+        }
 
         var assistantPartContentIds = response.AssistantPartContentIds;
         for (var partIndex = 0; partIndex < response.AssistantMessage.Parts.Count; partIndex++)
@@ -1068,7 +1078,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             runId,
             update.Kind,
             update.Message,
-            update.Details);
+            update.Details,
+            Usage: update.Usage);
         await AppendEventsAsync([@event], AgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
     }
 

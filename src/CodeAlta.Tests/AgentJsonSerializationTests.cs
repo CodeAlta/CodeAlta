@@ -372,4 +372,43 @@ public sealed class AgentJsonSerializationTests
         Assert.AreEqual("LocalProviderUsage", document.RootElement.GetProperty("source").GetString());
         Assert.AreEqual(AgentUsageSource.ProviderUsage, deserialized?.Source);
     }
+
+    [TestMethod]
+    public void AgentTurnContracts_AndNamedCodexRateLimits_RoundTripAdditively()
+    {
+        var usage = new AgentSessionUsage(
+            RateLimits: new AgentRateLimitSummary(Primary: new AgentRateLimitWindow(12)),
+            Details: new CodexSessionUsageDetails(
+                NamedRateLimits:
+                [
+                    new CodexRateLimitSnapshot(
+                        "codex_other",
+                        "Other quota",
+                        "plus",
+                        null,
+                        new CodexRateLimitWindow(8, null, 60),
+                        new CodexCreditsSnapshot(true, false, "42.5")),
+                ]));
+        var update = new AgentTurnSessionUpdate
+        {
+            Kind = AgentSessionUpdateKind.UsageUpdated,
+            Message = "Usage updated.",
+            Usage = usage,
+        };
+        var response = new AgentTurnResponse
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, []),
+            Usage = usage,
+            RequiresProviderFollowUp = true,
+        };
+
+        var updateJson = JsonSerializer.Serialize(update, AgentJsonSerializerContext.Default.AgentTurnSessionUpdate);
+        var responseJson = JsonSerializer.Serialize(response, AgentJsonSerializerContext.Default.AgentTurnResponse);
+        var restoredUpdate = JsonSerializer.Deserialize(updateJson, AgentJsonSerializerContext.Default.AgentTurnSessionUpdate);
+        var restoredResponse = JsonSerializer.Deserialize(responseJson, AgentJsonSerializerContext.Default.AgentTurnResponse);
+
+        Assert.AreEqual("codex_other", ((CodexSessionUsageDetails?)restoredUpdate?.Usage?.Details)?.NamedRateLimits?[0].LimitId);
+        Assert.AreEqual("42.5", ((CodexSessionUsageDetails?)restoredResponse?.Usage?.Details)?.NamedRateLimits?[0].Credits?.Balance);
+        Assert.IsTrue(restoredResponse?.RequiresProviderFollowUp);
+    }
 }

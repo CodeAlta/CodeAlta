@@ -594,6 +594,72 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
+    public void ProtocolParser_NormalizesNamedRateLimitsCreditsModerationAndSafetyHeaders()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.OK);
+        response.Headers.Add("x-request-id", "request-private-id");
+        response.Headers.Add("OpenAI-Model", "gpt-5.3-codex-reroute");
+        response.Headers.Add("x-models-etag", "models-v2");
+        response.Headers.Add("x-reasoning-included", "true");
+        response.Headers.Add("x-codex-primary-used-percent", "12.5");
+        response.Headers.Add("x-codex-primary-window-minutes", "300");
+        response.Headers.Add("x-codex-primary-reset-at", "1770000000");
+        response.Headers.Add("x-codex-other-secondary-used-percent", "8");
+        response.Headers.Add("x-codex-other-secondary-window-minutes", "60");
+        response.Headers.Add("x-codex-credits-has-credits", "true");
+        response.Headers.Add("x-codex-credits-unlimited", "false");
+        response.Headers.Add("x-codex-credits-balance", "42.5");
+        response.Headers.Add("x-codex-safety-buffering-enabled", "true");
+        response.Headers.Add("x-codex-safety-buffering-faster-model", "gpt-5.3-codex-fast");
+
+        var initial = CodexProtocolEventParser.CreateInitialHttpEvent(response);
+        var metadata = CodexProtocolEventParser.Parse(
+            CodexProtocolTransport.WebSocket,
+            BinaryData.FromString(
+                """
+                {
+                  "type":"response.metadata",
+                  "metadata": {
+                    "openai_verification_recommendation":["trusted_access_for_cyber","unknown"],
+                    "openai_chatgpt_moderation_metadata":{"flagged":true,"category":"cyber"},
+                    "raw_secret":"must-not-survive"
+                  },
+                  "safety_buffering":{"message":"Checking safety","retry_model":null}
+                }
+                """));
+
+        Assert.AreEqual(2, initial.Metadata.RateLimits?.Count);
+        Assert.AreEqual("codex", initial.Metadata.RateLimits?[0].Name);
+        Assert.AreEqual(300, initial.Metadata.RateLimits?[0].Primary?.WindowDurationMinutes);
+        Assert.AreEqual("codex_other", initial.Metadata.RateLimits?[1].Name);
+        Assert.AreEqual(8, initial.Metadata.RateLimits?[1].Secondary?.UsedPercent);
+        Assert.AreEqual("42.5", initial.Metadata.RateLimits?[0].Credits?.Balance);
+        Assert.AreEqual("gpt-5.3-codex-fast", initial.Metadata.SafetyBuffering?.FallbackRetryModel);
+        Assert.AreEqual("trusted_access_for_cyber", metadata.Metadata.VerificationRecommendation);
+        StringAssert.Contains(metadata.Metadata.TurnModeration, "flagged");
+        Assert.IsFalse(JsonSerializer.Serialize(metadata.Metadata).Contains("raw_secret", StringComparison.Ordinal));
+        Assert.IsTrue(metadata.Metadata.SafetyBuffering?.RetryModelPresent);
+        Assert.IsNull(metadata.Metadata.SafetyBuffering?.RetryModel);
+    }
+
+    [TestMethod]
+    public void ProtocolParser_TracksEndTurnFalseTrueAndAbsentOnlyOnTerminalEvents()
+    {
+        static CodexProtocolEvent Parse(string endTurn)
+            => CodexProtocolEventParser.Parse(
+                CodexProtocolTransport.Http,
+                BinaryData.FromString("{\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"status\":\"completed\"" + endTurn + "}}"));
+
+        Assert.AreEqual(false, Parse(",\"end_turn\":false").Terminal?.EndTurn);
+        Assert.AreEqual(true, Parse(",\"end_turn\":true").Terminal?.EndTurn);
+        Assert.IsNull(Parse(string.Empty).Terminal?.EndTurn);
+        var nonterminal = CodexProtocolEventParser.Parse(
+            CodexProtocolTransport.Http,
+            BinaryData.FromString("""{"type":"response.created","response":{"end_turn":false}}"""));
+        Assert.IsNull(nonterminal.Terminal);
+    }
+
+    [TestMethod]
     public void ProtocolParser_ToleratesUnknownAndMalformedNonterminalEvents()
     {
         var unknown = CodexProtocolEventParser.Parse(

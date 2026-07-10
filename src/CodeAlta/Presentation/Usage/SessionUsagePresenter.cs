@@ -332,6 +332,19 @@ internal sealed class SessionUsagePresenter
                 stack.Add(totalChart);
             }
         }
+
+        foreach (var rateLimit in details.NamedRateLimits?.Skip(1) ?? [])
+        {
+            stack.Add(new Markup($"[bold]{AnsiMarkup.Escape(rateLimit.LimitName ?? rateLimit.LimitId ?? SR.T("Rate limit"))}[/]"));
+            if (rateLimit.Primary is { } primary)
+            {
+                stack.Add(new Markup(AnsiMarkup.Escape($"{SR.T("Primary")}: {SessionUsageFormatter.FormatAgentRateLimitWindow(new AgentRateLimitWindow(primary.UsedPercent, primary.ResetsAt, primary.WindowDurationMinutes))}")));
+            }
+            if (rateLimit.Secondary is { } secondary)
+            {
+                stack.Add(new Markup(AnsiMarkup.Escape($"{SR.T("Secondary")}: {SessionUsageFormatter.FormatAgentRateLimitWindow(new AgentRateLimitWindow(secondary.UsedPercent, secondary.ResetsAt, secondary.WindowDurationMinutes))}")));
+            }
+        }
     }
 
     private static void AddCopilotUsageContent(VStack stack, CopilotSessionUsageDetails details)

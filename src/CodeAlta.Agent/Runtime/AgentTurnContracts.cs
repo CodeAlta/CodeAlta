@@ -141,6 +141,11 @@ public sealed record AgentTurnResponse
     public AgentSessionUsage? Usage { get; init; }
 
     /// <summary>
+    /// Gets or initializes a value indicating whether the provider explicitly requested another inference cycle.
+    /// </summary>
+    public bool RequiresProviderFollowUp { get; init; }
+
+    /// <summary>
     /// Gets or initializes the provider-native session identifier when available.
     /// </summary>
     public string? ProviderSessionId { get; init; }
@@ -216,4 +221,9 @@ public sealed record AgentTurnSessionUpdate
     /// Gets or initializes optional structured update details.
     /// </summary>
     public JsonElement? Details { get; init; }
+
+    /// <summary>
+    /// Gets or initializes an optional live usage snapshot associated with this update.
+    /// </summary>
+    public AgentSessionUsage? Usage { get; init; }
 }

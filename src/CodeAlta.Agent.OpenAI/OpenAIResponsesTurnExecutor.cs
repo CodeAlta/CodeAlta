@@ -133,6 +133,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     var streamedReasoningTextSections = new HashSet<(string ItemId, int ContentIndex)>();
                     int? activeReasoningOutputIndex = null;
                     var sideChannelEvents = new List<OpenAIResponsesWebSocketSideChannelEvent>();
+                    var codexMetadata = new CodexMetadataAccumulator();
+                    var requiresProviderFollowUp = false;
 
                     async Task ProcessStreamAsync(OpenAIResponsesTransport transport)
                     {
@@ -145,6 +147,19 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 sideChannelEvents,
                                 cancellationToken).ConfigureAwait(false))
                         {
+                            if (provider.CodexSubscription is not null)
+                            {
+                                foreach (var sessionUpdate in codexMetadata.Apply(request.ModelId, protocolEvent.Metadata))
+                                {
+                                    await onSessionUpdate(sessionUpdate, cancellationToken).ConfigureAwait(false);
+                                }
+
+                                if (protocolEvent.Terminal?.EndTurn is false)
+                                {
+                                    requiresProviderFollowUp = true;
+                                }
+                            }
+
                             if (requestContext is not null && !string.IsNullOrWhiteSpace(protocolEvent.Metadata.TurnState))
                             {
                                 requestContext.TurnState.Capture(protocolEvent.Metadata.TurnState);
@@ -396,7 +411,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     }
 
                     var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(request, completedResponse, streamedOutputItemIds);
-                    ValidateCodexTerminalResponseShape(provider, assistantMessage);
+                    ValidateCodexTerminalResponseShape(provider, assistantMessage, requiresProviderFollowUp);
                     attemptState.CommittedFinalContent = true;
                     UpdateLiveContinuation(request, fullOptions, completedResponse, assistantMessage);
                     WriteCodexConsoleDiagnostic(
@@ -407,10 +422,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     {
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
-                        Usage = CreateUsage(request, completedResponse),
+                        Usage = CreateUsage(request, completedResponse, codexMetadata),
                         ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
-                        ProviderState = CreateProviderState(completedResponse, sideChannelEvents),
+                        ProviderState = CreateProviderState(completedResponse, codexMetadata),
                         Summary = ExtractSummary(assistantMessage),
+                        RequiresProviderFollowUp = requiresProviderFollowUp,
                     };
                 }
                 catch (Exception ex) when (ShouldRefreshCodexSubscriptionCredential(
@@ -1685,14 +1701,15 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     private static void ValidateCodexTerminalResponseShape(
         OpenAIProviderOptions provider,
-        AgentConversationMessage assistantMessage)
+        AgentConversationMessage assistantMessage,
+        bool requiresProviderFollowUp)
     {
         if (provider.CodexSubscription is null)
         {
             return;
         }
 
-        if (assistantMessage.Parts.Any(static part =>
+        if (requiresProviderFollowUp || assistantMessage.Parts.Any(static part =>
                 part is AgentMessagePart.ToolCall ||
                 part is AgentMessagePart.Text text && !string.IsNullOrWhiteSpace(text.Value)))
         {
@@ -1720,30 +1737,126 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return string.IsNullOrWhiteSpace(item.Id) ? response.Id : item.Id;
     }
 
-    private static AgentSessionUsage? CreateUsage(AgentTurnRequest request, ResponseResult response)
+    private static AgentSessionUsage? CreateUsage(
+        AgentTurnRequest request,
+        ResponseResult response,
+        CodexMetadataAccumulator codexMetadata)
     {
-        if (response.Usage is null)
+        var operationUsage = response.Usage is null
+            ? null
+            : AgentUsageFactory.CreateOperationUsage(
+                modelId: codexMetadata.EffectiveModel ?? response.Model,
+                modelInfo: request.ModelInfo,
+                inputTokens: response.Usage.InputTokenCount,
+                outputTokens: response.Usage.OutputTokenCount,
+                totalTokens: response.Usage.TotalTokenCount,
+                cachedInputTokens: response.Usage.InputTokenDetails?.CachedTokenCount,
+                reasoningTokens: response.Usage.OutputTokenDetails?.ReasoningTokenCount,
+                updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt);
+        if (codexMetadata.RateLimits.Count == 0)
         {
-            return null;
+            return operationUsage;
         }
 
-        var cachedInputTokens = response.Usage.InputTokenDetails?.CachedTokenCount;
-        return AgentUsageFactory.CreateOperationUsage(
-            modelId: response.Model,
-            modelInfo: request.ModelInfo,
-            inputTokens: response.Usage.InputTokenCount,
-            outputTokens: response.Usage.OutputTokenCount,
-            totalTokens: response.Usage.TotalTokenCount,
-            cachedInputTokens: cachedInputTokens,
-            reasoningTokens: response.Usage.OutputTokenDetails?.ReasoningTokenCount,
-            updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt);
+        var snapshots = codexMetadata.RateLimits.Values.Select(MapRateLimitSnapshot).ToArray();
+        var defaultSnapshot = snapshots.FirstOrDefault(static snapshot => snapshot.LimitId == "codex") ?? snapshots[0];
+        return (operationUsage ?? new AgentSessionUsage(
+            Scope: AgentUsageScope.RateLimitOnly,
+            Source: AgentUsageSource.ProviderUsage,
+            UpdatedAt: DateTimeOffset.UtcNow)) with
+        {
+            RateLimits = new AgentRateLimitSummary(
+                defaultSnapshot.LimitName ?? defaultSnapshot.LimitId,
+                defaultSnapshot.PlanType,
+                MapRateLimitWindow(defaultSnapshot.Primary),
+                MapRateLimitWindow(defaultSnapshot.Secondary),
+                "Codex rate limits"),
+            Details = new CodexSessionUsageDetails(
+                RateLimits: defaultSnapshot,
+                NamedRateLimits: snapshots),
+        };
+    }
+
+    private static CodexRateLimitSnapshot MapRateLimitSnapshot(CodexNamedRateLimitSnapshot snapshot)
+        => new(
+            snapshot.Name,
+            snapshot.LimitName,
+            snapshot.PlanType,
+            snapshot.Primary is null ? null : new CodexRateLimitWindow(
+                (int)Math.Round(snapshot.Primary.UsedPercent ?? 0, MidpointRounding.AwayFromZero),
+                snapshot.Primary.ResetAt,
+                snapshot.Primary.WindowDurationMinutes),
+            snapshot.Secondary is null ? null : new CodexRateLimitWindow(
+                (int)Math.Round(snapshot.Secondary.UsedPercent ?? 0, MidpointRounding.AwayFromZero),
+                snapshot.Secondary.ResetAt,
+                snapshot.Secondary.WindowDurationMinutes),
+            snapshot.Credits is null ? null : new CodexCreditsSnapshot(
+                snapshot.Credits.HasCredits,
+                snapshot.Credits.Unlimited,
+                snapshot.Credits.Balance));
+
+    private static AgentRateLimitWindow? MapRateLimitWindow(CodexRateLimitWindow? window)
+        => window is null
+            ? null
+            : new AgentRateLimitWindow(window.UsedPercent, window.ResetsAt, window.WindowDurationMinutes);
+
+    private static void WriteRateLimitSnapshot(Utf8JsonWriter writer, CodexNamedRateLimitSnapshot snapshot)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("limitId"u8, TruncateForConsole(snapshot.Name, 128));
+        if (!string.IsNullOrWhiteSpace(snapshot.LimitName))
+        {
+            writer.WriteString("limitName"u8, TruncateForConsole(snapshot.LimitName, 128));
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.PlanType))
+        {
+            writer.WriteString("planType"u8, TruncateForConsole(snapshot.PlanType, 64));
+        }
+        WriteRateLimitWindow(writer, "primary", snapshot.Primary);
+        WriteRateLimitWindow(writer, "secondary", snapshot.Secondary);
+        if (snapshot.Credits is { } credits)
+        {
+            writer.WritePropertyName("credits"u8);
+            writer.WriteStartObject();
+            writer.WriteBoolean("hasCredits"u8, credits.HasCredits);
+            writer.WriteBoolean("unlimited"u8, credits.Unlimited);
+            if (!string.IsNullOrWhiteSpace(credits.Balance))
+            {
+                writer.WriteString("balance"u8, TruncateForConsole(credits.Balance, 64));
+            }
+            writer.WriteEndObject();
+        }
+        writer.WriteEndObject();
+    }
+
+    private static void WriteRateLimitWindow(Utf8JsonWriter writer, string name, CodexNamedRateLimitWindow? window)
+    {
+        if (window is null)
+        {
+            return;
+        }
+        writer.WritePropertyName(name);
+        writer.WriteStartObject();
+        if (window.UsedPercent is { } usedPercent)
+        {
+            writer.WriteNumber("usedPercent"u8, usedPercent);
+        }
+        if (window.WindowDurationMinutes is { } minutes)
+        {
+            writer.WriteNumber("windowDurationMinutes"u8, minutes);
+        }
+        if (window.ResetAt is { } resetAt)
+        {
+            writer.WriteString("resetsAt"u8, resetAt);
+        }
+        writer.WriteEndObject();
     }
 
     private static JsonElement? CreateProviderState(
         ResponseResult response,
-        IReadOnlyList<OpenAIResponsesWebSocketSideChannelEvent> sideChannelEvents)
+        CodexMetadataAccumulator metadata)
     {
-        if (string.IsNullOrWhiteSpace(response.Id) && sideChannelEvents.Count == 0)
+        if (string.IsNullOrWhiteSpace(response.Id) && !metadata.HasPersistableData)
         {
             return null;
         }
@@ -1757,15 +1870,30 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 writer.WriteString("responseId", response.Id);
             }
 
-            if (sideChannelEvents.Count > 0)
+            if (!string.IsNullOrWhiteSpace(metadata.RequestId))
             {
-                writer.WritePropertyName("codexWebSocketSideChannels"u8);
+                writer.WriteString("requestId"u8, TruncateForConsole(metadata.RequestId, 256));
+            }
+            if (!string.IsNullOrWhiteSpace(metadata.EffectiveModel))
+            {
+                writer.WriteString("effectiveModel"u8, TruncateForConsole(metadata.EffectiveModel, 128));
+            }
+            if (!string.IsNullOrWhiteSpace(metadata.ModelsETag))
+            {
+                writer.WriteString("modelsEtag"u8, TruncateForConsole(metadata.ModelsETag, 256));
+            }
+            if (metadata.ReasoningIncluded is { } reasoningIncluded)
+            {
+                writer.WriteBoolean("reasoningIncluded"u8, reasoningIncluded);
+            }
+            if (metadata.RateLimits.Count > 0)
+            {
+                writer.WritePropertyName("rateLimits"u8);
                 writer.WriteStartArray();
-                foreach (var sideChannelEvent in sideChannelEvents.TakeLast(8))
+                foreach (var snapshot in metadata.RateLimits.Values.Take(8))
                 {
-                    WriteSideChannelSummary(writer, sideChannelEvent);
+                    WriteRateLimitSnapshot(writer, snapshot);
                 }
-
                 writer.WriteEndArray();
             }
 
@@ -3081,6 +3209,141 @@ internal sealed class OpenAIResponsesTurnExecutor(
         public string? Param { get; } = param;
 
         public TimeSpan? RetryAfter { get; } = retryAfter;
+    }
+
+    private sealed class CodexMetadataAccumulator
+    {
+        private string? _fallbackRetryModel;
+        private string? _lastEffectiveModelUpdate;
+
+        public string? RequestId { get; private set; }
+
+        public string? EffectiveModel { get; private set; }
+
+        public string? ModelsETag { get; private set; }
+
+        public bool? ReasoningIncluded { get; private set; }
+
+        public SortedDictionary<string, CodexNamedRateLimitSnapshot> RateLimits { get; } = new(StringComparer.Ordinal);
+
+        public bool HasPersistableData =>
+            !string.IsNullOrWhiteSpace(RequestId) ||
+            !string.IsNullOrWhiteSpace(EffectiveModel) ||
+            !string.IsNullOrWhiteSpace(ModelsETag) ||
+            ReasoningIncluded is not null ||
+            RateLimits.Count > 0;
+
+        public IReadOnlyList<AgentTurnSessionUpdate> Apply(string? requestedModel, CodexResponseMetadata metadata)
+        {
+            var updates = new List<AgentTurnSessionUpdate>();
+            RequestId = Normalize(metadata.RequestId) ?? RequestId;
+            ModelsETag = Normalize(metadata.ModelsETag) ?? ModelsETag;
+            ReasoningIncluded = metadata.ReasoningIncluded ?? ReasoningIncluded;
+
+            if (Normalize(metadata.EffectiveModel) is { } effectiveModel)
+            {
+                EffectiveModel = effectiveModel;
+                if (!string.IsNullOrWhiteSpace(requestedModel) &&
+                    !string.Equals(effectiveModel, requestedModel, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(effectiveModel, _lastEffectiveModelUpdate, StringComparison.Ordinal))
+                {
+                    _lastEffectiveModelUpdate = effectiveModel;
+                    updates.Add(new AgentTurnSessionUpdate
+                    {
+                        Kind = AgentSessionUpdateKind.ModelChanged,
+                        Message = $"Provider rerouted the request to {effectiveModel}.",
+                        Details = CreateDetails(("requestedModel", requestedModel), ("effectiveModel", effectiveModel)),
+                    });
+                }
+            }
+
+            if (metadata.RateLimits is { Count: > 0 })
+            {
+                foreach (var snapshot in metadata.RateLimits.Take(8))
+                {
+                    RateLimits[snapshot.Name] = snapshot;
+                }
+
+                var snapshots = RateLimits.Values.Select(MapRateLimitSnapshot).ToArray();
+                var defaultSnapshot = snapshots.FirstOrDefault(static item => item.LimitId == "codex") ?? snapshots[0];
+                updates.Add(new AgentTurnSessionUpdate
+                {
+                    Kind = AgentSessionUpdateKind.UsageUpdated,
+                    Message = "Codex rate limits updated.",
+                    Usage = new AgentSessionUsage(
+                        RateLimits: new AgentRateLimitSummary(
+                            defaultSnapshot.LimitName ?? defaultSnapshot.LimitId,
+                            defaultSnapshot.PlanType,
+                            MapRateLimitWindow(defaultSnapshot.Primary),
+                            MapRateLimitWindow(defaultSnapshot.Secondary),
+                            "Codex rate limits"),
+                        Scope: AgentUsageScope.RateLimitOnly,
+                        Source: AgentUsageSource.ProviderUsage,
+                        UpdatedAt: DateTimeOffset.UtcNow,
+                        Details: new CodexSessionUsageDetails(
+                            RateLimits: defaultSnapshot,
+                            NamedRateLimits: snapshots)),
+                });
+            }
+
+            if (metadata.SafetyBuffering is { } safety)
+            {
+                _fallbackRetryModel = Normalize(safety.FallbackRetryModel) ?? _fallbackRetryModel;
+                var retryModel = safety.RetryModelPresent ? Normalize(safety.RetryModel) : _fallbackRetryModel;
+                updates.Add(new AgentTurnSessionUpdate
+                {
+                    Kind = retryModel is null ? AgentSessionUpdateKind.Info : AgentSessionUpdateKind.Warning,
+                    Message = Normalize(safety.Message) ?? "Codex safety buffering is active.",
+                    Details = CreateDetails(
+                        ("retryModel", retryModel),
+                        ("retryModelSource", safety.RetryModelPresent ? "event" : retryModel is null ? null : "header"),
+                        ("treatment", Normalize(safety.Treatment))),
+                });
+            }
+
+            if (Normalize(metadata.VerificationRecommendation) is { } verification)
+            {
+                updates.Add(new AgentTurnSessionUpdate
+                {
+                    Kind = AgentSessionUpdateKind.Info,
+                    Message = "Codex model verification is recommended.",
+                    Details = CreateDetails(("verification", verification)),
+                });
+            }
+
+            if (Normalize(metadata.TurnModeration) is { } moderation)
+            {
+                updates.Add(new AgentTurnSessionUpdate
+                {
+                    Kind = AgentSessionUpdateKind.Warning,
+                    Message = "Codex reported turn moderation metadata.",
+                    Details = CreateDetails(("metadata", moderation)),
+                });
+            }
+
+            return updates;
+        }
+
+        private static string? Normalize(string? value)
+            => string.IsNullOrWhiteSpace(value) ? null : value.Length <= 4096 ? value : value[..4096];
+
+        private static JsonElement CreateDetails(params (string Name, string? Value)[] values)
+        {
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var (name, value) in values)
+                {
+                    if (value is not null)
+                    {
+                        writer.WriteString(name, value);
+                    }
+                }
+                writer.WriteEndObject();
+            }
+            return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+        }
     }
 
     private sealed record CodexStreamAttemptState(int Attempt, string DraftAttemptId)
