@@ -129,13 +129,13 @@
 
 ## Verification checklist
 
-- [ ] Run focused protocol/model tests from `src`: `dotnet test CodeAlta.Tests/CodeAlta.Tests.csproj -c Release --filter "FullyQualifiedName~OpenAICodexSubscriptionPipelineTests|FullyQualifiedName~OpenAIRawApiModelProviderRuntimeTests"`.
-- [ ] Run focused runtime/config/serialization tests from `src`: `dotnet test CodeAlta.Tests/CodeAlta.Tests.csproj -c Release --filter "FullyQualifiedName~AgentSessionTests|FullyQualifiedName~CodeAltaConfigStoreRawApiTests|FullyQualifiedName~AgentJsonSerializationTests|FullyQualifiedName~CodeAltaAppTests"`.
-- [ ] Run `dotnet build -c Release` and `dotnet test -c Release` from `src`.
-- [ ] Run `lunet build` from `site`.
-- [ ] Run `git diff --check` and self-review the staged diff for generic Responses regressions, public XML docs, config round-trip compatibility, disposal/cancellation, AOT/trimming friendliness, and absence of static mutable state.
-- [ ] Inspect generated/request fixtures and persisted session state to confirm secrets, raw headers, turn state, and raw moderation metadata are absent.
-- [ ] Confirm the pre-existing untracked `.alta/config.toml`, `.alta/mcp.json`, and diagnostic archive remain unchanged; no live subscription request is required for acceptance.
+- [x] Run focused protocol/model tests from `src`: `dotnet test CodeAlta.Tests/CodeAlta.Tests.csproj -c Release --filter "FullyQualifiedName~OpenAICodexSubscriptionPipelineTests|FullyQualifiedName~OpenAIRawApiModelProviderRuntimeTests"`.
+- [x] Run focused runtime/config/serialization tests from `src`: `dotnet test CodeAlta.Tests/CodeAlta.Tests.csproj -c Release --filter "FullyQualifiedName~AgentSessionTests|FullyQualifiedName~CodeAltaConfigStoreRawApiTests|FullyQualifiedName~AgentJsonSerializationTests|FullyQualifiedName~CodeAltaAppTests"`.
+- [x] Run `dotnet build -c Release` and `dotnet test -c Release` from `src`.
+- [x] Run `lunet build` from `site`.
+- [x] Run `git diff --check` and self-review the staged diff for generic Responses regressions, public XML docs, config round-trip compatibility, disposal/cancellation, AOT/trimming friendliness, and absence of static mutable state.
+- [x] Inspect generated/request fixtures and persisted session state to confirm secrets, raw headers, turn state, and raw moderation metadata are absent.
+- [x] Confirm the pre-existing untracked `.alta/config.toml`, `.alta/mcp.json`, and diagnostic archive remain unchanged; no live subscription request is required for acceptance.
 
 ## Handoff notes
 
