@@ -414,7 +414,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.IsTrue(provider.IncludeEncryptedReasoning);
         Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
         Assert.AreEqual("websocket_with_http_fallback", provider.ResponseTransport);
-        Assert.IsTrue(provider.SendResponsesBetaHeader);
+        Assert.IsFalse(provider.SendResponsesBetaHeader);
         Assert.IsFalse(provider.SendInstallationId);
         Assert.AreEqual("codealta_state", provider.InstallationIdSource);
         Assert.IsFalse(provider.Experimental);
@@ -461,6 +461,26 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.IsFalse(provider.SendResponsesBetaHeader);
         Assert.IsTrue(provider.SendInstallationId);
         Assert.AreEqual("codex_home_readonly", provider.InstallationIdSource);
+    }
+
+    [TestMethod]
+    public void SaveGlobalProviderDefinitions_CodexSubscriptionPreservesExplicitLegacyBetaOptIn()
+    {
+        using var temp = TempDirectory.Create();
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        store.SaveGlobalProviderDefinitions(
+        [
+            new CodeAltaProviderDocument
+            {
+                ProviderKey = "codex",
+                ProviderType = "codex",
+                SendResponsesBetaHeader = true,
+            },
+        ]);
+
+        var content = File.ReadAllText(Path.Combine(temp.Path, "config.toml"));
+        StringAssert.Contains(content, "send_responses_beta_header = true");
+        Assert.IsTrue(store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().SendResponsesBetaHeader);
     }
 
     [TestMethod]

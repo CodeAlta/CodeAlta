@@ -96,7 +96,7 @@ OpenAI-compatible, Anthropic, Google, Mistral, direct HTTP, and subscription-bac
 
 `openai-chat` uses streaming chat completions. The adapter maps content, reasoning, tool calls, usage, and finish reasons into normalized `AgentEvent` values. Tool schemas are normalized for strict function-schema requirements.
 
-`openai-responses` uses Responses streaming over HTTP. `response_transport = "http"` and `response_transport = "sse"` both force the HTTP path in current code. WebSocket transport is configured only for subscription-backed `codex` providers.
+`openai-responses` uses SDK-owned Responses streaming over HTTP. WebSocket transport and `response_transport` configuration are available only for subscription-backed `codex` providers.
 
 `azure-openai` uses `Azure.AI.OpenAI` against an Azure OpenAI resource endpoint such as `https://your-resource.openai.azure.com`. Azure OpenAI deployment names are used anywhere CodeAlta asks for a model id, so set `model` and/or `single_model_id` to the deployment name. The Azure SDK does not expose model management for Azure OpenAI, and CodeAlta falls back to the configured single model instead of listing deployments. Azure OpenAI is currently wired to the chat-completions path; use OpenAI-compatible `openai-responses` only for endpoints that expose the OpenAI v1 Responses API directly.
 
@@ -114,12 +114,13 @@ Current behavior:
 - default auth source: `codealta_oauth`;
 - supported auth sources: `codealta_oauth`, `codex_auth_import`, and `codex_auth_file_readonly`;
 - default response transport: WebSocket with HTTP fallback;
-- `response_transport = "http"` or `"sse"` forces the HTTP/SSE SDK path;
+- `response_transport = "http"` forces the Codex HTTP/SSE path (the config validator intentionally does not accept the legacy programmatic `"sse"` alias);
 - encrypted reasoning is included by default;
 - model discovery defaults to `codex_endpoint_with_static_fallback`, which reads the subscription `/models` endpoint and falls back to the static allow-list if discovery fails;
 - recognized reasoning efforts follow the order advertised by Codex, including model-specific `max`; CodeAlta ignores Codex's `ultra` client tier because its distinct proactive delegation policy is not implemented;
 - the static fallback includes GPT-5.6 Sol, Terra, and Luna with `max` as their highest reasoning effort;
 - `send_installation_id` defaults to `false` and sends a CodeAlta-owned stable id only when explicitly enabled;
+- `send_responses_beta_header` defaults to `false`; set it to `true` only for a legacy turn endpoint that still requires `OpenAI-Beta: responses=experimental`;
 - requests use CodeAlta-owned stored subscription credentials and do not convert subscription tokens into platform API keys.
 
 CodeAlta does not rotate accounts, bypass provider limits, or silently fall back to a different provider when this provider reports quota or authentication failures.
@@ -131,7 +132,7 @@ sequenceDiagram
     participant Runtime as CodeAlta local session
     participant Executor as OpenAIResponsesTurnExecutor
     participant WS as OpenAICodexSubscriptionWebSocketSession
-    participant HTTP as ResponsesClient HTTP/SSE
+    participant HTTP as Codex HTTP/SSE adapter
     participant Service as Subscription endpoint
 
     Runtime->>Executor: execute provider turn
@@ -145,7 +146,7 @@ sequenceDiagram
             Executor->>HTTP: retry same turn over HTTP/SSE
             HTTP->>Service: streamed Responses request
         end
-    else response_transport is http/sse
+    else response_transport is http
         Executor->>HTTP: streamed Responses request
         HTTP->>Service: streamed Responses updates
     end
@@ -155,11 +156,16 @@ sequenceDiagram
 Implementation notes verified against `OpenAIResponsesTurnExecutor` and `OpenAICodexSubscriptionWebSocketSession`:
 
 - Ordinary `openai-responses` providers always use the HTTP/SSE SDK path. The WebSocket path is created only when `provider.CodexSubscription` is set.
-- The WebSocket URI is the configured base URI with `/responses` appended when needed and `http/https` changed to `ws/wss`.
-- WebSocket handshakes send bearer subscription auth plus `OpenAI-Beta: responses_websockets=2026-02-06`, `originator: codealta`, `session_id`, `x-client-request-id`, `User-Agent`, optional `ChatGPT-Account-Id`, optional `X-OpenAI-Fedramp`, and captured `x-codex-turn-state` when present.
-- HTTP/SSE requests use the SDK `ResponsesClient` with subscription auth policy and `CodexSubscriptionHeadersPolicy`. That policy sends `originator`, optional account/session headers, optional `OpenAI-Beta: responses=experimental`, and captures `x-codex-turn-state` from responses.
-- Codex subscription request customization disables stored output, keeps streaming enabled, omits `max_output_tokens`, enables auto tool choice, adds encrypted reasoning when configured, sets `prompt_cache_key` to the CodeAlta session id, sets `text.verbosity`, and optionally adds `client_metadata.x-codex-installation-id`.
-- Reasoning summaries retain the SDK's `summary_index` and completed summary-part boundaries. A streaming part whose body, after an optional bold heading, is exactly `<!-- -->` keeps a compact card with no body; on completion that part and its heading are hidden. Literal comments in substantive prose or fenced examples and raw provider/session data are retained.
+- Generic Responses providers remain on SDK-owned HTTP streaming. Codex subscription HTTP uses a narrow adapter around the configured `HttpClient`, SSE framing, and SDK event deserialization so initial response headers and Codex extensions are available before body events.
+- The WebSocket URI preserves configured query parameters, appends `/responses` when needed, and changes `http/https` to `ws/wss`. HTTP and discovery also preserve configured query parameters.
+- Turn requests consistently send `session-id`, `thread-id`, and `x-client-request-id`; the obsolete underscored `session_id` HTTP header is not sent. WebSocket handshakes additionally send `OpenAI-Beta: responses_websockets=2026-02-06`. HTTP turns send `Accept: text/event-stream`; the legacy Responses beta header is sent only when explicitly enabled.
+- HTTP, WebSocket, and `/models` requests share the CodeAlta User-Agent shape, subscription account/FedRAMP identity, endpoint rules, and supplied HTTP transport where applicable. `/models` never receives the Responses beta header.
+- A canonical per-turn request context owns compatibility headers and `client_metadata`. Turn state is sent per WebSocket request (not on the handshake), remains turn-scoped, and is never persisted.
+- Responses Lite is enabled only by trusted model metadata (currently GPT-5.6 Sol/Terra/Luna in the static catalog). Lite moves tools and nonempty instructions into leading developer input items, removes top-level tools/instructions and image detail, and uses all-turn reasoning context; ordinary Codex and generic Responses payloads retain their standard shape.
+- Codex lifecycle reduction stops at the first terminal event, requires a terminal event for Codex streams, treats indexed `output_item.done` items as authoritative, and honors explicit `end_turn: false` by continuing inference. Fatal policy failures are not retried; safe transport failures use a bounded retry/fallback budget.
+- Reasoning summary part/done, summary text done, and encrypted reasoning output are retained. The reducer supports sequential-cutoff events, but CodeAlta does not negotiate sequential-cutoff delivery by default.
+- Initial/event metadata is projected through an allowlist. Rate limits become usage, effective-model reroutes and safety/verification/moderation become transient updates, and only bounded request/model/ETag/reasoning/rate-limit summaries enter provider state; raw headers, moderation blobs, turn state, credentials, and unknown metadata are excluded.
+- Model discovery has a five-second outer timeout and up to three attempts for network, timeout, or HTTP 5xx failures. It does not retry 4xx responses, preserves 401 behavior, reads successful ETag headers, and uses the configured static fallback mode after eligible discovery failure.
 - Active in-memory WebSocket sessions can reuse provider continuation with `previous_response_id` only when the replayed request prefix still matches. This continuation is not a persisted recovery mechanism; journals remain the durable source of truth.
 - WebSocket sessions are cached per CodeAlta session and expire after an idle timeout, defaulting to five minutes.
 - The turn executor retries subscription streams with a small bounded budget and `Retry-After`/exponential backoff when it is safe to retry. It avoids retrying after committed final content, dispatched tool side effects, or observed tool-call items.

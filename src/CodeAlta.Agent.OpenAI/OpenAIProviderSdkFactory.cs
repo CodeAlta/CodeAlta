@@ -196,14 +196,26 @@ internal static class OpenAIProviderSdkFactory
         {
             var stateRootPath = ResolveStateRootPath(provider);
             var authManager = CreateCodexSubscriptionAuthManager(provider, options, stateRootPath);
-            var discoveryClient = new CodexSubscriptionModelDiscoveryClient(
-                provider.CodexSubscriptionHttpClient ?? new HttpClient(),
-                authManager,
-                options,
-                CreateCodeAltaUserAgentApplicationId());
-            var discoveredModels = await discoveryClient.GetModelsAsync(
-                provider.BaseUri ?? new Uri("https://chatgpt.com/backend-api/codex"),
-                cancellationToken).ConfigureAwait(false);
+            var httpClient = CodexSubscriptionHttpRequestFactory.ResolveHttpClient(provider, out var ownsHttpClient);
+            IReadOnlyList<CodexSubscriptionDiscoveredModel> discoveredModels;
+            try
+            {
+                var discoveryClient = new CodexSubscriptionModelDiscoveryClient(
+                    httpClient,
+                    authManager,
+                    options,
+                    CreateCodeAltaUserAgentApplicationId());
+                discoveredModels = await discoveryClient.GetModelsAsync(
+                    provider.BaseUri ?? CodexSubscriptionHttpRequestFactory.DefaultBaseUri,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (ownsHttpClient)
+                {
+                    httpClient.Dispose();
+                }
+            }
             var models = MapCodexSubscriptionDiscoveredModels(
                 discoveredModels,
                 providerDescriptor,
@@ -245,6 +257,7 @@ internal static class OpenAIProviderSdkFactory
         return exception switch
         {
             HttpRequestException => true,
+            TimeoutException => true,
             InvalidOperationException invalidOperationException
                 when invalidOperationException.Message.Contains("login is required", StringComparison.OrdinalIgnoreCase) => true,
             JsonException => true,

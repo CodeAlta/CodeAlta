@@ -3072,6 +3072,40 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocket426FallsBackImmediatelyToHttp()
+    {
+        var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
+            new HttpRequestException("Upgrade rejected.", null, HttpStatusCode.UpgradeRequired));
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-http-426-fallback",
+                    modelId: "gpt-5.3-codex",
+                    text: "Recovered over HTTP.",
+                    reasoningText: "WebSocket unavailable.",
+                    encryptedReasoning: null),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, webSocketSession.RequestCount);
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual("Recovered over HTTP.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_RetriesCodexWebSocketConnectionLimitWithoutHttpFallback()
     {
         var connectionLimit = new HttpRequestException("Responses websocket connection limit reached.");

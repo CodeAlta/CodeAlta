@@ -118,14 +118,14 @@
 
 ### 7. Align headers, transport construction, discovery, config, and docs
 
-- [ ] Centralize subscription HTTP/discovery identity helpers so endpoint resolution, account/FedRAMP auth, truthful `version`, and one CodeAlta User-Agent shape stay consistent; continue honoring supplied `provider.HttpClient` behavior.
-- [ ] Remove underscored `session_id`, retain hyphenated `session-id`/`thread-id` and `x-client-request-id`, preserve configured query parameters when deriving the WebSocket URI, and send `Accept: text/event-stream` on Codex HTTP turns.
-- [ ] Change `send_responses_beta_header` defaults in `OpenAICodexSubscriptionOptions`, `ConfiguredModelProviderRegistryBuilder`, and `CodeAltaConfigStore` to false; retain explicit true for legacy turn requests and never send `responses=experimental` to `/models`.
-- [ ] Give model discovery a five-second outer timeout and bounded retry for network/timeout/5xx only, preserve 401 behavior and static-fallback rules, and reuse the shared subscription HTTP transport rather than an unrelated default `HttpClient`.
-- [ ] Add pipeline/config regressions for default/explicit beta behavior, header identity, query preservation, discovery timeout/retry/ETag, HTTP 401 refresh, WebSocket 426 fallback, retry exhaustion, and non-retryable policy failures.
-- [ ] Update `doc/providers.md` and `site/docs/model-providers.md` for the Codex-only protocol adapter, Lite capability gating, current metadata/turn-state flow, beta default, header names, reasoning delivery support, strict lifecycle, discovery behavior, and sanitized metadata projection.
-- [ ] Remove the inaccurate documented `response_transport="sse"` config claim while retaining runtime tolerance for programmatic legacy values, unless implementation evidence shows the config validator should intentionally accept it as an alias.
-- [ ] Review `readme.md` and `doc/development-guide.md`; update them only if public setup or repository-wide provider-boundary guidance changed, avoiding duplicate implementation detail.
+- [x] Centralize subscription HTTP/discovery identity helpers so endpoint resolution, account/FedRAMP auth, truthful `version`, and one CodeAlta User-Agent shape stay consistent; continue honoring supplied `provider.HttpClient` behavior.
+- [x] Remove underscored `session_id`, retain hyphenated `session-id`/`thread-id` and `x-client-request-id`, preserve configured query parameters when deriving the WebSocket URI, and send `Accept: text/event-stream` on Codex HTTP turns.
+- [x] Change `send_responses_beta_header` defaults in `OpenAICodexSubscriptionOptions`, `ConfiguredModelProviderRegistryBuilder`, and `CodeAltaConfigStore` to false; retain explicit true for legacy turn requests and never send `responses=experimental` to `/models`.
+- [x] Give model discovery a five-second outer timeout and bounded retry for network/timeout/5xx only, preserve 401 behavior and static-fallback rules, and reuse the shared subscription HTTP transport rather than an unrelated default `HttpClient`.
+- [x] Add pipeline/config regressions for default/explicit beta behavior, header identity, query preservation, discovery timeout/retry/ETag, HTTP 401 refresh, WebSocket 426 fallback, retry exhaustion, and non-retryable policy failures.
+- [x] Update `doc/providers.md` and `site/docs/model-providers.md` for the Codex-only protocol adapter, Lite capability gating, current metadata/turn-state flow, beta default, header names, reasoning delivery support, strict lifecycle, discovery behavior, and sanitized metadata projection.
+- [x] Remove the inaccurate documented `response_transport="sse"` config claim while retaining runtime tolerance for programmatic legacy values, unless implementation evidence shows the config validator should intentionally accept it as an alias.
+- [x] Review `readme.md` and `doc/development-guide.md`; update them only if public setup or repository-wide provider-boundary guidance changed, avoiding duplicate implementation detail.
 
 ## Verification checklist
 

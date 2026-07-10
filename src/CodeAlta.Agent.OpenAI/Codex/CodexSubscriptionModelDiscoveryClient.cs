@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
 
@@ -11,12 +10,16 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
     private readonly OpenAICodexSubscriptionAuthManager _authManager;
     private readonly OpenAICodexSubscriptionOptions _options;
     private readonly string _userAgentApplicationId;
+    private readonly TimeSpan _timeout;
+    private readonly TimeSpan _retryDelay;
 
     public CodexSubscriptionModelDiscoveryClient(
         HttpClient httpClient,
         OpenAICodexSubscriptionAuthManager authManager,
         OpenAICodexSubscriptionOptions options,
-        string userAgentApplicationId)
+        string userAgentApplicationId,
+        TimeSpan? timeout = null,
+        TimeSpan? retryDelay = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(authManager);
@@ -27,6 +30,8 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
         _authManager = authManager;
         _options = options;
         _userAgentApplicationId = userAgentApplicationId;
+        _timeout = timeout ?? TimeSpan.FromSeconds(5);
+        _retryDelay = retryDelay ?? TimeSpan.FromMilliseconds(100);
     }
 
     public async ValueTask<IReadOnlyList<CodexSubscriptionDiscoveredModel>> GetModelsAsync(
@@ -35,42 +40,48 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
     {
         ArgumentNullException.ThrowIfNull(baseUri);
 
-        var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
-        var accountContext = await _authManager.GetAccountContextAsync(cancellationToken).ConfigureAwait(false);
-        using var request = new HttpRequestMessage(HttpMethod.Get, CreateModelsUri(baseUri, _userAgentApplicationId));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.AccessToken);
-        request.Headers.TryAddWithoutValidation("originator", "codealta");
-        request.Headers.TryAddWithoutValidation("User-Agent", _userAgentApplicationId);
-        if (!string.IsNullOrWhiteSpace(accountContext.AccountId))
-        {
-            request.Headers.TryAddWithoutValidation("ChatGPT-Account-Id", accountContext.AccountId);
-        }
-
-        if (_options.SendResponsesBetaHeader)
-        {
-            request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
-        }
-
-        if (accountContext.IsFedRamp)
-        {
-            request.Headers.TryAddWithoutValidation("X-OpenAI-Fedramp", "true");
-        }
-
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
-        var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new CodexSubscriptionModelDiscoveryException(
-                CreateFailureMessage(response.StatusCode, content),
-                response.StatusCode);
-        }
-
         try
         {
-            return ParseModels(content, response.Headers.ETag?.Tag);
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutSource.CancelAfter(_timeout);
+            var effectiveCancellation = timeoutSource.Token;
+            var identity = await CodexSubscriptionHttpRequestFactory.CreateIdentityAsync(
+                _authManager,
+                _options,
+                effectiveCancellation).ConfigureAwait(false);
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Get,
+                        CreateModelsUri(baseUri, _userAgentApplicationId));
+                    CodexSubscriptionHttpRequestFactory.ApplyIdentity(request, identity);
+                    using var response = await _httpClient.SendAsync(
+                        request,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        effectiveCancellation).ConfigureAwait(false);
+                    var content = await response.Content.ReadAsStringAsync(effectiveCancellation).ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        throw new CodexSubscriptionModelDiscoveryException(
+                            CreateFailureMessage(response.StatusCode, content),
+                            response.StatusCode);
+                    }
+
+                    var etag = response.Headers.ETag?.Tag ??
+                               (response.Headers.TryGetValues("X-Models-Etag", out var values) ? values.FirstOrDefault() : null);
+                    return ParseModels(content, etag);
+                }
+                catch (Exception ex) when (attempt < 3 && IsRetryable(ex, cancellationToken))
+                {
+                    await Task.Delay(_retryDelay, effectiveCancellation).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("Codex model discovery exceeded the five-second timeout.", ex);
         }
         catch (JsonException ex)
         {
@@ -86,13 +97,23 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
         ArgumentNullException.ThrowIfNull(baseUri);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientVersion);
 
-        var baseText = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
-            ? baseUri.AbsoluteUri
-            : baseUri.AbsoluteUri + "/";
-        var builder = new UriBuilder(new Uri(new Uri(baseText), "models"));
-        builder.Query = "client_version=" + Uri.EscapeDataString(NormalizeClientVersion(clientVersion));
-        return builder.Uri;
+        var modelsUri = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "models");
+        return CodexSubscriptionHttpRequestFactory.AppendQueryParameter(
+            modelsUri,
+            "client_version",
+            NormalizeClientVersion(clientVersion));
     }
+
+    private static bool IsRetryable(
+        Exception exception,
+        CancellationToken callerCancellation)
+        => exception switch
+        {
+            CodexSubscriptionModelDiscoveryException { StatusCode: >= HttpStatusCode.InternalServerError } => true,
+            HttpRequestException => true,
+            OperationCanceledException => !callerCancellation.IsCancellationRequested,
+            _ => false,
+        };
 
     private static string NormalizeClientVersion(string clientVersion)
     {

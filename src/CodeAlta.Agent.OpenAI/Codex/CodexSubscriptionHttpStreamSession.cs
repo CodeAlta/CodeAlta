@@ -33,8 +33,7 @@ internal sealed class CodexSubscriptionHttpStreamSession
         _options = provider.CodexSubscription ?? throw new ArgumentException("Codex subscription options are required.", nameof(provider));
         _authManager = authManager;
         _requestContext = requestContext;
-        _httpClient = provider.HttpClient ?? provider.CodexSubscriptionHttpClient ?? new HttpClient();
-        _ownsHttpClient = provider.HttpClient is null && provider.CodexSubscriptionHttpClient is null;
+        _httpClient = CodexSubscriptionHttpRequestFactory.ResolveHttpClient(provider, out _ownsHttpClient);
         _trace = trace;
     }
 
@@ -89,33 +88,23 @@ internal sealed class CodexSubscriptionHttpStreamSession
         CreateResponseOptions options,
         CancellationToken cancellationToken)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, ResolveResponsesUri(_provider.BaseUri));
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            CodexSubscriptionHttpRequestFactory.ResolveEndpoint(_provider.BaseUri, "responses"));
         var payload = ModelReaderWriter.Write(options, new ModelReaderWriterOptions("J"), OpenAIContext.Default);
         request.Content = new ByteArrayContent(payload.ToMemory().ToArray());
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         _trace?.WriteLine($">>> body: {payload}");
 
-        var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
-        var account = await _authManager.GetAccountContextAsync(cancellationToken).ConfigureAwait(false);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.AccessToken);
-        SetHeader(request, "originator", "codealta");
-        SetHeader(request, "User-Agent", OpenAIProviderSdkFactory.CreateCodeAltaUserAgentApplicationId());
-        SetHeader(request, "session_id", _requestContext.SessionId);
+        var identity = await CodexSubscriptionHttpRequestFactory.CreateIdentityAsync(
+            _authManager,
+            _options,
+            cancellationToken).ConfigureAwait(false);
+        CodexSubscriptionHttpRequestFactory.ApplyIdentity(request, identity);
         if (_options.SendResponsesBetaHeader)
         {
             SetHeader(request, "OpenAI-Beta", "responses=experimental");
-        }
-
-        var accountId = !string.IsNullOrWhiteSpace(_options.AccountId) ? _options.AccountId : account.AccountId;
-        if (!string.IsNullOrWhiteSpace(accountId))
-        {
-            SetHeader(request, "ChatGPT-Account-Id", accountId);
-        }
-
-        if (account.IsFedRamp)
-        {
-            SetHeader(request, "X-OpenAI-Fedramp", "true");
         }
 
         var extraHeaders = OpenAIModelRequestOverrides.MergeHeaders(
@@ -220,16 +209,5 @@ internal sealed class CodexSubscriptionHttpStreamSession
            name.Equals("x-api-key", StringComparison.OrdinalIgnoreCase);
 
     private static void SetHeader(HttpRequestMessage request, string name, string value)
-    {
-        request.Headers.Remove(name);
-        request.Headers.TryAddWithoutValidation(name, value);
-    }
-
-    private static Uri ResolveResponsesUri(Uri? baseUri)
-    {
-        var builder = new UriBuilder(baseUri ?? new Uri("https://chatgpt.com/backend-api/codex"));
-        var path = builder.Path.TrimEnd('/');
-        builder.Path = path.EndsWith("/responses", StringComparison.OrdinalIgnoreCase) ? path : path + "/responses";
-        return builder.Uri;
-    }
+        => CodexSubscriptionHttpRequestFactory.SetHeader(request, name, value);
 }

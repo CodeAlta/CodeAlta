@@ -71,7 +71,6 @@ internal sealed class CodexSubscriptionHeadersPolicy : PipelinePolicy
         {
             headers.Set("session-id", _context.SessionId);
             headers.Set("thread-id", _context.SessionId);
-            headers.Set("session_id", _context.SessionId);
             headers.Set("x-client-request-id", _context.SessionId);
         }
 

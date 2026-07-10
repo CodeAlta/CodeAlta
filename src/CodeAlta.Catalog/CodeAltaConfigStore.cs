@@ -1249,7 +1249,7 @@ public sealed class CodeAltaConfigStore
         definition.IncludeEncryptedReasoning ??= true;
         definition.ModelDiscovery ??= CodexSubscriptionDefaultModelDiscovery;
         definition.ResponseTransport ??= CodexSubscriptionDefaultResponseTransport;
-        definition.SendResponsesBetaHeader ??= true;
+        definition.SendResponsesBetaHeader ??= false;
         definition.SendInstallationId ??= false;
         definition.InstallationIdSource ??= CodexSubscriptionDefaultInstallationIdSource;
         definition.Experimental ??= false;
@@ -1773,7 +1773,7 @@ public sealed class CodeAltaConfigStore
                 definition.ResponseTransport = null;
             }
 
-            if (definition.SendResponsesBetaHeader == true)
+            if (definition.SendResponsesBetaHeader == false)
             {
                 definition.SendResponsesBetaHeader = null;
             }

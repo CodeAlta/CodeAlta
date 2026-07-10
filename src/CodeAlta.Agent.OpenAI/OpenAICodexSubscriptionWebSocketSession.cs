@@ -132,7 +132,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
     internal static Uri ResolveWebSocketUri(Uri baseUri)
     {
         ArgumentNullException.ThrowIfNull(baseUri);
-        var responsesUri = ResolveResponsesUri(baseUri);
+        var responsesUri = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "responses");
         var builder = new UriBuilder(responsesUri)
         {
             Scheme = responsesUri.Scheme.ToLowerInvariant() switch
@@ -141,7 +141,6 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
                 "https" => "wss",
                 _ => responsesUri.Scheme,
             },
-            Query = string.Empty,
         };
         return builder.Uri;
     }
@@ -299,7 +298,6 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         options.SetRequestHeader("originator", "codealta");
         options.SetRequestHeader("session-id", _sessionId);
         options.SetRequestHeader("thread-id", _sessionId);
-        options.SetRequestHeader("session_id", _sessionId);
         options.SetRequestHeader("x-client-request-id", _sessionId);
         options.SetRequestHeader("User-Agent", _userAgentApplicationId);
         options.CollectHttpResponseDetails = true;
@@ -843,16 +841,6 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
                 value = string.Empty;
                 return false;
         }
-    }
-
-    private static Uri ResolveResponsesUri(Uri baseUri)
-    {
-        var builder = new UriBuilder(baseUri);
-        var path = builder.Path.TrimEnd('/');
-        builder.Path = path.EndsWith("/responses", StringComparison.OrdinalIgnoreCase)
-            ? path
-            : path + "/responses";
-        return builder.Uri;
     }
 
     private static bool IsTerminalEvent(string? eventType)

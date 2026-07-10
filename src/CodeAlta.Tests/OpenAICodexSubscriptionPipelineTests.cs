@@ -192,7 +192,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual("responses=experimental", handler.Requests[0]["OpenAI-Beta"]);
         Assert.AreEqual("session_456", handler.Requests[0]["session-id"]);
         Assert.AreEqual("session_456", handler.Requests[0]["thread-id"]);
-        Assert.AreEqual("session_456", handler.Requests[0]["session_id"]);
+        Assert.IsFalse(handler.Requests[0].ContainsKey("session_id"));
         Assert.AreEqual("session_456", handler.Requests[0]["x-client-request-id"]);
         Assert.AreEqual("true", handler.Requests[0]["X-OpenAI-Fedramp"]);
         Assert.IsFalse(handler.Requests[0].ContainsKey("api-key"));
@@ -768,6 +768,11 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
         Assert.AreEqual("text/event-stream", handler.Requests[0]["Accept"]);
         Assert.AreEqual("https://chatgpt.com/backend-api/codex/responses", handler.RequestUris[0].ToString());
+        Assert.AreEqual("session-http", handler.Requests[0]["session-id"]);
+        Assert.AreEqual("session-http", handler.Requests[0]["thread-id"]);
+        Assert.AreEqual("session-http", handler.Requests[0]["x-client-request-id"]);
+        Assert.IsFalse(handler.Requests[0].ContainsKey("session_id"));
+        Assert.IsFalse(handler.Requests[0].ContainsKey("OpenAI-Beta"));
         Assert.IsTrue(handler.Requests[0].ContainsKey("x-codex-turn-metadata"));
     }
 
@@ -878,7 +883,92 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual("Bearer access-token", handler.Requests[0]["Authorization"]);
         Assert.AreEqual("acct_configured", handler.Requests[0]["ChatGPT-Account-Id"]);
         Assert.AreEqual("codealta", handler.Requests[0]["originator"]);
-        Assert.AreEqual("responses=experimental", handler.Requests[0]["OpenAI-Beta"]);
+        Assert.IsFalse(handler.Requests[0].ContainsKey("OpenAI-Beta"));
+        Assert.AreEqual(OpenAIProviderSdkFactory.CreateCodeAltaUserAgentApplicationId(), handler.Requests[0]["User-Agent"]);
+    }
+
+    [TestMethod]
+    public void SubscriptionEndpoints_PreserveConfiguredQueryParameters()
+    {
+        var baseUri = new Uri("https://example.test/backend-api/codex?tenant=alpha%20one");
+
+        var models = CodexSubscriptionModelDiscoveryClient.CreateModelsUri(baseUri, "CodeAlta/1.2.3.4");
+        var responses = CodexSubscriptionHttpRequestFactory.ResolveEndpoint(baseUri, "responses");
+        var webSocket = OpenAICodexSubscriptionWebSocketSession.ResolveWebSocketUri(baseUri);
+
+        Assert.AreEqual("https://example.test/backend-api/codex/models?tenant=alpha%20one&client_version=1.2.3", models.AbsoluteUri);
+        Assert.AreEqual("https://example.test/backend-api/codex/responses?tenant=alpha%20one", responses.AbsoluteUri);
+        Assert.AreEqual("wss://example.test/backend-api/codex/responses?tenant=alpha%20one", webSocket.AbsoluteUri);
+    }
+
+    [TestMethod]
+    public async Task ModelDiscovery_RetriesOnlyTransientFailuresAndUsesSuccessEtagHeader()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var success = CreateModelsResponse();
+        success.Headers.Remove("ETag");
+        success.Headers.TryAddWithoutValidation("X-Models-Etag", "success-etag");
+        var handler = new RecordingHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("temporary") },
+            success);
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            BaseUri = new Uri("https://chatgpt.com/backend-api/codex"),
+            StateRootPath = temp.Path,
+            HttpClient = new HttpClient(handler),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ModelDiscovery = "codex_endpoint",
+                SendResponsesBetaHeader = true,
+            },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(
+            provider,
+            CreateProviderDescriptor(),
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests.Count);
+        Assert.AreEqual("success-etag", models[0].Capabilities?["etag"]);
+        Assert.IsFalse(handler.Requests[0].ContainsKey("OpenAI-Beta"), "The legacy Responses beta header is turn-only.");
+    }
+
+    [TestMethod]
+    public async Task ModelDiscovery_DoesNotRetryClientErrorsAndHonorsOuterTimeout()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var authManager = OpenAIProviderSdkFactory.CreateCodexSubscriptionAuthManager(
+            new OpenAIProviderOptions { ProviderKey = "codex", StateRootPath = temp.Path },
+            new OpenAICodexSubscriptionOptions(),
+            temp.Path);
+        var badRequestHandler = new RecordingHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("bad") },
+            CreateModelsResponse());
+        var badRequestClient = new CodexSubscriptionModelDiscoveryClient(
+            new HttpClient(badRequestHandler),
+            authManager,
+            new OpenAICodexSubscriptionOptions(),
+            "CodeAlta/1.2.3",
+            timeout: TimeSpan.FromSeconds(1),
+            retryDelay: TimeSpan.Zero);
+
+        _ = await Assert.ThrowsExactlyAsync<CodexSubscriptionModelDiscoveryException>(
+            () => badRequestClient.GetModelsAsync(new Uri("https://example.test/codex"), CancellationToken.None).AsTask()).ConfigureAwait(false);
+        Assert.AreEqual(1, badRequestHandler.Requests.Count);
+
+        var timeoutClient = new CodexSubscriptionModelDiscoveryClient(
+            new HttpClient(new WaitingHttpMessageHandler()),
+            authManager,
+            new OpenAICodexSubscriptionOptions(),
+            "CodeAlta/1.2.3",
+            timeout: TimeSpan.FromMilliseconds(25),
+            retryDelay: TimeSpan.Zero);
+        await Assert.ThrowsExactlyAsync<TimeoutException>(
+            () => timeoutClient.GetModelsAsync(new Uri("https://example.test/codex"), CancellationToken.None).AsTask()).ConfigureAwait(false);
     }
 
     [TestMethod]
@@ -1485,6 +1575,16 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             }
 
             return headers;
+        }
+    }
+
+    private sealed class WaitingHttpMessageHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _ = request;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException("Unreachable.");
         }
     }
 

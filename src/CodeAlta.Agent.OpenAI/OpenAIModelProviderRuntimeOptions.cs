@@ -249,9 +249,9 @@ public sealed class OpenAICodexSubscriptionOptions
     public string ResponseTransport { get; set; } = "websocket_with_http_fallback";
 
     /// <summary>
-    /// Gets or sets whether to send the Responses experimental beta header.
+    /// Gets or sets whether to send the legacy Responses experimental beta header. The default is <see langword="false" />.
     /// </summary>
-    public bool SendResponsesBetaHeader { get; set; } = true;
+    public bool SendResponsesBetaHeader { get; set; }
 
     /// <summary>
     /// Gets or sets whether to include a stable installation id in request metadata.

@@ -358,7 +358,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning ?? true,
                 ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? "codex_endpoint_with_static_fallback",
                 ResponseTransport = NormalizeText(definition.ResponseTransport) ?? "websocket_with_http_fallback",
-                SendResponsesBetaHeader = definition.SendResponsesBetaHeader ?? true,
+                SendResponsesBetaHeader = definition.SendResponsesBetaHeader ?? false,
                 SendInstallationId = definition.SendInstallationId ?? false,
                 InstallationIdSource = NormalizeText(definition.InstallationIdSource) ?? "codealta_state",
                 Experimental = definition.Experimental == true,
