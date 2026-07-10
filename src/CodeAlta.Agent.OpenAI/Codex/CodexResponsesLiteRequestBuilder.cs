@@ -67,7 +67,10 @@ internal static class CodexResponsesLiteRequestBuilder
         }
 
         options.Patch.Set("$.input"u8, BinaryData.FromBytes(stream.ToArray()));
-        options.Patch.Set("$.reasoning.context"u8, "all_turns");
+        if (options.ReasoningOptions is not null)
+        {
+            options.ReasoningOptions.Patch.Set("$.context"u8, "all_turns");
+        }
         options.Instructions = null;
         options.InputItems.Clear();
         options.Tools.Clear();

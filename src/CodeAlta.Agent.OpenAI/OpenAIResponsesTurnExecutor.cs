@@ -1302,18 +1302,29 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.ToolChoice = ResponseToolChoice.CreateAutoChoice();
         }
 
-        if ((request.Provider.Profile?.SupportsReasoningEffort ?? true) &&
-            request.ReasoningEffort is { } reasoningEffort &&
-            SupportsRequestedReasoningEffort(request, reasoningEffort))
+        if (request.Provider.Profile?.SupportsReasoningEffort ?? true)
         {
             var modelCapabilities = CodexSubscriptionModelCapabilities.FromModel(request.ModelInfo);
-            options.ReasoningOptions = new ResponseReasoningOptions
+            var explicitReasoningEffort = request.ReasoningEffort;
+            var effectiveReasoningEffort = explicitReasoningEffort ??
+                (provider.CodexSubscription is not null ? request.ModelInfo?.DefaultReasoningEffort : null);
+            var supportsEffectiveReasoningEffort = effectiveReasoningEffort is { } reasoningEffort &&
+                SupportsRequestedReasoningEffort(request, reasoningEffort);
+            var shouldRequestCodexSummary = provider.CodexSubscription is not null &&
+                explicitReasoningEffort is not AgentReasoningEffort.None &&
+                modelCapabilities.SupportsReasoningSummaries;
+            if (supportsEffectiveReasoningEffort || shouldRequestCodexSummary)
             {
-                ReasoningEffortLevel = MapReasoningEffortLevel(reasoningEffort),
-            };
-            if (provider.CodexSubscription is null || modelCapabilities.SupportsReasoningSummaries)
-            {
-                options.ReasoningOptions.ReasoningSummaryVerbosity = ResponseReasoningSummaryVerbosity.Detailed;
+                options.ReasoningOptions = new ResponseReasoningOptions
+                {
+                    ReasoningEffortLevel = supportsEffectiveReasoningEffort
+                        ? MapReasoningEffortLevel(effectiveReasoningEffort!.Value)
+                        : null,
+                };
+                if (provider.CodexSubscription is null || modelCapabilities.SupportsReasoningSummaries)
+                {
+                    options.ReasoningOptions.ReasoningSummaryVerbosity = ResponseReasoningSummaryVerbosity.Detailed;
+                }
             }
         }
 

@@ -2152,9 +2152,10 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ModelId = modelId,
             SystemMessage = "System instructions",
             DeveloperInstructions = "Developer instructions",
-            ReasoningEffort = AgentReasoningEffort.Medium,
+            ReasoningEffort = null,
             ModelInfo = new AgentModelInfo(
                 modelId,
+                DefaultReasoningEffort: AgentReasoningEffort.Medium,
                 SupportedReasoningEfforts: [AgentReasoningEffort.Medium],
                 Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
@@ -2202,7 +2203,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsFalse(root.TryGetProperty("instructions", out _));
         Assert.IsFalse(root.TryGetProperty("tools", out _));
         Assert.IsFalse(root.GetProperty("parallel_tool_calls").GetBoolean());
-        Assert.AreEqual("all_turns", root.GetProperty("reasoning").GetProperty("context").GetString());
+        var reasoning = root.GetProperty("reasoning");
+        Assert.IsTrue(reasoning.TryGetProperty("effort", out var effort), root.GetRawText());
+        Assert.AreEqual("medium", effort.GetString());
+        Assert.AreEqual("detailed", reasoning.GetProperty("summary").GetString());
+        Assert.AreEqual("all_turns", reasoning.GetProperty("context").GetString());
         Assert.IsFalse(root.TryGetProperty("stream_options", out _));
         var input = root.GetProperty("input").EnumerateArray().ToArray();
         Assert.AreEqual("additional_tools", input[0].GetProperty("type").GetString());
@@ -2216,6 +2221,93 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             input.Skip(2).Select(static item => item.GetProperty("type").GetString()).ToArray());
         Assert.IsFalse(input[2].GetProperty("content")[1].TryGetProperty("detail", out _));
         Assert.IsTrue(root.TryGetProperty("client_metadata", out _));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexRequestsSummaryWithoutExplicitOrDefaultEffort()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-summary-only", "gpt-summary", "Answer.")],
+        ]);
+        var executor = CreateCodexExecutor(responsesClient);
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-summary",
+            ReasoningEffort = null,
+            ModelInfo = new AgentModelInfo(
+                "gpt-summary",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["source"] = "codex-endpoint",
+                    ["supportsReasoningSummaries"] = true,
+                }),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var reasoning = document.RootElement.GetProperty("reasoning");
+        Assert.AreEqual("detailed", reasoning.GetProperty("summary").GetString());
+        Assert.IsFalse(reasoning.TryGetProperty("effort", out _));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexExplicitNoneDoesNotEnableLiteReasoning()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-none", "gpt-5.6-sol", "Answer.")],
+        ]);
+        var executor = CreateCodexExecutor(responsesClient);
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.6-sol",
+            ReasoningEffort = AgentReasoningEffort.None,
+            ModelInfo = new AgentModelInfo(
+                "gpt-5.6-sol",
+                DefaultReasoningEffort: AgentReasoningEffort.Medium,
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium],
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["source"] = "codex-endpoint",
+                    ["supportsReasoningSummaries"] = true,
+                    ["useResponsesLite"] = true,
+                }),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.IsFalse(document.RootElement.TryGetProperty("reasoning", out _));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_GenericResponsesDoesNotApplyModelDefaultReasoningEffort()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-generic-default", "gpt-generic", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "generic",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-generic",
+            ReasoningEffort = null,
+            ModelInfo = new AgentModelInfo(
+                "gpt-generic",
+                DefaultReasoningEffort: AgentReasoningEffort.Medium,
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium]),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.IsFalse(document.RootElement.TryGetProperty("reasoning", out _));
     }
 
     [TestMethod]
@@ -2248,7 +2340,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_SequentialCutoffDoneEventsDoNotDuplicateLegacyDeltas()
+    public async Task OpenAIResponsesTurnExecutor_ResponsesLiteReasoningEventsReachTimelineWithoutDuplication()
     {
         var reasoningItem = new ReasoningResponseItem(string.Empty) { Id = "reasoning-1" };
         var response = new ResponseResult
@@ -2282,9 +2374,24 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var responsesClient = new RecordingOpenAIResponseClient([updates]);
         var executor = CreateCodexExecutor(responsesClient);
         var deltas = new List<AgentTurnDelta>();
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.6-sol",
+            ReasoningEffort = AgentReasoningEffort.Medium,
+            ModelInfo = new AgentModelInfo(
+                "gpt-5.6-sol",
+                DefaultReasoningEffort: AgentReasoningEffort.Medium,
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium],
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["source"] = "codex-endpoint",
+                    ["supportsReasoningSummaries"] = true,
+                    ["useResponsesLite"] = true,
+                }),
+        };
 
         var result = await executor.ExecuteTurnAsync(
-            CreateCodexTurnRequest(),
+            request,
             (delta, _) =>
             {
                 deltas.Add(delta);
