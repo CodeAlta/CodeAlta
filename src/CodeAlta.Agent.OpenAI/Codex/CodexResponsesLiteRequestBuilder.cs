@@ -33,7 +33,7 @@ internal static class CodexResponsesLiteRequestBuilder
             writer.WriteEndArray();
             writer.WriteEndObject();
 
-            if (!string.IsNullOrWhiteSpace(developerInstructions))
+            if (!string.IsNullOrEmpty(developerInstructions))
             {
                 writer.WriteStartObject();
                 writer.WriteString("type", "message");

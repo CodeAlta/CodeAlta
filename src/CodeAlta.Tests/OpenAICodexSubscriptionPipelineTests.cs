@@ -129,6 +129,26 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
+    public void ResponsesLiteRequest_PreservesNonemptyWhitespaceInstructions()
+    {
+        var options = new OpenAI.Responses.CreateResponseOptions
+        {
+            Model = "gpt-5.6-sol",
+            Instructions = " ",
+        };
+
+        CodexResponsesLiteRequestBuilder.Apply(options, options.Instructions);
+
+        using var document = JsonDocument.Parse(ModelReaderWriter.Write(
+            options,
+            new ModelReaderWriterOptions("J"),
+            OpenAIContext.Default));
+        var input = document.RootElement.GetProperty("input");
+        Assert.AreEqual("additional_tools", input[0].GetProperty("type").GetString());
+        Assert.AreEqual(" ", input[1].GetProperty("content")[0].GetProperty("text").GetString());
+    }
+
+    [TestMethod]
     public async Task Pipeline_AddsOAuthAndCodexHeadersWithoutApiKeyAuth()
     {
         using var temp = TempDirectory.Create();
