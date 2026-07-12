@@ -51,6 +51,34 @@ public sealed class ModelProviderInitializationServiceTests
     }
 
     [TestMethod]
+    public async Task GetModelsAsync_PreservesProviderOrderByDefaultAsync()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("ordered"), "Ordered", "test");
+        var runtime = new TestRuntime(descriptor, CreateUnsortedModels());
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+
+        var models = await service.GetModelsAsync(descriptor.ProviderId, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new[] { "z-model", "a-model", "b-model" }, models.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
+    public async Task GetModelsAsync_SortsModelsByDisplayNameWhenConfiguredAsync()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("sorted"), "Sorted", "test") { SortModels = true };
+        var runtime = new TestRuntime(descriptor, CreateUnsortedModels());
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+
+        var models = await service.GetModelsAsync(descriptor.ProviderId, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new[] { "a-model", "b-model", "z-model" }, models.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
     public async Task GetModelsAsync_DoesNotReturnCatalogForUnregisteredProviderAsync()
     {
         await using var registry = new ModelProviderRegistry();
@@ -65,6 +93,14 @@ public sealed class ModelProviderInitializationServiceTests
             () => service.GetModelsAsync(descriptor.ProviderId, CancellationToken.None));
         Assert.AreEqual(0, service.CurrentStates.Count);
     }
+
+    private static AgentModelInfo[] CreateUnsortedModels()
+        =>
+        [
+            new AgentModelInfo("z-model", DisplayName: "Zulu"),
+            new AgentModelInfo("a-model", DisplayName: "alpha"),
+            new AgentModelInfo("b-model", DisplayName: "Bravo"),
+        ];
 
     private sealed class TestRuntime : IModelProviderRuntime
     {

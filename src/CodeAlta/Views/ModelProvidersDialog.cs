@@ -819,6 +819,7 @@ internal sealed class ModelProvidersDialog
             AddTextRow(form, ref row, SR.T("Models.dev Id"), CreateDefaultTextField(bindings.ModelsDevProviderId, () => item.UseDefaultModelsDevProviderId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelsDevProviderId));
             AddTextRow(form, ref row, SR.T("Single Model Id"), CreateDefaultTextField(bindings.SingleModelId, () => item.UseDefaultSingleModelId), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultSingleModelId));
             AddTextRow(form, ref row, SR.T("Models Include Regex"), CreateDefaultTextField(bindings.ModelsIncludeRegex, () => item.UseDefaultModelsIncludeRegex), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModelsIncludeRegex));
+            AddCheckRow(form, ref row, SR.T("Model Order"), new CheckBox(SR.T("Sort models alphabetically")).IsChecked(bindings.SortModels), CreateSpacer());
         }
 
         if (item.ProviderType == "codex")
@@ -2507,6 +2508,7 @@ internal sealed class ModelProvidersDialog
             definition.ModelsDevProviderId,
             definition.SingleModelId,
             definition.ModelsIncludeRegex,
+            definition.SortModels,
             definition.AuthSource,
             definition.AccountId,
             definition.ModelDiscovery,
@@ -2531,6 +2533,7 @@ internal sealed class ModelProvidersDialog
         string? ModelsDevProviderId,
         string? SingleModelId,
         string? ModelsIncludeRegex,
+        bool? SortModels,
         string? AuthSource,
         string? AccountId,
         string? ModelDiscovery,

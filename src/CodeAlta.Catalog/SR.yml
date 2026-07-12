@@ -3798,6 +3798,12 @@
   fr: "Id modèle"
   ja: "モデル ID"
   zh: "模型 ID"
+"Model Order":
+  de: "Modellreihenfolge"
+  es: "Orden de modelos"
+  fr: "Ordre des modèles"
+  ja: "モデルの順序"
+  zh: "模型顺序"
 "Model Providers":
   de: "Modellanbieter"
   es: "Proveedores de modelos"
@@ -6312,6 +6318,12 @@
   fr: "Mode de tri"
   ja: "ソート方法"
   zh: "排序方式"
+"Sort models alphabetically":
+  de: "Modelle alphabetisch sortieren"
+  es: "Ordenar modelos alfabéticamente"
+  fr: "Trier les modèles par ordre alphabétique"
+  ja: "モデルをアルファベット順に並べ替える"
+  zh: "按字母顺序排列模型"
 "Sort projects by last activity":
   de: "Projekte nach letzter Aktivität sortieren"
   es: "Ordenar proyectos por última actividad"

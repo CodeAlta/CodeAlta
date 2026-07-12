@@ -45,6 +45,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         UseDefaultSingleModelId = source.SingleModelId is null;
         ModelsIncludeRegex = source.ModelsIncludeRegex;
         UseDefaultModelsIncludeRegex = source.ModelsIncludeRegex is null;
+        SortModels = source.SortModels == true;
         AuthSource = source.AuthSource ?? "codealta_oauth";
         UseDefaultAuthSource = source.AuthSource is null;
         AccountId = source.AccountId;
@@ -167,6 +168,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
     public partial bool UseDefaultModelsIncludeRegex { get; set; }
 
     [Bindable]
+    public partial bool SortModels { get; set; }
+
+    [Bindable]
     public partial string? AuthSource { get; set; }
 
     [Bindable]
@@ -227,6 +231,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ModelsDevProviderId = UseDefaultModelsDevProviderId ? null : NormalizeText(ModelsDevProviderId);
         definition.SingleModelId = UseDefaultSingleModelId ? null : NormalizeText(SingleModelId);
         definition.ModelsIncludeRegex = UseDefaultModelsIncludeRegex ? null : NormalizeText(ModelsIncludeRegex);
+        definition.SortModels = SortModels ? true : null;
         var usesAuthSourceField = ProviderType is "codex" or "copilot" or "xai";
         var usesModelDiscoveryField = ProviderType is "codex" or "copilot" or "xai";
         definition.AuthSource = usesAuthSourceField && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
@@ -304,6 +309,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
     partial void OnUseDefaultSingleModelIdChanged(bool value) => ClearTestResultOnEdit();
     partial void OnModelsIncludeRegexChanged(string? value) => ClearTestResultOnEdit();
     partial void OnUseDefaultModelsIncludeRegexChanged(bool value) => ClearTestResultOnEdit();
+    partial void OnSortModelsChanged(bool value) => ClearTestResultOnEdit();
     partial void OnAuthSourceChanged(string? value) => ClearTestResultOnEdit();
     partial void OnUseDefaultAuthSourceChanged(bool value) => ClearTestResultOnEdit();
     partial void OnAccountIdChanged(string? value) => ClearTestResultOnEdit();
@@ -339,6 +345,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
+            SortModels = definition.SortModels,
             ExtraBody = definition.ExtraBody,
             Profile = definition.Profile,
             Compaction = definition.Compaction,

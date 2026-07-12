@@ -302,12 +302,14 @@ public sealed class ModelsDevCatalogTests
                 ProviderType = "google-genai",
                 ApiKey = "test-key",
                 SingleModelId = "gemini-test",
+                SortModels = true,
             },
             temp.Path,
             catalog,
-            out _,
+            out var descriptor,
             out var createRuntime));
 
+        Assert.IsTrue(descriptor.SortModels);
         await using var runtime = createRuntime();
         var agentRuntime = Assert.IsInstanceOfType<IAgentModelProviderRuntime>(runtime);
         var model = (await agentRuntime.ModelCatalog!.ListModelsAsync(agentRuntime.RuntimeDescriptor).ConfigureAwait(false)).Single();

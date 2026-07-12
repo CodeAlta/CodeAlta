@@ -781,6 +781,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
             DefaultModelId = NormalizeText(definition.SingleModelId) ?? NormalizeText(definition.Model),
+            SortModels = definition.SortModels == true,
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
         };
     }

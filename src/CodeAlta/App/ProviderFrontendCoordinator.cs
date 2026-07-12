@@ -209,7 +209,7 @@ internal sealed class ProviderFrontendCoordinator
 
         await using var _ = runtime;
         var probe = await runtime.ProbeAsync(cancellationToken);
-        var models = probe.Models;
+        var models = SortModelsIfRequested(probe.Models, definition.SortModels == true);
         return new ProviderModelListResult(true, SR.T("Model listing completed · {0} model(s) available.", models.Count), models);
     }
 
@@ -541,6 +541,14 @@ internal sealed class ProviderFrontendCoordinator
         runtime = createRuntime();
         return true;
     }
+
+    private static IReadOnlyList<AgentModelInfo> SortModelsIfRequested(IReadOnlyList<AgentModelInfo> models, bool sortModels)
+        => sortModels
+            ? models
+                .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+            : models;
 
     private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)
     {

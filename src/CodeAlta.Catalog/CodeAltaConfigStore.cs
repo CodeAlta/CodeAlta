@@ -1882,6 +1882,7 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ModelsDevProviderId) ||
                !string.IsNullOrWhiteSpace(definition.SingleModelId) ||
                !string.IsNullOrWhiteSpace(definition.ModelsIncludeRegex) ||
+               definition.SortModels is not null ||
                definition.ExtraBody is { Count: > 0 } ||
                definition.Request is not null ||
                definition.Profile is not null ||
@@ -1970,6 +1971,7 @@ public sealed class CodeAltaConfigStore
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
+            SortModels = definition.SortModels,
             ExtraBody = CloneExtraBody(definition.ExtraBody),
             Request = CloneRequest(definition.Request),
             Profile = CloneProfile(definition.Profile),

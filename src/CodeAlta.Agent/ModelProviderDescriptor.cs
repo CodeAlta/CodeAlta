@@ -66,6 +66,11 @@ public sealed record ModelProviderDescriptor
     public string? DefaultModelId { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether discovered models should be sorted alphabetically for presentation.
+    /// </summary>
+    public bool SortModels { get; init; }
+
+    /// <summary>
     /// Gets the configured default reasoning effort, when any.
     /// </summary>
     public AgentReasoningEffort? DefaultReasoningEffort { get; init; }

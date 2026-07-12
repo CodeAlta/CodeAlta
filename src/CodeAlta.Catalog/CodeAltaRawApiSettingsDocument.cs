@@ -437,6 +437,12 @@ public sealed class CodeAltaProviderDocument
     public string? ModelsIncludeRegex { get; set; }
 
     /// <summary>
+    /// Gets or sets whether discovered models are sorted alphabetically for presentation.
+    /// </summary>
+    [JsonPropertyName("sort_models")]
+    public bool? SortModels { get; set; }
+
+    /// <summary>
     /// Gets or sets provider-specific OpenAI-compatible request-body fields that should be added to outgoing requests.
     /// </summary>
     [JsonPropertyName("extra_body")]

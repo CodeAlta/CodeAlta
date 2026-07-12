@@ -27,6 +27,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             models_dev_provider_id = " OpenRouter "
             single_model_id = " gpt-5 "
             models_include_regex = " ^gpt-(5|4o) "
+            sort_models = true
 
             [providers.OpenRouter.extra_body]
             custom_boolean = true
@@ -107,6 +108,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("openrouter", openRouter.ModelsDevProviderId);
         Assert.AreEqual("gpt-5", openRouter.SingleModelId);
         Assert.AreEqual("^gpt-(5|4o)", openRouter.ModelsIncludeRegex);
+        Assert.AreEqual(true, openRouter.SortModels);
         Assert.IsNotNull(openRouter.ExtraBody);
         Assert.AreEqual(true, openRouter.ExtraBody!["custom_boolean"]);
         Assert.AreEqual(0.75d, Convert.ToDouble(openRouter.ExtraBody["custom_threshold"]));

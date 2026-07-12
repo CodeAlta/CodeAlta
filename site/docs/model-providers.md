@@ -83,6 +83,7 @@ Common provider fields are:
 | `models_dev_provider_id` | Optional models.dev provider id used to enrich model metadata where supported. |
 | `single_model_id` | Fixed model id for endpoints that do not expose a model list. |
 | `models_include_regex` | Optional .NET regular expression applied to model ids after discovery/fallback. When unset, all discovered models remain visible; examples include `model1|model2` or `model\d+`. |
+| `sort_models` | Set to `true` to sort discovered models alphabetically by display name (then id) in selectors. Defaults to `false`, preserving provider-returned order. |
 | `profile` | Compatibility profile block; see below. |
 | `compaction` | Local raw-API compaction settings; see [Context usage and compaction](#context-usage-and-compaction). |
 | `model_overrides` | Per-model metadata overrides; see [Model metadata overrides](#model-metadata-overrides). |

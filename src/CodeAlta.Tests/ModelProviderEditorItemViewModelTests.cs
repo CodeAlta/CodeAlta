@@ -41,4 +41,20 @@ public sealed class ModelProviderEditorItemViewModelTests
         Assert.AreEqual(ModelProviderLastTestState.Success, item.LastTestState);
         Assert.AreEqual("Login completed.", item.LastTestMessage);
     }
+
+    [TestMethod]
+    public void ToDocument_PreservesConfiguredModelSorting()
+    {
+        var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument
+        {
+            ProviderKey = "openai",
+            ProviderType = "openai-responses",
+            SortModels = true,
+        });
+
+        var definition = item.ToDocument();
+
+        Assert.IsTrue(item.SortModels);
+        Assert.AreEqual(true, definition.SortModels);
+    }
 }

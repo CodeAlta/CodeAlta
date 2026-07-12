@@ -177,6 +177,13 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                 ? ModelProviderAvailability.Ready
                 : probe.Availability;
             var models = probe.Models ?? [];
+            if (descriptor.SortModels)
+            {
+                models = models
+                    .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
 
             PublishState(new ModelProviderStateSnapshot
             {
