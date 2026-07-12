@@ -218,10 +218,7 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
                 GetBoolean(modelElement, "hidden") ?? IsHiddenVisibility(visibility),
                 GetBoolean(modelElement, "requires_websocket") ?? GetBoolean(modelElement, "requiresWebSocket") ?? false,
                 GetBoolean(modelElement, "supports_reasoning_effort") ?? GetBoolean(modelElement, "supportsReasoningEffort") ?? true,
-                GetBoolean(modelElement, "supports_reasoning_summaries") ??
-                    GetBoolean(modelElement, "supports_reasoning_summary") ??
-                    GetBoolean(modelElement, "supportsReasoningSummary") ??
-                    false,
+                GetReasoningSummaryParameterSupport(modelElement),
                 GetBoolean(modelElement, "supports_encrypted_reasoning") ?? GetBoolean(modelElement, "supportsEncryptedReasoning") ?? true,
                 GetBoolean(modelElement, "supports_text_verbosity") ??
                     GetBoolean(modelElement, "supportsTextVerbosity") ??
@@ -257,6 +254,21 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
         => element.TryGetProperty(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
             ? value.GetBoolean()
             : null;
+
+    private static bool GetReasoningSummaryParameterSupport(JsonElement element)
+    {
+        if (element.TryGetProperty("supports_reasoning_summary_parameter", out var currentValue) ||
+            element.TryGetProperty("supportsReasoningSummaryParameter", out currentValue) ||
+            element.TryGetProperty("supports_reasoning_summaries", out currentValue) ||
+            element.TryGetProperty("supports_reasoning_summary", out currentValue) ||
+            element.TryGetProperty("supportsReasoningSummary", out currentValue))
+        {
+            return currentValue.ValueKind is JsonValueKind.True or JsonValueKind.False && currentValue.GetBoolean();
+        }
+
+        // Current Codex model metadata defaults this backward-compatible capability to true when omitted.
+        return true;
+    }
 
     private static bool IsListVisibility(string? visibility)
         => string.IsNullOrWhiteSpace(visibility) || string.Equals(visibility, "list", StringComparison.OrdinalIgnoreCase);

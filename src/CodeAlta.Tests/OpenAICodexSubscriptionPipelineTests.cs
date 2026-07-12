@@ -1030,7 +1030,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
-    public async Task ModelDiscovery_UsesExactCapabilityFieldsAndTreatsMissingOrWrongTypesAsFalse()
+    public async Task ModelDiscovery_UsesCurrentSummaryCapabilityAndBackwardCompatibleDefault()
     {
         using var temp = TempDirectory.Create();
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
@@ -1045,7 +1045,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                       "display_name": "GPT-5.6 Sol",
                       "supported_in_api": true,
                       "visibility": "list",
-                      "supports_reasoning_summaries": false,
+                      "supports_reasoning_summary_parameter": true,
                       "support_verbosity": false,
                       "supports_parallel_tool_calls": false,
                       "supports_image_detail_original": false,
@@ -1061,6 +1061,12 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                       "support_verbosity": 1,
                       "supports_parallel_tool_calls": null,
                       "use_responses_lite": []
+                    },
+                    {
+                      "slug": "gpt-5.4",
+                      "display_name": "GPT-5.4",
+                      "supported_in_api": true,
+                      "visibility": "list"
                     }
                   ]
                 }
@@ -1086,7 +1092,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             CancellationToken.None).ConfigureAwait(false);
 
         var lite = models.Single(static model => model.Id == "gpt-5.6-sol");
-        Assert.AreEqual(false, lite.Capabilities?["supportsReasoningSummaries"]);
+        Assert.AreEqual(true, lite.Capabilities?["supportsReasoningSummaries"]);
         Assert.AreEqual(false, lite.Capabilities?["supportVerbosity"]);
         Assert.AreEqual(false, lite.Capabilities?["supportsParallelToolCalls"]);
         Assert.AreEqual(false, lite.Capabilities?["supportsImageDetailOriginal"]);
@@ -1099,6 +1105,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(false, malformed.Capabilities?["supportsParallelToolCalls"]);
         Assert.AreEqual(false, malformed.Capabilities?["supportsImageDetailOriginal"]);
         Assert.AreEqual(false, malformed.Capabilities?["useResponsesLite"]);
+
+        var omitted = models.Single(static model => model.Id == "gpt-5.4");
+        Assert.AreEqual(true, omitted.Capabilities?["supportsReasoningSummaries"]);
     }
 
     [TestMethod]

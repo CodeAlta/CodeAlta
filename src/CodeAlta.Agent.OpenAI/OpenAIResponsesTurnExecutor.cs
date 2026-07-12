@@ -1310,10 +1310,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 (provider.CodexSubscription is not null ? request.ModelInfo?.DefaultReasoningEffort : null);
             var supportsEffectiveReasoningEffort = effectiveReasoningEffort is { } reasoningEffort &&
                 SupportsRequestedReasoningEffort(request, reasoningEffort);
-            var shouldRequestCodexSummary = provider.CodexSubscription is not null &&
-                explicitReasoningEffort is not AgentReasoningEffort.None &&
-                modelCapabilities.SupportsReasoningSummaries;
-            if (supportsEffectiveReasoningEffort || shouldRequestCodexSummary)
+            var shouldRequestSummary = explicitReasoningEffort is not AgentReasoningEffort.None &&
+                ((provider.CodexSubscription is not null && modelCapabilities.SupportsReasoningSummaries) ||
+                 (IsOfficialOpenAIResponsesEndpoint(provider) &&
+                  request.ModelInfo?.SupportedReasoningEfforts is { Count: > 0 }));
+            if (supportsEffectiveReasoningEffort || shouldRequestSummary)
             {
                 options.ReasoningOptions = new ResponseReasoningOptions
                 {
@@ -1323,9 +1324,17 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 };
                 if (provider.CodexSubscription is null || modelCapabilities.SupportsReasoningSummaries)
                 {
-                    options.ReasoningOptions.ReasoningSummaryVerbosity = ResponseReasoningSummaryVerbosity.Detailed;
+                    options.ReasoningOptions.ReasoningSummaryVerbosity =
+                        provider.CodexSubscription is not null || IsOfficialOpenAIResponsesEndpoint(provider)
+                            ? ResponseReasoningSummaryVerbosity.Auto
+                            : ResponseReasoningSummaryVerbosity.Detailed;
                 }
             }
+        }
+
+        if (options.ReasoningOptions is not null && IsOfficialOpenAIResponsesEndpoint(provider))
+        {
+            options.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
         }
 
         var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
@@ -1371,6 +1380,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
             supportedReasoningEfforts.Contains(reasoningEffort);
     }
 
+    private static bool IsOfficialOpenAIResponsesEndpoint(OpenAIProviderOptions provider)
+        => provider.CodexSubscription is null &&
+           !provider.IsAzureOpenAI &&
+           (provider.BaseUri is null ||
+            string.Equals(provider.BaseUri.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase));
+
     private ValueTask ApplyCodexSubscriptionRequestCustomizationAsync(
         AgentTurnRequest request,
         CreateResponseOptions options,
@@ -1399,7 +1414,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.Patch.Set("$.text.verbosity"u8, codexOptions.TextVerbosity);
         }
 
-        if (codexOptions.EnableSequentialCutoffReasoningSummaries)
+        if (codexOptions.EnableSequentialCutoffReasoningSummaries &&
+            options.ReasoningOptions?.ReasoningSummaryVerbosity is not null)
         {
             options.Patch.Set("$.stream_options.reasoning_summary_delivery"u8, "sequential_cutoff");
         }
@@ -1502,9 +1518,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     private static IEnumerable<ResponseItem> CreateAssistantItems(IReadOnlyList<AgentMessagePart> parts)
     {
+        var items = new List<ResponseItem>();
         var contentParts = new List<ResponseContentPart>();
-        var reasoningItems = new List<ResponseItem>();
-        var toolCalls = new List<ResponseItem>();
 
         foreach (var part in parts)
         {
@@ -1520,6 +1535,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     contentParts.Add(ResponseContentPart.CreateOutputTextPart(data.Name ?? data.MediaType ?? "attachment", []));
                     break;
                 case AgentMessagePart.Reasoning reasoning:
+                    FlushAssistantContent(items, contentParts);
                     var reasoningItem = reasoning.SummaryParts is { Count: > 0 } summaryParts
                         ? new ReasoningResponseItem(summaryParts.Select(ReasoningSummaryPart.CreateTextPart))
                         : ResponseItem.CreateReasoningItem(reasoning.Value ?? string.Empty);
@@ -1528,10 +1544,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         reasoningItem.EncryptedContent = reasoning.ProtectedData;
                     }
 
-                    reasoningItems.Add(reasoningItem);
+                    items.Add(reasoningItem);
                     break;
                 case AgentMessagePart.ToolCall toolCall:
-                    toolCalls.Add(
+                    FlushAssistantContent(items, contentParts);
+                    items.Add(
                         ResponseItem.CreateFunctionCallItem(
                             toolCall.CallId,
                             AgentToolBridge.GetRegisteredToolName(toolCall.Name),
@@ -1540,20 +1557,19 @@ internal sealed class OpenAIResponsesTurnExecutor(
             }
         }
 
-        if (contentParts.Count > 0)
+        FlushAssistantContent(items, contentParts);
+        return items;
+    }
+
+    private static void FlushAssistantContent(List<ResponseItem> items, List<ResponseContentPart> contentParts)
+    {
+        if (contentParts.Count == 0)
         {
-            yield return ResponseItem.CreateAssistantMessageItem(contentParts.ToArray());
+            return;
         }
 
-        foreach (var reasoningItem in reasoningItems)
-        {
-            yield return reasoningItem;
-        }
-
-        foreach (var toolCall in toolCalls)
-        {
-            yield return toolCall;
-        }
+        items.Add(ResponseItem.CreateAssistantMessageItem(contentParts.ToArray()));
+        contentParts.Clear();
     }
 
     private static IEnumerable<ResponseItem> CreateToolResultItems(IReadOnlyList<AgentMessagePart> parts)

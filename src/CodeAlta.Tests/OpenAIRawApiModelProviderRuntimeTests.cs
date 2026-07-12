@@ -119,7 +119,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsNull(responsesClient.Requests[1].Options.PreviousResponseId);
         Assert.IsNotNull(responsesClient.Requests[0].Options.ReasoningOptions);
         Assert.AreEqual(new ResponseReasoningEffortLevel("max"), responsesClient.Requests[0].Options.ReasoningOptions!.ReasoningEffortLevel);
-        Assert.AreEqual(ResponseReasoningSummaryVerbosity.Detailed, responsesClient.Requests[0].Options.ReasoningOptions.ReasoningSummaryVerbosity);
+        Assert.AreEqual(ResponseReasoningSummaryVerbosity.Auto, responsesClient.Requests[0].Options.ReasoningOptions.ReasoningSummaryVerbosity);
+        Assert.IsTrue(responsesClient.Requests[0].Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
         Assert.IsTrue(
             responsesClient.Requests[1].InputItems.OfType<FunctionCallOutputResponseItem>()
                 .Any(static item => item.CallId == "call-1" && item.FunctionOutput == "README contents"));
@@ -1639,6 +1640,61 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ReplaysReasoningMessagesAndToolCallsInOriginalOrder()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-ordered-replay", "gpt-test", "Done.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var provenance = new AgentReasoningProvenance(
+            "openai-responses",
+            "openai",
+            AgentTransportKind.OpenAIResponses,
+            "gpt-test");
+        var request = CreateTurnRequest() with
+        {
+            Conversation =
+            [
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("Inspect the file.")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Assistant,
+                    [
+                        new AgentMessagePart.Reasoning(
+                            "Checking the file.",
+                            "encrypted-reasoning",
+                            provenance,
+                            ["Checking the file."]),
+                        new AgentMessagePart.Text("I’ll inspect it now."),
+                        new AgentMessagePart.ToolCall(
+                            "call-read",
+                            "inspect_file",
+                            JsonDocument.Parse("""{"path":"README.md"}""").RootElement.Clone()),
+                    ]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Tool,
+                    [new AgentMessagePart.ToolResult("call-read", new AgentToolResult(true, [new AgentToolResultItem.Text("contents")]))]),
+            ],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var inputItems = responsesClient.Requests.Single().InputItems;
+        Assert.IsInstanceOfType<MessageResponseItem>(inputItems[0]);
+        var reasoning = Assert.IsInstanceOfType<ReasoningResponseItem>(inputItems[1]);
+        Assert.AreEqual("encrypted-reasoning", reasoning.EncryptedContent);
+        Assert.IsInstanceOfType<MessageResponseItem>(inputItems[2]);
+        Assert.IsInstanceOfType<FunctionCallResponseItem>(inputItems[3]);
+        Assert.IsInstanceOfType<FunctionCallOutputResponseItem>(inputItems[4]);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_MapsErrorUpdateToContextOverflowFailure()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
@@ -2206,7 +2262,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var reasoning = root.GetProperty("reasoning");
         Assert.IsTrue(reasoning.TryGetProperty("effort", out var effort), root.GetRawText());
         Assert.AreEqual("medium", effort.GetString());
-        Assert.AreEqual("detailed", reasoning.GetProperty("summary").GetString());
+        Assert.AreEqual("auto", reasoning.GetProperty("summary").GetString());
         Assert.AreEqual("all_turns", reasoning.GetProperty("context").GetString());
         Assert.IsFalse(root.TryGetProperty("stream_options", out _));
         var input = root.GetProperty("input").EnumerateArray().ToArray();
@@ -2248,7 +2304,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
         var reasoning = document.RootElement.GetProperty("reasoning");
-        Assert.AreEqual("detailed", reasoning.GetProperty("summary").GetString());
+        Assert.AreEqual("auto", reasoning.GetProperty("summary").GetString());
         Assert.IsFalse(reasoning.TryGetProperty("effort", out _));
     }
 
@@ -2283,7 +2339,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_GenericResponsesDoesNotApplyModelDefaultReasoningEffort()
+    public async Task OpenAIResponsesTurnExecutor_OfficialResponsesRequestsSummaryWithoutApplyingModelDefaultEffort()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
         [
@@ -2291,10 +2347,10 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
-            ProviderKey = "generic",
+            ProviderKey = "openai",
             ResponsesClientFactory = _ => responsesClient,
         });
-        var request = CreateCodexTurnRequest() with
+        var request = CreateTurnRequest() with
         {
             ModelId = "gpt-generic",
             ReasoningEffort = null,
@@ -2307,7 +2363,68 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var reasoning = document.RootElement.GetProperty("reasoning");
+        Assert.AreEqual("auto", reasoning.GetProperty("summary").GetString());
+        Assert.IsFalse(reasoning.TryGetProperty("effort", out _));
+        Assert.IsTrue(responsesClient.Requests.Single().Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_OfficialResponsesExplicitNoneDisablesReasoningSummary()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-openai-none", "gpt-reasoning", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with
+        {
+            ModelId = "gpt-reasoning",
+            ReasoningEffort = AgentReasoningEffort.None,
+            ModelInfo = new AgentModelInfo(
+                "gpt-reasoning",
+                DefaultReasoningEffort: AgentReasoningEffort.Medium,
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium]),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
         Assert.IsFalse(document.RootElement.TryGetProperty("reasoning", out _));
+        Assert.IsFalse(responsesClient.Requests.Single().Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CustomResponsesRetainsCompatibleReasoningShape()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-custom-reasoning", "gpt-custom", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "custom",
+            BaseUri = new Uri("https://responses.example.test/v1"),
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with
+        {
+            ModelId = "gpt-custom",
+            ReasoningEffort = AgentReasoningEffort.Medium,
+            ModelInfo = new AgentModelInfo(
+                "gpt-custom",
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium]),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var options = responsesClient.Requests.Single().Options;
+        Assert.AreEqual(ResponseReasoningSummaryVerbosity.Detailed, options.ReasoningOptions!.ReasoningSummaryVerbosity);
+        Assert.IsFalse(options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
     }
 
     [TestMethod]
@@ -2337,6 +2454,45 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(
             "sequential_cutoff",
             document.RootElement.GetProperty("stream_options").GetProperty("reasoning_summary_delivery").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotNegotiateSequentialCutoffWithoutRequestedSummary()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-no-summary-cutoff", "gpt-no-summary", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+                EnableSequentialCutoffReasoningSummaries = true,
+            },
+        });
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-no-summary",
+            ReasoningEffort = AgentReasoningEffort.Medium,
+            ModelInfo = new AgentModelInfo(
+                "gpt-no-summary",
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium],
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["supportsReasoningSummaries"] = false,
+                }),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual("medium", document.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.IsFalse(document.RootElement.GetProperty("reasoning").TryGetProperty("summary", out _));
+        Assert.IsFalse(document.RootElement.TryGetProperty("stream_options", out _));
     }
 
     [TestMethod]
