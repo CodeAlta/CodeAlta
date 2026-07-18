@@ -30,6 +30,9 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(plan.Body, "enqueue the execution turn with `--queue-if-busy`");
         StringAssert.Contains(plan.Body, "--same-model-as <session-id>");
         StringAssert.Contains(plan.Body, "--model-ref");
+        StringAssert.Contains(plan.Body, "only when the user explicitly asks for delegation or sub-sessions");
+        StringAssert.Contains(plan.Body, "all relevant child and descendant work");
+        StringAssert.Contains(plan.Body, "over-compression across nesting levels");
         StringAssert.Contains(plan.Body, "\"description\": \"Review the attached plan file before CodeAlta starts implementation.\"");
         StringAssert.Contains(plan.Body, "\"description\": \"Approve the plan and hand off to Default/build mode for execution.\"");
         StringAssert.Contains(plan.Body, "alta session set_agent --prompt-id default");
@@ -63,8 +66,11 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "GitHub-style blockquotes");
         StringAssert.Contains(defaultPrompt.Body, "commit the plan update with the implementation step it records");
         StringAssert.Contains(defaultPrompt.Body, "one writing child at a time");
-        StringAssert.Contains(defaultPrompt.Body, "simple or single-phase requests");
+        StringAssert.Contains(defaultPrompt.Body, "only when the user explicitly asks for delegation or sub-sessions");
+        StringAssert.Contains(defaultPrompt.Body, "complexity alone is not permission");
         StringAssert.Contains(defaultPrompt.Body, "Implementation children that write files must run sequentially");
+        StringAssert.Contains(defaultPrompt.Body, "all relevant child and descendant work");
+        StringAssert.Contains(defaultPrompt.Body, "over-compression across nesting levels");
         StringAssert.Contains(defaultPrompt.Body, "--same-model-as");
         StringAssert.Contains(defaultPrompt.Body, "--model-ref");
         StringAssert.Contains(defaultPrompt.Body, "alta reminder create --duration 00:05:00");

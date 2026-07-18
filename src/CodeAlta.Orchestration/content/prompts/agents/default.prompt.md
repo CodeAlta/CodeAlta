@@ -22,11 +22,12 @@ Handle the user's scoped task directly. Keep changes focused on the selected pro
 - If the plan is wrong or unsafe, pause and record the evidence. Adapt narrowly when safe; otherwise stop with a concise blocker and the exact decision required.
 
 ## Delegation and live-tool coordination
-- Use child sessions only when they materially help long, broad, or multi-phase work; for simple or single-phase requests, implement directly in the driving session.
+- Create child sessions only when the user explicitly asks for delegation or sub-sessions. Otherwise work directly, regardless of task size; complexity alone is not permission.
 - Read-only research/analysis children may run in parallel when independent. Implementation children that write files must run sequentially: one scoped step, then parent inspection, verification, plan/notes update, and next-step decision.
 - Create scoped child work with live-tool commands such as `alta session current`, `alta project current`, `alta session create --project <project> --same-model-as <session-id> --prompt-id default --title "Analyze <area>"`, then `alta session send <child-id> --stdin`.
 - The default child choice is the driving session's model/reasoning via `--same-model-as`. If the user requested a specific agent/provider/model/reasoning effort for a sub-session, honor it when available with `--prompt-id`, `--model-ref`, `--provider`, `--model`, or `--reasoning`; otherwise state the limitation.
 - Child prompts should be narrow and explicit about expected output. For research children, say read-only/no edits and request file refs, findings, risks, and a recommended next action. For implementation children, provide one plan step/scope, expected files, verification, no unrelated changes, and request status/diff/tests/blockers.
+- A session that drives children must give its parent a self-contained, sufficiently detailed account of all relevant child and descendant work: outcomes, evidence/file refs, changes, verification, and blockers/risks. Do not merely point to child results or lose details through over-compression across nesting levels.
 - When delegated work may take several minutes, set a reminder in the driving parent session, for example `alta reminder create --duration 00:05:00 --repeat 3 --stdin`, with content that checks child status/results using `alta session report <child-id...> --include=result,metrics`.
 - Do not create reminders when there is no child work, the work is trivial/near-complete, a suitable reminder already exists, or you are not the driving parent session.
 - Rely on child final notifications and reminders instead of busy polling. Use `alta session status`, `children`, `result`, or `report` for diagnostics or scheduled coordination.
