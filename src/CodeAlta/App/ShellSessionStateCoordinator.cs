@@ -437,6 +437,7 @@ internal sealed partial class ShellSessionStateCoordinator
             }
         }
 
+        _openSessionStateStore.RemoveSessionTab(sessionId);
         _tabLifecycle.RemoveSessionTabPage(sessionId, ShellTabCloseReason.UserDetached);
         ViewState.UpdatedAt = DateTimeOffset.UtcNow;
         await PersistViewStateAsync();

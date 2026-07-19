@@ -79,7 +79,10 @@ internal sealed class OpenSessionStateStore
     public void RemoveSessionTab(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        _sessionTabs.Remove(sessionId);
+        if (_sessionTabs.Remove(sessionId, out var tab))
+        {
+            ResetSessionTab(tab);
+        }
     }
 
     public void PruneRetainedSessionState(IReadOnlyList<SessionViewDescriptor> sessions)
@@ -94,7 +97,7 @@ internal sealed class OpenSessionStateStore
         {
             if (!knownSessionIds.Contains(sessionId))
             {
-                _sessionTabs.Remove(sessionId);
+                RemoveSessionTab(sessionId);
             }
         }
     }

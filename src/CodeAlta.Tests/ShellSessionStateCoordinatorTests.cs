@@ -210,7 +210,7 @@ public sealed class ShellSessionStateCoordinatorTests
     }
 
     [TestMethod]
-    public async Task CloseSessionTabAsync_RetainsSessionStateForReopen()
+    public async Task CloseSessionTabAsync_ReleasesSessionStateAndTimelineForReopen()
     {
         using var temp = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = temp.Path };
@@ -222,15 +222,22 @@ public sealed class ShellSessionStateCoordinatorTests
 
         var tab = coordinator.FindOpenSession(session.SessionId);
         Assert.IsNotNull(tab);
-        tab.Session.PromptDraftText = "keep this draft";
+        tab.Timeline.RenderOptimisticUserPrompt("Retained timeline content", DateTimeOffset.UtcNow);
+        Assert.IsNotEmpty(tab.Timeline.Flow.Items);
 
         var closeResult = await coordinator.CloseSessionTabAsync(session.SessionId).ConfigureAwait(false);
 
         Assert.AreEqual(TabCloseResult.Closed, closeResult);
-        var retained = coordinator.FindOpenSession(session.SessionId);
-        Assert.IsNotNull(retained);
-        Assert.AreEqual("keep this draft", retained.Session.PromptDraftText);
+        Assert.IsNull(coordinator.FindOpenSession(session.SessionId));
+        Assert.IsEmpty(tab.Timeline.Flow.Items);
         Assert.IsFalse(coordinator.ViewState.OpenSessionIds.Contains(session.SessionId, StringComparer.OrdinalIgnoreCase));
+
+        Assert.AreEqual(OpenSessionResult.Opened, coordinator.OpenSession(session.SessionId));
+        var reopenedTab = coordinator.FindOpenSession(session.SessionId);
+        Assert.IsNotNull(reopenedTab);
+        Assert.AreNotSame(tab, reopenedTab);
+        Assert.AreNotSame(tab.Timeline, reopenedTab.Timeline);
+        Assert.IsEmpty(reopenedTab.Timeline.Flow.Items);
     }
 
     [TestMethod]
