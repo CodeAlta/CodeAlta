@@ -381,6 +381,8 @@ internal sealed class SidebarView
             {
                 HorizontalAlignment = Align.Stretch,
                 VerticalAlignment = Align.Stretch,
+                HorizontalScrollEnabled = false,
+                VerticalScrollEnabled = false,
                 Options = MarkdownRenderOptions.Default with
                 {
                     WrapCodeBlocks = true,

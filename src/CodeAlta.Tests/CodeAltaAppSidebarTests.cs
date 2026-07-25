@@ -453,7 +453,7 @@ public sealed class CodeAltaAppSidebarTests
     }
 
     [TestMethod]
-    public void SidebarView_NotesGroupUsesMarkdownControlAndUpdatesMarkdown()
+    public void SidebarView_NotesGroupUsesSingleScrollingHostAndUpdatesMarkdown()
     {
         var notesService = new AltaNotesService(static () => "session-notes");
         var caller = new AltaCallerIdentity { Kind = "host", SourceSessionId = "session-notes" };
@@ -465,6 +465,9 @@ public sealed class CodeAltaAppSidebarTests
 
         Assert.AreEqual("# Initial", markdown.Markdown);
         Assert.IsFalse(scrollViewer.HorizontalScrollEnabled);
+        Assert.IsTrue(scrollViewer.VerticalScrollEnabled);
+        Assert.IsFalse(markdown.HorizontalScrollEnabled);
+        Assert.IsFalse(markdown.VerticalScrollEnabled);
         Assert.IsTrue(markdown.Options.WrapCodeBlocks);
 
         view.SetNotesMarkdown("- [x] Done");
