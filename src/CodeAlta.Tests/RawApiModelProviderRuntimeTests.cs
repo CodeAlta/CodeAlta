@@ -65,6 +65,7 @@ public sealed class RawApiModelProviderRuntimeTests
                             Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
                             {
                                 ["maxInputTokens"] = 200000L,
+                                 ["outputTokenLimit"] = 64000L,
                             }),
                     ]),
                 },
@@ -95,6 +96,7 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.AreEqual(24L, usageEvent.Usage?.LastOperation?.InputTokens + usageEvent.Usage?.LastOperation?.OutputTokens);
         Assert.AreEqual(200000L, usageEvent.Usage?.TokenLimit);
         Assert.IsNotNull(client.LastOptions);
+        Assert.AreEqual(64000, client.LastOptions.MaxOutputTokens);
         StringAssert.Contains(client.LastOptions.Instructions, "System instructions");
 
         await using var resumed = await providerRuntime.ResumeSessionAsync(
@@ -164,6 +166,7 @@ public sealed class RawApiModelProviderRuntimeTests
                             Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
                             {
                                 ["maxInputTokens"] = 204800L,
+                                 ["outputTokenLimit"] = 64000L,
                             }),
                     ]),
                 },
@@ -219,7 +222,13 @@ public sealed class RawApiModelProviderRuntimeTests
                     ChatClientFactory = () => client,
                     ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [
-                        new AgentModelInfo("claude-opus-4-7", DisplayName: "Claude Opus 4.7"),
+                        new AgentModelInfo(
+                            "claude-opus-4-7",
+                            DisplayName: "Claude Opus 4.7",
+                            Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                            {
+                                ["outputTokenLimit"] = 64000L,
+                            }),
                     ]),
                 },
             },
@@ -242,8 +251,62 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.IsNotNull(createParams.Thinking);
         Assert.IsTrue(createParams.Thinking.TryPickAdaptive(out var adaptive));
         Assert.IsNotNull(adaptive);
+        Assert.AreEqual(64000L, createParams.MaxTokens);
         Assert.AreEqual(AnthropicDisplay.Summarized, adaptive.Display?.Value());
         Assert.AreEqual(AnthropicEffort.High, createParams.OutputConfig?.Effort?.Value());
+    }
+
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_PreservesExplicitMaxOutputTokens()
+    {
+        var client = new RecordingChatClient(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Anthropic answer.")]),
+        ]);
+        var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
+        {
+            ProviderKey = "anthropic",
+            ChatClientFactory = () => client,
+        });
+        var request = CreateAnthropicTurnRequest(
+            maxOutputTokens: 4096,
+            modelInfo: new AgentModelInfo(
+                "claude-sonnet-test",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["outputTokenLimit"] = 64000L,
+                }));
+
+        _ = await executor.ExecuteTurnAsync(
+            request,
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(4096, client.LastOptions?.MaxOutputTokens);
+    }
+
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_RejectsMissingMaxOutputTokensBeforeSending()
+    {
+        var client = new RecordingChatClient(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Anthropic answer.")]),
+        ]);
+        var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
+        {
+            ProviderKey = "anthropic",
+            ChatClientFactory = () => client,
+        });
+        var request = CreateAnthropicTurnRequest(
+            maxOutputTokens: null,
+            modelInfo: new AgentModelInfo("claude-sonnet-test"));
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => executor.ExecuteTurnAsync(
+            request,
+            static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+
+        StringAssert.Contains(exception.Message, "does not declare a maximum output-token limit");
+        StringAssert.Contains(exception.Message, "output_token_limit");
+        Assert.IsNull(client.LastOptions);
     }
 
     [TestMethod]
@@ -273,7 +336,13 @@ public sealed class RawApiModelProviderRuntimeTests
                     ChatClientFactory = () => client,
                     ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [
-                        new AgentModelInfo("claude-opus-4-6", DisplayName: "Claude Opus 4.6"),
+                        new AgentModelInfo(
+                            "claude-opus-4-6",
+                            DisplayName: "Claude Opus 4.6",
+                            Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                            {
+                                ["outputTokenLimit"] = 64000L,
+                            }),
                     ]),
                 },
             },
@@ -328,7 +397,13 @@ public sealed class RawApiModelProviderRuntimeTests
                     ChatClientFactory = () => client,
                     ModelListAsync = _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>(
                     [
-                        new AgentModelInfo(modelId, DisplayName: displayName),
+                        new AgentModelInfo(
+                            modelId,
+                            DisplayName: displayName,
+                            Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                            {
+                                ["outputTokenLimit"] = 64000L,
+                            }),
                     ]),
                 },
             },
@@ -400,6 +475,20 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.IsNotNull(options.RawRepresentationFactory);
         var createParams = Assert.IsInstanceOfType<AnthropicMessageCreateParams>(options.RawRepresentationFactory(new RecordingChatClient([])));
         Assert.AreEqual(AnthropicEffort.Xhigh, createParams.OutputConfig?.Effort?.Value());
+    }
+
+    [TestMethod]
+    public async Task AnthropicAdaptiveThinkingChatClient_RejectsMissingMaxOutputTokens()
+    {
+        var options = await CaptureAnthropicOptionsAsync(
+            "claude-opus-4-7",
+            ReasoningEffort.High,
+            maxOutputTokens: null).ConfigureAwait(false);
+
+        Assert.IsNotNull(options.RawRepresentationFactory);
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            options.RawRepresentationFactory(new RecordingChatClient([])));
+        StringAssert.Contains(exception.Message, "requires an explicit maximum output-token limit");
     }
 
     [TestMethod]
@@ -489,7 +578,40 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.AreEqual("google-signature", reasoningPart.ProtectedData);
     }
 
-    private static async Task<ChatOptions> CaptureAnthropicOptionsAsync(string modelId, ReasoningEffort reasoningEffort)
+    private static AgentTurnRequest CreateAnthropicTurnRequest(int? maxOutputTokens, AgentModelInfo modelInfo)
+        => new()
+        {
+            Provider = new ModelProviderRuntimeDescriptor
+            {
+                ProtocolFamily = "anthropic-messages",
+                ProviderKey = "anthropic",
+                DisplayName = "Anthropic",
+                TransportKind = AgentTransportKind.AnthropicMessages,
+            },
+            ProviderId = new ModelProviderId("anthropic"),
+            SessionId = "session-test",
+            RunId = new AgentRunId("run-test"),
+            ModelId = modelInfo.Id,
+            ModelInfo = modelInfo,
+            MaxOutputTokens = maxOutputTokens,
+            Conversation =
+            [
+                new AgentConversationMessage(
+                    AgentConversationRole.User,
+                    [new AgentMessagePart.Text("Hello")]),
+            ],
+            Tools = [],
+            State = new AgentSessionState
+            {
+                SessionId = "session-test",
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+        };
+
+    private static async Task<ChatOptions> CaptureAnthropicOptionsAsync(
+        string modelId,
+        ReasoningEffort reasoningEffort,
+        int? maxOutputTokens = 64000)
     {
         var inner = new RecordingChatClient(
         [
@@ -507,6 +629,7 @@ public sealed class RawApiModelProviderRuntimeTests
             new ChatOptions
             {
                 ModelId = modelId,
+                 MaxOutputTokens = maxOutputTokens,
                 Reasoning = new ReasoningOptions
                 {
                     Effort = reasoningEffort,

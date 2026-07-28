@@ -101,7 +101,31 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     {
         return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
-            (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken));
+            (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
+            configureOptions: ConfigureOptions);
+    }
+
+    private static void ConfigureOptions(AgentTurnRequest request, ChatOptions options)
+    {
+        if (options.MaxOutputTokens is not null)
+        {
+            return;
+        }
+
+        var tokenBudget = AgentTokenBudgetResolver.Resolve(
+            request.ModelInfo,
+            request.Provider.Compaction ?? AgentCompactionSettings.Default);
+        if (tokenBudget.MaxOutputTokens is > 0)
+        {
+            options.MaxOutputTokens = (int)Math.Min(tokenBudget.MaxOutputTokens.Value, int.MaxValue);
+            return;
+        }
+
+        var modelId = string.IsNullOrWhiteSpace(request.ModelId) ? "<unknown>" : request.ModelId;
+        throw new AgentTurnExecutionException(new AgentTurnFailure(
+            $"Anthropic model '{modelId}' does not declare a maximum output-token limit. " +
+            "Configure output_token_limit in the provider's model_overrides settings.",
+            IsContextOverflow: false));
     }
 
     private static ValueTask<IChatClient> CreateChatClientAsync(

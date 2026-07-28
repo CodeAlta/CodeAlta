@@ -331,6 +331,8 @@ api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
 
 Anthropic-compatible providers can use the same type with a custom `api_url` and, when needed, `single_model_id`.
 
+CodeAlta always sends an explicit Anthropic output-token limit, using the selected model's discovered or configured metadata instead of the SDK's small default. If a custom model does not publish this metadata, configure `output_token_limit` under its `model_overrides` entry; CodeAlta reports a configuration error rather than silently limiting the response to 1,024 tokens.
+
 ### Gemini / Google GenAI
 
 Use `google-genai` for the Gemini API with an API key. Leave `model` unset

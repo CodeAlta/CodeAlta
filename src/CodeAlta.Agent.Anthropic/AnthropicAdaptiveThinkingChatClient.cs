@@ -8,8 +8,6 @@ namespace CodeAlta.Agent.Anthropic;
 
 internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : IChatClient
 {
-    private const int DefaultMaxTokens = 1024;
-
     public void Dispose() => inner.Dispose();
 
     public object? GetService(System.Type serviceType, object? serviceKey = null)
@@ -54,7 +52,8 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : I
 
             createParams ??= new MessageCreateParams
             {
-                MaxTokens = options.MaxOutputTokens ?? DefaultMaxTokens,
+                MaxTokens = options.MaxOutputTokens ?? throw new InvalidOperationException(
+                    "Anthropic adaptive thinking requires an explicit maximum output-token limit."),
                 Messages = [],
                 Model = options.ModelId!,
             };

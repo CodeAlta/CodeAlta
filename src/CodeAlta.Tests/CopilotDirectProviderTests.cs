@@ -553,6 +553,7 @@ public sealed class CopilotDirectProviderTests
                         {
                             ["copilotEndpointKind"] = "AnthropicMessages",
                             ["family"] = "claude",
+                             ["outputTokenLimit"] = 64000L,
                         }),
                     Conversation =
                     [
@@ -661,6 +662,7 @@ public sealed class CopilotDirectProviderTests
                         {
                             ["copilotEndpointKind"] = "AnthropicMessages",
                             ["family"] = "claude",
+                             ["outputTokenLimit"] = 64000L,
                         }),
                     Conversation =
                     [
