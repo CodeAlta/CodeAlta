@@ -24,6 +24,8 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
     private const string WebSocketWrappedErrorDataKey = "OpenAI.WebSocketWrappedError";
     private const string WebSocketConnectionLimitReachedCode = "websocket_connection_limit_reached";
     private const string WebSocketConnectionLimitReachedMessage = "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.";
+    private const string PreviousResponseNotFoundCode = "previous_response_not_found";
+    private const string PreviousResponseNotFoundMessage = "Previous response was not found. Retrying the full request.";
     private static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(15);
 
     private readonly Uri _baseUri;
@@ -373,7 +375,9 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
 
                     if (result.MessageType != WebSocketMessageType.Text)
                     {
-                        throw new InvalidOperationException("Codex subscription WebSocket returned a non-text frame.");
+                        throw new OpenAIResponsesProtocolException(
+                            OpenAIResponsesProtocolErrorCode.UnexpectedBinaryFrame,
+                            "Codex subscription WebSocket returned a non-text frame.");
                     }
 
                     stream.Write(buffer, 0, result.Count);
@@ -398,32 +402,62 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         ArgumentNullException.ThrowIfNull(webSocket);
         ArgumentNullException.ThrowIfNull(uri);
 
-        if (connectTimeout == Timeout.InfiniteTimeSpan)
-        {
-            await webSocket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        if (connectTimeout <= TimeSpan.Zero)
+        if (connectTimeout != Timeout.InfiniteTimeSpan && connectTimeout <= TimeSpan.Zero)
         {
             throw new OpenAIResponsesTransportException(
                 OpenAIResponsesTransportErrorCode.WebSocketConnectTimeout,
                 "Codex subscription WebSocket did not connect before the configured connect timeout elapsed.");
         }
 
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(connectTimeout);
+        using CancellationTokenSource? timeoutSource = connectTimeout == Timeout.InfiniteTimeSpan
+            ? null
+            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource?.CancelAfter(connectTimeout);
         try
         {
-            await webSocket.ConnectAsync(uri, timeoutSource.Token).ConfigureAwait(false);
+            await webSocket.ConnectAsync(uri, timeoutSource?.Token ?? cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (
+            timeoutSource is not null &&
+            !cancellationToken.IsCancellationRequested &&
+            timeoutSource.IsCancellationRequested)
         {
             throw new OpenAIResponsesTransportException(
                 OpenAIResponsesTransportErrorCode.WebSocketConnectTimeout,
                 $"Codex subscription WebSocket did not connect within {connectTimeout}.",
                 ex);
         }
+        catch (WebSocketException ex)
+        {
+            // Preserve the upgrade response status so retry, credential refresh, and HTTP fallback
+            // classification can treat handshake failures like the equivalent HTTP responses.
+            throw CreateHandshakeFailureException(webSocket, ex);
+        }
+    }
+
+    internal static Exception CreateHandshakeFailureException(
+        ClientWebSocket webSocket,
+        WebSocketException exception)
+    {
+        ArgumentNullException.ThrowIfNull(webSocket);
+        ArgumentNullException.ThrowIfNull(exception);
+
+        var statusCode = webSocket.HttpStatusCode;
+        var message = statusCode == default
+            ? $"Codex subscription WebSocket handshake failed: {exception.Message}"
+            : $"Codex subscription WebSocket handshake failed with HTTP {(int)statusCode}: {exception.Message}";
+        var failure = statusCode is >= HttpStatusCode.BadRequest and <= (HttpStatusCode)599
+            ? new HttpRequestException(message, exception, statusCode)
+            : new HttpRequestException(message, exception);
+        foreach (var name in new[] { "Retry-After", "x-request-id", "x-oai-request-id", "cf-ray" })
+        {
+            if (TryGetHeaderValue(webSocket.HttpResponseHeaders, name, out var value))
+            {
+                failure.Data[name] = value;
+            }
+        }
+
+        return failure;
     }
 
     internal static async Task<WebSocketReceiveResult> ReceiveFrameWithIdleTimeoutAsync(
@@ -702,10 +736,9 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         var message = GetNestedString(errorEvent, "error", "message") ??
                       GetString(errorEvent, "message");
 
-        if (string.Equals(code, WebSocketConnectionLimitReachedCode, StringComparison.Ordinal))
+        if (TryGetRetryableWrappedErrorMessage(code, message, out var retryableMessage))
         {
-            var retryable = new HttpRequestException(
-                string.IsNullOrWhiteSpace(message) ? WebSocketConnectionLimitReachedMessage : message);
+            var retryable = new HttpRequestException(retryableMessage);
             PopulateWebSocketErrorData(retryable, errorEvent, payload, code, errorType);
             return retryable;
         }
@@ -724,6 +757,28 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
             CreateWrappedWebSocketErrorMessage(null, code, errorType, message));
         PopulateWebSocketErrorData(protocolException, errorEvent, payload, code, errorType);
         return protocolException;
+    }
+
+    /// <summary>
+    /// Maps wrapped error codes that the service expects the client to recover from by opening a new
+    /// connection and resending the full request, instead of failing the turn.
+    /// </summary>
+    private static bool TryGetRetryableWrappedErrorMessage(string? code, string? message, out string retryableMessage)
+    {
+        var fallbackMessage = code switch
+        {
+            WebSocketConnectionLimitReachedCode => WebSocketConnectionLimitReachedMessage,
+            PreviousResponseNotFoundCode => PreviousResponseNotFoundMessage,
+            _ => null,
+        };
+        if (fallbackMessage is null)
+        {
+            retryableMessage = string.Empty;
+            return false;
+        }
+
+        retryableMessage = string.IsNullOrWhiteSpace(message) ? fallbackMessage : message;
+        return true;
     }
 
     private static string CreateWrappedWebSocketErrorMessage(

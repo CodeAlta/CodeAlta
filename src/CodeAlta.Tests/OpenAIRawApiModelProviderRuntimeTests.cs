@@ -3088,6 +3088,85 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketHandshakeServiceUnavailableRetriesThenFallsBackToHttp()
+    {
+        var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
+            WithZeroRetryAfter(new HttpRequestException(
+                "Codex subscription WebSocket handshake failed with HTTP 503: The server returned status code '503' when status code '101' was expected.",
+                new WebSocketException("The server returned status code '503' when status code '101' was expected."),
+                HttpStatusCode.ServiceUnavailable)));
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-handshake-fallback",
+                    modelId: "gpt-5.3-codex",
+                    text: "Fallback answer.",
+                    reasoningText: "Recovered over HTTP.",
+                    encryptedReasoning: null),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(6, webSocketSession.RequestCount);
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketUnexpectedBinaryFrameRetriesThenFallsBackToHttp()
+    {
+        var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
+            WithZeroRetryAfter(new OpenAIResponsesProtocolException(
+                OpenAIResponsesProtocolErrorCode.UnexpectedBinaryFrame,
+                "Codex subscription WebSocket returned a non-text frame.")));
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-binary-frame-fallback",
+                    modelId: "gpt-5.3-codex",
+                    text: "Fallback answer.",
+                    reasoningText: "Recovered over HTTP.",
+                    encryptedReasoning: null),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(6, webSocketSession.RequestCount);
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CodexWebSocketAbruptCloseFallsBackAfterRetriesBeforeVisibleOutput()
     {
         var webSocketSession = new PartiallyFailingOpenAIResponsesWebSocketSession(

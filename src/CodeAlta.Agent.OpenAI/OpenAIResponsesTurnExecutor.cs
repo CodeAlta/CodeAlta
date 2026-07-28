@@ -2630,6 +2630,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 OpenAIResponsesProtocolErrorCode.StreamCompletedWithoutTerminalPayload => "stream_closed_before_terminal",
                 OpenAIResponsesProtocolErrorCode.TerminalResponseWithoutAssistantOutput => "terminal_response_without_assistant_output",
                 OpenAIResponsesProtocolErrorCode.UnsupportedTerminalResponseUpdate => "unsupported_terminal_response_update",
+                OpenAIResponsesProtocolErrorCode.UnexpectedBinaryFrame => "unexpected_binary_frame",
                 _ => "responses_protocol_error",
             };
         }
@@ -2741,7 +2742,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         if (TryGetOpenAIResponsesProtocolError(exception, out var protocolErrorCode) &&
-            protocolErrorCode is OpenAIResponsesProtocolErrorCode.TerminalResponseWithoutAssistantOutput)
+            protocolErrorCode is OpenAIResponsesProtocolErrorCode.TerminalResponseWithoutAssistantOutput or
+                OpenAIResponsesProtocolErrorCode.UnexpectedBinaryFrame)
         {
             return true;
         }

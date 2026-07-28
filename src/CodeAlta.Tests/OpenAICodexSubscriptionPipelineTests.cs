@@ -2,6 +2,7 @@
 
 using System.ClientModel.Primitives;
 using System.Net;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Text.Json;
@@ -425,6 +426,55 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsNull(httpException.StatusCode);
         Assert.AreEqual("websocket_connection_limit_reached", httpException.Data["OpenAI.WebSocketErrorCode"]);
         StringAssert.Contains(httpException.Message, "connection limit");
+    }
+
+    [TestMethod]
+    public void WebSocketSession_MapsPreviousResponseNotFoundAsRetryableWithoutHttpStatus()
+    {
+        var mapped = TryCreateWebSocketResponseUpdateMessage(
+            BinaryData.FromString(
+                """
+                {
+                  "type": "error",
+                  "status": 400,
+                  "error": {
+                    "type": "invalid_request_error",
+                    "code": "previous_response_not_found",
+                    "message": "Previous response not found."
+                  }
+                }
+                """),
+            out _,
+            out var eventType,
+            out var exception);
+
+        Assert.IsFalse(mapped);
+        Assert.AreEqual("error", eventType);
+        var httpException = Assert.IsInstanceOfType<HttpRequestException>(exception);
+        Assert.IsNull(httpException.StatusCode);
+        Assert.AreEqual("previous_response_not_found", httpException.Data["OpenAI.WebSocketErrorCode"]);
+        StringAssert.Contains(httpException.Message, "Previous response not found.");
+    }
+
+    [TestMethod]
+    public async Task WebSocketSession_MapsHandshakeStatusToHttpRequestException()
+    {
+        await using var server = FailingWebSocketHandshakeServer.Start(HttpStatusCode.ServiceUnavailable, retryAfterSeconds: "3");
+        using var webSocket = new ClientWebSocket();
+        webSocket.Options.CollectHttpResponseDetails = true;
+
+        var exception = await Assert.ThrowsExactlyAsync<HttpRequestException>(
+                () => OpenAICodexSubscriptionWebSocketSession.ConnectWithTimeoutAsync(
+                    webSocket,
+                    server.WebSocketUri,
+                    TimeSpan.FromSeconds(15),
+                    CancellationToken.None))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
+        Assert.AreEqual("3", exception.Data["Retry-After"]);
+        Assert.IsInstanceOfType<WebSocketException>(exception.InnerException);
+        StringAssert.Contains(exception.Message, "503");
     }
 
     [TestMethod]
@@ -1642,6 +1692,79 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             bool endOfMessage,
             CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Answers the WebSocket upgrade with an ordinary HTTP error response, like the Codex endpoint
+    /// does when the responses WebSocket is unavailable.
+    /// </summary>
+    private sealed class FailingWebSocketHandshakeServer : IAsyncDisposable
+    {
+        private readonly HttpListener _listener = new();
+        private readonly CancellationTokenSource _shutdown = new();
+        private readonly Task _acceptLoop;
+
+        private FailingWebSocketHandshakeServer(HttpStatusCode statusCode, string? retryAfterSeconds)
+        {
+            var port = GetFreeLoopbackPort();
+            var baseUri = new Uri($"http://127.0.0.1:{port}/", UriKind.Absolute);
+            WebSocketUri = new Uri($"ws://127.0.0.1:{port}/responses", UriKind.Absolute);
+            _listener.Prefixes.Add(baseUri.ToString());
+            _listener.Start();
+            _acceptLoop = Task.Run(() => AcceptLoopAsync(statusCode, retryAfterSeconds));
+        }
+
+        public Uri WebSocketUri { get; }
+
+        public static FailingWebSocketHandshakeServer Start(HttpStatusCode statusCode, string? retryAfterSeconds = null)
+            => new(statusCode, retryAfterSeconds);
+
+        public async ValueTask DisposeAsync()
+        {
+            await _shutdown.CancelAsync().ConfigureAwait(false);
+            _listener.Stop();
+            try
+            {
+                await _acceptLoop.ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or HttpListenerException)
+            {
+            }
+
+            _listener.Close();
+            _shutdown.Dispose();
+        }
+
+        private static int GetFreeLoopbackPort()
+        {
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+
+        private async Task AcceptLoopAsync(HttpStatusCode statusCode, string? retryAfterSeconds)
+        {
+            while (!_shutdown.IsCancellationRequested)
+            {
+                HttpListenerContext context;
+                try
+                {
+                    context = await _listener.GetContextAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
+                {
+                    return;
+                }
+
+                context.Response.StatusCode = (int)statusCode;
+                if (retryAfterSeconds is not null)
+                {
+                    context.Response.Headers["Retry-After"] = retryAfterSeconds;
+                }
+
+                context.Response.Close();
+            }
+        }
     }
 
     private sealed class TempDirectory(string path) : IDisposable
