@@ -3128,6 +3128,71 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketRetryUpdatesStayWithinBudgetAndReportTransportFallback()
+    {
+        var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
+            WithZeroRetryAfter(new HttpRequestException(
+                "Codex subscription WebSocket handshake failed with HTTP 503.",
+                new WebSocketException("The server returned status code '503' when status code '101' was expected."),
+                HttpStatusCode.ServiceUnavailable)));
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-retry-budget",
+                    modelId: "gpt-5.3-codex",
+                    text: "Fallback answer.",
+                    reasoningText: "Recovered over HTTP.",
+                    encryptedReasoning: null),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest(),
+                static (_, _) => ValueTask.CompletedTask,
+                (update, _) =>
+                {
+                    sessionUpdates.Add(update);
+                    return ValueTask.CompletedTask;
+                })
+            .ConfigureAwait(false);
+
+        var reconnectMessages = sessionUpdates
+            .Where(static update => update.Kind == AgentSessionUpdateKind.Reconnecting)
+            .Select(static update => update.Message)
+            .ToList();
+
+        // The first WebSocket retry stays silent, and no reconnect update exceeds the retry budget.
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "Reconnecting to ChatGPT/Codex... 2/5",
+                "Reconnecting to ChatGPT/Codex... 3/5",
+                "Reconnecting to ChatGPT/Codex... 4/5",
+                "Reconnecting to ChatGPT/Codex... 5/5",
+            },
+            reconnectMessages);
+
+        var fallbackUpdate = sessionUpdates.Single(static update => update.Kind == AgentSessionUpdateKind.Warning);
+        StringAssert.StartsWith(fallbackUpdate.Message, "Falling back from WebSocket to HTTP transport for ChatGPT/Codex.");
+        Assert.IsTrue(fallbackUpdate.Details.HasValue);
+        Assert.AreEqual("websocket", fallbackUpdate.Details.Value.GetProperty("transport").GetString());
+        Assert.AreEqual("http", fallbackUpdate.Details.Value.GetProperty("fallbackTransport").GetString());
+        Assert.AreEqual(5, fallbackUpdate.Details.Value.GetProperty("maxRetries").GetInt32());
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CodexWebSocketUnexpectedBinaryFrameRetriesThenFallsBackToHttp()
     {
         var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(

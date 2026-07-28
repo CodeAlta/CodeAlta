@@ -23,7 +23,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
     private static readonly ResponseReasoningEffortLevel XHighReasoningEffortLevel = new("xhigh");
     private static readonly ResponseReasoningEffortLevel MaxReasoningEffortLevel = new("max");
-    private static readonly TimeSpan CodexBaseRetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan CodexBaseRetryDelay = TimeSpan.FromMilliseconds(200);
     private static readonly TimeSpan DefaultWebSocketIdleTimeout = TimeSpan.FromMinutes(5);
     private static readonly Random SharedRandom = Random.Shared;
     private const string WebSocketErrorCodeDataKey = "OpenAI.WebSocketErrorCode";
@@ -464,8 +464,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     ex,
                     attempt,
                     retryBudget,
-                    activatedHttpFallbackAfterWebSocketRetries,
-                    out var fallbackDelay))
+                    activatedHttpFallbackAfterWebSocketRetries))
                 {
                     ClearLiveContinuation(request.SessionId);
                     MarkWebSocketHttpFallback(request.SessionId);
@@ -478,10 +477,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         httpStatus: GetHttpStatusCode(ex),
                         errorType: ex.GetType().Name);
                     await onSessionUpdate(
-                            CreateCodexReconnectSessionUpdate(request, attemptState, attempt, retryBudget, ex, initialTransport),
+                            CreateCodexTransportFallbackSessionUpdate(request, attemptState, retryBudget, ex),
                             cancellationToken)
                         .ConfigureAwait(false);
-                    await Task.Delay(fallbackDelay, cancellationToken).ConfigureAwait(false);
                     attempt = 0;
                 }
                 catch (Exception ex) when (ShouldRetryCodexSubscriptionRequest(
@@ -504,10 +502,14 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         attempt,
                         httpStatus: GetHttpStatusCode(ex),
                         errorType: ex.GetType().Name);
-                    await onSessionUpdate(
-                            CreateCodexReconnectSessionUpdate(request, attemptState, attempt, retryBudget, ex, initialTransport),
-                            cancellationToken)
-                        .ConfigureAwait(false);
+                    if (ShouldReportCodexRetry(attempt, initialTransport))
+                    {
+                        await onSessionUpdate(
+                                CreateCodexReconnectSessionUpdate(request, attemptState, attempt, retryBudget, ex, initialTransport),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
                     await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -2521,10 +2523,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         Exception exception,
         int attempt,
         int retryBudget,
-        bool alreadyActivatedFallback,
-        out TimeSpan delay)
+        bool alreadyActivatedFallback)
     {
-        delay = TimeSpan.Zero;
         if (provider.CodexSubscription is null ||
             transport != OpenAIResponsesTransport.WebSocket ||
             alreadyActivatedFallback ||
@@ -2537,9 +2537,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return false;
         }
 
-        delay = GetRetryAfterDelay(exception) ?? GetExponentialBackoffDelay(attempt);
         return true;
     }
+
+    // Codex hides the first WebSocket reconnect notification because short socket drops are
+    // common and self-healing; later WebSocket retries and all HTTP retries stay visible.
+    private static bool ShouldReportCodexRetry(int attempt, OpenAIResponsesTransport transport)
+        => attempt > 1 || transport != OpenAIResponsesTransport.WebSocket;
 
     private static AgentTurnSessionUpdate CreateCodexReconnectSessionUpdate(
         AgentTurnRequest request,
@@ -2558,6 +2562,51 @@ internal sealed class OpenAIResponsesTurnExecutor(
             Message = $"Reconnecting to ChatGPT/Codex... {retryText}/{maxRetriesText}",
             Details = CreateCodexReconnectDetails(request, attemptState, retryAttempt, retryBudget, exception, transport),
         };
+    }
+
+    private static AgentTurnSessionUpdate CreateCodexTransportFallbackSessionUpdate(
+        AgentTurnRequest request,
+        CodexStreamAttemptState attemptState,
+        int retryBudget,
+        Exception exception)
+        => new()
+        {
+            Kind = AgentSessionUpdateKind.Warning,
+            Message = $"Falling back from WebSocket to HTTP transport for ChatGPT/Codex. {exception.Message}",
+            Details = CreateCodexTransportFallbackDetails(request, attemptState, retryBudget, exception),
+        };
+
+    private static JsonElement CreateCodexTransportFallbackDetails(
+        AgentTurnRequest request,
+        CodexStreamAttemptState attemptState,
+        int retryBudget,
+        Exception exception)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("provider", "codex");
+            writer.WriteString("transport", "websocket");
+            writer.WriteString("fallbackTransport", "http");
+            writer.WriteNumber("maxRetries", Math.Max(retryBudget - 1, 1));
+            writer.WriteString("runId", request.RunId.Value);
+            writer.WriteString("draftAttemptId", attemptState.DraftAttemptId);
+            writer.WriteBoolean("discardDraft", attemptState.HasEmittedVisibleDelta);
+            writer.WriteString("reason", GetRetryReason(exception));
+            if (TryGetResponsesErrorCode(exception, out var errorCode))
+            {
+                writer.WriteString("errorCode", errorCode);
+            }
+            else
+            {
+                writer.WriteNull("errorCode");
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
     private static AgentTurnSessionUpdate CreateCodexConcurrencyLimitWaitSessionUpdate(
@@ -3210,10 +3259,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     private static TimeSpan GetExponentialBackoffDelay(int attempt)
     {
+        // Mirrors Codex `backoff()`: 200ms base, doubling per retry, multiplicative 0.9-1.1 jitter.
         var exponent = Math.Max(attempt - 1, 0);
         var baseDelay = CodexBaseRetryDelay.TotalMilliseconds * Math.Pow(2, exponent);
-        var jitter = SharedRandom.Next(0, 125);
-        return TimeSpan.FromMilliseconds(Math.Min(baseDelay + jitter, 2_000));
+        var jitter = 0.9 + (SharedRandom.NextDouble() * 0.2);
+        return TimeSpan.FromMilliseconds(baseDelay * jitter);
     }
 
     private static bool IsContextOverflowMessage(string? message)
