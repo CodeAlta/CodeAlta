@@ -109,4 +109,6 @@ public sealed class AnthropicProviderOptions
     internal string? AuthToken { get; set; }
 
     internal HttpClient? HttpClient { get; set; }
+
+    internal Func<DelegatingHandler>? HttpHandlerFactory { get; set; }
 }

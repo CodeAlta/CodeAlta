@@ -239,6 +239,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         {
             options.HttpClient = provider.HttpClient;
         }
+        if (provider.HttpHandlerFactory is not null)
+        {
+            options.Handlers = [provider.HttpHandlerFactory()];
+        }
 
         if (provider.BaseUri is not null)
         {
@@ -272,14 +276,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         ArgumentNullException.ThrowIfNull(providerDescriptor);
 
         return HasHost(providerDescriptor.BaseUri, "minimax.io") ||
-            HasHost(providerDescriptor.BaseUri, "minimaxi.com") ||
-            HasHost(providerDescriptor.BaseUri, "githubcopilot.com") ||
-            HasCopilotApiHost(providerDescriptor.BaseUri) ||
-            providerDescriptor.ProviderKey.Contains("copilot", StringComparison.OrdinalIgnoreCase);
+            HasHost(providerDescriptor.BaseUri, "minimaxi.com");
     }
-
-    private static bool HasCopilotApiHost(Uri? baseUri)
-        => baseUri?.Host.StartsWith("copilot-api.", StringComparison.OrdinalIgnoreCase) == true;
 
     private static bool HasHost(Uri? baseUri, string expectedHost)
     {

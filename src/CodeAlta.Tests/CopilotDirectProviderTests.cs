@@ -468,10 +468,11 @@ public sealed class CopilotDirectProviderTests
     }
 
     [TestMethod]
-    public async Task CopilotDirect_AnthropicMessages_UsesNonStreamingCompatibilityAndKeepsSharedHttpClientUsable()
+    public async Task CopilotDirect_AnthropicMessages_UsesNativeStreamingAndKeepsSharedHttpClientUsable()
     {
         var sawAnthropicRequest = false;
         var sawModelDiscoveryRequest = false;
+        using var toolSchema = JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""");
         var handler = new StubHandler(request =>
         {
             if (request.RequestUri == new Uri("https://api.individual.githubcopilot.com/v1/messages"))
@@ -482,24 +483,57 @@ public sealed class CopilotDirectProviderTests
                 Assert.IsTrue(request.Headers.TryGetValues("X-Initiator", out var initiator));
                 Assert.AreEqual("user", initiator.Single());
                 var requestJson = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-                Assert.IsFalse(requestJson.Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase));
+                using (var requestDocument = JsonDocument.Parse(requestJson))
+                {
+                    Assert.IsTrue(requestDocument.RootElement.GetProperty("stream").GetBoolean());
+                    Assert.AreEqual(64000, requestDocument.RootElement.GetProperty("max_tokens").GetInt32());
+                    Assert.AreEqual("adaptive", requestDocument.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+                    Assert.AreEqual("high", requestDocument.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+                }
+
+                // Copilot's otherwise Anthropic-shaped stream includes an OpenAI-style
+                // terminal record. Ignore its exact payload even when a proxy assigns an
+                // event name that the Anthropic SDK would otherwise try to parse as JSON.
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
                         """
-                        {
-                          "id": "msg_test",
-                          "type": "message",
-                          "role": "assistant",
-                          "model": "claude-haiku-4.5",
-                          "content": [{ "type": "text", "text": "Hello from Haiku" }],
-                          "stop_reason": "end_turn",
-                          "stop_sequence": null,
-                          "usage": { "input_tokens": 3, "output_tokens": 4 }
-                        }
-                        """,
+                        event: message_start
+                        data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-opus-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":0}}}
+
+                        event: content_block_start
+                        data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+                        event: content_block_delta
+                        data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Inspecting the file."}}
+
+                        event: content_block_delta
+                        data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-test"}}
+
+                        event: content_block_stop
+                        data: {"type":"content_block_stop","index":0}
+
+                        event: content_block_start
+                        data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_test","name":"read_file","input":{},"caller":{"type":"direct"}}}
+
+                        event: content_block_delta
+                        data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"README.md\"}"}}
+
+                        event: content_block_stop
+                        data: {"type":"content_block_stop","index":1}
+
+                        event: message_delta
+                        data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":3,"output_tokens":12}}
+
+                        event: message_stop
+                        data: {"type":"message_stop"}
+
+                        event: completion
+                        data: [DONE]
+
+                        """ + "\n",
                         Encoding.UTF8,
-                        "application/json"),
+                        "text/event-stream"),
                 };
             }
 
@@ -545,9 +579,10 @@ public sealed class CopilotDirectProviderTests
                     ProviderId = new ModelProviderId(provider.ProviderKey),
                     SessionId = "session-test",
                     RunId = new AgentRunId("run-test"),
-                    ModelId = "claude-haiku-4.5",
+                    ModelId = "claude-opus-5",
+                    ReasoningEffort = AgentReasoningEffort.High,
                     ModelInfo = new AgentModelInfo(
-                        "claude-haiku-4.5",
+                        "claude-opus-5",
                         Provider: "github-copilot",
                         Capabilities: new Dictionary<string, object?>
                         {
@@ -561,7 +596,12 @@ public sealed class CopilotDirectProviderTests
                             AgentConversationRole.User,
                             [new AgentMessagePart.Text("test")]),
                     ],
-                    Tools = [],
+                    Tools =
+                    [
+                        new AgentToolDefinition(
+                            new AgentToolSpec("read_file", "Read a file", toolSchema.RootElement.Clone()),
+                            static (_, _) => Task.FromResult(new AgentToolResult(true, []))),
+                    ],
                     State = new AgentSessionState
                     {
                         SessionId = "session-test",
@@ -572,8 +612,15 @@ public sealed class CopilotDirectProviderTests
                 },
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
-            Assert.IsTrue(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>()
-                .Any(static part => part.Value.Contains("Hello from Haiku", StringComparison.Ordinal)));
+            var reasoning = response.AssistantMessage.Parts.OfType<AgentMessagePart.Reasoning>().Single();
+            Assert.AreEqual("Inspecting the file.", reasoning.Value);
+            Assert.AreEqual("sig-test", reasoning.ProtectedData);
+            var toolCall = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+            Assert.AreEqual("toolu_test", toolCall.CallId);
+            Assert.AreEqual("read_file", toolCall.Name);
+            Assert.AreEqual("README.md", toolCall.Arguments.GetProperty("path").GetString());
+            Assert.AreEqual(3L, response.Usage?.LastOperation?.InputTokens);
+            Assert.AreEqual(12L, response.Usage?.LastOperation?.OutputTokens);
 
             _ = await executor.ListModelsAsync(provider).ConfigureAwait(false);
             Assert.IsTrue(sawAnthropicRequest);
@@ -602,23 +649,36 @@ public sealed class CopilotDirectProviderTests
             {
                 sawAnthropicRequest = true;
                 Assert.AreEqual($"Bearer {CopilotToken}", request.Headers.Authorization?.ToString());
+                using (var requestDocument = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()))
+                {
+                    Assert.IsTrue(requestDocument.RootElement.GetProperty("stream").GetBoolean());
+                }
+
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
                         """
-                        {
-                          "id": "msg_test",
-                          "type": "message",
-                          "role": "assistant",
-                          "model": "claude-haiku-4.5",
-                          "content": [{ "type": "text", "text": "ok" }],
-                          "stop_reason": "end_turn",
-                          "stop_sequence": null,
-                          "usage": { "input_tokens": 1, "output_tokens": 1 }
-                        }
+                        event: message_start
+                        data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-haiku-4.5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}
+
+                        event: content_block_start
+                        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+                        event: content_block_delta
+                        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+
+                        event: content_block_stop
+                        data: {"type":"content_block_stop","index":0}
+
+                        event: message_delta
+                        data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
+
+                        event: message_stop
+                        data: {"type":"message_stop"}
+
                         """,
                         Encoding.UTF8,
-                        "application/json"),
+                        "text/event-stream"),
                 };
             }
 

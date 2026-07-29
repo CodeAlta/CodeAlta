@@ -158,6 +158,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             AuthToken = credential.Token,
             BaseUri = credential.BaseUri,
             HttpClient = _httpClient,
+            HttpHandlerFactory = static () => new CopilotAnthropicSseHandler(),
             IsDefault = _provider.IsDefault,
             Profile = _provider.Profile ?? AnthropicMessagesProfile,
             Compaction = _provider.Compaction,
