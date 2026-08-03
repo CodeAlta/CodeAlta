@@ -690,6 +690,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
                 }
                 : null,
         };
+#pragma warning disable MCP9007
         if (request.AllowOAuthBrowserLogin)
         {
             var browser = new McpOAuthBrowserAuthorization(request.OAuthStatus, request.OpenOAuthBrowser);
@@ -699,6 +700,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         {
             options.AuthorizationRedirectDelegate = static (_, _, _) => Task.FromResult<string?>(null);
         }
+#pragma warning restore MCP9007
 
         return options;
     }
