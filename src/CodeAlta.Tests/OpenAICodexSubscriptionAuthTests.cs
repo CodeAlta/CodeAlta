@@ -317,31 +317,35 @@ public sealed class OpenAICodexSubscriptionAuthTests
     [TestMethod]
     public async Task OAuthClient_RequestDeviceCodeParsesVerificationDetails()
     {
-        using var httpClient = new HttpClient(new QueueHttpMessageHandler(
+        using var handler = new QueueHttpMessageHandler(
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
                     """
                     {
-                      "device_code": "device",
+                      "device_auth_id": "device-auth",
                       "user_code": "ABCD-EFGH",
-                      "verification_uri": "https://auth.openai.com/codex/device",
-                      "expires_in": 900,
-                      "interval": 3
+                      "interval": "3"
                     }
                     """,
                     Encoding.UTF8,
                     "application/json"),
-            }));
+            });
+        using var httpClient = new HttpClient(handler);
         var client = new OpenAICodexSubscriptionOAuthClient(httpClient);
 
         var deviceCode = await client.RequestDeviceCodeAsync().ConfigureAwait(false);
 
-        Assert.AreEqual("device", deviceCode.DeviceCode);
+        Assert.AreEqual("device-auth", deviceCode.DeviceAuthId);
         Assert.AreEqual("ABCD-EFGH", deviceCode.UserCode);
         Assert.AreEqual(OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri, deviceCode.VerificationUri);
         Assert.AreEqual(TimeSpan.FromSeconds(900), deviceCode.ExpiresIn);
         Assert.AreEqual(TimeSpan.FromSeconds(3), deviceCode.Interval);
+        Assert.AreEqual(new Uri(OpenAICodexSubscriptionOAuthDefaults.DeviceUserCodeEndpoint), handler.Requests[0].Uri);
+        Assert.AreEqual("application/json", handler.Requests[0].ContentType);
+        using var request = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.AreEqual(OpenAICodexSubscriptionOAuthDefaults.ClientId, request.RootElement.GetProperty("client_id").GetString());
+        Assert.AreEqual(1, request.RootElement.EnumerateObject().Count());
     }
 
     [TestMethod]
@@ -354,11 +358,22 @@ public sealed class OpenAICodexSubscriptionAuthTests
                 Content = new StringContent(
                     """
                     {
-                      "device_code": "device",
+                      "device_auth_id": "device-auth",
                       "user_code": "ABCD-EFGH",
-                      "verification_uri": "https://auth.openai.com/codex/device",
-                      "expires_in": 900,
-                      "interval": 0
+                      "interval": "0"
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            },
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "authorization_code": "authorization-code",
+                      "code_challenge": "code-challenge",
+                      "code_verifier": "code-verifier"
                     }
                     """,
                     Encoding.UTF8,
@@ -401,11 +416,24 @@ public sealed class OpenAICodexSubscriptionAuthTests
     }
 
     [TestMethod]
-    public async Task OAuthClient_PollDeviceTokenHonorsPollingCadenceAndSlowDown()
+    public async Task OAuthClient_PollDeviceTokenUsesCodexPollingProtocolAndCadence()
     {
         using var handler = new QueueHttpMessageHandler(
-            CreateDeviceErrorResponse("authorization_pending"),
-            CreateDeviceErrorResponse("slow_down"),
+            new HttpResponseMessage(HttpStatusCode.Forbidden),
+            new HttpResponseMessage(HttpStatusCode.NotFound),
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "authorization_code": "authorization-code",
+                      "code_challenge": "code-challenge",
+                      "code_verifier": "code-verifier"
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            },
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
@@ -423,7 +451,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var timeProvider = new AutoAdvanceTimeProvider(DateTimeOffset.Parse("2026-04-24T12:00:00Z"));
         var client = new OpenAICodexSubscriptionOAuthClient(httpClient);
         var deviceCode = new OpenAICodexSubscriptionDeviceCode(
-            "device",
+            "device-auth",
             "ABCD-EFGH",
             OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri,
             TimeSpan.FromMinutes(10),
@@ -432,21 +460,30 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var credential = await client.PollDeviceTokenAsync(deviceCode, timeProvider).ConfigureAwait(false);
 
         Assert.AreEqual("access-secret", credential.AccessToken);
-        Assert.AreEqual(3, handler.RequestCount);
+        Assert.AreEqual(4, handler.RequestCount);
         CollectionAssert.AreEqual(
-            new[] { TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(8) },
+            new[] { TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3) },
             timeProvider.Delays);
+        Assert.AreEqual(new Uri(OpenAICodexSubscriptionOAuthDefaults.DeviceTokenEndpoint), handler.Requests[0].Uri);
+        Assert.AreEqual(new Uri(OpenAICodexSubscriptionOAuthDefaults.TokenEndpoint), handler.Requests[3].Uri);
+        using var pollRequest = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.AreEqual("device-auth", pollRequest.RootElement.GetProperty("device_auth_id").GetString());
+        Assert.AreEqual("ABCD-EFGH", pollRequest.RootElement.GetProperty("user_code").GetString());
+        Assert.AreEqual(2, pollRequest.RootElement.EnumerateObject().Count());
+        StringAssert.Contains(handler.Requests[3].Body, "grant_type=authorization_code");
+        StringAssert.Contains(handler.Requests[3].Body, "code_verifier=code-verifier");
+        StringAssert.Contains(handler.Requests[3].Body, "redirect_uri=https%3A%2F%2Fauth.openai.com%2Fdeviceauth%2Fcallback");
     }
 
     [TestMethod]
     public async Task OAuthClient_PollDeviceTokenStopsOnExpiry()
     {
-        using var handler = new QueueHttpMessageHandler(CreateDeviceErrorResponse("authorization_pending"));
+        using var handler = new QueueHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.Forbidden));
         using var httpClient = new HttpClient(handler);
         var timeProvider = new AutoAdvanceTimeProvider(DateTimeOffset.Parse("2026-04-24T12:00:00Z"));
         var client = new OpenAICodexSubscriptionOAuthClient(httpClient);
         var deviceCode = new OpenAICodexSubscriptionDeviceCode(
-            "device",
+            "device-auth",
             "ABCD-EFGH",
             OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri,
             TimeSpan.FromSeconds(1),
@@ -462,11 +499,11 @@ public sealed class OpenAICodexSubscriptionAuthTests
     [TestMethod]
     public async Task OAuthClient_PollDeviceTokenStopsOnCancellation()
     {
-        using var handler = new QueueHttpMessageHandler(CreateDeviceErrorResponse("authorization_pending"));
+        using var handler = new QueueHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.Forbidden));
         using var httpClient = new HttpClient(handler);
         var client = new OpenAICodexSubscriptionOAuthClient(httpClient);
         var deviceCode = new OpenAICodexSubscriptionDeviceCode(
-            "device",
+            "device-auth",
             "ABCD-EFGH",
             OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri,
             TimeSpan.FromMinutes(10),
@@ -484,7 +521,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         using var httpClient = new HttpClient(new QueueHttpMessageHandler(CreateDeviceErrorResponse("access_denied")));
         var client = new OpenAICodexSubscriptionOAuthClient(httpClient);
         var deviceCode = new OpenAICodexSubscriptionDeviceCode(
-            "device",
+            "device-auth",
             "ABCD-EFGH",
             OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri,
             TimeSpan.FromMinutes(10),
@@ -711,17 +748,25 @@ public sealed class OpenAICodexSubscriptionAuthTests
 
         public int RequestCount { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public List<RecordedRequest> Requests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestCount++;
+            Requests.Add(new RecordedRequest(
+                request.RequestUri,
+                request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false),
+                request.Content?.Headers.ContentType?.MediaType));
             if (_responses.Count == 0)
             {
                 throw new InvalidOperationException("No HTTP response was queued.");
             }
 
-            return Task.FromResult(_responses.Dequeue());
+            return _responses.Dequeue();
         }
     }
+
+    private sealed record RecordedRequest(Uri? Uri, string Body, string? ContentType);
 
     private sealed class AutoAdvanceTimeProvider(DateTimeOffset now) : TimeProvider
     {

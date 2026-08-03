@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Agent.OpenAI.Codex;
 
@@ -120,12 +121,12 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
     public async Task<OpenAICodexSubscriptionDeviceCode> RequestDeviceCodeAsync(
         CancellationToken cancellationToken = default)
     {
-        using var content = new FormUrlEncodedContent(
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["client_id"] = OpenAICodexSubscriptionOAuthDefaults.ClientId,
-                ["scope"] = OpenAICodexSubscriptionOAuthDefaults.Scope,
-            });
+        using var content = new StringContent(
+            JsonSerializer.Serialize(
+                new OpenAICodexSubscriptionDeviceCodeRequest(OpenAICodexSubscriptionOAuthDefaults.ClientId),
+                OpenAICodexSubscriptionJsonSerializerContext.Default.OpenAICodexSubscriptionDeviceCodeRequest),
+            Encoding.UTF8,
+            "application/json");
         using var response = await _httpClient.PostAsync(
                 OpenAICodexSubscriptionOAuthDefaults.DeviceUserCodeEndpoint,
                 content,
@@ -136,11 +137,11 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
         return new OpenAICodexSubscriptionDeviceCode(
-            RequiredString(root, "device_code"),
+            RequiredString(root, "device_auth_id"),
             RequiredString(root, "user_code"),
-            GetString(root, "verification_uri") ?? OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri,
-            TimeSpan.FromSeconds(GetInt32(root, "expires_in") ?? 900),
-            TimeSpan.FromSeconds(GetInt32(root, "interval") ?? 5));
+            OpenAICodexSubscriptionOAuthDefaults.DeviceVerificationUri,
+            TimeSpan.FromMinutes(15),
+            TimeSpan.FromSeconds(GetInt32OrString(root, "interval") ?? 5));
     }
 
     public async Task<OpenAICodexSubscriptionCredential> PollDeviceTokenAsync(
@@ -153,14 +154,12 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         var expiresAt = timeProvider.GetUtcNow() + deviceCode.ExpiresIn;
         while (timeProvider.GetUtcNow() < expiresAt)
         {
-            using var content = new FormUrlEncodedContent(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["client_id"] = OpenAICodexSubscriptionOAuthDefaults.ClientId,
-                    ["device_code"] = deviceCode.DeviceCode,
-                    ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
-                    ["redirect_uri"] = OpenAICodexSubscriptionOAuthDefaults.DeviceRedirectUri,
-                });
+            using var content = new StringContent(
+                JsonSerializer.Serialize(
+                    new OpenAICodexSubscriptionDeviceTokenRequest(deviceCode.DeviceAuthId, deviceCode.UserCode),
+                    OpenAICodexSubscriptionJsonSerializerContext.Default.OpenAICodexSubscriptionDeviceTokenRequest),
+                Encoding.UTF8,
+                "application/json");
             using var response = await _httpClient.PostAsync(
                     OpenAICodexSubscriptionOAuthDefaults.DeviceTokenEndpoint,
                     content,
@@ -168,20 +167,25 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
                 .ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
-                return await ReadTokenResponseAsync(response, cancellationToken).ConfigureAwait(false);
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                var root = document.RootElement;
+                _ = RequiredString(root, "code_challenge");
+                return await ExchangeAuthorizationCodeAsync(
+                        RequiredString(root, "authorization_code"),
+                        RequiredString(root, "code_verifier"),
+                        OpenAICodexSubscriptionOAuthDefaults.DeviceRedirectUri,
+                        cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            var error = await ReadErrorAsync(response, cancellationToken).ConfigureAwait(false);
-            if (!string.Equals(error, "authorization_pending", StringComparison.Ordinal) &&
-                !string.Equals(error, "slow_down", StringComparison.Ordinal))
+            if (response.StatusCode is not HttpStatusCode.Forbidden and not HttpStatusCode.NotFound)
             {
+                var error = await ReadErrorAsync(response, cancellationToken).ConfigureAwait(false);
                 throw new InvalidOperationException($"Device authorization failed: {error ?? response.StatusCode.ToString()}.");
             }
 
-            var delay = string.Equals(error, "slow_down", StringComparison.Ordinal)
-                ? deviceCode.Interval + TimeSpan.FromSeconds(5)
-                : deviceCode.Interval;
-            await Task.Delay(delay, timeProvider, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(deviceCode.Interval, timeProvider, cancellationToken).ConfigureAwait(false);
         }
 
         throw new TimeoutException("Device authorization expired before login completed.");
@@ -217,14 +221,21 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
 
     private static async Task<string?> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        if (stream.Length == 0)
+        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(json))
         {
             return null;
         }
 
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-        return GetString(document.RootElement, "error");
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return GetString(document.RootElement, "error");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string BuildFormUrlEncoded(IReadOnlyDictionary<string, string?> values)
@@ -253,13 +264,35 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)
             ? value
             : null;
+
+    private static int? GetInt32OrString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetInt32(out var value) => value,
+            JsonValueKind.String when int.TryParse(property.GetString(), out var value) => value,
+            _ => null,
+        };
+    }
 }
 
 internal sealed record OpenAICodexSubscriptionPkce(string Verifier, string Challenge);
 
 internal sealed record OpenAICodexSubscriptionDeviceCode(
-    string DeviceCode,
+    string DeviceAuthId,
     string UserCode,
     string VerificationUri,
     TimeSpan ExpiresIn,
     TimeSpan Interval);
+
+internal sealed record OpenAICodexSubscriptionDeviceCodeRequest(
+    [property: JsonPropertyName("client_id")] string ClientId);
+
+internal sealed record OpenAICodexSubscriptionDeviceTokenRequest(
+    [property: JsonPropertyName("device_auth_id")] string DeviceAuthId,
+    [property: JsonPropertyName("user_code")] string UserCode);
