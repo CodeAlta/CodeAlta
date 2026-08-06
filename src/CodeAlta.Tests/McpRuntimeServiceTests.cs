@@ -6,6 +6,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugins.Abstractions;
+using ModelContextProtocol.Authentication;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.Tests;
@@ -307,8 +308,11 @@ public sealed class McpRuntimeServiceTests
         var authorization = new McpOAuthBrowserAuthorization(messages.Add, openBrowser: false);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var authorizeTask = authorization.AuthorizeAsync(
-            new Uri("https://auth.example.test/authorize?state=expected-state", UriKind.Absolute),
-            redirectUri,
+            new AuthorizationCallbackContext
+            {
+                AuthorizationUri = new Uri("https://auth.example.test/authorize?state=expected-state", UriKind.Absolute),
+                RedirectUri = redirectUri,
+            },
             cancellation.Token);
         using var http = new HttpClient();
         using var preflight = new HttpRequestMessage(HttpMethod.Options, redirectUri)
@@ -1225,6 +1229,7 @@ public sealed class McpRuntimeServiceTests
                         200,
                         JsonSerializer.Serialize(new
                         {
+                            issuer = BaseUri.GetLeftPart(UriPartial.Authority),
                             authorization_endpoint = new Uri(BaseUri, "authorize").ToString(),
                             token_endpoint = new Uri(BaseUri, "token").ToString(),
                             response_types_supported = new[] { "code" },
@@ -1291,7 +1296,7 @@ public sealed class McpRuntimeServiceTests
             await WriteJsonAsync(context, 401, "{\"error\":\"invalid_token\",\"error_description\":\"Missing or invalid access token\"}", cancellationToken).ConfigureAwait(false);
         }
 
-        private static void WriteAuthorizationRedirect(HttpListenerContext context)
+        private void WriteAuthorizationRedirect(HttpListenerContext context)
         {
             var redirectUri = context.Request.QueryString["redirect_uri"];
             if (string.IsNullOrWhiteSpace(redirectUri))
@@ -1308,6 +1313,8 @@ public sealed class McpRuntimeServiceTests
             {
                 location += "&state=" + WebUtility.UrlEncode(state);
             }
+
+            location += "&iss=" + WebUtility.UrlEncode(BaseUri.GetLeftPart(UriPartial.Authority));
 
             context.Response.StatusCode = 302;
             context.Response.RedirectLocation = location;

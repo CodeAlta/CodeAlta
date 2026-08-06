@@ -233,8 +233,11 @@ internal sealed class McpOAuthBrowserAuthorization
         _openBrowser = openBrowser;
     }
 
-    public async Task<string?> AuthorizeAsync(Uri authorizationUri, Uri redirectUri, CancellationToken cancellationToken)
+    public async Task<AuthorizationResult?> AuthorizeAsync(AuthorizationCallbackContext authorization, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(authorization);
+        var authorizationUri = authorization.AuthorizationUri;
+        var redirectUri = authorization.RedirectUri;
         ArgumentNullException.ThrowIfNull(authorizationUri);
         ArgumentNullException.ThrowIfNull(redirectUri);
         if (!redirectUri.IsLoopback || redirectUri.Scheme != Uri.UriSchemeHttp || redirectUri.Port <= 0 || redirectUri.IsDefaultPort)
@@ -276,6 +279,7 @@ internal sealed class McpOAuthBrowserAuthorization
                 var error = context.Request.QueryString["error"];
                 var code = context.Request.QueryString["code"];
                 var state = context.Request.QueryString["state"];
+                var issuer = context.Request.QueryString["iss"];
                 if (!string.IsNullOrWhiteSpace(error) || string.IsNullOrWhiteSpace(code))
                 {
                     await WriteHtmlAsync(context.Response, FailureHtml, cancellationToken).ConfigureAwait(false);
@@ -291,7 +295,12 @@ internal sealed class McpOAuthBrowserAuthorization
                 }
 
                 await WriteHtmlAsync(context.Response, SuccessHtml, cancellationToken).ConfigureAwait(false);
-                return code;
+                return new AuthorizationResult
+                {
+                    Code = code,
+                    State = state,
+                    Iss = issuer,
+                };
             }
         }
         catch (HttpListenerException) when (cancellationToken.IsCancellationRequested)

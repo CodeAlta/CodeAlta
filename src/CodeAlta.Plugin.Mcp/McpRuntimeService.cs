@@ -678,10 +678,6 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             ClientMetadataDocumentUri = !string.IsNullOrWhiteSpace(oauth.ClientMetadataDocumentUri) && Uri.TryCreate(oauth.ClientMetadataDocumentUri, UriKind.Absolute, out var metadataUri) ? metadataUri : null,
             Scopes = oauth.Scopes.Count == 0 ? null : oauth.Scopes,
             TokenCache = new McpOAuthTokenCache(tokenPath),
-            AdditionalAuthorizationParameters = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["state"] = CreateOAuthState(),
-            },
             DynamicClientRegistration = oauth.DynamicClientRegistration
                 ? new DynamicClientRegistrationOptions
                 {
@@ -690,17 +686,15 @@ internal sealed class McpRuntimeService : IAsyncDisposable
                 }
                 : null,
         };
-#pragma warning disable MCP9007
         if (request.AllowOAuthBrowserLogin)
         {
             var browser = new McpOAuthBrowserAuthorization(request.OAuthStatus, request.OpenOAuthBrowser);
-            options.AuthorizationRedirectDelegate = browser.AuthorizeAsync;
+            options.AuthorizationCallbackHandler = browser.AuthorizeAsync;
         }
         else
         {
-            options.AuthorizationRedirectDelegate = static (_, _, _) => Task.FromResult<string?>(null);
+            options.AuthorizationCallbackHandler = static (_, _) => Task.FromResult<AuthorizationResult?>(null);
         }
-#pragma warning restore MCP9007
 
         return options;
     }
@@ -711,13 +705,6 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         return new Uri($"http://127.0.0.1:{port}/mcp/oauth/callback", UriKind.Absolute);
-    }
-
-    private static string CreateOAuthState()
-    {
-        Span<byte> bytes = stackalloc byte[16];
-        RandomNumberGenerator.Fill(bytes);
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     private async Task<ResolvedToolState?> ResolveToolStateAsync(RuntimeContext context, string serverKey, string toolName, IList<McpRuntimeDiagnostic> diagnostics, CancellationToken cancellationToken)
