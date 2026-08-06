@@ -49,6 +49,32 @@ public sealed class ModelProvidersDialogInteractionTests
     }
 
     [TestMethod]
+    public void ModelProvidersDialog_DeleteLastProviderClearsSelection()
+    {
+        var definitions = new[]
+        {
+            new CodeAltaProviderDocument
+            {
+                ProviderKey = "provider-1",
+                ProviderType = "openai-chat",
+                ApiKey = "key-1",
+            },
+        };
+        var dialog = CreateDialog(() => definitions);
+        InvokeLoadDefinitionsIntoDialog(
+            dialog,
+            definitions,
+            "[warning]No providers are configured yet.[/]",
+            "[dim]Provider configuration loaded from disk.[/]");
+
+        InvokeDeleteSelectedProvider(dialog);
+
+        Assert.AreEqual(0, GetProviderCount(dialog));
+        Assert.AreEqual(-1, GetSelectedProviderIndex(dialog));
+        Assert.IsTrue(HasUnsavedChanges(dialog));
+    }
+
+    [TestMethod]
     public void ModelProvidersDialog_SaveClearsDirtyStateWhenReloadReturnsPrunedDefaults()
     {
         using var session = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(120, 40)), new TerminalOptions { ImplicitStartInput = true }, force: true);
@@ -959,6 +985,11 @@ public sealed class ModelProvidersDialogInteractionTests
     private static void InvokeStartSave(ModelProvidersDialog dialog)
         => typeof(ModelProvidersDialog)
             .GetMethod("StartSave", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dialog, null);
+
+    private static void InvokeDeleteSelectedProvider(ModelProvidersDialog dialog)
+        => typeof(ModelProvidersDialog)
+            .GetMethod("DeleteSelectedProvider", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(dialog, null);
 
     private static void InvokeClose(ModelProvidersDialog dialog)

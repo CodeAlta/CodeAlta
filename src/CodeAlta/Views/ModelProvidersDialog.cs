@@ -452,7 +452,7 @@ internal sealed class ModelProvidersDialog
         }
 
         _providers.Remove(item);
-        SetSelectedProviderIndex(Math.Clamp(_selectedProviderIndex.Value, 0, _providers.Count - 1));
+        SetSelectedProviderIndex(_selectedProviderIndex.Value);
         NotifyProviderDraftChanged();
         SetStatus($"[warning]{SR.T("Removed provider. Save to apply, or Refresh to reload from disk.")}[/]");
     }
