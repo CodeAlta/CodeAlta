@@ -124,7 +124,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     LogCodexDiagnostic("request", request, attempt);
                     WriteCodexConsoleDiagnostic(
                         provider,
-                        $"request attempt={attempt} session={request.SessionId} run={request.RunId.Value} transport={initialTransport} fullPayload={FormatCodexConsolePayload(SerializeModel(fullOptions))}");
+                        $"request attempt={attempt} session={request.SessionId} run={request.RunId.Value} transport={initialTransport}");
                     ResponseResult? completedResponse = null;
                     ResponseResult? latestResponse = null;
                     var streamedOutputItems = new SortedDictionary<int, ResponseItem>();
@@ -365,6 +365,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         activeReasoningOutputIndex = null;
                         sideChannelEvents.Clear();
                         attemptState.ResetAfterTransportFallback();
+                        if (fullOptions.Patch.Contains("$.input"u8))
+                        {
+                            // OpenAI 2.13 marks raw JsonPatch values as model-owned during serialization.
+                            // Rebuild the Lite payload so the WebSocket attempt cannot corrupt the HTTP fallback.
+                            fullOptions = await CreateRequestPayloadAsync(request, requestContext, cancellationToken).ConfigureAwait(false);
+                        }
+
                         await ProcessStreamAsync(OpenAIResponsesTransport.Http).ConfigureAwait(false);
                     }
 
@@ -834,6 +841,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return fullOptions;
         }
 
+        if (fullOptions.Patch.Contains("$.input"u8))
+        {
+            // Responses Lite stores its custom input as a raw patch, which OpenAI 2.13 cannot serialize twice.
+            ClearLiveContinuation(request.SessionId);
+            return fullOptions;
+        }
+
         if (!request.CanUseProviderContinuation)
         {
             ClearLiveContinuation(request.SessionId);
@@ -915,6 +929,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     {
         if (!request.CanUseProviderContinuation ||
             provider.CodexSubscription is null ||
+            fullOptions.Patch.Contains("$.input"u8) ||
             string.IsNullOrWhiteSpace(response.Id))
         {
             ClearLiveContinuation(request.SessionId);
@@ -1413,7 +1428,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         options.Patch.Set("$.prompt_cache_key"u8, request.SessionId);
         if (modelCapabilities.SupportsVerbosity)
         {
-            options.Patch.Set("$.text.verbosity"u8, codexOptions.TextVerbosity);
+            // Avoid the SDK's root-level "$.text.*" propagator, which dereferences null text options.
+            var textOptions = options.TextOptions ??= new ResponseTextOptions();
+            textOptions.Patch.Set("$.verbosity"u8, codexOptions.TextVerbosity);
         }
 
         if (codexOptions.EnableSequentialCutoffReasoningSummaries &&

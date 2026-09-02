@@ -3071,7 +3071,6 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
             },
         });
-
         var response = await executor.ExecuteTurnAsync(
                 CreateCodexTurnRequest(),
                 static (_, _) => ValueTask.CompletedTask)
@@ -3085,6 +3084,51 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(2, responsesClient.Requests.Count);
         Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
         Assert.AreEqual("Sticky fallback answer.", secondResponse.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexResponsesLiteRebuildsPayloadForHttpFallback()
+    {
+        var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
+            WithZeroRetryAfter(new HttpRequestException("WebSocket unavailable.")),
+            serializeOptions: true);
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-lite-fallback", "gpt-5.6-sol", "Fallback answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+            },
+        });
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.6-sol",
+            ModelInfo = new AgentModelInfo(
+                "gpt-5.6-sol",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["useResponsesLite"] = true,
+                }),
+        };
+
+        var response = await executor.ExecuteTurnAsync(
+                request,
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(6, webSocketSession.RequestCount);
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        using var serializedRequest = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual(
+            "additional_tools",
+            serializedRequest.RootElement.GetProperty("input")[0].GetProperty("type").GetString());
     }
 
     [TestMethod]
@@ -5228,6 +5272,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                         ReasoningEffortLevel = options.ReasoningOptions.ReasoningEffortLevel,
                         ReasoningSummaryVerbosity = options.ReasoningOptions.ReasoningSummaryVerbosity,
                     },
+                TextOptions = options?.TextOptions is null ? null : new ResponseTextOptions(),
             };
 
             if (options is not null)
@@ -5263,10 +5308,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     clone.Patch.Set("$.prompt_cache_key"u8, promptCacheKey);
                 }
 
-                if (options.Patch.TryGetValue("$.text.verbosity"u8, out string? textVerbosity) &&
+                if (options.TextOptions is not null &&
+                    options.TextOptions.Patch.TryGetValue("$.verbosity"u8, out string? textVerbosity) &&
                     textVerbosity is not null)
                 {
-                    clone.Patch.Set("$.text.verbosity"u8, textVerbosity);
+                    clone.TextOptions!.Patch.Set("$.verbosity"u8, textVerbosity);
                 }
 
                 if (options.Patch.TryGetValue("$.client_metadata.x-codex-installation-id"u8, out string? installationId) &&
@@ -5497,7 +5543,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         }
     }
 
-    private sealed class ThrowingOpenAIResponsesWebSocketSession(Exception exception) : IOpenAIResponsesWebSocketSession
+    private sealed class ThrowingOpenAIResponsesWebSocketSession(
+        Exception exception,
+        bool serializeOptions = false) : IOpenAIResponsesWebSocketSession
     {
         public bool HasOpenConnection => true;
 
@@ -5510,10 +5558,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CreateResponseOptions? reconnectOptions = null,
             CancellationToken cancellationToken = default)
         {
-            _ = options;
             _ = reconnectOptions;
             _ = cancellationToken;
             RequestCount++;
+            if (serializeOptions)
+            {
+                _ = SerializeModel(options);
+            }
+
             throw exception;
         }
 

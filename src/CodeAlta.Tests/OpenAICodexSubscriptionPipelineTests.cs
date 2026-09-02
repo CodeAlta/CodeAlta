@@ -92,18 +92,23 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     [TestMethod]
     public void ResponsesLiteRequest_HasMatchingHttpAndWebSocketPayloadProperties()
     {
-        var options = new OpenAI.Responses.CreateResponseOptions
+        static OpenAI.Responses.CreateResponseOptions CreateOptions()
         {
-            Model = "gpt-5.6-sol",
-            Instructions = "Developer instructions",
-            StreamingEnabled = true,
-        };
-        options.InputItems.Add(OpenAI.Responses.ResponseItem.CreateUserMessageItem("Hello"));
-        options.Tools.Add(OpenAI.Responses.ResponseTool.CreateFunctionTool(
-            "inspect_file",
-            BinaryData.FromString("""{"type":"object","properties":{}}"""),
-            strictModeEnabled: true));
-        CodexResponsesLiteRequestBuilder.Apply(options, options.Instructions);
+            var options = new OpenAI.Responses.CreateResponseOptions
+            {
+                Model = "gpt-5.6-sol",
+                Instructions = "Developer instructions",
+                StreamingEnabled = true,
+            };
+            options.InputItems.Add(OpenAI.Responses.ResponseItem.CreateUserMessageItem("Hello"));
+            options.Tools.Add(OpenAI.Responses.ResponseTool.CreateFunctionTool(
+                "inspect_file",
+                BinaryData.FromString("""{"type":"object","properties":{}}"""),
+                strictModeEnabled: true));
+            CodexResponsesLiteRequestBuilder.Apply(options, options.Instructions);
+            return options;
+        }
+
         var context = new CodexSubscriptionRequestContext(
             "session-lite",
             new AgentRunId("run-lite"),
@@ -111,14 +116,15 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             DateTimeOffset.FromUnixTimeSeconds(1_752_124_567),
             installationId: null,
             new CodexTurnState());
-        context.ApplyClientMetadata(options, includeTurnState: false);
+        var httpOptions = CreateOptions();
+        context.ApplyClientMetadata(httpOptions, includeTurnState: false);
 
         using var http = JsonDocument.Parse(ModelReaderWriter.Write(
-            options,
+            httpOptions,
             new ModelReaderWriterOptions("J"),
             OpenAIContext.Default));
         using var webSocket = JsonDocument.Parse(
-            OpenAICodexSubscriptionWebSocketSession.CreateWebSocketRequest(options, context));
+            OpenAICodexSubscriptionWebSocketSession.CreateWebSocketRequest(CreateOptions(), context));
 
         Assert.AreEqual(http.RootElement.EnumerateObject().Count() + 1, webSocket.RootElement.EnumerateObject().Count());
         Assert.AreEqual("response.create", webSocket.RootElement.GetProperty("type").GetString());
