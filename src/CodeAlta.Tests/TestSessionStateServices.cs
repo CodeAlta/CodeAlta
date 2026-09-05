@@ -28,7 +28,8 @@ internal static class TestSessionStateServices
         Action<string>? replaceDraftTabWithSession = null,
         Action<string, ShellTabCloseReason>? removeSessionTabPage = null,
         FrontendEventPublisher? frontendEvents = null,
-        ProjectDescriptor? currentProject = null)
+        ProjectDescriptor? currentProject = null,
+        ViewStatePersistenceFeedback? persistenceFeedback = null)
         => new(
             projectCatalog,
             sessionCatalog,
@@ -47,5 +48,6 @@ internal static class TestSessionStateServices
                 replaceDraftTabWithSession ?? (static _ => { }),
                 removeSessionTabPage ?? (static (_, _) => { })),
             frontendEvents,
-            currentProject);
+            currentProject,
+            persistenceFeedback);
 }

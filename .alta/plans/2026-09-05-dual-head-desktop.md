@@ -1,6 +1,6 @@
 # Dual-head CodeAlta: native desktop and terminal
 
-- Status: In progress — M2 storage and watcher follow-up verified; additive UI-state persistence next
+- Status: In progress — M2 storage/UI-state persistence verified; prompt/skill CRUD extraction next
 - Plan file: `.alta/plans/2026-09-05-dual-head-desktop.md`
 - Created: 2026-09-05
 - Revised: 2026-09-05 — retain the editor/visual library evaluation and rich workspace UX; follow the user's trusted-desktop direction with direct library integration and no custom isolation infrastructure.
@@ -340,7 +340,7 @@ The order is deliberate: prove packaging, preserve behavior under extraction, es
 - [ ] Introduce the composition-only `CodeAlta.Hosting` project and focused tests. Move configured provider registry/defaults/auth/test/refresh workflows and model metadata lifetime there; keep concrete auth implementation in provider packages and config persistence in Catalog.
 - [ ] Consolidate startup ownership around one `CodeAltaHost` with explicit borrowed/owned services, rollback after partial creation, and best-effort complete disposal/error reporting. Remove parallel/manual disposal of host-exposed owned objects from TUI composition.
 - [ ] Move the shared single-instance guard/early CLI admission into the shared application startup path. Acquire before mutable/plugin startup, preserve `alta.lock`, and add process-level duplicate/race/stale/permission tests before targeted fixes.
-- [ ] Extend Catalog UI-state serialization additively for frontend-specific layout and shared logical tabs/preferences. Add TUI → desktop → TUI fixture round-trips with unknown/unavailable contributions and external-edit conflicts.
+- [x] Extend Catalog UI-state serialization additively for frontend-specific layout and shared logical tabs/preferences. Structured YAML retains unknown nested/tagged data and unavailable contributions across TUI → simulated desktop → TUI fixtures; known edits win and transient legacy fields remain omitted. Raw-byte conditional saves share the actual UI-state/draft/editor/ask codec; the TUI freezes and orders snapshots with acknowledged revisions and pending retention. Parent review required actual frontend failure feedback and exact guardrail reconciliation; neither budgets nor exemptions increased. Parent clean Release build, 207 audited TUI/architecture/storage/adapter cases, 43 Catalog passes (1 Unix-only skip), and site build passed. Layout/tab descriptors remain an opaque persistence seam, not rendered parity. Pending state/status visibility is memory-only; no new conflict dialog, recovery transaction, or external-writer atomic CAS. See parity evidence.
 - [ ] Adapt the TUI to these services and remove superseded domain/persistence implementations. Verify each extracted use case through TUI before writing its desktop equivalent; do not keep old/new behavior paths indefinitely.
 
 ### M3 — Head-neutral plugin runtime

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using SharpYaml.Model;
 
 namespace CodeAlta.Catalog;
 
@@ -8,6 +9,25 @@ namespace CodeAlta.Catalog;
 /// </summary>
 public sealed class SessionViewViewState
 {
+    /// <summary>Gets or sets frontend-owned layout trees, keyed by frontend identity (for example tui or desktop).
+    /// Unrecognized frontend values must be retained, not filtered by local availability.</summary>
+    [JsonIgnore]
+    public YamlMapping FrontendLayouts { get; set; } = new();
+
+    /// <summary>Gets or sets shared logical tab descriptors in order. Descriptors are YAML mappings
+    /// with stable id/kind/reference or contribution fields; unavailable kinds remain opaque data.
+    /// This is a persistence seam, not a renderer or plugin activation contract.</summary>
+    [JsonIgnore]
+    public YamlSequence LogicalTabs { get; set; } = new();
+
+    /// <summary>Gets the raw-byte revision observed on load. A newly constructed state expects a missing file.
+    /// Saves return a separate acknowledgment; this baseline is never advanced by a failed save.</summary>
+    [JsonIgnore]
+    public TextFileRevision Revision { get; internal set; } = TextFileRevision.Missing;
+
+    // Keep unknown nested fields outside replaceable TUI selection/navigator/preference projections.
+    internal string? RetainedYaml { get; set; }
+
     /// <summary>
     /// Gets or sets the ordered open session identifiers.
     /// </summary>

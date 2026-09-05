@@ -25,6 +25,7 @@ internal sealed partial class ShellSessionStateCoordinator
     private readonly ShellCatalogStateCoordinator _catalogStateCoordinator;
     private readonly OpenSessionStateStore _openSessionStateStore;
     private readonly SessionViewStateCoordinator _viewStateCoordinator;
+    private readonly ViewStatePersistenceFeedback? _persistenceFeedback;
     private readonly HashSet<string> _locallyRegisteredSessionIds = new(StringComparer.OrdinalIgnoreCase);
 
     public ShellSessionStateCoordinator(
@@ -39,7 +40,8 @@ internal sealed partial class ShellSessionStateCoordinator
         ISessionHistoryLoaderService historyLoader,
         ISessionStateTabLifecycleService tabLifecycle,
         FrontendEventPublisher? frontendEvents = null,
-        ProjectDescriptor? currentProject = null)
+        ProjectDescriptor? currentProject = null,
+        ViewStatePersistenceFeedback? persistenceFeedback = null)
     {
         ArgumentNullException.ThrowIfNull(projectCatalog);
         ArgumentNullException.ThrowIfNull(sessionCatalog);
@@ -60,6 +62,7 @@ internal sealed partial class ShellSessionStateCoordinator
         _historyLoader = historyLoader;
         _tabLifecycle = tabLifecycle;
         _viewStateCoordinator = new SessionViewStateCoordinator(sessionCatalog);
+        _persistenceFeedback = persistenceFeedback;
         var sessionStateFactory = new SessionStateFactory(
             uiDispatcher,
             timelineSurface,
@@ -143,8 +146,20 @@ internal sealed partial class ShellSessionStateCoordinator
     public Task<NavigatorSettings> LoadNavigatorSettingsAsync(CancellationToken cancellationToken)
         => _viewStateCoordinator.LoadNavigatorSettingsAsync(cancellationToken);
 
-    public async Task PersistViewStateAsync()
-        => await _viewStateCoordinator.PersistViewStateAsync(ViewState);
+    public async Task<SessionViewStateCoordinator.PersistenceResult> PersistViewStateAsync(bool reportStatus = true)
+    {
+        var result = await _viewStateCoordinator.PersistViewStateAsync(ViewState);
+        if (reportStatus)
+        {
+            _persistenceFeedback?.Report(result);
+        }
+
+        return result;
+    }
+
+    public SessionViewStateCoordinator.PersistenceResult? ViewStatePersistenceResult => _viewStateCoordinator.LastResult;
+
+    public bool HasPendingViewStateChanges => _viewStateCoordinator.HasPendingChanges;
 
     public void ApplyRecoveredCatalogState(
         IReadOnlyList<ProjectDescriptor> projects,
@@ -274,13 +289,14 @@ internal sealed partial class ShellSessionStateCoordinator
         SyncStateStore(selectionChanged: true);
     }
 
-    public async Task SaveNavigatorSettingsAsync(NavigatorSettings settings)
+    public async Task<SessionViewStateCoordinator.PersistenceResult> SaveNavigatorSettingsAsync(NavigatorSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
         settings.Validate();
 
-        await _viewStateCoordinator.SaveNavigatorSettingsAsync(ViewState, settings);
+        var result = await _viewStateCoordinator.SaveNavigatorSettingsAsync(ViewState, settings);
         SyncStateStore(selectionChanged: true);
+        return result;
     }
 
     public void TrySchedulePendingStartupSessionRestore(CancellationToken cancellationToken)

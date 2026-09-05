@@ -184,12 +184,13 @@ internal sealed class CodeAltaFrontendComposition
                 draftTabReplacement.ReplaceDraftTabWithSession,
                 frontend.RemoveSessionTabPage),
             frontendEvents,
-            currentProject);
+            currentProject,
+            new ViewStatePersistenceFeedback(frontend.SetStatus));
         var sessionSelectionContext = new SessionSelectionContext(
             sessionStateCoordinator,
             frontend.EnsureSessionHistoryLoadedAsync,
             frontend.IsSelectedSession);
-        var textFiles = new TextFileCodec();
+        var textFiles = sessionCatalog.TextFiles;
         var promptDraftUiCoordinator = new PromptDraftUiCoordinator(
             new PromptDraftCoordinator(),
             new PromptDraftStore(catalogOptions, textFiles),

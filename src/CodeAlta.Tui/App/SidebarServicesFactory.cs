@@ -51,11 +51,12 @@ internal static class SidebarServicesFactory
         var applicationLogs = new ApplicationLogsCoordinator(
             () => GetSidebarDialogBounds(sidebar),
             () => GetSidebarFocusTarget(sidebar));
+        var persistenceFeedback = new ViewStatePersistenceFeedback(setStatus);
         sidebar = new SidebarCoordinator(
             viewModel,
             catalogOptions,
             shellController,
-            () => _ = ToggleSortModeAsync(sessionStateCoordinator, refreshCatalogAndSessionWorkspace),
+            () => _ = ToggleSortModeAsync(sessionStateCoordinator, refreshCatalogAndSessionWorkspace, persistenceFeedback),
             navigatorSettings.Open,
             navigatorActions.RenameProjectDisplayNameAsync,
             new SidebarRowCommandDispatcher(navigatorActions),
@@ -64,16 +65,20 @@ internal static class SidebarServicesFactory
         return (navigatorActions, sidebar);
     }
 
-    private static async Task ToggleSortModeAsync(
+    internal static async Task ToggleSortModeAsync(
         ShellSessionStateCoordinator sessionStateCoordinator,
-        Action refreshCatalogAndSessionWorkspace)
+        Action refreshCatalogAndSessionWorkspace,
+        ViewStatePersistenceFeedback persistenceFeedback)
     {
         var settings = sessionStateCoordinator.GetNavigatorSettingsSnapshot();
         settings.SortMode = settings.SortMode == NavigatorProjectSortMode.Name
             ? NavigatorProjectSortMode.Date
             : NavigatorProjectSortMode.Name;
-        await sessionStateCoordinator.SaveNavigatorSettingsAsync(settings);
-        refreshCatalogAndSessionWorkspace();
+        var result = await sessionStateCoordinator.SaveNavigatorSettingsAsync(settings);
+        if (persistenceFeedback.Report(result))
+        {
+            refreshCatalogAndSessionWorkspace();
+        }
     }
 
     private static Rectangle? GetSidebarDialogBounds(SidebarCoordinator? sidebar)

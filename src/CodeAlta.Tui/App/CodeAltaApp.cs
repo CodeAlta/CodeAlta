@@ -302,7 +302,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     {
         _projectionCoordinator.Dispose();
         _reminderUiCoordinator.Dispose();
-        await PersistViewStateAsync();
+        await _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false);
         await _fileEditorWorkspaceCoordinator.DisposeAsync();
         await _runtimeEventPump.DisposeAsync();
         await _shellController.DisposeAsync();
@@ -708,8 +708,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
     private Task OpenFolderAsync(string folderPath, bool includeHidden)
         => _shellController.OpenFolderAsync(folderPath, includeHidden, CancellationToken.None);
 
-    internal async Task PersistViewStateAsync()
-        => await _sessionStateCoordinator.PersistViewStateAsync();
+    internal Task<SessionViewStateCoordinator.PersistenceResult> PersistViewStateAsync()
+        => _sessionStateCoordinator.PersistViewStateAsync();
     internal Task InitializeModelProvidersAsync(CancellationToken cancellationToken)
         => _modelProviderInitializationCoordinator.InitializeAsync(cancellationToken);
     internal Task InitializeModelProviderAsync(ModelProviderId providerId, CancellationToken cancellationToken)
@@ -726,9 +726,6 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     internal void TrySchedulePendingStartupSessionRestore(CancellationToken cancellationToken)
         => _sessionStateCoordinator.TrySchedulePendingStartupSessionRestore(cancellationToken);
-
-    private async Task RestoreStartupSessionHistoryAsync(string? sessionId, CancellationToken cancellationToken)
-        => await _sessionStateCoordinator.RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);
 
     internal Task RegisterCreatedSessionAsync(SessionView session)
         => _sessionStateCoordinator.RegisterCreatedSessionAsync(session);

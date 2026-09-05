@@ -6,12 +6,53 @@ namespace CodeAlta.Tui.App;
 internal sealed class SessionViewStateCoordinator
 {
     private readonly SessionViewCatalog _sessionCatalog;
-    private readonly SemaphoreSlim _persistViewStateGate = new(1, 1);
+    private readonly Func<SessionViewStateSaveRequest, CancellationToken, Task<SessionViewStateSaveResult>> _save;
+    private readonly object _persistenceGate = new();
+    private Task _persistTail = Task.CompletedTask;
+    private TextFileRevision? _acknowledgedRevision;
+    private string? _pendingYaml;
+    private long _submissionId;
+    private bool _hasPendingChanges;
+    private PersistenceResult? _lastResult;
+
+    internal sealed record PersistenceResult(SessionViewStateSaveResult? Save, Exception? Error)
+    {
+        public bool IsAcknowledged => Save is { IsConflict: false };
+    }
+
+    public TextFileRevision? AcknowledgedRevision
+    {
+        get { lock (_persistenceGate) { return _acknowledgedRevision; } }
+    }
+
+    public string? PendingYaml
+    {
+        get { lock (_persistenceGate) { return _pendingYaml; } }
+    }
+
+    public bool HasPendingChanges
+    {
+        get { lock (_persistenceGate) { return _hasPendingChanges; } }
+    }
+
+    public PersistenceResult? LastResult
+    {
+        get { lock (_persistenceGate) { return _lastResult; } }
+    }
 
     public SessionViewStateCoordinator(SessionViewCatalog sessionCatalog)
     {
         ArgumentNullException.ThrowIfNull(sessionCatalog);
         _sessionCatalog = sessionCatalog;
+        _save = sessionCatalog.SaveViewStateAsync;
+    }
+
+    internal SessionViewStateCoordinator(SessionViewCatalog sessionCatalog,
+        Func<SessionViewStateSaveRequest, CancellationToken, Task<SessionViewStateSaveResult>> save)
+        : this(sessionCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(save);
+        _save = save;
     }
 
     public Task<SessionViewViewState> LoadViewStateAsync(CancellationToken cancellationToken)
@@ -23,23 +64,83 @@ internal sealed class SessionViewStateCoordinator
         return GetNavigatorSettingsSnapshot(viewState);
     }
 
-    public async Task PersistViewStateAsync(SessionViewViewState viewState)
+    // Called on the UI owner: serialize before any await, never enumerate live collections in a worker.
+    public Task<PersistenceResult> PersistViewStateAsync(SessionViewViewState viewState, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(viewState);
+        lock (_persistenceGate)
+        {
+            var submissionId = ++_submissionId;
+            _hasPendingChanges = true;
+            SessionViewStateSaveRequest request;
+            try
+            {
+                request = _sessionCatalog.CreateViewStateSaveRequest(viewState, viewState.Revision);
+            }
+            catch (Exception ex)
+            {
+                LogFailure(ex, "Failed to snapshot session view state.");
+                _lastResult = new PersistenceResult(null, ex);
+                return Task.FromResult(_lastResult);
+            }
 
-        await _persistViewStateGate.WaitAsync().ConfigureAwait(false);
+            _acknowledgedRevision ??= request.ExpectedRevision;
+            _pendingYaml = request.Yaml;
+            var task = PersistSnapshotAsync(_persistTail, request, submissionId, cancellationToken);
+            _persistTail = task;
+            return task;
+        }
+    }
+
+    private async Task<PersistenceResult> PersistSnapshotAsync(
+        Task previous, SessionViewStateSaveRequest request, long submissionId, CancellationToken cancellationToken)
+    {
+        await previous.ConfigureAwait(false);
         try
         {
-            await _sessionCatalog.SaveViewStateAsync(viewState, CancellationToken.None).ConfigureAwait(false);
+            lock (_persistenceGate)
+            {
+                request = request with { ExpectedRevision = _acknowledgedRevision ?? request.ExpectedRevision };
+            }
+
+            var saved = await _save(request, cancellationToken).ConfigureAwait(false);
+            if (!saved.IsConflict)
+            {
+                lock (_persistenceGate)
+                {
+                    _acknowledgedRevision = saved.AcknowledgedRevision;
+                    if (_submissionId == submissionId)
+                    {
+                        _pendingYaml = null;
+                        _hasPendingChanges = false;
+                    }
+                }
+            }
+            else
+            {
+                CodeAlta.Tui.Views.CodeAltaApp.UiLogger.Warn("Session view state changed externally; pending state was not saved.");
+            }
+
+            return RememberResult(new PersistenceResult(saved, null), submissionId);
         }
         catch (Exception ex)
         {
-            CodeAlta.Tui.Views.CodeAltaApp.UiLogger.Error(ex, "Failed to persist session view state.");
+            LogFailure(ex, "Failed to persist session view state.");
+            return RememberResult(new PersistenceResult(null, ex), submissionId);
         }
-        finally
+    }
+
+    private PersistenceResult RememberResult(PersistenceResult result, long submissionId)
+    {
+        lock (_persistenceGate)
         {
-            _persistViewStateGate.Release();
+            if (_submissionId == submissionId)
+            {
+                _lastResult = result;
+            }
         }
+
+        return result;
     }
 
     public IReadOnlyList<SessionViewDescriptor> ApplySessionLocalState(
@@ -170,7 +271,7 @@ internal sealed class SessionViewStateCoordinator
         };
     }
 
-    public async Task SaveNavigatorSettingsAsync(SessionViewViewState viewState, NavigatorSettings settings)
+    public Task<PersistenceResult> SaveNavigatorSettingsAsync(SessionViewViewState viewState, NavigatorSettings settings)
     {
         ArgumentNullException.ThrowIfNull(viewState);
         ArgumentNullException.ThrowIfNull(settings);
@@ -185,7 +286,7 @@ internal sealed class SessionViewStateCoordinator
             AutoApprove = settings.AutoApprove,
         };
         viewState.UpdatedAt = DateTimeOffset.UtcNow;
-        await PersistViewStateAsync(viewState).ConfigureAwait(false);
+        return PersistViewStateAsync(viewState);
     }
 
     private static string? NormalizeLanguageName(string? languageName)

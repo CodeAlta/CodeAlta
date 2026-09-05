@@ -28,6 +28,12 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 > [!TIP]
 > If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
 
+## Saved workspace preferences
+
+Open-session selection, project preferences, theme and navigator settings are saved in `~/.alta/ui-state.yaml`. Session-specific execution state stays in session journals. UI-state saves retain unrecognized nested settings, frontend-specific layout data and logical tab descriptors for unavailable contributions; retaining a descriptor does not mean the current frontend can display it.
+
+Saves check the last successfully loaded/saved file content, not just its timestamp. If another editor changes, deletes or creates the file, stale UI state is not silently written over it. Malformed or unsupported YAML also remains untouched. During normal use, the workspace status line reports conflicts as warnings and other save failures as errors; a successful retry reports that pending changes were saved. The settings dialog still closes back to the workspace, and later UI activity may replace the status message. Pending settings can remain effective in memory without being saved. There is not yet a UI-state conflict-resolution dialog or restart recovery for those pending changes; preserve your intended changes before exiting after a save error. Shutdown save failures are logged without skipping later cleanup. YAML comments and formatting are not retained when a save succeeds.
+
 ## Timeline cards
 
 <div class="row g-3 my-4">

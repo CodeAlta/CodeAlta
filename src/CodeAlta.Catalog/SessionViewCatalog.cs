@@ -1,3 +1,4 @@
+using System.Text;
 using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Catalog;
@@ -43,6 +44,9 @@ public sealed class SessionViewCatalog
     /// Gets the session journal metadata store.
     /// </summary>
     public SessionViewJournalStore JournalStore { get; }
+
+    /// <summary>Gets the text codec shared by UI-state saves and cooperating file editors/stores.</summary>
+    public TextFileCodec TextFiles { get; } = new();
 
     /// <summary>
     /// Loads all legacy host-owned internal session records.
@@ -101,34 +105,83 @@ public sealed class SessionViewCatalog
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The view state, or an empty one when the file is missing.</returns>
+    /// <exception cref="IOException">Reading failed.</exception>
+    /// <exception cref="InvalidDataException">YAML has an unsupported shape.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access is denied.</exception>
+    /// <exception cref="DecoderFallbackException">The file contains invalid Unicode bytes.</exception>
+    /// <exception cref="SharpYaml.YamlException">The YAML is malformed.</exception>
+    /// <exception cref="ArgumentException">Known state is invalid.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public async Task<SessionViewViewState> LoadViewStateAsync(CancellationToken cancellationToken = default)
     {
-        var path = GetViewStatePath();
-        if (!File.Exists(path))
+        TextFileSnapshot file;
+        try
+        {
+            file = await TextFiles.LoadAsync(GetViewStatePath(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (FileNotFoundException)
+        {
+            return new SessionViewViewState();
+        }
+        catch (DirectoryNotFoundException)
         {
             return new SessionViewViewState();
         }
 
-        var yaml = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-        var viewState = _serializer.DeserializeViewState(yaml);
+        var viewState = _serializer.DeserializeViewState(file.Text);
         viewState.Validate();
+        viewState.Revision = file.Revision;
         return viewState;
     }
 
     /// <summary>
-    /// Saves the local session view state.
+    /// Conditionally saves against the state's loaded revision (missing for a new state).
+    /// Repeated saves must use the returned acknowledgment, not reuse the original baseline.
     /// </summary>
     /// <param name="viewState">The view state to save.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task SaveViewStateAsync(SessionViewViewState viewState, CancellationToken cancellationToken = default)
+    /// <returns>An acknowledgment or conflict; failure throws without advancing the baseline.</returns>
+    /// <inheritdoc cref="SaveViewStateAsync(SessionViewStateSaveRequest, CancellationToken)"/>
+    public Task<SessionViewStateSaveResult> SaveViewStateAsync(SessionViewViewState viewState, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(viewState);
-        viewState.Validate();
+        return SaveViewStateAsync(CreateViewStateSaveRequest(viewState, viewState.Revision), cancellationToken);
+    }
 
-        var path = GetViewStatePath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var yaml = _serializer.SerializeViewState(viewState);
-        await File.WriteAllTextAsync(path, yaml, cancellationToken).ConfigureAwait(false);
+    /// <summary>Synchronously freezes UI-owned mutable state before entering asynchronous persistence.</summary>
+    /// <exception cref="ArgumentNullException">The state or revision is null.</exception>
+    /// <exception cref="ArgumentException">Known state is invalid.</exception>
+    /// <exception cref="InvalidDataException">Retained YAML has an unsupported or invalid shape.</exception>
+    /// <exception cref="SharpYaml.YamlException">Retained YAML is malformed.</exception>
+    public SessionViewStateSaveRequest CreateViewStateSaveRequest(SessionViewViewState viewState, TextFileRevision expectedRevision)
+    {
+        ArgumentNullException.ThrowIfNull(viewState);
+        ArgumentNullException.ThrowIfNull(expectedRevision);
+        viewState.Validate();
+        return new SessionViewStateSaveRequest(_serializer.SerializeViewState(viewState), expectedRevision);
+    }
+
+    /// <summary>Saves a frozen YAML snapshot against an explicitly acknowledged raw-byte revision.</summary>
+    /// <remarks>Uses staged replacement through the shared codec. External writers still have the
+    /// codec's documented final-check/commit race; this is not cross-process atomic compare-and-swap.</remarks>
+    /// <exception cref="ArgumentNullException">The request or a required value is null.</exception>
+    /// <exception cref="ArgumentException">Known state is invalid.</exception>
+    /// <exception cref="InvalidDataException">YAML has an unsupported shape.</exception>
+    /// <exception cref="SharpYaml.YamlException">YAML is malformed.</exception>
+    /// <exception cref="IOException">Reading, staging or replacing the file failed.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access is denied.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested before commit.</exception>
+    public async Task<SessionViewStateSaveResult> SaveViewStateAsync(SessionViewStateSaveRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        var state = _serializer.DeserializeViewState(request.Yaml);
+        state.Validate();
+        // Requests are data, not permission to bypass migration/transient-field omission.
+        var yaml = _serializer.SerializeViewState(state);
+        var saved = await TextFiles.SaveAsync(new TextFileSaveRequest(
+            GetViewStatePath(), yaml, Encoding.UTF8, false, request.ExpectedRevision), cancellationToken).ConfigureAwait(false);
+        return new SessionViewStateSaveResult(saved.IsConflict ? null : saved.CurrentRevision, saved.CurrentRevision);
     }
 
     private string GetViewStatePath()

@@ -13,6 +13,7 @@ internal sealed class NavigatorSettingsCoordinator : INavigatorSettingsDialogSer
     private readonly Func<Visual?> _getFocusTarget;
     private readonly Action _refreshCatalogAndSessionWorkspace;
     private readonly Action<string, bool, StatusTone> _setStatus;
+    private readonly ViewStatePersistenceFeedback _persistenceFeedback;
 
     public NavigatorSettingsCoordinator(
         ShellSessionStateCoordinator sessionStateCoordinator,
@@ -32,6 +33,7 @@ internal sealed class NavigatorSettingsCoordinator : INavigatorSettingsDialogSer
         _getFocusTarget = getFocusTarget;
         _refreshCatalogAndSessionWorkspace = refreshCatalogAndSessionWorkspace;
         _setStatus = setStatus;
+        _persistenceFeedback = new ViewStatePersistenceFeedback(setStatus);
     }
 
     public void Open()
@@ -46,7 +48,12 @@ internal sealed class NavigatorSettingsCoordinator : INavigatorSettingsDialogSer
     {
         try
         {
-            await _sessionStateCoordinator.SaveNavigatorSettingsAsync(settings);
+            var result = await _sessionStateCoordinator.SaveNavigatorSettingsAsync(settings);
+            if (!_persistenceFeedback.Report(result))
+            {
+                return;
+            }
+
             UiTheme.ApplyLanguage(settings);
             _refreshCatalogAndSessionWorkspace();
         }

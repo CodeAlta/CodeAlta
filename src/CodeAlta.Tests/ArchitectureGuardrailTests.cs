@@ -690,12 +690,12 @@ public sealed class ArchitectureGuardrailTests
             "App/CodeAltaApp.cs:378:_ = PersistViewStateAsync();",
             "App/CodeAltaApp.cs:456:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
-            "App/ShellSessionStateCoordinator.cs:301:_ = RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);",
-            "App/ShellSessionStateCoordinator.cs:312:_ = PersistViewStateAsync();",
-            "App/ShellSessionStateCoordinator.cs:327:_ = PersistViewStateAsync();",
-            "App/ShellSessionStateCoordinator.cs:399:_ = PersistViewStateAsync();",
-            "App/ShellSessionStateCoordinator.cs:540:_ = PersistViewStateAsync();",
-            "App/ShellSessionStateCoordinator.cs:590:_ = PersistViewStateAsync();",
+            "App/ShellSessionStateCoordinator.cs:317:_ = RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);",
+            "App/ShellSessionStateCoordinator.cs:328:_ = PersistViewStateAsync();",
+            "App/ShellSessionStateCoordinator.cs:343:_ = PersistViewStateAsync();",
+            "App/ShellSessionStateCoordinator.cs:415:_ = PersistViewStateAsync();",
+            "App/ShellSessionStateCoordinator.cs:556:_ = PersistViewStateAsync();",
+            "App/ShellSessionStateCoordinator.cs:606:_ = PersistViewStateAsync();",
             "App/SidebarCoordinator.cs:312:_ = CommitInlineRenameAsync(row, projectId, displayName, previousTitle);",
             "App/SessionPromptDispatchCoordinator.cs:180:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
             "App/SessionHistoryCoordinator.cs:103:await Task.Run(",
@@ -1726,12 +1726,25 @@ public sealed class ArchitectureGuardrailTests
         var persistenceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "SessionPromptDraftPersistenceCoordinator.cs"));
         var draftStoreSource = File.ReadAllText(Path.GetFullPath(Path.Combine(GetCodeAltaSourceRoot(), "..", "CodeAlta.Catalog", "PromptDraftStore.cs")));
         var sessionStateSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ShellSessionStateCoordinator.cs"));
+        var catalogSource = File.ReadAllText(Path.GetFullPath(Path.Combine(GetCodeAltaSourceRoot(), "..", "CodeAlta.Catalog", "SessionViewCatalog.cs")));
+        var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs"));
+        var editorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "FileEditorWorkspaceCoordinator.cs"));
+        var askSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "AskModeCoordinator.cs"));
 
         Assert.IsTrue(compositionSource.Contains("new SessionPromptDraftService(frontend.LoadPromptDraft, frontend.DeletePromptDraft)", StringComparison.Ordinal));
-        Assert.AreEqual(1, Regex.Matches(compositionSource, @"new TextFileCodec\(\)").Count);
+        Assert.AreEqual(0, Regex.Matches(compositionSource, @"new TextFileCodec\(\)").Count);
+        Assert.AreEqual(1, Regex.Matches(catalogSource, @"TextFileCodec TextFiles \{ get; \} = new\(\)").Count);
+        Assert.IsTrue(compositionSource.Contains("var textFiles = sessionCatalog.TextFiles;", StringComparison.Ordinal));
+        Assert.IsTrue(catalogSource.Contains("await TextFiles.LoadAsync(GetViewStatePath(), cancellationToken)", StringComparison.Ordinal));
+        Assert.IsTrue(catalogSource.Contains("await TextFiles.SaveAsync(new TextFileSaveRequest(", StringComparison.Ordinal));
         Assert.IsTrue(compositionSource.Contains("new PromptDraftStore(catalogOptions, textFiles)", StringComparison.Ordinal));
         Assert.IsTrue(compositionSource.Contains("TextFiles = textFiles", StringComparison.Ordinal));
         Assert.IsTrue(Regex.IsMatch(compositionSource, @"new AskModeCoordinator\(\s*textFiles,"));
+        Assert.IsTrue(Regex.IsMatch(appSource, @"new FileEditorWorkspaceCoordinator\(\s*composition.TextFiles,"));
+        Assert.IsTrue(editorSource.Contains("_textFiles = textFiles;", StringComparison.Ordinal));
+        Assert.IsTrue(editorSource.Contains("FileEditorTab.CreateAsync(item, appearance, _textFiles,", StringComparison.Ordinal));
+        Assert.IsTrue(askSource.Contains("_textFiles = textFiles;", StringComparison.Ordinal));
+        Assert.IsTrue(askSource.Contains("AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session), _textFiles)", StringComparison.Ordinal));
         Assert.IsFalse(File.Exists(Path.Combine(GetCodeAltaSourceRoot(), "App", "ISessionStateFrontendPort.cs")));
         Assert.IsTrue(promptDraftSource.Contains("_promptDraftPersistence.ObservePromptDraft", StringComparison.Ordinal));
         Assert.IsTrue(catalogOptionsSource.Contains("saved_prompts", StringComparison.Ordinal));
@@ -1740,6 +1753,31 @@ public sealed class ArchitectureGuardrailTests
         Assert.IsTrue(draftStoreSource.Contains("PromptDraftsRoot", StringComparison.Ordinal));
         Assert.IsTrue(draftStoreSource.Contains("saved_prompt_", StringComparison.Ordinal));
         Assert.IsTrue(sessionStateSource.Contains("_promptDrafts.DeletePromptDraft(sessionId);", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void UiStatePersistence_SaveSeamsReportFailureWithoutShortCircuitingCleanup()
+    {
+        var root = GetCodeAltaSourceRoot();
+        var composition = File.ReadAllText(Path.Combine(root, "App", "CodeAltaFrontendComposition.cs"));
+        var shell = File.ReadAllText(Path.Combine(root, "App", "ShellSessionStateCoordinator.cs"));
+        var settings = File.ReadAllText(Path.Combine(root, "App", "NavigatorSettingsCoordinator.cs"));
+        var sidebar = File.ReadAllText(Path.Combine(root, "App", "SidebarServicesFactory.cs"));
+        var app = File.ReadAllText(Path.Combine(root, "App", "CodeAltaApp.cs"));
+        StringAssert.Contains(composition, "new ViewStatePersistenceFeedback(frontend.SetStatus)");
+        StringAssert.Contains(shell, "_persistenceFeedback?.Report(result);");
+        StringAssert.Contains(settings, "if (!_persistenceFeedback.Report(result))");
+        StringAssert.Contains(sidebar, "if (persistenceFeedback.Report(result))");
+        StringAssert.Contains(app, "internal Task<SessionViewStateCoordinator.PersistenceResult> PersistViewStateAsync()");
+        var start = app.IndexOf("async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()", StringComparison.Ordinal);
+        var end = app.IndexOf("IAsyncDisposable? IShellFrontendHostLifecycle.OwnedServices", start, StringComparison.Ordinal);
+        var disposal = app[start..end];
+        StringAssert.Contains(disposal, "await _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false);");
+        Assert.IsFalse(disposal.Contains("throw", StringComparison.Ordinal));
+        foreach (var cleanup in new[] { "_fileEditorWorkspaceCoordinator", "_runtimeEventPump", "_shellController", "_promptDraftUiCoordinator" })
+        {
+            StringAssert.Contains(disposal, $"await {cleanup}.DisposeAsync();");
+        }
     }
 
     [TestMethod]

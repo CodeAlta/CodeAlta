@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using SharpYaml;
+using SharpYaml.Model;
 
 namespace CodeAlta.Catalog;
 
@@ -181,14 +182,22 @@ public sealed class SessionViewYamlSerializer
     /// </summary>
     /// <param name="yaml">The YAML content.</param>
     /// <returns>The parsed view state.</returns>
+    /// <exception cref="ArgumentNullException">The YAML is null.</exception>
+    /// <exception cref="YamlException">The YAML is malformed.</exception>
+    /// <exception cref="InvalidDataException">The document is not a single mapping, has duplicate/merge keys,
+    /// anchors, or invalid frontend-layout/logical-tab section shapes.</exception>
     public SessionViewViewState DeserializeViewState(string yaml)
     {
         ArgumentNullException.ThrowIfNull(yaml);
+        var retained = ParseViewStateMapping(yaml);
         var document = YamlSerializer.Deserialize<SessionViewViewStateDocument>(yaml) ?? new SessionViewViewStateDocument();
         var openSessionIds = document.OpenSessionIds ?? [];
         var selection = document.Selection ?? BuildLegacySelection(document.SelectedSessionId, openSessionIds);
         return new SessionViewViewState
         {
+            RetainedYaml = yaml,
+            FrontendLayouts = ReadSection<YamlMapping>(retained, "frontend_layouts") ?? new YamlMapping(),
+            LogicalTabs = ReadSection<YamlSequence>(retained, "logical_tabs") ?? new YamlSequence(),
             OpenSessionIds = openSessionIds,
             Selection = selection,
             SelectedSessionId = selection.Surface == SessionViewSelectionSurface.Session ? selection.SessionId : null,
@@ -214,6 +223,12 @@ public sealed class SessionViewYamlSerializer
     /// </summary>
     /// <param name="viewState">The view state.</param>
     /// <returns>The serialized YAML.</returns>
+    /// <remarks>Retains unknown YAML trees semantically, including nested selection, navigator and
+    /// retained project-preference fields. Known values (including nulls) win. Literal formatting and
+    /// comments are not a retention contract. Legacy session fields are intentionally omitted.</remarks>
+    /// <exception cref="ArgumentNullException">The state is null.</exception>
+    /// <exception cref="YamlException">Retained YAML is malformed.</exception>
+    /// <exception cref="InvalidDataException">Retained or supplied YAML has an unsupported shape.</exception>
     public string SerializeViewState(SessionViewViewState viewState)
     {
         ArgumentNullException.ThrowIfNull(viewState);
@@ -229,7 +244,111 @@ public sealed class SessionViewYamlSerializer
             Navigator = viewState.Navigator,
         };
 
-        return YamlSerializer.Serialize(document);
+        var known = ParseViewStateMapping(YamlSerializer.Serialize(document));
+        var retained = ParseViewStateMapping(viewState.RetainedYaml ?? string.Empty);
+        MergeOwnedMapping(retained, known, "selection");
+        MergeOwnedMapping(retained, known, "navigator");
+        if (known["project_preferences"] is YamlMapping preferences && retained["project_preferences"] is YamlMapping oldPreferences)
+        {
+            // Iterate current keys only: removing a project preference must really remove it.
+            foreach (var entry in preferences.ToArray())
+            {
+                var key = ((YamlValue)entry.Key).Value;
+                MergeOwnedMapping(oldPreferences, preferences, key);
+            }
+        }
+
+        foreach (var entry in known)
+        {
+            retained[((YamlValue)entry.Key).Value] = entry.Value;
+        }
+
+        // These legacy fields are read for migration but never resurrected from retained data.
+        retained.Remove("session_preferences");
+        retained.Remove("session_states");
+        retained["frontend_layouts"] = viewState.FrontendLayouts;
+        retained["logical_tabs"] = viewState.LogicalTabs;
+        ValidateTree(retained);
+        return retained.ToString();
+    }
+
+    private static void MergeOwnedMapping(YamlMapping retained, YamlMapping known, string key)
+    {
+        if (retained[key] is not YamlMapping oldMapping || known[key] is not YamlMapping newMapping)
+        {
+            return;
+        }
+
+        foreach (var entry in newMapping)
+        {
+            // Known nulls also win, so clearing a known value cannot revive its old value.
+            oldMapping[((YamlValue)entry.Key).Value] = entry.Value;
+        }
+
+        known[key] = oldMapping;
+    }
+
+    private static T? ReadSection<T>(YamlMapping mapping, string key) where T : YamlElement
+    {
+        var value = mapping[key];
+        return value is null ? null : value as T ?? throw new InvalidDataException($"UI-state '{key}' has an invalid YAML shape.");
+    }
+
+    private static YamlMapping ParseViewStateMapping(string yaml)
+    {
+        if (string.IsNullOrWhiteSpace(yaml))
+        {
+            return new YamlMapping();
+        }
+
+        using var reader = new StringReader(yaml);
+        var stream = YamlStream.Load(reader);
+        if (stream.Count == 0 || (stream.Count == 1 && stream[0].Contents is YamlValue { Value.Length: 0 }))
+        {
+            return new YamlMapping(); // Preserve legacy empty/comment-only document reads.
+        }
+
+        if (stream.Count != 1 || stream[0].Contents is not YamlMapping mapping)
+        {
+            throw new InvalidDataException("UI state must contain exactly one YAML mapping document.");
+        }
+
+        ValidateTree(mapping);
+        return mapping;
+    }
+
+    private static void ValidateTree(YamlElement? element)
+    {
+        if (element is null)
+        {
+            throw new InvalidDataException("UI-state YAML nodes cannot be null; use a YAML null scalar.");
+        }
+
+        if (!string.IsNullOrEmpty(element.Anchor))
+        {
+            throw new InvalidDataException("UI-state YAML anchors and aliases are not supported.");
+        }
+
+        if (element is YamlMapping mapping)
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in mapping)
+            {
+                if (entry.Key is not YamlValue key || !string.IsNullOrEmpty(key.Anchor) || !keys.Add(key.Value) || key.Value == "<<")
+                {
+                    throw new InvalidDataException("UI-state mappings require unique scalar keys and do not support YAML merge keys.");
+                }
+
+                ValidateTree(entry.Value);
+            }
+        }
+        else if (element is YamlSequence sequence)
+        {
+            foreach (var child in sequence)
+            {
+                ValidateTree(child);
+            }
+        }
     }
 
     private static SessionViewSelectionState BuildLegacySelection(string? selectedSessionId, IReadOnlyList<string> openSessionIds)

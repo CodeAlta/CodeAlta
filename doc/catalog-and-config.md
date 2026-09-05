@@ -17,7 +17,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `cache/` | Process/runtime services | Machine-local cache root, including `cache.sqlite3` session-listing projections, refreshed model metadata, and plugin build cache. |
 | `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
 | `saved_prompts/` | Catalog `PromptDraftStore` | Unsent session and global/project new-session text drafts. |
-| `ui-state.yaml` | Frontend view-state service | Open/selected tabs, session/model preferences, theme, and shell view state. |
+| `ui-state.yaml` | Catalog UI-state store | Open/selected sessions, project preferences, theme/navigator settings, frontend layouts and shared logical tab descriptors. |
 | `plugins/` | Plugin runtime | User-scoped source plugin packages. |
 | `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
 | `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
@@ -79,7 +79,7 @@ Provider registrations are skipped at startup when required credentials or provi
 
 ### Project overrides
 
-Project-local config can override effective chat/provider behavior for that project. The frontend also persists session-specific provider/model/reasoning selections in `ui-state.yaml`, so an existing session view can keep its selected runtime after global defaults change.
+Project-local config can override effective chat/provider behavior for that project. Project execution preferences live in `ui-state.yaml`; session-specific provider/model/reasoning selections live in session journal state, so an existing session view can keep its selected runtime after global defaults change.
 
 Skill disablement is additive rather than an override: a skill named in global `[skills].disabled` is disabled everywhere, and a skill named in project `[skills].disabled` is disabled only for that project. A project config cannot re-enable a globally disabled skill.
 
@@ -114,7 +114,34 @@ The synchronous TUI projection/clear/delete seams join an awaitable flush on pro
 
 Coordinator disposal stops new edits and joins pending work, throwing on failed flush. `ShellFrontendHost` still disposes the application's owned services if frontend disposal fails, preserving the original error and aggregating a second owned-cleanup failure instead of losing either. This is not a complete shutdown confirmation/recovery UX. Successful flush means the file operation completed, not guaranteed survival of power loss. The TUI composition injects the **same** `TextFileCodec` instance into drafts, file editors and ask reviews, serializing cooperating saves/deletes even when an editor opens a draft's path. External writers/path-link changes retain the documented final-check/commit race, not cross-process atomic compare-and-swap.
 
-The frontend stores view state in `~/.alta/ui-state.yaml`, including open/selected tabs, theme and navigator settings, and session-specific model preferences.
+### Additive UI-state persistence
+
+`SessionViewCatalog` owns `CatalogOptions.UiStatePath` (`~/.alta/ui-state.yaml`). Existing `open_session_ids`, `selection`, mirrored legacy `selected_session_id`, `updated_at`, `project_preferences` and `navigator` retain their meanings. Legacy `session_preferences` and `session_states` remain readable in memory for migration but are **omitted** on save, not copied back from retained extension data. Session journals remain authoritative and are not rewritten by UI-state saves.
+
+Two additive sections provide a persistence seam for multiple frontends:
+
+```yaml
+frontend_layouts:
+  tui: {navigator_width: 32}
+  desktop: {window: {width: 1200, height: 800}}
+logical_tabs:
+  - {id: session-1, kind: session, reference: session-1}
+  - {id: review-panel, kind: plugin, contribution: example.review, data: {mode: summary}}
+```
+
+`SessionViewViewState.FrontendLayouts` is a SharpYaml mapping keyed by frontend identity; values belonging to unknown future frontends may have any YAML-tree shape. `LogicalTabs` is an ordered YAML sequence of opaque descriptors, conventionally mappings with stable `id`, `kind`, `reference`/`contribution` and optional data. This slice does not validate renderer-specific descriptors, authorize paths, activate plugins or implement tab rendering/restoration. Frontends must preserve descriptors they cannot render rather than availability-filtering the sequence. Existing TUI session-ID pruning is unchanged and does not prune these descriptors. Theme/language and execution preferences remain shared through the existing known fields; frontend geometry belongs in its own layout entry.
+
+The serializer retains unknown root fields **and nested values** in selection, navigator, retained project preferences and arbitrary layout/tab contribution trees, using SharpYaml's structured model (no YAML text rewriting). Retention is held outside replaceable TUI selection/navigator DTOs. Known values, including deliberate nulls, win; removing a project preference removes its associated unknown fields too. Frontend-owned trees and the logical descriptor list are replaced only by the supplied complete trees/list, so callers must carry unrecognized entries through updates. Comments, whitespace, literal formatting and original encoding are not preserved; scalar values, tags, sequences and mapping data are retained semantically. Output is UTF-8 without BOM.
+
+Malformed documents, duplicate scalar mapping keys, complex mapping keys, merge keys, anchors/aliases, multiple documents, or wrong section shapes produce explicit errors rather than dropping data. There is no automatic backup/recovery rewrite. An unreadable/invalid existing file cannot be overwritten by a new empty state's missing-file baseline.
+
+`LoadViewStateAsync` returns the loaded **raw-byte** `Revision`, distinguishing a missing file from an empty one. `CreateViewStateSaveRequest` synchronously freezes mutable state to YAML; `SaveViewStateAsync(request)` requires the previously loaded or successfully acknowledged revision and returns `SessionViewStateSaveResult`. Only `AcknowledgedRevision` is a successful commit; a conflict's `CurrentRevision` is diagnostic, not a replacement baseline. The convenience state overload uses its original loaded revision, so callers performing repeated saves must carry the returned acknowledgment explicitly. Validation, I/O and cancellation failures throw and leave original bytes intact before commit.
+
+The actual TUI coordinator freezes each snapshot before yielding, orders cooperating writes in one owned chain, and advances its baseline only on acknowledgment. It retains pending state and the original baseline on conflicts/failure, including same-mtime external edits, deletions and creation after a missing load. Ordinary shell saves report conflicts as warnings and other save failures as errors in the existing workspace status channel; the app facade preserves the result. Explicit workspace settings and sidebar sort adapters also inspect the result, reporting failure instead of running their successful-save language/refresh actions. A successful retry after a reported failure acknowledges that pending changes were saved. There is no new conflict dialog: settings still close back to the workspace, and status messages can be replaced by later UI activity. Pending settings can remain effective in memory; failure does not roll them back or mark them durable.
+
+Pending state is memory-only and can be lost on exit; retries do not silently adopt an external revision. Final shutdown persistence suppresses UI feedback after projections have been disposed and retains the nonthrowing result/logging path, so a storage conflict/failure does not newly skip the subsequent editor, runtime, controller and draft cleanup. This is not a shutdown recovery transaction. Startup's navigator-only projection is not a write baseline; full catalog loading supplies the state used by normal saves.
+
+`SessionViewCatalog.TextFiles` is the same codec used by the TUI's draft store, editors and ask reviews, so an editor opening `ui-state.yaml` participates in the same staged-save gate. Noncooperating writers retain the codec's final-check/commit race; this is **not** cross-process atomic compare-and-swap or power-loss durability. Fixture TUI → simulated desktop → TUI round-trips establish persistence, not rendered desktop parity.
 
 `ShellStateStore` is a UI-session projection of currently open shell state; it is not a replacement for the durable catalog, session journals, or runtime-owned session state.
 
@@ -132,7 +159,7 @@ The store accepts a **trusted backend root**, not a renderer file grant or RPC a
 
 ## Editable text files
 
-`CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves/deletes. The TUI composition shares one instance between prompt drafts, file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.
+`CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves/deletes. The TUI composition shares the session catalog's instance between UI state, prompt drafts, file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.
 
 Loads return the complete text, encoding/BOM information, an advisory timestamp, and a SHA-256 identity of the raw bytes. The missing-file revision differs from an empty file. Saves require the previously observed revision, including for creation: stale edits, external deletion, and same-timestamp content changes return a conflict without overwriting the target. File-editor Overwrite confirms the revision observed in the conflict, so another intervening edit conflicts again. Conflicts retain dirty editor text; ask-file saves return failure without marking the review saved or allowing the save-and-submit action to proceed.
 
