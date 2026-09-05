@@ -686,9 +686,9 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/CodeAltaShellController.cs:73:_initializationTask = Task.Run(",
             "App/CodeAltaShellController.cs:448:var startupProviderLoadTask = Task.Run(",
-            "App/CodeAltaApp.cs:346:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:377:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:455:_ = OpenModelProvidersAsync();",
+            "App/CodeAltaApp.cs:347:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:378:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:456:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
             "App/ShellSessionStateCoordinator.cs:301:_ = RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);",
             "App/ShellSessionStateCoordinator.cs:312:_ = PersistViewStateAsync();",
@@ -698,7 +698,6 @@ public sealed class ArchitectureGuardrailTests
             "App/ShellSessionStateCoordinator.cs:590:_ = PersistViewStateAsync();",
             "App/SidebarCoordinator.cs:312:_ = CommitInlineRenameAsync(row, projectId, displayName, previousTitle);",
             "App/SessionPromptDispatchCoordinator.cs:180:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
-            "App/SessionPromptDraftPersistenceCoordinator.cs:83:_ = PersistPromptDraftAsync(sessionId, normalizedPrompt, cancellationSource);",
             "App/SessionHistoryCoordinator.cs:103:await Task.Run(",
             "App/SessionHistoryCoordinator.cs:493:var loadTask = Task.Run(() => LoadCoreAsync(session, tab, cancellationToken));",
             "App/SessionRuntimeEventCoordinator.cs:281:Task.Run(async () =>",
@@ -1704,20 +1703,43 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void PromptDraftAdmission_ClearsBeforeQueueOrDispatchAcceptance()
+    {
+        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "SessionCommandCoordinator.cs"));
+        var start = source.IndexOf("public async Task SendPromptAsync(", StringComparison.Ordinal);
+        var end = source.IndexOf("internal static Task ClearInputAndAdmitPromptAsync", start, StringComparison.Ordinal);
+        var send = source[start..end];
+        Assert.IsTrue(send.Contains("await ClearInputAndAdmitPromptAsync(", StringComparison.Ordinal));
+        Assert.IsTrue(send.IndexOf("EnsureSessionHistoryLoadedAsync", StringComparison.Ordinal) < send.IndexOf("await ClearInputAndAdmitPromptAsync(", StringComparison.Ordinal));
+        Assert.IsTrue(send.Contains("hadExistingSession ? _commandContext.ClearSessionInput : _commandContext.ClearDraftInput", StringComparison.Ordinal));
+        Assert.IsTrue(send.Contains("() => _queueCoordinator.EnqueuePrompt(tab, prompt)", StringComparison.Ordinal));
+        Assert.IsTrue(send.Contains("() => _promptDispatchCoordinator.DispatchPromptAsync", StringComparison.Ordinal));
+        Assert.IsFalse(send.Contains("_commandContext.ClearDraftInput();", StringComparison.Ordinal));
+        Assert.IsFalse(send.Contains("_commandContext.ClearSessionInput();", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void SessionDraftPersistence_UsesMachineSavedPromptsAndDeleteHooks()
     {
         var compositionSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaFrontendComposition.cs"));
         var catalogOptionsSource = File.ReadAllText(Path.GetFullPath(Path.Combine(GetCodeAltaSourceRoot(), "..", "CodeAlta.Catalog", "CatalogOptions.cs")));
         var promptDraftSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "PromptDraftUiCoordinator.cs"));
         var persistenceSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "SessionPromptDraftPersistenceCoordinator.cs"));
+        var draftStoreSource = File.ReadAllText(Path.GetFullPath(Path.Combine(GetCodeAltaSourceRoot(), "..", "CodeAlta.Catalog", "PromptDraftStore.cs")));
         var sessionStateSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ShellSessionStateCoordinator.cs"));
 
         Assert.IsTrue(compositionSource.Contains("new SessionPromptDraftService(frontend.LoadPromptDraft, frontend.DeletePromptDraft)", StringComparison.Ordinal));
+        Assert.AreEqual(1, Regex.Matches(compositionSource, @"new TextFileCodec\(\)").Count);
+        Assert.IsTrue(compositionSource.Contains("new PromptDraftStore(catalogOptions, textFiles)", StringComparison.Ordinal));
+        Assert.IsTrue(compositionSource.Contains("TextFiles = textFiles", StringComparison.Ordinal));
+        Assert.IsTrue(Regex.IsMatch(compositionSource, @"new AskModeCoordinator\(\s*textFiles,"));
         Assert.IsFalse(File.Exists(Path.Combine(GetCodeAltaSourceRoot(), "App", "ISessionStateFrontendPort.cs")));
         Assert.IsTrue(promptDraftSource.Contains("_promptDraftPersistence.ObservePromptDraft", StringComparison.Ordinal));
         Assert.IsTrue(catalogOptionsSource.Contains("saved_prompts", StringComparison.Ordinal));
-        Assert.IsTrue(persistenceSource.Contains("PromptDraftsRoot", StringComparison.Ordinal));
-        Assert.IsTrue(persistenceSource.Contains("saved_prompt_", StringComparison.Ordinal));
+        Assert.IsTrue(persistenceSource.Contains("new PromptDraftStore(catalogOptions)", StringComparison.Ordinal));
+        Assert.IsFalse(persistenceSource.Contains("File.", StringComparison.Ordinal));
+        Assert.IsTrue(draftStoreSource.Contains("PromptDraftsRoot", StringComparison.Ordinal));
+        Assert.IsTrue(draftStoreSource.Contains("saved_prompt_", StringComparison.Ordinal));
         Assert.IsTrue(sessionStateSource.Contains("_promptDrafts.DeletePromptDraft(sessionId);", StringComparison.Ordinal));
     }
 
@@ -2023,6 +2045,9 @@ public sealed class ArchitectureGuardrailTests
         Assert.IsTrue(appSource.Contains("CodeAltaShellViewFactory.CreateSurface(new CodeAltaShellSurfaceOptions", StringComparison.Ordinal));
         Assert.IsTrue(hostSource.Contains("Terminal.RunAsync(", StringComparison.Ordinal));
         Assert.IsTrue(hostSource.Contains("DisposeFrontendAsync", StringComparison.Ordinal));
+        Assert.IsTrue(appSource.Contains("IShellFrontendHostLifecycle.OwnedServices => _ownedServices;", StringComparison.Ordinal));
+        Assert.IsFalse(appSource.Contains("await _ownedServices.DisposeAsync()", StringComparison.Ordinal));
+        Assert.IsTrue(hostSource.Contains("await ownedServices.DisposeAsync();", StringComparison.Ordinal));
         Assert.IsTrue(appSource.Contains("=> await _frontendHost.RunAsync(cancellationToken);", StringComparison.Ordinal));
         Assert.IsTrue(appSource.Contains("=> await _frontendHost.DisposeAsync();", StringComparison.Ordinal));
     }

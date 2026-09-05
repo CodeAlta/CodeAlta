@@ -10,8 +10,7 @@ namespace CodeAlta.Tui.App;
 internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
 {
     private const string DraftPromptSessionId = "__draft__";
-    private const string GlobalDraftScopeKey = "__draft__:global";
-    private const string ProjectDraftScopeKeyPrefix = "__draft__:project:";
+    private const string GlobalDraftScopeKey = PromptDraftStore.GlobalDraftScopeKey;
 
     private readonly PromptDraftCoordinator _promptDrafts;
     private readonly SessionPromptDraftPersistenceCoordinator _promptDraftPersistence;
@@ -27,14 +26,24 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
         Func<ShellSelection> getSelection,
         FrontendEventPublisher frontendEvents,
         Action? onPromptImageAttachmentsChanged = null)
+        : this(promptDrafts, new PromptDraftStore(catalogOptions), getSelection, frontendEvents, onPromptImageAttachmentsChanged)
+    {
+    }
+
+    public PromptDraftUiCoordinator(
+        PromptDraftCoordinator promptDrafts,
+        PromptDraftStore promptDraftStore,
+        Func<ShellSelection> getSelection,
+        FrontendEventPublisher frontendEvents,
+        Action? onPromptImageAttachmentsChanged = null)
     {
         ArgumentNullException.ThrowIfNull(promptDrafts);
-        ArgumentNullException.ThrowIfNull(catalogOptions);
+        ArgumentNullException.ThrowIfNull(promptDraftStore);
         ArgumentNullException.ThrowIfNull(getSelection);
         ArgumentNullException.ThrowIfNull(frontendEvents);
 
         _promptDrafts = promptDrafts;
-        _promptDraftPersistence = new SessionPromptDraftPersistenceCoordinator(catalogOptions);
+        _promptDraftPersistence = new SessionPromptDraftPersistenceCoordinator(promptDraftStore, TimeSpan.FromMilliseconds(500));
         _getSelection = getSelection;
         _frontendEvents = frontendEvents;
         _onPromptImageAttachmentsChanged = onPromptImageAttachmentsChanged ?? (static () => { });
@@ -67,6 +76,7 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
 
     public void SyncPromptText(SessionState? session)
     {
+        FlushPromptDrafts();
         var previousImageList = GetCurrentImageList(GetActivePromptState());
         _activePromptSessionId = session is null ? DraftPromptSessionId : ResolveCurrentPromptSessionId();
         var activeState = GetOrCreatePromptState(_activePromptSessionId, session);
@@ -79,11 +89,16 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
     }
 
     public void ClearPromptText()
-        => PromptText = string.Empty;
+    {
+        var state = GetActivePromptState();
+        DeletePersistedPromptText(state);
+        ClearPromptText(state);
+    }
 
     public void ClearPrompt()
     {
         var state = GetActivePromptState();
+        DeletePersistedPromptText(state);
         ClearPromptText(state);
         ClearPromptImages(state);
     }
@@ -92,8 +107,8 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
     {
         var state = GetOrCreatePromptState(DraftPromptSessionId, session: null);
         var draftScopeKey = state.DraftScopeKey;
+        DeletePersistedPromptText(state);
         _promptDrafts.RememberPrompt(null, string.Empty, draftScopeKey);
-        _promptDraftPersistence.ObservePromptDraft(draftScopeKey, string.Empty);
         ClearPromptText(state);
         ClearPromptImages(state);
     }
@@ -159,6 +174,12 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
 
     public ValueTask DisposeAsync()
         => _promptDraftPersistence.DisposeAsync();
+
+    public Task<PromptDraftFlushResult> FlushPromptDraftsAsync()
+        => _promptDraftPersistence.FlushAsync();
+
+    private void FlushPromptDrafts()
+        => FlushPromptDraftsAsync().GetAwaiter().GetResult().ThrowIfFailed();
 
     private PromptDraftSessionState GetActivePromptState()
         => GetOrCreatePromptState(
@@ -233,9 +254,7 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
     }
 
     private static string ResolveDraftScopeKey(string? projectId, bool isGlobal)
-        => !isGlobal && !string.IsNullOrWhiteSpace(projectId)
-            ? ProjectDraftScopeKeyPrefix + projectId.Trim()
-            : GlobalDraftScopeKey;
+        => PromptDraftStore.GetDraftScopeKey(projectId, isGlobal);
 
     private void SyncPromptTextFromSession(PromptDraftSessionState state)
     {
@@ -343,8 +362,44 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
         NotifyPromptImagesChanged(state, editedStateChanged: wasEmpty != (list.Count == 0));
     }
 
+    private void DeletePersistedPromptText(PromptDraftSessionState state)
+    {
+        var key = state.BoundSession is null ? state.DraftScopeKey : state.PromptSessionId;
+        var text = state.ViewModel.PromptText;
+        try
+        {
+            // Do not mutate the composer or its images until deletion is acknowledged.
+            _promptDraftPersistence.DeletePromptDraft(key);
+        }
+        catch
+        {
+            // A rejected pre-admission clear must retain the original unsent intent, not a
+            // pending tombstone that could erase it on a later retry or shutdown flush.
+            _promptDraftPersistence.ObservePromptDraft(key, text);
+            throw;
+        }
+    }
+
     private void ClearPromptText(PromptDraftSessionState state)
-        => state.ViewModel.PromptText = string.Empty;
+    {
+        var change = _promptDrafts.RememberPrompt(state.BoundSession, string.Empty, state.DraftScopeKey);
+        // The deletion was already acknowledged. Update the UI without scheduling a second
+        // delete that could fail after send/queue admission has succeeded.
+        state.SyncingPromptText = true;
+        try
+        {
+            state.ViewModel.PromptText = string.Empty;
+        }
+        finally
+        {
+            state.SyncingPromptText = false;
+        }
+
+        if (change.EditedStateChanged)
+        {
+            PublishSessionPromptEditedStateChanged(state.BoundSession is null ? state.DraftScopeKey : state.PromptSessionId);
+        }
+    }
 
     private void ClearPromptImages(PromptDraftSessionState state)
     {

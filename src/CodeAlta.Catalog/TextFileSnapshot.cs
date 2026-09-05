@@ -38,3 +38,6 @@ public sealed record TextFileSaveResult(TextFileSnapshot? Snapshot, TextFileRevi
     [MemberNotNullWhen(false, nameof(Snapshot))]
     public bool IsConflict => Snapshot is null;
 }
+
+/// <summary>Reports a conditional deletion: missing on success, or the conflicting observed revision.</summary>
+public sealed record TextFileDeleteResult(bool IsConflict, TextFileRevision CurrentRevision);

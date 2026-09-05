@@ -156,8 +156,6 @@ internal sealed class SessionCommandCoordinator
             {
                 return;
             }
-
-            _commandContext.ClearDraftInput();
         }
         var tab = _sessionSelection.EnsureSessionTab(session);
         if (!IsModelProviderReady(tab.ProviderId))
@@ -187,15 +185,33 @@ internal sealed class SessionCommandCoordinator
 
         var alwaysEnqueue = hadExistingSession &&
             UiDispatch.Invoke(_selectorState.GetUiDispatcher(), _getAlwaysEnqueue);
-        if (!steer && (tab.StatusBusy || alwaysEnqueue))
+        await ClearInputAndAdmitPromptAsync(
+            hadExistingSession ? _commandContext.ClearSessionInput : _commandContext.ClearDraftInput,
+            !steer && (tab.StatusBusy || alwaysEnqueue),
+            () => _queueCoordinator.EnqueuePrompt(tab, prompt),
+            () => _promptDispatchCoordinator.DispatchPromptAsync(session, tab, prompt, steer, cancellationToken));
+    }
+
+    internal static Task ClearInputAndAdmitPromptAsync(
+        Action clearInput,
+        bool enqueue,
+        Action enqueuePrompt,
+        Func<Task> dispatchPrompt)
+    {
+        ArgumentNullException.ThrowIfNull(clearInput);
+        ArgumentNullException.ThrowIfNull(enqueuePrompt);
+        ArgumentNullException.ThrowIfNull(dispatchPrompt);
+
+        // Clear is revision-conditional and can fail. Complete it before either admission
+        // path so retrying a storage failure cannot enqueue an already accepted prompt.
+        clearInput();
+        if (enqueue)
         {
-            _queueCoordinator.EnqueuePrompt(tab, prompt);
-            _commandContext.ClearSessionInput();
-            return;
+            enqueuePrompt();
+            return Task.CompletedTask;
         }
 
-        _commandContext.ClearSessionInput();
-        await _promptDispatchCoordinator.DispatchPromptAsync(session, tab, prompt, steer, cancellationToken);
+        return dispatchPrompt();
     }
 
     public bool IsCurrentPromptEmpty()

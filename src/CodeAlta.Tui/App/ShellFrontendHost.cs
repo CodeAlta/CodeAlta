@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 
@@ -12,6 +13,8 @@ internal interface IShellFrontendHostLifecycle
     TerminalLoopResult Tick(CancellationToken cancellationToken);
 
     ValueTask DisposeFrontendAsync();
+
+    IAsyncDisposable? OwnedServices { get; }
 }
 
 internal sealed class ShellFrontendHost : IAsyncDisposable
@@ -38,5 +41,33 @@ internal sealed class ShellFrontendHost : IAsyncDisposable
         => _lifecycle.Tick(cancellationToken);
 
     public async ValueTask DisposeAsync()
-        => await _lifecycle.DisposeFrontendAsync();
+    {
+        Exception? frontendFailure = null;
+        try
+        {
+            await _lifecycle.DisposeFrontendAsync();
+        }
+        catch (Exception ex)
+        {
+            frontendFailure = ex;
+        }
+
+        // A failed draft acknowledgement must not abandon runtime/provider/plugin ownership.
+        try
+        {
+            if (_lifecycle.OwnedServices is { } ownedServices)
+            {
+                await ownedServices.DisposeAsync();
+            }
+        }
+        catch (Exception ex) when (frontendFailure is not null)
+        {
+            throw new AggregateException(frontendFailure, ex);
+        }
+
+        if (frontendFailure is not null)
+        {
+            ExceptionDispatchInfo.Throw(frontendFailure);
+        }
+    }
 }

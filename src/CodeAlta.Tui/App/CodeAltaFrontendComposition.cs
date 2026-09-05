@@ -189,9 +189,10 @@ internal sealed class CodeAltaFrontendComposition
             sessionStateCoordinator,
             frontend.EnsureSessionHistoryLoadedAsync,
             frontend.IsSelectedSession);
+        var textFiles = new TextFileCodec();
         var promptDraftUiCoordinator = new PromptDraftUiCoordinator(
             new PromptDraftCoordinator(),
-            catalogOptions,
+            new PromptDraftStore(catalogOptions, textFiles),
             () => sessionStateCoordinator.Selection,
             frontendEvents,
             frontend.UpdatePromptImageAttachmentsUi);
@@ -429,7 +430,6 @@ internal sealed class CodeAltaFrontendComposition
             altaServices,
             frontend.GetAlwaysEnqueue,
             agentPromptSelectorCoordinator.GetPreferredAgentPromptId);
-        var textFiles = new TextFileCodec();
         var askModeCoordinator = new AskModeCoordinator(
             textFiles,
             askService,

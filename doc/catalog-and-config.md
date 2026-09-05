@@ -16,7 +16,7 @@ CodeAlta keeps user-owned durable state under a global root and project-local `.
 | `agents/` | Catalog model | File-backed agent-definition root used by host-owned coordinator setup. |
 | `cache/` | Process/runtime services | Machine-local cache root, including `cache.sqlite3` session-listing projections, refreshed model metadata, and plugin build cache. |
 | `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
-| `saved_prompts/` | Frontend prompt draft service | Unsent per-session prompt drafts. |
+| `saved_prompts/` | Catalog `PromptDraftStore` | Unsent session and global/project new-session text drafts. |
 | `ui-state.yaml` | Frontend view-state service | Open/selected tabs, session/model preferences, theme, and shell view state. |
 | `plugins/` | Plugin runtime | User-scoped source plugin packages. |
 | `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
@@ -104,13 +104,23 @@ Optional protocol traces are written to `~/.alta/sessions/traces/<session-id>.tr
 
 ## Prompt drafts and view state
 
-Unsent per-session prompts are stored under `~/.alta/saved_prompts/` so closing a tab or restarting the app does not discard edited drafts. The frontend stores view state in `~/.alta/ui-state.yaml`, including open/selected tabs, theme and navigator settings, and session-specific model preferences.
+`CodeAlta.Catalog.PromptDraftStore` owns unsent text under `CatalogOptions.PromptDraftsRoot` (`<GlobalRoot>/saved_prompts`). Files remain plain text named `saved_prompt_{sanitizedScopeKey}.md`: session IDs are used unchanged as keys, global new-session drafts use `__draft__:global`, and project new-session drafts use `__draft__:project:{trimmedProjectId}`. Project drafts still live in the **global** root. Filename sanitization replaces the current OS's invalid filename characters with `-`; colon handling therefore remains OS-dependent, preserving existing filenames rather than migrating them.
+
+Legacy reads use the shared codec's strict BOM-aware Unicode decoding. Writes remain UTF-8 **without BOM** (including when replacing a BOM-bearing legacy file), retaining nonblank text, whitespace, Unicode and newlines literally. Null or whitespace-only text requests deletion. Missing and empty-file revisions differ. There is no new draft schema, and unsent image lists remain transient TUI state; this store does not persist images.
+
+The TUI owns debounce, selection, events, bindings and image lists. Its persistence coordinator tracks one ordered work chain for saves **and deletes**. Canceling a debounce never abandons a started write: subsequent edits/clears and disposal join it, and only acknowledged commits advance the baseline revision. Conflicts (including same-mtime external edits/deletions) and I/O failures retain pending text/deletion intent; a flush returns failures rather than marking it saved. Retries use the original acknowledged revision, never the conflicting external revision. Storage errors before an initial baseline is read fail closed. Pending text is in memory, not a recovery journal: preserve it before exiting after an error.
+
+The synchronous TUI projection/clear/delete seams join an awaitable flush on prompt selection synchronization, send-related clear actions and session deletion. Composer clear acknowledges deletion **before** changing text or images; failed pre-admission clear retains both the original composer and its pending text, not a tombstone. Send and queue paths complete that clear before admission, so a storage-failure retry cannot enqueue an already accepted prompt. New-session draft clear is deferred until provider/content checks and history loading succeed. Conflicts return no acknowledged snapshot, only the observed revision; successful deletion returns a missing snapshot. Deletion removes the final file entry, including a normal or dangling symbolic link, without deleting the linked target.
+
+Coordinator disposal stops new edits and joins pending work, throwing on failed flush. `ShellFrontendHost` still disposes the application's owned services if frontend disposal fails, preserving the original error and aggregating a second owned-cleanup failure instead of losing either. This is not a complete shutdown confirmation/recovery UX. Successful flush means the file operation completed, not guaranteed survival of power loss. The TUI composition injects the **same** `TextFileCodec` instance into drafts, file editors and ask reviews, serializing cooperating saves/deletes even when an editor opens a draft's path. External writers/path-link changes retain the documented final-check/commit race, not cross-process atomic compare-and-swap.
+
+The frontend stores view state in `~/.alta/ui-state.yaml`, including open/selected tabs, theme and navigator settings, and session-specific model preferences.
 
 `ShellStateStore` is a UI-session projection of currently open shell state; it is not a replacement for the durable catalog, session journals, or runtime-owned session state.
 
 ## Editable text files
 
-`CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves. The TUI composition shares one instance between file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.
+`CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves/deletes. The TUI composition shares one instance between prompt drafts, file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.
 
 Loads return the complete text, encoding/BOM information, an advisory timestamp, and a SHA-256 identity of the raw bytes. The missing-file revision differs from an empty file. Saves require the previously observed revision, including for creation: stale edits, external deletion, and same-timestamp content changes return a conflict without overwriting the target. File-editor Overwrite confirms the revision observed in the conflict, so another intervening edit conflicts again. Conflicts retain dirty editor text; ask-file saves return failure without marking the review saved or allowing the save-and-submit action to proceed.
 

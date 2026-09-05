@@ -13,6 +13,8 @@ A CodeAlta session is a durable work unit with provider/model state, prompt hist
 
 The sidebar keeps running sessions visible even when their tab is closed. Closing a tab does not stop active work, and unsent session drafts are saved under `~/.alta/saved_prompts/`.
 
+Draft text for new global and project sessions is saved there too. Text saves and clears are checked against the last saved version: an external edit or storage failure is not silently overwritten or treated as saved. If a pre-send clear fails, your composer text and images remain available, and the prompt is not sent or queued; retrying that storage failure does not duplicate an accepted queue entry. If a draft flush fails, preserve your pending text before exiting; failed changes are retained in memory, not in a separate recovery file. Unsent image attachments are not restored after restart.
+
 > [!NOTE]
 > Closing a tab only closes that view. Check the sidebar for running sessions before assuming work has stopped.
 

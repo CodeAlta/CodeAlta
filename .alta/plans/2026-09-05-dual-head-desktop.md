@@ -1,6 +1,6 @@
 # Dual-head CodeAlta: native desktop and terminal
 
-- Status: In progress — M2 editable-text extraction verified; draft storage next
+- Status: In progress — M2 text and draft storage verified; attachment storage next
 - Plan file: `.alta/plans/2026-09-05-dual-head-desktop.md`
 - Created: 2026-09-05
 - Revised: 2026-09-05 — retain the editor/visual library evaluation and rich workspace UX; follow the user's trusted-desktop direction with direct library integration and no custom isolation infrastructure.
@@ -331,7 +331,7 @@ The order is deliberate: prove packaging, preserve behavior under extraction, es
 
 - [ ] Extract store-only draft/image/file operations into Catalog, retaining filenames, encoding/BOM and project-scope behavior; add conflict-aware save requests and regression fixtures before changing callers.
   - [x] A — Editable text: Catalog raw-byte revisions/conditional saves and shared TUI editor/ask adapters implemented. Parent Release build (0 warnings/errors), 22 Catalog tests (1 Unix-only skip), 124 audited TUI/architecture tests and site build passed. Parent review required creation-time Windows staging DACL preservation; regression verifies permissions before writing/after close and successful replacement. Four shifted legacy guardrail locations updated without adding exceptions. External-writer CAS, identical-byte recreation, hard links, full Windows security descriptors/EFS, Unix execution and mid-write cancellation qualification remain explicit limits. Evidence: `doc/dual-head-desktop-parity.md`. Draft/image/UI-state work remains separate.
-  - [ ] B — Prompt drafts: Catalog scope/path/read/conditional save/delete, ordered acknowledged TUI persistence and flush with retained pending text on failure.
+  - [x] B — Prompt drafts: Catalog scope/path/read/conditional save/delete and an ordered, joined TUI work chain preserve acknowledged revisions and pending text on failure. Actual drafts/editors/ask composition shares one codec gate; deletion unlinks normal/dangling symlinks without deleting targets. Parent-required regressions cover clear failure retaining text/images, no queue/send admission before acknowledged clear, and owned-service cleanup after frontend flush failure. Parent clean Release build, 30 Catalog cases (1 Unix-only skip, including text regressions), 154 audited TUI/architecture/admission/fake-lifecycle cases and site build passed. Full recovery/selection rollback/shutdown UX, earlier frontend-cleanup failures, external-writer CAS and unsent image durability remain separate. See parity evidence; no full-suite/profile startup qualification claimed.
   - [ ] C — Prompt image attachments: Catalog payload/reference persistence with collision-safe creation; preserve dispatch/queue ownership and current paths.
 - [ ] Extract prompt/skill CRUD, validation/scope/provenance and config recovery writes from TUI dialogs/services into Catalog-owned services. Retain built-in read-only rules and safe overwrite/delete semantics.
 - [ ] Extract portable session execution policy/options and interaction ownership into Orchestration. Replace current selected-tab dependencies with explicit IDs and catalog/runtime lookup; preserve permission configuration.

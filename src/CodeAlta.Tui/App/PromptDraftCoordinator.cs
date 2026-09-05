@@ -1,11 +1,10 @@
 using CodeAlta.Tui.Models;
+using static CodeAlta.Catalog.PromptDraftStore;
 
 namespace CodeAlta.Tui.App;
 
 internal sealed class PromptDraftCoordinator
 {
-    private const string DefaultDraftScopeKey = "__draft__:global";
-
     private readonly Dictionary<string, string> _draftPromptTextByScope = new(StringComparer.OrdinalIgnoreCase);
 
     public PromptDraftChange RememberPrompt(SessionState? session, string? text, string? draftScopeKey = null)
@@ -36,7 +35,4 @@ internal sealed class PromptDraftCoordinator
 
     private string GetDraftPrompt(string draftScopeKey)
         => _draftPromptTextByScope.GetValueOrDefault(draftScopeKey) ?? string.Empty;
-
-    private static string NormalizeDraftScopeKey(string? draftScopeKey)
-        => string.IsNullOrWhiteSpace(draftScopeKey) ? DefaultDraftScopeKey : draftScopeKey.Trim();
 }

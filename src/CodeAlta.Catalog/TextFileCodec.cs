@@ -177,6 +177,50 @@ public sealed class TextFileCodec
         }
     }
 
+    /// <summary>Conditionally deletes a file entry under the same instance gate used for saves.</summary>
+    /// <remarks>
+    /// Revisions describe the bytes read through the path, but deletion unlinks the final entry,
+    /// not a symbolic link's target. Dangling links can be deleted with the missing revision.
+    /// External writers can still race between the revision check and deletion.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The path is blank or invalid.</exception>
+    /// <exception cref="ArgumentNullException">The expected revision is null.</exception>
+    /// <exception cref="IOException">Reading or deleting failed.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access is denied.</exception>
+    public Task<TextFileDeleteResult> DeleteAsync(string fullPath, TextFileRevision expectedRevision)
+        => DeleteAsync(fullPath, expectedRevision, CancellationToken.None);
+
+    /// <summary>Conditionally deletes; cancellation takes effect only before commit.</summary>
+    /// <inheritdoc cref="DeleteAsync(string, TextFileRevision)"/>
+    /// <exception cref="OperationCanceledException">Cancellation was requested before commit.</exception>
+    public async Task<TextFileDeleteResult> DeleteAsync(string fullPath, TextFileRevision expectedRevision, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(expectedRevision);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+        var path = Path.GetFullPath(fullPath);
+        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var current = await ReadRevisionAsync(path, cancellationToken).ConfigureAwait(false);
+            if (current != expectedRevision)
+            {
+                return new TextFileDeleteResult(true, current);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (current.Exists || new FileInfo(path).LinkTarget is not null)
+            {
+                File.Delete(path);
+            }
+
+            return new TextFileDeleteResult(false, TextFileRevision.Missing);
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
+    }
+
     internal static FileStream CreateStagingFile(string stagingPath, string? existingPath)
     {
         if (OperatingSystem.IsWindows() && existingPath is not null)

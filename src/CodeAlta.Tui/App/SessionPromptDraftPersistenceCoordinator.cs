@@ -3,214 +3,273 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.Tui.App;
 
+// Infrastructure-only state: no bindings or UI callbacks run on the owned work chain.
 internal sealed class SessionPromptDraftPersistenceCoordinator : IAsyncDisposable
 {
-    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.UI");
-    private readonly string _promptDraftsRoot;
+    private readonly Logger _logger = LogManager.GetLogger("CodeAlta.UI");
+    private readonly PromptDraftStore _store;
+    private readonly Func<string, string?, TextFileRevision, Task<PromptDraftSaveResult>> _save;
     private readonly TimeSpan _saveDelay;
     private readonly object _syncRoot = new();
-    private readonly Dictionary<string, PendingPromptDraftSave> _pendingSaves = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DraftState> _drafts = new(StringComparer.OrdinalIgnoreCase);
+    private Task _work = Task.CompletedTask;
+    private bool _disposed;
 
     public SessionPromptDraftPersistenceCoordinator(CatalogOptions catalogOptions, TimeSpan? saveDelay = null)
+        : this(new PromptDraftStore(catalogOptions), saveDelay ?? TimeSpan.FromMilliseconds(500))
     {
-        ArgumentNullException.ThrowIfNull(catalogOptions);
-        if (string.IsNullOrWhiteSpace(catalogOptions.GlobalRoot))
-        {
-            throw new ArgumentException("Global root is required.", nameof(catalogOptions));
-        }
-
-        _promptDraftsRoot = catalogOptions.PromptDraftsRoot;
-        _saveDelay = saveDelay ?? TimeSpan.FromMilliseconds(500);
     }
 
-    public string? LoadPromptDraft(string sessionId)
+    internal SessionPromptDraftPersistenceCoordinator(
+        PromptDraftStore store,
+        TimeSpan saveDelay,
+        Func<string, string?, TextFileRevision, Task<PromptDraftSaveResult>>? save = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(store);
+        if (saveDelay < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(saveDelay));
+        }
 
+        _store = store;
+        _save = save ?? store.SaveAsync;
+        _saveDelay = saveDelay;
+    }
+
+    public string? LoadPromptDraft(string scopeKey)
+    {
         lock (_syncRoot)
         {
-            if (_pendingSaves.TryGetValue(sessionId, out var pending))
+            var draft = GetDraft(scopeKey);
+            if (draft.Revision is null && !draft.IsDirty)
             {
-                return pending.PromptText;
+                throw new IOException("Failed to load prompt draft.", draft.Error);
             }
-        }
 
-        var path = GetPromptDraftPath(sessionId);
-        return File.Exists(path)
-            ? File.ReadAllText(path)
-            : null;
+            return draft.Text;
+        }
     }
 
-    public bool HasPromptDraft(string sessionId)
+    public bool HasPromptDraft(string scopeKey)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-
         lock (_syncRoot)
         {
-            if (_pendingSaves.TryGetValue(sessionId, out var pending))
+            var draft = GetDraft(scopeKey);
+            if (draft.Revision is null && !draft.IsDirty)
             {
-                return !string.IsNullOrWhiteSpace(pending.PromptText);
+                throw new IOException("Failed to load prompt draft.", draft.Error);
             }
-        }
 
-        return File.Exists(GetPromptDraftPath(sessionId));
+            return draft.IsDirty ? !string.IsNullOrWhiteSpace(draft.Text) : draft.Revision?.Exists == true;
+        }
     }
 
-    public void ObservePromptDraft(string sessionId, string? promptText)
+    public void ObservePromptDraft(string scopeKey, string? promptText)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-
-        var normalizedPrompt = promptText ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(normalizedPrompt))
-        {
-            CancelPendingSave(sessionId);
-            DeletePromptDraft(sessionId);
-            return;
-        }
-
-        var cancellationSource = new CancellationTokenSource();
         lock (_syncRoot)
         {
-            if (_pendingSaves.TryGetValue(sessionId, out var existing))
-            {
-                existing.CancellationSource.Cancel();
-                existing.CancellationSource.Dispose();
-            }
-
-            _pendingSaves[sessionId] = new PendingPromptDraftSave(normalizedPrompt, cancellationSource);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var draft = GetDraft(scopeKey);
+            draft.Text = promptText;
+            draft.Version++;
+            draft.Delay?.Cancel();
+            var delay = new CancellationTokenSource();
+            draft.Delay = delay;
+            _work = PersistAsync(_work, scopeKey, draft, draft.Version, delay);
         }
-
-        _ = PersistPromptDraftAsync(sessionId, normalizedPrompt, cancellationSource);
     }
 
-    public void DeletePromptDraft(string sessionId)
+    // Existing synchronous deletion callers get an acknowledgement, not cancellation-as-success.
+    public void DeletePromptDraft(string scopeKey)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ObservePromptDraft(scopeKey, null);
+        FlushAsync().GetAwaiter().GetResult().ThrowIfFailed();
+    }
 
-        CancelPendingSave(sessionId);
-
-        try
+    public Task<PromptDraftFlushResult> FlushAsync()
+    {
+        lock (_syncRoot)
         {
-            var path = GetPromptDraftPath(sessionId);
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception ex)
-        {
-            LogFailure(ex, $"Failed to delete saved prompt draft for '{sessionId}'.");
+            return QueueFlush();
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        List<KeyValuePair<string, string>> pendingWrites;
+        Task<PromptDraftFlushResult> flush;
         lock (_syncRoot)
         {
-            pendingWrites = _pendingSaves
-                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Value.PromptText))
-                .Select(static entry => new KeyValuePair<string, string>(entry.Key, entry.Value.PromptText))
-                .ToList();
-
-            foreach (var pending in _pendingSaves.Values)
-            {
-                pending.CancellationSource.Cancel();
-                pending.CancellationSource.Dispose();
-            }
-
-            _pendingSaves.Clear();
+            _disposed = true; // Stop admission before capturing/joining all owned work, including deletes.
+            flush = QueueFlush();
         }
 
-        foreach (var pendingWrite in pendingWrites)
-        {
-            try
-            {
-                await WritePromptDraftAsync(pendingWrite.Key, pendingWrite.Value, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                LogFailure(ex, $"Failed to flush saved prompt draft for '{pendingWrite.Key}'.");
-            }
-        }
+        (await flush.ConfigureAwait(false)).ThrowIfFailed();
     }
 
-    private async Task PersistPromptDraftAsync(string sessionId, string promptText, CancellationTokenSource cancellationSource)
+    private DraftState GetDraft(string scopeKey)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        if (_drafts.TryGetValue(scopeKey, out var draft))
+        {
+            return draft;
+        }
+
+        draft = new DraftState();
         try
         {
-            await Task.Delay(_saveDelay, cancellationSource.Token).ConfigureAwait(false);
-            await WritePromptDraftAsync(sessionId, promptText, cancellationSource.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationSource.IsCancellationRequested)
-        {
+            var loaded = _store.Load(scopeKey);
+            draft.Text = loaded.Text;
+            draft.Revision = loaded.Revision;
         }
         catch (Exception ex)
         {
-            LogFailure(ex, $"Failed to persist saved prompt draft for '{sessionId}'.");
+            draft.Error = ex; // Without a baseline, never guess that the file was missing.
         }
-        finally
+
+        _drafts.Add(scopeKey, draft);
+        return draft;
+    }
+
+    // Called under _syncRoot. A flush covers the edits admitted at this point, not future edits.
+    private Task<PromptDraftFlushResult> QueueFlush()
+    {
+        var targets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, draft) in _drafts)
         {
-            lock (_syncRoot)
+            if (!draft.IsDirty)
             {
-                if (_pendingSaves.TryGetValue(sessionId, out var pending) &&
-                    ReferenceEquals(pending.CancellationSource, cancellationSource))
+                continue;
+            }
+
+            targets.Add(key, draft.Version);
+            draft.Delay?.Cancel();
+            _work = PersistAsync(_work, key, draft, draft.Version, delay: null);
+        }
+
+        return CompleteFlushAsync(_work, targets);
+    }
+
+    private async Task<PromptDraftFlushResult> CompleteFlushAsync(Task work, Dictionary<string, long> targets)
+    {
+        await work.ConfigureAwait(false);
+        lock (_syncRoot)
+        {
+            var failures = new Dictionary<string, Exception>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, version) in targets)
+            {
+                var draft = _drafts[key];
+                if (draft.AcknowledgedVersion < version)
                 {
-                    _pendingSaves.Remove(sessionId);
+                    failures.Add(key, draft.Error ?? new IOException("A newer prompt edit is still pending."));
                 }
             }
 
-            cancellationSource.Dispose();
+            return new PromptDraftFlushResult(failures);
         }
     }
 
-    private async Task WritePromptDraftAsync(string sessionId, string promptText, CancellationToken cancellationToken)
+    private async Task PersistAsync(Task previous, string key, DraftState draft, long version, CancellationTokenSource? delay)
     {
-        Directory.CreateDirectory(_promptDraftsRoot);
-        var path = GetPromptDraftPath(sessionId);
-        await File.WriteAllTextAsync(path, promptText, cancellationToken).ConfigureAwait(false);
-    }
-
-    private void CancelPendingSave(string sessionId)
-    {
-        CancellationTokenSource? pendingCancellation = null;
-        lock (_syncRoot)
+        try
         {
-            if (_pendingSaves.TryGetValue(sessionId, out var pending))
+            if (delay is not null)
             {
-                pendingCancellation = pending.CancellationSource;
-                _pendingSaves.Remove(sessionId);
+                try
+                {
+                    await Task.Delay(_saveDelay, delay.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (delay.IsCancellationRequested)
+                {
+                }
+            }
+
+            await previous.ConfigureAwait(false);
+            string? text;
+            TextFileRevision revision;
+            lock (_syncRoot)
+            {
+                if (delay?.IsCancellationRequested == true || version != draft.Version || !draft.IsDirty)
+                {
+                    return;
+                }
+
+                if (draft.Revision is null)
+                {
+                    return;
+                }
+
+                text = draft.Text;
+                revision = draft.Revision;
+            }
+
+            // Once a write starts it is joined, never canceled to pretend it did not commit.
+            // The following operation uses only this operation's acknowledged revision.
+            var result = await _save(key, text, revision).ConfigureAwait(false);
+            lock (_syncRoot)
+            {
+                if (result.IsConflict)
+                {
+                    draft.Error = new IOException($"Prompt draft '{key}' changed on disk; pending text was retained.");
+                    _logger.Error(draft.Error, "Prompt draft persistence conflict.");
+                    return; // Never adopt the conflicting revision and silently retry.
+                }
+
+                draft.Revision = result.Snapshot.Revision;
+                draft.AcknowledgedVersion = version;
+                draft.Error = null;
+                if (draft.Version == version)
+                {
+                    draft.Text = result.Snapshot.Text;
+                }
             }
         }
-
-        if (pendingCancellation is null)
+        catch (Exception ex)
         {
-            return;
+            lock (_syncRoot)
+            {
+                draft.Error = ex;
+            }
+
+            _logger.Error(ex, $"Failed to persist prompt draft '{key}'; pending text was retained.");
         }
-
-        pendingCancellation.Cancel();
-        pendingCancellation.Dispose();
-    }
-
-    private string GetPromptDraftPath(string sessionId)
-        => Path.Combine(_promptDraftsRoot, $"saved_prompt_{SanitizeFileName(sessionId)}.md");
-
-    private static string SanitizeFileName(string value)
-    {
-        var invalidCharacters = Path.GetInvalidFileNameChars();
-        var builder = new char[value.Length];
-        for (var i = 0; i < value.Length; i++)
+        finally
         {
-            builder[i] = invalidCharacters.Contains(value[i]) ? '-' : value[i];
+            if (delay is not null)
+            {
+                lock (_syncRoot)
+                {
+                    if (ReferenceEquals(draft.Delay, delay))
+                    {
+                        draft.Delay = null;
+                    }
+
+                    delay.Dispose();
+                }
+            }
         }
-
-        return new string(builder);
     }
 
-    private static void LogFailure(Exception ex, string message)
+    private sealed class DraftState
     {
-        Logger.Error(ex, message);
+        public string? Text { get; set; }
+        public TextFileRevision? Revision { get; set; }
+        public long Version { get; set; }
+        public long AcknowledgedVersion { get; set; }
+        public bool IsDirty => Version != AcknowledgedVersion;
+        public Exception? Error { get; set; }
+        public CancellationTokenSource? Delay { get; set; }
     }
+}
 
-    private sealed record PendingPromptDraftSave(string PromptText, CancellationTokenSource CancellationSource);
+internal sealed record PromptDraftFlushResult(IReadOnlyDictionary<string, Exception> Failures)
+{
+    public bool Succeeded => Failures.Count == 0;
+
+    public void ThrowIfFailed()
+    {
+        if (!Succeeded)
+        {
+            throw new IOException("Prompt drafts could not be flushed; pending text was retained.", new AggregateException(Failures.Values));
+        }
+    }
 }

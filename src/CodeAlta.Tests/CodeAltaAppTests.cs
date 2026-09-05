@@ -3205,6 +3205,8 @@ public sealed class CodeAltaAppTests
 
             selectedProjectId = "project-2";
             coordinator.SyncPromptText(session: null);
+            var store = new PromptDraftStore(new CatalogOptions { GlobalRoot = root });
+            Assert.AreEqual("project one prompt", store.Load(PromptDraftStore.GetDraftScopeKey("project-1", false)).Text);
             Assert.AreEqual(string.Empty, coordinator.PromptText);
             coordinator.PromptText = "project two prompt";
 
@@ -3285,6 +3287,8 @@ public sealed class CodeAltaAppTests
             coordinator.ClearDraftPromptText();
 
             Assert.IsFalse(coordinator.HasDraftPrompt("project-1", isGlobal: false));
+            var store = new PromptDraftStore(new CatalogOptions { GlobalRoot = root });
+            Assert.IsFalse(File.Exists(store.GetPath(PromptDraftStore.GetDraftScopeKey("project-1", false))));
             await coordinator.DisposeAsync().ConfigureAwait(false);
 
             selection = ShellSelection.ProjectDraft("project-1");
@@ -3308,22 +3312,137 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
-    public void PromptDraftUiCoordinator_FirstSessionPromptCharacterPublishesPromptDraftEvent()
+    public async Task PromptDraftUiCoordinator_FirstSessionPromptCharacterPublishesPromptDraftEvent()
     {
+        var root = Path.Combine(Path.GetTempPath(), $"CodeAlta.Tests.{Guid.NewGuid():N}");
         var publisher = new FrontendEventPublisher(new InlineUiDispatcher());
         var events = new List<ShellFrontendEvent>();
         publisher.Subscribe(events.Add);
         var coordinator = new PromptDraftUiCoordinator(
             new PromptDraftCoordinator(),
-            new CatalogOptions { GlobalRoot = Path.GetTempPath() },
+            new CatalogOptions { GlobalRoot = root },
             static () => ShellSelection.Session("session-1", "project-1"),
             publisher);
 
-        coordinator.SyncPromptText(new SessionState());
-        coordinator.PromptText = "a";
+        try
+        {
+            coordinator.SyncPromptText(new SessionState());
+            coordinator.PromptText = "a";
 
-        Assert.IsFalse(events.OfType<CatalogChangedEvent>().Any());
-        Assert.IsTrue(events.OfType<PromptDraftChangedEvent>().Any(e => e.PromptSessionId == "session-1"));
+            Assert.IsFalse(events.OfType<CatalogChangedEvent>().Any());
+            Assert.IsTrue(events.OfType<PromptDraftChangedEvent>().Any(e => e.PromptSessionId == "session-1"));
+        }
+        finally
+        {
+            await coordinator.DisposeAsync();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task PromptDraftUiCoordinator_FlushConflictRetainsComposerText()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"CodeAlta.Tests.{Guid.NewGuid():N}");
+        var options = new CatalogOptions { GlobalRoot = root };
+        var store = new PromptDraftStore(options);
+        var key = PromptDraftStore.GetDraftScopeKey("project", false);
+        await store.SaveAsync(key, "original", TextFileRevision.Missing);
+        var coordinator = new PromptDraftUiCoordinator(new PromptDraftCoordinator(), options,
+            () => ShellSelection.ProjectDraft("project"), new FrontendEventPublisher(new InlineUiDispatcher()));
+        try
+        {
+            coordinator.SyncPromptText(null);
+            await File.WriteAllTextAsync(store.GetPath(key), "external");
+            coordinator.PromptText = "dirty composer text";
+            Assert.IsFalse((await coordinator.FlushPromptDraftsAsync()).Succeeded);
+            Assert.AreEqual("dirty composer text", coordinator.PromptText);
+            Assert.Throws<IOException>(() => coordinator.SyncPromptText(null));
+            Assert.AreEqual("dirty composer text", coordinator.PromptText);
+            Assert.AreEqual("external", await File.ReadAllTextAsync(store.GetPath(key)));
+        }
+        finally
+        {
+            try
+            {
+                await coordinator.DisposeAsync();
+            }
+            catch (IOException)
+            {
+            }
+
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public async Task PromptDraftUiCoordinator_ClearConflictRetainsUnsentTextAndImages(bool clearDraft, bool enqueue)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"CodeAlta.Tests.{Guid.NewGuid():N}");
+        var options = new CatalogOptions { GlobalRoot = root };
+        var store = new PromptDraftStore(options);
+        var key = PromptDraftStore.GetDraftScopeKey("project", false);
+        await store.SaveAsync(key, "unsent text", TextFileRevision.Missing);
+        var coordinator = new PromptDraftUiCoordinator(new PromptDraftCoordinator(), options,
+            () => ShellSelection.ProjectDraft("project"), new FrontendEventPublisher(new InlineUiDispatcher()));
+        var image = PromptImageAttachment.Create("unsent image", [1, 2, 3], "image/png", ".png");
+        try
+        {
+            coordinator.SyncPromptText(null);
+            coordinator.AddPromptImage(image);
+            var storedImage = coordinator.CurrentPromptImages[0];
+            await File.WriteAllTextAsync(store.GetPath(key), "external");
+
+            var admissions = 0;
+            Task AdmitPrompt()
+            {
+                return SessionCommandCoordinator.ClearInputAndAdmitPromptAsync(
+                    clearDraft ? coordinator.ClearDraftPromptText : coordinator.ClearPrompt,
+                    enqueue,
+                    () => admissions++,
+                    () =>
+                    {
+                        admissions++;
+                        return Task.CompletedTask;
+                    });
+            }
+
+            await Assert.ThrowsAsync<IOException>(AdmitPrompt);
+            await Assert.ThrowsAsync<IOException>(AdmitPrompt);
+            Assert.AreEqual(0, admissions);
+            Assert.AreEqual("unsent text", coordinator.PromptText);
+            Assert.AreEqual("unsent text", coordinator.LoadPromptDraft(key));
+            Assert.AreEqual(1, coordinator.CurrentPromptImages.Count);
+            Assert.AreSame(storedImage, coordinator.CurrentPromptImages[0]);
+            CollectionAssert.AreEqual(image.Bytes, coordinator.CurrentPromptImages[0].Bytes);
+            Assert.AreEqual("external", await File.ReadAllTextAsync(store.GetPath(key)));
+
+            // Restore the original baseline, not the coordinator's expected revision.
+            await File.WriteAllTextAsync(store.GetPath(key), "unsent text");
+            await AdmitPrompt();
+            Assert.AreEqual(1, admissions);
+            Assert.AreEqual(string.Empty, coordinator.PromptText);
+            Assert.AreEqual(0, coordinator.CurrentPromptImages.Count);
+            Assert.IsFalse(File.Exists(store.GetPath(key)));
+        }
+        finally
+        {
+            try
+            {
+                await coordinator.DisposeAsync();
+            }
+            catch (IOException)
+            {
+            }
+
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [TestMethod]

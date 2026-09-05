@@ -31,11 +31,47 @@ public sealed class ShellFrontendHostTests
         Assert.IsTrue(lifecycle.Disposed);
     }
 
-    private sealed class CapturingLifecycle : IShellFrontendHostLifecycle
+    [TestMethod]
+    public async Task DisposeAsync_DraftFlushFailureStillDisposesOwnedServices()
+    {
+        var failure = new IOException("Draft flush failed");
+        var lifecycle = new CapturingLifecycle { FrontendFailure = failure };
+        var host = new ShellFrontendHost(lifecycle);
+
+        var reported = await Assert.ThrowsAsync<IOException>(async () => await host.DisposeAsync());
+
+        Assert.AreSame(failure, reported);
+        Assert.IsTrue(lifecycle.Disposed);
+        Assert.IsTrue(lifecycle.OwnedServicesDisposed);
+    }
+
+    [TestMethod]
+    public async Task DisposeAsync_ReportsBothFrontendAndOwnedCleanupFailures()
+    {
+        var frontendFailure = new IOException("Draft flush failed");
+        var ownedFailure = new InvalidOperationException("Owned cleanup failed");
+        var lifecycle = new CapturingLifecycle { FrontendFailure = frontendFailure, OwnedFailure = ownedFailure };
+        var host = new ShellFrontendHost(lifecycle);
+
+        var reported = await Assert.ThrowsAsync<AggregateException>(async () => await host.DisposeAsync());
+
+        CollectionAssert.AreEqual(new Exception[] { frontendFailure, ownedFailure }, reported.InnerExceptions.ToArray());
+        Assert.IsTrue(lifecycle.OwnedServicesDisposed);
+    }
+
+    private sealed class CapturingLifecycle : IShellFrontendHostLifecycle, IAsyncDisposable
     {
         public int TickCount { get; private set; }
 
         public bool Disposed { get; private set; }
+
+        public bool OwnedServicesDisposed { get; private set; }
+
+        public IAsyncDisposable? OwnedServices => this;
+
+        public Exception? FrontendFailure { get; init; }
+
+        public Exception? OwnedFailure { get; init; }
 
         public TerminalLoopResult TickResult { get; init; } = TerminalLoopResult.Continue;
 
@@ -54,7 +90,18 @@ public sealed class ShellFrontendHostTests
         public ValueTask DisposeFrontendAsync()
         {
             Disposed = true;
+            if (FrontendFailure is not null)
+            {
+                return ValueTask.FromException(FrontendFailure);
+            }
+
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            OwnedServicesDisposed = true;
+            return OwnedFailure is null ? ValueTask.CompletedTask : ValueTask.FromException(OwnedFailure);
         }
     }
 }

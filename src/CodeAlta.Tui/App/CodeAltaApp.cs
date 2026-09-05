@@ -307,8 +307,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         await _runtimeEventPump.DisposeAsync();
         await _shellController.DisposeAsync();
         await _promptDraftUiCoordinator.DisposeAsync();
-        if (_ownedServices is not null) await _ownedServices.DisposeAsync();
     }
+
+    IAsyncDisposable? IShellFrontendHostLifecycle.OwnedServices => _ownedServices;
 
     private string? GetDraftProjectRoot()
         => _sessionStateCoordinator.Selection.Target is WorkspaceTarget.Draft { IsGlobal: true }
