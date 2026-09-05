@@ -1,6 +1,6 @@
 # Dual-head desktop parity — in development
 
-> **Status: initial M0 baseline, 2026-09-05.** This is an implementation acceptance ledger, not documentation of a shipped desktop. All desktop parity rows and native/package gates below are **pending**. The existing `CodeAlta` / `alta` remains the terminal application at this baseline. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: M0 Windows package/native feasibility accepted, 2026-09-05.** This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**; the isolated M0 package/native proof below has passed. The existing `CodeAlta` / `alta` remains the terminal application at this checkpoint. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records only the bounded M0 baseline/parity-document step; it does **not** mark all of M0 complete. The coordinator owns the plan checklist and subsequent implementation.
 
@@ -107,9 +107,9 @@ Remote hosting/network authentication, multi-user access, installers/automatic u
 
 | Gate | Required evidence | Current status |
 | --- | --- | --- |
-| G01 — M0 NuGet consumer | Minimal consumer using published NeoAstra **0.1.0**, centrally pinned package and reviewed locked frontend dependencies; staged client and relative assets. Planning-time package metadata is not executed restore/native proof. | **Pending — not attempted here** |
-| G02 — M0 serverless/native proof | Fake-data packaged Release launch, typed RPC round trip, channel cancellation, close/dialog behavior, dynamic asset loading and ordinary CM/Radix/direct Mermaid integration without Node/dev server/providers/plugins. | **Pending — not attempted here** |
-| G03 — M0 isolated tool distribution | Local-feed pack/install outside checkout into task-owned tool path; native/assets/contracts/content inventory and command exit/output checks; Windows console/window subsystem behavior. No absolute local NeoAstra dependency or global tool replacement. | **Pending — not attempted here** |
+| G01 — M0 NuGet consumer | Minimal consumer using published NeoAstra **0.1.0**, centrally pinned package and reviewed locked frontend dependencies; staged client and relative assets. | **Pass — isolated prototype**, not production |
+| G02 — M0 serverless/native proof | Fake-data packaged Release launch, typed RPC round trip, channel cancellation, close/dialog behavior, dynamic asset loading and ordinary CM/Radix/direct Mermaid integration without Node/dev server/providers/plugins. | **Pass — Windows x64 prototype**, parent rerun |
+| G03 — M0 isolated tool distribution | Local-feed pack/install outside checkout into task-owned tool path; native/assets/contracts/content inventory and command exit/output checks; Windows console/window subsystem behavior. No absolute local NeoAstra dependency or global tool replacement. | **Pass — Exe/WinExe prototype packages**; interactive console/Explorer UX and production plugin CLI pending |
 | G04 — Shared ownership and compatibility | Both heads and both cross-head lock orders/races/stale/denied-access cases; admission before mutable startup; fake-provider sessions with closed tabs, reload, queue/stop and confirmed quit; legacy/current journal/config/UI-state/text/image draft handoff without unknown-field loss. | **Pending** |
 | G05 — Recovery and permissions | One runtime reader; revisioned snapshot/subscribe, bounded nonblocking fan-out, loss/gap recovery with bounded history reads; exactly-once ask/permission resolution across reconnect/abort/quit and stale/wrong-session rejection. Preserve permission configuration including current AutoApprove default. | **Pending** |
 | G06 — Content and package correctness | Controlled application navigation/links/attachments/native grants, default Markdown/Mermaid content handling, no secrets/source maps/remote assets/dev overrides in Release; explicit OAuth listeners cleaned up. No custom isolation framework. | **Pending** |
@@ -118,11 +118,11 @@ Remote hosting/network authentication, multi-user access, installers/automatic u
 
 ### Native platform qualification
 
-No NeoAstra engine was launched or version-measured in this baseline. Windows x64 is the first planned visual milestone, **not** a qualified desktop platform. Managed compilation on this machine qualifies none of these RIDs.
+The [M0 prototype README](../src/prototypes/CodeAlta.Desktop.Probe/README.md) and its evidence ledger record actual Windows x64 execution on WebView2 **152.0.4191.62**, .NET **10.0.11**, Windows **10.0.26200**. Both ordinary Exe/WinExe local tool packages preserve native-dialog manifests and pass redirected CLI/native smoke. Parent independently reran the installed Exe smoke and all three frontend tests. Asset inspection verified 100 hashes (3,823,561 bytes) and six native binaries; no Node/runtime/source-map bundle. Only this bounded feasibility fixture is accepted; all production/native feature qualification remains open, including five other architectures/engines, interactive console behavior, accessibility/performance and complete release notices. Point-in-time npm/NuGet advisory checks reported no vulnerabilities.
 
 | Intended desktop RID | Native engine | Actual engine/version evidence | Qualification |
 | --- | --- | --- | --- |
-| `win-x64` | WebView2 | Not measured; no native run | **Pending / unqualified** |
+| `win-x64` | WebView2 | 152.0.4191.62; M0 local-tool/native smoke passed | **M0 feasibility passed; full product qualification pending** |
 | `win-arm64` | WebView2 | Not measured; no native run | **Pending / unqualified** |
 | `osx-x64` | WKWebView | Not measured; no native run | **Pending / unqualified** |
 | `osx-arm64` | WKWebView | Not measured; no native run | **Pending / unqualified** |
@@ -135,5 +135,5 @@ The TUI retains its existing eight-RID intent, including `linux-musl-x64` and `l
 ## Blockers and next step
 
 1. The executed build, audited tests and website build have no observed failure. The full Release test baseline is **incomplete by safety choice**; establish explicit runtime-root injection or audit additional no-profile/fake-provider fixtures before broadening it. Do not use the active user's profile to turn a skip into a pass.
-2. The rest of **M0 remains open**: next, the coordinator should review this evidence and run the scoped NuGet consumer/serverless/native/local-tool proof with isolated fake data. Record concrete framework/package failures before changing dependencies or proceeding to the application rename/extraction.
-3. All desktop feature, cross-head persistence/ownership, native platform, performance and release gates remain pending. No broad baseline fixes, package installation, application migration, plan edits or commits are part of this document-only step.
+2. **M0 feasibility is accepted** after parent diff/evidence review and an independent installed-tool rerun. Next is the scoped M1 tracked TUI rename and reference/guardrail update, followed by promotion of proven desktop wiring. No upstream NeoAstra change or custom launcher was required.
+3. Desktop feature, cross-head persistence/ownership, full native platform, performance and release gates remain pending. Prototype integration success is not parity, and the existing application has not yet been renamed.

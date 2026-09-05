@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <PackageId>CodeAlta.Desktop.Probe</PackageId>
+    <AssemblyName>alta-desktop-probe</AssemblyName>
+    <ToolCommandName>alta-desktop-probe</ToolCommandName>
+    <Version>0.1.0</Version>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <SelfContained>false</SelfContained>
+    <PublishSelfContained>false</PublishSelfContained>
+    <PublishAot>false</PublishAot>
+    <Description>Isolated, fake-data M0 desktop packaging and native feasibility probe. Not a production CodeAlta frontend.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="README.md" Pack="true" PackagePath="/" />
+    <PackageReference Include="NeoAstra" />
+  </ItemGroup>
+</Project>

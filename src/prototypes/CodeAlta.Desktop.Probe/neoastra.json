@@ -1,0 +1,25 @@
+{
+  "$schema": "neoastra-project-v1.schema.json",
+  "version": 1,
+  "app": {
+    "identifier": "org.codealta.desktop.probe",
+    "displayName": "CodeAlta Desktop Probe"
+  },
+  "frontend": {
+    "root": "frontend",
+    "devCommand": ["npm", "run", "dev"],
+    "backendCommand": ["dotnet", "run"],
+    "devUrl": "http://127.0.0.1:5173",
+    "buildCommand": ["npm", "run", "build"],
+    "dist": "frontend/dist",
+    "spaFallback": "index.html",
+    "packageManager": "npm",
+    "lockfile": "frontend/package-lock.json",
+    "generatedContract": "obj/neoastra/neoastra.ts"
+  },
+  "assets": {
+    "origin": "app://codealta",
+    "cacheHashedAssets": true,
+    "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  }
+}

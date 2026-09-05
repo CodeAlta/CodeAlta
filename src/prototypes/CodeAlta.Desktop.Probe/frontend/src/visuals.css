@@ -1,0 +1,4 @@
+.visual-proof { border-top: 3px solid #70cbad; margin-top: 16px; padding: 8px; }
+.visual-proof img { width: 32px; height: 32px; }
+.visual-proof section svg { max-height: 200px; }
+.cm-editor { min-height: 70px; }

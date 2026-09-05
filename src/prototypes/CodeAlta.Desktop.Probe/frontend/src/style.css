@@ -1,0 +1,7 @@
+:root { font-family: system-ui, sans-serif; color: #e0e7ef; background: #111b26; color-scheme: dark; }
+body { margin: 0; }
+main { max-width: 900px; padding: 24px; margin: auto; }
+button, input { font: inherit; padding: 8px; margin: 4px; }
+output { display: block; white-space: pre-wrap; font: 13px/1.5 monospace; margin-top: 16px; }
+.overlay { position: fixed; inset: 0; background: #0009; }
+.dialog { position: fixed; top: 30%; left: 25%; width: 50%; padding: 24px; background: #253547; border: 1px solid #aaa; }
