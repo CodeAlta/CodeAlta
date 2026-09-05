@@ -702,7 +702,6 @@ public sealed class ArchitectureGuardrailTests
             "App/SessionHistoryCoordinator.cs:493:var loadTask = Task.Run(() => LoadCoreAsync(session, tab, cancellationToken));",
             "App/SessionRuntimeEventCoordinator.cs:281:Task.Run(async () =>",
             "App/SessionRuntimeEventCoordinator.cs:624:_ = InvalidateProjectFileSearchAsync(session.WorkingDirectory);",
-            "Presentation/Editing/FileEditorTab.cs:225:_ = RefreshExternalStateAsync();",
             "Presentation/Editing/ProjectFileOpenDialogController.cs:217:_ = AcceptSelectedAsync(selected);",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:153:var sessionCreateTask = Task.Run(",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:164:_ = sessionCreateTask.ContinueWith(",

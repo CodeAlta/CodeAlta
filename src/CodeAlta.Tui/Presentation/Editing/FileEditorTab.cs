@@ -26,7 +26,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
     private TextFileSnapshot _snapshot;
     private TextFileRevision? _conflictingRevision;
     private bool _suppressEditorChanged;
-    private int _refreshExternalStateQueued;
+    private ExternalRefreshAttachment? _externalRefreshAttachment;
+    private bool _disposed;
 
     private FileEditorTab(
         ProjectFileSearchItem item,
@@ -59,7 +60,11 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         _reloadButton.IsVisible(() => HasExternalChanges && ExistsOnDisk);
         _reloadButton.IsEnabled(() => HasExternalChanges && ExistsOnDisk);
 
-        Root = BuildRoot();
+        Root = new EditorRoot(this, BuildRoot())
+        {
+            HorizontalAlignment = Align.Stretch,
+            VerticalAlignment = Align.Stretch,
+        };
         _watcher = CreateWatcher(item.FullPath);
         UpdateUiState();
     }
@@ -160,6 +165,13 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        Volatile.Write(ref _externalRefreshAttachment, null);
         Editor.TextDocument.Changed -= OnEditorDocumentChanged;
 
         if (_watcher is not null)
@@ -213,17 +225,50 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
     public void QueueExternalStateRefresh()
     {
-        if (Interlocked.Exchange(ref _refreshExternalStateQueued, 1) != 0)
+        // Watcher callbacks can arrive before mounting, after detaching, or after
+        // disposal. Never access bindable state or the global dispatcher here.
+        var attachment = Volatile.Read(ref _externalRefreshAttachment);
+        if (attachment is null || Interlocked.Exchange(ref attachment.RefreshQueued, 1) != 0)
         {
             return;
         }
 
-        Root.Dispatcher.Post(
-            () =>
+        var posted = false;
+        try
+        {
+            // TerminalApp.Post targets this app's queue even if its dispatcher
+            // detaches concurrently. A stale callback is invalidated below.
+            attachment.App.Post(
+                () =>
+                {
+                    Interlocked.Exchange(ref attachment.RefreshQueued, 0);
+                    if (ReferenceEquals(Volatile.Read(ref _externalRefreshAttachment), attachment))
+                    {
+                        RefreshExternalState();
+                    }
+                });
+            posted = true;
+        }
+        finally
+        {
+            if (!posted)
             {
-                Interlocked.Exchange(ref _refreshExternalStateQueued, 0);
-                _ = RefreshExternalStateAsync();
-            });
+                Interlocked.Exchange(ref attachment.RefreshQueued, 0);
+            }
+        }
+    }
+
+    private void AttachExternalStateRefresh(TerminalApp app)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // Each attachment owns its coalescing flag: an old queued callback cannot
+        // clear a new attachment's flag or update a disposed/re-attached editor.
+        Volatile.Write(ref _externalRefreshAttachment, new ExternalRefreshAttachment(app));
+        QueueExternalStateRefresh();
     }
 
     private Task<bool> SaveAsync() => SaveAsync(_snapshot.Revision);
@@ -318,7 +363,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         }
     }
 
-    private async Task RefreshExternalStateAsync()
+    private void RefreshExternalState()
     {
         try
         {
@@ -330,9 +375,11 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
                 _sessionState.MarkConflict(exists);
             }
             UpdateUiState();
-            await Task.CompletedTask;
         }
-        catch
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
         {
         }
     }
@@ -479,12 +526,12 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
             IncludeSubdirectories = false,
-            EnableRaisingEvents = true,
         };
         watcher.Changed += OnWatchedFileChanged;
         watcher.Created += OnWatchedFileChanged;
         watcher.Deleted += OnWatchedFileChanged;
         watcher.Renamed += OnWatchedFileRenamed;
+        watcher.EnableRaisingEvents = true;
         return watcher;
     }
 
@@ -616,6 +663,28 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         var app = dialog?.App ?? Root.App;
         dialog?.Close();
         app?.Focus(Editor);
+    }
+
+    private sealed class ExternalRefreshAttachment(TerminalApp app)
+    {
+        public TerminalApp App { get; } = app;
+
+        public int RefreshQueued;
+    }
+
+    private sealed class EditorRoot(FileEditorTab owner, Visual content) : Padder(content)
+    {
+        protected override void OnAttachedToApp(TerminalApp app)
+        {
+            base.OnAttachedToApp(app);
+            owner.AttachExternalStateRefresh(app);
+        }
+
+        protected override void OnDetachedFromApp(TerminalApp app)
+        {
+            Volatile.Write(ref owner._externalRefreshAttachment, null);
+            base.OnDetachedFromApp(app);
+        }
     }
 
     private sealed record DialogAction(string Label, ControlTone Tone, Func<Task> Execute);

@@ -11,6 +11,7 @@ Add a rule here when it is important enough that contributors and agents should 
 - `ConfigureAwait(false)` is allowed in explicit background or infrastructure code such as libraries, SDKs, transport, persistence, filesystem I/O, pumps, workers, and startup code that marshals back before touching UI-owned state.
 - When code leaves the UI flow for background work, keep the boundary explicit and narrow.
 - If background work needs to update UI-owned state afterward, marshal back to the UI dispatcher first.
+- File-editor watcher notifications are attachment-scoped: post to the captured terminal app, ignore notifications while unmounted, reconcile disk state on attachment, and invalidate pending callbacks on detach/disposal. Watcher threads must not mutate bindable state or post through an unattached global dispatcher.
 - Do not introduce workaround abstractions only to compensate for incorrect frontend `ConfigureAwait(false)` usage.
 
 ## Architecture Boundaries
