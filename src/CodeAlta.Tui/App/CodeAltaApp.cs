@@ -225,6 +225,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             () => { _agentPromptSelector.RefreshPrompts(); _sessionWorkspaceView?.SyncActivePromptPanelProjection(); },
             (message, tone) => SetStatus(message, tone: tone));
         _fileEditorWorkspaceCoordinator = new FileEditorWorkspaceCoordinator(
+            composition.TextFiles,
             projectFileSearchService,
             _shellTabService,
             ResolvePromptRoot,

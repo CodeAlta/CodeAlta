@@ -25,17 +25,21 @@ internal sealed class AskFileReviewView
     private readonly TextDocument? _document;
     private readonly string _fullPath;
     private readonly string _displayPath;
+    private readonly TextFileCodec _textFiles;
+    private TextFileSnapshot? _savedSnapshot;
     private ITextSnapshot? _lastFileSnapshot;
     private string _savedText;
     private string? _saveError;
     private int _lastEditorLine = 1;
     private bool _hasSavedUserChanges;
 
-    private AskFileReviewView(string fullPath, string displayPath, string? text, string? loadError)
+    private AskFileReviewView(string fullPath, string displayPath, TextFileCodec textFiles, TextFileSnapshot? snapshot, string? loadError)
     {
         _fullPath = fullPath;
         _displayPath = displayPath;
-        _savedText = text ?? string.Empty;
+        _textFiles = textFiles;
+        _savedSnapshot = snapshot;
+        _savedText = snapshot?.Text ?? string.Empty;
 
         if (loadError is null)
         {
@@ -100,17 +104,28 @@ internal sealed class AskFileReviewView
 
     public bool HasUnsavedChanges => Editor is not null && !string.Equals(GetEditorText(), _savedText, StringComparison.Ordinal);
 
-    public static AskFileReviewView? Create(AltaAskFile? file, IReadOnlyList<string> rootCandidates)
+    public static AskFileReviewView? Create(AltaAskFile? file, IReadOnlyList<string> rootCandidates, TextFileCodec textFiles)
     {
+        ArgumentNullException.ThrowIfNull(textFiles);
         if (string.IsNullOrWhiteSpace(file?.Path))
         {
             return null;
         }
 
-        var resolution = ResolveFilePath(file.Path!, rootCandidates);
-        return TryReadText(resolution.FullPath, out var text, out var error)
-            ? new AskFileReviewView(resolution.FullPath, resolution.DisplayPath, text, loadError: null)
-            : new AskFileReviewView(resolution.FullPath, resolution.DisplayPath, text: null, error);
+        var fullPath = TextFileCodec.ResolvePath(file.Path!, rootCandidates);
+        var displayPath = Path.IsPathFullyQualified(file.Path!.Trim()) ? fullPath : file.Path.Replace('\\', '/');
+        try
+        {
+            return new AskFileReviewView(fullPath, displayPath, textFiles, textFiles.Load(fullPath), loadError: null);
+        }
+        catch (FileNotFoundException)
+        {
+            return new AskFileReviewView(fullPath, displayPath, textFiles, null, SR.T("Attached ask file was not found: {0}", fullPath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or System.Security.SecurityException)
+        {
+            return new AskFileReviewView(fullPath, displayPath, textFiles, null, SR.T("Attached ask file could not be loaded: {0}", ex.Message));
+        }
     }
 
     public void AddQuestionFocusCommand(AskQuestionFormView form)
@@ -159,7 +174,7 @@ internal sealed class AskFileReviewView
     public bool TrySave(out string error)
     {
         error = string.Empty;
-        if (Editor is null)
+        if (Editor is null || _savedSnapshot is null)
         {
             error = SR.T("The attached file is not available for editing.");
             return false;
@@ -168,14 +183,24 @@ internal sealed class AskFileReviewView
         try
         {
             var text = GetEditorText();
-            File.WriteAllText(_fullPath, text);
+            var result = _textFiles.Save(new TextFileSaveRequest(
+                _fullPath, text, _savedSnapshot.Encoding, _savedSnapshot.HasByteOrderMark, _savedSnapshot.Revision));
+            if (result.IsConflict)
+            {
+                error = SR.T("'{0}' has changed on disk since it was opened or last saved.", _displayPath);
+                _saveError = error;
+                TouchFileState();
+                return false;
+            }
+
+            _savedSnapshot = result.Snapshot;
             _savedText = text;
             _hasSavedUserChanges = true;
             _saveError = null;
             TouchFileState();
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or System.Security.SecurityException)
         {
             error = ex.Message;
             _saveError = error;
@@ -631,59 +656,6 @@ internal sealed class AskFileReviewView
             .HorizontalScrollEnabled(false)
             .VerticalScrollEnabled(true)
             .Stretch();
-
-    private static bool TryReadText(string fullPath, out string text, out string error)
-    {
-        try
-        {
-            if (!File.Exists(fullPath))
-            {
-                text = string.Empty;
-                error = SR.T("Attached ask file was not found: {0}", fullPath);
-                return false;
-            }
-
-            text = File.ReadAllText(fullPath);
-            error = string.Empty;
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
-        {
-            text = string.Empty;
-            error = SR.T("Attached ask file could not be loaded: {0}", ex.Message);
-            return false;
-        }
-    }
-
-    private static AskFileResolution ResolveFilePath(string path, IReadOnlyList<string> rootCandidates)
-    {
-        var normalizedPath = path.Trim();
-        if (Path.IsPathFullyQualified(normalizedPath))
-        {
-            var fullPath = Path.GetFullPath(normalizedPath);
-            return new AskFileResolution(fullPath, fullPath);
-        }
-
-        foreach (var root in rootCandidates)
-        {
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                continue;
-            }
-
-            var candidate = Path.GetFullPath(Path.Combine(root, normalizedPath));
-            if (File.Exists(candidate))
-            {
-                return new AskFileResolution(candidate, path.Replace('\\', '/'));
-            }
-        }
-
-        var fallbackRoot = rootCandidates.FirstOrDefault(static root => !string.IsNullOrWhiteSpace(root)) ?? Environment.CurrentDirectory;
-        var fallback = Path.GetFullPath(Path.Combine(fallbackRoot, normalizedPath));
-        return new AskFileResolution(fallback, path.Replace('\\', '/'));
-    }
-
-    private sealed record AskFileResolution(string FullPath, string DisplayPath);
 
     private sealed class AskFileCommentEntry
     {

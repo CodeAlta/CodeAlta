@@ -51,6 +51,7 @@ internal sealed class CodeAltaFrontendComposition
     public required WorkspaceRefreshContext WorkspaceRefreshContext { get; init; }
     public required ReminderUiCoordinator ReminderUiCoordinator { get; init; }
     public required AskModeCoordinator AskModeCoordinator { get; init; }
+    public required TextFileCodec TextFiles { get; init; }
 
     public static CodeAltaFrontendComposition Create(
         IReadOnlyList<ModelProviderDescriptor> providerDescriptors,
@@ -428,7 +429,9 @@ internal sealed class CodeAltaFrontendComposition
             altaServices,
             frontend.GetAlwaysEnqueue,
             agentPromptSelectorCoordinator.GetPreferredAgentPromptId);
+        var textFiles = new TextFileCodec();
         var askModeCoordinator = new AskModeCoordinator(
+            textFiles,
             askService,
             sessionStateCoordinator,
             sessionCommandCoordinator,
@@ -438,6 +441,7 @@ internal sealed class CodeAltaFrontendComposition
 
         return new CodeAltaFrontendComposition
         {
+            TextFiles = textFiles,
             ModelProviderPreferences = modelProviderPreferences,
             AgentPromptPreferences = agentPromptPreferences,
             ShellController = shellController,

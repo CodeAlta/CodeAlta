@@ -42,6 +42,12 @@ internal sealed class FileEditorSessionState
     public void MarkReloaded(string text, DateTimeOffset savedWriteTimeUtc)
         => MarkSaved(text, savedWriteTimeUtc);
 
+    public void MarkConflict(bool existsOnDisk)
+    {
+        ExistsOnDisk = existsOnDisk;
+        HasExternalChanges = true;
+    }
+
     public void RefreshExternalState(bool existsOnDisk, DateTimeOffset? currentWriteTimeUtc)
     {
         ExistsOnDisk = existsOnDisk;

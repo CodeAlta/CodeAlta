@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.App;
 using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Tui.Views;
@@ -23,6 +24,7 @@ public sealed class FileEditorWorkspaceCoordinatorTests
             var syncCount = 0;
 
             await using var coordinator = new FileEditorWorkspaceCoordinator(
+                new TextFileCodec(),
                 NullProjectFileSearchService.Instance,
                 shellTabs,
                 () => tempDirectory.FullName,
@@ -63,6 +65,7 @@ public sealed class FileEditorWorkspaceCoordinatorTests
             var shellTabs = new InMemoryShellTabService();
 
             await using var coordinator = new FileEditorWorkspaceCoordinator(
+                new TextFileCodec(),
                 NullProjectFileSearchService.Instance,
                 shellTabs,
                 () => tempDirectory.FullName,
@@ -80,6 +83,57 @@ public sealed class FileEditorWorkspaceCoordinatorTests
             Assert.IsNull(coordinator.SelectedTabId);
             Assert.IsFalse(shellTabs.TryGetTab(new ShellTabId(tabId), out _));
             Assert.IsNull(coordinator.GetSelectedFileTab());
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task EditorSave_ConflictsRetainDirtyTextAndOverwriteRequiresObservedRevision()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(tempDirectory.FullName, "notes.txt");
+            await File.WriteAllTextAsync(path, "original");
+            var store = new TextFileCodec();
+            var snapshot = await store.LoadAsync(path);
+            await using var coordinator = new FileEditorWorkspaceCoordinator(
+                store,
+                NullProjectFileSearchService.Instance,
+                new InMemoryShellTabService(),
+                () => tempDirectory.FullName,
+                () => null,
+                () => null,
+                static build => new ComputedVisual(build),
+                _ => { },
+                static () => { },
+                static (_, _, _) => { });
+            await coordinator.OpenFilePathAsync(path);
+            var tab = coordinator.GetSelectedFileTab()!;
+            tab.Editor.TextDocument.Insert(0, "my edits ");
+            Assert.IsTrue(tab.IsDirty);
+            await File.WriteAllTextAsync(path, "external");
+            File.SetLastWriteTimeUtc(path, snapshot.LastWriteTimeUtc.UtcDateTime);
+
+            var conflict = await tab.SaveCurrentTextAsync(snapshot.Revision);
+            Assert.IsTrue(conflict.IsConflict);
+            Assert.IsTrue(tab.IsDirty);
+            Assert.IsTrue(tab.HasExternalChanges);
+            Assert.AreEqual("my edits original", CodeAlta.Tui.Presentation.Editing.CodeEditorFactory.GetText(tab.Editor));
+            Assert.AreEqual("external", await File.ReadAllTextAsync(path));
+
+            await File.WriteAllTextAsync(path, "another change");
+            var staleOverwrite = await tab.SaveCurrentTextAsync(conflict.CurrentRevision);
+            Assert.IsTrue(staleOverwrite.IsConflict);
+            Assert.IsTrue(tab.IsDirty);
+            var saved = await tab.SaveCurrentTextAsync(staleOverwrite.CurrentRevision);
+            Assert.IsFalse(saved.IsConflict);
+            Assert.IsFalse(tab.IsDirty);
+            Assert.IsFalse(tab.HasExternalChanges);
+            Assert.AreEqual("my edits original", await File.ReadAllTextAsync(path));
         }
         finally
         {

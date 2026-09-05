@@ -18,6 +18,7 @@ namespace CodeAlta.Tui.App;
 
 internal sealed class AskModeCoordinator : IDisposable
 {
+    private readonly TextFileCodec _textFiles;
     private readonly IAltaAskService _askService;
     private readonly ShellSessionStateCoordinator _sessionState;
     private readonly SessionCommandCoordinator _sessionCommands;
@@ -29,6 +30,7 @@ internal sealed class AskModeCoordinator : IDisposable
     private string? _activeSessionId;
 
     public AskModeCoordinator(
+        TextFileCodec textFiles,
         IAltaAskService askService,
         ShellSessionStateCoordinator sessionState,
         SessionCommandCoordinator sessionCommands,
@@ -36,6 +38,7 @@ internal sealed class AskModeCoordinator : IDisposable
         SessionWorkspaceViewModel workspaceViewModel,
         Action<string, bool, StatusTone> setStatus)
     {
+        ArgumentNullException.ThrowIfNull(textFiles);
         ArgumentNullException.ThrowIfNull(askService);
         ArgumentNullException.ThrowIfNull(sessionState);
         ArgumentNullException.ThrowIfNull(sessionCommands);
@@ -43,6 +46,7 @@ internal sealed class AskModeCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(workspaceViewModel);
         ArgumentNullException.ThrowIfNull(setStatus);
 
+        _textFiles = textFiles;
         _askService = askService;
         _sessionState = sessionState;
         _sessionCommands = sessionCommands;
@@ -74,7 +78,7 @@ internal sealed class AskModeCoordinator : IDisposable
         {
             _sessionState.OpenSession(sessionId);
             var form = new AskQuestionFormView(ask);
-            var fileReview = AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session));
+            var fileReview = AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session), _textFiles);
             if (fileReview is not null)
             {
                 form.AddFileReviewCommands(fileReview);

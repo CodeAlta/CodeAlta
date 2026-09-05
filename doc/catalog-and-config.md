@@ -108,6 +108,22 @@ Unsent per-session prompts are stored under `~/.alta/saved_prompts/` so closing 
 
 `ShellStateStore` is a UI-session projection of currently open shell state; it is not a replacement for the durable catalog, session journals, or runtime-owned session state.
 
+## Editable text files
+
+`CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves. The TUI composition shares one instance between file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.
+
+Loads return the complete text, encoding/BOM information, an advisory timestamp, and a SHA-256 identity of the raw bytes. The missing-file revision differs from an empty file. Saves require the previously observed revision, including for creation: stale edits, external deletion, and same-timestamp content changes return a conflict without overwriting the target. File-editor Overwrite confirms the revision observed in the conflict, so another intervening edit conflicts again. Conflicts retain dirty editor text; ask-file saves return failure without marking the review saved or allowing the save-and-submit action to proceed.
+
+UTF-8 with or without a BOM and BOM-bearing UTF-16/UTF-32 in either byte order are supported. Literal CRLF/LF/CR sequences, mixed line endings, Unicode, and final-newline presence are preserved; no newline conversion is applied. Invalid encoded bytes or invalid Unicode are rejected rather than decoded/encoded with replacement characters that could silently corrupt a saved document. BOM-less non-UTF-8 encodings are not inferred.
+
+Saves write a uniquely created temporary file in the destination directory, recheck content identity, and replace the target only after staging succeeds and cancellation is checked. Read-only targets are rejected, Unix mode bits are retained on replacement, and file symbolic links are followed rather than replaced with regular files. Failed/cancelled pre-commit saves leave the original intact and attempt to remove only their own staging file; cancellation after commit does not turn an acknowledged save into a cancellation. This is not a crash-recovery journal or a durability guarantee across power loss.
+
+Unix staging starts with user-only read/write mode. On Windows, staging for an existing file is created with a copy of the original's effective discretionary ACL (DACL), protected from additional directory inheritance, before any edited bytes are written. That DACL remains in place after the write handle closes for the revision check and replacement; directory readers do not gain additional DACL permissions through staging. Failure to read or apply the DACL aborts rather than falling back to directory permissions. Windows new-file saves have no original DACL and inherit directory permissions. This is DACL preservation, not a full security-descriptor/EFS copy or protection against privileged access; concurrent external security-metadata changes are not covered by content revisions.
+
+The instance-owned save gate serializes cooperating editors only. Other processes/instances or noncooperating writers can change a file or path link between the final check and replacement; there is no portable cross-process atomic compare-and-swap guarantee. Content identity also does not distinguish a delete/recreate sequence that restores identical bytes. Atomic replacement changes file identity, so hard-linked aliases do not receive the replacement contents. Do not treat timestamps, revisions, or paths as authorization tokens.
+
+Attached-file lookup retains the trusted TUI behavior: an absolute path is accepted; relative lookup tries the session working directory then project root, with the first supplied root/current directory as fallback. It is not a project containment or renderer authorization boundary. A future desktop adapter must validate project/session association and explicit external-file access before calling these APIs.
+
 ## Plugin and skill state
 
 Source plugins are discovered from user and project roots and are enabled by default unless disabled in config or safe mode is active. CodeAlta owns generated plugin-root build files and plugin build manifests under its roots; plugin package directories should contain only package-owned source/content files.

@@ -193,3 +193,7 @@ When the selected model supports image input, copy an image to the clipboard and
 | Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` |
 
 If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
+
+### Saving edited files
+
+The terminal file editor and attached ask-file editor preserve supported Unicode encoding, byte-order marks, and existing line endings. If the file changed or was deleted on disk, saving stops and keeps your unsaved edits. The file editor offers Cancel, Reload (discarding your edits), or Overwrite; another disk change after the overwrite prompt requires confirmation again. An attached ask-file save failure also stops save-and-submit. Invalid encoded content is reported instead of silently replaced during decoding.

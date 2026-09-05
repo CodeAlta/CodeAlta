@@ -1,4 +1,3 @@
-using System.Text;
 using CodeAlta.Tui.App;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.Presentation.Prompting;
@@ -23,14 +22,16 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
     private readonly Button _saveButton;
     private readonly Button _reloadButton;
     private readonly State<bool> _wordWrap = new(true);
-    private Encoding _encoding;
-    private bool _hasByteOrderMark;
+    private readonly TextFileCodec _textFiles;
+    private TextFileSnapshot _snapshot;
+    private TextFileRevision? _conflictingRevision;
     private bool _suppressEditorChanged;
     private int _refreshExternalStateQueued;
 
     private FileEditorTab(
         ProjectFileSearchItem item,
         ProjectFileAppearance appearance,
+        TextFileCodec textFiles,
         TextFileSnapshot snapshot,
         Action<string, bool, StatusTone> setStatus)
     {
@@ -43,8 +44,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         Appearance = appearance;
         TabId = CreateTabId(item.FullPath);
         _setStatus = setStatus;
-        _encoding = snapshot.Encoding;
-        _hasByteOrderMark = snapshot.HasByteOrderMark;
+        _textFiles = textFiles;
+        _snapshot = snapshot;
         _sessionState = new FileEditorSessionState(snapshot.Text, snapshot.LastWriteTimeUtc);
 
         Editor = CreateEditor(item, snapshot.Text);
@@ -90,15 +91,17 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
     public static async Task<FileEditorTab> CreateAsync(
         ProjectFileSearchItem item,
         ProjectFileAppearance appearance,
+        TextFileCodec textFiles,
         Action<string, bool, StatusTone> setStatus,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(appearance);
+        ArgumentNullException.ThrowIfNull(textFiles);
         ArgumentNullException.ThrowIfNull(setStatus);
 
-        var snapshot = await TextFileCodec.LoadAsync(item.FullPath, cancellationToken);
-        return new FileEditorTab(item, appearance, snapshot, setStatus);
+        var snapshot = await textFiles.LoadAsync(item.FullPath, cancellationToken);
+        return new FileEditorTab(item, appearance, textFiles, snapshot, setStatus);
     }
 
     public void Focus()
@@ -223,12 +226,14 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             });
     }
 
-    private async Task<bool> SaveAsync()
+    private Task<bool> SaveAsync() => SaveAsync(_snapshot.Revision);
+
+    private async Task<bool> SaveAsync(TextFileRevision expectedRevision)
     {
         try
         {
-            await RefreshExternalStateAsync();
-            if (HasExternalChanges)
+            var result = await SaveCurrentTextAsync(expectedRevision);
+            if (result.IsConflict)
             {
                 ShowActionDialog(
                     SR.T("File changed on disk"),
@@ -239,13 +244,12 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
                     [
                         new DialogAction(SR.T("Cancel"), ControlTone.Default, static () => Task.CompletedTask),
                         new DialogAction(SR.T("Reload"), ControlTone.Warning, () => ReloadAsync(confirmWhenDirty: false)),
-                        new DialogAction(SR.T("Overwrite"), ControlTone.Success, SaveCurrentTextAsync)
+                        new DialogAction(SR.T("Overwrite"), ControlTone.Success, async () => { await SaveAsync(result.CurrentRevision); })
                     ]);
                 return false;
             }
 
-            await SaveCurrentTextAsync();
-            return true;
+            return !IsDirty;
         }
         catch (Exception ex)
         {
@@ -254,19 +258,32 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         }
     }
 
-    private async Task SaveCurrentTextAsync()
+    internal async Task<TextFileSaveResult> SaveCurrentTextAsync(TextFileRevision expectedRevision)
     {
-        var snapshot = await TextFileCodec.SaveAsync(
+        var result = await _textFiles.SaveAsync(new TextFileSaveRequest(
             FullPath,
             GetEditorText(),
-            _encoding,
-            _hasByteOrderMark);
+            _snapshot.Encoding,
+            _snapshot.HasByteOrderMark,
+            expectedRevision));
 
-        _encoding = snapshot.Encoding;
-        _hasByteOrderMark = snapshot.HasByteOrderMark;
-        _sessionState.MarkSaved(snapshot.Text, snapshot.LastWriteTimeUtc);
+        if (result.IsConflict)
+        {
+            _conflictingRevision = result.CurrentRevision;
+            _sessionState.MarkConflict(result.CurrentRevision.Exists);
+            UpdateUiState();
+            _setStatus(SR.T("'{0}' has changed on disk since it was opened or last saved.", Item.Basename), false, StatusTone.Warning);
+            return result;
+        }
+
+        _snapshot = result.Snapshot;
+        _conflictingRevision = null;
+        _sessionState.MarkSaved(_snapshot.Text, _snapshot.LastWriteTimeUtc);
+        // Edits made while the save was awaiting I/O are not part of its acknowledgement.
+        _sessionState.UpdateEditorText(GetEditorText());
         UpdateUiState();
         _setStatus(SR.T("Saved '{0}'.", Item.Basename), false, StatusTone.Ready);
+        return result;
     }
 
     private async Task ReloadAsync(bool confirmWhenDirty)
@@ -287,9 +304,9 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
         try
         {
-            var snapshot = await TextFileCodec.LoadAsync(FullPath);
-            _encoding = snapshot.Encoding;
-            _hasByteOrderMark = snapshot.HasByteOrderMark;
+            var snapshot = await _textFiles.LoadAsync(FullPath);
+            _snapshot = snapshot;
+            _conflictingRevision = null;
             ReplaceEditorDocument(snapshot.Text);
             _sessionState.MarkReloaded(snapshot.Text, snapshot.LastWriteTimeUtc);
             UpdateUiState();
@@ -308,6 +325,10 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             var exists = File.Exists(FullPath);
             var lastWriteTimeUtc = exists ? File.GetLastWriteTimeUtc(FullPath) : (DateTimeOffset?)null;
             _sessionState.RefreshExternalState(exists, lastWriteTimeUtc);
+            if (_conflictingRevision is not null)
+            {
+                _sessionState.MarkConflict(exists);
+            }
             UpdateUiState();
             await Task.CompletedTask;
         }

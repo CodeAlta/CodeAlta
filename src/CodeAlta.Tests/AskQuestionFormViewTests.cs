@@ -1,5 +1,7 @@
 using System.Collections;
 using System.Reflection;
+using System.Text;
+using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
 using CodeAlta.Tui.Views;
 using XenoAtom.Terminal.UI;
@@ -164,7 +166,8 @@ public sealed class AskQuestionFormViewTests
         var tabHostSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "SessionTabHostView.cs"));
         var fileReviewSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "Views", "AskFileReviewView.cs"));
 
-        StringAssert.Contains(coordinatorSource, "AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session))");
+        StringAssert.Contains(coordinatorSource, "AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session), _textFiles)");
+        StringAssert.Contains(coordinatorSource, "if (!fileReview.TrySave(out var error))");
         StringAssert.Contains(coordinatorSource, "form.AddFileReviewCommands(fileReview)");
         StringAssert.Contains(coordinatorSource, "TryEnterAskMode(sessionId, form.Root, fileReview?.Root)");
         StringAssert.Contains(workspaceViewModelSource, "Func<string, Visual, Visual?, bool>? _enterAskMode");
@@ -192,7 +195,7 @@ public sealed class AskQuestionFormViewTests
         {
             File.WriteAllText(path, "This is a long attached file line that should wrap in the ask review editor by default.");
 
-            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, []);
+            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], new TextFileCodec());
 
             Assert.IsNotNull(view);
             Assert.IsNotNull(view.Editor);
@@ -214,7 +217,7 @@ public sealed class AskQuestionFormViewTests
         try
         {
             File.WriteAllText(path, "line 1" + Environment.NewLine + "line 2");
-            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, []);
+            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], new TextFileCodec());
 
             Assert.IsNotNull(view);
             typeof(AskFileReviewView)
@@ -241,6 +244,80 @@ public sealed class AskQuestionFormViewTests
             {
                 File.Delete(path);
             }
+        }
+    }
+
+    [TestMethod]
+    [DataRow(65001, false)]
+    [DataRow(65001, true)]
+    [DataRow(1200, true)]
+    [DataRow(1201, true)]
+    [DataRow(12000, true)]
+    [DataRow(12001, true)]
+    public void FileAsk_SavePreservesEncodingBomAndLiteralNewlines(int codePage, bool bom)
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        var path = Path.Combine(directory.FullName, "review.txt");
+        try
+        {
+            var encoding = codePage == 65001 ? new UTF8Encoding(bom) : Encoding.GetEncoding(codePage);
+            const string text = "héllo 🌍\r\nsecond\nthird\rlast";
+            File.WriteAllText(path, text, encoding);
+            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], new TextFileCodec())!;
+            view.Editor!.TextDocument.Insert(0, "edited ");
+            Assert.IsTrue(view.HasUnsavedChanges);
+            Assert.IsTrue(view.TrySave(out var error), error);
+            Assert.IsFalse(view.HasUnsavedChanges);
+            CollectionAssert.AreEqual(encoding.GetPreamble().Concat(encoding.GetBytes("edited " + text)).ToArray(), File.ReadAllBytes(path));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void FileAsk_ConflictRetainsDirtyEditsAndDoesNotMarkReviewSaved(bool delete)
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        var path = Path.Combine(directory.FullName, "review.txt");
+        try
+        {
+            File.WriteAllText(path, "original");
+            var store = new TextFileCodec();
+            var loaded = store.Load(path);
+            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], store)!;
+            view.Editor!.TextDocument.Insert(0, "my edits ");
+            if (delete)
+            {
+                File.Delete(path);
+            }
+            else
+            {
+                File.WriteAllText(path, "external");
+                File.SetLastWriteTimeUtc(path, loaded.LastWriteTimeUtc.UtcDateTime);
+            }
+
+            Assert.IsFalse(view.TrySave(out var error));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(error));
+            Assert.IsTrue(view.HasUnsavedChanges);
+            Assert.IsFalse(view.CreateReviewSnapshot().FileModifiedAndSaved);
+            Assert.IsFalse(view.TrySave(out _), "A retry must not silently accept the conflicting revision.");
+            Assert.AreEqual("my edits original", CodeAlta.Tui.Presentation.Editing.CodeEditorFactory.GetText(view.Editor));
+            if (delete)
+            {
+                Assert.IsFalse(File.Exists(path));
+            }
+            else
+            {
+                Assert.AreEqual("external", File.ReadAllText(path));
+            }
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
         }
     }
 

@@ -10,6 +10,7 @@ namespace CodeAlta.Tui.Views;
 
 internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
 {
+    private readonly TextFileCodec _textFiles;
     private readonly Func<SessionWorkspaceView?> _getWorkspaceView;
     private readonly Func<Visual?> _getSessionFocusTarget;
     private readonly Action<Action> _dispatchToUiDeferred;
@@ -22,6 +23,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
     private readonly Dictionary<string, FileEditorTab> _fileTabsByPath = new(StringComparer.OrdinalIgnoreCase);
 
     public FileEditorWorkspaceCoordinator(
+        TextFileCodec textFiles,
         IProjectFileSearchService projectFileSearchService,
         IShellTabService shellTabs,
         Func<string?> resolveProjectRoot,
@@ -32,6 +34,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
         Action syncSessionTabControl,
         Action<string, bool, StatusTone> setStatus)
     {
+        ArgumentNullException.ThrowIfNull(textFiles);
         ArgumentNullException.ThrowIfNull(projectFileSearchService);
         ArgumentNullException.ThrowIfNull(shellTabs);
         ArgumentNullException.ThrowIfNull(resolveProjectRoot);
@@ -42,6 +45,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(syncSessionTabControl);
         ArgumentNullException.ThrowIfNull(setStatus);
 
+        _textFiles = textFiles;
         _shellTabs = shellTabs;
         _getWorkspaceView = getWorkspaceView;
         _getSessionFocusTarget = getSessionFocusTarget;
@@ -202,7 +206,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
 
         try
         {
-            var fileTab = await FileEditorTab.CreateAsync(item, appearance, (message, showSpinner, tone) => _setStatus(message, showSpinner, tone), cancellationToken);
+            var fileTab = await FileEditorTab.CreateAsync(item, appearance, _textFiles, (message, showSpinner, tone) => _setStatus(message, showSpinner, tone), cancellationToken);
             _fileTabsById[fileTab.TabId] = fileTab;
             _fileTabsByPath[fileTab.FullPath] = fileTab;
             _shellTabs.OpenOrGetTab(new ShellTabDescriptor
