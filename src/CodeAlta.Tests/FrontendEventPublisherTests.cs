@@ -1,5 +1,5 @@
-using CodeAlta.App.Events;
-using CodeAlta.Threading;
+using CodeAlta.Tui.App.Events;
+using CodeAlta.Tui.Threading;
 
 namespace CodeAlta.Tests;
 

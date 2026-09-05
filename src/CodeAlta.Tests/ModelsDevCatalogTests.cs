@@ -5,7 +5,7 @@ using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.Runtime;
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using Microsoft.Extensions.AI;
 

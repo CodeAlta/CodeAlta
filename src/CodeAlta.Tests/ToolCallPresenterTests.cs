@@ -1,11 +1,11 @@
-using CodeAlta.Threading;
+using CodeAlta.Tui.Threading;
 using System.Reflection;
 using System.Text;
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Timeline;
-using CodeAlta.Views;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Timeline;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;

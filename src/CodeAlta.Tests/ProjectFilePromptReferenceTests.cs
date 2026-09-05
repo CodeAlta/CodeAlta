@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Catalog;
 using XenoAtom.Terminal.UI.Text;
 using XenoAtom.Terminal.UI.Styling;

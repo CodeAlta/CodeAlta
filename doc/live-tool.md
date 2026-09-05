@@ -2,6 +2,8 @@
 
 `alta` is an in-process command gateway exposed to CodeAlta-managed sessions and trusted plugins. It is not a separate daemon and it does not keep command streams open. Each invocation builds a fresh command tree, runs one command, and returns help text or a finite JSONL transcript.
 
+The terminal executable is `altatui`; this does not rename the in-process `alta` tool or turn its commands into shell subcommands.
+
 ## Architecture
 
 ```mermaid
@@ -162,7 +164,7 @@ Payloads are JSON objects. Keep strings concise and prefer `--stdin` so shell qu
 
 ```json
 {
-  "file": { "path": "src/CodeAlta/Views/SessionWorkspaceView.cs" },
+  "file": { "path": "src/CodeAlta.Tui/Views/SessionWorkspaceView.cs" },
   "questions": [
     {
       "title": "Plan",

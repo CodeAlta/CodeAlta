@@ -1,4 +1,4 @@
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 
 namespace CodeAlta.Tests;
 

@@ -1,10 +1,10 @@
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.App.Events;
-using CodeAlta.App.State;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.App.Events;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
-using CodeAlta.Threading;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Threading;
 using XenoAtom.Terminal.UI.Geometry;
 
 namespace CodeAlta.Tests;

@@ -1,15 +1,15 @@
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.App.Events;
-using CodeAlta.App.State;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.App.Events;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
+using CodeAlta.Tui.Models;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
-using CodeAlta.Presentation.Prompting;
-using CodeAlta.Presentation.Timeline;
+using CodeAlta.Tui.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Timeline;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Threading;
+using CodeAlta.Tui.Threading;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 

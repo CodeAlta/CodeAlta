@@ -1,12 +1,12 @@
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.App.Context;
-using CodeAlta.App.State;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.App.Context;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Shell;
-using CodeAlta.Threading;
-using CodeAlta.ViewModels;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Shell;
+using CodeAlta.Tui.Threading;
+using CodeAlta.Tui.ViewModels;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 

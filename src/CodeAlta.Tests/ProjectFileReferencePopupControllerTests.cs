@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Reflection;
-using CodeAlta.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;

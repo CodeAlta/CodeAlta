@@ -1,4 +1,4 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;

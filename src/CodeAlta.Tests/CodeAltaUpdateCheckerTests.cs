@@ -2,7 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using NuGet.Versioning;
 
 namespace CodeAlta.Tests;

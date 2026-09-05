@@ -3,7 +3,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.Runtime.Tools;
-using CodeAlta.Presentation.Formatting;
+using CodeAlta.Tui.Presentation.Formatting;
 
 namespace CodeAlta.Tests;
 

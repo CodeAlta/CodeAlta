@@ -1,4 +1,4 @@
-using CodeAlta.Presentation.Editing;
+using CodeAlta.Tui.Presentation.Editing;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Extensions.CodeEditor.TextMateSharp;
 

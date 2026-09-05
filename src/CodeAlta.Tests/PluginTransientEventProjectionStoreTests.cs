@@ -1,4 +1,4 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;

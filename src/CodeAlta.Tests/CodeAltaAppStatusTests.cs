@@ -1,6 +1,6 @@
 using CodeAlta.Agent;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Shell;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Shell;
 using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Tests;

@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using CodeAlta.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Prompting;
 using SkiaSharp;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI.Controls;

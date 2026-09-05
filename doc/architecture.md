@@ -1,6 +1,6 @@
 # Architecture overview
 
-CodeAlta is organized as a terminal frontend on top of reusable runtime libraries. Read the code from process composition downward: owned process services, shared host composition, frontend composition, orchestration runtime, session catalog, model providers, and extension points.
+CodeAlta's terminal frontend is `CodeAlta.Tui` (`altatui`), on top of reusable runtime libraries. The desktop head remains in development; the composition below describes the TUI. Read the code from process composition downward: owned process services, shared host composition, frontend composition, orchestration runtime, session catalog, model providers, and extension points.
 
 ## Startup and composition
 
@@ -47,7 +47,7 @@ flowchart BT
     ProviderPackages[CodeAlta.Agent.*]
     LiveTool[CodeAlta.LiveTool]
     Orchestration[CodeAlta.Orchestration]
-    Frontend[CodeAlta executable]
+    Frontend[CodeAlta.Tui executable - altatui]
     Tests[Tests]
 
     Plugins --> PluginApi
@@ -69,7 +69,7 @@ flowchart BT
 
 Important boundary rules:
 
-- Reusable session orchestration belongs in `CodeAlta.Orchestration`, not in `src/CodeAlta` views or dialogs.
+- Reusable session orchestration belongs in `CodeAlta.Orchestration`, not in `src/CodeAlta.Tui` views or dialogs. Lower-layer projects must not reference either `CodeAlta.Tui` or the reserved `CodeAlta` desktop project.
 - `CodeAlta.Orchestration` is headless and references `CodeAlta.Agent`, `CodeAlta.Catalog`, and `CodeAlta.Plugins` only.
 - Views and dialogs render state and invoke command/service interfaces; they must not call `SessionRuntimeService`, `AgentHub`, provider registries, or plugin runtime services directly.
 - Model providers own protocol adaptation, credentials, readiness, and model metadata. They do not own persisted session listing or project/session restore.
@@ -203,7 +203,7 @@ Extensions do not own canonical transcript persistence. Plugin-derived timeline 
 
 ## Where to put new code
 
-- UI controls, dialogs, view models, terminal presenters, and key-binding/slash-command adapters belong under `src/CodeAlta`.
+- UI controls, dialogs, view models, terminal presenters, and key-binding/slash-command adapters belong under `src/CodeAlta.Tui`.
 - Runtime command/event contracts, session behavior, queue draining, skill activation, and plugin orchestration bridges belong under `src/CodeAlta.Orchestration`.
 - Session catalog/store contracts, provider-neutral session/event contracts, model-provider contracts, and local raw-API mechanics belong under `src/CodeAlta.Agent`.
 - Provider-specific protocol details belong under the matching `src/CodeAlta.Agent.*` package.

@@ -1,7 +1,7 @@
 using System.Reflection;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 
 namespace CodeAlta.Tests;
 

@@ -1,12 +1,12 @@
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.App.State;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
+using CodeAlta.Tui.Models;
 using CodeAlta.Orchestration.Runtime;
-using CodeAlta.Presentation.Shell;
-using CodeAlta.Presentation.Timeline;
-using CodeAlta.Threading;
+using CodeAlta.Tui.Presentation.Shell;
+using CodeAlta.Tui.Presentation.Timeline;
+using CodeAlta.Tui.Threading;
 
 namespace CodeAlta.Tests;
 

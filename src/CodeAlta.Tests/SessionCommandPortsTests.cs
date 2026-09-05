@@ -1,9 +1,9 @@
-using CodeAlta.App;
-using CodeAlta.App.State;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Timeline;
-using CodeAlta.Threading;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Timeline;
+using CodeAlta.Tui.Threading;
 
 namespace CodeAlta.Tests;
 

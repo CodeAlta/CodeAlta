@@ -1,8 +1,10 @@
-# CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.svg)](https://www.nuget.org/packages/CodeAlta/)
+# CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Tui.svg)](https://www.nuget.org/packages/CodeAlta.Tui/)
 
-CodeAlta is a terminal workspace for agentic coding. It brings model-provider setup, project navigation, prompt attachments, durable sessions, delegated work, and trusted local plugins behind the `alta` command.
+CodeAlta is a terminal workspace for agentic coding. It brings model-provider setup, project navigation, prompt attachments, durable sessions, delegated work, and trusted local plugins behind the `altatui` command.
 
 > CodeAlta is pre-release software. Configuration, screenshots, and extension APIs may change before `1.0`.
+
+> On this development branch, the terminal package is renamed to `CodeAlta.Tui` / `altatui`. Installation commands below describe that package once released. Existing releases used `CodeAlta` / `alta`; the replacement desktop head is still in development. Shared `~/.alta` state and the in-session `alta` tool keep their identities.
 
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
@@ -10,17 +12,17 @@ CodeAlta is a terminal workspace for agentic coding. It brings model-provider se
 
 ## 🚀 Install
 
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install the CodeAlta global tool:
+Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install the CodeAlta terminal global tool:
 
 ```sh
-dotnet tool install -g CodeAlta
-alta
+dotnet tool install -g CodeAlta.Tui
+altatui
 ```
 
 Update an existing installation with:
 
 ```sh
-dotnet tool update -g CodeAlta
+dotnet tool update -g CodeAlta.Tui
 ```
 
 On first launch, CodeAlta creates `~/.alta/config.toml`. Existing config files are left untouched on later launches so you can remove, rename, or customize bundled entries. If no provider is enabled yet, the Model Providers dialog opens so you can configure Codex, Copilot, xAI Grok, OpenAI/Azure OpenAI/Alibaba APIs, Anthropic, Gemini/Vertex, or custom endpoints.

@@ -1,6 +1,6 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Prompting;
 
 namespace CodeAlta.Tests;
 

@@ -2,9 +2,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using CodeAlta.Frontend.Commands;
+using CodeAlta.Tui.Frontend.Commands;
 using CodeAlta.Orchestration.Runtime;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 
 namespace CodeAlta.Tests;
 
@@ -56,17 +56,17 @@ public sealed class ArchitectureGuardrailTests
                 return true;
             }
 
-            if (relativePath is "CodeAlta/Program.cs" or
-                "CodeAlta/App/State/ShellStateStore.cs" or
+            if (relativePath is "CodeAlta.Tui/Program.cs" or
+                "CodeAlta.Tui/App/State/ShellStateStore.cs" or
                 "CodeAlta.Tests/ProgramThreadGuardTests.cs" or
                 "CodeAlta.Tests/ShellStateStoreTests.cs")
             {
                 return true;
             }
 
-            if (relativePath.StartsWith("CodeAlta/Threading/", StringComparison.Ordinal) ||
-                text.Contains("using CodeAlta.Threading", StringComparison.Ordinal) ||
-                text.Contains("namespace CodeAlta.Threading", StringComparison.Ordinal) ||
+            if (relativePath.StartsWith("CodeAlta.Tui/Threading/", StringComparison.Ordinal) ||
+                text.Contains("using CodeAlta.Tui.Threading", StringComparison.Ordinal) ||
+                text.Contains("namespace CodeAlta.Tui.Threading", StringComparison.Ordinal) ||
                 text.Contains("using System.Threading", StringComparison.Ordinal) ||
                 text.Contains("System.Threading", StringComparison.Ordinal) ||
                 text.Contains("XenoAtom.Terminal.UI.Threading", StringComparison.Ordinal))
@@ -113,7 +113,7 @@ public sealed class ArchitectureGuardrailTests
         const string externalAcpProviderNamespace = "CodeAlta.Agent" + ".Acp";
         var matches = Directory
             .EnumerateFiles(codeAltaRoot, "*.cs", SearchOption.AllDirectories)
-            .Append(Path.Combine(codeAltaRoot, "CodeAlta.csproj"))
+            .Append(Path.Combine(codeAltaRoot, "CodeAlta.Tui.csproj"))
             .Where(file => File.ReadAllText(file).Contains(externalAcpProviderNamespace, StringComparison.Ordinal))
             .Select(file => Path.GetRelativePath(sourceRoot, file).Replace('\\', '/'))
             .OrderBy(static path => path, StringComparer.Ordinal)
@@ -906,7 +906,7 @@ public sealed class ArchitectureGuardrailTests
             "Presentation/Usage/SessionUsagePresenter.cs",
         };
         var viewDependencies = Directory.EnumerateFiles(presentationRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(file => File.ReadAllText(file).Contains("using CodeAlta.Views;", StringComparison.Ordinal))
+            .Where(file => File.ReadAllText(file).Contains("using CodeAlta.Tui.Views;", StringComparison.Ordinal))
             .Select(file => Path.GetRelativePath(codeAltaRoot, file).Replace('\\', '/'))
             .OrderBy(static value => value, StringComparer.Ordinal)
             .ToArray();
@@ -1052,9 +1052,11 @@ public sealed class ArchitectureGuardrailTests
 
         Assert.IsFalse(projectSource.Contains("..\\CodeAlta\\CodeAlta.csproj", StringComparison.Ordinal));
         Assert.IsFalse(projectSource.Contains("../CodeAlta/CodeAlta.csproj", StringComparison.Ordinal));
+        Assert.IsFalse(projectSource.Contains("..\\CodeAlta.Tui\\CodeAlta.Tui.csproj", StringComparison.Ordinal));
+        Assert.IsFalse(projectSource.Contains("../CodeAlta.Tui/CodeAlta.Tui.csproj", StringComparison.Ordinal));
         AssertSourceDoesNotContain(sourceFiles, "XenoAtom.Terminal.UI");
-        AssertSourceDoesNotContain(sourceFiles, "using CodeAlta.App");
-        AssertSourceDoesNotContain(sourceFiles, "using CodeAlta.Views");
+        AssertSourceDoesNotContain(sourceFiles, "using CodeAlta.Tui.App");
+        AssertSourceDoesNotContain(sourceFiles, "using CodeAlta.Tui.Views");
     }
 
     [TestMethod]
@@ -1076,7 +1078,9 @@ public sealed class ArchitectureGuardrailTests
             {
                 var projectSource = File.ReadAllText(projectFile);
                 return projectSource.Contains("..\\CodeAlta\\CodeAlta.csproj", StringComparison.Ordinal) ||
-                    projectSource.Contains("../CodeAlta/CodeAlta.csproj", StringComparison.Ordinal);
+                    projectSource.Contains("../CodeAlta/CodeAlta.csproj", StringComparison.Ordinal) ||
+                    projectSource.Contains("..\\CodeAlta.Tui\\CodeAlta.Tui.csproj", StringComparison.Ordinal) ||
+                    projectSource.Contains("../CodeAlta.Tui/CodeAlta.Tui.csproj", StringComparison.Ordinal);
             })
             .Select(projectFile => Path.GetRelativePath(sourceRoot, projectFile).Replace('\\', '/'))
             .OrderBy(static value => value, StringComparer.Ordinal)
@@ -1182,7 +1186,8 @@ public sealed class ArchitectureGuardrailTests
                 Content = File.ReadAllText(file),
             })
             .Where(static entry => entry.Content.Contains("PluginOrchestrationBridge", StringComparison.Ordinal))
-            .Where(static entry => entry.RelativePath.StartsWith("CodeAlta/", StringComparison.Ordinal))
+            .Where(static entry => entry.RelativePath.StartsWith("CodeAlta/", StringComparison.Ordinal) ||
+                entry.RelativePath.StartsWith("CodeAlta.Tui/", StringComparison.Ordinal))
             .Select(static entry => entry.RelativePath)
             .OrderBy(static path => path, StringComparer.Ordinal)
             .ToArray();
@@ -1223,7 +1228,7 @@ public sealed class ArchitectureGuardrailTests
             })
             .Where(static entry => entry.Content.Contains("PluginShellTabService", StringComparison.Ordinal) || entry.Content.Contains("PluginShellTabRequest", StringComparison.Ordinal))
             .Where(static entry =>
-                !entry.RelativePath.StartsWith("CodeAlta/", StringComparison.Ordinal) &&
+                !entry.RelativePath.StartsWith("CodeAlta.Tui/", StringComparison.Ordinal) &&
                 !entry.RelativePath.StartsWith("CodeAlta.Tests/", StringComparison.Ordinal))
             .Select(static entry => entry.RelativePath)
             .OrderBy(static path => path, StringComparer.Ordinal)
@@ -1918,8 +1923,13 @@ public sealed class ArchitectureGuardrailTests
     {
         var appPath = Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs");
         var appSize = new FileInfo(appPath).Length;
+        const int BaseFacadeSizeBudgetBytes = 47_000;
+        const int NamespaceIdentityAllowanceBytes = 64;
+        var appSizeBudget = BaseFacadeSizeBudgetBytes + NamespaceIdentityAllowanceBytes;
 
-        Assert.IsTrue(appSize < 47000, $"CodeAltaApp.cs exceeded the temporary facade size budget: {appSize} bytes.");
+        Assert.IsTrue(
+            appSize < appSizeBudget,
+            $"CodeAltaApp.cs exceeded the temporary facade size budget: {appSize} bytes (base {BaseFacadeSizeBudgetBytes} + namespace identity allowance {NamespaceIdentityAllowanceBytes}).");
     }
 
     [TestMethod]
@@ -2090,8 +2100,8 @@ public sealed class ArchitectureGuardrailTests
         while (directory is not null)
         {
             if (TryGetCodeAltaSourceRoot(directory.FullName, out var candidate) ||
-                TryGetCodeAltaSourceRoot(Path.Combine(directory.FullName, "CodeAlta"), out candidate) ||
-                TryGetCodeAltaSourceRoot(Path.Combine(directory.FullName, "src", "CodeAlta"), out candidate))
+                TryGetCodeAltaSourceRoot(Path.Combine(directory.FullName, "CodeAlta.Tui"), out candidate) ||
+                TryGetCodeAltaSourceRoot(Path.Combine(directory.FullName, "src", "CodeAlta.Tui"), out candidate))
             {
                 return candidate;
             }
@@ -2099,13 +2109,14 @@ public sealed class ArchitectureGuardrailTests
             directory = directory.Parent;
         }
 
-        Assert.Fail("Could not locate the CodeAlta source directory from the test output path.");
+        Assert.Fail("Could not locate the CodeAlta.Tui source directory from the test output path.");
         return null!;
     }
 
     private static bool TryGetCodeAltaSourceRoot(string candidate, [NotNullWhen(true)] out string? sourceRoot)
     {
-        if (Directory.Exists(Path.Combine(candidate, "App")) &&
+        if (File.Exists(Path.Combine(candidate, "CodeAlta.Tui.csproj")) &&
+            Directory.Exists(Path.Combine(candidate, "App")) &&
             Directory.Exists(Path.Combine(candidate, "Views")))
         {
             sourceRoot = candidate;

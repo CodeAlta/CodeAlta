@@ -1,6 +1,6 @@
-using CodeAlta.App;
-using CodeAlta.Models;
-using CodeAlta.Threading;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Threading;
 
 namespace CodeAlta.Tests;
 

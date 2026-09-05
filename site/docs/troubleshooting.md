@@ -22,8 +22,8 @@ Check the font setup in this order:
 
 1. Install the latest version of your preferred font from [Nerd Fonts](https://www.nerdfonts.com/font-downloads). Nerd Fonts v3.0.0 included breaking glyph code-point changes, so an older v2-era Nerd Font can be installed and still display the wrong symbols.
 2. Uninstall or delete older copies of the same patched font before reinstalling. Having both old and new variants installed can make the terminal keep selecting the outdated font.
-3. Select the updated Nerd Font in the terminal profile that runs `alta`; changing an editor font does not affect CodeAlta. For example, `CaskaydiaCove Nerd Font` is expected to work when the installed font files are current.
-4. Close all terminal windows and start a fresh terminal before launching `alta` again. On Linux, refresh the font cache if needed with `fc-cache -f -v`.
+3. Select the updated Nerd Font in the terminal profile that runs `altatui`; changing an editor font does not affect CodeAlta. For example, `CaskaydiaCove Nerd Font` is expected to work when the installed font files are current.
+4. Close all terminal windows and start a fresh terminal before launching `altatui` again. On Linux, refresh the font cache if needed with `fc-cache -f -v`.
 
 Platform-specific places to check for stale font copies include Windows **Settings > Personalization > Fonts**, `%LOCALAPPDATA%\Microsoft\Windows\Fonts`, `C:\Windows\Fonts`, macOS **Font Book**, and Linux user font directories such as `~/.local/share/fonts` or `~/.fonts`.
 
@@ -42,7 +42,7 @@ Add entries like this to the `keybindings` array in Windows Terminal's `settings
 ## Windows Terminal feels slow after a long session
 
 > [!NOTE]
-> A small known issue can affect Windows Terminal after CodeAlta has been running in the same tab for many hours, such as a full day. The UI may begin to feel sluggish. Restarting `alta` in the same Windows Terminal tab may not restore normal responsiveness, but opening a new tab or window and launching `alta` there usually does.
+> A small known issue can affect Windows Terminal after CodeAlta has been running in the same tab for many hours, such as a full day. The UI may begin to feel sluggish. Restarting `altatui` in the same Windows Terminal tab may not restore normal responsiveness, but opening a new tab or window and launching `altatui` there usually does.
 
 This appears to be related to how Windows Terminal handles long-running, high-refresh terminal rendering. CodeAlta uses XenoAtom.Terminal.UI for an interactive interface that can render at up to 60 FPS. If you notice slowdown after a long session, move to a fresh Windows Terminal tab or window.
 
@@ -65,7 +65,7 @@ Common fixes:
 
 If no provider is enabled, CodeAlta opens the Model Providers dialog automatically. Configure credentials, click **Test Provider**, then **Save**. A successful test enables the provider automatically; Codex/Copilot browser or device login also enables its provider automatically.
 
-For API-key providers, verify that the environment variable exists in the shell that launches `alta`.
+For API-key providers, verify that the environment variable exists in the shell that launches `altatui`.
 
 ## Codex or Copilot login is pending
 
@@ -79,13 +79,13 @@ The Model Providers dialog keeps Browser Login and Device Login instructions vis
 Start CodeAlta without dynamic plugins:
 
 ```sh
-alta --no-plugins
+altatui --no-plugins
 ```
 
 Or with plugin safe mode:
 
 ```sh
-alta --plugin-safe-mode
+altatui --plugin-safe-mode
 ```
 
 You can also set:
@@ -102,7 +102,7 @@ Source plugins require a .NET SDK that supports native file-based C# builds. Res
 
 ## Another CodeAlta instance is already running
 
-Only one `alta` application instance can run on a machine at a time. CodeAlta uses:
+Only one `altatui` application instance can run on a machine at a time. The shared CodeAlta lock identity is unchanged by the terminal rename:
 
 > [!CAUTION]
 > Do not delete the lock file for a running process. Multiple active instances would share user state, sessions, and provider/runtime files unsafely.

@@ -1,4 +1,4 @@
-using CodeAlta.ViewModels;
+using CodeAlta.Tui.ViewModels;
 using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.Tests;

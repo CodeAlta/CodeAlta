@@ -1,4 +1,4 @@
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 
 namespace CodeAlta.Tests;
 
@@ -10,7 +10,7 @@ public sealed class CodeAltaUpdateServiceTests
     {
         var stable = new CodeAltaUpdateCheckSnapshot(
             CodeAltaUpdateCheckStatus.UpdateAvailable,
-            "CodeAlta",
+            CodeAltaUpdateChecker.PackageId,
             "1.0.0",
             "1.1.0",
             LatestVersionIsPrerelease: false,
@@ -23,7 +23,7 @@ public sealed class CodeAltaUpdateServiceTests
             IncludePrerelease = true,
         };
 
-        Assert.AreEqual("dotnet tool update -g CodeAlta", stable.UpdateCommand);
-        Assert.AreEqual("dotnet tool update -g CodeAlta --prerelease", preview.UpdateCommand);
+        Assert.AreEqual("dotnet tool update -g CodeAlta.Tui", stable.UpdateCommand);
+        Assert.AreEqual("dotnet tool update -g CodeAlta.Tui --prerelease", preview.UpdateCommand);
     }
 }

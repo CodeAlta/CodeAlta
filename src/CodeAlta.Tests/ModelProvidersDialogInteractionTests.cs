@@ -1,8 +1,10 @@
 using System.Reflection;
 using CodeAlta.Agent;
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
+using CodeAlta.Tui.ViewModels;
+using ViewModels = CodeAlta.Tui.ViewModels;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;

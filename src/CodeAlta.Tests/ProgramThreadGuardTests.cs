@@ -103,13 +103,14 @@ public sealed class ProgramThreadGuardTests
             var candidates = new[]
             {
                 directory.FullName,
-                Path.Combine(directory.FullName, "CodeAlta"),
-                Path.Combine(directory.FullName, "src", "CodeAlta"),
+                Path.Combine(directory.FullName, "CodeAlta.Tui"),
+                Path.Combine(directory.FullName, "src", "CodeAlta.Tui"),
             };
 
             foreach (var candidate in candidates)
             {
-                if (Directory.Exists(Path.Combine(candidate, "App")) &&
+                if (File.Exists(Path.Combine(candidate, "CodeAlta.Tui.csproj")) &&
+                    Directory.Exists(Path.Combine(candidate, "App")) &&
                     Directory.Exists(Path.Combine(candidate, "Views")))
                 {
                     return candidate;
@@ -119,7 +120,7 @@ public sealed class ProgramThreadGuardTests
             directory = directory.Parent;
         }
 
-        Assert.Fail("Could not locate the CodeAlta source directory from the test output path.");
+        Assert.Fail("Could not locate the CodeAlta.Tui source directory from the test output path.");
         return null!;
     }
 

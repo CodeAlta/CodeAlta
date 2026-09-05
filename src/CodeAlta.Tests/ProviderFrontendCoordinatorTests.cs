@@ -1,7 +1,7 @@
 using CodeAlta.Agent;
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
+using CodeAlta.Tui.Models;
 
 namespace CodeAlta.Tests;
 

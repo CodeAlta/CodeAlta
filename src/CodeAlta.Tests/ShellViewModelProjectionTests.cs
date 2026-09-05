@@ -1,6 +1,6 @@
-using CodeAlta.App.State;
-using CodeAlta.Models;
-using CodeAlta.ViewModels;
+using CodeAlta.Tui.App.State;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.ViewModels;
 
 namespace CodeAlta.Tests;
 

@@ -23,9 +23,10 @@ og_type: website
       <a href="https://github.com/CodeAlta/CodeAlta" class="btn btn-info btn-lg"><i class="bi bi-github"></i> GitHub</a>
     </div>
     <div class="mt-4 text-start mx-auto" style="max-width: 48rem;">
-      <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta
-alta</code></pre>
-      <p class="text-center text-secondary mt-2" style="font-size: 0.85rem;">The NuGet package is <a href="https://www.nuget.org/packages/CodeAlta/" class="text-secondary">CodeAlta</a>; the installed command is <code>alta</code>. Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0" class="text-secondary">.NET 10</a>. Alternatively, use <code>dnx --yes CodeAlta</code> to install, update, and run in a single command.</p>
+      <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta.Tui
+altatui</code></pre>
+      <p class="text-center text-secondary mt-2" style="font-size: 0.85rem;">The terminal NuGet package is <a href="https://www.nuget.org/packages/CodeAlta.Tui/" class="text-secondary">CodeAlta.Tui</a>; the installed command is <code>altatui</code>. Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0" class="text-secondary">.NET 10</a>. Alternatively, use <code>dnx --yes CodeAlta.Tui</code> to install, update, and run in a single command.</p>
+      <p class="text-center text-secondary">Development branch: these commands describe the renamed terminal package once released. Earlier releases used <code>CodeAlta</code> / <code>alta</code>; the desktop head is still in development. The in-session <code>alta</code> tool and shared <code>~/.alta</code> state are unchanged.</p>
     </div>
   </div>
 </section>
@@ -34,7 +35,7 @@ alta</code></pre>
   <div class="workflow-preview-panel">
     <div class="workflow-terminal-frame">
       <div class="workflow-terminal-titlebar" aria-hidden="true">
-        <span></span><span></span><span></span><strong>alta</strong>
+        <span></span><span></span><span></span><strong>altatui</strong>
       </div>
       <div class="workflow-demo-video">
         <video controls autoplay loop muted playsinline preload="metadata" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta terminal workflow video">

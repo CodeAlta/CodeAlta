@@ -1,11 +1,11 @@
 using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Agent;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Formatting;
-using CodeAlta.Presentation.Styling;
-using CodeAlta.Presentation.Timeline;
-using CodeAlta.Threading;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Formatting;
+using CodeAlta.Tui.Presentation.Styling;
+using CodeAlta.Tui.Presentation.Timeline;
+using CodeAlta.Tui.Threading;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;

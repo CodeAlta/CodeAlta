@@ -1,9 +1,9 @@
-using CodeAlta.Threading;
+using CodeAlta.Tui.Threading;
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Prompting;
-using CodeAlta.Presentation.Timeline;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Timeline;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 
@@ -274,7 +274,7 @@ public sealed class SessionTimelinePresenterTests
         presenter.AppendContent(placeholderDelta);
         Assert.AreEqual(1, presenter.Flow.Items.Count);
         Assert.AreEqual(string.Empty, GetOnlyMarkdown(presenter).Markdown);
-        Assert.IsTrue(CodeAlta.Presentation.Formatting.ChatMarkdownFormatter.ShouldDisplayCompletedContent(completed));
+        Assert.IsTrue(CodeAlta.Tui.Presentation.Formatting.ChatMarkdownFormatter.ShouldDisplayCompletedContent(completed));
 
         presenter.FinalizeContent(completed);
 

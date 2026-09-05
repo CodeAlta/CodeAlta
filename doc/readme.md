@@ -27,7 +27,7 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 
 ```mermaid
 flowchart TD
-    Program[CodeAlta executable - Program + CodeAltaOwnedServices]
+    Program[CodeAlta.Tui executable - altatui - Program + CodeAltaOwnedServices]
     Host[CodeAltaHost - shared runtime composition]
     Frontend[CodeAlta TUI frontend - CodeAltaApp + views + coordinators]
     LiveTool[CodeAlta.LiveTool - alta registry + dispatcher]
@@ -58,13 +58,13 @@ flowchart TD
     Agent --> State
 ```
 
-The executable is the interactive terminal host. Reusable session orchestration lives in runtime libraries, not in terminal controls. `CodeAltaHost.CreateAsync` is the shared composition entry point: it creates the catalog, plugin runtime, skill catalog, model-provider registry/initialization service, session catalog, `AgentHub`, `SessionRuntimeService`, and project-file search service. The TUI then composes views and frontend coordinators around those services.
+The `altatui` executable is the interactive terminal host, packaged as `CodeAlta.Tui`. The in-process agent tool remains `alta`; the desktop head is still in development. Reusable session orchestration lives in runtime libraries, not in terminal controls. `CodeAltaHost.CreateAsync` is the shared composition entry point: it creates the catalog, plugin runtime, skill catalog, model-provider registry/initialization service, session catalog, `AgentHub`, `SessionRuntimeService`, and project-file search service. The TUI then composes views and frontend coordinators around those services.
 
 ## Current source roles
 
 | Source root | Role |
 | --- | --- |
-| `src/CodeAlta` | Executable, terminal UI composition, shell controller, dialogs, view models, provider-management UI, and owned process services. |
+| `src/CodeAlta.Tui` | `altatui` executable, terminal UI composition, shell controller, dialogs, view models, provider-management UI, and owned process services. |
 | `src/CodeAlta.Orchestration` | Headless runtime composition and session orchestration. It references `CodeAlta.Agent`, `CodeAlta.Catalog`, and `CodeAlta.Plugins`, not the TUI. |
 | `src/CodeAlta.Agent` | Session catalog/store contracts, normalized session/event contracts, model-provider runtime contracts, local raw-API session runtime, tools, journals, prompt instruction composition, and compaction. |
 | `src/CodeAlta.Agent.*` | Provider-specific adapters that implement model-provider runtimes, model discovery, credentials, and turn execution. |

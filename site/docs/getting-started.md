@@ -6,7 +6,10 @@ title: Getting Started
 
 ## Install
 
-CodeAlta is distributed as a .NET global tool. The package id is `CodeAlta`; the installed command is `alta`.
+The CodeAlta terminal workspace is packaged as the .NET global tool `CodeAlta.Tui`; the installed command is `altatui`. The in-session agent tool remains named `alta`.
+
+> [!NOTE]
+> This development branch documents the terminal package rename. The commands below apply once `CodeAlta.Tui` is released; older releases used `CodeAlta` / `alta`. The replacement desktop head is still in development. Existing `~/.alta` state is not renamed or migrated by the terminal rename.
 
 > [!IMPORTANT]
 > CodeAlta is currently distributed as preview `0.x` releases before the final `1.0`. Expect behavior, configuration shape, screenshots, and extension APIs to evolve between preview versions; review release notes before upgrading a workflow you depend on.
@@ -14,19 +17,19 @@ CodeAlta is distributed as a .NET global tool. The package id is `CodeAlta`; the
 Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first, then install/update CodeAlta:
 
 ```sh
-dotnet tool install -g CodeAlta
+dotnet tool install -g CodeAlta.Tui
 ```
 
 Alternatively, use `dnx` to install, update, and run in a single command:
 
 ```sh
-dnx --yes CodeAlta
+dnx --yes CodeAlta.Tui
 ```
 
 Then launch the terminal UI:
 
 ```sh
-alta
+altatui
 ```
 
 CodeAlta stores user state under `~/.alta/`, including configuration, logs, cached provider state, session journals, agent prompts under `~/.alta/prompts/agents`, plugins, and skills.
@@ -43,7 +46,7 @@ Recommended setup:
 1. Download a recent font from the official [Nerd Fonts downloads](https://www.nerdfonts.com/font-downloads) page.
 2. Remove older copies of the same Nerd Font before installing the new one, especially if you have had the font installed for years. Duplicate old and new font files can cause the terminal or OS font cache to keep using the outdated glyph set.
 3. Choose the updated Nerd Font family in your terminal profile, such as `CaskaydiaCove Nerd Font`. If a similarly named family such as `CaskaydiaCove NF` still shows broken tree-view icons, check for stale older copies and reinstall the current font.
-4. Restart the terminal window and `alta` after changing or reinstalling fonts.
+4. Restart the terminal window and `altatui` after changing or reinstalling fonts.
 
 See [Troubleshooting: glyphs or tree icons look wrong]({{site.basepath}}/docs/troubleshooting/#glyphs-or-tree-icons-look-wrong) if icons still do not display correctly.
 
@@ -76,7 +79,7 @@ Codex and Copilot credentials are stored in CodeAlta-owned state through their l
 If you use an API-key provider instead, set the provider's environment variable and enable that provider in the dialog or TOML. For OpenAI platform access:
 
 > [!TIP]
-> Environment variables keep API keys out of `~/.alta/config.toml` and project files. Set the variable in the same shell or profile that launches `alta`, then restart `alta` so the running process can see the new value.
+> Environment variables keep API keys out of `~/.alta/config.toml` and project files. Set the variable in the same shell or profile that launches `altatui`, then restart `altatui` so the running process can see the new value.
 
 ```sh
 # macOS/Linux
@@ -130,7 +133,7 @@ Inspect the failing test output below and propose the smallest safe fix.
 
 ## Add files to a prompt
 
-Type `@` in the prompt editor to open the project file/folder picker. Accepted entries are inserted as Markdown links such as `[Program.cs](src/CodeAlta/Program.cs)` and are sent as structured attachments. Raw `@path`, quoted paths, and optional `:line` or `:start-end` suffixes are also recognized at send time.
+Type `@` in the prompt editor to open the project file/folder picker. Accepted entries are inserted as Markdown links such as `[Program.cs](src/CodeAlta.Tui/Program.cs)` and are sent as structured attachments. Raw `@path`, quoted paths, and optional `:line` or `:start-end` suffixes are also recognized at send time.
 
 In GitHub repositories, type `#` to search recent issues. The picker accepts numbers or words, matches words case-insensitively, and inserts Markdown issue links such as `[#18](https://github.com/org/repo/issues/18)`.
 

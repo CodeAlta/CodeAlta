@@ -2,7 +2,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
-using CodeAlta.Presentation.Sessions;
+using CodeAlta.Tui.Presentation.Sessions;
 
 namespace CodeAlta.Tests;
 

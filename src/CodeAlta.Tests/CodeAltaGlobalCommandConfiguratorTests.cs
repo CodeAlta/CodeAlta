@@ -1,4 +1,4 @@
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Commands;

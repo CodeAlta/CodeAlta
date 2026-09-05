@@ -1,4 +1,4 @@
-using CodeAlta.Threading;
+using CodeAlta.Tui.Threading;
 
 namespace CodeAlta.Tests;
 

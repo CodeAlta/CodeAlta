@@ -1,4 +1,4 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 

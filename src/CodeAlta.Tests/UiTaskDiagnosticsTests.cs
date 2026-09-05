@@ -1,6 +1,6 @@
-using CodeAlta.App;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Shell;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Shell;
 
 namespace CodeAlta.Tests;
 

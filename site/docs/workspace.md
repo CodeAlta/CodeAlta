@@ -111,7 +111,7 @@ Type `@` in the prompt to search project files and folders. Accepted entries bec
 > Attach only the files or folders that are relevant to the task. Smaller, focused context usually makes provider responses easier to review and keeps compaction pressure lower.
 
 ```text
-@src/CodeAlta/Program.cs
+@src/CodeAlta.Tui/Program.cs
 @"src/path with spaces/file.cs":10-40
 ```
 
@@ -215,7 +215,7 @@ Open it with `Ctrl+G Ctrl+A` or `/about`. The dialog shows the animated CodeAlta
 
 ### New version toast
 
-When the startup update check finds a newer CodeAlta package on NuGet, CodeAlta shows a non-blocking toast during the session. The toast includes the latest version and the matching `dotnet tool update` command, with a copy action for the command. CodeAlta does not update itself automatically; after you exit the terminal UI, it also prints the same command so you can run it in your shell.
+When the startup update check finds a newer `CodeAlta.Tui` package on NuGet, CodeAlta shows a non-blocking toast during the session. The toast includes the latest version and the matching `dotnet tool update -g CodeAlta.Tui` command (with `--prerelease` for preview versions), with a copy action for the command. CodeAlta does not update itself automatically; after you exit `altatui`, it also prints the same command so you can run it in your shell.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-release-toast.png" alt="CodeAlta update-available toast showing a newer package version and a dotnet tool update command" loading="lazy">

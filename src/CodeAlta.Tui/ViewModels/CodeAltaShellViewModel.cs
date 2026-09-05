@@ -1,0 +1,35 @@
+using CodeAlta.Catalog;
+using CodeAlta.Tui.Models;
+using XenoAtom.Terminal.UI;
+
+namespace CodeAlta.Tui.ViewModels;
+
+internal sealed partial class CodeAltaShellViewModel
+{
+    public CodeAltaShellViewModel()
+    {
+        StatusText = SR.T("Prompt ready");
+        StatusIconMarkup = string.Empty;
+        ProviderSessionLoadStatusText = string.Empty;
+        StatusTone = StatusTone.Ready;
+        IsInitialized = false;
+    }
+
+    [Bindable]
+    public partial string StatusText { get; set; }
+
+    [Bindable]
+    public partial string StatusIconMarkup { get; set; }
+
+    [Bindable]
+    public partial string ProviderSessionLoadStatusText { get; set; }
+
+    [Bindable]
+    public partial bool StatusBusy { get; set; }
+
+    [Bindable]
+    public partial StatusTone StatusTone { get; set; }
+
+    [Bindable]
+    public partial bool IsInitialized { get; set; }
+}

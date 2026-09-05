@@ -1,4 +1,4 @@
-using CodeAlta.App.Context;
+using CodeAlta.Tui.App.Context;
 
 namespace CodeAlta.Tests;
 

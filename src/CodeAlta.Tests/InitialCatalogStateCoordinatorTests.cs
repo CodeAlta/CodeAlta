@@ -1,7 +1,7 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
-using CodeAlta.Views;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Views;
 
 namespace CodeAlta.Tests;
 

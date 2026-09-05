@@ -1,4 +1,4 @@
-using CodeAlta.Frontend.Commands;
+using CodeAlta.Tui.Frontend.Commands;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 

@@ -1,4 +1,4 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using System.Reflection;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;

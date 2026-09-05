@@ -1,9 +1,9 @@
-using CodeAlta.Threading;
+using CodeAlta.Tui.Threading;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
+using CodeAlta.Tui.Models;
 using CodeAlta.Orchestration.Runtime;
 using System.IO;
 

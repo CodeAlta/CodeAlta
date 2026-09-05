@@ -1,5 +1,5 @@
-using CodeAlta.Frontend.Commands;
-using CodeAlta.Views;
+using CodeAlta.Tui.Frontend.Commands;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;

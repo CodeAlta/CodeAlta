@@ -1,6 +1,6 @@
-using CodeAlta.App;
-using CodeAlta.Presentation.Prompting;
-using CodeAlta.Views;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.Presentation.Prompting;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 

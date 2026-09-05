@@ -1,6 +1,6 @@
 using System.Reflection;
 using CodeAlta.Catalog;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.Tests;
@@ -59,8 +59,8 @@ public sealed class ConfigRecoveryDialogTests
             var candidates = new[]
             {
                 directory.FullName,
-                Path.Combine(directory.FullName, "CodeAlta"),
-                Path.Combine(directory.FullName, "src", "CodeAlta"),
+                Path.Combine(directory.FullName, "CodeAlta.Tui"),
+                Path.Combine(directory.FullName, "src", "CodeAlta.Tui"),
             };
 
             foreach (var candidate in candidates)
@@ -74,7 +74,7 @@ public sealed class ConfigRecoveryDialogTests
             directory = directory.Parent;
         }
 
-        Assert.Fail("Could not locate the CodeAlta source directory from the test output path.");
+        Assert.Fail("Could not locate the CodeAlta.Tui source directory from the test output path.");
         return null!;
     }
 }

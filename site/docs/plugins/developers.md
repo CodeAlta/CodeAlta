@@ -134,8 +134,8 @@ If CodeAlta cannot start because a plugin is broken, bypass source plugins with
 one of:
 
 ```sh
-alta --no-plugins
-alta --plugin-safe-mode
+altatui --no-plugins
+altatui --plugin-safe-mode
 ```
 
 Or set:

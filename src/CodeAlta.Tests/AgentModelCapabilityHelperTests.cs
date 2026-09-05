@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Presentation.Chat;
+using CodeAlta.Tui.Presentation.Chat;
 
 namespace CodeAlta.Tests;
 

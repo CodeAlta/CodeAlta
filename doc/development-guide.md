@@ -15,7 +15,8 @@ Add a rule here when it is important enough that contributors and agents should 
 
 ## Architecture Boundaries
 
-- Keep reusable agent/session orchestration out of the `CodeAlta` frontend project. Frontend code should own terminal controls, view models, visual projections, dialogs, and adapters from user actions to application/runtime commands.
+- Keep reusable agent/session orchestration out of frontend projects. `CodeAlta.Tui` (`altatui`) owns terminal controls, view models, visual projections, dialogs, and adapters from user actions to application/runtime commands; `CodeAlta` / `alta` is reserved for the in-development desktop head. Lower-layer projects must not reference either frontend.
+- Keep the in-process `alta` tool name, CodeAlta product identity, neutral library namespaces, and shared `.alta` persistence paths stable across frontend/package renames. The broad `CodeAlta.Tests` assembly keeps its identity and references the TUI for existing frontend coverage.
 - Keep `CodeAlta.Orchestration`, `CodeAlta.Orchestration.Hosting`, `CodeAlta.Plugins`, and `CodeAlta.Catalog` independent from the TUI project and terminal UI controls.
 - Keep plugin orchestration hooks headless. Frontend code may render plugin-derived projections or adapt plugin UI/tab services, but should not own agent event observer dispatch or derived-event creation.
 - Keep plugin prompt/notification abstractions minimal data contracts. Do not reproduce `XenoAtom.Terminal.UI` toast or control APIs in plugin abstractions; terminal controls and dialogs stay owned by the frontend.

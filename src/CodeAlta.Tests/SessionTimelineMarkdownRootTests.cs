@@ -1,8 +1,8 @@
 using CodeAlta.Agent;
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
-using CodeAlta.Presentation.Timeline;
-using CodeAlta.Threading;
+using CodeAlta.Tui.Presentation.Timeline;
+using CodeAlta.Tui.Threading;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 

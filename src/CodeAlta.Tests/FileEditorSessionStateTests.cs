@@ -1,4 +1,4 @@
-using CodeAlta.Presentation.Editing;
+using CodeAlta.Tui.Presentation.Editing;
 
 namespace CodeAlta.Tests;
 

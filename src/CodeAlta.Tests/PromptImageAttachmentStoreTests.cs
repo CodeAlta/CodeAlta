@@ -1,5 +1,5 @@
 using CodeAlta.Catalog;
-using CodeAlta.Presentation.Prompting;
+using CodeAlta.Tui.Presentation.Prompting;
 
 namespace CodeAlta.Tests;
 

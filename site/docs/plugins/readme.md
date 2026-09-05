@@ -71,7 +71,7 @@ The dialog shows:
 You can also use a headless status summary:
 
 ```sh
-alta --plugins-status
+altatui --plugins-status
 ```
 
 ## Source plugins
@@ -112,8 +112,8 @@ enabled = false
 When a plugin is broken, start CodeAlta with a bypass:
 
 ```sh
-alta --no-plugins
-alta --plugin-safe-mode
+altatui --no-plugins
+altatui --plugin-safe-mode
 ```
 
 Or set:

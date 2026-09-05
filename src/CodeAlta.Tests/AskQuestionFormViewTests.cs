@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Reflection;
 using CodeAlta.LiveTool;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Text;
@@ -272,7 +272,7 @@ public sealed class AskQuestionFormViewTests
         var directory = AppContext.BaseDirectory;
         while (!string.IsNullOrWhiteSpace(directory))
         {
-            var candidate = Path.Combine(directory, "CodeAlta", "CodeAlta.csproj");
+            var candidate = Path.Combine(directory, "CodeAlta.Tui", "CodeAlta.Tui.csproj");
             if (File.Exists(candidate))
             {
                 return Path.GetDirectoryName(candidate)!;
@@ -281,6 +281,6 @@ public sealed class AskQuestionFormViewTests
             directory = Directory.GetParent(directory)?.FullName;
         }
 
-        throw new DirectoryNotFoundException("Could not find CodeAlta source root.");
+        throw new DirectoryNotFoundException("Could not find CodeAlta.Tui source root.");
     }
 }

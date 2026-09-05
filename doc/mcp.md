@@ -194,7 +194,7 @@ The MCP implementation is a built-in trusted plugin, enabled by default through 
 - direct `AgentToolDefinition` contributions for enabled/config-controlled MCP tools on session-activated servers;
 - shared discovery/runtime services consumed by direct tools and `alta`, plus management snapshots consumed by the TUI dialog, status indicator, and prompt guidance.
 
-Reusable MCP configuration, policy, runtime, and management code lives in `src/CodeAlta.Plugin.Mcp/`. TUI-specific composition, status indicator rendering, and the dialog live in `src/CodeAlta/`. Do not move reusable MCP runtime orchestration into frontend controls.
+Reusable MCP configuration, policy, runtime, and management code lives in `src/CodeAlta.Plugin.Mcp/`. TUI-specific composition, status indicator rendering, and the dialog live in `src/CodeAlta.Tui/`. Do not move reusable MCP runtime orchestration into frontend controls.
 
 ## Progressive MCP agent-tool behavior
 

@@ -1,6 +1,6 @@
-using CodeAlta.App;
-using CodeAlta.Frontend.Commands;
-using CodeAlta.Models;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.Frontend.Commands;
+using CodeAlta.Tui.Models;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Tests;

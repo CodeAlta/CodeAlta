@@ -1,7 +1,7 @@
 using System.Reflection;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;

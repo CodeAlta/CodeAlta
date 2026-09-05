@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="alta" />
+    <InternalsVisibleTo Include="altatui" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Xai" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />

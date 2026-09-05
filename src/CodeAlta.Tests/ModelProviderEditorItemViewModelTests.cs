@@ -1,5 +1,5 @@
 using CodeAlta.Catalog;
-using CodeAlta.ViewModels;
+using CodeAlta.Tui.ViewModels;
 
 namespace CodeAlta.Tests;
 

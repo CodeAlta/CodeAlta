@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Reflection;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 
 namespace CodeAlta.Tests;
 

@@ -1,15 +1,15 @@
 using System.Runtime.CompilerServices;
 using System.Reflection;
 using CodeAlta.Agent;
-using CodeAlta.App;
-using CodeAlta.App.Context;
-using CodeAlta.App.State;
+using CodeAlta.Tui.App;
+using CodeAlta.Tui.App.Context;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
-using CodeAlta.Presentation.Chat;
-using CodeAlta.Presentation.Workspace;
-using CodeAlta.Threading;
-using CodeAlta.ViewModels;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Presentation.Chat;
+using CodeAlta.Tui.Presentation.Workspace;
+using CodeAlta.Tui.Threading;
+using CodeAlta.Tui.ViewModels;
 
 namespace CodeAlta.Tests;
 

@@ -1,6 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
+using CodeAlta.Tui.Models;
 
 namespace CodeAlta.Tests;
 

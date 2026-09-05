@@ -1,4 +1,4 @@
-using CodeAlta.App;
+using CodeAlta.Tui.App;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Terminal.UI.Controls;

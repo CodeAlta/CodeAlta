@@ -1,12 +1,12 @@
 # Dual-head desktop parity — in development
 
-> **Status: M0 Windows package/native feasibility accepted, 2026-09-05.** This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**; the isolated M0 package/native proof below has passed. The existing `CodeAlta` / `alta` remains the terminal application at this checkpoint. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: M1a TUI rename verified, 2026-09-05.** This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**; isolated M0 Windows package/native proof has passed. The terminal project/package is now `CodeAlta.Tui`, command `altatui`; desktop promotion is next. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records only the bounded M0 baseline/parity-document step; it does **not** mark all of M0 complete. The coordinator owns the plan checklist and subsequent implementation.
 
 ## Scope and evidence rules
 
-- Target identities are desktop `CodeAlta` → `alta` and terminal `CodeAlta.Tui` → `altatui`, sharing .NET application/runtime services and durable state. These are targets, not completed renames.
+- Target identities are desktop `CodeAlta` → `alta` and terminal `CodeAlta.Tui` → `altatui`, sharing .NET application/runtime services and durable state. Terminal identity is implemented at M1a; desktop and shared-service extraction remain in progress.
 - Desktop uses the approved NeoAstra 0.1.0 NuGet integration, React/TypeScript/Vite and packaged local assets. No HTTP UI server, browser launch, SSR or installed Node runtime; explicit backend OAuth loopback callbacks are a separate preserved feature.
 - One application owns the shared data root across both heads. Tab closure/reload must not stop an accepted run; explicit Stop and confirmed application quit have separate lifetimes. JSONL remains authoritative and SQLite remains a rebuildable cache.
 - Use normal trusted-library integration. Document/model/plugin payload text remains data: raw Markdown HTML disabled, Mermaid strict defaults, controlled links/attachments and backend tool permissions. No auxiliary rendering view, custom sandbox or nonce infrastructure is part of this acceptance scope.
@@ -62,6 +62,14 @@ For command reproduction, expand each operand with `FullyQualifiedName` and join
 The audit narrowed the remaining isolation gaps: `SystemPromptInfrastructureTests.SystemPromptBuilder_CodeFormatsPathsInGeneratedMarkdown` omits explicit user roots and can read global prompts; `AgentInstructionTemplateProvider` passes the real user profile into common-skill discovery even when the host's `GlobalRoot` is temporary. These need explicit root injection before full runtime coverage. The tilde-path test writes only its GUID test directory under `~/codealta-open-tests`, not `~/.alta`; the selected lock tests use temporary locks, and their default-path assertion only compares strings. Fake provider construction, task-owned filesystem fixtures and local-loopback tests are not inherently live-profile or billable operations. No blanket unsafe classification or full-suite isolation claim is made.
 
 ## Feature-parity acceptance matrix
+
+### M1a rename checkpoint
+
+All 315 tracked terminal files moved to `src/CodeAlta.Tui` without moving/deleting ignored build residue. The project/package/root namespace is `CodeAlta.Tui`, assembly/tool command `altatui`; the broad `CodeAlta.Tests` assembly, neutral libraries, `CodeAlta` product name, `.alta` paths, in-process `alta` tool and explicit FIGlet resource identity are unchanged. Namespace completion followed the user's cheapest-option decision after most declarations were already changed. Solution/test references, head-aware architecture guards, CLI/update metadata and current-source/install documentation now match the terminal identity, with unreleased-package caveats.
+
+Parent independently ran `dotnet build -c Release --no-restore` from `src` (0 warnings/errors) and the `TuiIdentityTests`, `ArchitectureGuardrailTests`, `CodeAltaCliOptionsTests`, `ProgramThreadGuardTests`, `CodeAltaUpdateCheckerTests`, `CodeAltaUpdateServiceTests`, and `CodeAltaUpdateVisualFactoryTests` filter against matching Release output: **126 passed, none skipped**. Temporary evidence: `codealta-m1a-review-a947ac9503504aeba0222cd686ff38a8`. Child also passed the solution build and `lunet build` (111 files). Full-suite isolation and final installed TUI qualification remain open; the production TUI was not launched against the active profile. Historical baseline references below intentionally describe pre-rename paths.
+
+### Desktop acceptance rows
 
 All **14** approved areas are retained. The two evidence columns are deliberately separate: neither implementation intent nor existing TUI coverage establishes desktop acceptance. Paths/symbols below refer to the pre-rename implementation under `src/CodeAlta` unless otherwise noted.
 
@@ -135,5 +143,5 @@ The TUI retains its existing eight-RID intent, including `linux-musl-x64` and `l
 ## Blockers and next step
 
 1. The executed build, audited tests and website build have no observed failure. The full Release test baseline is **incomplete by safety choice**; establish explicit runtime-root injection or audit additional no-profile/fake-provider fixtures before broadening it. Do not use the active user's profile to turn a skip into a pass.
-2. **M0 feasibility is accepted** after parent diff/evidence review and an independent installed-tool rerun. Next is the scoped M1 tracked TUI rename and reference/guardrail update, followed by promotion of proven desktop wiring. No upstream NeoAstra change or custom launcher was required.
-3. Desktop feature, cross-head persistence/ownership, full native platform, performance and release gates remain pending. Prototype integration success is not parity, and the existing application has not yet been renamed.
+2. **M0 feasibility and M1a TUI rename are accepted** after parent review and independent verification. Next is promotion of proven desktop wiring and isolated desktop tests. No upstream NeoAstra change or custom launcher was required.
+3. Desktop feature, cross-head persistence/ownership, full native platform, performance and release gates remain pending. Prototype integration success and the terminal rename are not desktop parity.

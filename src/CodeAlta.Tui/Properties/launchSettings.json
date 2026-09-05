@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CodeAlta.Tui": {
+      "commandName": "Project",
+      "workingDirectory": "C:\\code\\CodeAlta"
+    }
+  }
+}

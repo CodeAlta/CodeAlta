@@ -1,7 +1,7 @@
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
-using CodeAlta.Presentation.Styling;
+using CodeAlta.Tui.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.Tests;
@@ -72,7 +72,7 @@ public sealed class CodeAltaUpdateVisualFactoryTests
     private static CodeAltaUpdateCheckSnapshot CreateUpdateAvailableSnapshot()
         => new(
             CodeAltaUpdateCheckStatus.UpdateAvailable,
-            "CodeAlta",
+            CodeAltaUpdateChecker.PackageId,
             "0.9.1",
             "0.9.2",
             LatestVersionIsPrerelease: false,

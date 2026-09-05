@@ -1,9 +1,9 @@
 using System.Reflection;
-using CodeAlta.Views;
+using CodeAlta.Tui.Views;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.Backends;
 using XenoAtom.Terminal.UI;
-using CodeAlta.Presentation.Styling;
+using CodeAlta.Tui.Presentation.Styling;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using XenoAtom.Terminal.UI.Hosting;

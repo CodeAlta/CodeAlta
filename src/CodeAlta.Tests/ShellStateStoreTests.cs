@@ -1,8 +1,8 @@
-using CodeAlta.App.State;
+using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
-using CodeAlta.Models;
-using CodeAlta.Threading;
-using CodeAlta.ViewModels;
+using CodeAlta.Tui.Models;
+using CodeAlta.Tui.Threading;
+using CodeAlta.Tui.ViewModels;
 
 namespace CodeAlta.Tests;
 

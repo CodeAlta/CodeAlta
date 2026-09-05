@@ -8,8 +8,9 @@ Paths/commands below are relative to this directory.
 
 ## Orientation
 
-- Library: `src/CodeAlta/`
+- Terminal frontend: `src/CodeAlta.Tui/` (`CodeAlta.Tui` package, `altatui` command)
 - Tests: `src/CodeAlta.Tests/` (MSTest)
+- The in-process agent tool remains `alta`; do not rename neutral `CodeAlta.*` libraries or shared `.alta` state when changing frontend identities.
 - Website: `site/` (Lunet end-user documentation)
 - Development rules to keep in sync: `doc/development-guide.md`
 - Docs to keep in sync with behavior: `readme.md`, the public website under `site/`, and the internal docs under `doc/` (e.g., `doc/**/*.md`)
