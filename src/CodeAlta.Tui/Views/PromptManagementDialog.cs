@@ -1,4 +1,3 @@
-using System.Text;
 using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using CodeAlta.Tui.Models;
@@ -16,6 +15,7 @@ using XenoAtom.Terminal.UI.Input;
 using XenoAtom.Terminal.UI.Styling;
 using XenoAtom.Terminal.UI.Templating;
 using XenoAtom.Terminal.UI.Text;
+using PromptStorageScope = CodeAlta.Catalog.PromptResourceScope;
 
 namespace CodeAlta.Tui.Views;
 
@@ -31,6 +31,9 @@ internal sealed class PromptManagementDialog
     private readonly Action _onPromptsChanged;
     private readonly Action<string, StatusTone> _setStatus;
     private readonly AgentPromptCatalog _promptCatalog;
+    private readonly AgentPromptCatalogQuery _query;
+    private readonly PromptResourceStore _promptStore;
+    private PromptEditingSession? _editingSession;
     private readonly OptionList<PromptRow> _promptList;
     private readonly OptionList<SystemPromptRow> _systemPromptList;
     private readonly TextBox _nameBox;
@@ -57,12 +60,14 @@ internal sealed class PromptManagementDialog
 
     public PromptManagementDialog(
         CatalogOptions catalogOptions,
+        TextFileCodec textFiles,
         Func<ProjectDescriptor?> getSelectedProject,
         Func<Rectangle?> getBounds,
         Func<Visual?> getFocusTarget,
         Action onPromptsChanged,
         Action<string, StatusTone> setStatus,
-        AgentPromptCatalog? promptCatalog = null)
+        AgentPromptCatalog? promptCatalog = null,
+        AgentPromptCatalogQuery? query = null)
     {
         ArgumentNullException.ThrowIfNull(catalogOptions);
         ArgumentNullException.ThrowIfNull(getSelectedProject);
@@ -78,6 +83,9 @@ internal sealed class PromptManagementDialog
         _onPromptsChanged = onPromptsChanged;
         _setStatus = setStatus;
         _promptCatalog = promptCatalog ?? new AgentPromptCatalog();
+        _query = query ?? CreateQuery();
+        var roots = _promptCatalog.ResolveRoots(_query);
+        _promptStore = new PromptResourceStore(roots.ShippedPromptRoot, roots.GlobalPromptRoot, roots.ProjectPromptRoot, textFiles);
 
         _promptList = new OptionList<PromptRow>()
             .ActivateOnClick(false)
@@ -165,7 +173,7 @@ internal sealed class PromptManagementDialog
             .Click(() => ShowNewPromptDialog(PromptStorageScope.Global));
         var newProjectButton = new Button(SR.T("New project"))
             .Tone(ControlTone.Primary)
-            .IsEnabled(() => _getSelectedProject() is not null)
+            .IsEnabled(() => _query.ProjectRoot is not null)
             .Click(() => ShowNewPromptDialog(PromptStorageScope.Project));
         var saveButton = new Button($"{TerminalIcons.MdContentSaveCheckOutline} {SR.T("Save")}")
             .Tone(ControlTone.Success)
@@ -176,7 +184,7 @@ internal sealed class PromptManagementDialog
             .IsEnabled(() => !IsSelectedReadOnly() && GetSelectedPath() is not null)
             .Click(DeleteSelectedPrompt);
         var refreshButton = new Button(SR.T("Refresh"))
-            .Click(() => ReloadActivePrompts(GetSelectedPath()));
+            .Click(RefreshPrompts);
 
         var toolbar = new HStack(newGlobalButton, newProjectButton, saveButton, deleteButton, refreshButton)
         {
@@ -363,9 +371,41 @@ internal sealed class PromptManagementDialog
         }
     }
 
+    private void RefreshPrompts()
+    {
+        if (!HasUnsavedChanges()) { ReloadActivePrompts(GetSelectedPath()); return; }
+        new ConfirmationDialog(SR.T("Discard Prompt Changes?"),
+            [SR.T("The selected prompt has unsaved changes.")], SR.T("Discard"), ControlTone.Error,
+            () => { ReloadActivePrompts(GetSelectedPath()); return Task.CompletedTask; }, _getBounds, () => _bodyEditor).Show();
+    }
+
+    private PromptFileContent LoadEditingSnapshot(AgentPromptSourceKind source, PromptResourceKind kind, string path)
+    {
+        var scope = source switch
+        {
+            AgentPromptSourceKind.BuiltIn => PromptResourceScope.BuiltIn,
+            AgentPromptSourceKind.UserGlobal => PromptResourceScope.Global,
+            AgentPromptSourceKind.Project => PromptResourceScope.Project,
+            _ => throw new ArgumentException("Unknown prompt source."),
+        };
+        var snapshot = _promptStore.Load(_promptStore.Identify(scope, kind, path));
+        _editingSession = new PromptEditingSession(_promptStore, snapshot);
+        return snapshot.Content;
+    }
+
+    private void ClearFailedSelection(Exception error)
+    {
+        _editingSession = null;
+        _loadedName = _loadedSystem = _loadedBody = string.Empty;
+        _loadedDescription = null;
+        _nameBox.Text = _descriptionBox.Text = _systemBox.Text = string.Empty;
+        SetBodyText(string.Empty);
+        SetDialogStatus(SR.T("Failed to load prompt: {0}", error.Message), StatusTone.Error);
+    }
+
     private void ReloadAgentPrompts(string? selectPath)
     {
-        var prompts = _promptCatalog.ListPrompts(CreateQuery());
+        var prompts = _promptCatalog.ListPrompts(_query);
         _rows = prompts
             .OrderBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
@@ -394,7 +434,7 @@ internal sealed class PromptManagementDialog
 
     private void ReloadSystemPrompts(string? selectPath)
     {
-        var prompts = _promptCatalog.ListSystemPrompts(CreateQuery());
+        var prompts = _promptCatalog.ListSystemPrompts(_query);
         _systemRows = prompts
             .OrderBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
@@ -652,6 +692,7 @@ internal sealed class PromptManagementDialog
     private void LoadSelectedAgentPrompt(int index)
     {
         _selectedRow = (uint)index < (uint)_rows.Count ? _rows[index] : null;
+        _editingSession = null;
         _suppressEditorChanged = true;
         try
         {
@@ -671,18 +712,23 @@ internal sealed class PromptManagementDialog
             }
 
             var descriptor = _selectedRow.Descriptor;
-            _loadedName = descriptor.DisplayName;
-            _loadedDescription = descriptor.Description;
-            _loadedSystem = descriptor.SystemPromptName;
-            _loadedBody = descriptor.Body;
-            _loadedMode = descriptor.Mode;
-            _nameBox.Text = descriptor.DisplayName;
-            _descriptionBox.Text = descriptor.Description ?? string.Empty;
-            _systemBox.Text = descriptor.SystemPromptName;
-            SetBodyText(descriptor.Body);
+            var content = LoadEditingSnapshot(descriptor.SourceKind, PromptResourceKind.Agent, descriptor.SourcePath);
+            _loadedName = content.Name ?? string.Empty;
+            _loadedDescription = content.Description;
+            _loadedSystem = content.SystemPromptName ?? string.Empty;
+            _loadedBody = content.Body;
+            _loadedMode = content.Append ? PromptCompositionMode.Append : PromptCompositionMode.Replace;
+            _nameBox.Text = _loadedName;
+            _descriptionBox.Text = _loadedDescription ?? string.Empty;
+            _systemBox.Text = _loadedSystem;
+            SetBodyText(_loadedBody);
             _statusMessage.Value = descriptor.IsBuiltIn
                 ? SR.T("Built-in prompts are read-only. Create a global or project prompt with the same file id to override one.")
                 : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            ClearFailedSelection(ex);
         }
         finally
         {
@@ -695,6 +741,7 @@ internal sealed class PromptManagementDialog
     private void LoadSelectedSystemPrompt(int index)
     {
         _selectedSystemRow = (uint)index < (uint)_systemRows.Count ? _systemRows[index] : null;
+        _editingSession = null;
         _suppressEditorChanged = true;
         try
         {
@@ -714,16 +761,21 @@ internal sealed class PromptManagementDialog
             }
 
             var descriptor = _selectedSystemRow.Descriptor;
+            var content = LoadEditingSnapshot(descriptor.SourceKind, PromptResourceKind.System, descriptor.SourcePath);
             _loadedName = descriptor.PromptName;
-            _loadedBody = descriptor.Body;
-            _loadedMode = descriptor.Mode;
+            _loadedBody = content.Body;
+            _loadedMode = content.Append ? PromptCompositionMode.Append : PromptCompositionMode.Replace;
             _nameBox.Text = descriptor.PromptName;
             _descriptionBox.Text = string.Empty;
             _systemBox.Text = string.Empty;
-            SetBodyText(descriptor.Body);
+            SetBodyText(_loadedBody);
             _statusMessage.Value = descriptor.IsBuiltIn
                 ? SR.T("Built-in system prompts are read-only. Create a global or project system prompt with the same file id to override one.")
                 : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            ClearFailedSelection(ex);
         }
         finally
         {
@@ -736,6 +788,7 @@ internal sealed class PromptManagementDialog
     private bool IsSelectedReadOnly()
     {
         _ = _selectionVersion.Value;
+        if (_editingSession is null) return true;
         return _activeTab == PromptResourceTab.SystemPrompt
             ? _selectedSystemRow?.Descriptor.IsBuiltIn != false
             : _selectedRow?.Descriptor.IsBuiltIn != false;
@@ -762,21 +815,15 @@ internal sealed class PromptManagementDialog
             return false;
         }
 
-        return !string.Equals(NormalizeRequiredText(_nameBox.Text), _loadedName, StringComparison.Ordinal) ||
+        return !string.Equals(NormalizeOptionalText(_nameBox.Text), NormalizeOptionalText(_loadedName), StringComparison.Ordinal) ||
                !string.Equals(NormalizeOptionalText(_descriptionBox.Text), NormalizeOptionalText(_loadedDescription), StringComparison.Ordinal) ||
-               !string.Equals(NormalizeSystemName(_systemBox.Text), _loadedSystem, StringComparison.Ordinal) ||
+               !string.Equals(NormalizeOptionalText(_systemBox.Text), NormalizeOptionalText(_loadedSystem), StringComparison.Ordinal) ||
                !string.Equals(GetEditorText(_bodyEditor).Trim(), _loadedBody, StringComparison.Ordinal);
     }
 
     private void SaveSelectedPrompt()
     {
-        if (_activeTab == PromptResourceTab.SystemPrompt)
-        {
-            SaveSelectedSystemPrompt();
-            return;
-        }
-
-        if (_selectedRow is not { } row || row.Descriptor.IsBuiltIn)
+        if (_editingSession is not { } editing || IsSelectedReadOnly())
         {
             SetDialogStatus(SR.T("Built-in prompts are read-only."), StatusTone.Warning);
             return;
@@ -788,65 +835,28 @@ internal sealed class PromptManagementDialog
             return;
         }
 
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(row.Descriptor.SourcePath)!);
-            File.WriteAllText(row.Descriptor.SourcePath, BuildPromptFile(values));
-            SetDialogStatus(SR.T("Saved prompt '{0}'.", values.Name), StatusTone.Ready);
-            _setStatus(SR.T("Saved prompt '{0}'.", values.Name), StatusTone.Ready);
-            _onPromptsChanged();
-            ReloadAgentPrompts(row.Descriptor.SourcePath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            SetDialogStatus(SR.T("Failed to save prompt: {0}", ex.Message), StatusTone.Error);
-        }
+        SaveEditingPrompt(editing, values, confirmedRevision: null);
     }
 
-    private void SaveSelectedSystemPrompt()
+    private void SaveEditingPrompt(PromptEditingSession editing, PromptFileContent values, TextFileRevision? confirmedRevision)
     {
-        if (_selectedSystemRow is not { } row || row.Descriptor.IsBuiltIn)
+        if (!ReferenceEquals(editing, _editingSession)) return;
+        var saved = editing.Save(values, () =>
         {
-            SetDialogStatus(SR.T("Built-in system prompts are read-only."), StatusTone.Warning);
-            return;
-        }
-
-        var body = GetEditorText(_bodyEditor).Trim();
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            SetDialogStatus(SR.T("System prompt body is required."), StatusTone.Error);
-            return;
-        }
-
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(row.Descriptor.SourcePath)!);
-            File.WriteAllText(row.Descriptor.SourcePath, BuildSystemPromptFile(body, row.Descriptor.Mode));
-            SetDialogStatus(SR.T("Saved system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
-            _setStatus(SR.T("Saved system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
+            SetDialogStatus(SR.T("Saved prompt '{0}'.", editing.Snapshot.Identity.Id), StatusTone.Ready);
+            _setStatus(SR.T("Saved prompt '{0}'.", editing.Snapshot.Identity.Id), StatusTone.Ready);
             _onPromptsChanged();
-            ReloadSystemPrompts(row.Descriptor.SourcePath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            ReloadActivePrompts(_promptStore.GetPath(editing.Snapshot.Identity));
+        }, message => SetDialogStatus(SR.T("Failed to save prompt: {0}", message), StatusTone.Error), confirmedRevision);
+        if (!saved && editing.ConflictRevision is { } observed)
         {
-            SetDialogStatus(SR.T("Failed to save system prompt: {0}", ex.Message), StatusTone.Error);
+            ConfirmConflict(() => SaveEditingPrompt(editing, values, observed));
         }
     }
 
     private void DeleteSelectedPrompt()
     {
-        if (_activeTab == PromptResourceTab.SystemPrompt)
-        {
-            DeleteSelectedSystemPrompt();
-            return;
-        }
-
-        if (_selectedRow is not { } row)
-        {
-            return;
-        }
-
-        if (row.Descriptor.IsBuiltIn)
+        if (_editingSession is not { } editing || IsSelectedReadOnly())
         {
             SetDialogStatus(SR.T("Built-in prompts are read-only and cannot be deleted."), StatusTone.Warning);
             return;
@@ -854,24 +864,12 @@ internal sealed class PromptManagementDialog
 
         new ConfirmationDialog(
             SR.T("Delete Prompt?"),
-            [SR.T("Delete '{0}' from {1}?", row.Descriptor.DisplayName, row.Descriptor.SourcePath), SR.T("This removes only the selected global/project prompt file.")],
+            [SR.T("Delete '{0}' from {1}?", editing.Snapshot.Identity.Id, _promptStore.GetPath(editing.Snapshot.Identity)), SR.T("This removes only the selected global/project prompt file.")],
             SR.T("Delete"),
             ControlTone.Error,
             () =>
             {
-                try
-                {
-                    File.Delete(row.Descriptor.SourcePath);
-                    SetDialogStatus(SR.T("Deleted prompt '{0}'.", row.Descriptor.DisplayName), StatusTone.Ready);
-                    _setStatus(SR.T("Deleted prompt '{0}'.", row.Descriptor.DisplayName), StatusTone.Ready);
-                    _onPromptsChanged();
-                    ReloadAgentPrompts(selectPath: null);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    SetDialogStatus(SR.T("Failed to delete prompt: {0}", ex.Message), StatusTone.Error);
-                }
-
+                DeleteEditingPrompt(editing, confirmedRevision: null);
                 return Task.CompletedTask;
             },
             _getBounds,
@@ -879,50 +877,31 @@ internal sealed class PromptManagementDialog
             .Show();
     }
 
-    private void DeleteSelectedSystemPrompt()
+    private void DeleteEditingPrompt(PromptEditingSession editing, TextFileRevision? confirmedRevision)
     {
-        if (_selectedSystemRow is not { } row)
+        if (!ReferenceEquals(editing, _editingSession)) return;
+        var deleted = editing.Delete(() =>
         {
-            return;
-        }
-
-        if (row.Descriptor.IsBuiltIn)
-        {
-            SetDialogStatus(SR.T("Built-in system prompts are read-only and cannot be deleted."), StatusTone.Warning);
-            return;
-        }
-
-        new ConfirmationDialog(
-            SR.T("Delete System Prompt?"),
-            [SR.T("Delete system prompt '{0}' from {1}?", row.Descriptor.PromptName, row.Descriptor.SourcePath), SR.T("This removes only the selected global/project system prompt file.")],
-            SR.T("Delete"),
-            ControlTone.Error,
-            () =>
-            {
-                try
-                {
-                    File.Delete(row.Descriptor.SourcePath);
-                    SetDialogStatus(SR.T("Deleted system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
-                    _setStatus(SR.T("Deleted system prompt '{0}'.", row.Descriptor.PromptName), StatusTone.Ready);
-                    _onPromptsChanged();
-                    ReloadSystemPrompts(selectPath: null);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    SetDialogStatus(SR.T("Failed to delete system prompt: {0}", ex.Message), StatusTone.Error);
-                }
-
-                return Task.CompletedTask;
-            },
-            _getBounds,
-            () => _systemPromptList)
-            .Show();
+            SetDialogStatus(SR.T("Deleted prompt '{0}'.", editing.Snapshot.Identity.Id), StatusTone.Ready);
+            _setStatus(SR.T("Deleted prompt '{0}'.", editing.Snapshot.Identity.Id), StatusTone.Ready);
+            _onPromptsChanged();
+            ReloadActivePrompts(selectPath: null);
+        }, message => SetDialogStatus(SR.T("Failed to delete prompt: {0}", message), StatusTone.Error), confirmedRevision);
+        if (!deleted && editing.ConflictRevision is { } observed)
+            ConfirmConflict(() => DeleteEditingPrompt(editing, observed));
     }
+
+    private void ConfirmConflict(Action retry)
+        => new ConfirmationDialog(
+            SR.T("Prompt File Changed"),
+            [SR.T("The prompt file changed outside this dialog. Your edits have been retained."), SR.T("Apply this operation to the observed version anyway? Further changes will cause another conflict.")],
+            SR.T("Continue"), ControlTone.Error,
+            () => { retry(); return Task.CompletedTask; }, _getBounds, () => _bodyEditor).Show();
 
     private void ShowNewPromptDialog(PromptStorageScope scope)
     {
         var resourceTab = _activeTab;
-        if (scope == PromptStorageScope.Project && _getSelectedProject() is null)
+        if (scope == PromptStorageScope.Project && _query.ProjectRoot is null)
         {
             SetDialogStatus(SR.T("Select a project before creating a project {0}.", ResourceLabel(resourceTab)), StatusTone.Warning);
             return;
@@ -1034,64 +1013,44 @@ internal sealed class PromptManagementDialog
             return;
         }
 
-        var targetDirectory = ResolveResourceDirectory(scope, resourceTab);
-        var path = Path.Combine(targetDirectory, promptId + ResourceSuffix(resourceTab));
-        if (File.Exists(path))
-        {
-            validationText.Text = SR.T("A prompt file already exists at {0}.", path);
-            return;
-        }
+        var identity = new PromptResourceIdentity(scope, ResourceKind(resourceTab), promptId);
+        var path = _promptStore.GetPath(identity);
 
         var body = resourceTab == PromptResourceTab.SystemPrompt
             ? SR.T("Describe the base system instructions CodeAlta should use for sessions that select this system prompt.")
             : SR.T("Describe how CodeAlta should handle sessions that use this prompt.");
-        var values = new PromptEditorValues(
+        var values = new PromptFileContent(
             name!,
             NormalizeOptionalText(descriptionBox.Text),
             NormalizeSystemName(systemBox.Text),
             body,
-            PromptCompositionMode.Replace);
+            false);
         try
         {
-            Directory.CreateDirectory(targetDirectory);
-            File.WriteAllText(path, resourceTab == PromptResourceTab.SystemPrompt ? BuildSystemPromptFile(values.Body, values.Mode) : BuildPromptFile(values));
+            var result = _promptStore.Create(identity, values);
+            if (result.IsConflict)
+            {
+                validationText.Text = SR.T("A prompt file already exists at {0}.", path);
+                return;
+            }
             createDialog.Close();
             SetDialogStatus(SR.T("Created {0} '{1}'.", ResourceLabel(resourceTab), name), StatusTone.Ready);
             _setStatus(SR.T("Created {0} '{1}'.", ResourceLabel(resourceTab), name), StatusTone.Ready);
             _onPromptsChanged();
             ReloadActivePrompts(path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
             validationText.Text = SR.T("Failed to create prompt: {0}", ex.Message);
         }
     }
 
-    private string ResolvePromptDirectory(PromptStorageScope scope)
-    {
-        var query = CreateQuery();
-        var promptsRoot = scope == PromptStorageScope.Project
-            ? _promptCatalog.ResolveProjectPromptDirectory(query) ?? _promptCatalog.ResolveGlobalPromptDirectory(query)
-            : _promptCatalog.ResolveGlobalPromptDirectory(query);
-        return Path.Combine(promptsRoot, "agents");
-    }
-
     private string ResolveResourceDirectory(PromptStorageScope scope, PromptResourceTab resourceTab)
-    {
-        if (resourceTab == PromptResourceTab.AgentPrompt)
-        {
-            return ResolvePromptDirectory(scope);
-        }
+        => _promptStore.GetDirectory(scope, ResourceKind(resourceTab));
 
-        var query = CreateQuery();
-        return scope == PromptStorageScope.Project
-            ? _promptCatalog.ResolveProjectSystemPromptDirectory(query) ?? _promptCatalog.ResolveGlobalSystemPromptDirectory(query)
-            : _promptCatalog.ResolveGlobalSystemPromptDirectory(query);
-    }
-
-    private bool ValidateEditor(out string validationMessage, out PromptEditorValues values)
+    private bool ValidateEditor(out string validationMessage, out PromptFileContent values)
     {
-        values = default;
+        values = null!;
         if (_activeTab == PromptResourceTab.SystemPrompt)
         {
             var systemBody = GetEditorText(_bodyEditor).Trim();
@@ -1101,13 +1060,13 @@ internal sealed class PromptManagementDialog
                 return false;
             }
 
-            values = new PromptEditorValues(_loadedName, null, AgentPromptCatalog.DefaultPromptName, systemBody, _loadedMode);
+            values = new PromptFileContent(null, null, null, systemBody, _loadedMode == PromptCompositionMode.Append);
             validationMessage = string.Empty;
             return true;
         }
 
         var name = NormalizeRequiredText(_nameBox.Text);
-        if (name is null)
+        if (name is null && _loadedMode != PromptCompositionMode.Append)
         {
             validationMessage = SR.T("Prompt name is required.");
             return false;
@@ -1120,12 +1079,14 @@ internal sealed class PromptManagementDialog
             return false;
         }
 
-        values = new PromptEditorValues(
+        values = new PromptFileContent(
             name,
             NormalizeOptionalText(_descriptionBox.Text),
-            NormalizeSystemName(_systemBox.Text),
+            NormalizeOptionalText(_systemBox.Text),
             body,
-            _loadedMode);
+            _loadedMode == PromptCompositionMode.Append);
+        try { PromptFileFormat.Validate(PromptResourceKind.Agent, values); }
+        catch (ArgumentException ex) { validationMessage = ex.Message; return false; }
         validationMessage = string.Empty;
         return true;
     }
@@ -1334,55 +1295,6 @@ internal sealed class PromptManagementDialog
         return CodeEditorFactory.GetText(editor);
     }
 
-    private static string BuildPromptFile(PromptEditorValues values)
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine("---");
-        builder.Append("name: ").AppendLine(ToYamlScalar(values.Name));
-        if (values.Mode == PromptCompositionMode.Append)
-        {
-            builder.AppendLine("mode: append");
-        }
-
-        if (!string.IsNullOrWhiteSpace(values.Description))
-        {
-            builder.Append("description: ").AppendLine(ToYamlScalar(values.Description!));
-        }
-
-        if (!string.Equals(values.SystemPromptName, AgentPromptCatalog.DefaultPromptName, StringComparison.OrdinalIgnoreCase))
-        {
-            builder.Append("system: ").AppendLine(ToYamlScalar(values.SystemPromptName));
-        }
-
-        builder.AppendLine("---");
-        builder.AppendLine(values.Body.Trim());
-        return builder.ToString();
-    }
-
-    private static string BuildSystemPromptFile(string body, PromptCompositionMode mode)
-    {
-        if (mode == PromptCompositionMode.Append)
-        {
-            return $"---{Environment.NewLine}mode: append{Environment.NewLine}---{Environment.NewLine}{body.Trim()}{Environment.NewLine}";
-        }
-
-        return body.Trim() + Environment.NewLine;
-    }
-
-    private static string ToYamlScalar(string value)
-    {
-        var mustQuote = value.Length == 0 ||
-            char.IsWhiteSpace(value[0]) ||
-            char.IsWhiteSpace(value[^1]) ||
-            value.Any(static ch => ch is ':' or '#' or '\'' or '"' or '[' or ']' or '{' or '}' or ',');
-        if (mustQuote)
-        {
-            return '"' + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + '"';
-        }
-
-        return value;
-    }
-
     private string? GetSelectedPath()
         => _activeTab == PromptResourceTab.SystemPrompt
             ? _selectedSystemRow?.Descriptor.SourcePath
@@ -1405,19 +1317,8 @@ internal sealed class PromptManagementDialog
             id = id[..^".system-prompt.md".Length];
         }
 
-        if (id is "." or ".." || id.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0)
-        {
-            return null;
-        }
-
-        foreach (var ch in id)
-        {
-            if (!char.IsLetterOrDigit(ch) && ch is not '-' and not '_' and not '.')
-            {
-                return null;
-            }
-        }
-
+        try { PromptResourceStore.ValidateId(id); }
+        catch (ArgumentException) { return null; }
         return id;
     }
 
@@ -1449,13 +1350,8 @@ internal sealed class PromptManagementDialog
 
     private sealed record SystemPromptRow(SystemPromptDescriptor Descriptor);
 
-    private readonly record struct PromptEditorValues(string Name, string? Description, string SystemPromptName, string Body, PromptCompositionMode Mode);
-
-    private enum PromptStorageScope
-    {
-        Global,
-        Project,
-    }
+    private static PromptResourceKind ResourceKind(PromptResourceTab resourceTab)
+        => resourceTab == PromptResourceTab.SystemPrompt ? PromptResourceKind.System : PromptResourceKind.Agent;
 
     private enum PromptResourceTab
     {

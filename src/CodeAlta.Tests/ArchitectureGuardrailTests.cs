@@ -686,9 +686,9 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/CodeAltaShellController.cs:73:_initializationTask = Task.Run(",
             "App/CodeAltaShellController.cs:448:var startupProviderLoadTask = Task.Run(",
-            "App/CodeAltaApp.cs:347:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:378:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:456:_ = OpenModelProvidersAsync();",
+            "App/CodeAltaApp.cs:348:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:379:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:457:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
             "App/ShellSessionStateCoordinator.cs:317:_ = RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);",
             "App/ShellSessionStateCoordinator.cs:328:_ = PersistViewStateAsync();",
@@ -1715,6 +1715,30 @@ public sealed class ArchitectureGuardrailTests
         Assert.IsTrue(send.Contains("() => _promptDispatchCoordinator.DispatchPromptAsync", StringComparison.Ordinal));
         Assert.IsFalse(send.Contains("_commandContext.ClearDraftInput();", StringComparison.Ordinal));
         Assert.IsFalse(send.Contains("_commandContext.ClearSessionInput();", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void PromptManagement_UsesCatalogCrudAndSharedSnapshotCodec()
+    {
+        var root = GetCodeAltaSourceRoot();
+        var dialog = File.ReadAllText(Path.Combine(root, "Views", "PromptManagementDialog.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(root, "Views", "PromptDialogCoordinator.cs"));
+        var app = File.ReadAllText(Path.Combine(root, "App", "CodeAltaApp.cs"));
+        var adapter = File.ReadAllText(Path.Combine(root, "Views", "PromptEditingSession.cs"));
+        var store = File.ReadAllText(Path.Combine(GetSourceRoot(), "CodeAlta.Catalog", "PromptResourceStore.cs"));
+        Assert.IsFalse(Regex.IsMatch(dialog, @"\b(File|Directory)\."));
+        Assert.IsFalse(dialog.Contains("BuildPromptFile", StringComparison.Ordinal));
+        StringAssert.Contains(dialog, "_promptStore.Load(_promptStore.Identify(scope, kind, path))");
+        StringAssert.Contains(dialog, "_promptStore.Create(identity, values)");
+        StringAssert.Contains(dialog, "SaveEditingPrompt(editing, values, observed)");
+        StringAssert.Contains(adapter, "confirmedRevision ?? Snapshot.File.Revision");
+        Assert.IsFalse(adapter.Contains("store.Load(", StringComparison.Ordinal));
+        Assert.IsTrue(Regex.IsMatch(app, @"new PromptDialogCoordinator\(\s*_catalogOptions,\s*composition.TextFiles,"));
+        StringAssert.Contains(coordinator, "_textFiles,");
+        StringAssert.Contains(dialog, "roots.ProjectPromptRoot, textFiles)");
+        Assert.IsFalse(store.Contains("CodeAlta.Orchestration", StringComparison.Ordinal));
+        StringAssert.Contains(store, "identity.Scope == PromptResourceScope.BuiltIn");
+        StringAssert.Contains(store, "FileAttributes.ReparsePoint");
     }
 
     [TestMethod]

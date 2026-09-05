@@ -107,6 +107,7 @@ flowchart LR
 - Do not add static mutable data anywhere in the codebase. Prefer instance-owned state, DI-managed services, immutable static data, frozen collections, or generated constants.
 - Runtime/session state should be owned by explicit services or mailbox actors. Avoid process-wide lock maps and static caches for runtime/session ownership.
 - Persist user-owned state only through the catalog/runtime stores that own that data. Do not write config, session journals, prompt drafts, plugin state, or UI state from unrelated layers.
+- Prompt-management dialogs use Catalog's `PromptResourceStore` with explicit roots and the application's shared `TextFileCodec`; editable fields and expected revision must come from the same loaded snapshot. Keep prompt discovery/composition in Orchestration and selection/confirmation/status controls in the frontend. Never refresh a revision invisibly before saving dirty fields or treat raw backend paths as renderer grants.
 - Treat logs, traces, journals, prompts, command output, provider payloads, and plugin diagnostics as potentially sensitive user data.
 
 ## Provider Defaults And Compatibility

@@ -463,7 +463,10 @@ public sealed class SystemPromptBuilder
             }
 
             var key = line[..colonIndex].Trim();
-            var value = line[(colonIndex + 1)..].Trim().Trim('"', '\'');
+            var rawValue = line[(colonIndex + 1)..].Trim();
+            var value = allowFrontmatterDelimiters
+                ? CodeAlta.Catalog.PromptFileFormat.DecodeScalar(rawValue)
+                : rawValue.Trim('"', '\'');
             values[key] = value;
         }
 

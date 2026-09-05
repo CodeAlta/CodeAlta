@@ -2922,6 +2922,30 @@
   fr: "Échec d’enregistrement du prompt : {0}"
   ja: "プロンプト保存失敗: {0}"
   zh: "无法保存提示词：{0}"
+"Failed to load prompt: {0}":
+  de: "Prompt konnte nicht geladen werden: {0}"
+  es: "No se pudo cargar el prompt: {0}"
+  fr: "Échec du chargement du prompt : {0}"
+  ja: "プロンプトの読み込みに失敗しました: {0}"
+  zh: "无法加载提示词：{0}"
+"Prompt File Changed":
+  de: "Prompt-Datei geändert"
+  es: "El archivo del prompt ha cambiado"
+  fr: "Le fichier du prompt a changé"
+  ja: "プロンプトファイルが変更されました"
+  zh: "提示词文件已更改"
+"The prompt file changed outside this dialog. Your edits have been retained.":
+  de: "Die Prompt-Datei wurde außerhalb dieses Dialogs geändert. Ihre Änderungen wurden beibehalten."
+  es: "El archivo del prompt cambió fuera de este diálogo. Se han conservado tus cambios."
+  fr: "Le fichier du prompt a été modifié en dehors de cette boîte de dialogue. Vos modifications ont été conservées."
+  ja: "プロンプトファイルがこのダイアログの外で変更されました。編集中の内容は保持されています。"
+  zh: "提示词文件已在此对话框外更改。您的编辑内容已保留。"
+"Apply this operation to the observed version anyway? Further changes will cause another conflict.":
+  de: "Diesen Vorgang trotzdem auf die festgestellte Version anwenden? Weitere Änderungen führen zu einem erneuten Konflikt."
+  es: "¿Aplicar esta operación a la versión observada de todos modos? Otros cambios causarán un nuevo conflicto."
+  fr: "Appliquer quand même cette opération à la version observée ? Toute modification supplémentaire provoquera un nouveau conflit."
+  ja: "確認されたバージョンにこの操作を適用しますか？さらに変更がある場合は再び競合します。"
+  zh: "仍要将此操作应用于检测到的版本吗？进一步的更改将导致再次冲突。"
 "Failed to save system prompt: {0}":
   de: "System-Prompt konnte nicht gespeichert werden: {0}"
   es: "No se pudo guardar el prompt del sistema: {0}"

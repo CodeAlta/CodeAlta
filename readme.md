@@ -59,6 +59,8 @@ CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched
 
 ## 📖 Documentation
 
+The prompt manager preserves unsaved edits on external-file conflicts and requires confirmation before retrying; built-ins stay read-only and same-scope creation never overwrites an existing prompt.
+
 - User guide and screenshots: <https://codealta.github.io/>
 - Getting started: <https://codealta.github.io/docs/getting-started/>
 - Model provider configuration: <https://codealta.github.io/docs/model-providers/>

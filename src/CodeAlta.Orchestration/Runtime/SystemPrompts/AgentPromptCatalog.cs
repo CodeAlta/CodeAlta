@@ -178,8 +178,12 @@ public sealed class AgentPromptCatalog
         return root is null ? null : Path.Combine(root, "system");
     }
 
-    private SystemPromptContentRoots ResolveRoots(AgentPromptCatalogQuery query)
-        => _contentLocator.GetRoots(new SystemPromptDiscoveryContext
+    /// <summary>Resolves the same explicit roots used by discovery for trusted-backend management.</summary>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    public SystemPromptContentRoots ResolveRoots(AgentPromptCatalogQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return _contentLocator.GetRoots(new SystemPromptDiscoveryContext
         {
             AppBaseDirectory = query.AppBaseDirectory,
             UserProfileRoot = query.UserProfileRoot,
@@ -187,6 +191,7 @@ public sealed class AgentPromptCatalog
             ProjectRoot = query.ProjectRoot,
             ProjectPromptResourcesTrusted = query.ProjectPromptResourcesTrusted || !string.IsNullOrWhiteSpace(query.ProjectRoot),
         });
+    }
 
     private static IEnumerable<GlobalPromptRoot> EnumeratePromptRoots(SystemPromptContentRoots roots)
     {
@@ -259,7 +264,7 @@ public sealed class AgentPromptCatalog
             return false;
         }
 
-        var (frontmatter, body) = SplitFrontmatter(text);
+        var (frontmatter, body) = CodeAlta.Catalog.PromptFileFormat.SplitFrontmatter(text);
         var mode = ParseCompositionMode(frontmatter);
         if (mode is null)
         {
@@ -311,7 +316,7 @@ public sealed class AgentPromptCatalog
             return false;
         }
 
-        var (frontmatter, body) = SplitFrontmatter(text);
+        var (frontmatter, body) = CodeAlta.Catalog.PromptFileFormat.SplitFrontmatter(text);
         var mode = ParseCompositionMode(frontmatter);
         if (mode is null)
         {
@@ -436,40 +441,12 @@ public sealed class AgentPromptCatalog
     }
 
     private static PromptCompositionMode? ParseCompositionMode(IReadOnlyDictionary<string, string> frontmatter)
-    {
-        bool? appendFlag = null;
-        if (frontmatter.TryGetValue("append", out var appendValue))
+        => CodeAlta.Catalog.PromptFileFormat.ParseAppend(frontmatter) switch
         {
-            if (!bool.TryParse(appendValue, out var append))
-            {
-                return null;
-            }
-
-            appendFlag = append;
-        }
-
-        PromptCompositionMode? mode = null;
-        if (frontmatter.TryGetValue("mode", out var modeValue))
-        {
-            mode = NormalizeOptionalText(modeValue)?.ToLowerInvariant() switch
-            {
-                null or "replace" => PromptCompositionMode.Replace,
-                "append" => PromptCompositionMode.Append,
-                _ => null,
-            };
-            if (mode is null)
-            {
-                return null;
-            }
-        }
-
-        if (appendFlag is not null && mode is not null && appendFlag.Value != (mode.Value == PromptCompositionMode.Append))
-        {
-            return null;
-        }
-
-        return mode ?? (appendFlag == true ? PromptCompositionMode.Append : PromptCompositionMode.Replace);
-    }
+            true => PromptCompositionMode.Append,
+            false => PromptCompositionMode.Replace,
+            null => null,
+        };
 
     private static string JoinPromptBodies(IEnumerable<string> bodies)
     {
@@ -495,50 +472,6 @@ public sealed class AgentPromptCatalog
 
     private static string? LastNonBlank(IEnumerable<string?> values)
         => values.LastOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim();
-
-    private static (Dictionary<string, string> Frontmatter, string Body) SplitFrontmatter(string text)
-    {
-        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-        if (!normalized.StartsWith("---\n", StringComparison.Ordinal))
-        {
-            return (new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), text);
-        }
-
-        var end = normalized.IndexOf("\n---\n", 4, StringComparison.Ordinal);
-        if (end < 0)
-        {
-            return (new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), text);
-        }
-
-        var frontmatterText = normalized[4..end];
-        var body = normalized[(end + 5)..];
-        return (ParseFlatKeyValueFile(frontmatterText), body);
-    }
-
-    private static Dictionary<string, string> ParseFlatKeyValueFile(string text)
-    {
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var rawLine in text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n'))
-        {
-            var line = rawLine.Trim();
-            if (line.Length == 0 || line.StartsWith('#') || line == "---")
-            {
-                continue;
-            }
-
-            var colonIndex = line.IndexOf(':', StringComparison.Ordinal);
-            if (colonIndex <= 0)
-            {
-                continue;
-            }
-
-            var key = line[..colonIndex].Trim();
-            var value = line[(colonIndex + 1)..].Trim().Trim('"', '\'');
-            values[key] = value;
-        }
-
-        return values;
-    }
 
     private static string HashText(string value)
     {

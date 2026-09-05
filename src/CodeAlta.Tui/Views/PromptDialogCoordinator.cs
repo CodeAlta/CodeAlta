@@ -8,6 +8,7 @@ namespace CodeAlta.Tui.Views;
 internal sealed class PromptDialogCoordinator
 {
     private readonly CatalogOptions _catalogOptions;
+    private readonly TextFileCodec _textFiles;
     private readonly Func<ProjectDescriptor?> _getSelectedProject;
     private readonly Func<Visual?> _getFocusTarget;
     private readonly Action _onPromptsChanged;
@@ -15,18 +16,21 @@ internal sealed class PromptDialogCoordinator
 
     public PromptDialogCoordinator(
         CatalogOptions catalogOptions,
+        TextFileCodec textFiles,
         Func<ProjectDescriptor?> getSelectedProject,
         Func<Visual?> getFocusTarget,
         Action onPromptsChanged,
         Action<string, StatusTone> setStatus)
     {
         ArgumentNullException.ThrowIfNull(catalogOptions);
+        ArgumentNullException.ThrowIfNull(textFiles);
         ArgumentNullException.ThrowIfNull(getSelectedProject);
         ArgumentNullException.ThrowIfNull(getFocusTarget);
         ArgumentNullException.ThrowIfNull(onPromptsChanged);
         ArgumentNullException.ThrowIfNull(setStatus);
 
         _catalogOptions = catalogOptions;
+        _textFiles = textFiles;
         _getSelectedProject = getSelectedProject;
         _getFocusTarget = getFocusTarget;
         _onPromptsChanged = onPromptsChanged;
@@ -37,6 +41,7 @@ internal sealed class PromptDialogCoordinator
     {
         new PromptManagementDialog(
             _catalogOptions,
+            _textFiles,
             _getSelectedProject,
             () => DialogBoundsResolver.ResolveAppBounds(_getFocusTarget()),
             _getFocusTarget,

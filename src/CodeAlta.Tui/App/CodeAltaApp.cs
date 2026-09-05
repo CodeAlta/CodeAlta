@@ -220,6 +220,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             GetDialogAnchor);
         _promptDialogCoordinator = new PromptDialogCoordinator(
             _catalogOptions,
+            composition.TextFiles,
             GetSelectedProject,
             GetDialogAnchor,
             () => { _agentPromptSelector.RefreshPrompts(); _sessionWorkspaceView?.SyncActivePromptPanelProjection(); },

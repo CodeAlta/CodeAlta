@@ -177,6 +177,87 @@ public sealed class PromptManagementDialogTests
     }
 
     [TestMethod]
+    public void ActualDialogSaveRetainsDirtyTextOnConflictAndReloadsOnceAfterConfirmedRetry()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var path = WritePrompt(tempDirectory.Path, "original");
+        var changes = 0;
+        var promptDialog = CreatePromptDialog(tempDirectory.Path, () => changes++);
+        using var terminalSession = Terminal.Open(new InMemoryTerminalBackend(new TerminalSize(120, 40)), new TerminalOptions { ImplicitStartInput = true }, force: true);
+        var app = new TerminalApp(new TextBlock("Host"), terminalSession.Instance, new TerminalAppOptions { HostKind = TerminalHostKind.Fullscreen });
+        InvokeTerminalApp(app, "BeginRun");
+        try
+        {
+            promptDialog.Show();
+            TickTerminalApp(app);
+            var editing = GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession");
+            InvokePromptDialog(promptDialog, "SetBodyText", "dirty");
+            File.WriteAllText(path, "---\nname: External\n---\nnewer");
+            File.SetLastWriteTimeUtc(path, editing.Snapshot.File.LastWriteTimeUtc.UtcDateTime);
+            InvokePromptDialog(promptDialog, "SaveSelectedPrompt");
+            Assert.AreEqual(0, changes);
+            Assert.AreSame(editing, GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession"));
+            Assert.AreEqual("original", GetPrivateField<string>(promptDialog, "_loadedBody"));
+            Assert.AreEqual("dirty", GetEditorText(GetPrivateField<CodeEditor>(promptDialog, "_bodyEditor")));
+            Assert.IsTrue(HasDialogWithTitle(app, "Prompt File Changed"));
+            var observed = editing.ConflictRevision;
+            Assert.IsNotNull(observed);
+            DispatchKeyEvent(app, TerminalKey.Escape); // Cancel never acknowledges the conflict.
+            Assert.AreSame(editing, GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession"));
+            InvokePromptDialog(promptDialog, "SaveEditingPrompt", editing, editing.Snapshot.Content with { Body = "dirty" }, observed);
+            Assert.AreEqual(1, changes);
+            Assert.AreNotSame(editing, GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession"));
+            Assert.AreEqual("dirty", GetPrivateField<string>(promptDialog, "_loadedBody"));
+        }
+        finally { InvokeTerminalApp(app, "EndRun"); }
+    }
+
+    [TestMethod]
+    public void ActualCreateCollisionRetainsFieldsAndDoesNotNotifyOrReload()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var path = WritePrompt(tempDirectory.Path, "original");
+        var before = File.ReadAllBytes(path);
+        var changes = 0;
+        var promptDialog = CreatePromptDialog(tempDirectory.Path, () => changes++);
+        InvokePromptDialog(promptDialog, "ReloadAgentPrompts", path);
+        InvokePromptDialog(promptDialog, "SetBodyText", "dirty selected text");
+        var editing = GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession");
+        var id = new TextBox("custom");
+        var name = new TextBox("New name");
+        var validation = new TextBlock(string.Empty);
+        var tabType = typeof(PromptManagementDialog).GetNestedType("PromptResourceTab", BindingFlags.NonPublic)!;
+        InvokePromptDialog(promptDialog, "CreatePromptFromDialog", new Dialog(), PromptResourceScope.Global,
+            Enum.ToObject(tabType, 0), id, name, new TextBox("description"), new TextBox("default"), validation);
+        Assert.AreEqual(0, changes);
+        StringAssert.Contains(validation.Text, "already exists");
+        Assert.AreEqual("New name", name.Text);
+        Assert.AreEqual("custom", id.Text);
+        Assert.AreSame(editing, GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession"));
+        Assert.AreEqual("dirty selected text", GetEditorText(GetPrivateField<CodeEditor>(promptDialog, "_bodyEditor")));
+        CollectionAssert.AreEqual(before, File.ReadAllBytes(path));
+    }
+
+    [TestMethod]
+    public void SelectionLoadsMetadataAndRevisionTogetherRatherThanStaleDiscoveryText()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var path = WritePrompt(tempDirectory.Path, "old body");
+        var promptDialog = CreatePromptDialog(tempDirectory.Path);
+        InvokePromptDialog(promptDialog, "ReloadAgentPrompts", path);
+        File.WriteAllText(path, "---\nname: New name\ndescription: New description\nsystem: other\nmode: append\n---\nnew body");
+        // The row still has old discovery text, but selecting it must use one fresh file snapshot.
+        InvokePromptDialog(promptDialog, "LoadSelectedAgentPrompt", 0);
+        var editing = GetPrivateField<PromptEditingSession>(promptDialog, "_editingSession");
+        Assert.AreEqual("New name", GetPrivateField<TextBox>(promptDialog, "_nameBox").Text);
+        Assert.AreEqual("New description", GetPrivateField<TextBox>(promptDialog, "_descriptionBox").Text);
+        Assert.AreEqual("other", GetPrivateField<TextBox>(promptDialog, "_systemBox").Text);
+        Assert.AreEqual("new body", GetEditorText(GetPrivateField<CodeEditor>(promptDialog, "_bodyEditor")));
+        Assert.IsTrue(editing.Snapshot.Content.Append);
+        Assert.AreEqual(new TextFileCodec().Load(path).Revision, editing.Snapshot.File.Revision);
+    }
+
+    [TestMethod]
     public void SystemPromptCatalogListsBuiltInAndOverrideWithoutOverwritingBuiltIn()
     {
         using var tempDirectory = TempDirectory.Create();
@@ -187,7 +268,10 @@ public sealed class PromptManagementDialogTests
 
         var prompts = catalog.ListSystemPrompts(new AgentPromptCatalogQuery
         {
+            AppBaseDirectory = appBase,
+            UserProfileRoot = Path.Combine(tempDirectory.Path, "profile"),
             UserCodeAltaRoot = Path.Combine(tempDirectory.Path, "global"),
+            ProjectRoot = Path.Combine(tempDirectory.Path, "project"),
         });
 
         Assert.AreEqual(2, prompts.Count);
@@ -201,19 +285,27 @@ public sealed class PromptManagementDialogTests
         Assert.AreEqual("override body", userGlobal.Body);
     }
 
-    private static PromptManagementDialog CreatePromptDialog(string root)
+    private static PromptManagementDialog CreatePromptDialog(string root, Action? onPromptsChanged = null)
     {
         var globalRoot = Path.Combine(root, "global");
         var appBase = Path.Combine(root, "app");
         var catalog = new AgentPromptCatalog(new FileSystemPromptContentLocator(appBase));
         return new PromptManagementDialog(
             new CatalogOptions { GlobalRoot = globalRoot },
+            new TextFileCodec(),
             static () => null,
             static () => new Rectangle(0, 0, 120, 40),
             static () => null,
-            static () => { },
+            onPromptsChanged ?? (static () => { }),
             static (_, _) => { },
-            catalog);
+            catalog,
+            new AgentPromptCatalogQuery
+            {
+                AppBaseDirectory = appBase,
+                UserProfileRoot = Path.Combine(root, "profile"),
+                UserCodeAltaRoot = globalRoot,
+                ProjectRoot = Path.Combine(root, "project"),
+            });
     }
 
     private static string WritePrompt(string root, string body)
@@ -239,6 +331,9 @@ public sealed class PromptManagementDialogTests
 
     private static void DispatchKeyEvent(TerminalApp app, TerminalKey key)
         => InvokeTerminalApp(app, "DispatchKeyEvent", new TerminalKeyEvent { Key = key }, true);
+
+    private static void InvokePromptDialog(PromptManagementDialog dialog, string method, params object?[] arguments)
+        => typeof(PromptManagementDialog).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(dialog, arguments);
 
     private static int CountDialogs(TerminalApp app)
         => app.Root.EnumerateVisualsDepthFirst().OfType<Dialog>().Count();
