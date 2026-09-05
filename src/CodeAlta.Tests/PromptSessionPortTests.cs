@@ -13,7 +13,7 @@ public sealed class PromptSessionPortTests
     [TestMethod]
     public void CapturePrompt_RequiresBoundPromptSessionAndClonesImages()
     {
-        var image = PromptImageAttachment.Create("Image-1", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Image-1", [1, 2, 3], "image/png", ".png");
         var port = CreatePort(snapshotPromptImages: () => [image]);
         var promptSessionId = new PromptSessionId("prompt-1");
         port.BindPromptSession(CreateBinding(promptSessionId));
@@ -36,7 +36,7 @@ public sealed class PromptSessionPortTests
             restorePromptText: text => restoredText = text,
             restorePromptImages: images => restoredImages = images);
         var promptSessionId = new PromptSessionId("prompt-1");
-        var image = PromptImageAttachment.Create("Image-1", [1], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Image-1", [1], "image/png", ".png");
         port.BindPromptSession(CreateBinding(promptSessionId));
 
         port.RestorePrompt(promptSessionId, PromptSubmission.Create("retry", [image]));

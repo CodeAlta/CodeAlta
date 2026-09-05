@@ -118,6 +118,18 @@ The frontend stores view state in `~/.alta/ui-state.yaml`, including open/select
 
 `ShellStateStore` is a UI-session projection of currently open shell state; it is not a replacement for the durable catalog, session journals, or runtime-owned session state.
 
+### Prompt image attachment copies
+
+`CodeAlta.Catalog.PromptImageAttachmentStore` owns encoded image persistence and the neutral `PromptImageAttachment` / `PromptImageAttachmentReference` records. The TUI retains localized title/factory helpers, clipboard/DIB/Skia decoding, composer state, `PromptSubmission` snapshots, and conversion to `AgentInputItem.LocalImage`. No terminal toolkit dependency is introduced into Catalog.
+
+Images are copied into `<GlobalRoot>/sessions/<session CreatedAt UTC yyyy>/<MM>/<dd>/<sanitizedSessionId>.attachments/`; an unset creation date uses the current UTC date. Filenames remain `{currentUTC:yyyyMMddHHmmssfff}-{index:00}-{sanitizedTitle}-{first8ImageId}{extension}`, with titles capped at 48 characters and collision suffixes `-2`, `-3`, etc. Source image files are not moved or rewritten. Atomic `FileMode.CreateNew` creation never overwrites a preexisting entry; only native already-exists errors retry, bounded to 1000 candidates. Write/flush, permission and other I/O errors do not become collision retries.
+
+The entire batch's path/payload fields are validated before writes: nonempty bytes and titles, an image MIME type without parameters, 1–128 ASCII letter/digit/hyphen/underscore IDs, and 1–16 ASCII alphanumeric extension characters (optional leading dot). Session IDs must sanitize to 1–200 characters. Sanitization neutralizes both platforms' separators, invalid filename characters and control characters; unusable session components are rejected. This preserves normal legacy names without promising compatibility for malformed directly constructed payloads. Validation does not decode or sniff image contents.
+
+Queue and dispatch ownership are unchanged: submission/queue snapshots copy byte arrays before composer clear; saving happens on actual dispatch, **before** run augmentation and runtime submission. A failed/cancelled save attempts to remove only files that batch successfully created (including partial writes), never preexisting collision entries. Once save succeeds, its references remain valid across composer/queue clear, downstream augmentation cancellation or dispatch failure; retries may create another copy. Empty directories and files that cannot be removed due to filesystem errors may remain after rollback. This does not add image garbage collection, reference counting, recovery or restart durability for unsent images.
+
+The store accepts a **trusted backend root**, not a renderer file grant or RPC authorization. Its lexical validation and create-new behavior are not a filesystem sandbox: externally replaced directories/symlinks/files can race persistence or rollback, and cleanup cannot prove file identity after external replacement. Successful writes do not guarantee survival of power loss. Renderer authorization and broader ownership/recovery remain separate work.
+
 ## Editable text files
 
 `CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves/deletes. The TUI composition shares one instance between prompt drafts, file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.

@@ -51,7 +51,7 @@ public sealed class ShellSessionCommandContextTests
     public void CaptureSessionInput_IncludesClonedPromptImages()
     {
         var dispatcher = new RecordingUiDispatcher();
-        var image = PromptImageAttachment.Create("Image-1", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Image-1", [1, 2, 3], "image/png", ".png");
         var context = CreateContext(
             dispatcher,
             snapshotPromptImages: () => [image]);
@@ -76,7 +76,7 @@ public sealed class ShellSessionCommandContextTests
             dispatcher,
             restoreSessionInput: text => restoredText = text,
             restorePromptImages: images => restoredImages = images);
-        var image = PromptImageAttachment.Create("Image-1", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Image-1", [1, 2, 3], "image/png", ".png");
 
         context.RestoreSessionInput(PromptSubmission.Create("retry", [image]));
 

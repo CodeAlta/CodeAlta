@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.Presentation.Prompting;
 
 namespace CodeAlta.Tui.Models;

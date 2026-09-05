@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.App;
 using CodeAlta.Plugins.Abstractions;
 using CodeAlta.Tui.Presentation.Prompting;
@@ -10,7 +11,7 @@ public sealed class PluginHostBridgeTests
     [TestMethod]
     public void ApplyPromptProcessingResult_PreservesImagesWhenPluginLeavesPromptUnchanged()
     {
-        var image = PromptImageAttachment.Create("Screenshot", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Screenshot", [1, 2, 3], "image/png", ".png");
         var prompt = PromptSubmission.Create("Describe this", [image]);
         var result = PluginPromptResult.Replace(
             "Describe this",
@@ -32,7 +33,7 @@ public sealed class PluginHostBridgeTests
     [TestMethod]
     public void ApplyPromptProcessingResult_PreservesImagesWhenPluginReplacesTextOnly()
     {
-        var image = PromptImageAttachment.Create("Screenshot", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Screenshot", [1, 2, 3], "image/png", ".png");
         var prompt = PromptSubmission.Create("Describe this", [image]);
         var result = PluginPromptResult.Replace("Please describe this image");
 

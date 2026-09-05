@@ -15,6 +15,8 @@ The sidebar keeps running sessions visible even when their tab is closed. Closin
 
 Draft text for new global and project sessions is saved there too. Text saves and clears are checked against the last saved version: an external edit or storage failure is not silently overwritten or treated as saved. If a pre-send clear fails, your composer text and images remain available, and the prompt is not sent or queued; retrying that storage failure does not duplicate an accepted queue entry. If a draft flush fails, preserve your pending text before exiting; failed changes are retained in memory, not in a separate recovery file. Unsent image attachments are not restored after restart.
 
+When a prompt is dispatched, its image bytes are saved as separate copies beside the session journal, in `<session-id>.attachments/`. Existing copies are never overwritten. Clearing the composer does not delete images retained by queued prompts or successfully saved submissions. A later dispatch failure or retry can leave additional saved copies; this is not restart persistence for unsent images.
+
 > [!NOTE]
 > Closing a tab only closes that view. Check the sidebar for running sessions before assuming work has stopped.
 

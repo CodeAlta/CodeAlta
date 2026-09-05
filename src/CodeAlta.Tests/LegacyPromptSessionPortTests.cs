@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.App;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.Presentation.Prompting;
@@ -12,7 +13,7 @@ public sealed class LegacyPromptSessionPortTests
     public void CaptureAndRestorePrompt_UseUiDispatcherAndImages()
     {
         var dispatcher = new RecordingUiDispatcher();
-        var image = PromptImageAttachment.Create("Image-1", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("Image-1", [1, 2, 3], "image/png", ".png");
         var restoredText = string.Empty;
         IReadOnlyList<PromptImageAttachment>? restoredImages = null;
         var port = new LegacyPromptSessionPort(

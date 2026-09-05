@@ -3391,7 +3391,7 @@ public sealed class CodeAltaAppTests
         await store.SaveAsync(key, "unsent text", TextFileRevision.Missing);
         var coordinator = new PromptDraftUiCoordinator(new PromptDraftCoordinator(), options,
             () => ShellSelection.ProjectDraft("project"), new FrontendEventPublisher(new InlineUiDispatcher()));
-        var image = PromptImageAttachment.Create("unsent image", [1, 2, 3], "image/png", ".png");
+        var image = PromptImageAttachmentFactory.Create("unsent image", [1, 2, 3], "image/png", ".png");
         try
         {
             coordinator.SyncPromptText(null);

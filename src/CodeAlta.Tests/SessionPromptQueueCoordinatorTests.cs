@@ -15,6 +15,51 @@ namespace CodeAlta.Tests;
 public sealed class SessionPromptQueueCoordinatorTests
 {
     [TestMethod]
+    public async Task ImageSubmission_QueueRetryAndComposerClearPreserveOwnedBytesAndSavedReferences()
+    {
+        using var temp = TempDirectory.Create();
+        var tab = CreateOpenSessionState();
+        var store = new PromptImageAttachmentStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var composer = new List<PromptImageAttachment> { PromptImageAttachmentFactory.Create("Screenshot", [1, 2, 3], "image/png", ".png") };
+        var port = new LegacyPromptSessionPort(new InlineUiDispatcher(), () => composer.Count == 0,
+            composer.Clear, static _ => { }, () => composer, images => composer.AddRange(images.Select(image => image.Copy())));
+        var promptSessionId = new PromptSessionId("prompt-1");
+        var submission = port.CapturePrompt(promptSessionId, "describe");
+        IReadOnlyList<PromptImageAttachmentReference>? saved = null;
+        var attempts = 0;
+        var coordinator = CreateCoordinator(temp.Path, async (_, prompt, token) =>
+        {
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, prompt.Images[0].Bytes);
+            saved = await store.SaveAsync(tab.SessionView, prompt.Images, token);
+            var input = prompt.AppendImageItems(AgentInput.Text(prompt.Text), saved);
+            var image = input.Items.OfType<AgentInputItem.LocalImage>().Single();
+            Assert.AreEqual(saved[0].Path, image.Path);
+            if (++attempts == 1)
+            {
+                throw new IOException("dispatch failed after persistence");
+            }
+        });
+        coordinator.EnqueuePrompt(tab, submission);
+        composer[0].Bytes[0] = 99;
+        port.ClearPrompt(promptSessionId);
+        Assert.IsTrue(port.IsPromptEmpty(promptSessionId));
+        submission.Images[0].Bytes[0] = 88;
+
+        await coordinator.DrainNextQueuedPromptAsync(tab);
+        Assert.AreEqual(1, tab.QueuedPrompts.Count);
+        port.RestorePrompt(promptSessionId, tab.QueuedPrompts[0].Submission);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, composer[0].Bytes);
+        port.ClearPrompt(promptSessionId);
+        var firstPath = saved![0].Path;
+        await coordinator.DrainNextQueuedPromptAsync(tab);
+
+        Assert.AreEqual(0, tab.QueuedPrompts.Count);
+        Assert.AreEqual(2, attempts);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(firstPath));
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(saved![0].Path));
+    }
+
+    [TestMethod]
     public async Task DrainNextQueuedPromptAsync_RemovesPromptBeforeDispatchCompletes()
     {
         using var temp = TempDirectory.Create();

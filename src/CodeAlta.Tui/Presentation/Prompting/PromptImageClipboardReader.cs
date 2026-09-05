@@ -42,7 +42,7 @@ internal static class PromptImageClipboardReader
                     continue;
                 }
 
-                image = PromptImageAttachment.Create(title, pngBytes, format.MediaType, format.Extension);
+                image = PromptImageAttachmentFactory.Create(title, pngBytes, format.MediaType, format.Extension);
                 failureReason = null;
                 return true;
             }
@@ -52,7 +52,7 @@ internal static class PromptImageClipboardReader
                 continue;
             }
 
-            image = PromptImageAttachment.Create(title, data.Span, format.MediaType, format.Extension);
+            image = PromptImageAttachmentFactory.Create(title, data.Span, format.MediaType, format.Extension);
             failureReason = null;
             return true;
         }

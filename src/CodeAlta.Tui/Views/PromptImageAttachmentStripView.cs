@@ -132,7 +132,7 @@ internal sealed class PromptImageAttachmentStripView
 
         void AddImage()
         {
-            var title = PromptImageAttachment.NormalizeTitle(titleState.Value ?? string.Empty);
+            var title = PromptImageAttachmentFactory.NormalizeTitle(titleState.Value ?? string.Empty);
             _addPromptImage(image.WithTitle(title));
             dialog?.Close();
             FocusPromptEditor();
@@ -195,7 +195,7 @@ internal sealed class PromptImageAttachmentStripView
 
         void Rename()
         {
-            var title = PromptImageAttachment.NormalizeTitle(titleState.Value ?? string.Empty);
+            var title = PromptImageAttachmentFactory.NormalizeTitle(titleState.Value ?? string.Empty);
             _renamePromptImage(imageId, title);
             dialog?.Title(title);
             _setPromptImageStatus(SR.T("Renamed image to {0}.", title), StatusTone.Ready);

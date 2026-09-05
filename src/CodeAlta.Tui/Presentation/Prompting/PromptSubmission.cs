@@ -4,12 +4,7 @@ using CodeAlta.Catalog;
 
 namespace CodeAlta.Tui.Presentation.Prompting;
 
-internal sealed record PromptImageAttachment(
-    string Id,
-    string Title,
-    byte[] Bytes,
-    string MediaType,
-    string FileExtension)
+internal static class PromptImageAttachmentFactory
 {
     public static PromptImageAttachment Create(
         string title,
@@ -33,11 +28,8 @@ internal sealed record PromptImageAttachment(
             NormalizeFileExtension(fileExtension));
     }
 
-    public PromptImageAttachment Copy()
-        => this with { Bytes = [.. Bytes] };
-
-    public PromptImageAttachment WithTitle(string title)
-        => this with { Title = NormalizeTitle(title) };
+    public static PromptImageAttachment WithTitle(this PromptImageAttachment image, string title)
+        => image with { Title = NormalizeTitle(title) };
 
     public static string NormalizeTitle(string title)
     {
@@ -52,15 +44,6 @@ internal sealed record PromptImageAttachment(
         var trimmed = fileExtension.Trim();
         return trimmed[0] == '.' ? trimmed : "." + trimmed;
     }
-}
-
-internal sealed record PromptImageAttachmentReference(
-    string Title,
-    string Path,
-    string MediaType)
-{
-    public AgentInputItem.LocalImage ToAgentInputItem()
-        => new(Path, DisplayName: Title, MediaType: MediaType);
 }
 
 internal sealed record PromptSubmission(string Text, IReadOnlyList<PromptImageAttachment> Images, string? AskId = null)
@@ -122,7 +105,7 @@ internal sealed record PromptSubmission(string Text, IReadOnlyList<PromptImageAt
         items.AddRange(input.Items);
         foreach (var reference in references)
         {
-            items.Add(reference.ToAgentInputItem());
+            items.Add(new AgentInputItem.LocalImage(reference.Path, DisplayName: reference.Title, MediaType: reference.MediaType));
         }
 
         return new AgentInput(items);

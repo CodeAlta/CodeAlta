@@ -307,7 +307,7 @@ internal sealed class PromptDraftUiCoordinator : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(imageId);
 
-        var normalizedTitle = PromptImageAttachment.NormalizeTitle(title);
+        var normalizedTitle = PromptImageAttachmentFactory.NormalizeTitle(title);
         var list = GetCurrentImageList(state);
         for (var index = 0; index < list.Count; index++)
         {

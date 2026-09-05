@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.Threading;
 using CodeAlta.Agent;
 using CodeAlta.Tui.App;

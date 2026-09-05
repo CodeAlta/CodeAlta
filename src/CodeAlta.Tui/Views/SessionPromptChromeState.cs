@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.ViewModels;
 
 namespace CodeAlta.Tui.Views;
