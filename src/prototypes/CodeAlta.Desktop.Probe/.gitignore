@@ -1,3 +1,4 @@
+# Retired source location: preserve and continue ignoring the original user-owned build artifacts.
 frontend/node_modules/
 frontend/dist/
 evidence/local/

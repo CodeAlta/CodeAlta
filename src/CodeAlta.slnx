@@ -45,9 +45,11 @@
     <Project Path="CodeAlta.Plugins/CodeAlta.Plugins.csproj" />
   </Folder>
   <Folder Name="/main/">
+    <Project Path="CodeAlta/CodeAlta.csproj" />
     <Project Path="CodeAlta.Tui/CodeAlta.Tui.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />

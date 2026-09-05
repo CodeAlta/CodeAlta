@@ -1,6 +1,6 @@
 # Dual-head desktop parity — in development
 
-> **Status: M1a TUI rename verified, 2026-09-05.** This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**; isolated M0 Windows package/native proof has passed. The terminal project/package is now `CodeAlta.Tui`, command `altatui`; desktop promotion is next. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: M1 dual-head foundation verified, 2026-09-05.** This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` now provides an explicitly in-development native boot surface, not agent functionality. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records only the bounded M0 baseline/parity-document step; it does **not** mark all of M0 complete. The coordinator owns the plan checklist and subsequent implementation.
 
@@ -71,6 +71,10 @@ Parent independently ran `dotnet build -c Release --no-restore` from `src` (0 wa
 
 ### Desktop acceptance rows
 
+M1b adds the isolated desktop boot entrypoint, 22 managed desktop tests, opt-in native qualification, and the migrated M0 fixture under `CodeAlta.Desktop.Tests/NativeSmoke`. Parent independently passed the 22 tests plus 104 architecture/TUI identity tests and the installed desktop's explicit-root boot/close/CLI checks. See [native qualification](desktop-native-qualification.md) for package hashes, output/glob corrections, script commands and limitations. The production boot DOM is not yet natively asserted; full RPC/visual checks remain test-fixture evidence, not desktop feature parity.
+
+**Safety deviation:** a child ran the unfiltered full solution suite (1,821 passed, 2 skipped) without addressing known profile-discovery gaps. That result is not profile-isolated; the real-home test ran and global prompt/skill reads may have occurred. The evidence document records the exact command and corrects the child's initial no-access claim. Do not repeat that run until isolation is established; parent reruns used audited subsets and explicitly isolated native tools.
+
 All **14** approved areas are retained. The two evidence columns are deliberately separate: neither implementation intent nor existing TUI coverage establishes desktop acceptance. Paths/symbols below refer to the pre-rename implementation under `src/CodeAlta` unless otherwise noted.
 
 | ID / area and current reference | Required desktop acceptance | Automated evidence | Manual/native evidence |
@@ -126,7 +130,7 @@ Remote hosting/network authentication, multi-user access, installers/automatic u
 
 ### Native platform qualification
 
-The [M0 prototype README](../src/prototypes/CodeAlta.Desktop.Probe/README.md) and its evidence ledger record actual Windows x64 execution on WebView2 **152.0.4191.62**, .NET **10.0.11**, Windows **10.0.26200**. Both ordinary Exe/WinExe local tool packages preserve native-dialog manifests and pass redirected CLI/native smoke. Parent independently reran the installed Exe smoke and all three frontend tests. Asset inspection verified 100 hashes (3,823,561 bytes) and six native binaries; no Node/runtime/source-map bundle. Only this bounded feasibility fixture is accepted; all production/native feature qualification remains open, including five other architectures/engines, interactive console behavior, accessibility/performance and complete release notices. Point-in-time npm/NuGet advisory checks reported no vulnerabilities.
+The [preserved M0 fixture README](../src/CodeAlta.Desktop.Tests/NativeSmoke/README.md) and its evidence ledger record actual Windows x64 execution on WebView2 **152.0.4191.62**, .NET **10.0.11**, Windows **10.0.26200**. Both ordinary Exe/WinExe local tool packages preserve native-dialog manifests and pass redirected CLI/native smoke. Parent independently reran the installed Exe smoke and all three frontend tests. Asset inspection verified 100 hashes (3,823,561 bytes) and six native binaries; no Node/runtime/source-map bundle. Only this bounded feasibility fixture is accepted; all production/native feature qualification remains open, including five other architectures/engines, interactive console behavior, accessibility/performance and complete release notices. Point-in-time npm/NuGet advisory checks reported no vulnerabilities.
 
 | Intended desktop RID | Native engine | Actual engine/version evidence | Qualification |
 | --- | --- | --- | --- |
@@ -143,5 +147,5 @@ The TUI retains its existing eight-RID intent, including `linux-musl-x64` and `l
 ## Blockers and next step
 
 1. The executed build, audited tests and website build have no observed failure. The full Release test baseline is **incomplete by safety choice**; establish explicit runtime-root injection or audit additional no-profile/fake-provider fixtures before broadening it. Do not use the active user's profile to turn a skip into a pass.
-2. **M0 feasibility and M1a TUI rename are accepted** after parent review and independent verification. Next is promotion of proven desktop wiring and isolated desktop tests. No upstream NeoAstra change or custom launcher was required.
+2. **M0 feasibility and M1 dual-head foundation are accepted** after parent review and independent verification. Next is M2's first storage extraction slice, preserving legacy formats and adapting TUI callers. No upstream NeoAstra change or custom launcher was required.
 3. Desktop feature, cross-head persistence/ownership, full native platform, performance and release gates remain pending. Prototype integration success and the terminal rename are not desktop parity.

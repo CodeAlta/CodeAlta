@@ -1,4 +1,9 @@
-# M0 desktop package/native probe (not a production frontend)
+# Test-owned M0 native smoke fixture (not a production frontend)
+
+Moved tracked-file-only from `src/prototypes/CodeAlta.Desktop.Probe` during M1b. The old ignored
+build/npm/evidence artifacts are preserved in place. Historical results below retain their original
+package identity and evidence pointers. This fixture is retained solely for explicit qualification,
+not shipped as desktop functionality. See [test instructions](../README.md).
 
 This isolated consumer is deliberately **outside `CodeAlta.slnx`**. It references only the published
 `NeoAstra` NuGet package, centrally pinned at **0.1.0**. It has no CodeAlta/provider/plugin references,

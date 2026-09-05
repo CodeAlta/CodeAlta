@@ -1,0 +1,13 @@
+<Project>
+  <Import Project="../Directory.Build.props" />
+  <PropertyGroup>
+    <!-- This location held the TUI before M1a. Do not reuse or incrementally clean its old outputs. -->
+    <BaseOutputPath>bin/desktop/</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj/desktop/</BaseIntermediateOutputPath>
+    <!-- NeoAstra explicitly collects packaged assets; SDK source globs must not walk frontend outputs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**;frontend/node_modules/**;frontend/dist/**</DefaultItemExcludes>
+    <!-- Build-only generated frontend inputs retain the reviewed relative npm/TS paths. -->
+    <NeoRpcIntermediateOutputPath>$(MSBuildProjectDirectory)/obj/neoastra</NeoRpcIntermediateOutputPath>
+    <NeoAstraFrontendClientStageDirectory>$(MSBuildProjectDirectory)/obj/neoastra/client</NeoAstraFrontendClientStageDirectory>
+  </PropertyGroup>
+</Project>

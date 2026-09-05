@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>../../img/alta.ico</ApplicationIcon>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CodeAlta</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <PackageId>CodeAlta</PackageId>
+    <AssemblyName>alta</AssemblyName>
+    <ToolCommandName>alta</ToolCommandName>
+    <!-- One framework-dependent tool with standard shims, not .NET 10 RID-specific package fan-out.
+         The SDK also uses this list as RuntimeIdentifiers for restore. NeoAstra supplies native assets. -->
+    <PackAsToolShimRuntimeIdentifiers>win-x64;win-arm64;osx-x64;osx-arm64;linux-x64;linux-arm64</PackAsToolShimRuntimeIdentifiers>
+    <SelfContained>false</SelfContained>
+    <PublishSelfContained>false</PublishSelfContained>
+    <PublishAot>false</PublishAot>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/CodeAlta/CodeAlta</PackageProjectUrl>
+    <Description>CodeAlta desktop — in-development native boot surface. Use altatui for current agent functionality.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="README.md" Pack="true" PackagePath="/" />
+    <PackageReference Include="NeoAstra" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+  </ItemGroup>
+  <Target Name="CodeAltaExcludeBuildOnlyContractSource" AfterTargets="NeoAstraCollectRpcArtifacts">
+    <!-- Keep generated contracts for TS checking/build and runtime JSON metadata, not TS source in the tool. -->
+    <ItemGroup>
+      <ContentWithTargetPath Remove="$(NeoRpcTypeScriptOutput)" />
+    </ItemGroup>
+  </Target>
+</Project>

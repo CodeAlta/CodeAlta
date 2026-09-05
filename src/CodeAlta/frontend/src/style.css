@@ -1,0 +1,7 @@
+:root { color-scheme: dark light; font-family: system-ui, sans-serif; }
+body { margin: 0; }
+main { max-width: 46rem; margin: 10vh auto; padding: 2rem; line-height: 1.6; }
+h1 { font-size: 2.5rem; margin-bottom: .5rem; }
+.badge { font-weight: 600; }
+.detail { font-size: .9rem; }
+code { font-family: ui-monospace, monospace; }

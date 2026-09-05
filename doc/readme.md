@@ -25,6 +25,8 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 
 > **In development:** [Dual-head desktop parity and baseline](dual-head-desktop-parity.md) tracks the approved desktop/TUI work separately from the current implementation documented here. Pending acceptance criteria are not shipped features or platform-support claims.
 
+The isolated desktop boot entrypoint and its test-owned native fixtures are described in [desktop native qualification](desktop-native-qualification.md), including preserved M0 evidence and explicit platform gaps.
+
 ```mermaid
 flowchart TD
     Program[CodeAlta.Tui executable - altatui - Program + CodeAltaOwnedServices]
