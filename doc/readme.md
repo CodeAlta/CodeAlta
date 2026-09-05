@@ -23,6 +23,8 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 
 ## System map
 
+> **In development:** [Dual-head desktop parity and baseline](dual-head-desktop-parity.md) tracks the approved desktop/TUI work separately from the current implementation documented here. Pending acceptance criteria are not shipped features or platform-support claims.
+
 ```mermaid
 flowchart TD
     Program[CodeAlta executable - Program + CodeAltaOwnedServices]
