@@ -85,6 +85,8 @@ M1b adds the isolated desktop boot entrypoint, 22 managed desktop tests, opt-in 
 
 **Safety deviation:** a child ran the unfiltered full solution suite (1,821 passed, 2 skipped) without addressing known profile-discovery gaps. That result is not profile-isolated; the real-home test ran and global prompt/skill reads may have occurred. The evidence document records the exact command and corrects the child's initial no-access claim. Do not repeat that run until isolation is established; parent reruns used audited subsets and explicitly isolated native tools.
 
+The [M2 source-only isolation audit](desktop-native-qualification.md#m2-source-only-test-isolation-audit-2026-09-05) further confirms reachable MCP global discovery/write probes, live-tool/runtime skill home forwarding, and instruction ancestor walks. Excluding only the three historical cases is insufficient. These are source-confirmed paths, not an inventory of historical user-file accesses; no follow-up profile inspection or full-suite run occurred. Bounded root/fixture repairs and separate subprocess/OS qualification remain prerequisites to broader testing.
+
 All **14** approved areas are retained. The two evidence columns are deliberately separate: neither implementation intent nor existing TUI coverage establishes desktop acceptance. Paths/symbols below refer to the pre-rename implementation under `src/CodeAlta` unless otherwise noted.
 
 | ID / area and current reference | Required desktop acceptance | Automated evidence | Manual/native evidence |

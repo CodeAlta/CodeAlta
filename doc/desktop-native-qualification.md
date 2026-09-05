@@ -138,3 +138,63 @@ safety correction above. The fixture migration preserves 22 files exactly;
 only its README changed to describe test ownership. Plan/parity integration and commits remain
 the driving parent's responsibility. Native evidence remains Windows x64 only, with the boot DOM
 and other release gates explicitly unqualified as described above.
+
+## M2 source-only test-isolation audit (2026-09-05)
+
+**The three historical cases above are not an exhaustive exclusion list.** A read-only child audit,
+with parent spot-checks of MCP discovery, both ancestor walkers and live-tool skill queries,
+identified additional reachable profile paths. This audit ran no tests, providers, application
+startup or profile inspection. It establishes source behavior, not which user files were accessed
+during the historical full-suite run. Constructing a host/catalog/request alone does not prove discovery.
+
+| Reachable path | Source evidence and actual fixture invocation | Qualification consequence |
+| --- | --- | --- |
+| MCP global discovery and writability probes | `src/CodeAlta.Plugin.Mcp/McpConfigDiscovery.cs:7-21,34-44,53-96,127-164` always includes global configuration. `McpRuntimeServiceTests.SearchDescribeAndCall_UseStdioAndApplyToolPolicy` calls `SearchToolsAsync` without `UserHomeDirectory`; `McpManagementServiceTests.SetServerEnabledAsync_WritesPolicyAndRefreshesSnapshot` and `AddOrUpdateServerAsync_WritesJsonConfigAndRefreshesSnapshot` refresh discovery; the two `McpConfigTests.StatusLabel_*` cases call `RefreshSnapshot` without an injected home. | Existing global config is read and opened with read/write access (not proof of content modification). If absent, discovery conditionally creates/deletes `.codealta-write-test-<guid>` in `.alta` or its parent. Which branch occurred historically is unknown. Project scope does not suppress global discovery. |
+| MCP plugin/runtime helper fallbacks | `McpPlugin.cs:90,99,286,315,338,634` creates requests without an injected home. `McpRuntimeService.cs:404-412,663` uses the same home in global policy/token paths; `SearchToolsAsync:139-151` can obtain runtime state for effective servers. Paths are under `src/CodeAlta.Plugin.Mcp/`. | Fixtures need explicit home propagation through plugin helpers, not just outer management requests. Actual historical token access, subprocess/network activity and configured servers remain unknown; no credentials were inspected. |
+| Explicit real-home skill forwarding | `src/CodeAlta.Orchestration/Runtime/AgentInstructionTemplateProvider.cs:97-110,179-192`, `SessionRuntimeService.cs:1258-1262`, `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:3660-3675`, and `src/CodeAlta.Tui/App/SkillsManagementService.cs:43-54` supply the real profile. `src/CodeAlta.Catalog/Skills/BuiltInSkillRootProviders.cs:97-115` maps it to `.agents/skills`; `SkillCatalog.cs:303-410` performs discovery. | Temporary `GlobalRoot` does not isolate these consumers. Both `AltaLiveToolTests.SkillVisibility_*` cases actually invoke list/show through that path. Headless fixtures that submit a prompt can reach it, unlike construction-only tests. An unset `UserProfileRoot` is skipped by the user-common root provider; it does not itself fall back to home. |
+| Ancestor instruction traversal | `src/CodeAlta.Agent/Runtime/AgentInstructionComposer.cs:28-32,101-153` and `src/CodeAlta.Orchestration/Runtime/SystemPrompts/SystemPromptBuilder.cs:624-640,663-718` walk to filesystem root, select and read `AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`. `AgentSessionTests.AgentInstructionComposer_ComposesDeveloperInstructionsAndLargestContextFilesPerDirectory` directly calls `Compose`; the known formatting fixture calls `Build` with project context. | Normal Windows profile-local temporary projects can still probe/read profile ancestors after global-root injection. Traversal is confirmed; any particular ancestor-file read depends on its existence and was not observed. |
+
+The direct prompt-file seam is already available: supplying nonblank temporary `UserCodeAltaRoot`
+to `SystemPromptBuildRequest` prevents real `~/.alta/prompts` lookup through
+`SystemPromptContentLocator.cs:96-110`. Merely resolving a profile string does not prove file reads.
+`BuiltInPromptContentTests` and `PromptManagementDialogTests` were not confirmed prompt-profile leaks;
+`HeadlessHost_ComposesPluginSkillRoots` explicitly queries temporary roots with no user-common root.
+
+### Bounded repairs before expanding verification
+
+1. Add explicit-home tilde normalization/controller overloads while preserving production defaults;
+   move the tilde fixture entirely into a unique fake home. Cover `~`, `~/`, `~\`, unsupported `~name`
+   and rooted paths. Set both explicit user roots in the known prompt-formatting fixture.
+2. Add one discovery-home override to existing Catalog/host options and propagate it through
+   instruction construction, runtime activation, live-tool queries and TUI skill management.
+   Do not infer home from `GlobalRoot` or disable production common skills. Verify captured discovery
+   requests before traversal, then synthetic home/global/project precedence.
+3. Inject temporary `UserHomeDirectory` into relevant MCP requests and a narrow instance-owned
+   plugin helper seam; verify global/project overlay, policy and token paths. Preserve actual
+   discovery/writability behavior rather than bypassing it for tests. MCP home currently means the
+   **parent of `.alta`**, not an arbitrary portable data root; shared-host integration must handle that distinction.
+4. Bound both ancestor walkers explicitly for fixtures that test inheritance, or qualify them under
+   an approved disposable OS identity/VM. Test boundaries using an outside sentinel within an owned
+   outer directory, never the real profile. Non-discovery fixtures may use existing composed-instruction
+   inputs when that preserves the behavior under test.
+
+Keep executable admission/root propagation as the separate M2 shared-host step. In TUI `Program.cs`,
+logging starts at lines 16-17 and plugin prestart at 27, before the guard at 79; plugin disposal in
+the outer `finally` also occurs after that guard's scope. **Correction:** ordinary provider
+composition is reached through `DeferredCodeAltaApp` after guard acquisition, not established as
+pre-admission. Nevertheless, `CodeAltaOwnedServices.CreateAsync:95-166` and
+`DeferredCodeAltaApp.cs:243-249` reconstruct default roots independently. Reuse explicit lock-path,
+host/plugin root and provider state-root seams; acquire before mutable startup and release after disposal.
+
+Source-audited expansion candidates, **not newly executed tests**, include
+`OpenProjectRequestResolverTests`, `CodeAltaSingleInstanceGuardTests`, `BuiltInPromptContentTests`,
+`PromptManagementDialogTests` and the current-project discovery selection in `SkillsManagementServiceTests`.
+Do not add whole MCP/live-tool/headless classes until their individual requests and traversals are repaired.
+SDK/NuGet credential providers and caches in `RequiresDotNet10FileBuild` tests, shell/MCP subprocesses,
+native/browser/clipboard fixtures and arbitrary trusted plugin code need separate qualification.
+`ModelProviderRuntimeTestExtensions.cs:40-58,72-82` can forward a null state root after failed lookup,
+reaching `AgentRuntime.cs:42-46`'s real-home fallback; an offending invocation was not established.
+Some provider fixtures also use nonunique temp/output roots; these are not proven profile leaks.
+
+Environment-only `HOME`/`USERPROFILE` changes are not Windows `SpecialFolder` redirection, and
+application path injection is not OS isolation. **No profile-safe full-suite result is claimed.**
