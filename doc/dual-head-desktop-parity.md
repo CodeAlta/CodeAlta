@@ -46,6 +46,21 @@ Local evidence was retained outside the repository in the original temporary dir
 - Source-plugin tests tagged `RequiresDotNet10FileBuild`, the catalog's existing ignored timing-sensitive traversal test and platform-specific branches were not evaluated by this selection. They must not be reported as passing or as runner-skipped tests within the 13-test result.
 - No real-provider login/model request, default-root application smoke, multi-process lock test, cross-head handoff, desktop prototype, NuGet tool pack/install, GUI launch, benchmark or native accessibility test was attempted. There is no failing baseline to fix from the commands executed here; the unfiltered-suite omission is the regression-baseline gap.
 
+### Coordinator regression follow-up (2026-09-05)
+
+A bounded read-only audit identified additional temporary-root/in-memory fixtures. The coordinator ran these against the baseline Release outputs with `dotnet test <project>/<project>.csproj -c Release --no-build --no-restore --filter <filter>`, with TRX output in task-owned temporary `codealta-m0-followup-16cdec454c204bd8bd8ce3ae0e4d6355`. No executable startup, real provider, or default-root lock acquisition was used. The following results supplement, rather than replace, the initial baseline exclusions above:
+
+| Project | Filter (`FullyQualifiedName` unless noted) | Result | Wall time |
+| --- | --- | --- | --- |
+| `CodeAlta.Tests` | `~CodeAlta.Tests.CodeAltaSingleInstanceGuardTests` | 6 passed | 1.247 s |
+| `CodeAlta.Tests` | `=CodeAlta.Tests.CodeAltaHostTests.CreateAsync_HeadlessWithoutPlugins_ConstructsAndDisposesRuntimeServices` OR `=CodeAlta.Tests.CodeAltaHostTests.CreateAsync_ArchivedCurrentProjectIsVisibleInMemoryWithoutSaving` | 2 passed | 1.139 s |
+| `CodeAlta.Catalog.Tests` | `~ProjectFilePromptReferenceParserTests` OR `~ProjectFileSearchServiceTests` OR `~SkillCatalogTests` | 15 passed, 1 existing ignored test | 0.869 s |
+| `CodeAlta.Orchestration.Tests` | `~BoundedRuntimeEventStreamTests` OR `~OrchestrationMailboxActorTests` OR `~SessionActorRegistryTests` OR `~SessionEventSequencerTests` OR `~SessionPromptDispatchPlannerTests` | 22 passed | 0.874 s |
+
+For command reproduction, expand each operand with `FullyQualifiedName` and join OR operands with literal `|`. All commands exited 0. The ignored catalog case is `ProjectFileSearchSession_PublishesIncrementalUpdatesAndIgnoresStaleRefreshes`. This brings executed baseline coverage to **58 passed, 1 ignored**, not a full-suite result.
+
+The audit narrowed the remaining isolation gaps: `SystemPromptInfrastructureTests.SystemPromptBuilder_CodeFormatsPathsInGeneratedMarkdown` omits explicit user roots and can read global prompts; `AgentInstructionTemplateProvider` passes the real user profile into common-skill discovery even when the host's `GlobalRoot` is temporary. These need explicit root injection before full runtime coverage. The tilde-path test writes only its GUID test directory under `~/codealta-open-tests`, not `~/.alta`; the selected lock tests use temporary locks, and their default-path assertion only compares strings. Fake provider construction, task-owned filesystem fixtures and local-loopback tests are not inherently live-profile or billable operations. No blanket unsafe classification or full-suite isolation claim is made.
+
 ## Feature-parity acceptance matrix
 
 All **14** approved areas are retained. The two evidence columns are deliberately separate: neither implementation intent nor existing TUI coverage establishes desktop acceptance. Paths/symbols below refer to the pre-rename implementation under `src/CodeAlta` unless otherwise noted.
