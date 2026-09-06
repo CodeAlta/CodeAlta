@@ -71,11 +71,9 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _filePickerController.DisposeAsync();
-        foreach (var fileTab in _fileTabsById.Values.ToArray())
-        {
-            await fileTab.DisposeAsync();
-        }
+        await DisposeWorkspaceAsync(
+            _filePickerController.DisposeAsync,
+            () => _fileTabsById.Values.ToArray());
     }
 
     public Task ShowOpenFilePickerAsync()
@@ -269,4 +267,92 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
             .Where(static tab => tab.Kind == ShellTabKind.Editor)
             .Select(static tab => tab.TabId.Value)
             .ToList();
+
+    /// <summary>
+    /// Contains terminal picker and snapshotted tab disposal failures without abandoning later entries.
+    /// </summary>
+    /// <remarks>
+    /// Both mandatory callbacks undergo synchronous validation in signature order before the local
+    /// async core starts inline. Each plain await retains the cleanup context. After picker terminal
+    /// completion, including failure, invoke the late snapshot once, then await each returned entry
+    /// sequentially in array order. Preserve every entry and exception reference, including repeated
+    /// references and nested aggregates; a lone failure uses EDI, including OCE, and multiple failures
+    /// form an ordered direct aggregate without flattening or cancellation suppression.
+    /// A null snapshot or null entry is invalid seam data, not demonstrated production corruption;
+    /// a null entry fails independently and later entries are still attempted. Snapshot failure has
+    /// no fallback traversal. Add no cache, retry, admission barrier or repeated, concurrent or recursive
+    /// disposal guarantee. Awaited noncompletion can prevent all later workspace and frontend stages.
+    /// This does not join independent picker/query/accept or search refresh/ranking/publication work,
+    /// tab save/reload/initial load or dirty-dialog actions, queued focus/update actions or native watcher
+    /// callbacks. Partial acquisition and late tab publication remain possible; dirty close need not
+    /// have completed. Disposal is not durable save rollback, complete shutdown or process survival.
+    /// </remarks>
+    /// <param name="disposePicker">The mandatory picker disposal callback, awaited before the snapshot.</param>
+    /// <param name="snapshotTabs">The mandatory callback returning the single late array of tab entries.</param>
+    /// <exception cref="ArgumentNullException">A mandatory callback is null.</exception>
+    /// <exception cref="InvalidOperationException">The seam returns a null snapshot or a null entry; if alone, this failure escapes directly.</exception>
+    /// <exception cref="Exception">A lone original failure is rethrown through EDI with its reference preserved.</exception>
+    /// <exception cref="OperationCanceledException">The sole retained failure is OCE; the returned task is canceled.</exception>
+    /// <exception cref="AggregateException">Multiple direct failures escape in execution order, retaining nested and repeated references.</exception>
+    internal static Task DisposeWorkspaceAsync(
+        Func<ValueTask> disposePicker,
+        Func<IAsyncDisposable[]> snapshotTabs)
+    {
+        ArgumentNullException.ThrowIfNull(disposePicker);
+        ArgumentNullException.ThrowIfNull(snapshotTabs);
+        return CoreAsync();
+
+        async Task CoreAsync()
+        {
+            List<Exception>? failures = null;
+            try
+            {
+                await disposePicker();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            IAsyncDisposable[]? tabs = null;
+            try
+            {
+                tabs = snapshotTabs() ?? throw new InvalidOperationException("The tab snapshot must not be null.");
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            if (tabs is not null)
+            {
+                foreach (var tab in tabs)
+                {
+                    try
+                    {
+                        if (tab is null)
+                        {
+                            throw new InvalidOperationException("The tab snapshot contains a null entry.");
+                        }
+
+                        await tab.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        (failures ??= []).Add(ex);
+                    }
+                }
+            }
+
+            if (failures is { Count: 1 })
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failures[0]);
+            }
+
+            if (failures is { Count: > 1 })
+            {
+                throw new AggregateException(failures);
+            }
+        }
+    }
 }

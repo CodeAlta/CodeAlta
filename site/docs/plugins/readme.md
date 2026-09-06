@@ -85,6 +85,10 @@ If a terminal frontend cleanup step fails, CodeAlta attempts the remaining
 frontend cleanup steps before runtime cleanup and can report their failures
 together. A step that does not finish can still delay the rest of shutdown.
 
+Editor cleanup also attempts the remaining open editors if closing the file picker
+or an earlier editor fails. This does not wait for every pending file load, save,
+or search, and it does not roll back file changes already made.
+
 Runtime event-delivery cleanup also attempts its remaining stages after failures,
 waiting for its worker before releasing cancellation resources. This does not
 drain pending interface updates or stop plugins, and fatal runtime errors can
