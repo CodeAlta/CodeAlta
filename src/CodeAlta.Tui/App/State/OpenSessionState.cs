@@ -157,6 +157,9 @@ internal sealed class OpenSessionState
         set => ViewModel.StatusBusy = value;
     }
 
+    // UI-only dispatch revision: an old ask completion must not clear a newer prompt's optimism.
+    internal long PromptDispatchRevision { get; set; }
+
     public bool HasCustomStatus
     {
         get => ViewModel.HasCustomStatus;

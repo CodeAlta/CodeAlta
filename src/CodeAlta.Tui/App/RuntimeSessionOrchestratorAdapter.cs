@@ -36,7 +36,8 @@ internal sealed class RuntimeSessionOrchestratorAdapter : ISessionOrchestrator
         return new SessionCommandResult
         {
             Outcome = SessionCommandOutcomeKind.Submitted,
-            Session = SessionViewDescriptorSnapshot.FromDescriptor(session),
+            // Do not perform descriptor projection after positive runtime return. Ask responses
+            // must retain this late evidence even if subsequent frontend projection fails.
             RunId = runId.Value,
         };
     }

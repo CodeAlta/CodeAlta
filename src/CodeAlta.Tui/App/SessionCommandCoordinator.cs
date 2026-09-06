@@ -5,6 +5,7 @@ using CodeAlta.Tui.App.Context;
 using CodeAlta.Catalog;
 using CodeAlta.Tui.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Prompts;
 using CodeAlta.Tui.Presentation.Chat;
 using CodeAlta.Tui.Presentation.Shell;
 using CodeAlta.Tui.Presentation.Prompting;
@@ -217,26 +218,33 @@ internal sealed class SessionCommandCoordinator
     public bool IsCurrentPromptEmpty()
         => _commandContext.IsSessionInputEmpty();
 
-    public async Task SendAskResponseAsync(
+    public async Task<SessionPromptResponseResult> SendAskResponseAsync(
         SessionViewDescriptor session,
         OpenSessionState tab,
         string markdown,
         string askId,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(tab);
-        ArgumentException.ThrowIfNullOrWhiteSpace(markdown);
-        ArgumentException.ThrowIfNullOrWhiteSpace(askId);
-
-        await _sessionSelection.EnsureSessionHistoryLoadedAsync(session, cancellationToken);
-        tab.Timeline.ReplaceTruncatedHistoryLoadButton();
-        await _promptDispatchCoordinator.DispatchPromptAsync(
-            session,
-            tab,
-            PromptSubmission.TextOnly(markdown).WithAskId(askId),
-            steer: false,
-            cancellationToken);
+        // This preparation has not entered prompt dispatch. The history helper may resume a
+        // session, but does not submit this response. Its failures cannot establish admission.
+        PromptSubmission prompt;
+        try
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            ArgumentNullException.ThrowIfNull(tab);
+            ArgumentException.ThrowIfNullOrWhiteSpace(markdown);
+            ArgumentException.ThrowIfNullOrWhiteSpace(askId);
+            prompt = PromptSubmission.TextOnly(markdown).WithAskId(askId);
+            await _sessionSelection.EnsureSessionHistoryLoadedAsync(session, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            tab.Timeline.ReplaceTruncatedHistoryLoadButton();
+        }
+        catch (Exception ex)
+        {
+            return SessionPromptResponseResult.NotAdmitted(ex.Message);
+        }
+        return await _promptDispatchCoordinator.DispatchAskResponseAsync(
+            session, tab, prompt, cancellationToken);
     }
 
     public async Task AbortSelectedSessionAsync()

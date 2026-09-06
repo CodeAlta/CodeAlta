@@ -9,6 +9,20 @@ namespace CodeAlta.Tests;
 public sealed class PluginHostBridgeTests
 {
     [TestMethod]
+    public void ApplyPromptProcessingResult_ReplacementPreservesAskIdAndOwnedImages()
+    {
+        var image = PromptImageAttachmentFactory.Create("Screenshot", [1, 2, 3], "image/png", ".png");
+        var prompt = PromptSubmission.Create("original", [image], "ask-1");
+
+        var processed = PluginHostBridge.ApplyPromptProcessingResult(prompt, PluginPromptResult.Replace(" replacement "));
+
+        Assert.AreEqual("ask-1", processed.AskId);
+        Assert.AreEqual("replacement", processed.Text);
+        CollectionAssert.AreEqual(image.Bytes, processed.Images[0].Bytes);
+        Assert.AreNotSame(prompt.Images[0].Bytes, processed.Images[0].Bytes);
+    }
+
+    [TestMethod]
     public void ApplyPromptProcessingResult_PreservesImagesWhenPluginLeavesPromptUnchanged()
     {
         var image = PromptImageAttachmentFactory.Create("Screenshot", [1, 2, 3], "image/png", ".png");

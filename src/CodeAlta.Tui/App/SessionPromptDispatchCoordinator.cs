@@ -79,6 +79,43 @@ internal sealed class SessionPromptDispatchCoordinator
     public SessionExecutionOptions BuildExecutionOptions(SessionViewDescriptor session, OpenSessionState tab)
         => _executionOptionsFactory.BuildExecutionOptions(session, tab);
 
+    internal async Task<SessionPromptResponseResult> DispatchAskResponseAsync(
+        SessionViewDescriptor session, OpenSessionState tab, PromptSubmission prompt, CancellationToken cancellationToken)
+    {
+        DateTimeOffset? ownedStart = null;
+        var revision = ++tab.PromptDispatchRevision;
+        var result = await SessionPromptResponseDispatch.RunAsync(attempt =>
+        {
+            if (tab.ActiveRunStartedAt is null)
+            {
+                ownedStart = DateTimeOffset.UtcNow;
+                tab.ActiveRunStartedAt = ownedStart;
+            }
+            return DispatchPromptCoreAsync(session, tab, prompt, steer: false, cancellationToken, attempt);
+        });
+        // Uncertainty is not an indefinitely running UI turn. Clear only this attempt's
+        // synthetic marker, never an observed runtime ID, replaced timestamp or newer dispatch.
+        // No runtime Idle/Abort event or admission resolution is invented here.
+        try
+        {
+            if (result.Admission != SessionPromptResponseAdmission.Admitted && AskResponsePresentationPolicy.ShouldClearOptimisticRun(
+                revision, tab.PromptDispatchRevision, ownedStart, tab.ActiveRunStartedAt, tab.ActiveRunId))
+            {
+                tab.ActiveRunStartedAt = null;
+                _commandContext.SetSessionStatus(tab,
+                    result.Admission == SessionPromptResponseAdmission.Indeterminate
+                        ? SR.T("Ask response admission is unresolved. Resubmission and local cancellation are blocked; recovery is not available in this version.")
+                        : SR.T("This route did not submit the ask response. The ask is still pending; plugin actions are not undone."),
+                    false, StatusTone.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            result = result.WithDiagnostic(ex.Message);
+        }
+        return result;
+    }
+
     public SessionExecutionOptions AppendAdditionalDeveloperInstructions(
         SessionExecutionOptions options,
         string additionalDeveloperInstructions)
@@ -134,12 +171,17 @@ internal sealed class SessionPromptDispatchCoordinator
         OpenSessionState tab,
         PromptSubmission prompt,
         bool steer,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SessionPromptResponseDispatch? responseDispatch = null)
     {
         string? pendingSteerId = null;
         var renderedOptimisticPrompt = false;
         try
         {
+            if (responseDispatch is null)
+            {
+                tab.PromptDispatchRevision++;
+            }
             tab.ActiveRunStartedAt ??= DateTimeOffset.UtcNow;
             _commandContext.SetSessionStatus(tab, StatusVisualFormatter.BuildThinkingStatusText(), true, StatusTone.Info);
             var executionOptions = _executionOptionsFactory.BuildExecutionOptions(session, tab);
@@ -148,6 +190,10 @@ internal sealed class SessionPromptDispatchCoordinator
                 var processedPrompt = await _pluginHostBridge.ProcessPromptSubmittingAsync(session, tab, prompt, IsCodeAltaManagedProvider(executionOptions.ProviderId), cancellationToken);
                 if (processedPrompt is null)
                 {
+                    if (responseDispatch is not null)
+                    {
+                        return;
+                    }
                     tab.ActiveRunStartedAt = null;
                     _commandContext.SetSessionStatus(tab, SR.T("Prompt submission was handled or cancelled by a plugin."), false, StatusTone.Warning);
                     return;
@@ -168,6 +214,11 @@ internal sealed class SessionPromptDispatchCoordinator
                 var augmentation = await _pluginHostBridge.BuildAgentRunAugmentationAsync(session, tab, executionOptions, agentInput, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
                 {
+                    if (responseDispatch is not null)
+                    {
+                        // The phase policy retains this pre-invocation cancellation and its reason.
+                        throw new OperationCanceledException(augmentation.CancelReason);
+                    }
                     tab.ActiveRunStartedAt = null;
                     _commandContext.SetSessionStatus(tab, augmentation.CancelReason, false, StatusTone.Warning);
                     return;
@@ -191,8 +242,21 @@ internal sealed class SessionPromptDispatchCoordinator
                 renderedOptimisticPrompt = true;
                 tab.Timeline.RenderOptimisticUserPrompt(promptInput.NormalizedPromptText, imageReferences, DateTimeOffset.UtcNow);
 
-                var result = await _orchestrator.SubmitPromptAsync(CreateSubmitRequest(session, executionOptions, agentInput, prompt), cancellationToken);
-                runId = new AgentRunId(result.RunId ?? throw new InvalidOperationException("The orchestrator did not return a run id for the submitted prompt."));
+                var request = CreateSubmitRequest(session, executionOptions, agentInput, prompt);
+                if (responseDispatch is null)
+                {
+                    var result = await _orchestrator.SubmitPromptAsync(request, cancellationToken);
+                    runId = new AgentRunId(result.RunId ?? throw new InvalidOperationException("The orchestrator did not return a run id for the submitted prompt."));
+                }
+                else
+                {
+                    var result = await responseDispatch.InvokeAsync(() => _orchestrator.SubmitPromptAsync(request, cancellationToken));
+                    if (result.Admission != SessionPromptResponseAdmission.Admitted)
+                    {
+                        return;
+                    }
+                    runId = new AgentRunId(result.RunId ?? throw new InvalidOperationException("Admission evidence requires a run id."));
+                }
             }
 
             // Agent runtime sessions can complete and publish Idle before SendAsync returns.
@@ -206,7 +270,7 @@ internal sealed class SessionPromptDispatchCoordinator
             tab.HistoryLoaded = true;
             _commandContext.ApplyHeaderProjection();
         }
-        catch (NotSupportedException ex) when (steer)
+        catch (NotSupportedException ex) when (steer && responseDispatch is null)
         {
             if (renderedOptimisticPrompt)
             {
@@ -227,7 +291,7 @@ internal sealed class SessionPromptDispatchCoordinator
 
             CodeAltaApp.UiLogger.Debug(ex, $"Queued prompt after unsupported steering attempt for session {session.SessionId}");
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException ex) when (responseDispatch is null)
         {
             if (renderedOptimisticPrompt)
             {
@@ -245,7 +309,7 @@ internal sealed class SessionPromptDispatchCoordinator
             tab.ActiveRunStartedAt = null;
             _commandContext.SetSessionStatus(tab, SR.T("Prompt cancelled."), false, StatusTone.Warning);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (responseDispatch is null)
         {
             if (renderedOptimisticPrompt)
             {

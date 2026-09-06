@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using CodeAlta.Orchestration.Runtime.Prompts;
 
 namespace CodeAlta.LiveTool;
 
@@ -113,6 +114,12 @@ public sealed record AltaAskFileComment
 /// </summary>
 public sealed record AltaQueuedAsk
 {
+    /// <summary>Gets the immutable response attempt identity issued by the queue owner; null for unqueued presentation-only values.</summary>
+    public AltaAskResponseHandle? ResponseHandle { get; init; }
+
+    /// <summary>Gets the response ownership state at the time this snapshot was captured.</summary>
+    public AltaAskResponseState ResponseState { get; init; }
+
     /// <summary>Gets the generated ask id.</summary>
     public required string AskId { get; init; }
 
@@ -193,13 +200,23 @@ public interface IAltaAskService
     /// <exception cref="ArgumentException">The session id is empty or whitespace.</exception>
     IReadOnlyList<AltaQueuedAsk> GetPending(string sessionId);
 
-    /// <summary>Removes the pending head only when both session and ask ids match exactly (ordinal, without trimming).</summary>
+    /// <summary>Removes an unclaimed pending head only when both session and ask ids match exactly (ordinal, without trimming).</summary>
     /// <param name="sessionId">The session id.</param>
     /// <param name="askId">The expected head's ask id.</param>
-    /// <returns>An explicit removal outcome. Stale, wrong-session, and non-head keys leave pending state unchanged and do not notify.</returns>
+    /// <returns>An explicit removal outcome. Stale, wrong-session, non-head, submitting and indeterminate requests leave pending state unchanged and do not notify.</returns>
+    /// <remarks>Frontend response cancellation must use the generation-bound <see cref="TryCancelResponse"/> instead.</remarks>
     /// <exception cref="ArgumentNullException">Either id is null.</exception>
     /// <exception cref="ArgumentException">Either id is empty or whitespace.</exception>
     AltaAskRemovalResult TryRemoveHead(string sessionId, string askId);
+
+    /// <summary>Atomically claims a pending response generation, then dispatches and settles it outside queue ownership.</summary>
+    /// <remarks>Only positive admission removes the claimed head. Definite non-admission rotates the handle; uncertainty blocks replay. No execution lifetime, persistence or reconnect guarantee is provided.</remarks>
+    /// <exception cref="ArgumentNullException">The handle or callback is null.</exception>
+    Task<AltaAskResponseResult> RespondAsync(AltaAskResponseHandle handle, Func<Task<SessionPromptResponseResult>> dispatch);
+
+    /// <summary>Cancels only the current unclaimed generation. Stale, foreign, submitting and indeterminate handles are rejected.</summary>
+    /// <exception cref="ArgumentNullException">The handle is null.</exception>
+    AltaAskRemovalResult TryCancelResponse(AltaAskResponseHandle handle);
 }
 
 /// <summary>
@@ -224,10 +241,10 @@ public sealed class AltaAskQueueChangedEventArgs : EventArgs
 /// <summary>
 /// In-memory FIFO implementation of <see cref="IAltaAskService"/>.
 /// </summary>
-public sealed class AltaAskService : IAltaAskService
+public sealed partial class AltaAskService : IAltaAskService
 {
     private readonly object _gate = new();
-    private readonly Dictionary<string, Queue<AltaQueuedAsk>> _queues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Queue<PendingAsk>> _queues = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
     public event EventHandler<AltaAskQueueChangedEventArgs>? QueueChanged;
@@ -254,17 +271,18 @@ public sealed class AltaAskService : IAltaAskService
             Caller = caller,
             CreatedAt = DateTimeOffset.UtcNow,
         };
+        queued = queued with { ResponseHandle = new AltaAskResponseHandle(queued.SessionId, queued.AskId, 0) };
 
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!_queues.TryGetValue(queued.SessionId, out var queue))
             {
-                queue = new Queue<AltaQueuedAsk>();
+                queue = new Queue<PendingAsk>();
                 _queues.Add(queued.SessionId, queue);
             }
 
-            queue.Enqueue(queued);
+            queue.Enqueue(new PendingAsk(queued));
         }
 
         var errors = NotifyQueueChanged(queued.SessionId);
@@ -277,7 +295,7 @@ public sealed class AltaAskService : IAltaAskService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate)
         {
-            return _queues.TryGetValue(sessionId, out var queue) && queue.Count > 0 ? queue.Peek() : null;
+            return _queues.TryGetValue(sessionId, out var queue) && queue.Count > 0 ? queue.Peek().Snapshot : null;
         }
     }
 
@@ -287,7 +305,7 @@ public sealed class AltaAskService : IAltaAskService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate)
         {
-            return Array.AsReadOnly(_queues.TryGetValue(sessionId, out var queue) ? queue.ToArray() : []);
+            return Array.AsReadOnly(_queues.TryGetValue(sessionId, out var queue) ? queue.Select(static entry => entry.Snapshot).ToArray() : []);
         }
     }
 
@@ -299,16 +317,13 @@ public sealed class AltaAskService : IAltaAskService
         lock (_gate)
         {
             if (!_queues.TryGetValue(sessionId, out var queue) || queue.Count == 0
-                || !string.Equals(queue.Peek().AskId, askId, StringComparison.Ordinal))
+                || !string.Equals(queue.Peek().Snapshot.AskId, askId, StringComparison.Ordinal)
+                || queue.Peek().Snapshot.ResponseState != AltaAskResponseState.Pending)
             {
                 return new AltaAskRemovalResult { Accepted = false };
             }
 
-            queue.Dequeue();
-            if (queue.Count == 0)
-            {
-                _queues.Remove(sessionId);
-            }
+            RemoveHeadCore(sessionId);
         }
 
         return new AltaAskRemovalResult { Accepted = true, NotificationErrors = NotifyQueueChanged(sessionId) };

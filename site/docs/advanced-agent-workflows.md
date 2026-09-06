@@ -117,7 +117,13 @@ Before editing, ask me whether to update only website docs or both website and i
 
 After queuing an ask, the agent should stop and wait. CodeAlta presents the questions in the session UI and sends your answers back as the next prompt.
 
-Pending asks retain their queued questions and choices in per-session order, independently of whether that session has an open tab. A late submit/cancel callback cannot remove a different pending ask. These queues last only for the current application process; they are not restored after restart. If notification fails after an ask is queued, CodeAlta reports a warning without undoing the ask or changing the agent's instruction to wait. Answer submission still uses the normal prompt pathway, including plugin handling; queue removal is not a guarantee of model acceptance or safe automatic retry.
+Pending asks retain their queued questions and choices in per-session order, independently of whether that session has an open tab. Only one response attempt can own the current ask. While it is submitting, another response or local cancellation is blocked; callbacks from an older attempt cannot submit or cancel a new attempt.
+
+CodeAlta consumes the ask only after positive evidence that the runtime admitted its response. This acknowledgement may arrive after the provider finishes; it is not an early receipt or a guarantee of provider success. If a plugin intercepts the response or preparation fails before runtime submission, the ask stays pending with a fresh attempt. Plugin actions are not undone or automatically replayed.
+
+If submission fails or is canceled after entering the runtime without positive evidence, the status reports **unresolved admission**. Resubmission and local cancellation are blocked to avoid sending the answer twice. The unresolved head also blocks later asks in that session. **There is no recovery or dismiss action for this state in this version.** Do not assume the response was unsent or automatically retry it in the normal composer.
+
+These queues and response states last only for the current application process; they are not restored after restart. Closing presentation does not cancel an accepted response. Notification failures warn without undoing committed queue changes or changing the agent's instruction to wait. Execution lifetime and reconnect recovery remain separate limitations.
 
 ### Delegate read-only research
 

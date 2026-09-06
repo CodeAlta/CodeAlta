@@ -2,10 +2,10 @@ using CodeAlta.Tui.App.Events;
 using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
+using CodeAlta.Orchestration.Runtime.Prompts;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.ViewModels;
 using CodeAlta.Tui.Views;
-using XenoAtom.Logging;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using CodeAlta.Tui.Presentation.Styling;
@@ -28,6 +28,7 @@ internal sealed class AskModeCoordinator : IDisposable
     private readonly IDisposable _subscription;
     private string? _activeAskId;
     private string? _activeSessionId;
+    private AltaAskResponseHandle? _activeResponseHandle;
 
     public AskModeCoordinator(
         TextFileCodec textFiles,
@@ -61,19 +62,25 @@ internal sealed class AskModeCoordinator : IDisposable
     internal bool TryPresentPendingAsk(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var ask = _askService.Peek(sessionId);
+        if (ask is { ResponseState: not AltaAskResponseState.Pending })
+        {
+            ReportResponseState(sessionId, ask.ResponseState);
+            return false;
+        }
         if (_activeAskId is not null)
         {
             return false;
         }
 
-        var ask = _askService.Peek(sessionId);
-        if (ask is null || !TryGetIdleSession(sessionId, out var session, out var tab))
+        if (ask?.ResponseHandle is null || !TryGetIdleSession(sessionId, out var session, out var tab))
         {
             return false;
         }
 
         _activeAskId = ask.AskId;
         _activeSessionId = sessionId;
+        _activeResponseHandle = ask.ResponseHandle;
         try
         {
             _sessionState.OpenSession(sessionId);
@@ -149,6 +156,7 @@ internal sealed class AskModeCoordinator : IDisposable
                 form.Tabs,
                 () =>
                 {
+                    if (!IsCurrentPending(ask)) return;
                     if (!fileReview.TrySave(out var error))
                     {
                         _setStatus(SR.T("Failed to save attached ask file: {0}", error), false, StatusTone.Error);
@@ -166,36 +174,74 @@ internal sealed class AskModeCoordinator : IDisposable
 
     private void ObserveSubmit(AltaQueuedAsk ask, SessionViewDescriptor session, OpenSessionState tab, IReadOnlyList<AltaAskAnswer> answers, AskFileReviewView? fileReview)
         => _ = UiTaskDiagnostics.ObserveAsync(
-            () => SubmitAsync(ask, session, tab, answers, fileReview?.CreateReviewSnapshot()),
+            () => SubmitAsync(ask, session, tab, answers, fileReview),
             SR.T("submit ask response"),
             _setStatus);
 
-    private async Task SubmitAsync(AltaQueuedAsk ask, SessionViewDescriptor session, OpenSessionState tab, IReadOnlyList<AltaAskAnswer> answers, AltaAskFileReview? fileReview)
+    private async Task SubmitAsync(AltaQueuedAsk ask, SessionViewDescriptor session, OpenSessionState tab, IReadOnlyList<AltaAskAnswer> answers, AskFileReviewView? fileReview)
     {
         if (!IsActive(ask))
         {
             return;
         }
 
-        var markdown = AltaAskAnswerMarkdownFormatter.Format(ask.Request, answers, fileReview);
-        try
+        var result = await _askService.RespondAsync(ask.ResponseHandle!, async () =>
         {
-            RestoreNormalProjection(ask.SessionId);
-            await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId);
-        }
-        catch (Exception ex)
+            string markdown;
+            try
+            {
+                markdown = AltaAskAnswerMarkdownFormatter.Format(ask.Request, answers, fileReview?.CreateReviewSnapshot());
+                RestoreNormalProjection(ask.SessionId);
+                ReportResponseState(ask.SessionId, AltaAskResponseState.Submitting);
+            }
+            catch (Exception ex)
+            {
+                return SessionPromptResponseResult.NotAdmitted(ex.Message);
+            }
+            return await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId);
+        });
+
+        // The neutral owner has already settled the claim. UI failures cannot revoke admission
+        // or release uncertain ownership, and old generations cannot reconcile a newer form.
+        if (!result.Claimed)
         {
-            CodeAltaApp.UiLogger.Error(ex, $"Failed to submit ask response for session {ask.SessionId}");
-            _setStatus(SR.T("Failed to submit ask response: {0}", ex.Message), false, StatusTone.Error);
-            ReconcilePresentation(ask);
+            ReconcileRejectedPresentation(ask);
             return;
         }
-
-        // Existing dispatch completion is not proof of runtime admission. Only remove this exact pending head.
-        // Keep post-removal presentation/diagnostics outside the send-failure handler: removal is already committed.
-        var removal = _askService.TryRemoveHead(ask.SessionId, ask.AskId);
-        ReconcilePresentation(ask);
-        ReportNotificationErrors(removal);
+        if (!IsActive(ask))
+        {
+            return;
+        }
+        try
+        {
+            if (result.DispatchResult!.Admission == SessionPromptResponseAdmission.DefinitelyNotAdmittedByThisRoute)
+            {
+                tab.Timeline.RollbackOptimisticUserPrompt();
+            }
+        }
+        finally
+        {
+            ReconcilePresentation(ask);
+        }
+        var message = result.DispatchResult!.Admission switch
+        {
+            SessionPromptResponseAdmission.DefinitelyNotAdmittedByThisRoute => SR.T("This route did not submit the ask response. The ask is still pending; plugin actions are not undone."),
+            SessionPromptResponseAdmission.Indeterminate => SR.T("Ask response admission is unresolved. Resubmission and local cancellation are blocked; recovery is not available in this version."),
+            _ => SR.T("Ask response admission confirmed. This does not indicate provider success."),
+        };
+        if (result.DispatchResult.Diagnostic is { } diagnostic)
+        {
+            message += " " + SR.T("Additional ask response feedback: {0}", diagnostic);
+        }
+        if (result.NotificationErrors.Count > 0)
+        {
+            message += " " + SR.T("Ask queue updated, but notification failed: {0}", string.Join("; ", result.NotificationErrors));
+        }
+        if (AskResponsePresentationPolicy.ShouldReportBlockedState(ask.SessionId, _sessionState.GetSelectedSession()?.SessionId, _activeSessionId))
+        {
+            _setStatus(message, false, result.DispatchResult.Admission == SessionPromptResponseAdmission.Admitted
+                && result.DispatchResult.Diagnostic is null && result.NotificationErrors.Count == 0 ? StatusTone.Info : StatusTone.Warning);
+        }
     }
 
     private void HandleCancelRequest(AltaQueuedAsk ask, AskQuestionFormView form, AskFileReviewView? fileReview)
@@ -217,6 +263,7 @@ internal sealed class AskModeCoordinator : IDisposable
                 form.Tabs,
                 () =>
                 {
+                    if (!IsCurrentPending(ask)) return;
                     if (!fileReview.TrySave(out var error))
                     {
                         _setStatus(SR.T("Failed to save attached ask file: {0}", error), false, StatusTone.Error);
@@ -239,14 +286,22 @@ internal sealed class AskModeCoordinator : IDisposable
             return;
         }
 
-        var removal = _askService.TryRemoveHead(ask.SessionId, ask.AskId);
+        var removal = _askService.TryCancelResponse(ask.ResponseHandle!);
         if (removal.Accepted)
         {
-            _setStatus(SR.T("Ask canceled; no response was sent."), false, StatusTone.Warning);
+            _setStatus(SR.T("Ask canceled locally."), false, StatusTone.Warning);
         }
-
+        else
+        {
+            ReconcileRejectedPresentation(ask);
+            if (_askService.Peek(ask.SessionId) is { } pending)
+            {
+                ReportResponseState(ask.SessionId, pending.ResponseState);
+            }
+            return;
+        }
         ReconcilePresentation(ask);
-        ReportNotificationErrors(removal);
+        ReportNotificationErrors(removal.NotificationErrors);
     }
 
     private void ReconcilePresentation(AltaQueuedAsk ask)
@@ -254,17 +309,48 @@ internal sealed class AskModeCoordinator : IDisposable
         // A late submit/dialog callback must not tear down a newer ask's presentation either.
         if (IsActive(ask))
         {
-            RestoreNormalProjection(ask.SessionId);
-            ClearActive();
+            try
+            {
+                RestoreNormalProjection(ask.SessionId);
+            }
+            finally
+            {
+                ClearActive();
+            }
             _ = TryPresentPendingAsk(ask.SessionId);
         }
     }
 
-    private void ReportNotificationErrors(AltaAskRemovalResult removal)
+    private void ReconcileRejectedPresentation(AltaQueuedAsk ask)
     {
-        if (removal.NotificationErrors.Count > 0)
+        if (ask.ResponseHandle is { } attempted && AskResponsePresentationPolicy.ShouldReconcileRejected(
+            _activeResponseHandle, attempted, _askService.Peek(ask.SessionId)?.ResponseHandle))
         {
-            _setStatus(SR.T("Ask queue updated, but notification failed: {0}", string.Join("; ", removal.NotificationErrors)), false, StatusTone.Warning);
+            ReconcilePresentation(ask);
+        }
+    }
+
+    private void ReportNotificationErrors(IReadOnlyList<string> errors)
+    {
+        if (errors.Count > 0)
+        {
+            _setStatus(SR.T("Ask queue updated, but notification failed: {0}", string.Join("; ", errors)), false, StatusTone.Warning);
+        }
+    }
+
+    private void ReportResponseState(string sessionId, AltaAskResponseState state)
+    {
+        if (!AskResponsePresentationPolicy.ShouldReportBlockedState(sessionId, _sessionState.GetSelectedSession()?.SessionId, _activeSessionId))
+        {
+            return;
+        }
+        if (state == AltaAskResponseState.Submitting)
+        {
+            _setStatus(SR.T("Ask response submission is in progress. Another response or local cancellation is blocked."), false, StatusTone.Info);
+        }
+        else if (state == AltaAskResponseState.Indeterminate)
+        {
+            _setStatus(SR.T("Ask response admission is unresolved. Resubmission and local cancellation are blocked; recovery is not available in this version."), false, StatusTone.Warning);
         }
     }
 
@@ -414,7 +500,19 @@ internal sealed class AskModeCoordinator : IDisposable
     }
 
     private bool IsActive(AltaQueuedAsk ask)
-        => string.Equals(_activeAskId, ask.AskId, StringComparison.Ordinal) && string.Equals(_activeSessionId, ask.SessionId, StringComparison.Ordinal);
+        => string.Equals(_activeAskId, ask.AskId, StringComparison.Ordinal) && string.Equals(_activeSessionId, ask.SessionId, StringComparison.Ordinal)
+            && ReferenceEquals(_activeResponseHandle, ask.ResponseHandle);
+
+    private bool IsCurrentPending(AltaQueuedAsk ask)
+    {
+        if (IsActive(ask) && _askService.Peek(ask.SessionId) is { ResponseState: AltaAskResponseState.Pending } current
+            && ReferenceEquals(current.ResponseHandle, ask.ResponseHandle))
+        {
+            return true;
+        }
+        ReconcileRejectedPresentation(ask);
+        return false;
+    }
 
     private void RestoreNormalProjection(string sessionId)
         => _workspaceViewModel.ExitAskMode(sessionId);
@@ -423,6 +521,7 @@ internal sealed class AskModeCoordinator : IDisposable
     {
         _activeAskId = null;
         _activeSessionId = null;
+        _activeResponseHandle = null;
     }
 
 }

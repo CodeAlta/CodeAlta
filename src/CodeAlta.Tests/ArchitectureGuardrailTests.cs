@@ -14,16 +14,45 @@ public sealed class ArchitectureGuardrailTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    public void AskMode_RemovesOnlyCapturedHeadAndReconcilesStalePresentation()
+    public void AskMode_UsesOwnerSettlementAndGenerationBoundCancellation()
     {
         var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "AskModeCoordinator.cs"));
         Assert.IsFalse(source.Contains("_askService.Dequeue(", StringComparison.Ordinal));
-        Assert.AreEqual(2, Regex.Matches(source, @"_askService\.TryRemoveHead\(ask\.SessionId, ask\.AskId\)").Count);
+        Assert.IsFalse(source.Contains("_askService.TryRemoveHead(", StringComparison.Ordinal));
+        StringAssert.Contains(source, "await _askService.RespondAsync(ask.ResponseHandle!, async () =>");
+        StringAssert.Contains(source, "_askService.TryCancelResponse(ask.ResponseHandle!)");
+        Assert.IsTrue(source.IndexOf("await _askService.RespondAsync", StringComparison.Ordinal)
+            < source.IndexOf("AltaAskAnswerMarkdownFormatter.Format", StringComparison.Ordinal));
         StringAssert.Contains(source, "if (removal.Accepted)");
         StringAssert.Contains(source, "private void ReconcilePresentation(AltaQueuedAsk ask)");
         StringAssert.Contains(source, "if (IsActive(ask))");
         StringAssert.Contains(source, "await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId)");
-        StringAssert.Contains(source, "ReportNotificationErrors(removal)");
+        StringAssert.Contains(source, "ReportNotificationErrors(removal.NotificationErrors)");
+        StringAssert.Contains(source, "ReferenceEquals(_activeResponseHandle, ask.ResponseHandle)");
+        StringAssert.Contains(source, "ReferenceEquals(current.ResponseHandle, ask.ResponseHandle)");
+        StringAssert.Contains(source, "AskResponsePresentationPolicy.ShouldReconcileRejected(");
+        StringAssert.Contains(source, "AskResponsePresentationPolicy.ShouldReportBlockedState(");
+        // Rejected submit, rejected cancel, and save-dialog precheck all use the same narrow decision.
+        Assert.AreEqual(3, Regex.Matches(source, @"ReconcileRejectedPresentation\(ask\);").Count);
+        Assert.IsFalse(source.Contains("no response was sent", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void AskResponseDispatch_UsesTestedPhasePolicyAndDoesNotRestoreUncertainInput()
+    {
+        var root = GetCodeAltaSourceRoot();
+        var dispatch = File.ReadAllText(Path.Combine(root, "App", "SessionPromptDispatchCoordinator.cs"));
+        var commands = File.ReadAllText(Path.Combine(root, "App", "SessionCommandCoordinator.cs"));
+        StringAssert.Contains(commands, "return await _promptDispatchCoordinator.DispatchAskResponseAsync(");
+        StringAssert.Contains(dispatch, "SessionPromptResponseDispatch.RunAsync(attempt =>");
+        StringAssert.Contains(dispatch, "await responseDispatch.InvokeAsync(() => _orchestrator.SubmitPromptAsync(request, cancellationToken))");
+        StringAssert.Contains(dispatch, "if (result.Admission != SessionPromptResponseAdmission.Admitted)");
+        StringAssert.Contains(dispatch, "AskResponsePresentationPolicy.ShouldClearOptimisticRun(");
+        StringAssert.Contains(dispatch, "catch (NotSupportedException ex) when (steer && responseDispatch is null)");
+        StringAssert.Contains(dispatch, "catch (OperationCanceledException ex) when (responseDispatch is null)");
+        StringAssert.Contains(dispatch, "catch (Exception ex) when (responseDispatch is null)");
+        Assert.IsTrue(dispatch.IndexOf("await responseDispatch.InvokeAsync", StringComparison.Ordinal)
+            < dispatch.IndexOf("_commandContext.ApplyHeaderProjection();", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -734,7 +763,7 @@ public sealed class ArchitectureGuardrailTests
             "App/ShellSessionStateCoordinator.cs:556:_ = PersistViewStateAsync();",
             "App/ShellSessionStateCoordinator.cs:606:_ = PersistViewStateAsync();",
             "App/SidebarCoordinator.cs:312:_ = CommitInlineRenameAsync(row, projectId, displayName, previousTitle);",
-            "App/SessionPromptDispatchCoordinator.cs:181:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
+            "App/SessionPromptDispatchCoordinator.cs:232:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
             "App/SessionHistoryCoordinator.cs:103:await Task.Run(",
             "App/SessionHistoryCoordinator.cs:493:var loadTask = Task.Run(() => LoadCoreAsync(session, tab, cancellationToken));",
             "App/SessionRuntimeEventCoordinator.cs:281:Task.Run(async () =>",

@@ -109,7 +109,7 @@ internal sealed class PluginHostBridge
             return prompt;
         }
 
-        return PromptSubmission.Create(replacementText, replacementImages);
+        return PromptSubmission.Create(replacementText, replacementImages, prompt.AskId);
     }
 
     private static IReadOnlyList<PromptImageAttachment> ResolveReplacementPromptImages(
