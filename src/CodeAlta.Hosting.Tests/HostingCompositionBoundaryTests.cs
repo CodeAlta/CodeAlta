@@ -390,8 +390,8 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(tui.Contains("DeleteCodexSubscriptionCredentialCoreAsync", StringComparison.Ordinal));
         Assert.IsFalse(tui.Contains("CodexSubscriptionDeleteCredentialOperation", StringComparison.Ordinal));
 
-        // The unchanged shared manager helper is still required by browser login, not duplication
-        // of deletion orchestration. Do not forbid all Codex manager construction in the TUI.
+        // Preserve the original shared manager helper even though browser now has a mandatory factory.
+        // Do not forbid all Codex manager construction in the TUI during browser Phase 1.
         var expectedHelper = "    private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)\n"
             + "    {\n"
             + "        if (!string.Equals(definition.ProviderType, \"codex\", StringComparison.Ordinal))\n"
@@ -410,7 +410,21 @@ public sealed class HostingCompositionBoundaryTests
             Assert.IsTrue(entryStart >= 0);
             var entryEnd = tui.IndexOf("\n    }", entryStart, StringComparison.Ordinal);
             Assert.IsTrue(entryEnd > entryStart);
-            StringAssert.Contains(tui[entryStart..entryEnd], "var manager = CreateCodexSubscriptionLoginManager(definition);");
+            StringAssert.Contains(tui[entryStart..entryEnd], "await LoginCodexBrowserCoreAsync(\n"
+                + "            definition,\n"
+                + "            GetProviderStateRootPath,\n"
+                + "            static () => SR.T(\"Select a Codex provider first.\"),\n"
+                + "            authorizeUri => ReportCodexBrowserAuthorization(authorizeUri, reportStatus),\n"
+                + "            TryOpenBrowser,\n"
+                + "            static () => SR.T(\"ChatGPT browser login completed\"),\n"
+                + "            (prefix, rawAccountId) => result = FormatCodexBrowserLoginResult(prefix, rawAccountId),\n"
+                + "            static (providerDefinition, getStateRootPath) =>\n"
+                + "            {\n"
+                + "                var manager = new OpenAICodexSubscriptionLoginManager(\n"
+                + "                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),\n"
+                + "                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n"
+                + "                    providerDefinition.ProviderKey);");
+            Assert.IsFalse(tui[entryStart..entryEnd].Contains("CreateCodexSubscriptionLoginManager(definition)", StringComparison.Ordinal));
             Assert.IsFalse(tui[entryStart..entryEnd].Contains("ConfiguredCodexAuthentication", StringComparison.Ordinal));
         }
 
@@ -744,16 +758,38 @@ public sealed class HostingCompositionBoundaryTests
                 ArgumentNullException.ThrowIfNull(definition);
                 ArgumentNullException.ThrowIfNull(reportStatus);
 
-                var manager = CreateCodexSubscriptionLoginManager(definition);
-                var login = manager.BeginBrowserLogin(definition.AccountId);
-                var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, cancellationToken).AsTask();
-                reportStatus(SR.T("Open ChatGPT login in your browser: {0}", login.AuthorizeUri));
-                TryOpenBrowser(login.AuthorizeUri);
-                var credential = await waitForCallbackTask;
-                return new ProviderTestResult(
-                    true,
-                    FormatCodexCredentialMessage(SR.T("ChatGPT browser login completed"), credential),
-                    0);
+                ProviderTestResult result = default;
+                await LoginCodexBrowserCoreAsync(
+                    definition,
+                    GetProviderStateRootPath,
+                    static () => SR.T("Select a Codex provider first."),
+                    authorizeUri => ReportCodexBrowserAuthorization(authorizeUri, reportStatus),
+                    TryOpenBrowser,
+                    static () => SR.T("ChatGPT browser login completed"),
+                    (prefix, rawAccountId) => result = FormatCodexBrowserLoginResult(prefix, rawAccountId),
+                    static (providerDefinition, getStateRootPath) =>
+                    {
+                        var manager = new OpenAICodexSubscriptionLoginManager(
+                            new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                            providerDefinition.ProviderKey);
+                        return async (reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, token) =>
+                        {
+                            var login = manager.BeginBrowserLogin(providerDefinition.AccountId);
+                            var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
+                            reportAuthorization(login.AuthorizeUri);
+                            openBrowser(login.AuthorizeUri);
+                            var credential = await waitForCallbackTask;
+                            var prefix = formatCompletionPrefix();
+                            // Approved browser-specific post-prefix snapshot: the nonblank branch now reads once,
+                            // not twice. The fresh sealed credential has a plain property and is saved before return.
+                            // This is not arbitrary-property or task identity/stack/settlement equivalence.
+                            var rawAccountId = credential.AccountId;
+                            onCompleted(prefix, rawAccountId);
+                        };
+                    },
+                    cancellationToken);
+                return result;
             }
         """.Replace("\r\n", "\n");
         Assert.AreEqual(expectedBrowser, ReadMethod(tui, "    public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync("));
@@ -805,6 +841,160 @@ public sealed class HostingCompositionBoundaryTests
             var end = source.IndexOf("\n    }", start, StringComparison.Ordinal);
             Assert.IsTrue(end > start);
             return source[start..(end + "\n    }".Length)];
+        }
+    }
+
+    [TestMethod]
+    public void CodexBrowserLogin_TuiMandatoryFactoryPreservesExactSequenceAndProtectedBoundaries()
+    {
+        // Four named checkout sources only. No concrete Begin/listener/protocol execution or qualification.
+        // The preceding device guard also compares the complete browser entry and original shared helpers.
+        var root = SourceRoot();
+        var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
+        var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredCodexAuthentication.cs")).Replace("\r\n", "\n");
+        var adapter = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "IModelProviderDialogService.cs")).Replace("\r\n", "\n");
+        var dialog = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "Views", "ModelProvidersDialog.cs")).Replace("\r\n", "\n");
+        var browser = ReadMethod(tui, "    public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync(");
+        StringAssert.Contains(browser, "    public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync(\n"
+            + "        CodeAltaProviderDocument definition,\n"
+            + "        Action<string> reportStatus,\n"
+            + "        CancellationToken cancellationToken = default)\n"
+            + "    {\n"
+            + "        ArgumentNullException.ThrowIfNull(definition);\n"
+            + "        ArgumentNullException.ThrowIfNull(reportStatus);");
+        StringAssert.Contains(browser, "            cancellationToken);\n        return result;\n    }");
+
+        // Scope the factory inside BROWSER, not an account/deletion/device or shared helper region.
+        var factoryStart = browser.IndexOf("            static (providerDefinition, getStateRootPath) =>", StringComparison.Ordinal);
+        Assert.IsTrue(factoryStart >= 0);
+        var factoryEnd = browser.IndexOf("\n            },", factoryStart, StringComparison.Ordinal);
+        Assert.IsTrue(factoryEnd > factoryStart);
+        var factory = browser[factoryStart..factoryEnd];
+        var expectedFactory = "                var manager = new OpenAICodexSubscriptionLoginManager(\n"
+            + "                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),\n"
+            + "                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n"
+            + "                    providerDefinition.ProviderKey);\n"
+            + "                return async (reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, token) =>\n"
+            + "                {\n"
+            + "                    var login = manager.BeginBrowserLogin(providerDefinition.AccountId);\n"
+            + "                    var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();\n"
+            + "                    reportAuthorization(login.AuthorizeUri);\n"
+            + "                    openBrowser(login.AuthorizeUri);\n"
+            + "                    var credential = await waitForCallbackTask;\n"
+            + "                    var prefix = formatCompletionPrefix();";
+        StringAssert.Contains(factory, expectedFactory);
+        Assert.AreEqual(2, factory.Split("login.AuthorizeUri", StringSplitOptions.None).Length - 1);
+        Assert.AreEqual(1, factory.Split("providerDefinition.AccountId", StringSplitOptions.None).Length - 1);
+        Assert.AreEqual(1, factory.Split("providerDefinition.ProviderKey", StringSplitOptions.None).Length - 1);
+        var prefix = factory.IndexOf("var prefix = formatCompletionPrefix();", StringComparison.Ordinal);
+        var projection = factory.IndexOf("var rawAccountId = credential.AccountId;", StringComparison.Ordinal);
+        var completion = factory.IndexOf("onCompleted(prefix, rawAccountId);", StringComparison.Ordinal);
+        Assert.IsTrue(prefix >= 0 && projection > prefix && completion > projection);
+        Assert.IsFalse(factory[prefix..completion].Contains("await ", StringComparison.Ordinal));
+        Assert.AreEqual(1, factory.Split("credential.AccountId", StringSplitOptions.None).Length - 1);
+        StringAssert.Contains(factory, "var rawAccountId = credential.AccountId;\n                    onCompleted(prefix, rawAccountId);\n                };");
+
+        var core = ReadMethod(tui, "    internal static async Task LoginCodexBrowserCoreAsync(");
+        var expectedCore = """
+            internal static async Task LoginCodexBrowserCoreAsync(
+                CodeAltaProviderDocument definition,
+                Func<string> getStateRootPath,
+                Func<string> formatInvalidProvider,
+                Action<Uri> reportAuthorization,
+                Action<Uri> openBrowser,
+                Func<string> formatCompletionPrefix,
+                Action<string, string?> onCompleted,
+                Func<CodeAltaProviderDocument, Func<string>, CodexBrowserLoginOperation> createOperation,
+                CancellationToken cancellationToken)
+            {
+                ArgumentNullException.ThrowIfNull(definition);
+                ArgumentNullException.ThrowIfNull(getStateRootPath);
+                ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+                ArgumentNullException.ThrowIfNull(reportAuthorization);
+                ArgumentNullException.ThrowIfNull(openBrowser);
+                ArgumentNullException.ThrowIfNull(formatCompletionPrefix);
+                ArgumentNullException.ThrowIfNull(onCompleted);
+                ArgumentNullException.ThrowIfNull(createOperation);
+
+                if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(formatInvalidProvider());
+                }
+
+                var operation = createOperation(definition, getStateRootPath);
+                await operation(reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, cancellationToken);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedCore, core);
+        StringAssert.Contains(tui, "internal delegate ValueTask CodexBrowserLoginOperation(\n    Action<Uri> reportAuthorization,\n    Action<Uri> openBrowser,\n    Func<string> formatCompletionPrefix,\n    Action<string, string?> onCompleted,\n    CancellationToken cancellationToken);");
+        StringAssert.Contains(tui, "    internal static void ReportCodexBrowserAuthorization(Uri authorizeUri, Action<string> reportStatus)\n        => reportStatus(SR.T(\"Open ChatGPT login in your browser: {0}\", authorizeUri));");
+        var expectedCompletion = """
+            internal static ProviderTestResult FormatCodexBrowserLoginResult(string prefix, string? rawAccountId)
+            {
+                var account = string.IsNullOrWhiteSpace(rawAccountId) ? SR.T("account/workspace unknown") : rawAccountId;
+                return new ProviderTestResult(true, SR.T("{0} · account/workspace: {1}.", prefix, account), 0);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedCompletion, ReadMethod(tui, "    internal static ProviderTestResult FormatCodexBrowserLoginResult("));
+        StringAssert.Contains(tui, "    private string GetProviderStateRootPath()\n        => _ownedServices?.CatalogOptions.GlobalRoot\n           ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), \".alta\");");
+        foreach (var forbidden in new[]
+        {
+            "ResolveAccountId", "AccountLabel", "CodexAccountMetadata", "AuthSource", "Enabled", "new Uri(",
+            "ConfigureAwait(", "Task.Run(", "ThrowIfCancellationRequested(", "Dispose(", "DisposeAsync(",
+            "catch", "finally", "WhenAll(", "WaitAsync(", "Pkce", "login.State", "HttpListener", "ToString(",
+        })
+        {
+            Assert.IsFalse(browser.Contains(forbidden, StringComparison.Ordinal));
+            Assert.IsFalse(core.Contains(forbidden, StringComparison.Ordinal));
+        }
+        Assert.IsFalse(browser.Contains("ConfiguredCodexAuthentication", StringComparison.Ordinal));
+        foreach (var absent in new[] { "LoginWithBrowserAsync", "LoginCodexBrowserCoreAsync", "CodexBrowserLoginOperation", "BeginBrowserLogin", "WaitForBrowserCallbackAsync" })
+        {
+            Assert.IsFalse(source.Contains(absent, StringComparison.Ordinal));
+        }
+
+        var expectedAdapter = """
+            public Task<ProviderTestResult> LoginWithBrowserAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
+                => definition.ProviderType switch
+                {
+                    "copilot" => _providerUi.LoginCopilotDirectWithBrowserAsync(definition, reportStatus, cancellationToken),
+                    "xai" => _providerUi.LoginXaiDirectWithBrowserAsync(definition, reportStatus, cancellationToken),
+                    _ => _providerUi.LoginCodexSubscriptionWithBrowserAsync(definition, reportStatus, cancellationToken),
+                };
+        """.Replace("\r\n", "\n");
+        StringAssert.Contains(adapter, expectedAdapter);
+        StringAssert.Contains(dialog, "                CreateCancelableProviderActionButton(\n                    item,\n                    SR.T(\"Browser Login\"),\n                    SR.T(\"Cancel Browser Login\"),\n                    ProviderDialogOperationKind.CodexBrowserLogin,\n                    SR.T(\"start ChatGPT browser login\"),\n                    SR.T(\"Starting ChatGPT browser login...\"),\n                    _modelProviders.LoginWithBrowserAsync),");
+        StringAssert.Contains(dialog, "                    if (IsActiveOperation(operationKind))\n                    {\n                        CancelActiveOperation();\n                        return;\n                    }");
+        StringAssert.Contains(dialog, "                        operationKind,\n                        canCancel: true,\n                        actionAsync);");
+        // Callback return means queued dispatcher work, not that rendering or the route has settled.
+        StringAssert.Contains(dialog, "        QueueBackgroundOperation(\n            cancellationToken => actionAsync(\n                definition,\n                message => _ = _dialog.Dispatcher.InvokeAsync(\n                    () =>\n                    {\n                        CaptureActiveLoginDetails(message);\n                        SetStatus($\"[primary]{AnsiMarkup.Escape(message)}[/]\");\n                    }),\n                cancellationToken),");
+        var expectedOpener = """
+            private static void TryOpenBrowser(Uri uri)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = uri.ToString(),
+                        UseShellExecute = true,
+                    });
+                }
+                catch (Exception)
+                {
+                    // Headless terminals can use the reported authorization URL instead.
+                }
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedOpener, ReadMethod(tui, "    private static void TryOpenBrowser("));
+
+        static string ReadMethod(string text, string signature)
+        {
+            var start = text.IndexOf(signature, StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            Assert.AreEqual(-1, text.IndexOf(signature, start + signature.Length, StringComparison.Ordinal));
+            var end = text.IndexOf("\n    }", start, StringComparison.Ordinal);
+            Assert.IsTrue(end > start);
+            return text[start..(end + "\n    }".Length)];
         }
     }
 
