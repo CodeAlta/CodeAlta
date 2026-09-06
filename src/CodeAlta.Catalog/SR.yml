@@ -1,5 +1,35 @@
 # CodeAlta string resources. English source text is the YAML key.
 # Keep language values as double-quoted YAML strings.
+"Notification failed ({0} observer(s)): {1}":
+  de: "Benachrichtigung fehlgeschlagen ({0} Beobachter): {1}"
+  es: "La notificación falló ({0} observadores): {1}"
+  fr: "Échec de la notification ({0} observateurs) : {1}"
+  ja: "通知に失敗しました（{0} 件のオブザーバー）: {1}"
+  zh: "通知失败（{0} 个观察者）：{1}"
+"Diagnostic messages were shortened or omitted.":
+  de: "Diagnosemeldungen wurden gekürzt oder ausgelassen."
+  es: "Los mensajes de diagnóstico se acortaron u omitieron."
+  fr: "Des messages de diagnostic ont été raccourcis ou omis."
+  ja: "診断メッセージは短縮または省略されました。"
+  zh: "诊断消息已缩短或省略。"
+"Refresh failed: {0}":
+  de: "Aktualisierung fehlgeschlagen: {0}"
+  es: "La actualización falló: {0}"
+  fr: "Échec de l’actualisation : {0}"
+  ja: "表示の更新に失敗しました: {0}"
+  zh: "刷新失败：{0}"
+"Error message unavailable.":
+  de: "Fehlermeldung nicht verfügbar."
+  es: "Mensaje de error no disponible."
+  fr: "Message d’erreur indisponible."
+  ja: "エラーメッセージを取得できません。"
+  zh: "错误消息不可用。"
+"Latest retained notification failure: reminder {0}, change {1}, firing count {2}. {3}":
+  de: "Letzter gespeicherter Benachrichtigungsfehler: Erinnerung {0}, Änderung {1}, Auslösungen {2}. {3}"
+  es: "Último fallo de notificación conservado: recordatorio {0}, cambio {1}, envíos {2}. {3}"
+  fr: "Dernier échec de notification conservé : rappel {0}, modification {1}, déclenchements {2}. {3}"
+  ja: "保持されている最新の通知失敗: リマインダー {0}、変更 {1}、発火回数 {2}。{3}"
+  zh: "最近保留的通知失败：提醒 {0}，变更 {1}，触发次数 {2}。{3}"
 "Unable to load or create config file: {0}":
   de: "Konfigurationsdatei kann nicht geladen oder erstellt werden: {0}"
   es: "No se puede cargar o crear el archivo de configuración: {0}"

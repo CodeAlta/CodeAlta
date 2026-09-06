@@ -8,6 +8,269 @@ namespace CodeAlta.Tests;
 public sealed class AltaReminderServiceTests
 {
     [TestMethod]
+    public void ObserverFailure_DoesNotSkipLaterObserver()
+    {
+        using var fixture = new ReminderFixture();
+        var calls = 0;
+        fixture.Subscribe((_, _) => throw new InvalidOperationException("projection failed"));
+        fixture.Subscribe((_, _) => calls++);
+
+        fixture.Create();
+
+        Assert.AreEqual(1, fixture.Service.List(null, true).Count);
+        Assert.AreEqual(1, calls);
+    }
+
+    [TestMethod]
+    [DataRow("create")]
+    [DataRow("edit")]
+    [DataRow("delete")]
+    public void ObserverCancellation_DoesNotFailCommittedMutation(string operation)
+    {
+        using var fixture = new ReminderFixture();
+        var reminder = operation == "create" ? null : fixture.Create();
+        fixture.Subscribe((_, _) => throw new OperationCanceledException("observer cancellation"));
+        Exception? failure = null;
+        try
+        {
+            switch (operation)
+            {
+                case "create": fixture.Create(); break;
+                case "edit": fixture.Service.TryUpdateContent(reminder!.ReminderId, "committed edit", out _); break;
+                case "delete": fixture.Service.TryDelete(reminder!.ReminderId, out _); break;
+            }
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        if (operation == "delete")
+        {
+            Assert.AreEqual(0, fixture.Service.List(null, true).Count);
+        }
+        else
+        {
+            Assert.AreEqual(operation == "edit" ? "committed edit" : "original text", fixture.Snapshot().ContentPreview);
+        }
+
+        Assert.IsNull(failure, "Observer cancellation must not fail an already committed mutation.");
+    }
+
+    [TestMethod]
+    public async Task ObserverCancellation_AfterFiringDoesNotStopRepeat()
+    {
+        using var fixture = new ReminderFixture();
+        fixture.Create(repeatCount: 2);
+        await fixture.Clock.NextTimerAsync();
+        var firstFinished = fixture.WatchFiredCount(1);
+        fixture.Subscribe((_, _) => throw new OperationCanceledException("projection cancellation"));
+        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+        await fixture.NextDeliveryAsync();
+        await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.AreEqual(1, fixture.Snapshot().FiredCount);
+        Assert.AreEqual(AltaExitCodes.Success, fixture.Snapshot().LastExitCode);
+        Assert.AreEqual(AltaReminderStates.Active, fixture.Snapshot().State);
+        await fixture.Clock.NextTimerAsync();
+        var completed = fixture.WatchFiredCount(2);
+        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+        await fixture.NextDeliveryAsync();
+        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(2, fixture.DeliveryCount);
+    }
+
+    [TestMethod]
+    public void NotificationFailure_IsBoundedImmutableAndCountsEveryObserver()
+    {
+        using var fixture = new ReminderFixture();
+        fixture.Subscribe((_, _) => throw new InvalidOperationException(new string('x', 600)));
+        fixture.Subscribe((_, _) => throw new UnreadableMessageException());
+        for (var i = 0; i < 8; i++)
+        {
+            fixture.Subscribe((_, _) => throw new OperationCanceledException("canceled observer"));
+        }
+
+        var lastCalled = false;
+        fixture.Subscribe((_, _) => lastCalled = true);
+        var reminder = fixture.Create(1, out var failure);
+
+        Assert.IsTrue(lastCalled);
+        Assert.IsNotNull(failure);
+        Assert.AreEqual(reminder.ReminderId, failure.ReminderId);
+        Assert.AreEqual("Target-Session", failure.TargetSessionId);
+        Assert.AreEqual(AltaReminderChangeKind.Created, failure.ChangeKind);
+        Assert.AreEqual(0, failure.FiredCount);
+        Assert.AreEqual(10, failure.FailureCount);
+        Assert.AreEqual(8, failure.Messages.Count);
+        Assert.AreEqual(512, failure.Messages[0].Length);
+        Assert.AreEqual("Observer failed; its message is unavailable.", failure.Messages[1]);
+        Assert.IsTrue(failure.MessagesTruncated);
+        Assert.ThrowsExactly<NotSupportedException>(() => ((IList<string>)failure.Messages)[0] = "changed");
+        Assert.AreSame(failure, fixture.Service.GetLastNotificationFailure());
+    }
+
+    [TestMethod]
+    public void SuccessfulAndMissingOperations_DoNotEraseHistoricalFailureOrNotifyForMissingIds()
+    {
+        using var fixture = new ReminderFixture();
+        EventHandler throwing = (_, _) => throw new InvalidOperationException("retained");
+        fixture.Subscribe(throwing);
+        var reminder = fixture.Create(1, out var createdFailure);
+        fixture.Service.Changed -= throwing;
+        var notifications = 0;
+        fixture.Subscribe((_, _) => notifications++);
+
+        Assert.IsTrue(fixture.Service.TryUpdateContent(reminder.ReminderId, "new text", out _, out var updatedFailure));
+        Assert.IsNull(updatedFailure);
+        Assert.AreSame(createdFailure, fixture.Service.GetLastNotificationFailure());
+        Assert.IsTrue(fixture.Service.TryDelete(reminder.ReminderId, out _, out var deletedFailure));
+        Assert.IsNull(deletedFailure);
+        Assert.IsFalse(fixture.Service.TryDelete(reminder.ReminderId, out var missing, out var missingFailure));
+        Assert.IsNull(missing);
+        Assert.IsNull(missingFailure);
+        Assert.IsFalse(fixture.Service.TryUpdateContent(reminder.ReminderId, "missing", out _, out missingFailure));
+        Assert.IsNull(missingFailure);
+        Assert.AreEqual(2, notifications);
+        Assert.AreSame(createdFailure, fixture.Service.GetLastNotificationFailure());
+        Assert.AreEqual(0, fixture.Service.List(null, true).Count);
+    }
+
+    [TestMethod]
+    public void CapturedSubscribers_KeepSamePassMembership()
+    {
+        using var fixture = new ReminderFixture();
+        var calls = new List<string>();
+        EventHandler second = (_, _) => calls.Add("second");
+        EventHandler third = (_, _) => calls.Add("third");
+        var changed = false;
+        fixture.Subscribe((_, _) =>
+        {
+            calls.Add("first");
+            if (!changed)
+            {
+                changed = true;
+                fixture.Service.Changed -= second;
+                fixture.Subscribe(third);
+            }
+        });
+        fixture.Subscribe(second);
+
+        var reminder = fixture.Create();
+        CollectionAssert.AreEqual(new[] { "first", "second" }, calls);
+        calls.Clear();
+        fixture.Service.TryUpdateContent(reminder.ReminderId, "edited", out _);
+        CollectionAssert.AreEqual(new[] { "first", "third" }, calls);
+    }
+
+    [TestMethod]
+    public void CrossThreadReentry_PreservesMutationAndPerPassFeedback()
+    {
+        using var fixture = new ReminderFixture();
+        var reminder = fixture.Create();
+        AltaReminderNotificationFailure? inner = null;
+        var entered = 0;
+        var error = "inner";
+        fixture.Subscribe((_, _) =>
+        {
+            if (Interlocked.Exchange(ref entered, 1) == 0)
+            {
+                Task.Run(() =>
+                {
+                    Assert.AreEqual("outer edit", fixture.Snapshot().ContentPreview);
+                    fixture.Service.TryUpdateContent(reminder.ReminderId, "inner edit", out _, out inner);
+                }).WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                error = "outer";
+            }
+        });
+        fixture.Subscribe((_, _) => throw new InvalidOperationException(error));
+
+        fixture.Service.TryUpdateContent(reminder.ReminderId, "outer edit", out var descriptor, out var outer);
+
+        Assert.IsNotNull(inner);
+        Assert.IsNotNull(outer);
+        CollectionAssert.AreEqual(new[] { "inner" }, inner.Messages.ToArray());
+        CollectionAssert.AreEqual(new[] { "outer" }, outer.Messages.ToArray());
+        Assert.AreEqual("outer edit", descriptor!.ContentPreview);
+        Assert.AreEqual("inner edit", fixture.Snapshot().ContentPreview);
+        Assert.AreSame(outer, fixture.Service.GetLastNotificationFailure());
+    }
+
+    [TestMethod]
+    public async Task FailedPublicationOrder_IsCompletionOrderAndDoesNotResurrectDeletedEntry()
+    {
+        using var fixture = new ReminderFixture();
+        var reminder = fixture.Create();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        fixture.Subscribe((_, _) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                entered.TrySetResult();
+                release.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                throw new InvalidOperationException("older mutation finished later");
+            }
+
+            throw new OperationCanceledException("newer deletion finished first");
+        });
+        var editing = Task.Run(() =>
+        {
+            fixture.Service.TryUpdateContent(reminder.ReminderId, "committed", out _, out var failure);
+            return failure;
+        });
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.IsTrue(fixture.Service.TryDelete(reminder.ReminderId, out _, out var deletion));
+            Assert.AreSame(deletion, fixture.Service.GetLastNotificationFailure());
+            Assert.AreEqual(AltaReminderChangeKind.Deleted, deletion!.ChangeKind);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await editing.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        var edit = await editing;
+        Assert.AreSame(edit, fixture.Service.GetLastNotificationFailure());
+        Assert.AreEqual(AltaReminderChangeKind.ContentUpdated, edit!.ChangeKind);
+        Assert.AreEqual(0, fixture.Service.List(null, true).Count);
+    }
+
+    [TestMethod]
+    public async Task FiringObserverFailure_DoesNotReplaceFailedDeliveryResult()
+    {
+        using var fixture = new ReminderFixture();
+        fixture.Create(repeatCount: 2);
+        await fixture.Clock.NextTimerAsync();
+        fixture.Send = static _ => throw new InvalidOperationException("delivery failed");
+        var firstFinished = fixture.WatchFiredCount(1);
+        fixture.Subscribe((_, _) => throw new OperationCanceledException("observer only"));
+        fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+        await fixture.NextDeliveryAsync();
+        await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+        await fixture.Clock.NextTimerAsync(); // Scheduling resumes only after diagnostic publication.
+
+        var descriptor = fixture.Snapshot();
+        var failure = fixture.Service.GetLastNotificationFailure();
+        Assert.AreEqual(AltaExitCodes.Failure, descriptor.LastExitCode);
+        StringAssert.Contains(descriptor.LastError!, "delivery failed");
+        Assert.AreEqual(1, descriptor.FiredCount);
+        Assert.AreEqual(fixture.Clock.GetUtcNow() + TimeSpan.FromMinutes(1), descriptor.DueAt);
+        Assert.IsNotNull(failure);
+        Assert.AreEqual(AltaReminderChangeKind.Fired, failure.ChangeKind);
+        Assert.AreEqual(1, failure.FiredCount);
+        CollectionAssert.AreEqual(new[] { "observer only" }, failure.Messages.ToArray());
+    }
+
+    private sealed class UnreadableMessageException : Exception
+    {
+        public override string Message => throw new OperationCanceledException("message getter failed");
+    }
+
+    [TestMethod]
     public async Task EditDuringDispatcherResolution_PreservesCapturedContent()
     {
         using var fixture = new ReminderFixture();
@@ -243,7 +506,9 @@ public sealed class AltaReminderServiceTests
         public Func<Delivery, Task<int>> Send { get; set; } = static _ => Task.FromResult(AltaExitCodes.Success);
         public int DeliveryCount => Volatile.Read(ref _deliveryCount);
 
-        public AltaReminderDescriptor Create(int repeatCount = 1) => Service.Create(new AltaReminderCreateRequest
+        public AltaReminderDescriptor Create(int repeatCount = 1) => Create(repeatCount, out _);
+
+        public AltaReminderDescriptor Create(int repeatCount, out AltaReminderNotificationFailure? failure) => Service.Create(new AltaReminderCreateRequest
         {
             TargetSessionId = " Target-Session ",
             SourceSessionId = " Source-Session ",
@@ -254,9 +519,15 @@ public sealed class AltaReminderServiceTests
             Content = "original text",
             Duration = TimeSpan.FromMinutes(1),
             RepeatCount = repeatCount,
-        });
+        }, out failure);
 
         public AltaReminderDescriptor Snapshot() => Service.List(null, includeCompleted: true).Single();
+
+        public void Subscribe(EventHandler handler)
+        {
+            _subscriptions.Add(handler);
+            Service.Changed += handler;
+        }
 
         public Task WatchFiredCount(int count)
         {
@@ -337,7 +608,7 @@ public sealed class AltaReminderServiceTests
 
     // One-shot timers only, as used by Task.Delay. Time advances explicitly and callbacks always
     // run outside clock ownership. No wall-clock sleeps, discovery, or background clock worker.
-    private sealed class ManualClock : TimeProvider, IDisposable
+    internal sealed class ManualClock : TimeProvider, IDisposable
     {
         private readonly object _gate = new();
         private readonly List<ManualTimer> _timers = [];

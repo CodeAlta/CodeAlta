@@ -2428,6 +2428,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         AltaReminderDescriptor descriptor;
+        AltaReminderNotificationFailure? notificationFailure;
         try
         {
             descriptor = reminderService.Create(new AltaReminderCreateRequest
@@ -2441,7 +2442,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
                 SourceProjectId = context.Caller.SourceProjectId,
                 PluginRuntimeKey = context.Caller.PluginRuntimeKey,
                 Cwd = context.Cwd,
-            });
+            }, out notificationFailure);
         }
         catch (ArgumentOutOfRangeException ex)
         {
@@ -2453,6 +2454,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         WriteReminder(context, "alta.reminder.created", descriptor);
+        WriteReminderNotificationFailure(context, notificationFailure, historical: false);
         return AltaExitCodes.Success;
     }
 
@@ -2470,6 +2472,12 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
 
         WriteSummary(context, "alta.reminder.summary", reminders.Count, truncated: false);
+        var notificationFailure = reminderService.GetLastNotificationFailure();
+        if (notificationFailure is not null && (string.IsNullOrWhiteSpace(sessionId)
+            || string.Equals(notificationFailure.TargetSessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
+        {
+            WriteReminderNotificationFailure(context, notificationFailure, historical: true);
+        }
         return AltaExitCodes.Success;
     }
 
@@ -2485,12 +2493,13 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
-        if (!reminderService.TryDelete(reminderId, out var descriptor))
+        if (!reminderService.TryDelete(reminderId, out var descriptor, out var notificationFailure))
         {
             return NotFound(context, "reminder.notFound", $"Reminder '{reminderId}' was not found.");
         }
 
         WriteReminder(context, "alta.reminder.deleted", descriptor!);
+        WriteReminderNotificationFailure(context, notificationFailure, historical: false);
         return AltaExitCodes.Success;
     }
 
@@ -4841,6 +4850,41 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             notification = CreatePromptNotificationPayload(context, session),
             submittedBy = CreateProvenance(context),
             promptPreview = prompt.Length <= 160 ? prompt : prompt[..160],
+        });
+    }
+
+    internal static void WriteReminderNotificationFailure(AltaCommandContext context, AltaReminderNotificationFailure? failure, bool historical)
+    {
+        if (failure is null)
+        {
+            return;
+        }
+
+        var action = failure.ChangeKind switch
+        {
+            AltaReminderChangeKind.Created => "was created",
+            AltaReminderChangeKind.ContentUpdated => "had its content updated",
+            AltaReminderChangeKind.Deleted => "was deleted",
+            AltaReminderChangeKind.Fired => "had its delivery result recorded",
+            AltaReminderChangeKind.Failed => "had its runner failure recorded",
+            _ => "was changed",
+        };
+        AltaJsonlWriter.WriteRecord(context.Stderr, new
+        {
+            type = "alta.warning",
+            version = 1,
+            correlationId = context.CorrelationId,
+            code = "reminder.notificationFailed",
+            message = (historical ? "Historical notification failure (latest retained): " : string.Empty)
+                + $"Reminder '{failure.ReminderId}' {action}, but notification failed. This does not change the committed outcome or delivery result.",
+            historical,
+            reminderId = failure.ReminderId,
+            sessionId = failure.TargetSessionId,
+            changeKind = failure.ChangeKind.ToString(),
+            firedCount = failure.FiredCount,
+            failureCount = failure.FailureCount,
+            messages = failure.Messages,
+            messagesTruncated = failure.MessagesTruncated,
         });
     }
 

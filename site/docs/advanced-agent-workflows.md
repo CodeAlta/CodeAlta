@@ -150,6 +150,8 @@ Reminders are delivered through normal session queue semantics while the current
 
 Each firing captures its message and target before sending, without requiring an open session tab. Edits made after that capture affect only later firings. Deleting a reminder prevents future firings, but an already captured send may still proceed; deletion does not remove queued prompts or stop a run. Repeats wait the configured delay after the previous delivery call returns, and failed delivery results also count toward the repeat limit. Completed reminders remain in `reminder list --all` until deleted. A successful delivery result is not proof that the agent finished the work, and reminder schedules do not survive restarting CodeAlta.
 
+If a reminder change succeeds but notifying the interface fails, CodeAlta reports a warning rather than pretending the change failed. Observer errors do not replace delivery results or cancel repeats. `reminder list` and opening/refreshing the TUI reminder dialog can show the latest retained notification failure, including one for a completed or deleted reminder. This single process-only snapshot is overwritten by the next failed notification pass; it is historical feedback, not a current delivery failure or complete history. Successful notifications do not clear it, and warnings may be shortened or omitted by output limits. Feedback is queried rather than guaranteed to appear immediately.
+
 ### Switch or create modes through prompts
 
 You can ask an agent to inspect available prompts, recommend one, create a project prompt, or switch the current session.

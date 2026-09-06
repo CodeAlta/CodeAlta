@@ -320,24 +320,28 @@ internal sealed class ReminderManagementDialog
             return;
         }
 
+        AltaReminderDescriptor? descriptor;
+        AltaReminderNotificationFailure? failure;
+        bool updated;
         try
         {
-            if (!_reminders.TryUpdateContent(row.Descriptor.ReminderId, content, out var descriptor))
-            {
-                SetDialogStatus($"[warning]{SR.T("Reminder was not found.")}[/]", SR.T("Reminder was not found."), StatusTone.Warning);
-                Reload(null);
-                _onRemindersChanged();
-                return;
-            }
-
-            SetDialogStatus($"[success]{SR.T("Reminder message updated.")}[/]", SR.T("Reminder message updated."), StatusTone.Info);
-            Reload(descriptor!.ReminderId);
-            _onRemindersChanged();
+            updated = _reminders.TryUpdateContent(row.Descriptor.ReminderId, content, out descriptor, out failure);
         }
         catch (ArgumentException ex)
         {
             SetDialogStatus($"[error]{AnsiMarkup.Escape(ex.Message)}[/]", ex.Message, StatusTone.Error);
+            return;
         }
+
+        if (!updated)
+        {
+            SetDialogStatus($"[warning]{SR.T("Reminder was not found.")}[/]", SR.T("Reminder was not found."), StatusTone.Warning);
+            Reload(null);
+            _onRemindersChanged();
+            return;
+        }
+
+        ReportCommitted(SR.T("Reminder message updated."), descriptor!.ReminderId, failure);
     }
 
     private void CreateReminder()
@@ -364,9 +368,11 @@ internal sealed class ReminderManagementDialog
             return;
         }
 
+        AltaReminderDescriptor descriptor;
+        AltaReminderNotificationFailure? failure;
         try
         {
-            var descriptor = _reminders.Create(new AltaReminderCreateRequest
+            descriptor = _reminders.Create(new AltaReminderCreateRequest
             {
                 TargetSessionId = _session.SessionId,
                 Content = content,
@@ -375,19 +381,20 @@ internal sealed class ReminderManagementDialog
                 SourceSessionId = _session.SessionId,
                 SourceProjectId = _session.ProjectRef,
                 Cwd = string.IsNullOrWhiteSpace(_session.WorkingDirectory) ? null : _session.WorkingDirectory,
-            });
-            SetDialogStatus($"[success]{SR.T("Reminder created.")}[/]", SR.T("Reminder created."), StatusTone.Info);
-            Reload(descriptor.ReminderId);
-            _onRemindersChanged();
+            }, out failure);
         }
         catch (ArgumentOutOfRangeException ex)
         {
             SetDialogStatus($"[error]{AnsiMarkup.Escape(ex.Message)}[/]", ex.Message, StatusTone.Error);
+            return;
         }
         catch (ArgumentException ex)
         {
             SetDialogStatus($"[error]{AnsiMarkup.Escape(ex.Message)}[/]", ex.Message, StatusTone.Error);
+            return;
         }
+
+        ReportCommitted(SR.T("Reminder created."), descriptor.ReminderId, failure);
     }
 
     private void DeleteSelectedReminder()
@@ -398,11 +405,9 @@ internal sealed class ReminderManagementDialog
             return;
         }
 
-        if (_reminders.TryDelete(row.Descriptor.ReminderId, out _))
+        if (_reminders.TryDelete(row.Descriptor.ReminderId, out _, out var failure))
         {
-            SetDialogStatus($"[success]{SR.T("Reminder deleted.")}[/]", SR.T("Reminder deleted."), StatusTone.Info);
-            Reload(null);
-            _onRemindersChanged();
+            ReportCommitted(SR.T("Reminder deleted."), null, failure);
             return;
         }
 
@@ -434,6 +439,18 @@ internal sealed class ReminderManagementDialog
         }
 
         _selectedIndex.Value = selectedIndex;
+        var historical = ReminderPresentationFeedback.HistoricalMarkup(_reminders.GetLastNotificationFailure(), _session.SessionId);
+        if (historical.Length > 0)
+        {
+            _summaryText += "\n" + historical;
+        }
+    }
+
+    private void ReportCommitted(string message, string? preferredReminderId, AltaReminderNotificationFailure? failure)
+    {
+        var feedback = ReminderPresentationFeedback.AfterCommit(message, failure,
+            () => Reload(preferredReminderId), _onRemindersChanged);
+        SetDialogStatus(feedback.Markup, feedback.Message, feedback.Tone);
     }
 
     private ReminderRow? GetSelectedRow()

@@ -13,6 +13,7 @@ public sealed class AltaReminderService
     private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
     private readonly Dictionary<string, ReminderEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private AltaReminderNotificationFailure? _lastNotificationFailure;
 
     /// <summary>Initializes the in-process reminder service.</summary>
     /// <param name="services">Host services used when reminders deliver prompts.</param>
@@ -32,7 +33,28 @@ public sealed class AltaReminderService
     /// <summary>
     /// Occurs when the active reminder set or reminder metadata changes.
     /// </summary>
+    /// <remarks>
+    /// This is outside-gate invalidation/requery, not ordered replay. Every subscriber captured
+    /// for a pass is attempted; exceptions, including observer cancellation, become bounded feedback.
+    /// Failed feedback is published after the pass, so callbacks cannot rely on seeing it immediately.
+    /// Blocking or infinitely reentrant observers can still prevent progress.
+    /// </remarks>
     public event EventHandler? Changed;
+
+    /// <summary>Gets the last failed notification pass published by this service, or <see langword="null" />.</summary>
+    /// <remarks>
+    /// Publication order is not mutation order. Successful passes do not clear this single snapshot;
+    /// later failures replace it, including after deletion. Query-based feedback is process-only,
+    /// not ordered event replay. Publishing diagnostics does not raise <see cref="Changed" />.
+    /// </remarks>
+    /// <returns>The immutable failure snapshot.</returns>
+    public AltaReminderNotificationFailure? GetLastNotificationFailure()
+    {
+        lock (_gate)
+        {
+            return _lastNotificationFailure;
+        }
+    }
 
     /// <summary>
     /// Creates and starts a delayed prompt reminder.
@@ -43,6 +65,16 @@ public sealed class AltaReminderService
     /// <exception cref="ArgumentException">Thrown when a required string value is missing.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when duration or repeat count is not positive.</exception>
     public AltaReminderDescriptor Create(AltaReminderCreateRequest request)
+        => Create(request, out _);
+
+    /// <summary>Creates a reminder and returns observer feedback without retracting the committed creation.</summary>
+    /// <param name="request">The reminder creation request.</param>
+    /// <param name="notificationFailure">Receives this notification pass's failure, or <see langword="null" />.</param>
+    /// <returns>The created reminder descriptor.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="request" /> is <see langword="null" />.</exception>
+    /// <exception cref="ArgumentException">Thrown when a required string value is missing.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when duration or repeat count is not positive.</exception>
+    public AltaReminderDescriptor Create(AltaReminderCreateRequest request, out AltaReminderNotificationFailure? notificationFailure)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetSessionId);
@@ -77,13 +109,15 @@ public sealed class AltaReminderService
         };
 
         var entry = new ReminderEntry(descriptor, request.Content);
+        NotificationContext context;
         lock (_gate)
         {
             _entries.Add(descriptor.ReminderId, entry);
+            context = CaptureNotification(descriptor, AltaReminderChangeKind.Created);
         }
 
         _ = RunReminderAsync(entry);
-        OnChanged();
+        notificationFailure = OnChanged(context);
         lock (_gate)
         {
             return entry.Descriptor;
@@ -122,9 +156,21 @@ public sealed class AltaReminderService
     /// <returns><see langword="true" /> when the reminder was found and deleted.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="reminderId" /> is missing.</exception>
     public bool TryDelete(string reminderId, out AltaReminderDescriptor? descriptor)
+        => TryDelete(reminderId, out descriptor, out _);
+
+    /// <summary>Deletes a reminder and returns observer feedback without retracting the committed deletion.</summary>
+    /// <param name="reminderId">The reminder id.</param>
+    /// <param name="descriptor">Receives the deleted descriptor when found.</param>
+    /// <param name="notificationFailure">Receives this notification pass's failure, or <see langword="null" />.</param>
+    /// <returns>Whether the reminder was found and deleted. Missing ids do not notify observers.</returns>
+    /// <remarks>An already captured delivery may still send; deletion does not retract queued work or abort a run.</remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="reminderId" /> is missing.</exception>
+    public bool TryDelete(string reminderId, out AltaReminderDescriptor? descriptor, out AltaReminderNotificationFailure? notificationFailure)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reminderId);
+        notificationFailure = null;
         ReminderEntry? entry;
+        NotificationContext context;
         var now = _timeProvider.GetUtcNow();
         lock (_gate)
         {
@@ -140,10 +186,11 @@ public sealed class AltaReminderService
                 CompletedAt = now,
             };
             entry.Descriptor = descriptor;
+            context = CaptureNotification(descriptor, AltaReminderChangeKind.Deleted);
         }
 
         entry.Cancel();
-        OnChanged();
+        notificationFailure = OnChanged(context);
         return true;
     }
 
@@ -180,9 +227,22 @@ public sealed class AltaReminderService
     /// <returns><see langword="true" /> when the reminder was found and updated.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="reminderId" /> or <paramref name="content" /> is missing.</exception>
     public bool TryUpdateContent(string reminderId, string content, out AltaReminderDescriptor? descriptor)
+        => TryUpdateContent(reminderId, content, out descriptor, out _);
+
+    /// <summary>Updates reminder content and returns observer feedback without retracting the committed edit.</summary>
+    /// <param name="reminderId">The reminder id.</param>
+    /// <param name="content">The replacement prompt content.</param>
+    /// <param name="descriptor">Receives the updated descriptor when found.</param>
+    /// <param name="notificationFailure">Receives this notification pass's failure, or <see langword="null" />.</param>
+    /// <returns>Whether the reminder was found and updated. Missing ids do not notify observers.</returns>
+    /// <remarks>Edits do not change due time and affect only firings captured after the edit.</remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="reminderId" /> or <paramref name="content" /> is missing.</exception>
+    public bool TryUpdateContent(string reminderId, string content, out AltaReminderDescriptor? descriptor, out AltaReminderNotificationFailure? notificationFailure)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reminderId);
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
+        notificationFailure = null;
+        NotificationContext context;
         lock (_gate)
         {
             if (!_entries.TryGetValue(reminderId, out var entry))
@@ -197,9 +257,10 @@ public sealed class AltaReminderService
                 ContentPreview = CreatePreview(content),
             };
             entry.Descriptor = descriptor;
+            context = CaptureNotification(descriptor, AltaReminderChangeKind.ContentUpdated);
         }
 
-        OnChanged();
+        notificationFailure = OnChanged(context);
         return true;
     }
 
@@ -248,6 +309,7 @@ public sealed class AltaReminderService
                 var delivery = await DeliverAsync(snapshot).ConfigureAwait(false);
                 var firedAt = _timeProvider.GetUtcNow();
                 var completed = false;
+                NotificationContext context;
                 lock (_gate)
                 {
                     if (!ReferenceEquals(_entries.GetValueOrDefault(entry.Descriptor.ReminderId), entry) || entry.IsCancellationRequested)
@@ -268,9 +330,10 @@ public sealed class AltaReminderService
                         DueAt = completed ? null : firedAt + entry.Descriptor.Duration,
                         CompletedAt = completed ? firedAt : null,
                     };
+                    context = CaptureNotification(entry.Descriptor, AltaReminderChangeKind.Fired);
                 }
 
-                OnChanged();
+                OnChanged(context);
                 if (completed)
                 {
                     return;
@@ -282,7 +345,7 @@ public sealed class AltaReminderService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var changed = false;
+            NotificationContext? context = null;
             var completedAt = _timeProvider.GetUtcNow();
             lock (_gate)
             {
@@ -296,13 +359,13 @@ public sealed class AltaReminderService
                         LastError = ex.Message,
                         LastTranscriptPreview = CreatePreview(ex.ToString()),
                     };
-                    changed = true;
+                    context = CaptureNotification(entry.Descriptor, AltaReminderChangeKind.Failed);
                 }
             }
 
-            if (changed)
+            if (context is not null)
             {
-                OnChanged();
+                OnChanged(context);
             }
         }
         finally
@@ -346,16 +409,76 @@ public sealed class AltaReminderService
     private static string CreatePreview(string value)
         => value.Length <= 160 ? value : value[..160];
 
-    private void OnChanged()
+    private static NotificationContext CaptureNotification(AltaReminderDescriptor descriptor, AltaReminderChangeKind kind)
+        => new(descriptor.ReminderId, descriptor.TargetSessionId, kind, descriptor.FiredCount);
+
+    private AltaReminderNotificationFailure? OnChanged(NotificationContext context)
     {
-        try
+        var observers = Changed;
+        if (observers is null)
         {
-            Changed?.Invoke(this, EventArgs.Empty);
+            return null;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        const int MaximumMessages = 8;
+        const int MaximumMessageLength = 512;
+        List<string>? messages = null;
+        var failureCount = 0;
+        var truncated = false;
+        foreach (EventHandler observer in observers.GetInvocationList())
         {
+            try
+            {
+                observer(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                // Observer cancellation is feedback failure, not timer/dispatch cancellation.
+                failureCount++;
+                if (failureCount > MaximumMessages)
+                {
+                    truncated = true;
+                    continue;
+                }
+
+                string message;
+                try
+                {
+                    message = ex.Message;
+                }
+                catch (Exception)
+                {
+                    message = "Observer failed; its message is unavailable.";
+                }
+
+                if (message.Length > MaximumMessageLength)
+                {
+                    message = message[..MaximumMessageLength];
+                    truncated = true;
+                }
+
+                (messages ??= []).Add(message);
+            }
         }
+
+        if (messages is null)
+        {
+            return null;
+        }
+
+        var failure = new AltaReminderNotificationFailure(context.ReminderId, context.TargetSessionId,
+            context.ChangeKind, context.FiredCount, failureCount, messages.ToArray(), truncated);
+        lock (_gate)
+        {
+            // Only diagnostic publication is owned here. Never restore stale entry metadata,
+            // erase a newer edit, resurrect a deletion, or recursively notify about feedback.
+            _lastNotificationFailure = failure;
+        }
+
+        return failure;
     }
+
+    private sealed record NotificationContext(string ReminderId, string TargetSessionId, AltaReminderChangeKind ChangeKind, int FiredCount);
 
     private sealed record ReminderDeliverySnapshot(AltaReminderDescriptor Descriptor, string Content);
 
