@@ -5,7 +5,6 @@ using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
 using CodeAlta.Tui.Models;
 using CodeAlta.Orchestration.Runtime;
-using CodeAlta.Tui.Threading;
 
 namespace CodeAlta.Tui.App;
 
@@ -13,7 +12,7 @@ internal sealed class SessionExecutionOptionsFactory
 {
     private readonly CatalogOptions _catalogOptions;
     private readonly Dictionary<string, ModelProviderState> _modelProviderStates;
-    private readonly SessionSelectionContext _sessionSelection;
+    private readonly Func<string?, ProjectDescriptor?> _getProjectById;
     private readonly SessionPermissionRequestCoordinator _permissionRequests;
     private readonly SessionUserInputRequestCoordinator _userInputRequests;
     private readonly Func<string?>? _preferredAgentPromptProvider;
@@ -36,7 +35,7 @@ internal sealed class SessionExecutionOptionsFactory
 
         _catalogOptions = catalogOptions;
         _modelProviderStates = modelProviderStates;
-        _sessionSelection = sessionSelection;
+        _getProjectById = sessionSelection.GetProjectById;
         _permissionRequests = permissionRequests;
         _userInputRequests = userInputRequests;
         _preferredAgentPromptProvider = preferredAgentPromptProvider;
@@ -47,33 +46,16 @@ internal sealed class SessionExecutionOptionsFactory
         ModelProviderId providerId,
         string workingDirectory,
         IReadOnlyList<string> projectRoots,
+        ProjectDescriptor? project,
         Func<string?>? sourceSessionIdProvider = null)
     {
         ArgumentNullException.ThrowIfNull(projectRoots);
 
         _modelProviderStates.TryGetValue(providerId.Value, out var providerState);
-        var model = providerState?.SelectedModelId;
-        var reasoning = providerState?.SelectedReasoningEffort;
-
-        var sourceProjectId = projectRoots.Count == 0
-            ? null
-            : _sessionSelection.GetSelectedProjectId();
-        return new SessionExecutionOptions
-        {
-            ProviderId = providerId,
-            ProviderKey = providerId.Value,
-            WorkingDirectory = workingDirectory,
-            ProjectRoots = projectRoots,
-            Model = model,
-            ReasoningEffort = reasoning,
-            AgentPromptId = NormalizeOptionalText(_preferredAgentPromptProvider?.Invoke()),
-            Tools = CreateAltaTools(
-                sourceSessionIdProvider: sourceSessionIdProvider,
-                sourceProjectIdProvider: () => sourceProjectId,
-                workingDirectoryProvider: () => workingDirectory),
-            OnPermissionRequest = CreatePermissionHandler(CreateTransientSessionKey(providerId, workingDirectory)),
-            OnUserInputRequest = (request, cancellationToken) => _userInputRequests.HandleAsync(CreateTransientSessionKey(providerId, workingDirectory), request, cancellationToken),
-        };
+        var request = SessionExecutionPolicy.CapturePreferred(
+            providerId, workingDirectory, projectRoots, project,
+            providerState?.SelectedModelId, providerState?.SelectedReasoningEffort, _preferredAgentPromptProvider?.Invoke());
+        return BuildOptions(request, sourceSessionIdProvider);
     }
 
     public SessionExecutionOptions BuildExecutionOptions(SessionViewDescriptor session, OpenSessionState tab)
@@ -81,28 +63,20 @@ internal sealed class SessionExecutionOptionsFactory
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(tab);
 
-        var workingDirectory = ResolveWorkingDirectory(session);
-        var projectRoots = ResolveProjectRoots(session);
-        var providerKey = tab.ProviderId.IsEmpty
-            ? session.ResolvedProviderKey
-            : tab.ProviderId.Value;
-        var providerId = new ModelProviderId(providerKey);
-        return new SessionExecutionOptions
-        {
-            ProviderId = providerId,
-            ProviderKey = providerKey,
-            WorkingDirectory = workingDirectory,
-            ProjectRoots = projectRoots,
-            Model = tab.ModelId,
-            ReasoningEffort = tab.ReasoningEffort,
-            AgentPromptId = NormalizeOptionalText(tab.AgentPromptId ?? session.AgentPromptId),
-            Tools = CreateAltaTools(
-                sourceSessionIdProvider: () => session.SessionId,
-                sourceProjectIdProvider: () => session.ProjectRef,
-                workingDirectoryProvider: () => ResolveWorkingDirectory(session)),
-            OnPermissionRequest = CreatePermissionHandler(session.SessionId),
-            OnUserInputRequest = (request, cancellationToken) => _userInputRequests.HandleAsync(session.SessionId, request, cancellationToken),
-        };
+        var request = SessionExecutionPolicy.CaptureSession(
+            session, _getProjectById(session.ProjectRef), _catalogOptions.GlobalRoot,
+            tab.ProviderId, tab.ModelId, tab.ReasoningEffort, tab.AgentPromptId);
+        return BuildOptions(request, () => request.SessionId);
+    }
+
+    private SessionExecutionOptions BuildOptions(SessionExecutionRequest context, Func<string?>? sourceSessionIdProvider)
+    {
+        var sessionKey = context.SessionId ?? CreateTransientSessionKey(context.ProviderId, context.WorkingDirectory);
+        return SessionExecutionPolicy.BuildOptions(
+            context,
+            CreateAltaTools(sourceSessionIdProvider, () => context.ProjectId, () => context.WorkingDirectory),
+            CreatePermissionHandler(sessionKey),
+            (request, cancellationToken) => _userInputRequests.HandleAsync(sessionKey, request, cancellationToken));
     }
 
     public static string CreateTransientSessionKey(ModelProviderId providerId, string workingDirectory)
@@ -144,28 +118,5 @@ internal sealed class SessionExecutionOptionsFactory
                     DefaultTimeout = TimeSpan.FromSeconds(120),
                 }),
         ];
-    }
-
-    private string ResolveWorkingDirectory(SessionViewDescriptor session)
-    {
-        return session.Kind switch
-        {
-            SessionViewKind.GlobalSession => _catalogOptions.GlobalRoot,
-            SessionViewKind.ProjectSession when _sessionSelection.GetProjectById(session.ProjectRef) is { } project => project.ProjectPath,
-            _ => session.WorkingDirectory,
-        };
-    }
-
-    private static string? NormalizeOptionalText(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private IReadOnlyList<string> ResolveProjectRoots(SessionViewDescriptor session)
-    {
-        if (_sessionSelection.GetProjectById(session.ProjectRef) is { } project)
-        {
-            return [project.ProjectPath];
-        }
-
-        return [];
     }
 }

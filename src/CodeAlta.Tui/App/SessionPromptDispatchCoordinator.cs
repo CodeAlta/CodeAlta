@@ -112,8 +112,9 @@ internal sealed class SessionPromptDispatchCoordinator
         ModelProviderId providerId,
         string workingDirectory,
         IReadOnlyList<string> projectRoots,
+        ProjectDescriptor? project,
         Func<string?>? sourceSessionIdProvider = null)
-        => _executionOptionsFactory.BuildPreferredExecutionOptions(providerId, workingDirectory, projectRoots, sourceSessionIdProvider);
+        => _executionOptionsFactory.BuildPreferredExecutionOptions(providerId, workingDirectory, projectRoots, project, sourceSessionIdProvider);
 
     public static string CreateInitialSessionTitle(string prompt)
     {

@@ -16,7 +16,7 @@ internal sealed class SessionCreationCoordinator
     private readonly Func<string?> _readDraftTitle;
     private readonly Func<ProjectDescriptor, Task<ProjectDescriptor>> _ensureProjectPersistedAsync;
     private readonly Action<ProjectDescriptor> _upsertProject;
-    private readonly Func<ModelProviderId, string, IReadOnlyList<string>, Func<string?>?, SessionExecutionOptions> _buildPreferredExecutionOptions;
+    private readonly Func<ModelProviderId, string, IReadOnlyList<string>, ProjectDescriptor?, Func<string?>?, SessionExecutionOptions> _buildPreferredExecutionOptions;
     private readonly Action<string, string?, AgentReasoningEffort?, bool> _rememberSessionPreference;
     private readonly Func<SessionViewDescriptor, Task> _registerCreatedSessionAsync;
     private readonly Action _clearSessionTitleDraft;
@@ -31,7 +31,7 @@ internal sealed class SessionCreationCoordinator
         Func<string?> readDraftTitle,
         Func<ProjectDescriptor, Task<ProjectDescriptor>> ensureProjectPersistedAsync,
         Action<ProjectDescriptor> upsertProject,
-        Func<ModelProviderId, string, IReadOnlyList<string>, Func<string?>?, SessionExecutionOptions> buildPreferredExecutionOptions,
+        Func<ModelProviderId, string, IReadOnlyList<string>, ProjectDescriptor?, Func<string?>?, SessionExecutionOptions> buildPreferredExecutionOptions,
         Action<string, string?, AgentReasoningEffort?, bool> rememberSessionPreference,
         Func<SessionViewDescriptor, Task> registerCreatedSessionAsync,
         Action clearSessionTitleDraft,
@@ -77,6 +77,7 @@ internal sealed class SessionCreationCoordinator
                 _getPreferredProviderId(),
                 _catalogOptions.GlobalRoot,
                 [],
+                null,
                 () => createdSessionId);
             var session = await _runtimeService.CreateGlobalSessionAsync(executionOptions, title);
             createdSessionId = session.SessionId;
@@ -114,6 +115,7 @@ internal sealed class SessionCreationCoordinator
                 _getPreferredProviderId(),
                 project.ProjectPath,
                 [project.ProjectPath],
+                project,
                 () => createdSessionId);
             var session = await _runtimeService.CreateProjectSessionAsync(project, executionOptions, title);
             createdSessionId = session.SessionId;

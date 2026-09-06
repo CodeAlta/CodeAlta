@@ -43,6 +43,16 @@ flowchart TD
 
 Same-session mutation is serialized by internal mailbox actors and session coordinators. Different sessions can run concurrently; a blocked provider call, tool execution, or journal append for one session must not serialize unrelated sessions. Runtime events use bounded streams so slow readers do not create unbounded memory pressure.
 
+### Captured execution options
+
+`SessionExecutionPolicy` captures a portable, immutable `SessionExecutionRequest` and assembles `SessionExecutionOptions` with host-supplied Agent tool and interaction contracts. Assembly performs no filesystem access, provider startup, model discovery or prompt discovery. Descriptors and root lists are copied into scalar/read-only values rather than retained as mutable authority. Provider/model/reasoning choices are preserved even before the model catalog synchronizes; an existing tab's provider override wins over the stored provider, and agent prompt preferences retain null-fallback and whitespace normalization behavior.
+
+The TUI's creation route carries the explicitly captured project to this policy. Existing send/resume options resolve the session's own `ProjectRef`, independent of selection, and reject an unrelated resolved project. Global sessions use the configured global root without project tool identity or overlays; known project sessions use their project path; missing projects retain the stored working directory with no project overlays. A missing project reference still identifies the session's project association, not whichever project happens to be selected.
+
+`SessionExecutionOptionsFactory` remains the TUI adapter for `alta` tools and permission/user-input callbacks. Tools share the execution request's frozen project identity and working directory. Existing-session ids are captured too; draft tools retain only the deliberate deferred canonical id binding after creation. Permission callbacks still prefer an explicit request session id over the captured fallback, and user-input callbacks retain their captured session association. Auto-approval defaults, immediate user-input responses, cancellation behavior and interaction lifetimes are unchanged; a portable pending-interaction owner is separate work.
+
+These APIs accept trusted backend policy inputs. They are not renderer authorization, filesystem grants, or new tool approvals: an application boundary must authorize renderer requests and resolve their descriptors before calling them. LiveTool and UI services are supplied by adapters, not located or referenced by Orchestration.
+
 ## Provider initialization
 
 `IModelProviderRegistry` lists configured `ModelProviderDescriptor` values and creates provider runtimes. `IModelProviderInitializationService` starts provider probes eagerly after provider descriptors/configuration are available. Each provider probe owns its success/failure state and model list cache:

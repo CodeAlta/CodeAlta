@@ -397,8 +397,9 @@ internal sealed class SessionCommandCoordinator
         ModelProviderId providerId,
         string workingDirectory,
         IReadOnlyList<string> projectRoots,
+        ProjectDescriptor? project,
         Func<string?>? sourceSessionIdProvider = null)
-        => _promptDispatchCoordinator.BuildPreferredExecutionOptions(providerId, workingDirectory, projectRoots, sourceSessionIdProvider);
+        => _promptDispatchCoordinator.BuildPreferredExecutionOptions(providerId, workingDirectory, projectRoots, project, sourceSessionIdProvider);
 
     public SessionExecutionOptions BuildExecutionOptions(SessionViewDescriptor session, OpenSessionState tab)
         => _promptDispatchCoordinator.BuildExecutionOptions(session, tab);

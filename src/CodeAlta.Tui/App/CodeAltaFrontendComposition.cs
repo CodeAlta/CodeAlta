@@ -394,7 +394,7 @@ internal sealed class CodeAltaFrontendComposition
             static () => null,
             project => projectCatalog.EnsurePersistedAsync(project, CancellationToken.None),
             frontend.UpsertProject,
-            (providerId, workingDirectory, projectRoots, sourceSessionIdProvider) => sessionCommandCoordinator!.BuildPreferredExecutionOptions(providerId, workingDirectory, projectRoots, sourceSessionIdProvider),
+            (providerId, workingDirectory, projectRoots, project, sourceSessionIdProvider) => sessionCommandCoordinator!.BuildPreferredExecutionOptions(providerId, workingDirectory, projectRoots, project, sourceSessionIdProvider),
             frontend.RememberSessionPreference,
             frontend.RegisterCreatedSessionAsync,
             static () => { },
