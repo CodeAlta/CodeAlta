@@ -3,7 +3,6 @@ using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
-using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Tui.App.Events;
 using CodeAlta.Catalog;
@@ -17,13 +16,6 @@ internal readonly record struct ProviderTestResult(bool Success, string Message,
 
 internal sealed class ProviderFrontendCoordinator
 {
-    // Call-scoped seam for characterizing temporary inspection without constructing concrete runtimes.
-    internal delegate bool TryCreateProviderRuntime(
-        CodeAltaProviderDocument definition,
-        string stateRootPath,
-        ModelsDevCatalogService? modelCatalog,
-        out IModelProviderRuntime runtime);
-
     private readonly CodeAltaOwnedServices? _ownedServices;
     private readonly CodeAltaConfigStore _configStore;
     private readonly ModelProviderInitializationCoordinator _modelProviderInitializationCoordinator;
@@ -172,11 +164,12 @@ internal sealed class ProviderFrontendCoordinator
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
         var modelCatalog = _ownedServices?.ModelsDevCatalogService;
 
-        return await TestProviderCoreAsync(
-            definition, homeRoot, modelCatalog, TryCreateRuntime,
+        var result = await ConfiguredProviderInspection.TestProviderAsync(
+            definition, homeRoot, modelCatalog,
             static () => SR.T("Enter valid provider settings before testing."),
             static count => SR.T("Connected successfully · {0} model(s) discovered.", count),
             cancellationToken);
+        return new ProviderTestResult(result.Success, result.Message, result.ModelCount);
     }
 
     public IReadOnlyDictionary<string, ProviderRuntimeStatus> GetProviderRuntimeStatuses()
@@ -206,51 +199,12 @@ internal sealed class ProviderFrontendCoordinator
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
         var modelCatalog = _ownedServices?.ModelsDevCatalogService;
 
-        return await ListProviderModelsCoreAsync(
-            definition, homeRoot, modelCatalog, TryCreateRuntime,
+        var result = await ConfiguredProviderInspection.ListProviderModelsAsync(
+            definition, homeRoot, modelCatalog,
             static () => SR.T("Enter valid provider settings before listing models."),
             static count => SR.T("Model listing completed · {0} model(s) available.", count),
             cancellationToken);
-    }
-
-    internal static async Task<ProviderTestResult> TestProviderCoreAsync(
-        CodeAltaProviderDocument definition,
-        string stateRootPath,
-        ModelsDevCatalogService? modelCatalog,
-        TryCreateProviderRuntime tryCreateRuntime,
-        Func<string> formatInvalidSettings,
-        Func<int, string> formatSuccess,
-        CancellationToken cancellationToken)
-    {
-        if (!tryCreateRuntime(definition, stateRootPath, modelCatalog, out var runtime))
-        {
-            return new ProviderTestResult(false, formatInvalidSettings(), 0);
-        }
-
-        await using var _ = runtime;
-        var probe = await runtime.ProbeAsync(cancellationToken);
-        var models = probe.Models;
-        return new ProviderTestResult(true, formatSuccess(models.Count), models.Count);
-    }
-
-    internal static async Task<ProviderModelListResult> ListProviderModelsCoreAsync(
-        CodeAltaProviderDocument definition,
-        string stateRootPath,
-        ModelsDevCatalogService? modelCatalog,
-        TryCreateProviderRuntime tryCreateRuntime,
-        Func<string> formatInvalidSettings,
-        Func<int, string> formatSuccess,
-        CancellationToken cancellationToken)
-    {
-        if (!tryCreateRuntime(definition, stateRootPath, modelCatalog, out var runtime))
-        {
-            return new ProviderModelListResult(false, formatInvalidSettings(), []);
-        }
-
-        await using var _ = runtime;
-        var probe = await runtime.ProbeAsync(cancellationToken);
-        var models = SortModelsIfRequested(probe.Models, definition.SortModels == true);
-        return new ProviderModelListResult(true, formatSuccess(models.Count), models);
+        return new ProviderModelListResult(result.Success, result.Message, result.Models);
     }
 
     public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync(
@@ -523,22 +477,16 @@ internal sealed class ProviderFrontendCoordinator
             return false;
         }
 
-        switch (state.Availability)
+        if (!ConfiguredProviderInspection.TryBuildActiveProviderTestResult(
+            state.Availability, state.StatusMessage, state.Models,
+            static count => SR.T("Using active model provider · {0} model(s) discovered.", count),
+            out var inspection))
         {
-            case ModelProviderAvailability.Ready:
-                result = new ProviderTestResult(
-                    true,
-                    SR.T("Using active model provider · {0} model(s) discovered.", state.Models.Count),
-                    state.Models.Count);
-                return true;
-            case ModelProviderAvailability.Probing:
-            case ModelProviderAvailability.Failed:
-            case ModelProviderAvailability.Unsupported:
-                result = new ProviderTestResult(false, state.StatusMessage, 0);
-                return true;
-            default:
-                return false;
+            return false;
         }
+
+        result = new ProviderTestResult(inspection.Success, inspection.Message, inspection.ModelCount);
+        return true;
     }
 
     internal static bool TryBuildActiveProviderModelListResult(
@@ -550,45 +498,22 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(modelProviderStates);
 
         result = default;
-        if (!modelProviderStates.TryGetValue(definition.ProviderKey, out var state) ||
-            state.Availability != ModelProviderAvailability.Ready)
+        if (!modelProviderStates.TryGetValue(definition.ProviderKey, out var state))
         {
             return false;
         }
 
-        result = new ProviderModelListResult(
-            true,
-            SR.T("Using active model provider · {0} model(s) available.", state.Models.Count),
-            state.Models);
-        return true;
-    }
-
-    private static bool TryCreateRuntime(
-        CodeAltaProviderDocument definition,
-        string stateRootPath,
-        ModelsDevCatalogService? modelCatalog,
-        out IModelProviderRuntime runtime)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
-
-        if (!ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, out _, out var createRuntime))
+        if (!ConfiguredProviderInspection.TryBuildActiveProviderModelListResult(
+            state.Availability, state.Models,
+            static count => SR.T("Using active model provider · {0} model(s) available.", count),
+            out var inspection))
         {
-            runtime = null!;
             return false;
         }
 
-        runtime = createRuntime();
+        result = new ProviderModelListResult(inspection.Success, inspection.Message, inspection.Models);
         return true;
     }
-
-    private static IReadOnlyList<AgentModelInfo> SortModelsIfRequested(IReadOnlyList<AgentModelInfo> models, bool sortModels)
-        => sortModels
-            ? models
-                .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
-                .ToArray()
-            : models;
 
     private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)
     {

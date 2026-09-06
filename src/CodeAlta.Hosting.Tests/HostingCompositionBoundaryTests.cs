@@ -31,10 +31,14 @@ public sealed class HostingCompositionBoundaryTests
     }
 
     [TestMethod]
-    public void HostingAssembly_ExposesOnlyBuilderAndHasNoFrontendReferencesOrOptionalParameters()
+    public void HostingAssembly_ExposesOnlyApprovedCompositionApiWithoutFrontendReferencesOrOptionalParameters()
     {
         var assembly = typeof(ConfiguredModelProviderRegistryBuilder).Assembly;
-        CollectionAssert.AreEqual(new[] { typeof(ConfiguredModelProviderRegistryBuilder) }, assembly.GetExportedTypes());
+        CollectionAssert.AreEquivalent(new[]
+        {
+            typeof(ConfiguredModelProviderRegistryBuilder), typeof(ConfiguredProviderInspection),
+            typeof(ProviderInspectionTestResult), typeof(ProviderInspectionModelListResult),
+        }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>
             reference.Name is "alta" or "altatui" or "CodeAlta.Tui" or "CodeAlta" ||
             reference.Name?.StartsWith("XenoAtom.Terminal", StringComparison.Ordinal) == true ||
@@ -43,6 +47,13 @@ public sealed class HostingCompositionBoundaryTests
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
         Assert.AreEqual(5, methods.Length);
         Assert.IsFalse(methods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
+        var inspectionMethods = typeof(ConfiguredProviderInspection).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+        CollectionAssert.AreEquivalent(new[]
+        {
+            "TryBuildActiveProviderTestResult", "TryBuildActiveProviderModelListResult", "TestProviderAsync", "ListProviderModelsAsync",
+        }, inspectionMethods.Select(method => method.Name).ToArray());
+        Assert.IsFalse(inspectionMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
     }
 
     [TestMethod]
@@ -65,7 +76,35 @@ public sealed class HostingCompositionBoundaryTests
         StringAssert.Contains(startup, "ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(");
         var probe = File.ReadAllText(Path.Combine(tui, "App", "ProviderFrontendCoordinator.cs"));
         StringAssert.Contains(probe, "using CodeAlta.Hosting;");
-        StringAssert.Contains(probe, "ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(");
+        StringAssert.Contains(probe, "ConfiguredProviderInspection.TestProviderAsync(");
+        StringAssert.Contains(probe, "ConfiguredProviderInspection.ListProviderModelsAsync(");
+        StringAssert.Contains(probe, "ConfiguredProviderInspection.TryBuildActiveProviderTestResult(");
+        StringAssert.Contains(probe, "ConfiguredProviderInspection.TryBuildActiveProviderModelListResult(");
+        Assert.IsFalse(probe.Contains("TryCreateRuntime(", StringComparison.Ordinal));
+        Assert.IsFalse(probe.Contains("SortModelsIfRequested(", StringComparison.Ordinal));
+        Assert.IsFalse(probe.Contains("TryCreateProviderRuntime", StringComparison.Ordinal));
+        Assert.IsFalse(probe.Contains("ProviderCoreAsync(", StringComparison.Ordinal));
+        Assert.IsFalse(probe.Contains("ProviderModelsCoreAsync(", StringComparison.Ordinal));
+        var inspection = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredProviderInspection.cs"));
+        StringAssert.Contains(inspection, "ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(");
+        StringAssert.Contains(inspection, "runtime = createRuntime();");
+        Assert.IsFalse(inspection.Contains("new ModelProviderRegistry", StringComparison.Ordinal));
+        Assert.IsFalse(inspection.Contains("Environment.GetFolderPath", StringComparison.Ordinal));
+        Assert.IsFalse(inspection.Contains("ConfigureAwait(false)", StringComparison.Ordinal));
+        foreach (var method in new[] { "TestProviderAsync", "ListProviderModelsAsync" })
+        {
+            // Public production overloads validate all required inputs before selecting the real factory.
+            var start = inspection.IndexOf($"> {method}(", StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            var forwarding = inspection.IndexOf($"return await {method}(", start, StringComparison.Ordinal);
+            Assert.IsTrue(forwarding > start);
+            var prefix = inspection[start..forwarding];
+            StringAssert.Contains(prefix, "ArgumentNullException.ThrowIfNull(definition);");
+            StringAssert.Contains(prefix, "ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);");
+            StringAssert.Contains(prefix, "ArgumentNullException.ThrowIfNull(formatInvalidSettings);");
+            StringAssert.Contains(prefix, "ArgumentNullException.ThrowIfNull(formatSuccess);");
+            StringAssert.Contains(inspection[forwarding..], $"return await {method}(definition, stateRootPath, modelCatalog, TryCreateRuntime,");
+        }
     }
 
     // Compile-time checkout path: inspect only named source/project files, never discover profile ancestors.

@@ -2012,11 +2012,16 @@ public sealed class ArchitectureGuardrailTests
     public void ProviderFrontendCoordinator_TestProvider_DisposesRuntimeWithoutDoubleStop()
     {
         var coordinatorSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "ProviderFrontendCoordinator.cs"));
+        var inspectionSource = File.ReadAllText(Path.Combine(GetSourceRoot(), "CodeAlta.Hosting", "ConfiguredProviderInspection.cs"));
 
-        Assert.IsTrue(coordinatorSource.Contains("await using var _ = runtime;", StringComparison.Ordinal));
-        Assert.IsTrue(coordinatorSource.Contains("var probe = await runtime.ProbeAsync(cancellationToken);", StringComparison.Ordinal));
-        Assert.IsTrue(coordinatorSource.Contains("var models = probe.Models;", StringComparison.Ordinal));
-        Assert.IsFalse(coordinatorSource.Contains("await runtime.StopAsync(cancellationToken);", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("await ConfiguredProviderInspection.TestProviderAsync(", StringComparison.Ordinal));
+        Assert.IsTrue(coordinatorSource.Contains("await ConfiguredProviderInspection.ListProviderModelsAsync(", StringComparison.Ordinal));
+        Assert.IsFalse(coordinatorSource.Contains("runtime.ProbeAsync(", StringComparison.Ordinal));
+        Assert.AreEqual(2, inspectionSource.Split("await using var _ = runtime;", StringSplitOptions.None).Length - 1);
+        Assert.AreEqual(2, inspectionSource.Split("var probe = await runtime.ProbeAsync(cancellationToken);", StringSplitOptions.None).Length - 1);
+        Assert.IsTrue(inspectionSource.Contains("var models = probe.Models;", StringComparison.Ordinal));
+        Assert.IsFalse(inspectionSource.Contains("await runtime.StopAsync(cancellationToken);", StringComparison.Ordinal));
+        Assert.IsFalse(inspectionSource.Contains("new ModelProviderRegistry", StringComparison.Ordinal));
     }
 
     [TestMethod]
