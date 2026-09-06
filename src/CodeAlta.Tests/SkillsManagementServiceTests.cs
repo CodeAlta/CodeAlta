@@ -1,6 +1,12 @@
+using System.Reflection;
 using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Tui.ViewModels;
+using CodeAlta.Tui.Views;
+using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Controls;
+using XenoAtom.Terminal.UI.DataGrid;
 
 namespace CodeAlta.Tests;
 
@@ -47,12 +53,23 @@ public sealed class SkillsManagementServiceTests
     [TestMethod]
     public void ListRelatedFiles_ReturnsEmptyForMissingSkillRoot()
     {
-        var descriptor = CreateDescriptor(Path.Combine(Path.GetTempPath(), $"missing-skill-{Guid.NewGuid():N}"));
-        var service = CreateService(Path.GetTempPath());
+        using var temp = TempDirectory.Create();
+        var descriptor = CreateDescriptor(Path.Combine(temp.Path, "missing-skill"));
+        var service = CreateService(temp.Path);
 
         var files = service.ListRelatedFiles(descriptor);
 
         Assert.AreEqual(0, files.Count);
+    }
+
+    [TestMethod]
+    public void ListRelatedFiles_DoesNotIncludeTopLevelFilesNamedLikeFolders()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "scripts"), "not a scripts resource");
+        File.WriteAllText(Path.Combine(temp.Path, "references"), "not a references resource");
+        File.WriteAllText(Path.Combine(temp.Path, "assets"), "not an assets resource");
+        Assert.AreEqual(0, CreateService(temp.Path).ListRelatedFiles(CreateDescriptor(temp.Path)).Count);
     }
 
     [TestMethod]
@@ -61,7 +78,7 @@ public sealed class SkillsManagementServiceTests
         using var temp = TempDirectory.Create();
         var projectRoot = Path.Combine(temp.Path, "repo");
         var skillRoot = Path.Combine(projectRoot, ".alta", "skills", "sample-skill");
-        Directory.CreateDirectory(Path.Combine(projectRoot, ".git"));
+        CreateGitBoundary(projectRoot);
         Directory.CreateDirectory(Path.Combine(skillRoot, "assets"));
         File.WriteAllText(
             Path.Combine(projectRoot, ".gitignore"),
@@ -85,10 +102,11 @@ public sealed class SkillsManagementServiceTests
         var projectRoot = Path.Combine(temp.Path, "project");
         var globalRoot = Path.Combine(temp.Path, ".alta");
         Directory.CreateDirectory(projectRoot);
-        var service = new SkillsManagementService(
-            new SkillCatalog(),
+        Directory.CreateDirectory(globalRoot);
+        var service = SkillsManagementCoordinatorFactory.CreateService(
+            CreateCatalog(),
             new CatalogOptions { GlobalRoot = globalRoot },
-            () => new ProjectDescriptor { ProjectPath = projectRoot });
+            () => new ProjectDescriptor { ProjectPath = projectRoot }, temp.Path);
 
         var result = await service.CreateSkillAsync(
             SkillsManagementScope.Combined,
@@ -110,10 +128,10 @@ public sealed class SkillsManagementServiceTests
     public async Task CreateSkillAsync_CreatesUserAltaSkillWhenNoProjectIsSelected()
     {
         using var temp = TempDirectory.Create();
-        var service = new SkillsManagementService(
-            new SkillCatalog(),
+        var service = SkillsManagementCoordinatorFactory.CreateService(
+            CreateCatalog(),
             new CatalogOptions { GlobalRoot = temp.Path },
-            () => null);
+            () => null, temp.Path);
 
         var result = await service.CreateSkillAsync(
             SkillsManagementScope.Combined,
@@ -134,10 +152,10 @@ public sealed class SkillsManagementServiceTests
     public async Task CreateSkillAsync_RejectsInvalidSkillNames(string name)
     {
         using var temp = TempDirectory.Create();
-        var service = new SkillsManagementService(
-            new SkillCatalog(),
+        var service = SkillsManagementCoordinatorFactory.CreateService(
+            CreateCatalog(),
             new CatalogOptions { GlobalRoot = temp.Path },
-            () => null);
+            () => null, temp.Path);
 
         await Assert.ThrowsExactlyAsync<ArgumentException>(
             () => service.CreateSkillAsync(SkillsManagementScope.User, name, "Description.")).ConfigureAwait(false);
@@ -153,11 +171,11 @@ public sealed class SkillsManagementServiceTests
         var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "home") };
         var configStore = new CodeAltaConfigStore(options);
         configStore.SaveGlobalSkillEnabled("sample-skill", enabled: false);
-        var service = new SkillsManagementService(
-            new SkillCatalog(),
+        var service = SkillsManagementCoordinatorFactory.CreateService(
+            CreateCatalog(),
             options,
             () => new ProjectDescriptor { ProjectPath = projectRoot },
-            configStore);
+            temp.Path);
 
         var descriptors = await service.LoadAsync(SkillsManagementScope.CurrentProject).ConfigureAwait(false);
 
@@ -173,12 +191,13 @@ public sealed class SkillsManagementServiceTests
         var projectRoot = Path.Combine(temp.Path, "project");
         Directory.CreateDirectory(projectRoot);
         var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "home") };
+        Directory.CreateDirectory(options.GlobalRoot);
         var configStore = new CodeAltaConfigStore(options);
-        var service = new SkillsManagementService(
-            new SkillCatalog(),
+        var service = SkillsManagementCoordinatorFactory.CreateService(
+            CreateCatalog(),
             options,
             () => new ProjectDescriptor { ProjectPath = projectRoot },
-            configStore);
+            temp.Path);
 
         var disabled = service.SetSkillsEnabled(SkillEnablementScope.Both, ["sample-skill", "other-skill"], enabled: false);
 
@@ -199,9 +218,165 @@ public sealed class SkillsManagementServiceTests
     {
         using var temp = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "home") };
-        var service = new SkillsManagementService(new SkillCatalog(), options, () => null, new CodeAltaConfigStore(options));
+        Directory.CreateDirectory(options.GlobalRoot);
+        var service = SkillsManagementCoordinatorFactory.CreateService(CreateCatalog(), options, () => null, temp.Path);
 
         Assert.ThrowsExactly<InvalidOperationException>(() => service.SetSkillsEnabled(SkillEnablementScope.Project, ["sample-skill"], enabled: false));
+    }
+
+    [TestMethod]
+    public async Task CreateSkillAsync_CanceledRequestLeavesNoFinalDirectory()
+    {
+        using var temp = TempDirectory.Create();
+        var service = CreateService(temp.Path);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => service.CreateSkillAsync(
+            SkillsManagementScope.User, "canceled", "Description", cancellation.Token));
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Path, "skills", "canceled")));
+    }
+
+    [TestMethod]
+    public void SetSkillsEnabled_BothWithoutProjectDoesNotWriteGlobal()
+    {
+        using var temp = TempDirectory.Create();
+        var service = CreateService(temp.Path);
+        Assert.ThrowsExactly<InvalidOperationException>(() => service.SetSkillsEnabled(
+            SkillEnablementScope.Both, ["sample"], false));
+        Assert.IsFalse(File.Exists(Path.Combine(temp.Path, "config.toml")));
+    }
+
+    [TestMethod]
+    public async Task CreateSkillAsync_InvalidScopeDoesNotCreateSkill()
+    {
+        using var temp = TempDirectory.Create();
+        var service = CreateService(temp.Path);
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.CreateSkillAsync(
+            (SkillsManagementScope)99, "sample", "Description"));
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Path, "skills")));
+    }
+
+    [TestMethod]
+    public async Task CreateSkillAsync_RejectsControlDescriptionBeforeMutation()
+    {
+        using var temp = TempDirectory.Create();
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => CreateService(temp.Path).CreateSkillAsync(
+            SkillsManagementScope.User, "sample", "bad\0description"));
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Path, "skills")));
+    }
+
+    [TestMethod]
+    public async Task CreateSkillAsync_PreservesCollision()
+    {
+        using var temp = TempDirectory.Create();
+        var root = Path.Combine(temp.Path, "skills", "sample");
+        Directory.CreateDirectory(root);
+        var file = Path.Combine(root, "SKILL.md");
+        File.WriteAllText(file, "existing");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => CreateService(temp.Path).CreateSkillAsync(
+            SkillsManagementScope.User, "sample", "Description"));
+        Assert.AreEqual("existing", File.ReadAllText(file));
+    }
+
+    [TestMethod]
+    public async Task FactoryService_UsesInjectedHomeAndPreservesProvenance()
+    {
+        using var temp = TempDirectory.Create();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var home = Directory.CreateDirectory(Path.Combine(temp.Path, "home")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        await WriteSkillAsync(Path.Combine(global, "skills", "sample"), "sample", "Global");
+        await WriteSkillAsync(Path.Combine(home, ".agents", "skills", "sample"), "sample", "Common");
+        await WriteSkillAsync(Path.Combine(project, ".alta", "skills", "sample"), "sample", "Project");
+        var service = SkillsManagementCoordinatorFactory.CreateService(CreateCatalog(), new CatalogOptions { GlobalRoot = global },
+            () => new ProjectDescriptor { ProjectPath = project }, home);
+
+        var all = await service.LoadAsync(SkillsManagementScope.Combined);
+        Assert.AreEqual(3, all.Count);
+        Assert.AreEqual(SkillSourceKind.ProjectAlta, all[0].SourceKind);
+        Assert.IsFalse(all[0].IsShadowed);
+        Assert.IsTrue(all[1].IsShadowed);
+        Assert.AreEqual(SkillSourceKind.UserCommon, all[2].SourceKind);
+        Assert.IsTrue(all.All(d => d.SkillRootPath.StartsWith(temp.Path, StringComparison.Ordinal)));
+        Assert.AreEqual(2, (await service.LoadAsync(SkillsManagementScope.User)).Count);
+        Assert.AreEqual(1, (await service.LoadAsync(SkillsManagementScope.CurrentProject)).Count);
+
+        var noHome = SkillsManagementCoordinatorFactory.CreateService(CreateCatalog(), new CatalogOptions { GlobalRoot = global }, () => null, null);
+        Assert.AreEqual(1, (await noHome.LoadAsync(SkillsManagementScope.User)).Count);
+    }
+
+    [TestMethod]
+    public async Task CaptureContext_DoesNotRedirectQueuedOperations()
+    {
+        using var temp = TempDirectory.Create();
+        var first = Directory.CreateDirectory(Path.Combine(temp.Path, "first")).FullName;
+        var second = Directory.CreateDirectory(Path.Combine(temp.Path, "second")).FullName;
+        var selected = new ProjectDescriptor { ProjectPath = first };
+        var service = SkillsManagementCoordinatorFactory.CreateService(CreateCatalog(), new CatalogOptions { GlobalRoot = temp.Path }, () => selected, temp.Path);
+        var captured = service.CaptureContext();
+        selected = new ProjectDescriptor { ProjectPath = second };
+
+        var result = await Task.Run(() => captured.CreateSkillAsync(SkillsManagementScope.Combined, "sample", "Description"));
+        Assert.AreEqual(Path.Combine(first, ".alta", "skills", "sample"), result.SkillRootPath);
+        await Task.Run(() => captured.SetSkillEnabled(SkillEnablementScope.Project, "sample", false));
+        Assert.IsFalse(File.Exists(Path.Combine(second, ".alta", "config.toml")));
+        Assert.AreEqual(1, (await captured.LoadAsync(SkillsManagementScope.CurrentProject)).Count);
+    }
+
+    [TestMethod]
+    public async Task Dialog_CreateFailureShowsValidationWithoutOpeningEditor()
+    {
+        using var temp = TempDirectory.Create();
+        var opened = false;
+        var dialog = new SkillsManagementDialog(CreateService(temp.Path), (_, _) => { opened = true; return Task.CompletedTask; },
+            (_, _) => Task.CompletedTask, () => null, () => null);
+        var validation = new TextBlock();
+        var method = typeof(SkillsManagementDialog).GetMethod("CreateSkillFromDialogAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await (Task)method.Invoke(dialog, [null, new TextBox { Text = "../invalid" }, new TextBox { Text = "Description" }, validation])!;
+        Assert.IsFalse(opened);
+        StringAssert.Contains(validation.Text, "Skill name");
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Path, "skills")));
+    }
+
+    [TestMethod]
+    public async Task Dialog_OpenFailureShowsFeedback()
+    {
+        using var temp = TempDirectory.Create();
+        var dialog = new SkillsManagementDialog(CreateService(temp.Path), (_, _) => throw new IOException("editor unavailable"),
+            (_, _) => Task.CompletedTask, () => null, () => null);
+        var row = new SkillManagementRowViewModel(CreateDescriptor(temp.Path), (_, _, _) => Task.CompletedTask);
+        typeof(SkillsManagementDialog).GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(dialog, new[] { row });
+        var cell = (State<DataGridCell>)typeof(SkillsManagementDialog).GetField("_currentSkillCell", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
+        cell.Value = new DataGridCell(0, 0);
+        await (Task)typeof(SkillsManagementDialog).GetMethod("OpenSelectedSkillAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(dialog, null)!;
+        var summary = (string)typeof(SkillsManagementDialog).GetField("_summaryText", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
+        StringAssert.Contains(summary, "editor unavailable");
+        StringAssert.Contains(summary, "[error]");
+    }
+
+    [TestMethod]
+    public async Task Dialog_BothWithoutProjectShowsFailureWithoutGlobalWrite()
+    {
+        using var temp = TempDirectory.Create();
+        var dialog = new SkillsManagementDialog(CreateService(temp.Path), (_, _) => Task.CompletedTask,
+            (_, _) => Task.CompletedTask, () => null, () => null);
+        var row = new SkillManagementRowViewModel(CreateDescriptor(temp.Path), (_, _, _) => Task.CompletedTask);
+        typeof(SkillsManagementDialog).GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(dialog, new[] { row });
+        var scopeSelect = typeof(SkillsManagementDialog).GetField("_bulkScopeSelect", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
+        scopeSelect.GetType().GetProperty("SelectedIndex")!.SetValue(scopeSelect, 2);
+        await (Task)typeof(SkillsManagementDialog).GetMethod("ApplyBulkEnablementAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(dialog, [false])!;
+        var summary = (string)typeof(SkillsManagementDialog).GetField("_summaryText", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
+        StringAssert.Contains(summary, "[error]");
+        StringAssert.Contains(summary, "Failed to update skill enablement");
+        Assert.IsFalse(File.Exists(Path.Combine(temp.Path, "config.toml")));
+    }
+
+    private static void CreateGitBoundary(string root)
+    {
+        var git = Path.Combine(root, ".git");
+        Directory.CreateDirectory(git);
+        File.WriteAllText(Path.Combine(git, "config"), "[core]\nignorecase = false\nexcludesFile = excludes\n");
+        File.WriteAllText(Path.Combine(git, "excludes"), string.Empty);
     }
 
     private static SkillDescriptor CreateDescriptor(string skillRoot)
@@ -224,10 +399,14 @@ public sealed class SkillsManagementServiceTests
         };
 
     private static SkillsManagementService CreateService(string globalRoot)
-        => new(
-            new SkillCatalog(),
+        => SkillsManagementCoordinatorFactory.CreateService(
+            CreateCatalog(),
             new CatalogOptions { GlobalRoot = globalRoot },
-            () => null);
+            () => null, globalRoot);
+
+    private static SkillCatalog CreateCatalog()
+        => new([new ProjectCodeAltaSkillRootProvider(), new ProjectCommonSkillRootProvider(),
+            new UserCodeAltaSkillRootProvider(), new UserCommonSkillRootProvider()]);
 
     private static async Task WriteSkillAsync(string skillRoot, string name, string description)
     {
@@ -251,6 +430,7 @@ public sealed class SkillsManagementServiceTests
         {
             var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"codealta-skills-ui-tests-{Guid.NewGuid():N}");
             Directory.CreateDirectory(path);
+            CreateGitBoundary(path);
             return new TempDirectory(path);
         }
 

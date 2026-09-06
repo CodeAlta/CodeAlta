@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Skills;
 using CodeAlta.Tui.Models;
 using XenoAtom.Terminal.UI;
 
@@ -24,7 +25,8 @@ internal static class SkillsManagementCoordinatorFactory
         }
 
         var coordinator = new SkillsManagementCoordinator(
-            new SkillsManagementService(ownedServices.SkillCatalog, catalogOptions, getSelectedProject),
+            CreateService(ownedServices.SkillCatalog, catalogOptions, getSelectedProject,
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
             openFileAsync,
             activateSkillAsync,
             () => DialogBoundsResolver.ResolveAppBounds(getDialogAnchor()),
@@ -35,4 +37,8 @@ internal static class SkillsManagementCoordinatorFactory
             return Task.CompletedTask;
         };
     }
+
+    internal static SkillsManagementService CreateService(SkillCatalog catalog, CatalogOptions options,
+        Func<ProjectDescriptor?> getSelectedProject, string? userProfileRoot)
+        => new(new SkillManagementService(catalog, options.GlobalRoot, userProfileRoot), getSelectedProject);
 }

@@ -304,7 +304,8 @@ internal sealed class SkillsManagementDialog
         preferredSkillName ??= GetSelectedDescriptor()?.Name;
         try
         {
-            var descriptors = await Task.Run(() => _service.LoadAsync(scope));
+            var service = _service.CaptureContext();
+            var descriptors = await Task.Run(() => service.LoadAsync(scope));
             await _dialog.Dispatcher.InvokeAsync(
                 () =>
                 {
@@ -452,7 +453,7 @@ internal sealed class SkillsManagementDialog
             return;
         }
 
-        await _openFileAsync(descriptor.SkillFilePath, CancellationToken.None);
+        await OpenFileWithFeedbackAsync(descriptor.SkillFilePath);
     }
 
     private async Task OpenSelectedRelatedFileAsync()
@@ -467,7 +468,19 @@ internal sealed class SkillsManagementDialog
             return;
         }
 
-        await _openFileAsync(relatedFiles[index].FullPath, CancellationToken.None);
+        await OpenFileWithFeedbackAsync(relatedFiles[index].FullPath);
+    }
+
+    private async Task OpenFileWithFeedbackAsync(string path)
+    {
+        try
+        {
+            await _openFileAsync(path, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _summaryText = $"[error]{SR.T("Failed to open '{0}': {1}", AnsiMarkup.Escape(path), AnsiMarkup.Escape(ex.Message))}[/]";
+        }
     }
 
     private void ShowNewSkillDialog()
@@ -554,7 +567,7 @@ internal sealed class SkillsManagementDialog
             createDialog?.Close();
             await ReloadAsync(result.Name);
             _summaryText = $"[success]{SR.T("Created skill '{0}' at {1}.", AnsiMarkup.Escape(result.Name), AnsiMarkup.Escape(result.SkillRootPath))}[/]";
-            await _openFileAsync(result.SkillFilePath, CancellationToken.None);
+            await OpenFileWithFeedbackAsync(result.SkillFilePath);
         }
         catch (Exception ex)
         {
@@ -609,7 +622,8 @@ internal sealed class SkillsManagementDialog
         var skillName = row.Descriptor.Name;
         try
         {
-            var result = await Task.Run(() => _service.SetSkillEnabled(scope, skillName, enabled));
+            var service = _service.CaptureContext();
+            var result = await Task.Run(() => service.SetSkillEnabled(scope, skillName, enabled));
             await ReloadAsync(skillName);
             _summaryText = BuildEnablementUpdateMarkup(result, enabled ? SR.T("enabled") : SR.T("disabled"), skillName);
         }
@@ -633,7 +647,8 @@ internal sealed class SkillsManagementDialog
         {
             var scope = GetSelectedBulkScope();
             var selectedName = GetSelectedDescriptor()?.Name;
-            var result = await Task.Run(() => _service.SetSkillsEnabled(scope, names, enabled));
+            var service = _service.CaptureContext();
+            var result = await Task.Run(() => service.SetSkillsEnabled(scope, names, enabled));
             await ReloadAsync(selectedName);
             _summaryText = BuildEnablementUpdateMarkup(result, enabled ? SR.T("enabled") : SR.T("disabled"), SR.T("{0} shown skill(s)", names.Count));
         }
@@ -656,7 +671,8 @@ internal sealed class SkillsManagementDialog
         {
             var scope = GetSelectedBulkScope();
             var selectedName = GetSelectedDescriptor()?.Name;
-            var result = await Task.Run(() => _service.InvertSkillsEnabled(scope, names));
+            var service = _service.CaptureContext();
+            var result = await Task.Run(() => service.InvertSkillsEnabled(scope, names));
             await ReloadAsync(selectedName);
             _summaryText = BuildEnablementUpdateMarkup(result, SR.T("inverted"), SR.T("{0} shown skill(s)", names.Count));
         }

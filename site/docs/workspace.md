@@ -246,6 +246,10 @@ Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The dialog shows discove
 
 CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. The skills dialog lets you inspect skills, open related files, activate enabled skills when the selected provider supports injected skill context, and manage enablement. Compact `G` and `P` checkboxes disable or enable a skill in global `~/.alta/config.toml` or the selected project's `.alta/config.toml`; bulk actions can enable, disable, or invert the currently shown skills for Global, Project, or Both scopes. Disabled skills remain inspectable in the dialog but are not advertised to models and cannot be activated.
 
+**New skill** creates `SKILL.md` plus `scripts/`, `references/`, and `assets/` folders under `<project>/.alta/skills/<name>` (Current Project, or Combined with a selected project) or `~/.alta/skills/<name>` (User, or Combined without a project). Names use lowercase Unicode letters/digits and single hyphens, up to 64 characters; portable reserved device names are rejected. Supply a description of up to 1024 characters. Creation requires an available root and rejects linked/reparse paths and existing files or directories rather than overwriting them. A canceled or failed creation before publication does not leave a partially created final skill.
+
+Enablement edits preserve TOML comments and unknown settings. Project and Both require a selected project before any config changes are written. Both is not a transaction: a later project-file I/O failure can leave the global change applied. Built-in skill provenance is shown, but the current generic file editor does not enforce read-only opening for built-in skills; do not edit bundled skill files to customize them. Create your own project or user skill instead.
+
 ## Logs viewer
 
 <figure class="my-4">

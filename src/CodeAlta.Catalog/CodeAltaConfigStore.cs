@@ -240,17 +240,18 @@ public sealed class CodeAltaConfigStore
     /// <summary>
     /// Persists the complete global disabled skill set.
     /// </summary>
+    /// <remarks>Edits only skill enablement tokens, preserving TOML comments and unknown settings. This is not an external-writer compare-and-swap.</remarks>
     /// <param name="skillNames">The skill names to disable globally.</param>
     public void SaveGlobalDisabledSkillNames(IEnumerable<string> skillNames)
     {
         ArgumentNullException.ThrowIfNull(skillNames);
-        var document = LoadGlobal();
-        SaveDisabledSkillNames(_options.ConfigPath, document, skillNames);
+        SaveDisabledSkillNames(_options.ConfigPath, skillNames);
     }
 
     /// <summary>
     /// Persists the complete project-local disabled skill set.
     /// </summary>
+    /// <remarks>Edits only skill enablement tokens, preserving TOML comments and unknown settings. This is not a transaction with global configuration.</remarks>
     /// <param name="projectRoot">The project root directory.</param>
     /// <param name="skillNames">The skill names to disable for the project.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> is empty.</exception>
@@ -259,8 +260,7 @@ public sealed class CodeAltaConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         ArgumentNullException.ThrowIfNull(skillNames);
         var path = GetProjectConfigPath(projectRoot);
-        var document = LoadDocument(path);
-        SaveDisabledSkillNames(path, document, skillNames);
+        SaveDisabledSkillNames(path, skillNames);
     }
 
     /// <summary>
@@ -853,14 +853,25 @@ public sealed class CodeAltaConfigStore
         SaveDocument(path, document);
     }
 
-    private static void SaveDisabledSkillNames(string path, CodeAltaConfigDocument document, IEnumerable<string> skillNames)
+    private static void SaveDisabledSkillNames(string path, IEnumerable<string> skillNames)
     {
         ArgumentNullException.ThrowIfNull(skillNames);
-        NormalizeDocument(document);
         var disabled = NormalizeSkillConfigNameList(skillNames);
-        document.Skills ??= new CodeAltaSkillSettingsDocument();
-        document.Skills.Disabled = disabled;
-        SaveDocument(path, document);
+        var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        try
+        {
+            _ = ParseDocument(content, path);
+        }
+        catch (Exception ex) when (IsConfigLoadException(ex))
+        {
+            throw new InvalidDataException($"Failed to parse CodeAlta config '{path}'.", ex);
+        }
+        var updated = Skills.SkillConfigSyntax.UpdateDisabledNames(content, disabled ?? []);
+        // Validate the edited document before writing; this remains ordinary config-owner persistence,
+        // not a multi-file transaction or external-writer compare-and-swap.
+        _ = ParseDocument(updated, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, updated);
     }
 
     private static IReadOnlySet<string> LoadDisabledSkillNames(CodeAltaConfigDocument document)
