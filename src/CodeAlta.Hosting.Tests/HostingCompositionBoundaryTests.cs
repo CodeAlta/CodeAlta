@@ -39,7 +39,7 @@ public sealed class HostingCompositionBoundaryTests
             typeof(ConfiguredModelProviderRegistryBuilder), typeof(ConfiguredProviderInspection),
             typeof(ProviderInspectionTestResult), typeof(ProviderInspectionModelListResult),
             typeof(ConfiguredCopilotAuthentication), typeof(ConfiguredXaiAuthentication),
-            typeof(ConfiguredCodexAuthentication),
+            typeof(ConfiguredCodexAuthentication), typeof(CodexAccountMetadata),
         }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>
             reference.Name is "alta" or "altatui" or "CodeAlta.Tui" or "CodeAlta" ||
@@ -72,12 +72,13 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(xaiAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
         var codexAuthenticationMethods = typeof(ConfiguredCodexAuthentication).GetMethods(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
-        CollectionAssert.AreEqual(new[] { "DeleteCredentialAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
-        Assert.AreEqual(typeof(Task), codexAuthenticationMethods[0].ReturnType);
+        CollectionAssert.AreEquivalent(new[] { "DeleteCredentialAsync", "ReadAccountMetadataAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
+        var codexDeletionMethod = codexAuthenticationMethods.Single(method => method.Name == "DeleteCredentialAsync");
+        Assert.AreEqual(typeof(Task), codexDeletionMethod.ReturnType);
         CollectionAssert.AreEqual(new[]
         {
             typeof(CodeAlta.Catalog.CodeAltaProviderDocument), typeof(Func<string>), typeof(Func<string>), typeof(CancellationToken),
-        }, codexAuthenticationMethods[0].GetParameters().Select(parameter => parameter.ParameterType).ToArray());
+        }, codexDeletionMethod.GetParameters().Select(parameter => parameter.ParameterType).ToArray());
         Assert.IsFalse(codexAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
     }
 
@@ -421,6 +422,147 @@ public sealed class HostingCompositionBoundaryTests
         {
             Assert.IsFalse(source.Contains(forbidden, StringComparison.Ordinal));
         }
+    }
+
+    [TestMethod]
+    public void CodexAccountMetadata_PublicShapeAndSourceWiringPreservePostLoadProjectionAndSynchronousPresentation()
+    {
+        // Type metadata and named checkout sources only; no operation or provider constructor is executed.
+        var method = typeof(ConfiguredCodexAuthentication).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly)
+            .Single(candidate => candidate.Name == "ReadAccountMetadataAsync");
+        Assert.AreEqual(typeof(Task), method.ReturnType);
+        CollectionAssert.AreEqual(new[]
+        {
+            typeof(CodeAlta.Catalog.CodeAltaProviderDocument), typeof(Func<string>), typeof(Action<CodexAccountMetadata>), typeof(CancellationToken),
+        }, method.GetParameters().Select(parameter => parameter.ParameterType).ToArray());
+        Assert.IsFalse(method.GetParameters().Any(parameter => parameter.IsOptional));
+        Assert.IsTrue(typeof(CodexAccountMetadata).IsSealed);
+        var properties = typeof(CodexAccountMetadata).GetProperties(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly);
+        CollectionAssert.AreEquivalent(new[] { "AccountId", "AccountLabel" }, properties.Select(property => property.Name).ToArray());
+        var nullability = new System.Reflection.NullabilityInfoContext();
+        foreach (var property in properties)
+        {
+            Assert.AreEqual(typeof(string), property.PropertyType);
+            Assert.AreEqual(System.Reflection.NullabilityState.Nullable, nullability.Create(property).ReadState);
+        }
+        var constructor = typeof(CodexAccountMetadata).GetConstructors().Single();
+        CollectionAssert.AreEqual(new[] { typeof(string), typeof(string) }, constructor.GetParameters().Select(parameter => parameter.ParameterType).ToArray());
+        CollectionAssert.AreEqual(new[] { "AccountId", "AccountLabel" }, constructor.GetParameters().Select(parameter => parameter.Name).ToArray());
+        foreach (var parameter in constructor.GetParameters())
+        {
+            Assert.IsFalse(parameter.IsOptional);
+            Assert.AreEqual(System.Reflection.NullabilityState.Nullable, nullability.Create(parameter).ReadState);
+        }
+
+        var root = SourceRoot();
+        var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredCodexAuthentication.cs")).Replace("\r\n", "\n");
+        var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
+        var start = source.IndexOf("    public static Task ReadAccountMetadataAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(start >= 0);
+        var end = source.IndexOf("\n    internal static async Task ReadAccountMetadataAsync(", start, StringComparison.Ordinal);
+        Assert.IsTrue(end > start);
+        var expectedPublic = """
+            public static Task ReadAccountMetadataAsync(
+                CodeAltaProviderDocument definition,
+                Func<string> getStateRootPath,
+                Action<CodexAccountMetadata?> onMetadata,
+                CancellationToken cancellationToken)
+                => ReadAccountMetadataAsync(
+                    definition, getStateRootPath, onMetadata,
+                    static (providerDefinition, getStateRootPath) =>
+                    {
+                        var store = new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath());
+                        return async (onMetadata, token) =>
+                        {
+                            var credential = await store.LoadAsync(providerDefinition.ProviderKey, token);
+                            if (credential is null)
+                            {
+                                onMetadata(null);
+                                return;
+                            }
+
+                            var accountId = OpenAICodexSubscriptionAuthManager.ResolveAccountId(providerDefinition.AccountId, credential);
+                            var accountLabel = credential.AccountLabel;
+                            onMetadata(new CodexAccountMetadata(accountId, accountLabel));
+                        };
+                    },
+                    cancellationToken);
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedPublic + "\n", source[start..end]);
+        var coreEnd = source.IndexOf("\n    }", end, StringComparison.Ordinal);
+        Assert.IsTrue(coreEnd > end);
+        var expectedCore = """
+            internal static async Task ReadAccountMetadataAsync(
+                CodeAltaProviderDocument definition,
+                Func<string> getStateRootPath,
+                Action<CodexAccountMetadata?> onMetadata,
+                Func<CodeAltaProviderDocument, Func<string>, CodexAccountLookupOperation> createOperation,
+                CancellationToken cancellationToken)
+            {
+                ArgumentNullException.ThrowIfNull(definition);
+                ArgumentNullException.ThrowIfNull(getStateRootPath);
+                ArgumentNullException.ThrowIfNull(onMetadata);
+                ArgumentNullException.ThrowIfNull(createOperation);
+
+                var operation = createOperation(definition, getStateRootPath);
+                await operation(onMetadata, cancellationToken);
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedCore, source[(end + 1)..coreEnd]);
+        StringAssert.Contains(source, "public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabel);");
+        StringAssert.Contains(source, "internal delegate ValueTask CodexAccountLookupOperation(\n    Action<CodexAccountMetadata?> onMetadata,\n    CancellationToken cancellationToken);");
+
+        var routeStart = tui.IndexOf("    public async Task<ProviderTestResult> ListCodexSubscriptionAccountsAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(routeStart >= 0);
+        var routeEnd = tui.IndexOf("\n    }", routeStart, StringComparison.Ordinal);
+        Assert.IsTrue(routeEnd > routeStart);
+        var expectedRoute = """
+            public async Task<ProviderTestResult> ListCodexSubscriptionAccountsAsync(
+                CodeAltaProviderDocument definition,
+                CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(definition);
+
+                ProviderTestResult result = default;
+                await ConfiguredCodexAuthentication.ReadAccountMetadataAsync(
+                    definition,
+                    GetProviderStateRootPath,
+                    metadata => result = FormatCodexAccountMetadataResult(metadata),
+                    cancellationToken);
+                return result;
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedRoute, tui[routeStart..routeEnd]);
+        var expectedFormatter = """
+            internal static ProviderTestResult FormatCodexAccountMetadataResult(CodexAccountMetadata? metadata)
+            {
+                if (metadata is null)
+                {
+                    return new ProviderTestResult(false, SR.T("Login required before account/workspace metadata can be listed."), 0);
+                }
+
+                var accountId = metadata.AccountId;
+                var accountLabel = string.IsNullOrWhiteSpace(metadata.AccountLabel) ? SR.T("ChatGPT account/workspace") : metadata.AccountLabel;
+                var accountMessage = string.IsNullOrWhiteSpace(accountId)
+                    ? SR.T("{0}: token did not expose an account/workspace id; enter one in Account/Workspace Id if required.", accountLabel)
+                    : SR.T("{0}: {1}", accountLabel, accountId);
+                return new ProviderTestResult(true, accountMessage, string.IsNullOrWhiteSpace(accountId) ? 0 : 1);
+            }
+        """.Replace("\r\n", "\n");
+        StringAssert.Contains(tui, expectedFormatter);
+        foreach (var removed in new[] { "ReadCodexAccountMetadataCoreAsync", "record CodexAccountMetadata", "delegate ValueTask CodexAccountLookupOperation" })
+        {
+            Assert.IsFalse(tui.Contains(removed, StringComparison.Ordinal));
+        }
+        // The preceding deletion guard retains the exact login helper and both login caller checks.
+        StringAssert.Contains(tui, "private OpenAICodexSubscriptionAuthManager CreateCodexSubscriptionAuthManager(CodeAltaProviderDocument definition)");
+        StringAssert.Contains(tui, "var authManager = CreateCodexSubscriptionAuthManager(definition);");
+        StringAssert.Contains(tui, "private string GetProviderStateRootPath()\n        => _ownedServices?.CatalogOptions.GlobalRoot\n           ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), \".alta\");");
+        var adapter = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "IModelProviderDialogService.cs")).Replace("\r\n", "\n");
+        StringAssert.Contains(adapter, "public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)\n        => _providerUi.ListCodexSubscriptionAccountsAsync(definition, cancellationToken);");
+        var dialog = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "Views", "ModelProvidersDialog.cs")).Replace("\r\n", "\n");
+        StringAssert.Contains(dialog, "definition => _modelProviders.ListAccountsAsync(definition)");
+        StringAssert.Contains(dialog, "canCancel: false,\n            (definition, _, _) => actionAsync(definition));");
     }
 
     // Compile-time checkout path: inspect only named source/project files, never discover profile ancestors.
