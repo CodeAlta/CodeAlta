@@ -390,7 +390,7 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(tui.Contains("DeleteCodexSubscriptionCredentialCoreAsync", StringComparison.Ordinal));
         Assert.IsFalse(tui.Contains("CodexSubscriptionDeleteCredentialOperation", StringComparison.Ordinal));
 
-        // The unchanged shared manager helper is still required by browser/device login, not duplication
+        // The unchanged shared manager helper is still required by browser login, not duplication
         // of deletion orchestration. Do not forbid all Codex manager construction in the TUI.
         var expectedHelper = "    private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)\n"
             + "    {\n"
@@ -404,7 +404,7 @@ public sealed class HostingCompositionBoundaryTests
             + "            definition.ProviderKey);\n"
             + "    }";
         StringAssert.Contains(tui, expectedHelper);
-        foreach (var entry in new[] { "LoginCodexSubscriptionWithBrowserAsync", "LoginCodexSubscriptionWithDeviceCodeAsync" })
+        foreach (var entry in new[] { "LoginCodexSubscriptionWithBrowserAsync" })
         {
             var entryStart = tui.IndexOf($"    public async Task<ProviderTestResult> {entry}(", StringComparison.Ordinal);
             Assert.IsTrue(entryStart >= 0);
@@ -554,7 +554,7 @@ public sealed class HostingCompositionBoundaryTests
         {
             Assert.IsFalse(tui.Contains(removed, StringComparison.Ordinal));
         }
-        // The preceding deletion guard retains the exact login helper and both login caller checks.
+        // The preceding deletion guard retains the exact login helper and browser login caller checks.
         StringAssert.Contains(tui, "private OpenAICodexSubscriptionAuthManager CreateCodexSubscriptionAuthManager(CodeAltaProviderDocument definition)");
         StringAssert.Contains(tui, "var authManager = CreateCodexSubscriptionAuthManager(definition);");
         StringAssert.Contains(tui, "private string GetProviderStateRootPath()\n        => _ownedServices?.CatalogOptions.GlobalRoot\n           ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), \".alta\");");
@@ -563,6 +563,198 @@ public sealed class HostingCompositionBoundaryTests
         var dialog = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "Views", "ModelProvidersDialog.cs")).Replace("\r\n", "\n");
         StringAssert.Contains(dialog, "definition => _modelProviders.ListAccountsAsync(definition)");
         StringAssert.Contains(dialog, "canCancel: false,\n            (definition, _, _) => actionAsync(definition));");
+    }
+
+    [TestMethod]
+    public void CodexDeviceLogin_TuiCharacterizationPreservesExactFactoryCallbacksPresentationAndOtherRoutes()
+    {
+        // Three named checkout sources only. No coordinator, provider constructor or operation executes.
+        var root = SourceRoot();
+        var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
+        var adapter = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "IModelProviderDialogService.cs")).Replace("\r\n", "\n");
+        var dialog = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "Views", "ModelProvidersDialog.cs")).Replace("\r\n", "\n");
+        var device = ReadMethod(tui, "    public async Task<ProviderTestResult> LoginCodexSubscriptionWithDeviceCodeAsync(");
+        var expectedDevice = """
+            public async Task<ProviderTestResult> LoginCodexSubscriptionWithDeviceCodeAsync(
+                CodeAltaProviderDocument definition,
+                Action<string> reportStatus,
+                CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(definition);
+                ArgumentNullException.ThrowIfNull(reportStatus);
+
+                ProviderTestResult result = default;
+                await LoginCodexDeviceCoreAsync(
+                    definition,
+                    GetProviderStateRootPath,
+                    static () => SR.T("Select a Codex provider first."),
+                    (verificationUri, userCode) => ReportCodexDeviceCode(verificationUri, userCode, reportStatus),
+                    static () => SR.T("ChatGPT device-code login completed"),
+                    (prefix, rawAccountId) => result = FormatCodexDeviceLoginResult(prefix, rawAccountId),
+                    static (providerDefinition, getStateRootPath) =>
+                    {
+                        var manager = new OpenAICodexSubscriptionLoginManager(
+                            new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                            providerDefinition.ProviderKey);
+                        return async (reportDeviceCode, formatCompletionPrefix, onCompleted, token) =>
+                        {
+                            var credential = await manager.CompleteDeviceLoginAsync(
+                                (deviceCode, _) =>
+                                {
+                                    reportDeviceCode(deviceCode.VerificationUri, deviceCode.UserCode);
+                                    return ValueTask.CompletedTask;
+                                },
+                                cancellationToken: token);
+                            var prefix = formatCompletionPrefix();
+                            // Approved once-only raw ID capture AFTER prefix localization, not resolver output.
+                            // The provider returns a fresh, unexposed credential with a plain auto-property.
+                            var rawAccountId = credential.AccountId;
+                            onCompleted(prefix, rawAccountId);
+                        };
+                    },
+                    cancellationToken);
+                return result;
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedDevice, device);
+
+        // Scope the factory inside DEVICE, never select an earlier account/deletion factory.
+        var factoryStart = device.IndexOf("            static (providerDefinition, getStateRootPath) =>", StringComparison.Ordinal);
+        Assert.IsTrue(factoryStart >= 0);
+        var factoryEnd = device.IndexOf("\n            },", factoryStart, StringComparison.Ordinal);
+        Assert.IsTrue(factoryEnd > factoryStart);
+        var factory = device[factoryStart..factoryEnd];
+        StringAssert.Contains(factory, "var manager = new OpenAICodexSubscriptionLoginManager(\n                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),\n                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n                    providerDefinition.ProviderKey);");
+        var prefix = factory.IndexOf("var prefix = formatCompletionPrefix();", StringComparison.Ordinal);
+        var projection = factory.IndexOf("var rawAccountId = credential.AccountId;", StringComparison.Ordinal);
+        var completion = factory.IndexOf("onCompleted(prefix, rawAccountId);", StringComparison.Ordinal);
+        Assert.IsTrue(prefix >= 0 && projection > prefix && completion > projection);
+        Assert.IsFalse(factory[prefix..completion].Contains("await ", StringComparison.Ordinal));
+        Assert.AreEqual(projection + "var rawAccountId = ".Length, factory.IndexOf("credential.AccountId", StringComparison.Ordinal));
+        Assert.AreEqual(-1, factory.IndexOf("credential.AccountId", projection + "var rawAccountId = credential.AccountId".Length, StringComparison.Ordinal));
+        foreach (var forbidden in new[]
+        {
+            "ResolveAccountId", "AccountLabel", "CodexAccountMetadata", "DeviceAuthId", "timeProvider:",
+            "AuthSource", "Enabled", "definition.AccountId", "providerDefinition.AccountId", "new Uri(",
+            "TryOpenBrowser", "ConfiguredCodexAuthentication", "ConfigureAwait(", "Task.Run(",
+            "ThrowIfCancellationRequested(", "Dispose(", "DisposeAsync(", "catch",
+        })
+        {
+            Assert.IsFalse(device.Contains(forbidden, StringComparison.Ordinal));
+        }
+
+        var expectedCore = """
+            internal static async Task LoginCodexDeviceCoreAsync(
+                CodeAltaProviderDocument definition,
+                Func<string> getStateRootPath,
+                Func<string> formatInvalidProvider,
+                Action<string, string> reportDeviceCode,
+                Func<string> formatCompletionPrefix,
+                Action<string, string?> onCompleted,
+                Func<CodeAltaProviderDocument, Func<string>, CodexDeviceLoginOperation> createOperation,
+                CancellationToken cancellationToken)
+            {
+                ArgumentNullException.ThrowIfNull(definition);
+                ArgumentNullException.ThrowIfNull(getStateRootPath);
+                ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+                ArgumentNullException.ThrowIfNull(reportDeviceCode);
+                ArgumentNullException.ThrowIfNull(formatCompletionPrefix);
+                ArgumentNullException.ThrowIfNull(onCompleted);
+                ArgumentNullException.ThrowIfNull(createOperation);
+
+                if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(formatInvalidProvider());
+                }
+
+                var operation = createOperation(definition, getStateRootPath);
+                await operation(reportDeviceCode, formatCompletionPrefix, onCompleted, cancellationToken);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedCore, ReadMethod(tui, "    internal static async Task LoginCodexDeviceCoreAsync("));
+        StringAssert.Contains(tui, "internal delegate ValueTask CodexDeviceLoginOperation(\n    Action<string, string> reportDeviceCode,\n    Func<string> formatCompletionPrefix,\n    Action<string, string?> onCompleted,\n    CancellationToken cancellationToken);");
+        StringAssert.Contains(tui, "    internal static void ReportCodexDeviceCode(string verificationUri, string userCode, Action<string> reportStatus)\n        => reportStatus(SR.T(\"Open {0} and enter code {1}. Waiting for ChatGPT authorization...\", verificationUri, userCode));");
+        var expectedCompletion = """
+            internal static ProviderTestResult FormatCodexDeviceLoginResult(string prefix, string? rawAccountId)
+            {
+                var account = string.IsNullOrWhiteSpace(rawAccountId) ? SR.T("account/workspace unknown") : rawAccountId;
+                return new ProviderTestResult(true, SR.T("{0} · account/workspace: {1}.", prefix, account), 0);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedCompletion, ReadMethod(tui, "    internal static ProviderTestResult FormatCodexDeviceLoginResult("));
+
+        var expectedBrowser = """
+            public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync(
+                CodeAltaProviderDocument definition,
+                Action<string> reportStatus,
+                CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(definition);
+                ArgumentNullException.ThrowIfNull(reportStatus);
+
+                var manager = CreateCodexSubscriptionLoginManager(definition);
+                var login = manager.BeginBrowserLogin(definition.AccountId);
+                var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, cancellationToken).AsTask();
+                reportStatus(SR.T("Open ChatGPT login in your browser: {0}", login.AuthorizeUri));
+                TryOpenBrowser(login.AuthorizeUri);
+                var credential = await waitForCallbackTask;
+                return new ProviderTestResult(
+                    true,
+                    FormatCodexCredentialMessage(SR.T("ChatGPT browser login completed"), credential),
+                    0);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedBrowser, ReadMethod(tui, "    public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync("));
+        var expectedHelper = """
+            private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)
+            {
+                if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(SR.T("Select a Codex provider first."));
+                }
+
+                return new OpenAICodexSubscriptionLoginManager(
+                    new FileOpenAICodexSubscriptionCredentialStore(GetProviderStateRootPath()),
+                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                    definition.ProviderKey);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedHelper, ReadMethod(tui, "    private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager("));
+        var expectedFormatter = """
+            private static string FormatCodexCredentialMessage(string prefix, OpenAICodexSubscriptionCredential credential)
+            {
+                var account = string.IsNullOrWhiteSpace(credential.AccountId) ? SR.T("account/workspace unknown") : credential.AccountId;
+                return SR.T("{0} · account/workspace: {1}.", prefix, account);
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedFormatter, ReadMethod(tui, "    private static string FormatCodexCredentialMessage("));
+        StringAssert.Contains(tui, "    private string GetProviderStateRootPath()\n        => _ownedServices?.CatalogOptions.GlobalRoot\n           ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), \".alta\");");
+
+        var expectedAdapter = """
+            public Task<ProviderTestResult> LoginWithDeviceCodeAsync(CodeAltaProviderDocument definition, Action<string> reportStatus, CancellationToken cancellationToken = default)
+                => definition.ProviderType switch
+                {
+                    "copilot" => _providerUi.LoginCopilotDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+                    "xai" => _providerUi.LoginXaiDirectWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+                    _ => _providerUi.LoginCodexSubscriptionWithDeviceCodeAsync(definition, reportStatus, cancellationToken),
+                };
+        """.Replace("\r\n", "\n");
+        StringAssert.Contains(adapter, expectedAdapter);
+        StringAssert.Contains(dialog, "                CreateCancelableProviderActionButton(\n                    item,\n                    SR.T(\"Device Login\"),\n                    SR.T(\"Cancel Device Login\"),\n                    ProviderDialogOperationKind.CodexDeviceLogin,\n                    SR.T(\"start ChatGPT device-code login\"),\n                    SR.T(\"Requesting ChatGPT device code...\"),\n                    _modelProviders.LoginWithDeviceCodeAsync),");
+        // Reporting returns after queuing dispatcher work, not after the prompt has rendered.
+        StringAssert.Contains(dialog, "        QueueBackgroundOperation(\n            cancellationToken => actionAsync(\n                definition,\n                message => _ = _dialog.Dispatcher.InvokeAsync(\n                    () =>\n                    {\n                        CaptureActiveLoginDetails(message);\n                        SetStatus($\"[primary]{AnsiMarkup.Escape(message)}[/]\");\n                    }),\n                cancellationToken),");
+        StringAssert.Contains(dialog, "                if (ex is OperationCanceledException || ex.GetBaseException() is OperationCanceledException)\n                {\n                    SetStatus($\"[warning]{SR.T(\"Provider operation canceled.\")}[/]\");\n                    return;\n                }");
+
+        static string ReadMethod(string source, string signature)
+        {
+            var start = source.IndexOf(signature, StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            Assert.AreEqual(-1, source.IndexOf(signature, start + signature.Length, StringComparison.Ordinal));
+            var end = source.IndexOf("\n    }", start, StringComparison.Ordinal);
+            Assert.IsTrue(end > start);
+            return source[start..(end + "\n    }".Length)];
+        }
     }
 
     // Compile-time checkout path: inspect only named source/project files, never discover profile ancestors.
