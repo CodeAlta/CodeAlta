@@ -81,6 +81,10 @@ cleanup before shutting down plugins started for the application. Runtime
 cleanup is best-effort and may report multiple failures together. This is not
 a guarantee that a failed or unresponsive plugin has stopped all of its work.
 
+If a terminal frontend cleanup step fails, CodeAlta attempts the remaining
+frontend cleanup steps before runtime cleanup and can report their failures
+together. A step that does not finish can still delay the rest of shutdown.
+
 If shared runtime startup fails, CodeAlta also attempts to clean up resources
 already acquired during that startup. This cleanup does not remove folders or
 files already created, and it does not guarantee that all background work has

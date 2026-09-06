@@ -283,13 +283,23 @@ public sealed class DeferredCodeAltaAppSourceTests
         RequireOnce(app, "IAsyncDisposable? IShellFrontendHostLifecycle.OwnedServices => _ownedServices;");
         var frontendCleanup = Scope(app, "    async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()", "\n    }\n");
         RequireOrdered(frontendCleanup,
-            "_projectionCoordinator.Dispose();",
-            "_reminderUiCoordinator.Dispose();",
-            "await _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false);",
-            "await _fileEditorWorkspaceCoordinator.DisposeAsync();",
-            "await _runtimeEventPump.DisposeAsync();",
-            "await _shellController.DisposeAsync();",
-            "await _promptDraftUiCoordinator.DisposeAsync();");
+            "await ShellFrontendHost.DisposeFrontendResourcesAsync(",
+            "_projectionCoordinator.Dispose, _reminderUiCoordinator.Dispose,",
+            "() => _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false),",
+            "_fileEditorWorkspaceCoordinator.DisposeAsync,",
+            "_runtimeEventPump.DisposeAsync,",
+            "_shellController.DisposeAsync,",
+            "_promptDraftUiCoordinator.DisposeAsync);");
+        RequireOnce(frontendCleanup, """
+                    await ShellFrontendHost.DisposeFrontendResourcesAsync(
+                        _projectionCoordinator.Dispose, _reminderUiCoordinator.Dispose,
+                        () => _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false),
+                        _fileEditorWorkspaceCoordinator.DisposeAsync,
+                        _runtimeEventPump.DisposeAsync,
+                        _shellController.DisposeAsync,
+                        _promptDraftUiCoordinator.DisposeAsync);
+            """);
+        Reject(frontendCleanup, "async ()", "ThrowIfFailed", "PersistenceResult", "IsConflict", "Succeeded", "reportStatus: true");
 
         var shell = ReadSource("CodeAlta.Tui/App/ShellFrontendHost.cs");
         var shellCleanup = Scope(shell, "    public async ValueTask DisposeAsync()", "\n    }\n");

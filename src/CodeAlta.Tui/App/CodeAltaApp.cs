@@ -301,13 +301,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()
     {
-        _projectionCoordinator.Dispose();
-        _reminderUiCoordinator.Dispose();
-        await _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false);
-        await _fileEditorWorkspaceCoordinator.DisposeAsync();
-        await _runtimeEventPump.DisposeAsync();
-        await _shellController.DisposeAsync();
-        await _promptDraftUiCoordinator.DisposeAsync();
+        await ShellFrontendHost.DisposeFrontendResourcesAsync(
+            _projectionCoordinator.Dispose, _reminderUiCoordinator.Dispose,
+            () => _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false),
+            _fileEditorWorkspaceCoordinator.DisposeAsync,
+            _runtimeEventPump.DisposeAsync,
+            _shellController.DisposeAsync,
+            _promptDraftUiCoordinator.DisposeAsync);
     }
 
     IAsyncDisposable? IShellFrontendHostLifecycle.OwnedServices => _ownedServices;

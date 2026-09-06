@@ -1893,11 +1893,11 @@ public sealed class ArchitectureGuardrailTests
         var start = app.IndexOf("async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()", StringComparison.Ordinal);
         var end = app.IndexOf("IAsyncDisposable? IShellFrontendHostLifecycle.OwnedServices", start, StringComparison.Ordinal);
         var disposal = app[start..end];
-        StringAssert.Contains(disposal, "await _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false);");
+        StringAssert.Contains(disposal, "() => _sessionStateCoordinator.PersistViewStateAsync(reportStatus: false),");
         Assert.IsFalse(disposal.Contains("throw", StringComparison.Ordinal));
         foreach (var cleanup in new[] { "_fileEditorWorkspaceCoordinator", "_runtimeEventPump", "_shellController", "_promptDraftUiCoordinator" })
         {
-            StringAssert.Contains(disposal, $"await {cleanup}.DisposeAsync();");
+            StringAssert.Contains(disposal, $"{cleanup}.DisposeAsync");
         }
     }
 
