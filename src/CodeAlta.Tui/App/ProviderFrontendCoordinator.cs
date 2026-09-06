@@ -390,15 +390,12 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        var manager = CreateXaiDirectLoginManager(definition);
-        var result = await manager.LoginWithBrowserAsync(
-            CreateXaiDirectLoginOptions(definition),
-            (authorization, _) =>
-            {
-                reportStatus(SR.T("Opening xAI login in your browser: {0}. Waiting for authorization...", authorization.AuthorizeUri));
-                TryOpenBrowser(authorization.AuthorizeUri);
-                return ValueTask.CompletedTask;
-            },
+        var result = await LoginXaiDirectWithBrowserCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select an xAI provider first."),
+            static () => new XaiDirectLoginManager(new HttpClient()).LoginWithBrowserAsync,
+            (authorization, _) => ReportXaiDirectBrowserAuthorization(authorization, reportStatus, TryOpenBrowser),
             cancellationToken);
         return new ProviderTestResult(true, FormatXaiDirectLoginMessage(SR.T("xAI login completed"), result), 0);
     }
@@ -411,14 +408,12 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        var manager = CreateXaiDirectLoginManager(definition);
-        var result = await manager.LoginWithDeviceCodeAsync(
-            CreateXaiDirectLoginOptions(definition),
-            (deviceCode, _) =>
-            {
-                reportStatus(SR.T("Open {0} and enter code {1}. Waiting for xAI authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
-                return ValueTask.CompletedTask;
-            },
+        var result = await LoginXaiDirectWithDeviceCodeCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select an xAI provider first."),
+            static () => new XaiDirectLoginManager(new HttpClient()).LoginWithDeviceCodeAsync,
+            (deviceCode, _) => ReportXaiDirectDeviceCode(deviceCode, reportStatus),
             cancellationToken);
         return new ProviderTestResult(true, FormatXaiDirectLoginMessage(SR.T("xAI device login completed"), result), 0);
     }
@@ -429,8 +424,12 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        await CreateXaiDirectLoginManager(definition)
-            .DeleteCredentialAsync(CreateXaiDirectLoginOptions(definition), cancellationToken);
+        await DeleteXaiDirectCredentialCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select an xAI provider first."),
+            static () => new XaiDirectLoginManager(new HttpClient()).DeleteCredentialAsync,
+            cancellationToken);
         return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned xAI credentials for this provider."), 0);
     }
 
@@ -440,8 +439,12 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var status = await CreateXaiDirectLoginManager(definition)
-            .GetCredentialStatusAsync(CreateXaiDirectLoginOptions(definition), cancellationToken);
+        var status = await GetXaiDirectCredentialStatusCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select an xAI provider first."),
+            static () => new XaiDirectLoginManager(new HttpClient()).GetCredentialStatusAsync,
+            cancellationToken);
         return status is null
             ? new ProviderTestResult(false, SR.T("Login required before cached xAI credentials can be used."), 0)
             : new ProviderTestResult(true, FormatXaiDirectLoginMessage(SR.T("Authenticated with cached xAI credentials"), status), 0);
@@ -559,20 +562,136 @@ internal sealed class ProviderFrontendCoordinator
         return ValueTask.CompletedTask;
     }
 
-    private static XaiDirectLoginManager CreateXaiDirectLoginManager(CodeAltaProviderDocument definition)
+    // Mandatory call-scoped seams: no injected factory can fall back to a concrete manager.
+    internal delegate ValueTask<XaiDirectLoginResult> XaiDirectBrowserLoginOperation(
+        XaiDirectLoginOptions options,
+        Func<XaiDirectBrowserAuthorization, CancellationToken, ValueTask> onAuthorize,
+        CancellationToken cancellationToken);
+
+    internal delegate ValueTask<XaiDirectLoginResult> XaiDirectDeviceLoginOperation(
+        XaiDirectLoginOptions options,
+        Func<XaiDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,
+        CancellationToken cancellationToken);
+
+    internal delegate ValueTask XaiDirectDeleteCredentialOperation(
+        XaiDirectLoginOptions options,
+        CancellationToken cancellationToken);
+
+    internal delegate ValueTask<XaiDirectLoginResult?> XaiDirectCredentialStatusOperation(
+        XaiDirectLoginOptions options,
+        CancellationToken cancellationToken);
+
+    internal static async Task<XaiDirectLoginResult> LoginXaiDirectWithBrowserCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<XaiDirectBrowserLoginOperation> createOperation,
+        Func<XaiDirectBrowserAuthorization, CancellationToken, ValueTask> onAuthorize,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(onAuthorize);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
         if (!string.Equals(definition.ProviderType, "xai", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException(SR.T("Select an xAI provider first."));
+            throw new InvalidOperationException(formatInvalidProvider());
         }
 
-        return new XaiDirectLoginManager(new HttpClient());
+        // Preserve construction before root/options and the existing absence of manager/HttpClient disposal.
+        var operation = createOperation();
+        return await operation(CreateXaiDirectLoginOptions(definition, getStateRootPath), onAuthorize, cancellationToken);
     }
 
-    private XaiDirectLoginOptions CreateXaiDirectLoginOptions(CodeAltaProviderDocument definition)
+    internal static async Task<XaiDirectLoginResult> LoginXaiDirectWithDeviceCodeCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<XaiDirectDeviceLoginOperation> createOperation,
+        Func<XaiDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(onDeviceCode);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "xai", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation();
+        return await operation(CreateXaiDirectLoginOptions(definition, getStateRootPath), onDeviceCode, cancellationToken);
+    }
+
+    internal static async Task DeleteXaiDirectCredentialCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<XaiDirectDeleteCredentialOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "xai", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation();
+        await operation(CreateXaiDirectLoginOptions(definition, getStateRootPath), cancellationToken);
+    }
+
+    internal static async Task<XaiDirectLoginResult?> GetXaiDirectCredentialStatusCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<XaiDirectCredentialStatusOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "xai", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation();
+        return await operation(CreateXaiDirectLoginOptions(definition, getStateRootPath), cancellationToken);
+    }
+
+    internal static ValueTask ReportXaiDirectBrowserAuthorization(
+        XaiDirectBrowserAuthorization authorization,
+        Action<string> reportStatus,
+        Action<Uri> openBrowser)
+    {
+        reportStatus(SR.T("Opening xAI login in your browser: {0}. Waiting for authorization...", authorization.AuthorizeUri));
+        openBrowser(authorization.AuthorizeUri);
+        return ValueTask.CompletedTask;
+    }
+
+    internal static ValueTask ReportXaiDirectDeviceCode(XaiDirectDeviceCode deviceCode, Action<string> reportStatus)
+    {
+        reportStatus(SR.T("Open {0} and enter code {1}. Waiting for xAI authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
+        return ValueTask.CompletedTask;
+    }
+
+    private static XaiDirectLoginOptions CreateXaiDirectLoginOptions(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath)
         => new(
             definition.ProviderKey,
-            GetProviderStateRootPath(),
+            getStateRootPath(),
             TryCreateUri(definition.ApiUrl));
 
     private string GetProviderStateRootPath()
@@ -592,7 +711,7 @@ internal sealed class ProviderFrontendCoordinator
         return SR.T("{0} · {1} · API {2} · {3}.", prefix, enterprise, result.BaseUri, expiry);
     }
 
-    private static string FormatXaiDirectLoginMessage(string prefix, XaiDirectLoginResult result)
+    internal static string FormatXaiDirectLoginMessage(string prefix, XaiDirectLoginResult result)
     {
         var expiry = result.ExpiresAt is null ? SR.T("expiry unknown") : SR.T("expires {0}", result.ExpiresAt.Value.LocalDateTime.ToString("g", CultureInfo.CurrentCulture));
         var scope = string.IsNullOrWhiteSpace(result.Scope) ? SR.T("scope unknown") : SR.T("scope {0}", result.Scope.Trim());
