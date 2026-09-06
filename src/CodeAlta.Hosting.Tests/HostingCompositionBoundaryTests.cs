@@ -38,7 +38,7 @@ public sealed class HostingCompositionBoundaryTests
         {
             typeof(ConfiguredModelProviderRegistryBuilder), typeof(ConfiguredProviderInspection),
             typeof(ProviderInspectionTestResult), typeof(ProviderInspectionModelListResult),
-            typeof(ConfiguredCopilotAuthentication),
+            typeof(ConfiguredCopilotAuthentication), typeof(ConfiguredXaiAuthentication),
         }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>
             reference.Name is "alta" or "altatui" or "CodeAlta.Tui" or "CodeAlta" ||
@@ -62,6 +62,13 @@ public sealed class HostingCompositionBoundaryTests
             "LoginWithDeviceCodeAsync", "DeleteCredentialAsync", "GetCredentialStatusAsync",
         }, authenticationMethods.Select(method => method.Name).ToArray());
         Assert.IsFalse(authenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
+        var xaiAuthenticationMethods = typeof(ConfiguredXaiAuthentication).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+        CollectionAssert.AreEquivalent(new[]
+        {
+            "LoginWithBrowserAsync", "LoginWithDeviceCodeAsync", "DeleteCredentialAsync", "GetCredentialStatusAsync",
+        }, xaiAuthenticationMethods.Select(method => method.Name).ToArray());
+        Assert.IsFalse(xaiAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
     }
 
     [TestMethod]
@@ -204,6 +211,104 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(cores.Contains("new HttpClient", StringComparison.Ordinal));
         Assert.IsFalse(cores.Contains("Dispose(", StringComparison.Ordinal));
         Assert.IsFalse(cores.Contains("DisposeAsync(", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void XaiAuthentication_PublicForwardingAndTuiWiringKeepConcreteWorkBehindValidatedCores()
+    {
+        var root = SourceRoot();
+        var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredXaiAuthentication.cs")).Replace("\r\n", "\n");
+        var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
+        foreach (var (method, returnType, callbackType, callbackName) in new[]
+        {
+            ("LoginWithBrowserAsync", "Task<XaiDirectLoginResult>", "XaiDirectBrowserAuthorization", "onAuthorize"),
+            ("LoginWithDeviceCodeAsync", "Task<XaiDirectLoginResult>", "XaiDirectDeviceCode", "onDeviceCode"),
+            ("DeleteCredentialAsync", "Task", string.Empty, string.Empty),
+            ("GetCredentialStatusAsync", "Task<XaiDirectLoginResult?>", string.Empty, string.Empty),
+        })
+        {
+            var start = source.IndexOf($"    public static {returnType} {method}(", StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            var end = source.IndexOf(';', start);
+            Assert.IsTrue(end > start);
+            var callbackParameter = callbackName.Length > 0 ? $"        Func<{callbackType}, CancellationToken, ValueTask> {callbackName},\n" : string.Empty;
+            var callbackArgument = callbackName.Length > 0 ? $"{callbackName}, " : string.Empty;
+            var expected = $"    public static {returnType} {method}(\n"
+                + "        CodeAltaProviderDocument definition,\n"
+                + "        Func<string> getStateRootPath,\n"
+                + "        Func<string> formatInvalidProvider,\n"
+                + callbackParameter
+                + "        CancellationToken cancellationToken)\n"
+                + $"        => {method}(\n"
+                + "            definition, getStateRootPath, formatInvalidProvider,\n"
+                + $"            static () => new XaiDirectLoginManager(new HttpClient()).{method},\n"
+                + $"            {callbackArgument}cancellationToken);";
+            Assert.AreEqual(expected, source[start..(end + 1)]);
+
+            // Source-only check: passing this lambda must not construct a manager. Required-object
+            // and ordinal type validation in the characterized overload precede its invocation.
+            var coreStart = source.IndexOf($"    internal static async {returnType} {method}(", StringComparison.Ordinal);
+            Assert.IsTrue(coreStart >= 0);
+            var coreEnd = source.IndexOf("\n    }", coreStart, StringComparison.Ordinal);
+            Assert.IsTrue(coreEnd > coreStart);
+            var core = source[coreStart..coreEnd];
+            var callbackGuard = callbackName.Length > 0 ? $"        ArgumentNullException.ThrowIfNull({callbackName});\n" : string.Empty;
+            var guards = "        ArgumentNullException.ThrowIfNull(definition);\n"
+                + callbackGuard
+                + "        ArgumentNullException.ThrowIfNull(getStateRootPath);\n"
+                + "        ArgumentNullException.ThrowIfNull(formatInvalidProvider);\n"
+                + "        ArgumentNullException.ThrowIfNull(createOperation);";
+            var guardStart = core.IndexOf(guards, StringComparison.Ordinal);
+            var typeCheck = core.IndexOf("if (!string.Equals(definition.ProviderType, \"xai\", StringComparison.Ordinal))", StringComparison.Ordinal);
+            var construct = core.IndexOf("var operation = createOperation();", StringComparison.Ordinal);
+            var invoke = core.IndexOf("await operation(CreateXaiDirectLoginOptions(", StringComparison.Ordinal);
+            Assert.IsTrue(guardStart >= 0 && typeCheck > guardStart + guards.Length && construct > typeCheck && invoke > construct);
+            StringAssert.Contains(core, "throw new InvalidOperationException(formatInvalidProvider());");
+        }
+
+        foreach (var (entry, method, callback) in new[]
+        {
+            ("LoginXaiDirectWithBrowserAsync", "LoginWithBrowserAsync", "            (authorization, _) => ReportXaiDirectBrowserAuthorization(authorization, reportStatus, TryOpenBrowser),\n"),
+            ("LoginXaiDirectWithDeviceCodeAsync", "LoginWithDeviceCodeAsync", "            (deviceCode, _) => ReportXaiDirectDeviceCode(deviceCode, reportStatus),\n"),
+            ("LogoutXaiDirectAsync", "DeleteCredentialAsync", string.Empty),
+            ("TestXaiDirectAuthenticationAsync", "GetCredentialStatusAsync", string.Empty),
+        })
+        {
+            var start = tui.IndexOf($"    public async Task<ProviderTestResult> {entry}(", StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            var end = tui.IndexOf("\n    }", start, StringComparison.Ordinal);
+            Assert.IsTrue(end > start);
+            StringAssert.Contains(tui[start..end], $"await ConfiguredXaiAuthentication.{method}(\n"
+                + "            definition,\n"
+                + "            GetProviderStateRootPath,\n"
+                + "            static () => SR.T(\"Select an xAI provider first.\"),\n"
+                + callback
+                + "            cancellationToken);");
+        }
+
+        foreach (var removed in new[]
+        {
+            "XaiDirectLoginManager", "CreateXaiDirectLoginOptions", "XaiDirectBrowserLoginOperation", "XaiDirectDeviceLoginOperation",
+            "XaiDirectDeleteCredentialOperation", "XaiDirectCredentialStatusOperation",
+            "LoginXaiDirectWithBrowserCoreAsync", "LoginXaiDirectWithDeviceCodeCoreAsync", "DeleteXaiDirectCredentialCoreAsync", "GetXaiDirectCredentialStatusCoreAsync",
+        })
+        {
+            Assert.IsFalse(tui.Contains(removed, StringComparison.Ordinal));
+        }
+
+        foreach (var forbidden in new[]
+        {
+            "Environment.", "Process.", "File.", "Directory.", "Path.", "SR.T(", "ConfigureAwait(false)", "Task.Run(",
+            "ThrowIfCancellationRequested(", "new ModelProviderRegistry", "XaiOAuthClient", "XaiDirectCredentialStore", "HttpListener",
+            "Dispose(", "DisposeAsync(",
+        })
+        {
+            Assert.IsFalse(source.Contains(forbidden, StringComparison.Ordinal));
+        }
+
+        var cores = source[source.IndexOf("    // Mandatory call-scoped seams:", StringComparison.Ordinal)..];
+        Assert.IsFalse(cores.Contains("new XaiDirectLoginManager", StringComparison.Ordinal));
+        Assert.IsFalse(cores.Contains("new HttpClient", StringComparison.Ordinal));
     }
 
     // Compile-time checkout path: inspect only named source/project files, never discover profile ancestors.
