@@ -14,6 +14,30 @@ public sealed class ArchitectureGuardrailTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public void NotesComposition_UsesDurableAdapterAndKeepsOnlyPresentationInTui()
+    {
+        var tui = GetCodeAltaSourceRoot();
+        var composition = File.ReadAllText(Path.Combine(tui, "App", "CodeAltaFrontendComposition.cs"));
+        StringAssert.Contains(composition, "new RuntimeAltaNotesService(");
+        StringAssert.Contains(composition, ".Add<IAltaNotesService>(notesService)");
+        StringAssert.Contains(composition, "sessionStateCoordinator?.GetSelectedSession()?.SessionId");
+        StringAssert.Contains(composition, "sessionStateCoordinator.FindOpenSession(args.SessionId)");
+        StringAssert.Contains(composition, "notesService.Changed += (_, args) => uiDispatcher.Post(");
+        StringAssert.Contains(composition, "openSession.NotesMarkdown = args.Markdown");
+        StringAssert.Contains(composition, "sidebarCoordinator.View.SetNotesMarkdown(args.Markdown)");
+        Assert.IsFalse(File.Exists(Path.Combine(tui, "App", "SessionAltaNotesService.cs")));
+        var sidebar = File.ReadAllText(Path.Combine(tui, "Views", "SidebarView.cs"));
+        StringAssert.Contains(sidebar, "new MarkdownControl(initialMarkdown)");
+        Assert.IsFalse(sidebar.Contains("GetMarkdownAsync", StringComparison.Ordinal));
+        Assert.IsFalse(sidebar.Contains("GetAwaiter()", StringComparison.Ordinal));
+        var adapter = File.ReadAllText(Path.Combine(GetSourceRoot(), "CodeAlta.LiveTool", "RuntimeAltaNotesService.cs"));
+        Assert.IsFalse(adapter.Contains("OpenSessionState", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("UiDispatch", StringComparison.Ordinal));
+        StringAssert.Contains(adapter, "_runtime.GetNotesMarkdownAsync");
+        StringAssert.Contains(adapter, "_runtime.UpdateNotesAsync");
+    }
+
+    [TestMethod]
     public void CodeAltaSource_DoesNotContainLegacyUiSessionHelpersOrBroadRefreshView()
     {
         var codeAltaRoot = GetCodeAltaSourceRoot();

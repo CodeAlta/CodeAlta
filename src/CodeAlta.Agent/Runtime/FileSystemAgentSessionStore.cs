@@ -255,9 +255,15 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     private AgentSessionCacheProjectionContext CreateCacheProjectionContext()
         => new(_layout.SessionsRootPath, ProjectSessionFileForCacheAsync);
 
-    private async Task<AgentSessionCacheProjection?> ProjectSessionFileForCacheAsync(
+    private Task<AgentSessionCacheProjection?> ProjectSessionFileForCacheAsync(
         string sessionFile,
         CancellationToken cancellationToken)
+        => ProjectSessionFileForCacheAsync(sessionFile, cancellationToken, ownsJournalGate: false);
+
+    private async Task<AgentSessionCacheProjection?> ProjectSessionFileForCacheAsync(
+        string sessionFile,
+        CancellationToken cancellationToken,
+        bool ownsJournalGate)
     {
         var before = GetFileStamp(sessionFile);
         if (before is null)
@@ -267,7 +273,9 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
 
         try
         {
-            var projection = await ProjectSessionFileAsync(sessionFile, includeHistory: false, cancellationToken).ConfigureAwait(false);
+            var projection = ownsJournalGate
+                ? await ProjectSessionMetadataFileAsync(sessionFile, cancellationToken).ConfigureAwait(false)
+                : await ProjectSessionFileAsync(sessionFile, includeHistory: false, cancellationToken).ConfigureAwait(false);
             if (projection.Summary is null)
             {
                 return null;
@@ -283,24 +291,24 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
                 projection.State,
                 projection.ViewState);
         }
-        catch (IOException)
+        catch (IOException) when (!ownsJournalGate)
         {
             return null;
         }
-        catch (JsonException)
+        catch (JsonException) when (!ownsJournalGate)
         {
             return null;
         }
     }
 
-    private async Task UpsertCacheFromFileAsync(string sessionFile, CancellationToken cancellationToken)
+    private async Task UpsertCacheFromFileAsync(string sessionFile, CancellationToken cancellationToken, bool ownsJournalGate = false)
     {
         if (_projectionCache is null)
         {
             return;
         }
 
-        var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken, ownsJournalGate).ConfigureAwait(false);
         if (projection is not null)
         {
             await _projectionCache.UpsertSessionAsync(projection, cancellationToken).ConfigureAwait(false);
@@ -390,6 +398,73 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
 
         await AppendLinesAsync(sessionFile, [snapshotEvent.ToJson()], cancellationToken).ConfigureAwait(false);
         await UpsertCacheFromFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the last canonical notes event, retaining only one event rather than the whole history.</summary>
+    /// <param name="sessionId">An existing identifier in this store's configured root, not a path.</param>
+    /// <param name="cancellationToken">Cancels lookup, gate admission, or reading.</param>
+    /// <returns>The latest event in journal order, or null if there are no notes events.</returns>
+    /// <exception cref="ArgumentException">The identifier is empty.</exception>
+    /// <exception cref="InvalidOperationException">The session does not exist.</exception>
+    /// <exception cref="IOException">The journal cannot be read.</exception>
+    /// <exception cref="InvalidDataException">A notes event has no Markdown value.</exception>
+    /// <exception cref="JsonException">A canonical journal record is malformed (existing trailing-record tolerance applies).</exception>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<AgentNotesEvent?> ReadLatestNotesAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = await GetExistingSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return await _journalFile.WithPathLockAsync(path, async () =>
+        {
+            AgentNotesEvent? latest = null;
+            await foreach (var entry in ReadJournalEventsAsync(path, cancellationToken).ConfigureAwait(false))
+            {
+                if (entry is AgentNotesEvent notes)
+                {
+                    if (notes.Markdown is null)
+                    {
+                        throw new InvalidDataException("A notes journal event has no Markdown value.");
+                    }
+
+                    latest = notes;
+                }
+            }
+
+            return latest;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Appends notes to an existing journal and delivers acknowledged feedback in journal-write order.</summary>
+    /// <param name="notes">The canonical notes event.</param>
+    /// <param name="committed">Feedback after the record and metadata cache are acknowledged. Must not reenter this journal's operations.</param>
+    /// <param name="cancellationToken">Cancels lookup or admission; after write admission the record and feedback finish without caller cancellation.</param>
+    /// <returns>A task completing after acknowledged persistence and feedback.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="InvalidOperationException">The session does not exist.</exception>
+    /// <exception cref="IOException">The write failed; no rollback of partial filesystem I/O is promised.</exception>
+    /// <exception cref="JsonException">Existing canonical content, including the final record, is malformed. No bytes are changed.</exception>
+    /// <exception cref="InvalidDataException">Existing notes lack Markdown or the journal has a non-UTF-8 BOM. No bytes are changed.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before write admission.</exception>
+    /// <exception cref="AgentNotesCommittedException">The record was committed but subsequent cache or observer feedback failed.</exception>
+    public async Task AppendNotesAsync(AgentNotesEvent notes, Func<Task> committed, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(notes);
+        ArgumentNullException.ThrowIfNull(notes.Markdown);
+        ArgumentNullException.ThrowIfNull(committed);
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = await GetExistingSessionFilePathAsync(notes.SessionId, cancellationToken).ConfigureAwait(false);
+        await _journalFile.AppendNotesLineAsync(path, notes.ToJson(), Utf8WithoutBom, ValidateNotesAppendAsync, async () =>
+        {
+            try
+            {
+                await UpsertCacheFromFileAsync(path, CancellationToken.None, ownsJournalGate: true).ConfigureAwait(false);
+                await committed().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                throw new AgentNotesCommittedException(notes.SessionId, exception);
+            }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -858,7 +933,31 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await using var stream = await OpenReadStreamAsync(path, cancellationToken).ConfigureAwait(false);
-        using var reader = new StreamReader(stream, Utf8WithoutBom, detectEncodingFromByteOrderMarks: true);
+        await foreach (var entry in ReadJournalEventsAsync(stream, tolerateIncompleteTail: true, cancellationToken).ConfigureAwait(false))
+        {
+            yield return entry;
+        }
+    }
+
+    private static async Task ValidateNotesAppendAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        // Full canonical validation is streaming/bounded-memory, not repair. A malformed
+        // tail must not become an interior record that hides an acknowledged notes write.
+        await foreach (var entry in ReadJournalEventsAsync(stream, tolerateIncompleteTail: false, cancellationToken).ConfigureAwait(false))
+        {
+            if (entry is AgentNotesEvent { Markdown: null })
+            {
+                throw new InvalidDataException("A notes journal event has no Markdown value.");
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<AgentEvent> ReadJournalEventsAsync(
+        Stream stream,
+        bool tolerateIncompleteTail,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(stream, Utf8WithoutBom, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
         {
@@ -874,12 +973,19 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
                 @event = JsonSerializer.Deserialize(line, AgentJsonSerializerContext.Default.AgentEvent)
                     ?? throw new JsonException("Journal line deserialized to null.");
             }
-            catch (JsonException) when (reader.Peek() < 0)
+            catch (JsonException) when (tolerateIncompleteTail && reader.Peek() < 0)
             {
                 yield break;
             }
 
             yield return @event;
+        }
+
+        // Canonical writes are UTF-8. Tolerant reads may detect legacy BOMs, but
+        // appending UTF-8 to a different encoding would acknowledge unreadable notes.
+        if (!tolerateIncompleteTail && reader.CurrentEncoding.CodePage != Utf8WithoutBom.CodePage)
+        {
+            throw new InvalidDataException("Notes cannot append to a non-UTF-8 journal. No journal bytes were changed.");
         }
     }
 

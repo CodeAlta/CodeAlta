@@ -28,6 +28,14 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 > [!TIP]
 > If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
 
+## Session notes
+
+The sidebar **Notes** panel shows the selected session's sticky Markdown checklist, status, or next actions. Agents use `alta notes get`, `alta notes set --stdin`, and `alta notes clear`; `note` remains an alias. The panel wraps Markdown, scrolls vertically, copies the exact Markdown, and clears without blocking the UI.
+
+Notes belong to the session, not its tab. A known caller session can read or update its notes while its tab is closed, and reopening restores the latest notes or clear event from the session journal. Switching tabs cannot redirect an operation that has already captured its session. An unknown explicit session is an error rather than permission to change another session's notes. Writes preserve exact Markdown, including empty text, and acknowledge journal persistence before reporting success. If an error explicitly says the notes were committed but feedback failed, read them again before retrying; do not assume the write was rolled back. This does not add restart persistence for asks or reminders.
+
+If the session journal contains malformed or truncated data, notes updates are refused without discarding that data. Notes commands do not automatically repair journals.
+
 ## Saved workspace preferences
 
 Open-session selection, project preferences, theme and navigator settings are saved in `~/.alta/ui-state.yaml`. Session-specific execution state stays in session journals. UI-state saves retain unrecognized nested settings, frontend-specific layout data and logical tab descriptors for unavailable contributions; retaining a descriptor does not mean the current frontend can display it.

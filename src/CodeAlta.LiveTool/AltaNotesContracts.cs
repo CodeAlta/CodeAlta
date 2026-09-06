@@ -5,15 +5,25 @@ namespace CodeAlta.LiveTool;
 /// </summary>
 public interface IAltaNotesService
 {
-    /// <summary>Occurs after a session's active notes Markdown changes.</summary>
+    /// <summary>Occurs after a session's notes are acknowledged. Durable adapters deliver notifications in journal-write order; handlers must not block or reenter notes storage.</summary>
     event EventHandler<AltaNotesChangedEventArgs>? Changed;
+
+    /// <summary>Captures explicit caller identity or the injected current-session fallback before awaiting input or storage.</summary>
+    /// <param name="caller">The immutable caller identity.</param>
+    /// <returns>A caller with a fixed source session identifier. Explicit identifiers never fall back.</returns>
+    /// <exception cref="ArgumentNullException">The caller is null.</exception>
+    /// <exception cref="AltaNotesSessionRequiredException">No session identifier is available.</exception>
+    AltaCallerIdentity CaptureCaller(AltaCallerIdentity caller);
 
     /// <summary>Gets the current sticky notes Markdown for the caller's session.</summary>
     /// <param name="caller">The caller whose current session should be used.</param>
+    /// <param name="cancellationToken">Cancels lookup or reading.</param>
     /// <returns>The current Markdown text, or an empty string when no notes are set.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="caller"/> is <see langword="null"/>.</exception>
     /// <exception cref="AltaNotesSessionRequiredException">Thrown when no current session can be resolved.</exception>
-    string GetMarkdown(AltaCallerIdentity caller);
+    /// <exception cref="OperationCanceledException">Lookup or reading was canceled.</exception>
+    /// <exception cref="IOException">Durable notes could not be read.</exception>
+    ValueTask<string> GetMarkdownAsync(AltaCallerIdentity caller, CancellationToken cancellationToken = default);
 
     /// <summary>Replaces the current session's sticky notes Markdown.</summary>
     /// <param name="markdown">The replacement Markdown text.</param>
@@ -22,6 +32,9 @@ public interface IAltaNotesService
     /// <returns>A completed task after the notes are replaced.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="markdown"/> or <paramref name="caller"/> is <see langword="null"/>.</exception>
     /// <exception cref="AltaNotesSessionRequiredException">Thrown when no current session can be resolved.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before write admission.</exception>
+    /// <exception cref="IOException">Durable notes could not be written; partial I/O is not claimed to be rolled back.</exception>
+    /// <exception cref="CodeAlta.Agent.Runtime.AgentNotesCommittedException">The journal committed but subsequent feedback failed.</exception>
     ValueTask SetMarkdownAsync(string markdown, AltaCallerIdentity caller, CancellationToken cancellationToken = default);
 
     /// <summary>Clears the current session's sticky notes Markdown.</summary>
@@ -30,6 +43,9 @@ public interface IAltaNotesService
     /// <returns>A completed task after the notes are cleared.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="caller"/> is <see langword="null"/>.</exception>
     /// <exception cref="AltaNotesSessionRequiredException">Thrown when no current session can be resolved.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before write admission.</exception>
+    /// <exception cref="IOException">Durable notes could not be written; partial I/O is not claimed to be rolled back.</exception>
+    /// <exception cref="CodeAlta.Agent.Runtime.AgentNotesCommittedException">The journal committed but subsequent feedback failed.</exception>
     ValueTask ClearAsync(AltaCallerIdentity caller, CancellationToken cancellationToken = default);
 }
 
@@ -97,13 +113,21 @@ public sealed class AltaNotesService : IAltaNotesService
     public event EventHandler<AltaNotesChangedEventArgs>? Changed;
 
     /// <inheritdoc />
-    public string GetMarkdown(AltaCallerIdentity caller)
+    public AltaCallerIdentity CaptureCaller(AltaCallerIdentity caller)
     {
         ArgumentNullException.ThrowIfNull(caller);
+        return caller with { SourceSessionId = ResolveSessionId(caller) };
+    }
+
+    /// <inheritdoc />
+    public ValueTask<string> GetMarkdownAsync(AltaCallerIdentity caller, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        cancellationToken.ThrowIfCancellationRequested();
         var sessionId = ResolveSessionId(caller);
         lock (_gate)
         {
-            return _markdownBySessionId.TryGetValue(sessionId, out var markdown) ? markdown : string.Empty;
+            return ValueTask.FromResult(_markdownBySessionId.TryGetValue(sessionId, out var markdown) ? markdown : string.Empty);
         }
     }
 

@@ -121,6 +121,94 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// </summary>
     public long DroppedRuntimeEventCount => _events.DroppedCount;
 
+    /// <summary>Reads durable notes for a known active or recoverable session, without requiring a frontend view or starting providers.</summary>
+    /// <param name="sessionId">An identifier resolved only within the configured backend root.</param>
+    /// <param name="cancellationToken">Cancels lookup or reading.</param>
+    /// <returns>The exact latest Markdown, or empty when no notes event exists.</returns>
+    /// <exception cref="ArgumentException">The identifier is empty.</exception>
+    /// <exception cref="SessionNotesSessionNotFoundException">No known session matches the identifier and scope.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    /// <exception cref="IOException">The journal cannot be read.</exception>
+    /// <exception cref="System.Text.Json.JsonException">A canonical journal record cannot be decoded.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime has been disposed.</exception>
+    public async Task<string> GetNotesMarkdownAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        var session = await ResolveNotesSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var notes = await _sessionViewCatalog.JournalStore.CreateSessionStore()
+            .ReadLatestNotesAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        return notes is null ? string.Empty : notes.Markdown;
+    }
+
+    /// <summary>Appends session notes and delivers feedback in the existing per-journal write order.</summary>
+    /// <param name="sessionId">A known backend session identifier; never a renderer grant or arbitrary path.</param>
+    /// <param name="markdown">Exact replacement Markdown.</param>
+    /// <param name="kind">Set or cleared. Cleared requires empty Markdown.</param>
+    /// <param name="committed">Synchronous, non-reentrant presentation notification after acknowledgment. Must not block on UI work.</param>
+    /// <param name="cancellationToken">Cancels before write admission, not an acknowledged commit.</param>
+    /// <returns>A task completing after persistence and feedback.</returns>
+    /// <exception cref="ArgumentException">The identifier or update is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Markdown or feedback is null.</exception>
+    /// <exception cref="SessionNotesSessionNotFoundException">No known session matches.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before write admission.</exception>
+    /// <exception cref="IOException">The write failed; partial I/O is not claimed to be rolled back.</exception>
+    /// <exception cref="AgentNotesCommittedException">Persistence succeeded but subsequent feedback failed.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime has been disposed.</exception>
+    public async Task UpdateNotesAsync(string sessionId, string markdown, AgentNotesUpdateKind kind,
+        Action<AgentNotesEvent> committed, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+        ArgumentNullException.ThrowIfNull(committed);
+        if (kind is not (AgentNotesUpdateKind.Set or AgentNotesUpdateKind.Cleared) ||
+            (kind == AgentNotesUpdateKind.Cleared && markdown.Length != 0))
+        {
+            throw new ArgumentException("Invalid notes update.", nameof(kind));
+        }
+
+        var session = await ResolveNotesSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var notes = new AgentNotesEvent(session.ProviderId, session.SessionId, DateTimeOffset.UtcNow, null, kind, markdown);
+        await _sessionViewCatalog.JournalStore.CreateSessionStore().AppendNotesAsync(notes, async () =>
+        {
+            await _agentSessionCatalog.InvalidateAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
+            _events.TryPublish(new SessionAgentEvent(session.SessionId, notes));
+            committed(notes);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<(string SessionId, ModelProviderId ProviderId)> ResolveNotesSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated)
+        {
+            return (entry.SessionId, !string.IsNullOrWhiteSpace(entry.ProviderId.Value)
+                ? entry.ProviderId
+                : new ModelProviderId(entry.ProviderKey));
+        }
+
+        var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore()
+            .GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var cwd = metadata?.Context?.Cwd ?? metadata?.WorkspacePath;
+        if (metadata is null || string.IsNullOrWhiteSpace(metadata.ProviderKey) || string.IsNullOrWhiteSpace(cwd))
+        {
+            throw new SessionNotesSessionNotFoundException(sessionId);
+        }
+
+        // Same rooted project/global identity as recoverable discovery, without prompt
+        // discovery, provider initialization, or trusting a caller-supplied descriptor.
+        var normalizedCwd = NormalizePath(cwd);
+        if (!string.Equals(normalizedCwd, NormalizePath(_catalogOptions.GlobalRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            if (!projects.Any(project => string.Equals(NormalizePath(project.ProjectPath), normalizedCwd, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new SessionNotesSessionNotFoundException(sessionId);
+            }
+        }
+
+        return (metadata.SessionId, new ModelProviderId(metadata.ProviderKey.Trim()));
+    }
+
     /// <summary>
     /// Gets an active session descriptor from the runtime's in-memory coordinator session table.
     /// </summary>

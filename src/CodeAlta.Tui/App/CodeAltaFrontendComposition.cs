@@ -110,11 +110,9 @@ internal sealed class CodeAltaFrontendComposition
         ShellSessionStateCoordinator? sessionStateCoordinator = null;
         var askService = new AltaAskService();
         askService.QueueChanged += (_, args) => frontendEvents.Publish(new AskQueueChangedEvent(args.SessionId));
-        var notesService = new SessionAltaNotesService(
-            uiDispatcher,
+        var notesService = new RuntimeAltaNotesService(
             runtimeService,
-            () => sessionStateCoordinator?.GetSelectedSession() is { } session ? sessionStateCoordinator.FindOpenSession(session.SessionId) : null,
-            sessionId => sessionStateCoordinator?.FindOpenSession(sessionId));
+            () => UiDispatch.Invoke(uiDispatcher, () => sessionStateCoordinator?.GetSelectedSession()?.SessionId));
         var altaServices = new AltaServiceCollection()
             .Add(catalogOptions)
             .Add(sessionCatalog.TextFiles)
@@ -236,10 +234,16 @@ internal sealed class CodeAltaFrontendComposition
             frontend.SetStatus,
             frontend.SetReadyStatusForCurrentSelection);
         sidebarCoordinatorRef = sidebarCoordinator;
-        notesService.Changed += (_, args) => UiDispatch.Post(
-            uiDispatcher,
+        // Always enqueue: an inline UI completion must not overtake an older
+        // journal-ordered notification already queued by a background caller.
+        notesService.Changed += (_, args) => uiDispatcher.Post(
             () =>
             {
+                if (sessionStateCoordinator.FindOpenSession(args.SessionId) is { } openSession)
+                {
+                    openSession.NotesMarkdown = args.Markdown;
+                }
+
                 if (sessionStateCoordinator.GetSelectedSession() is { } selectedSession &&
                     string.Equals(selectedSession.SessionId, args.SessionId, StringComparison.OrdinalIgnoreCase))
                 {

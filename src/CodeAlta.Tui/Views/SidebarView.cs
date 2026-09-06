@@ -56,7 +56,8 @@ internal sealed class SidebarView
         ISidebarRowCommandDispatcher rowCommandDispatcher,
         Action<SidebarSelectionTarget?> onSelectedTargetChanged,
         Action? openLogs = null,
-        IAltaNotesService? notesService = null)
+        IAltaNotesService? notesService = null,
+        string initialNotesMarkdown = "")
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(refreshCatalog);
@@ -157,7 +158,7 @@ internal sealed class SidebarView
         group.TopRightText = collapseToggle;
 
         _group = group;
-        _notesView = new SidebarNotesView(notesService ?? new AltaNotesService());
+        _notesView = new SidebarNotesView(notesService ?? new AltaNotesService(), initialNotesMarkdown);
         _rootSplitter = new VSplitter
         {
             First = _group,
@@ -372,12 +373,12 @@ internal sealed class SidebarView
         private readonly MarkdownControl _markdown;
         private readonly Markup _title;
 
-        public SidebarNotesView(IAltaNotesService notesService)
+        public SidebarNotesView(IAltaNotesService notesService, string initialMarkdown)
         {
             ArgumentNullException.ThrowIfNull(notesService);
 
             _notesService = notesService;
-            _markdown = new MarkdownControl(ReadInitialNotesMarkdown(notesService))
+            _markdown = new MarkdownControl(initialMarkdown)
             {
                 HorizontalAlignment = Align.Stretch,
                 VerticalAlignment = Align.Stretch,
@@ -442,18 +443,6 @@ internal sealed class SidebarView
             catch (Exception ex)
             {
                 CodeAltaApp.UiLogger.Error(ex, "Failed to clear sidebar notes.");
-            }
-        }
-
-        private static string ReadInitialNotesMarkdown(IAltaNotesService notesService)
-        {
-            try
-            {
-                return notesService.GetMarkdown(AltaCallerIdentity.Host);
-            }
-            catch (AltaNotesSessionRequiredException)
-            {
-                return string.Empty;
             }
         }
 

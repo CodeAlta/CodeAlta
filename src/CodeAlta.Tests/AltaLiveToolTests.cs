@@ -655,11 +655,11 @@ public sealed class AltaLiveToolTests
         var clearRecord = ReadJsonLines(clear.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.notes.updated");
         Assert.AreEqual(string.Empty, clearRecord.GetProperty("markdown").GetString());
         Assert.IsTrue(clearRecord.GetProperty("empty").GetBoolean());
-        Assert.AreEqual(string.Empty, notesService.GetMarkdown(caller));
+        Assert.AreEqual(string.Empty, await notesService.GetMarkdownAsync(caller));
     }
 
     [TestMethod]
-    public void AltaNotesService_ReplacesClearsAndRaisesChangedEventsPerSession()
+    public async Task AltaNotesService_ReplacesClearsAndRaisesChangedEventsPerSession()
     {
         var service = new AltaNotesService();
         var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-notes" };
@@ -672,12 +672,12 @@ public sealed class AltaLiveToolTests
             markdownChanges.Add(args.Markdown);
         };
 
-        service.SetMarkdownAsync("# Status", caller).GetAwaiter().GetResult();
-        service.SetMarkdownAsync("# Other", otherCaller).GetAwaiter().GetResult();
-        service.ClearAsync(caller).GetAwaiter().GetResult();
+        await service.SetMarkdownAsync("# Status", caller);
+        await service.SetMarkdownAsync("# Other", otherCaller);
+        await service.ClearAsync(caller);
 
-        Assert.AreEqual(string.Empty, service.GetMarkdown(caller));
-        Assert.AreEqual("# Other", service.GetMarkdown(otherCaller));
+        Assert.AreEqual(string.Empty, await service.GetMarkdownAsync(caller));
+        Assert.AreEqual("# Other", await service.GetMarkdownAsync(otherCaller));
         CollectionAssert.AreEqual(new[] { "# Status", "# Other", string.Empty }, markdownChanges);
         CollectionAssert.AreEqual(new[] { "session-notes", "session-other", "session-notes" }, changedSessionIds);
     }

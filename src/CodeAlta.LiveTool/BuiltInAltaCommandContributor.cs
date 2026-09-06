@@ -235,7 +235,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
     private static Command CreateNotesGetCommand(AltaCommandContext context)
     {
         var command = Leaf("get", "Get the current sticky notes Markdown.");
-        command.Add((_, _) => ValueTask.FromResult(HandleNotesGet(context)));
+        command.Add((_, _) => HandleNotesGetAsync(context));
         return command;
     }
 
@@ -3049,7 +3049,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         return ValueTask.FromResult(AltaExitCodes.Success);
     }
 
-    private static int HandleNotesGet(AltaCommandContext context)
+    private static async ValueTask<int> HandleNotesGetAsync(AltaCommandContext context)
     {
         if (!TryGetNotesService(context, out var notesService))
         {
@@ -3058,7 +3058,8 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
 
         try
         {
-            WriteNotesRecord(context, "alta.notes.current", notesService.GetMarkdown(context.Caller));
+            var markdown = await notesService.GetMarkdownAsync(context.Caller, context.CancellationToken).ConfigureAwait(false);
+            WriteNotesRecord(context, "alta.notes.current", markdown);
             return AltaExitCodes.Success;
         }
         catch (AltaNotesSessionRequiredException)
@@ -3075,10 +3076,11 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
-        var markdown = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
         try
         {
-            await notesService.SetMarkdownAsync(markdown, context.Caller, context.CancellationToken).ConfigureAwait(false);
+            var caller = notesService.CaptureCaller(context.Caller);
+            var markdown = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
+            await notesService.SetMarkdownAsync(markdown, caller, context.CancellationToken).ConfigureAwait(false);
             WriteNotesRecord(context, "alta.notes.updated", markdown);
             return AltaExitCodes.Success;
         }

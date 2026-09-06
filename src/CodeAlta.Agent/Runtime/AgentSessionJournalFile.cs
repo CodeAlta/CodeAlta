@@ -122,6 +122,44 @@ internal sealed class AgentSessionJournalFile
         CancellationToken cancellationToken)
         => AppendLinesAsync(path, [line], encoding, cancellationToken);
 
+    // Notes use the existing journal gate, but never create a missing journal. Once the
+    // stream is open and cancellation is checked, finish the single record and feedback
+    // without caller cancellation: cancellation must not masquerade as a rollback.
+    public Task AppendNotesLineAsync(
+        string path, string line, Encoding encoding, Func<Stream, CancellationToken, Task> validate,
+        Func<Task> committed, CancellationToken cancellationToken)
+        => WithPathLockAsync(path, async () =>
+        {
+            // Retry only opening, never a partially written record.
+            await using (var stream = await RetryFileOperationAsync(
+                () => Task.FromResult(new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, 4096, useAsync: true)),
+                cancellationToken).ConfigureAwait(false))
+            {
+                // Validate through the canonical parser on this same handle, before
+                // changing any bytes, with read-only file sharing requested.
+                await validate(stream, cancellationToken).ConfigureAwait(false);
+                var needsSeparator = false;
+                if (stream.Length != 0)
+                {
+                    stream.Seek(-1, SeekOrigin.End);
+                    var lastByte = new byte[1];
+                    await stream.ReadExactlyAsync(lastByte, cancellationToken).ConfigureAwait(false);
+                    needsSeparator = lastByte[0] is not ((byte)'\n' or (byte)'\r');
+                }
+
+                stream.Seek(0, SeekOrigin.End);
+                cancellationToken.ThrowIfCancellationRequested();
+                await using var writer = new StreamWriter(stream, encoding);
+                if (needsSeparator)
+                {
+                    await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, CancellationToken.None).ConfigureAwait(false);
+                }
+                await writer.WriteLineAsync(line.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+                await writer.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            await committed().ConfigureAwait(false);
+        }, cancellationToken);
+
     private static async Task AppendLinesCoreAsync(
         string path,
         IReadOnlyList<string> lines,

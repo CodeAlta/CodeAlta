@@ -458,7 +458,7 @@ public sealed class CodeAltaAppSidebarTests
         var notesService = new AltaNotesService(static () => "session-notes");
         var caller = new AltaCallerIdentity { Kind = "host", SourceSessionId = "session-notes" };
         notesService.SetMarkdownAsync("# Initial", caller).GetAwaiter().GetResult();
-        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, new CapturingSidebarRowCommandDispatcher(), static _ => { }, notesService: notesService);
+        var view = new SidebarView(new SidebarViewModel(), static () => { }, static () => { }, static () => { }, static () => { }, static _ => { }, static _ => { }, new CapturingSidebarRowCommandDispatcher(), static _ => { }, notesService: notesService, initialNotesMarkdown: "# Initial");
         var notesGroup = Assert.IsInstanceOfType<Group>(view.NotesRoot);
         var scrollViewer = Assert.IsInstanceOfType<ScrollViewer>(notesGroup.Content);
         var markdown = Assert.IsInstanceOfType<MarkdownControl>(scrollViewer.Content);
@@ -886,7 +886,10 @@ public sealed class CodeAltaAppSidebarTests
 
         public event EventHandler<AltaNotesChangedEventArgs>? Changed;
 
-        public string GetMarkdown(AltaCallerIdentity caller) => "# Initial";
+        public AltaCallerIdentity CaptureCaller(AltaCallerIdentity caller) => caller;
+
+        public ValueTask<string> GetMarkdownAsync(AltaCallerIdentity caller, CancellationToken cancellationToken = default)
+            => throw new AssertFailedException("A UI constructor must not read notes storage.");
 
         public ValueTask SetMarkdownAsync(string markdown, AltaCallerIdentity caller, CancellationToken cancellationToken = default)
             => ValueTask.CompletedTask;

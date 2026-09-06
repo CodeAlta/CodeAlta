@@ -195,7 +195,7 @@ After receiving `alta.ask.queued`, an LLM should stop the turn: do not call anot
 
 ## Notes
 
-Use `alta notes` for short-lived sticky Markdown that should remain visible while an agent works in the current session, such as a checklist, plan status, or next actions. Notes are session-scoped: `get`, `set`, and `clear` operate on the caller/current tab's session, switching tabs shows that session's notes, and reopening a session restores the latest `alta notes set` or `alta notes clear` event from the session journal. The sidebar Notes panel renders Markdown in a scrollable view, wraps horizontally, offers a copy-to-Markdown button, and has a clear action.
+Use `alta notes` for sticky Markdown such as a checklist, plan status, or next actions. Notes are session-scoped and journal-backed: `get`, `set`, and `clear` work for a known active or persisted caller session even with no open tab. An explicit source session never falls back to a different selected session. Host callers may use the current session as a fallback, captured before reading stdin or awaiting storage; without either identity the command returns `usage.missingSession`. Switching tabs shows that session's notes, and reopening a session restores the latest set or clear event from its journal. The sidebar renders Markdown in a scrollable view, wraps horizontally, offers a copy-to-Markdown button, and clears asynchronously without blocking the UI.
 
 ```text
 alta notes get
@@ -204,6 +204,10 @@ alta notes clear
 ```
 
 `alta notes get` emits the current Markdown as `alta.notes.current`. `alta notes set` replaces the entire notes document with Markdown read from stdin and emits `alta.notes.updated`; `--stdin` is accepted for consistency with other text commands. `alta notes clear` sets the document back to empty. Prefer `notes` over the singular `note` alias in new prompts and documentation.
+
+Markdown is preserved exactly, including empty text. Success follows acknowledged journal persistence; unknown IDs do not create sessions or journals, and read failures do not become empty notes. Cancellation before write admission leaves notes unchanged; after admission the single record finishes rather than claiming cancellation rolled it back. If persistence commits but later cache or UI feedback fails, the error explicitly says notes were committed: read them again before retrying. Notes use the existing journal/restart semantics, not a new database, power-loss guarantee, or persistence for asks/reminders.
+
+A valid final journal record missing its newline is preserved when appending notes. Malformed or truncated journal content is instead refused without modifying bytes or reporting an update; notes commands do not repair journals or discard incomplete user data.
 
 ## Prompt file mutations
 
