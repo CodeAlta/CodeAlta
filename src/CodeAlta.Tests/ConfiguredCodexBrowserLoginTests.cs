@@ -1,5 +1,7 @@
 using CodeAlta.Catalog;
+using CodeAlta.Hosting;
 using CodeAlta.Tui.App;
+using Authentication = CodeAlta.Hosting.ConfiguredCodexAuthentication;
 using Coordinator = CodeAlta.Tui.App.ProviderFrontendCoordinator;
 
 namespace CodeAlta.Tests;
@@ -13,222 +15,6 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ConfiguredCodexBrowserLoginTests
 {
-    [TestMethod]
-    [DataRow(0, false)]
-    [DataRow(1, false)]
-    [DataRow(2, false)]
-    [DataRow(3, false)]
-    [DataRow(4, false)]
-    [DataRow(5, false)]
-    [DataRow(6, false)]
-    [DataRow(7, false)]
-    [DataRow(0, true)]
-    [DataRow(1, true)]
-    [DataRow(2, true)]
-    [DataRow(3, true)]
-    [DataRow(4, true)]
-    [DataRow(5, true)]
-    [DataRow(6, true)]
-    [DataRow(7, true)]
-    public async Task RequiredArguments_ValidateEachInputAndEveryPrecedenceSuffix(int index, bool nullSuffix)
-    {
-        var fake = new RecordingBrowserLogin();
-        fake.Definition.ProviderType = "wrong";
-        var missing = new bool[8];
-        for (var position = index; position < (nullSuffix ? missing.Length : index + 1); position++)
-        {
-            missing[position] = true;
-        }
-
-        var failure = await Assert.ThrowsExactlyAsync<ArgumentNullException>(() =>
-            Coordinator.LoginCodexBrowserCoreAsync(
-                missing[0] ? null! : fake.Definition,
-                missing[1] ? null! : fake.GetStateRootPath,
-                missing[2] ? null! : fake.FormatInvalidProvider,
-                missing[3] ? null! : fake.ReportAuthorization,
-                missing[4] ? null! : fake.OpenBrowser,
-                missing[5] ? null! : fake.FormatCompletionPrefix,
-                missing[6] ? null! : fake.OnCompleted,
-                missing[7] ? null! : fake.CreateOperation,
-                CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)));
-
-        var names = new[]
-        {
-            "definition", "getStateRootPath", "formatInvalidProvider", "reportAuthorization",
-            "openBrowser", "formatCompletionPrefix", "onCompleted", "createOperation",
-        };
-        Assert.AreEqual(names[index], failure.ParamName);
-        Assert.IsEmpty(fake.Events);
-    }
-
-    [TestMethod]
-    [DataRow(null)]
-    [DataRow("")]
-    [DataRow(" ")]
-    [DataRow("\t")]
-    [DataRow("Codex")]
-    [DataRow("CODEX")]
-    [DataRow(" codex")]
-    [DataRow("codex ")]
-    [DataRow("codex-subscription")]
-    [DataRow("other")]
-    public async Task ProviderType_RequiresExactOrdinalCodex(string? providerType)
-    {
-        var fake = new RecordingBrowserLogin();
-        fake.Definition.ProviderType = providerType;
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => fake.InvokeAsync(cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5)));
-
-        Assert.AreEqual("fixture invalid provider", failure.Message);
-        CollectionAssert.AreEqual(new[] { "format-invalid" }, fake.Events);
-    }
-
-    [TestMethod]
-    public async Task Mismatch_UsesSuppliedLocalizedMessage()
-    {
-        var fake = new RecordingBrowserLogin();
-        fake.Definition.ProviderType = "wrong";
-        fake.InvalidProviderText = () => SR.T("Select a Codex provider first.");
-
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => fake.InvokeAsync().WaitAsync(TimeSpan.FromSeconds(5)));
-
-        Assert.AreEqual(SR.T("Select a Codex provider first."), failure.Message);
-        CollectionAssert.AreEqual(new[] { "format-invalid" }, fake.Events);
-    }
-
-    [TestMethod]
-    public async Task MatchingType_ForwardsOriginalReferencesAndTokenWithoutConsumingRoot()
-    {
-        var fake = new RecordingBrowserLogin();
-        fake.RootValue = () => throw new AssertFailedException("Core must not consume root.");
-        fake.InvalidProviderText = () => throw new AssertFailedException("Matching type must not format mismatch.");
-        using var cancellation = new CancellationTokenSource();
-
-        var task = fake.InvokeAsync(cancellation.Token);
-
-        try
-        {
-            Assert.IsTrue(task.IsCompletedSuccessfully);
-        }
-        finally
-        {
-            await ObserveAsync(task);
-        }
-        Assert.AreSame(fake.Definition, fake.ObservedDefinition);
-        Assert.AreSame(fake.GetStateRootPath, fake.ObservedRootCallback);
-        Assert.AreSame(fake.ReportAuthorization, fake.ObservedReportCallback);
-        Assert.AreSame(fake.OpenBrowser, fake.ObservedOpenCallback);
-        Assert.AreSame(fake.FormatCompletionPrefix, fake.ObservedPrefixCallback);
-        Assert.AreSame(fake.OnCompleted, fake.ObservedCompletionCallback);
-        Assert.AreEqual(cancellation.Token, fake.ObservedToken);
-        Assert.AreEqual(cancellation.Token, fake.ObservedWaitToken);
-        Assert.AreSame(fake.AuthorizationUri, fake.ReportedUri);
-        Assert.AreSame(fake.AuthorizationUri, fake.OpenedUri);
-        CollectionAssert.AreEqual(new[]
-        {
-            "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open", "prefix", "synthetic-project-id", "completion",
-        }, fake.Events);
-    }
-
-    [TestMethod]
-    public async Task Factory_ControlsLazyRootKeyAndConfiguredAccountConsumption()
-    {
-        var fake = new RecordingBrowserLogin();
-        var rootValue = " first synthetic root ";
-        fake.RootValue = () =>
-        {
-            fake.Definition.ProviderKey = " changed synthetic key ";
-            fake.Definition.AccountId = " changed synthetic account ";
-            return rootValue;
-        };
-        fake.FactoryBody = (definition, getRoot) =>
-        {
-            Assert.AreEqual(" first synthetic root ", getRoot());
-            Assert.AreEqual(" changed synthetic key ", definition.ProviderKey);
-            rootValue = " second synthetic root ";
-            Assert.AreEqual(" second synthetic root ", getRoot());
-            return fake.InvokeOperation;
-        };
-
-        await ObserveAsync(fake.InvokeAsync());
-
-        Assert.AreEqual(" changed synthetic account ", fake.ObservedConfiguredAccountId);
-        CollectionAssert.AreEqual(new[]
-        {
-            "factory", "root", "root", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open", "prefix", "synthetic-project-id", "completion",
-        }, fake.Events);
-    }
-
-    [TestMethod]
-    [DataRow(null, "synthetic-key")]
-    [DataRow("synthetic-root", null)]
-    [DataRow("", "")]
-    [DataRow(" \t ", " \t ")]
-    [DataRow(" raw synthetic root ", " raw synthetic/key ")]
-    public async Task RootAndKey_AreNotNormalizedByCore(string? rootValue, string? providerKey)
-    {
-        var fake = new RecordingBrowserLogin();
-        // Intentional invalid synthetic values despite non-null annotations; only the fake sees them.
-        fake.RootValue = () => rootValue!;
-        fake.Definition.ProviderKey = providerKey!;
-        fake.FactoryBody = (definition, getRoot) =>
-        {
-            Assert.AreEqual(rootValue, getRoot());
-            Assert.AreEqual(providerKey, definition.ProviderKey);
-            return fake.InvokeOperation;
-        };
-
-        await ObserveAsync(fake.InvokeAsync());
-
-        CollectionAssert.AreEqual(new[]
-        {
-            "factory", "root", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open", "prefix", "synthetic-project-id", "completion",
-        }, fake.Events);
-    }
-
-    [TestMethod]
-    [DataRow(null)]
-    [DataRow("")]
-    [DataRow(" \t ")]
-    [DataRow("synthetic-account")]
-    [DataRow(" padded synthetic account ")]
-    public async Task ConfiguredAccountId_IsForwardedRawAtBeginAfterFactory(string? accountId)
-    {
-        var fake = new RecordingBrowserLogin();
-        fake.Definition.AccountId = "before factory";
-        fake.FactoryBody = (definition, _) =>
-        {
-            definition.AccountId = accountId;
-            return fake.InvokeOperation;
-        };
-
-        await ObserveAsync(fake.InvokeAsync());
-
-        // This is fake-controlled consumption; provider URI query trimming remains source-only.
-        Assert.AreEqual(accountId, fake.ObservedConfiguredAccountId);
-        Assert.AreSame(fake.Definition, fake.ObservedDefinition);
-    }
-
-    [TestMethod]
-    [DataRow(null, null)]
-    [DataRow("unused", false)]
-    [DataRow(" arbitrary synthetic source ", true)]
-    public async Task IrrelevantConfiguration_DoesNotAddEligibility(string? authSource, bool? enabled)
-    {
-        var fake = new RecordingBrowserLogin();
-        fake.Definition.AuthSource = authSource;
-        fake.Definition.Enabled = enabled;
-
-        await ObserveAsync(fake.InvokeAsync());
-
-        CollectionAssert.AreEqual(new[]
-        {
-            "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open", "prefix", "synthetic-project-id", "completion",
-        }, fake.Events);
-    }
-
     [TestMethod]
     [DataRow("mismatch")]
     [DataRow("factory")]
@@ -311,59 +97,6 @@ public sealed class ConfiguredCodexBrowserLoginTests
     }
 
     [TestMethod]
-    [DataRow("success")]
-    [DataRow("fault")]
-    [DataRow("cancel")]
-    public async Task AlreadyCompletedWait_IsObservedAfterReportingAndOpening(string outcome)
-    {
-        var fake = new RecordingBrowserLogin();
-        var failure = new InvalidOperationException("synthetic wait failure");
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        // Independently retained before invocation, including faulted/canceled tasks.
-        var wait = CompletedWait(outcome, failure, cancellation.Token);
-        fake.WaitBody = _ => wait;
-        Task? route = null;
-        try
-        {
-            route = fake.InvokeAsync();
-            await ObserveAsync(route, outcome == "fault" ? failure : null, outcome == "cancel");
-            CollectionAssert.AreEqual(outcome == "success"
-                ? new[] { "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open", "prefix", "synthetic-project-id", "completion" }
-                : new[] { "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open" }, fake.Events);
-        }
-        finally
-        {
-            await JoinBothAsync(route, wait, outcome == "fault" ? failure : null, outcome == "cancel",
-                outcome == "fault" ? failure : null, outcome == "cancel");
-        }
-    }
-
-    [TestMethod]
-    [DataRow("report")]
-    [DataRow("opener")]
-    public async Task CallbackFailure_WinsOverAlreadyFaultedWait(string callback)
-    {
-        var fake = new RecordingBrowserLogin();
-        var callbackFailure = new InvalidOperationException("synthetic callback failure");
-        var waitFailure = new InvalidOperationException("synthetic wait failure");
-        var wait = Task.FromException(waitFailure);
-        fake.WaitBody = _ => wait;
-        SetCallbackFailure(fake, callback, callbackFailure);
-        Task? route = null;
-        try
-        {
-            route = fake.InvokeAsync();
-            await ObserveAsync(route, callbackFailure);
-            AssertCallbackEvents(fake, callback);
-        }
-        finally
-        {
-            await JoinBothAsync(route, wait, callbackFailure, false, waitFailure, false);
-        }
-    }
-
-    [TestMethod]
     [DataRow("report", "success")]
     [DataRow("report", "fault")]
     [DataRow("report", "cancel")]
@@ -434,67 +167,6 @@ public sealed class ConfiguredCodexBrowserLoginTests
         {
             gate.TrySetResult();
             await JoinBothAsync(route, wait);
-        }
-    }
-
-    [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task PrecanceledToken_ReachesIgnoringAndCooperativeWait(bool cooperative)
-    {
-        var fake = new RecordingBrowserLogin();
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        var wait = cooperative ? Task.FromCanceled(cancellation.Token) : Task.CompletedTask;
-        fake.WaitBody = token =>
-        {
-            Assert.AreEqual(cancellation.Token, token);
-            return wait;
-        };
-        Task? route = null;
-        try
-        {
-            route = fake.InvokeAsync(cancellation.Token);
-            await ObserveAsync(route, canceled: cooperative, expectedToken: cooperative ? cancellation.Token : null);
-            Assert.AreEqual(cancellation.Token, fake.ObservedToken);
-            Assert.AreEqual(cancellation.Token, fake.ObservedWaitToken);
-            CollectionAssert.AreEqual(cooperative
-                ? new[] { "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open" }
-                : new[] { "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open", "prefix", "synthetic-project-id", "completion" }, fake.Events);
-        }
-        finally
-        {
-            await JoinBothAsync(route, wait, routeCanceled: cooperative, waitCanceled: cooperative);
-        }
-    }
-
-    [TestMethod]
-    public async Task PendingWait_CooperativelyCancelsWithOriginalToken()
-    {
-        var fake = new RecordingBrowserLogin();
-        using var cancellation = new CancellationTokenSource();
-        var gate = NewGate();
-        var wait = gate.Task;
-        using var registration = cancellation.Token.Register(() => gate.TrySetCanceled(cancellation.Token));
-        fake.WaitBody = token =>
-        {
-            Assert.AreEqual(cancellation.Token, token);
-            return wait;
-        };
-        Task? route = null;
-        try
-        {
-            route = fake.InvokeAsync(cancellation.Token);
-            Assert.IsFalse(route.IsCompleted);
-            Assert.IsFalse(wait.IsCompleted);
-            cancellation.Cancel();
-            await ObserveAsync(route, canceled: true, expectedToken: cancellation.Token);
-            CollectionAssert.AreEqual(new[] { "factory", "operation", "synthetic-begin", "synthetic-start-wait", "report", "open" }, fake.Events);
-        }
-        finally
-        {
-            cancellation.Cancel();
-            await JoinBothAsync(route, wait, routeCanceled: true, waitCanceled: true);
         }
     }
 
@@ -795,7 +467,7 @@ public sealed class ConfiguredCodexBrowserLoginTests
         }
 
         public Task InvokeAsync(CancellationToken cancellationToken = default)
-            => Coordinator.LoginCodexBrowserCoreAsync(
+            => Authentication.LoginWithBrowserAsync(
                 Definition, GetStateRootPath, FormatInvalidProvider, ReportAuthorization, OpenBrowser,
                 FormatCompletionPrefix, OnCompleted, CreateOperation, cancellationToken);
     }

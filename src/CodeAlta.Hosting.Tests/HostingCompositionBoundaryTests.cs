@@ -72,7 +72,7 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(xaiAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
         var codexAuthenticationMethods = typeof(ConfiguredCodexAuthentication).GetMethods(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
-        CollectionAssert.AreEquivalent(new[] { "DeleteCredentialAsync", "ReadAccountMetadataAsync", "LoginWithDeviceCodeAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "DeleteCredentialAsync", "ReadAccountMetadataAsync", "LoginWithDeviceCodeAsync", "LoginWithBrowserAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
         var codexDeletionMethod = codexAuthenticationMethods.Single(method => method.Name == "DeleteCredentialAsync");
         Assert.AreEqual(typeof(Task), codexDeletionMethod.ReturnType);
         CollectionAssert.AreEqual(new[]
@@ -390,8 +390,8 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(tui.Contains("DeleteCodexSubscriptionCredentialCoreAsync", StringComparison.Ordinal));
         Assert.IsFalse(tui.Contains("CodexSubscriptionDeleteCredentialOperation", StringComparison.Ordinal));
 
-        // Preserve the original shared manager helper even though browser now has a mandatory factory.
-        // Do not forbid all Codex manager construction in the TUI during browser Phase 1.
+        // Preserve the original shared manager helper even though browser's factory is now in Hosting.
+        // The unused helper is protected; do not forbid all Codex manager construction in the TUI.
         var expectedHelper = "    private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)\n"
             + "    {\n"
             + "        if (!string.Equals(definition.ProviderType, \"codex\", StringComparison.Ordinal))\n"
@@ -410,7 +410,7 @@ public sealed class HostingCompositionBoundaryTests
             Assert.IsTrue(entryStart >= 0);
             var entryEnd = tui.IndexOf("\n    }", entryStart, StringComparison.Ordinal);
             Assert.IsTrue(entryEnd > entryStart);
-            StringAssert.Contains(tui[entryStart..entryEnd], "await LoginCodexBrowserCoreAsync(\n"
+            StringAssert.Contains(tui[entryStart..entryEnd], "await ConfiguredCodexAuthentication.LoginWithBrowserAsync(\n"
                 + "            definition,\n"
                 + "            GetProviderStateRootPath,\n"
                 + "            static () => SR.T(\"Select a Codex provider first.\"),\n"
@@ -418,14 +418,10 @@ public sealed class HostingCompositionBoundaryTests
                 + "            TryOpenBrowser,\n"
                 + "            static () => SR.T(\"ChatGPT browser login completed\"),\n"
                 + "            (prefix, rawAccountId) => result = FormatCodexBrowserLoginResult(prefix, rawAccountId),\n"
-                + "            static (providerDefinition, getStateRootPath) =>\n"
-                + "            {\n"
-                + "                var manager = new OpenAICodexSubscriptionLoginManager(\n"
-                + "                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),\n"
-                + "                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n"
-                + "                    providerDefinition.ProviderKey);");
+                + "            cancellationToken);\n"
+                + "        return result;");
             Assert.IsFalse(tui[entryStart..entryEnd].Contains("CreateCodexSubscriptionLoginManager(definition)", StringComparison.Ordinal));
-            Assert.IsFalse(tui[entryStart..entryEnd].Contains("ConfiguredCodexAuthentication", StringComparison.Ordinal));
+            Assert.IsFalse(tui[entryStart..entryEnd].Contains("new OpenAICodexSubscriptionLoginManager", StringComparison.Ordinal));
         }
 
         foreach (var forbidden in new[]
@@ -759,7 +755,7 @@ public sealed class HostingCompositionBoundaryTests
                 ArgumentNullException.ThrowIfNull(reportStatus);
 
                 ProviderTestResult result = default;
-                await LoginCodexBrowserCoreAsync(
+                await ConfiguredCodexAuthentication.LoginWithBrowserAsync(
                     definition,
                     GetProviderStateRootPath,
                     static () => SR.T("Select a Codex provider first."),
@@ -767,27 +763,6 @@ public sealed class HostingCompositionBoundaryTests
                     TryOpenBrowser,
                     static () => SR.T("ChatGPT browser login completed"),
                     (prefix, rawAccountId) => result = FormatCodexBrowserLoginResult(prefix, rawAccountId),
-                    static (providerDefinition, getStateRootPath) =>
-                    {
-                        var manager = new OpenAICodexSubscriptionLoginManager(
-                            new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
-                            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
-                            providerDefinition.ProviderKey);
-                        return async (reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, token) =>
-                        {
-                            var login = manager.BeginBrowserLogin(providerDefinition.AccountId);
-                            var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
-                            reportAuthorization(login.AuthorizeUri);
-                            openBrowser(login.AuthorizeUri);
-                            var credential = await waitForCallbackTask;
-                            var prefix = formatCompletionPrefix();
-                            // Approved browser-specific post-prefix snapshot: the nonblank branch now reads once,
-                            // not twice. The fresh sealed credential has a plain property and is saved before return.
-                            // This is not arbitrary-property or task identity/stack/settlement equivalence.
-                            var rawAccountId = credential.AccountId;
-                            onCompleted(prefix, rawAccountId);
-                        };
-                    },
                     cancellationToken);
                 return result;
             }
@@ -845,10 +820,36 @@ public sealed class HostingCompositionBoundaryTests
     }
 
     [TestMethod]
-    public void CodexBrowserLogin_TuiMandatoryFactoryPreservesExactSequenceAndProtectedBoundaries()
+    public void CodexBrowserLogin_HostingWiringPreservesExactFactoryAndProtectedBoundaries()
     {
-        // Four named checkout sources only. No concrete Begin/listener/protocol execution or qualification.
+        // Type metadata and four named checkout sources only. No concrete Begin/listener/protocol execution or qualification.
         // The preceding device guard also compares the complete browser entry and original shared helpers.
+        var method = typeof(ConfiguredCodexAuthentication).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly)
+            .Single(candidate => candidate.Name == "LoginWithBrowserAsync");
+        Assert.AreEqual(typeof(Task), method.ReturnType);
+        var parameters = method.GetParameters();
+        CollectionAssert.AreEqual(new[]
+        {
+            typeof(CodeAlta.Catalog.CodeAltaProviderDocument), typeof(Func<string>), typeof(Func<string>),
+            typeof(Action<Uri>), typeof(Action<Uri>), typeof(Func<string>), typeof(Action<string, string>), typeof(CancellationToken),
+        }, parameters.Select(parameter => parameter.ParameterType).ToArray());
+        CollectionAssert.AreEqual(new[]
+        {
+            "definition", "getStateRootPath", "formatInvalidProvider", "reportAuthorization", "openBrowser",
+            "formatCompletionPrefix", "onCompleted", "cancellationToken",
+        }, parameters.Select(parameter => parameter.Name).ToArray());
+        Assert.IsFalse(parameters.Any(parameter => parameter.IsOptional));
+        var nullability = new System.Reflection.NullabilityInfoContext();
+        foreach (var parameter in parameters.Take(7))
+        {
+            Assert.AreEqual(System.Reflection.NullabilityState.NotNull, nullability.Create(parameter).ReadState);
+        }
+        Assert.AreEqual(System.Reflection.NullabilityState.NotNull, nullability.Create(parameters[3]).GenericTypeArguments[0].ReadState);
+        Assert.AreEqual(System.Reflection.NullabilityState.NotNull, nullability.Create(parameters[4]).GenericTypeArguments[0].ReadState);
+        var completionNullability = nullability.Create(parameters[6]);
+        Assert.AreEqual(System.Reflection.NullabilityState.NotNull, completionNullability.GenericTypeArguments[0].ReadState);
+        Assert.AreEqual(System.Reflection.NullabilityState.Nullable, completionNullability.GenericTypeArguments[1].ReadState);
         var root = SourceRoot();
         var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
         var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredCodexAuthentication.cs")).Replace("\r\n", "\n");
@@ -864,12 +865,54 @@ public sealed class HostingCompositionBoundaryTests
             + "        ArgumentNullException.ThrowIfNull(reportStatus);");
         StringAssert.Contains(browser, "            cancellationToken);\n        return result;\n    }");
 
-        // Scope the factory inside BROWSER, not an account/deletion/device or shared helper region.
-        var factoryStart = browser.IndexOf("            static (providerDefinition, getStateRootPath) =>", StringComparison.Ordinal);
+        var publicStart = source.IndexOf("    public static Task LoginWithBrowserAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(publicStart >= 0);
+        var coreStart = source.IndexOf("\n    internal static async Task LoginWithBrowserAsync(", publicStart, StringComparison.Ordinal);
+        Assert.IsTrue(coreStart > publicStart);
+        var publicBrowser = source[publicStart..coreStart];
+        var expectedPublic = """
+            public static Task LoginWithBrowserAsync(
+                CodeAltaProviderDocument definition,
+                Func<string> getStateRootPath,
+                Func<string> formatInvalidProvider,
+                Action<Uri> reportAuthorization,
+                Action<Uri> openBrowser,
+                Func<string> formatCompletionPrefix,
+                Action<string, string?> onCompleted,
+                CancellationToken cancellationToken)
+                => LoginWithBrowserAsync(
+                    definition, getStateRootPath, formatInvalidProvider, reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted,
+                    static (providerDefinition, getStateRootPath) =>
+                    {
+                        var manager = new OpenAICodexSubscriptionLoginManager(
+                            new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                            providerDefinition.ProviderKey);
+                        return async (reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, token) =>
+                        {
+                            var login = manager.BeginBrowserLogin(providerDefinition.AccountId);
+                            var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
+                            reportAuthorization(login.AuthorizeUri);
+                            openBrowser(login.AuthorizeUri);
+                            var credential = await waitForCallbackTask;
+                            var prefix = formatCompletionPrefix();
+                            // Approved browser-specific post-prefix snapshot: the nonblank branch now reads once,
+                            // not twice. The fresh sealed credential has a plain property and is saved before return.
+                            // This is not arbitrary-property or task identity/stack/settlement equivalence.
+                            var rawAccountId = credential.AccountId;
+                            onCompleted(prefix, rawAccountId);
+                        };
+                    },
+                    cancellationToken);
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedPublic + "\n", publicBrowser);
+
+        // Scope the factory inside Hosting BROWSER, not an account/deletion/device or shared helper region.
+        var factoryStart = publicBrowser.IndexOf("            static (providerDefinition, getStateRootPath) =>", StringComparison.Ordinal);
         Assert.IsTrue(factoryStart >= 0);
-        var factoryEnd = browser.IndexOf("\n            },", factoryStart, StringComparison.Ordinal);
+        var factoryEnd = publicBrowser.IndexOf("\n            },", factoryStart, StringComparison.Ordinal);
         Assert.IsTrue(factoryEnd > factoryStart);
-        var factory = browser[factoryStart..factoryEnd];
+        var factory = publicBrowser[factoryStart..factoryEnd];
         var expectedFactory = "                var manager = new OpenAICodexSubscriptionLoginManager(\n"
             + "                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),\n"
             + "                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n"
@@ -894,9 +937,9 @@ public sealed class HostingCompositionBoundaryTests
         Assert.AreEqual(1, factory.Split("credential.AccountId", StringSplitOptions.None).Length - 1);
         StringAssert.Contains(factory, "var rawAccountId = credential.AccountId;\n                    onCompleted(prefix, rawAccountId);\n                };");
 
-        var core = ReadMethod(tui, "    internal static async Task LoginCodexBrowserCoreAsync(");
+        var core = ReadMethod(source, "    internal static async Task LoginWithBrowserAsync(");
         var expectedCore = """
-            internal static async Task LoginCodexBrowserCoreAsync(
+            internal static async Task LoginWithBrowserAsync(
                 CodeAltaProviderDocument definition,
                 Func<string> getStateRootPath,
                 Func<string> formatInvalidProvider,
@@ -926,7 +969,7 @@ public sealed class HostingCompositionBoundaryTests
             }
         """.Replace("\r\n", "\n");
         Assert.AreEqual(expectedCore, core);
-        StringAssert.Contains(tui, "internal delegate ValueTask CodexBrowserLoginOperation(\n    Action<Uri> reportAuthorization,\n    Action<Uri> openBrowser,\n    Func<string> formatCompletionPrefix,\n    Action<string, string?> onCompleted,\n    CancellationToken cancellationToken);");
+        StringAssert.Contains(source, "internal delegate ValueTask CodexBrowserLoginOperation(\n    Action<Uri> reportAuthorization,\n    Action<Uri> openBrowser,\n    Func<string> formatCompletionPrefix,\n    Action<string, string?> onCompleted,\n    CancellationToken cancellationToken);");
         StringAssert.Contains(tui, "    internal static void ReportCodexBrowserAuthorization(Uri authorizeUri, Action<string> reportStatus)\n        => reportStatus(SR.T(\"Open ChatGPT login in your browser: {0}\", authorizeUri));");
         var expectedCompletion = """
             internal static ProviderTestResult FormatCodexBrowserLoginResult(string prefix, string? rawAccountId)
@@ -946,11 +989,22 @@ public sealed class HostingCompositionBoundaryTests
         {
             Assert.IsFalse(browser.Contains(forbidden, StringComparison.Ordinal));
             Assert.IsFalse(core.Contains(forbidden, StringComparison.Ordinal));
+            Assert.IsFalse(factory.Contains(forbidden, StringComparison.Ordinal));
         }
-        Assert.IsFalse(browser.Contains("ConfiguredCodexAuthentication", StringComparison.Ordinal));
-        foreach (var absent in new[] { "LoginWithBrowserAsync", "LoginCodexBrowserCoreAsync", "CodexBrowserLoginOperation", "BeginBrowserLogin", "WaitForBrowserCallbackAsync" })
+        Assert.IsFalse(factory.Contains("ConfiguredCodexAuthentication", StringComparison.Ordinal));
+        foreach (var absent in new[] { "LoginCodexBrowserCoreAsync", "CodexBrowserLoginOperation", "BeginBrowserLogin", "WaitForBrowserCallbackAsync" })
         {
-            Assert.IsFalse(source.Contains(absent, StringComparison.Ordinal));
+            Assert.IsFalse(tui.Contains(absent, StringComparison.Ordinal));
+        }
+        foreach (var concrete in new[] { "OpenAICodexSubscriptionLoginManager", "FileOpenAICodexSubscriptionCredentialStore", "OpenAICodexSubscriptionOAuthClient", "HttpClient", "credential." })
+        {
+            Assert.IsFalse(browser.Contains(concrete, StringComparison.Ordinal));
+            Assert.IsFalse(core.Contains(concrete, StringComparison.Ordinal));
+        }
+        foreach (var presentation in new[] { "SR.T(", "Process.", "Environment.", "TryOpenBrowser", "ReportCodexBrowserAuthorization", "FormatCodexBrowserLoginResult" })
+        {
+            Assert.IsFalse(publicBrowser.Contains(presentation, StringComparison.Ordinal));
+            Assert.IsFalse(core.Contains(presentation, StringComparison.Ordinal));
         }
 
         var expectedAdapter = """

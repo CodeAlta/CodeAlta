@@ -15,6 +15,13 @@ internal delegate ValueTask CodexDeviceLoginOperation(
     Action<string, string?> onCompleted,
     CancellationToken cancellationToken);
 
+internal delegate ValueTask CodexBrowserLoginOperation(
+    Action<Uri> reportAuthorization,
+    Action<Uri> openBrowser,
+    Func<string> formatCompletionPrefix,
+    Action<string, string?> onCompleted,
+    CancellationToken cancellationToken);
+
 /// <summary>
 /// Non-secret metadata from one locally stored Codex credential, not remote account enumeration or authentication validation.
 /// </summary>
@@ -29,7 +36,7 @@ internal delegate ValueTask CodexDeviceLoginOperation(
 public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabel);
 
 /// <summary>
-/// Composes configured Codex credential deletion, local non-secret account metadata lookup and device login.
+/// Composes configured Codex credential deletion, local non-secret account metadata lookup, device and browser login.
 /// </summary>
 /// <remarks>
 /// The caller owns localization and lazy root selection. The root is trusted backend input, not a
@@ -43,9 +50,10 @@ public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabe
 /// the OAuth client. No secret-bearing result or result DTO escapes deletion. Account lookup constructs
 /// only the owned credential store and reports two-string metadata synchronously after loading; it has no
 /// type, auth-source, enabled, expiry or access-token eligibility guard. TUI retains localization, root policy
-/// and the dialog's unchanged cancellation behavior. Device login projects only display strings through
-/// synchronous callbacks; Codex browser login and authentication-test orchestration remain
-/// TUI-owned; broader provider behavior, application lifetime and native parity remain unqualified.
+/// and the dialog's unchanged cancellation behavior. Device login projects display strings; browser login
+/// projects the existing authorization URI and raw nullable account ID through synchronous callbacks.
+/// Browser launch and presentation remain caller-owned; authentication-test orchestration remains TUI-owned.
+/// Broader provider behavior, application lifetime and native parity remain unqualified.
 /// </remarks>
 public static class ConfiguredCodexAuthentication
 {
@@ -186,7 +194,7 @@ public static class ConfiguredCodexAuthentication
     /// values and possibly personal account metadata must not acquire extra logging or persistence.
     /// No disposal, ownership, context suppression, cancellation checks, scheduling, retry, wrapping or settlement
     /// framework is added. Existing manager/HTTP-client non-disposal, TUI root policy and dialog cancellation remain.
-    /// Browser login and authentication testing remain TUI-owned. Inert forwarding/source checks do not qualify
+    /// Authentication testing remains TUI-owned. Inert forwarding/source checks do not qualify
     /// real protocol/storage behavior, native parity or application lifetime.
     /// </remarks>
     public static Task LoginWithDeviceCodeAsync(
@@ -248,5 +256,104 @@ public static class ConfiguredCodexAuthentication
 
         var operation = createOperation(definition, getStateRootPath);
         await operation(reportDeviceCode, formatCompletionPrefix, onCompleted, cancellationToken);
+    }
+
+    /// <summary>
+    /// Completes configured ChatGPT/Codex browser login through the existing provider and caller-owned presentation.
+    /// </summary>
+    /// <param name="definition">Required original definition; its type must be exactly ordinal <c>codex</c>. Its account ID is read after manager construction, at Begin, without new eligibility or normalization.</param>
+    /// <param name="getStateRootPath">Required lazy trusted-backend root callback, not a renderer grant or sandbox. Root/store validation precedes HTTP/OAuth construction, then the original key read and manager validation; values are forwarded unchanged.</param>
+    /// <param name="formatInvalidProvider">Required mismatch-only formatter, invoked before the factory or root selection.</param>
+    /// <param name="reportAuthorization">Required synchronous callback receiving the existing authorization <see cref="Uri"/> after the callback wait starts. Returning does not imply a dispatcher rendered the prompt.</param>
+    /// <param name="openBrowser">Required synchronous caller-owned opener, invoked after reporting with a separate read of the authorization URI. The TUI opener still suppresses ordinary launch exceptions.</param>
+    /// <param name="formatCompletionPrefix">Required callback invoked after awaiting the stored callback task, before reading the raw nullable credential account ID.</param>
+    /// <param name="onCompleted">Required synchronous callback receiving prefix then once-captured raw nullable ID, without an intervening await, trimming, resolver, label, metadata record or lazy credential getter.</param>
+    /// <param name="cancellationToken">Original token forwarded to the provider wait without an early cancellation check.</param>
+    /// <returns>A task completing after provider callback handling and synchronous completion presentation; presentation may fail after persistence.</returns>
+    /// <exception cref="ArgumentNullException">Definition, root, mismatch, report, opener, prefix or completion callback is null, checked in that order before ordinal type selection and construction. Provider constructors also reject null root/key values.</exception>
+    /// <exception cref="ArgumentException">The provider rejects a blank root during store construction or a blank key during later manager construction.</exception>
+    /// <exception cref="InvalidOperationException">The type is not exactly <c>codex</c>, or the provider rejects authorization or a response.</exception>
+    /// <exception cref="OperationCanceledException">The provider or a callback observes cancellation.</exception>
+    /// <remarks>
+    /// The internal mandatory-factory guard follows all seven required-object guards. The deferred factory
+    /// constructs root/store, HTTP/OAuth, then key/manager. Its operation reads the original configured ID at
+    /// Begin, stores WaitForBrowserCallbackAsync(...).AsTask(), reports, opens, then awaits that stored task.
+    /// An already-faulted/canceled returned wait still permits reporting/opening before await; a genuinely
+    /// synchronous fake start-wait throw differs from ordinary async provider failures. Report/custom-opener
+    /// failure intentionally leaves the wait unjoined; it may later persist. No joining or lifetime remedy is added.
+    /// Prefix localization precedes the once-only raw ID read and synchronous completion. This accepted
+    /// browser-specific nonblank two-reads-to-one deviation uses a fresh sealed credential's plain property,
+    /// saved before return; it is not arbitrary-property or task identity/stack/settlement equivalence.
+    /// URI query/correlation and potentially personal display data must not acquire extra logging/persistence,
+    /// parsing, normalization or snapshots. No credential, PKCE, state or browser-context object crosses callbacks.
+    /// The provider saves before its status-200 text/plain; charset=utf-8 success response, not HTML. Response,
+    /// cleanup or presentation failures may follow persistence; provider response/cleanup exceptions may supersede
+    /// earlier failures. Exceptions escaping constructors, callbacks and provider work propagate without wrapping.
+    /// No early cancellation, context suppression, scheduling, retry, ownership/disposal or settlement framework
+    /// is added; existing manager/HTTP-client non-disposal and TUI root/dialog cancellation policies remain.
+    /// Inert recording order and named-source checks do not qualify concrete protocol/listener/storage behavior,
+    /// application lifetime or native parity. Authentication-test orchestration remains TUI-owned and deferred.
+    /// </remarks>
+    public static Task LoginWithBrowserAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<Uri> reportAuthorization,
+        Action<Uri> openBrowser,
+        Func<string> formatCompletionPrefix,
+        Action<string, string?> onCompleted,
+        CancellationToken cancellationToken)
+        => LoginWithBrowserAsync(
+            definition, getStateRootPath, formatInvalidProvider, reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted,
+            static (providerDefinition, getStateRootPath) =>
+            {
+                var manager = new OpenAICodexSubscriptionLoginManager(
+                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                    providerDefinition.ProviderKey);
+                return async (reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, token) =>
+                {
+                    var login = manager.BeginBrowserLogin(providerDefinition.AccountId);
+                    var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
+                    reportAuthorization(login.AuthorizeUri);
+                    openBrowser(login.AuthorizeUri);
+                    var credential = await waitForCallbackTask;
+                    var prefix = formatCompletionPrefix();
+                    // Approved browser-specific post-prefix snapshot: the nonblank branch now reads once,
+                    // not twice. The fresh sealed credential has a plain property and is saved before return.
+                    // This is not arbitrary-property or task identity/stack/settlement equivalence.
+                    var rawAccountId = credential.AccountId;
+                    onCompleted(prefix, rawAccountId);
+                };
+            },
+            cancellationToken);
+
+    internal static async Task LoginWithBrowserAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<Uri> reportAuthorization,
+        Action<Uri> openBrowser,
+        Func<string> formatCompletionPrefix,
+        Action<string, string?> onCompleted,
+        Func<CodeAltaProviderDocument, Func<string>, CodexBrowserLoginOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(reportAuthorization);
+        ArgumentNullException.ThrowIfNull(openBrowser);
+        ArgumentNullException.ThrowIfNull(formatCompletionPrefix);
+        ArgumentNullException.ThrowIfNull(onCompleted);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation(definition, getStateRootPath);
+        await operation(reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, cancellationToken);
     }
 }

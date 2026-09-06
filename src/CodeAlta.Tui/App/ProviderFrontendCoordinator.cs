@@ -14,13 +14,6 @@ namespace CodeAlta.Tui.App;
 
 internal readonly record struct ProviderTestResult(bool Success, string Message, int ModelCount);
 
-internal delegate ValueTask CodexBrowserLoginOperation(
-    Action<Uri> reportAuthorization,
-    Action<Uri> openBrowser,
-    Func<string> formatCompletionPrefix,
-    Action<string, string?> onCompleted,
-    CancellationToken cancellationToken);
-
 internal sealed class ProviderFrontendCoordinator
 {
     private readonly CodeAltaOwnedServices? _ownedServices;
@@ -223,7 +216,7 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(reportStatus);
 
         ProviderTestResult result = default;
-        await LoginCodexBrowserCoreAsync(
+        await ConfiguredCodexAuthentication.LoginWithBrowserAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Codex provider first."),
@@ -231,58 +224,8 @@ internal sealed class ProviderFrontendCoordinator
             TryOpenBrowser,
             static () => SR.T("ChatGPT browser login completed"),
             (prefix, rawAccountId) => result = FormatCodexBrowserLoginResult(prefix, rawAccountId),
-            static (providerDefinition, getStateRootPath) =>
-            {
-                var manager = new OpenAICodexSubscriptionLoginManager(
-                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
-                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
-                    providerDefinition.ProviderKey);
-                return async (reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, token) =>
-                {
-                    var login = manager.BeginBrowserLogin(providerDefinition.AccountId);
-                    var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
-                    reportAuthorization(login.AuthorizeUri);
-                    openBrowser(login.AuthorizeUri);
-                    var credential = await waitForCallbackTask;
-                    var prefix = formatCompletionPrefix();
-                    // Approved browser-specific post-prefix snapshot: the nonblank branch now reads once,
-                    // not twice. The fresh sealed credential has a plain property and is saved before return.
-                    // This is not arbitrary-property or task identity/stack/settlement equivalence.
-                    var rawAccountId = credential.AccountId;
-                    onCompleted(prefix, rawAccountId);
-                };
-            },
             cancellationToken);
         return result;
-    }
-
-    internal static async Task LoginCodexBrowserCoreAsync(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath,
-        Func<string> formatInvalidProvider,
-        Action<Uri> reportAuthorization,
-        Action<Uri> openBrowser,
-        Func<string> formatCompletionPrefix,
-        Action<string, string?> onCompleted,
-        Func<CodeAltaProviderDocument, Func<string>, CodexBrowserLoginOperation> createOperation,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(getStateRootPath);
-        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
-        ArgumentNullException.ThrowIfNull(reportAuthorization);
-        ArgumentNullException.ThrowIfNull(openBrowser);
-        ArgumentNullException.ThrowIfNull(formatCompletionPrefix);
-        ArgumentNullException.ThrowIfNull(onCompleted);
-        ArgumentNullException.ThrowIfNull(createOperation);
-
-        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(formatInvalidProvider());
-        }
-
-        var operation = createOperation(definition, getStateRootPath);
-        await operation(reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, cancellationToken);
     }
 
     internal static void ReportCodexBrowserAuthorization(Uri authorizeUri, Action<string> reportStatus)
