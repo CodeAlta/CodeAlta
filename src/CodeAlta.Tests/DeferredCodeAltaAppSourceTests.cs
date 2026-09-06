@@ -207,7 +207,7 @@ public sealed class DeferredCodeAltaAppSourceTests
                         reportedStartupFailure,
                         startupToken,
                         cancelStartup: () => startupCancellation?.Cancel(),
-                        disposeUpdate: _updateService.Dispose,
+                        disposeUpdate: _updateService.DisposeAsync,
                         disposePresenter: _graphicsPresenter.Dispose,
                         disposeStartupCancellation: () => startupCancellation?.Dispose());
             """);
@@ -221,7 +221,7 @@ public sealed class DeferredCodeAltaAppSourceTests
                     Exception? reportedStartupFailure,
                     CancellationToken startupToken,
                     Action cancelStartup,
-                    Action disposeUpdate,
+                    Func<ValueTask> disposeUpdate,
                     Action disposePresenter,
                     Action disposeStartupCancellation)
                     where TServices : class, IAsyncDisposable
@@ -246,7 +246,7 @@ public sealed class DeferredCodeAltaAppSourceTests
             "IsExpectedDeferredStartupCancellation(",
             "startupTask, ex, startupToken, requestedAtObservation)",
             "await returnedServices.DisposeAsync();",
-            "disposeUpdate();",
+            "await disposeUpdate();",
             "disposePresenter();",
             "disposeStartupCancellation();",
             "ExceptionDispatchInfo.Throw(failures[0]);",
@@ -364,14 +364,74 @@ public sealed class DeferredCodeAltaAppSourceTests
                             ownsLogging).ConfigureAwait(false);
             """);
 
-        // Preserve the existing cancel-only update boundary; no update-task joining claim.
+        // The same Deferred stage now awaits updater-owned cancellation, join and source release.
+        // This remains named-source evidence, not network/transport or complete shutdown qualification.
         var update = ReadSource("CodeAlta.Tui/Views/CodeAltaUpdateService.cs");
-        var updateCleanup = Scope(update, "    public void Dispose()", "\n    }\n");
-        RequireOrdered(updateCleanup,
-            "_cancellationTokenSource?.Cancel();",
-            "_cancellationTokenSource?.Dispose();",
-            "_cancellationTokenSource = null;");
-        Reject(updateCleanup, "await ", "_checkTask");
+        RequireOnce(update, "internal sealed class CodeAltaUpdateService : IAsyncDisposable");
+        RequireOnce(update, "private readonly Lazy<Task> _disposeTask;");
+        RequireOnce(update, "public ValueTask DisposeAsync() => new(_disposeTask.Value);");
+        var updateConstructor = Scope(update, "    public CodeAltaUpdateService()", "\n    }\n");
+        RequireOnce(updateConstructor, """
+                    _disposeTask = CreateUpdateDisposal(
+                        stopCheck: () => _stopRequested = true,
+                        disposeCore: DisposeCoreAsync);
+            """);
+        var updateFactory = Scope(update, "    internal static Lazy<Task> CreateUpdateDisposal(", "\n    }\n");
+        RequireOrdered(updateFactory,
+            "ArgumentNullException.ThrowIfNull(stopCheck);",
+            "ArgumentNullException.ThrowIfNull(disposeCore);",
+            "return new Lazy<Task>(async () =>",
+            "stopCheck();",
+            "await disposeCore();");
+        var updateSnapshot = Scope(update, "    private Task DisposeCoreAsync()", "\n    }\n");
+        RequireOrdered(updateSnapshot,
+            "var checkTask = _checkTask;",
+            "var cancellation = _cancellationTokenSource;",
+            "return DisposeUpdateCheckAsync(");
+        RequireOnce(updateSnapshot, """
+                    return DisposeUpdateCheckAsync(
+                        checkTask,
+                        cancelCheck: () => cancellation?.Cancel(),
+                        disposeCancellation: () => cancellation?.Dispose());
+            """);
+        Reject(updateSnapshot, "await ", ".Token", "_cancellationTokenSource?.Cancel()", "_cancellationTokenSource?.Dispose()");
+        var updateCore = Scope(update, "    internal static Task DisposeUpdateCheckAsync(", "\n    }\n");
+        RequireOnce(updateCore, """
+                internal static Task DisposeUpdateCheckAsync(
+                    Task? checkTask,
+                    Action cancelCheck,
+                    Action disposeCancellation)
+            """);
+        RequireOrdered(updateCore,
+            "ArgumentNullException.ThrowIfNull(cancelCheck);",
+            "ArgumentNullException.ThrowIfNull(disposeCancellation);",
+            "return CoreAsync();",
+            "async Task CoreAsync()",
+            "cancelCheck();",
+            "if (checkTask is not null)",
+            "await checkTask;",
+            "disposeCancellation();",
+            "ExceptionDispatchInfo.Throw(failures[0]);",
+            "throw new AggregateException(failures);");
+        RequireOnce(updateCore, """
+                        if (checkTask is not null)
+                        {
+                            try
+                            {
+                                await checkTask;
+                            }
+                            catch (Exception ex)
+                            {
+                                (failures ??= []).Add(ex);
+                            }
+                        }
+            """);
+        Reject(updateCore, "Task.Run(", "when (", "IsCanceled", "IsCompleted", "ReferenceEquals(");
+        Reject(update,
+            ": IDisposable", "public void Dispose()", "IsValueCreated", "ConfigureAwait(false)",
+            ".WaitAsync(", ".Wait(", "GetAwaiter().GetResult()", ".Result", "Task.WhenAny(", ".Flatten(",
+            "_checkTask = null;", "checkTask = null;", "_cancellationTokenSource = null;", "cancellationTokenSource = null;",
+            "_startRequested = false;", "startRequested = false;", "_stopRequested = false;", "stopRequested = false;");
     }
 
     // These seven literal call-site paths are the complete source-content read inventory.

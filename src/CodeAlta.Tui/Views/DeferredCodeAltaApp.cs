@@ -101,7 +101,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
             reportedStartupFailure,
             startupToken,
             cancelStartup: () => startupCancellation?.Cancel(),
-            disposeUpdate: _updateService.Dispose,
+            disposeUpdate: _updateService.DisposeAsync,
             disposePresenter: _graphicsPresenter.Dispose,
             disposeStartupCancellation: () => startupCancellation?.Dispose());
     }
@@ -345,7 +345,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     /// startup cancellation is omitted. This is not confirmation that live presentation succeeded.
     /// Plain awaits preserve frontend cleanup context. No timeout or child-termination guarantee is
     /// provided; callbacks and composed startup may depend on work outside this bounded traversal.
-    /// Update cleanup remains cancellation-only, not a join of its background operation.
+    /// Update cleanup is awaited at its existing stage, joining its check before later cleanup.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A mandatory operation is null.</exception>
     /// <exception cref="Exception">One retained failure is rethrown through EDI without replacement.</exception>
@@ -357,7 +357,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         Exception? reportedStartupFailure,
         CancellationToken startupToken,
         Action cancelStartup,
-        Action disposeUpdate,
+        Func<ValueTask> disposeUpdate,
         Action disposePresenter,
         Action disposeStartupCancellation)
         where TServices : class, IAsyncDisposable
@@ -431,7 +431,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
 
             try
             {
-                disposeUpdate();
+                await disposeUpdate();
             }
             catch (Exception ex)
             {

@@ -82,9 +82,9 @@ public sealed class AboutDialogInteractionTests
     }
 
     [TestMethod]
-    public void AboutDialog_UpdateAvailableStatusUsesWrappedCommandRowWithCopyButton()
+    public async Task AboutDialog_UpdateAvailableStatusUsesWrappedCommandRowWithCopyButton()
     {
-        using var updateService = new CodeAltaUpdateService();
+        await using var updateService = new CodeAltaUpdateService();
         var snapshot = new CodeAltaUpdateCheckSnapshot(
             CodeAltaUpdateCheckStatus.UpdateAvailable,
             "CodeAlta",

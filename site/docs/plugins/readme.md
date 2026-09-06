@@ -92,6 +92,11 @@ finishing cleanup. Services returned after exit are still cleaned up. Shutdown
 can therefore take longer when startup or a plugin does not respond to
 cancellation; there is no forced-termination timeout.
 
+Normal terminal cleanup also requests cancellation of the background version
+check and waits for its operation before releasing its resources. This happens
+after application/startup cleanup; an unresponsive earlier cleanup stage can
+delay that request. It does not add a forced shutdown deadline or install updates.
+
 ## Source plugins
 
 Dynamic source plugins are discovered from:

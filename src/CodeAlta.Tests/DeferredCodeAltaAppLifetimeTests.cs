@@ -405,7 +405,7 @@ public sealed class DeferredCodeAltaAppLifetimeTests
                 recording.Track(DeferredCodeAltaApp.DisposeDeferredStartupAsync<RecordingDisposable>(
                     null, null, null, CancellationToken.None,
                     missing is "cancel" or "all" ? null! : recording.CancelStartup,
-                    missing is "update" or "all" ? null! : recording.DisposeUpdate,
+                    missing is "update" or "all" ? null! : () => { recording.DisposeUpdate(); return ValueTask.CompletedTask; },
                     missing is "presenter" or "all" ? null! : recording.DisposePresenter,
                     missing is "cts" or "all" ? null! : recording.DisposeStartupCancellation));
             });
@@ -1076,7 +1076,7 @@ public sealed class DeferredCodeAltaAppLifetimeTests
         public Task Dispose(IAsyncDisposable? app, Task<RecordingDisposable>? startup, Exception? reported = null)
             => Track(DeferredCodeAltaApp.DisposeDeferredStartupAsync(
                 app, startup, reported, StartupToken,
-                CancelStartup, DisposeUpdate, DisposePresenter, DisposeStartupCancellation));
+                CancelStartup, () => { DisposeUpdate(); return ValueTask.CompletedTask; }, DisposePresenter, DisposeStartupCancellation));
 
         public async Task FinishAsync()
         {
