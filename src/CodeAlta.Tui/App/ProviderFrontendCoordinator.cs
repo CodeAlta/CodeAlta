@@ -17,6 +17,13 @@ internal readonly record struct ProviderTestResult(bool Success, string Message,
 
 internal sealed class ProviderFrontendCoordinator
 {
+    // Call-scoped seam for characterizing temporary inspection without constructing concrete runtimes.
+    internal delegate bool TryCreateProviderRuntime(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        out IModelProviderRuntime runtime);
+
     private readonly CodeAltaOwnedServices? _ownedServices;
     private readonly CodeAltaConfigStore _configStore;
     private readonly ModelProviderInitializationCoordinator _modelProviderInitializationCoordinator;
@@ -165,15 +172,11 @@ internal sealed class ProviderFrontendCoordinator
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
         var modelCatalog = _ownedServices?.ModelsDevCatalogService;
 
-        if (!TryCreateRuntime(definition, homeRoot, modelCatalog, out var runtime))
-        {
-            return new ProviderTestResult(false, SR.T("Enter valid provider settings before testing."), 0);
-        }
-
-        await using var _ = runtime;
-        var probe = await runtime.ProbeAsync(cancellationToken);
-        var models = probe.Models;
-        return new ProviderTestResult(true, SR.T("Connected successfully · {0} model(s) discovered.", models.Count), models.Count);
+        return await TestProviderCoreAsync(
+            definition, homeRoot, modelCatalog, TryCreateRuntime,
+            static () => SR.T("Enter valid provider settings before testing."),
+            static count => SR.T("Connected successfully · {0} model(s) discovered.", count),
+            cancellationToken);
     }
 
     public IReadOnlyDictionary<string, ProviderRuntimeStatus> GetProviderRuntimeStatuses()
@@ -203,15 +206,51 @@ internal sealed class ProviderFrontendCoordinator
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
         var modelCatalog = _ownedServices?.ModelsDevCatalogService;
 
-        if (!TryCreateRuntime(definition, homeRoot, modelCatalog, out var runtime))
+        return await ListProviderModelsCoreAsync(
+            definition, homeRoot, modelCatalog, TryCreateRuntime,
+            static () => SR.T("Enter valid provider settings before listing models."),
+            static count => SR.T("Model listing completed · {0} model(s) available.", count),
+            cancellationToken);
+    }
+
+    internal static async Task<ProviderTestResult> TestProviderCoreAsync(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        TryCreateProviderRuntime tryCreateRuntime,
+        Func<string> formatInvalidSettings,
+        Func<int, string> formatSuccess,
+        CancellationToken cancellationToken)
+    {
+        if (!tryCreateRuntime(definition, stateRootPath, modelCatalog, out var runtime))
         {
-            return new ProviderModelListResult(false, SR.T("Enter valid provider settings before listing models."), []);
+            return new ProviderTestResult(false, formatInvalidSettings(), 0);
+        }
+
+        await using var _ = runtime;
+        var probe = await runtime.ProbeAsync(cancellationToken);
+        var models = probe.Models;
+        return new ProviderTestResult(true, formatSuccess(models.Count), models.Count);
+    }
+
+    internal static async Task<ProviderModelListResult> ListProviderModelsCoreAsync(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        TryCreateProviderRuntime tryCreateRuntime,
+        Func<string> formatInvalidSettings,
+        Func<int, string> formatSuccess,
+        CancellationToken cancellationToken)
+    {
+        if (!tryCreateRuntime(definition, stateRootPath, modelCatalog, out var runtime))
+        {
+            return new ProviderModelListResult(false, formatInvalidSettings(), []);
         }
 
         await using var _ = runtime;
         var probe = await runtime.ProbeAsync(cancellationToken);
         var models = SortModelsIfRequested(probe.Models, definition.SortModels == true);
-        return new ProviderModelListResult(true, SR.T("Model listing completed · {0} model(s) available.", models.Count), models);
+        return new ProviderModelListResult(true, formatSuccess(models.Count), models);
     }
 
     public async Task<ProviderTestResult> LoginCodexSubscriptionWithBrowserAsync(
@@ -524,7 +563,7 @@ internal sealed class ProviderFrontendCoordinator
         return true;
     }
 
-    private bool TryCreateRuntime(
+    private static bool TryCreateRuntime(
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
