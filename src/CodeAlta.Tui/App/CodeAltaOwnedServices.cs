@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Copilot;
@@ -14,9 +15,19 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.Tui.App;
 
+/// <summary>
+/// Owns the existing shared host and models.dev refresh lifetime for the terminal frontend.
+/// </summary>
+/// <remarks>
+/// Host-exposed services remain borrowed views. A prestarted plugin runtime remains Program-owned
+/// and now survives this cleanup until Program's outer finally, after metadata cleanup.
+/// Disposal is one cached best-effort operation; repeated/concurrent callers share its outcome.
+/// Reentrant same-owner disposal is unsupported, and completion is not proof that all child work terminated.
+/// </remarks>
 internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 {
-    private readonly bool _ownsLogging;
+    private readonly CodeAltaHost _host;
+    private readonly Lazy<Task> _disposeTask;
     private readonly ModelProviderRegistry _modelProviderRegistry;
     private readonly IModelProviderInitializationService _modelProviderInitializationService;
     private readonly CodeAltaConfigStore _configStore;
@@ -25,40 +36,34 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
     private CodeAltaOwnedServices(
         bool ownsLogging,
-        ModelProviderRegistry modelProviderRegistry,
-        IModelProviderInitializationService modelProviderInitializationService,
+        CodeAltaHost host,
         CodeAltaConfigStore configStore,
         ModelsDevCatalogService modelsDevCatalogService,
-        PluginRuntimeManager pluginRuntime,
         PluginHostBridge pluginHostBridge,
-        CatalogOptions catalogOptions,
-        List<ModelProviderDescriptor> providerDescriptors,
-        IAgentSessionCatalog agentSessionCatalog,
-        ProjectCatalog projectCatalog,
-        SessionViewCatalog sessionViewCatalog,
-        SkillCatalog skillCatalog,
-        AgentHub agentHub,
-        SessionRuntimeService runtimeService,
-        IProjectFileSearchService projectFileSearchService,
-        ProjectDescriptor currentProject)
+        List<ModelProviderDescriptor> providerDescriptors)
     {
-        _ownsLogging = ownsLogging;
-        _modelProviderRegistry = modelProviderRegistry;
-        _modelProviderInitializationService = modelProviderInitializationService;
+        _host = host;
+        _modelProviderRegistry = host.ModelProviderRegistry;
+        _modelProviderInitializationService = host.ModelProviderInitializationService;
         _configStore = configStore;
         _modelsDevCatalogService = modelsDevCatalogService;
-        PluginRuntime = pluginRuntime;
+        PluginRuntime = host.PluginRuntime;
         PluginHostBridge = pluginHostBridge;
         _providerDescriptors = providerDescriptors;
-        AgentSessionCatalog = agentSessionCatalog;
-        CatalogOptions = catalogOptions;
-        ProjectCatalog = projectCatalog;
-        SessionViewCatalog = sessionViewCatalog;
-        SkillCatalog = skillCatalog;
-        AgentHub = agentHub;
-        RuntimeService = runtimeService;
-        ProjectFileSearchService = projectFileSearchService;
-        CurrentProject = currentProject;
+        AgentSessionCatalog = host.AgentSessionCatalog;
+        CatalogOptions = host.CatalogOptions;
+        ProjectCatalog = host.ProjectCatalog;
+        SessionViewCatalog = host.SessionViewCatalog;
+        SkillCatalog = host.SkillCatalog;
+        AgentHub = host.AgentHub;
+        RuntimeService = host.RuntimeService;
+        ProjectFileSearchService = host.ProjectFileSearchService;
+        CurrentProject = host.CurrentProject;
+        _disposeTask = CreateOwnedServicesDisposal(
+            _host.DisposeAsync,
+            _modelsDevCatalogService.DisposeAsync,
+            LogManager.Shutdown,
+            ownsLogging);
     }
 
     public CatalogOptions CatalogOptions { get; }
@@ -140,22 +145,11 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
         return new CodeAltaOwnedServices(
             ownsLogging,
-            sharedHost.ModelProviderRegistry,
-            sharedHost.ModelProviderInitializationService,
+            sharedHost,
             configStore,
             modelsDevCatalogService,
-            pluginRuntime,
             pluginHostBridge,
-            sharedHost.CatalogOptions,
-            providerDescriptors,
-            sharedHost.AgentSessionCatalog,
-            sharedHost.ProjectCatalog,
-            sharedHost.SessionViewCatalog,
-            sharedHost.SkillCatalog,
-            sharedHost.AgentHub,
-            sharedHost.RuntimeService,
-            sharedHost.ProjectFileSearchService,
-            sharedHost.CurrentProject);
+            providerDescriptors);
 
         void RegisterFrontendModelProviders(ModelProviderRegistry modelProviderRegistry)
         {
@@ -169,17 +163,93 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await RuntimeService.DisposeAsync().ConfigureAwait(false);
-        await AgentHub.DisposeAsync().ConfigureAwait(false);
-        await _modelProviderRegistry.DisposeAsync().ConfigureAwait(false);
-        await PluginRuntime.DisposeAsync().ConfigureAwait(false);
-        await _modelsDevCatalogService.DisposeAsync().ConfigureAwait(false);
+    /// <summary>
+    /// Awaits the single best-effort host, metadata and owned logging cleanup operation.
+    /// </summary>
+    /// <returns>The same underlying operation for repeated or concurrent callers, without retries.</returns>
+    /// <remarks>
+    /// Awaits the entire host operation before metadata cleanup, then attempts owned logging shutdown.
+    /// Each later stage is attempted after faults or cancellation. A lone failure is rethrown unchanged;
+    /// multiple failures retain direct references in execution order without flattening aggregates.
+    /// Callbacks must not recursively dispose or await disposal of this same owner. There is no hard timeout
+    /// or guarantee of termination of work left active by failed or noncooperative child services.
+    /// </remarks>
+    /// <exception cref="Exception">A single cleanup stage failed; the original exception is propagated.</exception>
+    /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
+    /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
+    public ValueTask DisposeAsync() => new(_disposeTask.Value);
 
-        if (_ownsLogging)
+    /// <summary>
+    /// Creates a lazy, single-execution outer cleanup operation from mandatory, caller-supplied operations.
+    /// </summary>
+    /// <remarks>
+    /// Validates every operation in parameter order without invoking it, including borrowed logging.
+    /// Uses default execution-and-publication; first access starts inline. Borrowed logging remains uncalled.
+    /// Callbacks must not recursively access the resulting lazy value or await its own disposal task.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A mandatory operation is null.</exception>
+    internal static Lazy<Task> CreateOwnedServicesDisposal(
+        Func<ValueTask> disposeHost,
+        Func<ValueTask> disposeModelsDevCatalog,
+        Action shutdownLogging,
+        bool ownsLogging)
+    {
+        ArgumentNullException.ThrowIfNull(disposeHost);
+        ArgumentNullException.ThrowIfNull(disposeModelsDevCatalog);
+        ArgumentNullException.ThrowIfNull(shutdownLogging);
+
+        return new Lazy<Task>(() => DisposeOwnedServicesCoreAsync(
+            disposeHost,
+            disposeModelsDevCatalog,
+            shutdownLogging,
+            ownsLogging));
+    }
+
+    private static async Task DisposeOwnedServicesCoreAsync(
+        Func<ValueTask> disposeHost,
+        Func<ValueTask> disposeModelsDevCatalog,
+        Action shutdownLogging,
+        bool ownsLogging)
+    {
+        List<Exception>? failures = null;
+        try
         {
-            LogManager.Shutdown();
+            await disposeHost().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        try
+        {
+            await disposeModelsDevCatalog().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        if (ownsLogging)
+        {
+            try
+            {
+                shutdownLogging();
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+        }
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Throw(failures[0]);
+        }
+
+        if (failures is { Count: > 1 })
+        {
+            throw new AggregateException(failures);
         }
     }
 

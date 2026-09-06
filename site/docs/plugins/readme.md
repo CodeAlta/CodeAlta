@@ -74,6 +74,13 @@ You can also use a headless status summary:
 altatui --plugins-status
 ```
 
+## Shutdown
+
+When `altatui` exits normally, it attempts runtime, provider and model-metadata
+cleanup before shutting down plugins started for the application. Runtime
+cleanup is best-effort and may report multiple failures together. This is not
+a guarantee that a failed or unresponsive plugin has stopped all of its work.
+
 ## Source plugins
 
 Dynamic source plugins are discovered from:

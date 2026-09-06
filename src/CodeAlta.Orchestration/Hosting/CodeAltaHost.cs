@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -12,10 +13,15 @@ namespace CodeAlta.Orchestration.Hosting;
 /// <summary>
 /// Shared CodeAlta runtime composition for frontend and headless hosts.
 /// </summary>
+/// <remarks>
+/// Exposed services are borrowed views; callers must not separately dispose host-owned services.
+/// A supplied prestarted plugin runtime remains caller-owned. Disposal shares one best-effort
+/// operation across repeated or concurrent callers, without retries or a termination timeout.
+/// Disposal callbacks must not recursively dispose or await disposal of this same host.
+/// </remarks>
 public sealed class CodeAltaHost : IAsyncDisposable
 {
-    private readonly bool _ownsPluginRuntime;
-    private readonly bool _ownsLogging;
+    private readonly Lazy<Task> _disposeTask;
 
     private CodeAltaHost(
         CatalogOptions catalogOptions,
@@ -45,8 +51,14 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ProjectFileSearchService = projectFileSearchService;
         PluginRuntime = pluginRuntime;
         CurrentProject = currentProject;
-        _ownsPluginRuntime = ownsPluginRuntime;
-        _ownsLogging = ownsLogging;
+        _disposeTask = CreateHostDisposal(
+            RuntimeService.DisposeAsync,
+            AgentHub.DisposeAsync,
+            ModelProviderRegistry.DisposeAsync,
+            PluginRuntime.DisposeAsync,
+            LogManager.Shutdown,
+            ownsPluginRuntime,
+            ownsLogging);
     }
 
     /// <summary>
@@ -316,20 +328,125 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 .ToDictionary(static entry => (string)entry.Key, static entry => entry.Value?.ToString(), StringComparer.OrdinalIgnoreCase),
         };
 
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Awaits the single best-effort disposal operation for this host's owned services.
+    /// </summary>
+    /// <returns>The same underlying operation for repeated or concurrent callers, including its terminal failure.</returns>
+    /// <remarks>
+    /// Attempts runtime, hub, registry, owned plugin and owned logging cleanup in order, even after a stage fails.
+    /// A lone failure is rethrown unchanged; multiple failures retain their direct references in execution order,
+    /// without flattening aggregates. Cancellation is recorded like other failures and does not skip later stages.
+    /// There are no retries or hard timeout guarantees. Reentrant disposal of this same host is unsupported.
+    /// Completion does not guarantee that failed or noncooperative child services have terminated all work.
+    /// </remarks>
+    /// <exception cref="Exception">A single cleanup stage failed; the original exception is propagated.</exception>
+    /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
+    /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
+    public ValueTask DisposeAsync() => new(_disposeTask.Value);
+
+    /// <summary>
+    /// Creates a lazy, single-execution host cleanup operation from mandatory, caller-supplied operations.
+    /// </summary>
+    /// <remarks>
+    /// Validates every operation in parameter order without invoking it, including borrowed plugin/logging operations.
+    /// Uses default execution-and-publication; first access starts inline. Borrowed operations remain uncalled.
+    /// Callbacks must not recursively access the resulting lazy value or await its own disposal task.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A mandatory operation is null.</exception>
+    internal static Lazy<Task> CreateHostDisposal(
+        Func<ValueTask> disposeRuntimeService,
+        Func<ValueTask> disposeAgentHub,
+        Func<ValueTask> disposeModelProviderRegistry,
+        Func<ValueTask> disposePluginRuntime,
+        Action shutdownLogging,
+        bool ownsPluginRuntime,
+        bool ownsLogging)
     {
-        await RuntimeService.DisposeAsync().ConfigureAwait(false);
-        await AgentHub.DisposeAsync().ConfigureAwait(false);
-        await ModelProviderRegistry.DisposeAsync().ConfigureAwait(false);
-        if (_ownsPluginRuntime)
+        ArgumentNullException.ThrowIfNull(disposeRuntimeService);
+        ArgumentNullException.ThrowIfNull(disposeAgentHub);
+        ArgumentNullException.ThrowIfNull(disposeModelProviderRegistry);
+        ArgumentNullException.ThrowIfNull(disposePluginRuntime);
+        ArgumentNullException.ThrowIfNull(shutdownLogging);
+
+        return new Lazy<Task>(() => DisposeHostCoreAsync(
+            disposeRuntimeService,
+            disposeAgentHub,
+            disposeModelProviderRegistry,
+            disposePluginRuntime,
+            shutdownLogging,
+            ownsPluginRuntime,
+            ownsLogging));
+    }
+
+    private static async Task DisposeHostCoreAsync(
+        Func<ValueTask> disposeRuntimeService,
+        Func<ValueTask> disposeAgentHub,
+        Func<ValueTask> disposeModelProviderRegistry,
+        Func<ValueTask> disposePluginRuntime,
+        Action shutdownLogging,
+        bool ownsPluginRuntime,
+        bool ownsLogging)
+    {
+        List<Exception>? failures = null;
+        try
         {
-            await PluginRuntime.DisposeAsync().ConfigureAwait(false);
+            await disposeRuntimeService().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            (failures ??= []).Add(exception);
         }
 
-        if (_ownsLogging)
+        try
         {
-            LogManager.Shutdown();
+            await disposeAgentHub().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        try
+        {
+            await disposeModelProviderRegistry().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        if (ownsPluginRuntime)
+        {
+            try
+            {
+                await disposePluginRuntime().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+        }
+
+        if (ownsLogging)
+        {
+            try
+            {
+                shutdownLogging();
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+        }
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Throw(failures[0]);
+        }
+
+        if (failures is { Count: > 1 })
+        {
+            throw new AggregateException(failures);
         }
     }
 }
