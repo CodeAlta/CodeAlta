@@ -127,103 +127,135 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <param name="options">Host composition options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created host.</returns>
+    /// <remarks>
+    /// On failure, awaits best-effort cleanup of successfully acquired runtime, hub, registry,
+    /// owned plugin and owned logging resources in normal disposal order. Caller cancellation
+    /// does not skip rollback. A supplied plugin remains borrowed, and durable bootstrap effects remain.
+    /// This cannot recover resources hidden by a throwing constructor or unpublished plugin activation
+    /// state, and does not guarantee termination of work left active by failed child cleanup.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="Exception">Creation failed and rollback succeeded; the original exception is propagated.</exception>
+    /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
+    /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions are retained in that order without flattening.</exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var globalRoot = string.IsNullOrWhiteSpace(options.GlobalRoot)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta")
-            : Path.GetFullPath(options.GlobalRoot);
-        Directory.CreateDirectory(globalRoot);
-        _ = CoordinatorAgentsBootstrapper.Ensure(globalRoot);
+        PluginRuntimeManager? pluginRuntime = null;
+        ModelProviderRegistry? modelProviderRegistry = null;
+        AgentHub? agentHub = null;
+        SessionRuntimeService? runtimeService = null;
+        var ownsPluginRuntime = false;
         var ownsLogging = false;
-        if (options.OwnsLogging && !LogManager.IsInitialized)
-        {
-            LogManager.InitializeForAsync(new LogManagerConfig());
-            ownsLogging = true;
-        }
 
-        var currentProjectPath = string.IsNullOrWhiteSpace(options.CurrentProjectPath)
-            ? Environment.CurrentDirectory
-            : Path.GetFullPath(options.CurrentProjectPath);
-        var catalogOptions = new CatalogOptions
+        try
         {
-            GlobalRoot = globalRoot,
-        };
-        var projectCatalog = new ProjectCatalog(catalogOptions);
-        var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
+            var globalRoot = string.IsNullOrWhiteSpace(options.GlobalRoot)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta")
+                : Path.GetFullPath(options.GlobalRoot);
+            Directory.CreateDirectory(globalRoot);
+            _ = CoordinatorAgentsBootstrapper.Ensure(globalRoot);
+            if (options.OwnsLogging && !LogManager.IsInitialized)
+            {
+                LogManager.InitializeForAsync(new LogManagerConfig());
+                ownsLogging = true;
+            }
 
-        var pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();
-        var ownsPluginRuntime = options.PrestartedPluginRuntime is null;
-        if (options.StartPlugins && options.PrestartedPluginRuntime is null)
-        {
-            await pluginRuntime.StartAsync(
-                    new PluginRuntimeManagerOptions
-                    {
-                        GlobalRoot = globalRoot,
-                        ProjectContext = new PluginProjectContext
+            var currentProjectPath = string.IsNullOrWhiteSpace(options.CurrentProjectPath)
+                ? Environment.CurrentDirectory
+                : Path.GetFullPath(options.CurrentProjectPath);
+            var catalogOptions = new CatalogOptions
+            {
+                GlobalRoot = globalRoot,
+            };
+            var projectCatalog = new ProjectCatalog(catalogOptions);
+            var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
+
+            pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();
+            ownsPluginRuntime = options.PrestartedPluginRuntime is null;
+            if (options.StartPlugins && options.PrestartedPluginRuntime is null)
+            {
+                await pluginRuntime.StartAsync(
+                        new PluginRuntimeManagerOptions
                         {
-                            ProjectId = currentProject.Id,
-                            ProjectPath = currentProject.ProjectPath,
+                            GlobalRoot = globalRoot,
+                            ProjectContext = new PluginProjectContext
+                            {
+                                ProjectId = currentProject.Id,
+                                ProjectPath = currentProject.ProjectPath,
+                            },
+                            SafeMode = options.PluginSafeMode,
+                            IsHeadless = options.IsHeadless,
+                            WaitForEnterAfterBuildLiveOutput = options.WaitForEnterAfterPluginLiveOutput,
+                            RawArguments = options.RawArguments,
+                            BuiltIns = options.PluginBuiltIns,
+                            Services = options.PluginServices,
                         },
-                        SafeMode = options.PluginSafeMode,
-                        IsHeadless = options.IsHeadless,
-                        WaitForEnterAfterBuildLiveOutput = options.WaitForEnterAfterPluginLiveOutput,
-                        RawArguments = options.RawArguments,
-                        BuiltIns = options.PluginBuiltIns,
-                        Services = options.PluginServices,
-                    },
-                    cancellationToken)
-                .ConfigureAwait(false);
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var sessionJournalFile = new AgentSessionJournalFile();
+            var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile);
+            var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
+            var skillCatalog = new SkillCatalog([
+                new ProjectCodeAltaSkillRootProvider(),
+                new ProjectCommonSkillRootProvider(),
+                new UserCodeAltaSkillRootProvider(),
+                new UserCommonSkillRootProvider(),
+                new BuiltInCodeAltaSkillRootProvider(),
+                new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
+            ]);
+            var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions);
+            modelProviderRegistry = new ModelProviderRegistry();
+            options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
+            var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
+            agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
+            var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
+            runtimeService = new SessionRuntimeService(
+                agentHub,
+                agentSessionCatalog,
+                projectCatalog,
+                sessionViewCatalog,
+                instructionTemplateProvider,
+                catalogOptions,
+                skillCatalog);
+            var projectFileSearchService = new ProjectFileSearchService(
+                new ProjectFileSnapshotCache(),
+                new InMemoryProjectFileUsageStore());
+
+            return new CodeAltaHost(
+                catalogOptions,
+                projectCatalog,
+                sessionViewCatalog,
+                skillCatalog,
+                modelProviderRegistry,
+                modelProviderInitializationService,
+                agentSessionCatalog,
+                agentHub,
+                runtimeService,
+                projectFileSearchService,
+                pluginRuntime,
+                ownsPluginRuntime,
+                ownsLogging,
+                currentProject);
         }
-
-        var sessionJournalFile = new AgentSessionJournalFile();
-        var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile);
-        var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
-        var skillCatalog = new SkillCatalog([
-            new ProjectCodeAltaSkillRootProvider(),
-            new ProjectCommonSkillRootProvider(),
-            new UserCodeAltaSkillRootProvider(),
-            new UserCommonSkillRootProvider(),
-            new BuiltInCodeAltaSkillRootProvider(),
-            new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
-        ]);
-        var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions);
-        var modelProviderRegistry = new ModelProviderRegistry();
-        options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
-        var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
-        var agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
-        var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
-        var runtimeService = new SessionRuntimeService(
-            agentHub,
-            agentSessionCatalog,
-            projectCatalog,
-            sessionViewCatalog,
-            instructionTemplateProvider,
-            catalogOptions,
-            skillCatalog);
-        var projectFileSearchService = new ProjectFileSearchService(
-            new ProjectFileSnapshotCache(),
-            new InMemoryProjectFileUsageStore());
-
-        return new CodeAltaHost(
-            catalogOptions,
-            projectCatalog,
-            sessionViewCatalog,
-            skillCatalog,
-            modelProviderRegistry,
-            modelProviderInitializationService,
-            agentSessionCatalog,
-            agentHub,
-            runtimeService,
-            projectFileSearchService,
-            pluginRuntime,
-            ownsPluginRuntime,
-            ownsLogging,
-            currentProject);
+        catch (Exception creationFailure)
+        {
+            await RollbackHostCreationAsync(
+                creationFailure,
+                () => runtimeService?.DisposeAsync() ?? ValueTask.CompletedTask,
+                () => agentHub?.DisposeAsync() ?? ValueTask.CompletedTask,
+                () => modelProviderRegistry?.DisposeAsync() ?? ValueTask.CompletedTask,
+                () => pluginRuntime?.DisposeAsync() ?? ValueTask.CompletedTask,
+                LogManager.Shutdown,
+                ownsPluginRuntime,
+                ownsLogging).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static async Task<ProjectDescriptor> ResolveCurrentProjectAsync(
@@ -448,5 +480,64 @@ public sealed class CodeAltaHost : IAsyncDisposable
         {
             throw new AggregateException(failures);
         }
+    }
+
+    /// <summary>
+    /// Awaits best-effort rollback of returned host acquisitions, then reports creation failure.
+    /// </summary>
+    /// <param name="creationFailure">The original creation exception, retained unchanged.</param>
+    /// <param name="disposeRuntimeService">Disposes the acquired runtime, or does nothing if none returned.</param>
+    /// <param name="disposeAgentHub">Disposes the acquired hub, or does nothing if none returned.</param>
+    /// <param name="disposeModelProviderRegistry">Disposes the acquired registry, or does nothing if none returned.</param>
+    /// <param name="disposePluginRuntime">Disposes an acquired plugin runtime, or does nothing if none returned.</param>
+    /// <param name="shutdownLogging">Shuts down logging only when owned.</param>
+    /// <param name="ownsPluginRuntime">Whether this creation acquired an owned rather than borrowed plugin runtime.</param>
+    /// <param name="ownsLogging">Whether this creation successfully acquired logging ownership.</param>
+    /// <returns>An operation that always reports creation failure, after attempting rollback.</returns>
+    /// <remarks>
+    /// Validates the creation exception first, then all callbacks synchronously through the existing
+    /// disposal factory before starting its traversal inline. Borrowed callbacks remain uncalled.
+    /// Cleanup has no caller cancellation or timeout. Never recursively await this creation/rollback
+    /// operation from its own callback. Hidden constructor acquisitions, unpublished plugin activation
+    /// state and work left active by failed child disposal remain outside this rollback guarantee.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The creation exception or a mandatory callback is null.</exception>
+    /// <exception cref="Exception">Rollback succeeded; the original creation exception is rethrown through EDI.</exception>
+    /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
+    /// <exception cref="AggregateException">Rollback failed; creation and rollback failures are two direct, ordered references without flattening.</exception>
+    internal static Task RollbackHostCreationAsync(
+        Exception creationFailure,
+        Func<ValueTask> disposeRuntimeService,
+        Func<ValueTask> disposeAgentHub,
+        Func<ValueTask> disposeModelProviderRegistry,
+        Func<ValueTask> disposePluginRuntime,
+        Action shutdownLogging,
+        bool ownsPluginRuntime,
+        bool ownsLogging)
+    {
+        ArgumentNullException.ThrowIfNull(creationFailure);
+        var disposal = CreateHostDisposal(
+            disposeRuntimeService,
+            disposeAgentHub,
+            disposeModelProviderRegistry,
+            disposePluginRuntime,
+            shutdownLogging,
+            ownsPluginRuntime,
+            ownsLogging);
+        return RollbackHostCreationCoreAsync(creationFailure, disposal);
+    }
+
+    private static async Task RollbackHostCreationCoreAsync(Exception creationFailure, Lazy<Task> disposal)
+    {
+        try
+        {
+            await disposal.Value.ConfigureAwait(false);
+        }
+        catch (Exception rollbackFailure)
+        {
+            throw new AggregateException(creationFailure, rollbackFailure);
+        }
+
+        ExceptionDispatchInfo.Throw(creationFailure);
     }
 }

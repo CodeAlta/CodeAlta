@@ -30,15 +30,15 @@ public sealed class CodeAltaHostLifetimeTests
 
         var create = Scope(source, "    public static async Task<CodeAltaHost> CreateAsync(",
             "    private static async Task<ProjectDescriptor> ResolveCurrentProjectAsync(");
-        RequireOnce(create, "var pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();");
-        RequireOnce(create, "var ownsPluginRuntime = options.PrestartedPluginRuntime is null;");
+        RequireOnce(create, "pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();");
+        RequireOnce(create, "ownsPluginRuntime = options.PrestartedPluginRuntime is null;");
         RequireOnce(create, "if (options.StartPlugins && options.PrestartedPluginRuntime is null)");
         RequireOnce(create, """
-                        projectFileSearchService,
-                        pluginRuntime,
-                        ownsPluginRuntime,
-                        ownsLogging,
-                        currentProject);
+                            projectFileSearchService,
+                            pluginRuntime,
+                            ownsPluginRuntime,
+                            ownsLogging,
+                            currentProject);
             """);
 
         var core = Scope(source, "    private static async Task DisposeHostCoreAsync(", "\n    }\n");
@@ -46,6 +46,149 @@ public sealed class CodeAltaHostLifetimeTests
         RequireOnce(core, "await disposePluginRuntime().ConfigureAwait(false);");
         RequireOnce(core, "if (ownsLogging)");
         RequireOnce(core, "shutdownLogging();");
+    }
+
+    [TestMethod]
+    public void HostCreation_SourceWiring_TracksAcquisitionsAndAwaitsNamedRollback()
+    {
+        // Exact named-checkout wiring evidence only; no concrete creation or rollback is executed.
+        var source = File.ReadAllText(Path.Combine(SourceRoot(), "CodeAlta.Orchestration", "Hosting", "CodeAltaHost.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var create = Scope(source, "    public static async Task<CodeAltaHost> CreateAsync(", "\n    }\n");
+        RequireOnce(create, "PluginRuntimeManager? pluginRuntime = null;");
+        Assert.IsTrue(create.StartsWith("""
+                public static async Task<CodeAltaHost> CreateAsync(
+                    CodeAltaHostOptions options,
+                    CancellationToken cancellationToken = default)
+            """ + "\n", StringComparison.Ordinal));
+
+        // Returned objects are tracked before the next fallible step; flags start unowned.
+        var setup = Scope(create, "    {\n", "        try\n");
+        Assert.AreEqual("""
+                {
+                    ArgumentNullException.ThrowIfNull(options);
+
+                    PluginRuntimeManager? pluginRuntime = null;
+                    ModelProviderRegistry? modelProviderRegistry = null;
+                    AgentHub? agentHub = null;
+                    SessionRuntimeService? runtimeService = null;
+                    var ownsPluginRuntime = false;
+                    var ownsLogging = false;
+            """ + "\n\n", setup);
+
+        // Freeze evaluation order, durable bootstrap effects, original option reads and successful transfer.
+        var acquisition = Scope(create, "        try\n", "        catch (Exception creationFailure)\n");
+        Assert.AreEqual("""
+                    try
+                    {
+                        var globalRoot = string.IsNullOrWhiteSpace(options.GlobalRoot)
+                            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta")
+                            : Path.GetFullPath(options.GlobalRoot);
+                        Directory.CreateDirectory(globalRoot);
+                        _ = CoordinatorAgentsBootstrapper.Ensure(globalRoot);
+                        if (options.OwnsLogging && !LogManager.IsInitialized)
+                        {
+                            LogManager.InitializeForAsync(new LogManagerConfig());
+                            ownsLogging = true;
+                        }
+
+                        var currentProjectPath = string.IsNullOrWhiteSpace(options.CurrentProjectPath)
+                            ? Environment.CurrentDirectory
+                            : Path.GetFullPath(options.CurrentProjectPath);
+                        var catalogOptions = new CatalogOptions
+                        {
+                            GlobalRoot = globalRoot,
+                        };
+                        var projectCatalog = new ProjectCatalog(catalogOptions);
+                        var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
+
+                        pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();
+                        ownsPluginRuntime = options.PrestartedPluginRuntime is null;
+                        if (options.StartPlugins && options.PrestartedPluginRuntime is null)
+                        {
+                            await pluginRuntime.StartAsync(
+                                    new PluginRuntimeManagerOptions
+                                    {
+                                        GlobalRoot = globalRoot,
+                                        ProjectContext = new PluginProjectContext
+                                        {
+                                            ProjectId = currentProject.Id,
+                                            ProjectPath = currentProject.ProjectPath,
+                                        },
+                                        SafeMode = options.PluginSafeMode,
+                                        IsHeadless = options.IsHeadless,
+                                        WaitForEnterAfterBuildLiveOutput = options.WaitForEnterAfterPluginLiveOutput,
+                                        RawArguments = options.RawArguments,
+                                        BuiltIns = options.PluginBuiltIns,
+                                        Services = options.PluginServices,
+                                    },
+                                    cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+
+                        var sessionJournalFile = new AgentSessionJournalFile();
+                        var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile);
+                        var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
+                        var skillCatalog = new SkillCatalog([
+                            new ProjectCodeAltaSkillRootProvider(),
+                            new ProjectCommonSkillRootProvider(),
+                            new UserCodeAltaSkillRootProvider(),
+                            new UserCommonSkillRootProvider(),
+                            new BuiltInCodeAltaSkillRootProvider(),
+                            new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
+                        ]);
+                        var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions);
+                        modelProviderRegistry = new ModelProviderRegistry();
+                        options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
+                        var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
+                        agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
+                        var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
+                        runtimeService = new SessionRuntimeService(
+                            agentHub,
+                            agentSessionCatalog,
+                            projectCatalog,
+                            sessionViewCatalog,
+                            instructionTemplateProvider,
+                            catalogOptions,
+                            skillCatalog);
+                        var projectFileSearchService = new ProjectFileSearchService(
+                            new ProjectFileSnapshotCache(),
+                            new InMemoryProjectFileUsageStore());
+
+                        return new CodeAltaHost(
+                            catalogOptions,
+                            projectCatalog,
+                            sessionViewCatalog,
+                            skillCatalog,
+                            modelProviderRegistry,
+                            modelProviderInitializationService,
+                            agentSessionCatalog,
+                            agentHub,
+                            runtimeService,
+                            projectFileSearchService,
+                            pluginRuntime,
+                            ownsPluginRuntime,
+                            ownsLogging,
+                            currentProject);
+                    }
+            """ + "\n", acquisition);
+
+        var rollback = Scope(create, "        catch (Exception creationFailure)\n", "\n        }");
+        Assert.AreEqual("""
+                    catch (Exception creationFailure)
+                    {
+                        await RollbackHostCreationAsync(
+                            creationFailure,
+                            () => runtimeService?.DisposeAsync() ?? ValueTask.CompletedTask,
+                            () => agentHub?.DisposeAsync() ?? ValueTask.CompletedTask,
+                            () => modelProviderRegistry?.DisposeAsync() ?? ValueTask.CompletedTask,
+                            () => pluginRuntime?.DisposeAsync() ?? ValueTask.CompletedTask,
+                            LogManager.Shutdown,
+                            ownsPluginRuntime,
+                            ownsLogging).ConfigureAwait(false);
+                        throw;
+            """, rollback);
+        Assert.IsTrue(create.EndsWith(rollback + "\n        }", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -318,6 +461,316 @@ public sealed class CodeAltaHostLifetimeTests
         var failure = await ObserveAsync(task);
         Assert.IsNull(failure);
         CollectionAssert.AreEqual(ExpectedStages(ownsPlugin, ownsLogging), recording.Events);
+    }
+
+    [TestMethod]
+    [DataRow("creation", false, false, "creationFailure")]
+    [DataRow("runtime", false, false, "disposeRuntimeService")]
+    [DataRow("hub", false, false, "disposeAgentHub")]
+    [DataRow("registry", false, false, "disposeModelProviderRegistry")]
+    [DataRow("plugin", false, false, "disposePluginRuntime")]
+    [DataRow("plugin", true, false, "disposePluginRuntime")]
+    [DataRow("logging", false, false, "shutdownLogging")]
+    [DataRow("logging", false, true, "shutdownLogging")]
+    [DataRow("all", false, false, "creationFailure")]
+    public async Task HostCreation_Rollback_ValidatesMandatoryInputsBeforeInvocation(
+        string missing, bool ownsPlugin, bool ownsLogging, string parameter)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        Task? rollbackTask = null;
+        try
+        {
+            var failure = Assert.ThrowsExactly<ArgumentNullException>(() =>
+            {
+                rollbackTask = CodeAltaHost.RollbackHostCreationAsync(
+                    missing is "creation" or "all" ? null! : creationFailure,
+                    missing is "runtime" or "all" ? null! : recording.DisposeRuntime,
+                    missing is "hub" or "all" ? null! : recording.DisposeHub,
+                    missing is "registry" or "all" ? null! : recording.DisposeRegistry,
+                    missing is "plugin" or "all" ? null! : recording.DisposePlugin,
+                    missing is "logging" or "all" ? null! : recording.ShutdownLogging,
+                    ownsPlugin, ownsLogging);
+            });
+            Assert.AreEqual(parameter, failure.ParamName);
+            Assert.AreEqual(0, recording.Events.Count);
+            Assert.IsNull(rollbackTask);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("ordinary")]
+    [DataRow("cancellation")]
+    [DataRow("nested")]
+    public async Task HostCreation_Rollback_CleanCleanup_RethrowsOriginalCreationFailure(string kind)
+    {
+        var recording = new RecordingOperations();
+        Exception expected = kind switch
+        {
+            "cancellation" => new OperationCanceledException(new CancellationToken(canceled: true)),
+            "nested" => new AggregateException(new InvalidOperationException("nested creation")),
+            _ => new InvalidOperationException("creation"),
+        };
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, expected);
+            var failure = await ObserveAsync(rollbackTask);
+            Assert.AreSame(expected, failure);
+            Assert.AreEqual(kind == "cancellation", rollbackTask.IsCanceled);
+            Assert.AreEqual(kind != "cancellation", rollbackTask.IsFaulted);
+            if (expected is OperationCanceledException cancellation)
+            {
+                Assert.IsInstanceOfType<OperationCanceledException>(failure);
+                Assert.AreEqual(cancellation.CancellationToken, ((OperationCanceledException)failure).CancellationToken);
+            }
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public async Task HostCreation_Rollback_OwnershipFlags_PreserveCleanupOrder(bool ownsPlugin, bool ownsLogging)
+    {
+        var recording = new RecordingOperations();
+        var expected = new InvalidOperationException("creation");
+        if (!ownsPlugin) recording.Operations["plugin"] = () => throw new AssertFailedException("Borrowed plugin invoked.");
+        if (!ownsLogging) recording.Logging = () => throw new AssertFailedException("Borrowed logging invoked.");
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = CodeAltaHost.RollbackHostCreationAsync(
+                expected, recording.DisposeRuntime, recording.DisposeHub, recording.DisposeRegistry,
+                recording.DisposePlugin, recording.ShutdownLogging, ownsPlugin, ownsLogging);
+            Assert.AreSame(expected, await ObserveAsync(rollbackTask));
+            Assert.IsTrue(rollbackTask.IsFaulted);
+            CollectionAssert.AreEqual(ExpectedStages(ownsPlugin, ownsLogging), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("runtime")]
+    [DataRow("hub")]
+    [DataRow("registry")]
+    [DataRow("plugin")]
+    public async Task HostCreation_Rollback_SynchronousAsyncCleanupThrow_AttemptsLaterStages(string stage)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = new ArgumentException("cleanup");
+        recording.Operations[stage] = () => throw cleanupFailure;
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("runtime")]
+    [DataRow("hub")]
+    [DataRow("registry")]
+    [DataRow("plugin")]
+    public async Task HostCreation_Rollback_ReturnedFault_AttemptsLaterStages(string stage)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = new ArgumentException("cleanup");
+        Task? rollbackTask = null;
+        var operationTask = Task.FromException(cleanupFailure);
+        try
+        {
+            recording.Operations[stage] = () => new ValueTask(operationTask);
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            Assert.IsTrue(operationTask.IsFaulted);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask, operationTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("runtime")]
+    [DataRow("hub")]
+    [DataRow("registry")]
+    [DataRow("plugin")]
+    public async Task HostCreation_Rollback_ReturnedCancellation_AttemptsLaterStages(string stage)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new OperationCanceledException(new CancellationToken(canceled: true));
+        var cleanupFailure = new OperationCanceledException(new CancellationToken(canceled: true));
+        Task? rollbackTask = null;
+        var operationTask = CreateCanceledTaskAsync(cleanupFailure);
+        try
+        {
+            Assert.IsTrue(operationTask.IsCanceled);
+            recording.Operations[stage] = () => new ValueTask(operationTask);
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            Assert.AreEqual(cleanupFailure.CancellationToken, ((OperationCanceledException)aggregate.InnerExceptions[1]).CancellationToken);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask, operationTask);
+        }
+    }
+
+    [TestMethod]
+    public async Task HostCreation_Rollback_LoggingThrow_KeepsCreationFailureFirst()
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = new ArgumentException("logging");
+        recording.Logging = () => throw cleanupFailure;
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("ordinary")]
+    [DataRow("nested")]
+    [DataRow("cancellations")]
+    public async Task HostCreation_Rollback_MultipleFailures_PreserveNestedOrderAndIdentity(string kind)
+    {
+        var recording = new RecordingOperations();
+        Exception creationFailure = kind switch
+        {
+            "nested" => new AggregateException(new InvalidOperationException("nested creation")),
+            "cancellations" => new OperationCanceledException(new CancellationToken(canceled: true)),
+            _ => new InvalidOperationException("creation"),
+        };
+        Exception first = kind switch
+        {
+            "nested" => new AggregateException(new ArgumentException("nested cleanup")),
+            "cancellations" => new OperationCanceledException(new CancellationToken(canceled: true)),
+            _ => new ArgumentException("first cleanup"),
+        };
+        var second = new InvalidOperationException("second cleanup");
+        recording.Operations["runtime"] = () => throw first;
+        recording.Logging = () => throw second;
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.IsInstanceOfType<AggregateException>(aggregate.InnerExceptions[1]);
+            var cleanup = (AggregateException)aggregate.InnerExceptions[1];
+            Assert.AreEqual(2, cleanup.InnerExceptions.Count);
+            Assert.AreSame(first, cleanup.InnerExceptions[0]);
+            Assert.AreSame(second, cleanup.InnerExceptions[1]);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("success")]
+    [DataRow("fault")]
+    [DataRow("cancellation")]
+    public async Task HostCreation_Rollback_PendingCleanup_DelaysTerminalCreationOutcome(string outcome)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = CreateOutcome(outcome);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? rollbackTask = null;
+        // Keep one independent operation even if an erroneous traversal invokes the callback repeatedly.
+        var operationTask = HoldAsync();
+        try
+        {
+            recording.Operations["plugin"] = () =>
+            {
+                entered.TrySetResult();
+                return new ValueTask(operationTask);
+            };
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.IsFalse(rollbackTask.IsCompleted);
+            CollectionAssert.AreEqual(new[] { "runtime", "hub", "registry", "plugin" }, recording.Events);
+            release.TrySetResult();
+            var failure = await ObserveAsync(rollbackTask);
+            if (cleanupFailure is null)
+            {
+                Assert.AreSame(creationFailure, failure);
+                Assert.IsTrue(rollbackTask.IsFaulted);
+            }
+            else
+            {
+                var aggregate = AssertCreationAggregate(rollbackTask, failure, creationFailure);
+                Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            }
+            AssertOutcome(operationTask, outcome);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            entered.TrySetResult();
+            release.TrySetResult();
+            await ObserveAllAsync(rollbackTask, operationTask, entered.Task, release.Task);
+        }
+
+        async Task HoldAsync()
+        {
+            await release.Task.ConfigureAwait(false);
+            if (cleanupFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(cleanupFailure);
+        }
+    }
+
+    private static Task RunRollbackAsync(RecordingOperations recording, Exception creationFailure)
+        => CodeAltaHost.RollbackHostCreationAsync(
+            creationFailure, recording.DisposeRuntime, recording.DisposeHub, recording.DisposeRegistry,
+            recording.DisposePlugin, recording.ShutdownLogging, true, true);
+
+    private static AggregateException AssertCreationAggregate(Task task, Exception? failure, Exception creationFailure)
+    {
+        Assert.IsTrue(task.IsFaulted);
+        Assert.IsInstanceOfType<AggregateException>(failure);
+        var aggregate = (AggregateException)failure;
+        Assert.AreEqual(2, aggregate.InnerExceptions.Count);
+        Assert.AreSame(creationFailure, aggregate.InnerExceptions[0]);
+        return aggregate;
     }
 
     private sealed class RecordingOperations

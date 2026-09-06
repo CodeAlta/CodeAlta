@@ -58,17 +58,17 @@ public sealed class CodeAltaOwnedServicesLifetimeTests
         Assert.IsFalse(source.Contains("public async ValueTask DisposeAsync()", StringComparison.Ordinal));
 
         var create = Scope(source, "    public static async Task<CodeAltaOwnedServices> CreateAsync(",
-            "        void RegisterFrontendModelProviders(");
-        RequireOnce(create, "var sharedHost = await CodeAltaHost.CreateAsync(");
+            "            void RegisterFrontendModelProviders(");
+        RequireOnce(create, "sharedHost = await CodeAltaHost.CreateAsync(");
         RequireOnce(create, "PrestartedPluginRuntime = prestartedPluginRuntime,");
         RequireOnce(create, """
-                    return new CodeAltaOwnedServices(
-                        ownsLogging,
-                        sharedHost,
-                        configStore,
-                        modelsDevCatalogService,
-                        pluginHostBridge,
-                        providerDescriptors);
+                        return new CodeAltaOwnedServices(
+                            ownsLogging,
+                            sharedHost,
+                            configStore,
+                            modelsDevCatalogService,
+                            pluginHostBridge,
+                            providerDescriptors);
             """);
 
         foreach (var oldDisposal in new[]
@@ -80,6 +80,121 @@ public sealed class CodeAltaOwnedServicesLifetimeTests
         })
         {
             Assert.IsFalse(source.Contains(oldDisposal, StringComparison.Ordinal), $"Parallel child disposal remains: {oldDisposal}");
+        }
+    }
+
+    [TestMethod]
+    public void OwnedServicesCreation_SourceWiring_TracksAcquisitionsAndAwaitsNamedRollback()
+    {
+        // Exact named-checkout wiring evidence only; no owner, metadata refresh or startup is executed.
+        var source = File.ReadAllText(Path.Combine(SourceRoot(), "CodeAlta.Tui", "App", "CodeAltaOwnedServices.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        var create = Scope(source, "    public static async Task<CodeAltaOwnedServices> CreateAsync(", "\n    }\n");
+        RequireOnce(create, "ModelsDevCatalogService? modelsDevCatalogService = null;");
+        Assert.IsTrue(create.StartsWith("""
+                public static async Task<CodeAltaOwnedServices> CreateAsync(
+                    CancellationToken cancellationToken,
+                    PluginRuntimeManager? prestartedPluginRuntime = null)
+            """ + "\n", StringComparison.Ordinal));
+
+        var setup = Scope(create, "    {\n", "        try\n");
+        Assert.AreEqual("""
+                {
+                    ModelsDevCatalogService? modelsDevCatalogService = null;
+                    CodeAltaHost? sharedHost = null;
+                    var ownsLogging = false;
+            """ + "\n\n", setup);
+
+        // Keep root/logging/options order, immediate refresh, host options/token and registration captures.
+        var acquisition = Scope(create, "        try\n", "        catch (Exception creationFailure)\n");
+        Assert.AreEqual("""
+                    try
+                    {
+                        var homeRoot = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                            ".alta");
+                        Directory.CreateDirectory(homeRoot);
+                        var cacheRoot = Path.Combine(homeRoot, "cache");
+                        ownsLogging = CodeAltaLogging.Initialize(homeRoot);
+
+                        Directory.CreateDirectory(cacheRoot);
+                        var rawArguments = Environment.GetCommandLineArgs();
+                        var pluginBootstrapOptions = CodeAltaCliOptions.GetPluginBootstrapOptions(rawArguments);
+                        var catalogOptions = new CatalogOptions { GlobalRoot = homeRoot };
+                        var configStore = new CodeAltaConfigStore(catalogOptions);
+                        modelsDevCatalogService = new ModelsDevCatalogService(
+                            new ModelsDevCatalogServiceOptions
+                            {
+                                CacheFilePath = Path.Combine(cacheRoot, "model-catalog", "models_dev_db.json"),
+                            });
+                        modelsDevCatalogService.StartBackgroundRefresh();
+
+                        var providerDescriptors = new List<ModelProviderDescriptor>();
+                        var pluginAltaServiceBridge = new PluginAltaServiceBridge();
+                        sharedHost = await CodeAltaHost.CreateAsync(
+                                new CodeAltaHostOptions
+                                {
+                                    GlobalRoot = homeRoot,
+                                    CurrentProjectPath = Environment.CurrentDirectory,
+                                    IsHeadless = false,
+                                    HasInteractiveUi = true,
+                                    PluginSafeMode = pluginBootstrapOptions.PluginSafeMode,
+                                    RawArguments = rawArguments,
+                                    WaitForEnterAfterPluginLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
+                                    PrestartedPluginRuntime = prestartedPluginRuntime,
+                                    PluginBuiltIns = CodeAltaBuiltInPlugins.All,
+                                    PluginServices = new CodeAltaPluginServices(pluginAltaServiceBridge),
+                                    ConfigureModelProviders = RegisterFrontendModelProviders,
+                                },
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        var pluginRuntime = sharedHost.PluginRuntime;
+                        var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge);
+
+                        return new CodeAltaOwnedServices(
+                            ownsLogging,
+                            sharedHost,
+                            configStore,
+                            modelsDevCatalogService,
+                            pluginHostBridge,
+                            providerDescriptors);
+
+                        void RegisterFrontendModelProviders(ModelProviderRegistry modelProviderRegistry)
+                        {
+                            providerDescriptors.AddRange(
+                                ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
+                                    modelProviderRegistry,
+                                    configStore,
+                                    homeRoot,
+                                    modelsDevCatalogService));
+
+                        }
+                    }
+            """ + "\n", acquisition);
+
+        // Only the completed host owns its runtime children; failed inner creation returns no host slot.
+        var rollback = Scope(create, "        catch (Exception creationFailure)\n", "\n        }");
+        Assert.AreEqual("""
+                    catch (Exception creationFailure)
+                    {
+                        await RollbackOwnedServicesCreationAsync(
+                            creationFailure,
+                            () => sharedHost?.DisposeAsync() ?? ValueTask.CompletedTask,
+                            () => modelsDevCatalogService?.DisposeAsync() ?? ValueTask.CompletedTask,
+                            LogManager.Shutdown,
+                            ownsLogging).ConfigureAwait(false);
+                        throw;
+            """, rollback);
+        Assert.IsTrue(create.EndsWith(rollback + "\n        }", StringComparison.Ordinal));
+        foreach (var parallelDisposal in new[]
+        {
+            "RuntimeService.DisposeAsync(",
+            "AgentHub.DisposeAsync(",
+            "ModelProviderRegistry.DisposeAsync(",
+            "PluginRuntime.DisposeAsync(",
+        })
+        {
+            Assert.IsFalse(create.Contains(parallelDisposal, StringComparison.Ordinal));
         }
     }
 
@@ -430,6 +545,300 @@ public sealed class CodeAltaOwnedServicesLifetimeTests
         var failure = await ObserveAsync(task);
         Assert.IsNull(failure);
         CollectionAssert.AreEqual(ExpectedStages(ownsLogging: false), recording.Events);
+    }
+
+    [TestMethod]
+    [DataRow("creation", false, "creationFailure")]
+    [DataRow("host", false, "disposeHost")]
+    [DataRow("metadata", false, "disposeModelsDevCatalog")]
+    [DataRow("logging", false, "shutdownLogging")]
+    [DataRow("logging", true, "shutdownLogging")]
+    [DataRow("all", false, "creationFailure")]
+    public async Task OwnedServicesCreation_Rollback_ValidatesMandatoryInputsBeforeInvocation(
+        string missing, bool ownsLogging, string parameter)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        Task? rollbackTask = null;
+        try
+        {
+            var failure = Assert.ThrowsExactly<ArgumentNullException>(() =>
+            {
+                rollbackTask = CodeAltaOwnedServices.RollbackOwnedServicesCreationAsync(
+                    missing is "creation" or "all" ? null! : creationFailure,
+                    missing is "host" or "all" ? null! : recording.DisposeHost,
+                    missing is "metadata" or "all" ? null! : recording.DisposeMetadata,
+                    missing is "logging" or "all" ? null! : recording.ShutdownLogging,
+                    ownsLogging);
+            });
+            Assert.AreEqual(parameter, failure.ParamName);
+            Assert.AreEqual(0, recording.Events.Count);
+            Assert.IsNull(rollbackTask);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("ordinary")]
+    [DataRow("cancellation")]
+    [DataRow("nested")]
+    public async Task OwnedServicesCreation_Rollback_CleanCleanup_RethrowsOriginalCreationFailure(string kind)
+    {
+        var recording = new RecordingOperations();
+        Exception expected = kind switch
+        {
+            "cancellation" => new OperationCanceledException(new CancellationToken(canceled: true)),
+            "nested" => new AggregateException(new InvalidOperationException("nested creation")),
+            _ => new InvalidOperationException("creation"),
+        };
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, expected);
+            var failure = await ObserveAsync(rollbackTask);
+            Assert.AreSame(expected, failure);
+            Assert.AreEqual(kind == "cancellation", rollbackTask.IsCanceled);
+            Assert.AreEqual(kind != "cancellation", rollbackTask.IsFaulted);
+            if (expected is OperationCanceledException cancellation)
+            {
+                Assert.IsInstanceOfType<OperationCanceledException>(failure);
+                Assert.AreEqual(cancellation.CancellationToken, ((OperationCanceledException)failure).CancellationToken);
+            }
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task OwnedServicesCreation_Rollback_OwnershipFlags_PreserveCleanupOrder(bool ownsLogging)
+    {
+        var recording = new RecordingOperations();
+        var expected = new InvalidOperationException("creation");
+        if (!ownsLogging) recording.Logging = () => throw new AssertFailedException("Borrowed logging invoked.");
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = CodeAltaOwnedServices.RollbackOwnedServicesCreationAsync(
+                expected, recording.DisposeHost, recording.DisposeMetadata, recording.ShutdownLogging, ownsLogging);
+            Assert.AreSame(expected, await ObserveAsync(rollbackTask));
+            Assert.IsTrue(rollbackTask.IsFaulted);
+            CollectionAssert.AreEqual(ExpectedStages(ownsLogging), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("host")]
+    [DataRow("metadata")]
+    public async Task OwnedServicesCreation_Rollback_SynchronousAsyncCleanupThrow_AttemptsLaterStages(string stage)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = new ArgumentException("cleanup");
+        recording.Operations[stage] = () => throw cleanupFailure;
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("host")]
+    [DataRow("metadata")]
+    public async Task OwnedServicesCreation_Rollback_ReturnedFault_AttemptsLaterStages(string stage)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = new ArgumentException("cleanup");
+        Task? rollbackTask = null;
+        var operationTask = Task.FromException(cleanupFailure);
+        try
+        {
+            recording.Operations[stage] = () => new ValueTask(operationTask);
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            Assert.IsTrue(operationTask.IsFaulted);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask, operationTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("host")]
+    [DataRow("metadata")]
+    public async Task OwnedServicesCreation_Rollback_ReturnedCancellation_AttemptsLaterStages(string stage)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new OperationCanceledException(new CancellationToken(canceled: true));
+        var cleanupFailure = new OperationCanceledException(new CancellationToken(canceled: true));
+        Task? rollbackTask = null;
+        var operationTask = CreateCanceledTaskAsync(cleanupFailure);
+        try
+        {
+            Assert.IsTrue(operationTask.IsCanceled);
+            recording.Operations[stage] = () => new ValueTask(operationTask);
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            Assert.AreEqual(cleanupFailure.CancellationToken, ((OperationCanceledException)aggregate.InnerExceptions[1]).CancellationToken);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask, operationTask);
+        }
+    }
+
+    [TestMethod]
+    public async Task OwnedServicesCreation_Rollback_LoggingThrow_KeepsCreationFailureFirst()
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = new ArgumentException("logging");
+        recording.Logging = () => throw cleanupFailure;
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("ordinary")]
+    [DataRow("nested")]
+    [DataRow("cancellations")]
+    public async Task OwnedServicesCreation_Rollback_MultipleFailures_PreserveNestedOrderAndIdentity(string kind)
+    {
+        var recording = new RecordingOperations();
+        Exception creationFailure = kind switch
+        {
+            "nested" => new AggregateException(new InvalidOperationException("nested creation")),
+            "cancellations" => new OperationCanceledException(new CancellationToken(canceled: true)),
+            _ => new InvalidOperationException("creation"),
+        };
+        Exception first = kind switch
+        {
+            "nested" => new AggregateException(new ArgumentException("nested cleanup")),
+            "cancellations" => new OperationCanceledException(new CancellationToken(canceled: true)),
+            _ => new ArgumentException("first cleanup"),
+        };
+        var second = new InvalidOperationException("second cleanup");
+        recording.Operations["host"] = () => throw first;
+        recording.Logging = () => throw second;
+        Task? rollbackTask = null;
+        try
+        {
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            var aggregate = AssertCreationAggregate(rollbackTask, await ObserveAsync(rollbackTask), creationFailure);
+            Assert.IsInstanceOfType<AggregateException>(aggregate.InnerExceptions[1]);
+            var cleanup = (AggregateException)aggregate.InnerExceptions[1];
+            Assert.AreEqual(2, cleanup.InnerExceptions.Count);
+            Assert.AreSame(first, cleanup.InnerExceptions[0]);
+            Assert.AreSame(second, cleanup.InnerExceptions[1]);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            await ObserveAllAsync(rollbackTask);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("success")]
+    [DataRow("fault")]
+    [DataRow("cancellation")]
+    public async Task OwnedServicesCreation_Rollback_PendingCleanup_DelaysTerminalCreationOutcome(string outcome)
+    {
+        var recording = new RecordingOperations();
+        var creationFailure = new InvalidOperationException("creation");
+        var cleanupFailure = CreateOutcome(outcome);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? rollbackTask = null;
+        // The callback signals entry but always returns this independently retained operation.
+        var operationTask = HoldAsync();
+        try
+        {
+            recording.Operations["host"] = () =>
+            {
+                entered.TrySetResult();
+                return new ValueTask(operationTask);
+            };
+            rollbackTask = RunRollbackAsync(recording, creationFailure);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.IsFalse(rollbackTask.IsCompleted);
+            CollectionAssert.AreEqual(new[] { "host" }, recording.Events);
+            release.TrySetResult();
+            var failure = await ObserveAsync(rollbackTask);
+            if (cleanupFailure is null)
+            {
+                Assert.AreSame(creationFailure, failure);
+                Assert.IsTrue(rollbackTask.IsFaulted);
+            }
+            else
+            {
+                var aggregate = AssertCreationAggregate(rollbackTask, failure, creationFailure);
+                Assert.AreSame(cleanupFailure, aggregate.InnerExceptions[1]);
+            }
+            AssertOutcome(operationTask, outcome);
+            CollectionAssert.AreEqual(ExpectedStages(), recording.Events);
+        }
+        finally
+        {
+            entered.TrySetResult();
+            release.TrySetResult();
+            await ObserveAllAsync(rollbackTask, operationTask, entered.Task, release.Task);
+        }
+
+        async Task HoldAsync()
+        {
+            await release.Task.ConfigureAwait(false);
+            if (cleanupFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(cleanupFailure);
+        }
+    }
+
+    private static Task RunRollbackAsync(RecordingOperations recording, Exception creationFailure)
+        => CodeAltaOwnedServices.RollbackOwnedServicesCreationAsync(
+            creationFailure, recording.DisposeHost, recording.DisposeMetadata, recording.ShutdownLogging, true);
+
+    private static AggregateException AssertCreationAggregate(Task task, Exception? failure, Exception creationFailure)
+    {
+        Assert.IsTrue(task.IsFaulted);
+        Assert.IsInstanceOfType<AggregateException>(failure);
+        var aggregate = (AggregateException)failure;
+        Assert.AreEqual(2, aggregate.InnerExceptions.Count);
+        Assert.AreSame(creationFailure, aggregate.InnerExceptions[0]);
+        return aggregate;
     }
 
     private sealed class RecordingOperations

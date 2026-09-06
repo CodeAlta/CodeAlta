@@ -98,68 +98,100 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
     public PluginHostBridge PluginHostBridge { get; }
 
+    /// <summary>
+    /// Creates the terminal frontend's owned services, rolling back returned acquisitions on failure.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels existing startup operations, but does not skip rollback.</param>
+    /// <param name="prestartedPluginRuntime">A borrowed plugin runtime that remains caller-owned.</param>
+    /// <returns>The completed owner of the shared host, metadata service and any acquired logging.</returns>
+    /// <remarks>
+    /// Failure cleanup awaits the entire acquired host operation before metadata and owned logging.
+    /// Failed inner host creation returns no host; its own rollback precedes outer cleanup.
+    /// Durable effects remain. Hidden constructor acquisitions, lower-owner failures and pending
+    /// deferred startup joining are not qualified by this bounded best-effort rollback.
+    /// </remarks>
+    /// <exception cref="Exception">Creation failed and rollback succeeded; the original exception is propagated.</exception>
+    /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
+    /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions remain ordered and unflattened.</exception>
     public static async Task<CodeAltaOwnedServices> CreateAsync(
         CancellationToken cancellationToken,
         PluginRuntimeManager? prestartedPluginRuntime = null)
     {
-        var homeRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".alta");
-        Directory.CreateDirectory(homeRoot);
-        var cacheRoot = Path.Combine(homeRoot, "cache");
-        var ownsLogging = CodeAltaLogging.Initialize(homeRoot);
+        ModelsDevCatalogService? modelsDevCatalogService = null;
+        CodeAltaHost? sharedHost = null;
+        var ownsLogging = false;
 
-        Directory.CreateDirectory(cacheRoot);
-        var rawArguments = Environment.GetCommandLineArgs();
-        var pluginBootstrapOptions = CodeAltaCliOptions.GetPluginBootstrapOptions(rawArguments);
-        var catalogOptions = new CatalogOptions { GlobalRoot = homeRoot };
-        var configStore = new CodeAltaConfigStore(catalogOptions);
-        var modelsDevCatalogService = new ModelsDevCatalogService(
-            new ModelsDevCatalogServiceOptions
-            {
-                CacheFilePath = Path.Combine(cacheRoot, "model-catalog", "models_dev_db.json"),
-            });
-        modelsDevCatalogService.StartBackgroundRefresh();
-
-        var providerDescriptors = new List<ModelProviderDescriptor>();
-        var pluginAltaServiceBridge = new PluginAltaServiceBridge();
-        var sharedHost = await CodeAltaHost.CreateAsync(
-                new CodeAltaHostOptions
-                {
-                    GlobalRoot = homeRoot,
-                    CurrentProjectPath = Environment.CurrentDirectory,
-                    IsHeadless = false,
-                    HasInteractiveUi = true,
-                    PluginSafeMode = pluginBootstrapOptions.PluginSafeMode,
-                    RawArguments = rawArguments,
-                    WaitForEnterAfterPluginLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
-                    PrestartedPluginRuntime = prestartedPluginRuntime,
-                    PluginBuiltIns = CodeAltaBuiltInPlugins.All,
-                    PluginServices = new CodeAltaPluginServices(pluginAltaServiceBridge),
-                    ConfigureModelProviders = RegisterFrontendModelProviders,
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
-        var pluginRuntime = sharedHost.PluginRuntime;
-        var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge);
-
-        return new CodeAltaOwnedServices(
-            ownsLogging,
-            sharedHost,
-            configStore,
-            modelsDevCatalogService,
-            pluginHostBridge,
-            providerDescriptors);
-
-        void RegisterFrontendModelProviders(ModelProviderRegistry modelProviderRegistry)
+        try
         {
-            providerDescriptors.AddRange(
-                ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
-                    modelProviderRegistry,
-                    configStore,
-                    homeRoot,
-                    modelsDevCatalogService));
+            var homeRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".alta");
+            Directory.CreateDirectory(homeRoot);
+            var cacheRoot = Path.Combine(homeRoot, "cache");
+            ownsLogging = CodeAltaLogging.Initialize(homeRoot);
 
+            Directory.CreateDirectory(cacheRoot);
+            var rawArguments = Environment.GetCommandLineArgs();
+            var pluginBootstrapOptions = CodeAltaCliOptions.GetPluginBootstrapOptions(rawArguments);
+            var catalogOptions = new CatalogOptions { GlobalRoot = homeRoot };
+            var configStore = new CodeAltaConfigStore(catalogOptions);
+            modelsDevCatalogService = new ModelsDevCatalogService(
+                new ModelsDevCatalogServiceOptions
+                {
+                    CacheFilePath = Path.Combine(cacheRoot, "model-catalog", "models_dev_db.json"),
+                });
+            modelsDevCatalogService.StartBackgroundRefresh();
+
+            var providerDescriptors = new List<ModelProviderDescriptor>();
+            var pluginAltaServiceBridge = new PluginAltaServiceBridge();
+            sharedHost = await CodeAltaHost.CreateAsync(
+                    new CodeAltaHostOptions
+                    {
+                        GlobalRoot = homeRoot,
+                        CurrentProjectPath = Environment.CurrentDirectory,
+                        IsHeadless = false,
+                        HasInteractiveUi = true,
+                        PluginSafeMode = pluginBootstrapOptions.PluginSafeMode,
+                        RawArguments = rawArguments,
+                        WaitForEnterAfterPluginLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
+                        PrestartedPluginRuntime = prestartedPluginRuntime,
+                        PluginBuiltIns = CodeAltaBuiltInPlugins.All,
+                        PluginServices = new CodeAltaPluginServices(pluginAltaServiceBridge),
+                        ConfigureModelProviders = RegisterFrontendModelProviders,
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var pluginRuntime = sharedHost.PluginRuntime;
+            var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge);
+
+            return new CodeAltaOwnedServices(
+                ownsLogging,
+                sharedHost,
+                configStore,
+                modelsDevCatalogService,
+                pluginHostBridge,
+                providerDescriptors);
+
+            void RegisterFrontendModelProviders(ModelProviderRegistry modelProviderRegistry)
+            {
+                providerDescriptors.AddRange(
+                    ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
+                        modelProviderRegistry,
+                        configStore,
+                        homeRoot,
+                        modelsDevCatalogService));
+
+            }
+        }
+        catch (Exception creationFailure)
+        {
+            await RollbackOwnedServicesCreationAsync(
+                creationFailure,
+                () => sharedHost?.DisposeAsync() ?? ValueTask.CompletedTask,
+                () => modelsDevCatalogService?.DisposeAsync() ?? ValueTask.CompletedTask,
+                LogManager.Shutdown,
+                ownsLogging).ConfigureAwait(false);
+            throw;
         }
     }
 
@@ -251,6 +283,52 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         {
             throw new AggregateException(failures);
         }
+    }
+
+    /// <summary>
+    /// Awaits best-effort rollback of returned outer acquisitions, then reports creation failure.
+    /// </summary>
+    /// <param name="creationFailure">The original creation exception, retained unchanged.</param>
+    /// <param name="disposeHost">Disposes the complete acquired host, or does nothing if none returned.</param>
+    /// <param name="disposeModelsDevCatalog">Disposes acquired metadata, or does nothing if none returned.</param>
+    /// <param name="shutdownLogging">Shuts down logging only when owned.</param>
+    /// <param name="ownsLogging">Whether this creation successfully acquired logging ownership.</param>
+    /// <returns>An operation that always reports creation failure, after attempting rollback.</returns>
+    /// <remarks>
+    /// Validates the creation exception first, then all callbacks synchronously through the existing
+    /// disposal factory before starting its traversal inline. Cleanup has no caller cancellation or
+    /// timeout. Never recursively await this creation/rollback operation from its own callback.
+    /// A host failure remains intact; metadata and owned logging are still attempted. This does not
+    /// recover hidden constructor resources or qualify lower-owner termination or deferred startup joins.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The creation exception or a mandatory callback is null.</exception>
+    /// <exception cref="Exception">Rollback succeeded; the original creation exception is rethrown through EDI.</exception>
+    /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
+    /// <exception cref="AggregateException">Rollback failed; creation and rollback failures are two direct, ordered references without flattening.</exception>
+    internal static Task RollbackOwnedServicesCreationAsync(
+        Exception creationFailure,
+        Func<ValueTask> disposeHost,
+        Func<ValueTask> disposeModelsDevCatalog,
+        Action shutdownLogging,
+        bool ownsLogging)
+    {
+        ArgumentNullException.ThrowIfNull(creationFailure);
+        var disposal = CreateOwnedServicesDisposal(disposeHost, disposeModelsDevCatalog, shutdownLogging, ownsLogging);
+        return RollbackOwnedServicesCreationCoreAsync(creationFailure, disposal);
+    }
+
+    private static async Task RollbackOwnedServicesCreationCoreAsync(Exception creationFailure, Lazy<Task> disposal)
+    {
+        try
+        {
+            await disposal.Value.ConfigureAwait(false);
+        }
+        catch (Exception rollbackFailure)
+        {
+            throw new AggregateException(creationFailure, rollbackFailure);
+        }
+
+        ExceptionDispatchInfo.Throw(creationFailure);
     }
 
     internal static IReadOnlyList<ModelProviderDescriptor> CreateBuiltInProviderDescriptors()
