@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Tui.App.Context;
 using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.Presentation.Chat;
 using CodeAlta.Tui.Presentation.Formatting;
@@ -34,7 +35,7 @@ internal sealed class SessionUserInputRequestCoordinator
         cancellationToken.ThrowIfCancellationRequested();
 
         var autoApproveEnabled = _commandContext.GetAutoApproveEnabled();
-        var response = ChatPromptResponseBuilder.CreateResponse(request, autoApproveEnabled);
+        var response = SessionUserInputPolicy.CreateResponse(request, autoApproveEnabled);
         if (_sessionSelection.FindOpenSession(sessionId) is { } tab)
         {
             _commandContext.TryRenderInteraction(

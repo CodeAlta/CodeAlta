@@ -1535,6 +1535,18 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void ImmediateUserInput_UsesOrchestrationPolicyWithoutSupersededTuiBuilder()
+    {
+        var frontendRoot = GetCodeAltaSourceRoot();
+        var adapter = File.ReadAllText(Path.Combine(frontendRoot, "App", "SessionUserInputRequestCoordinator.cs"));
+        Assert.IsTrue(adapter.Contains("using CodeAlta.Orchestration.Runtime;", StringComparison.Ordinal));
+        Assert.IsTrue(adapter.Contains("SessionUserInputPolicy.CreateResponse(request, autoApproveEnabled)", StringComparison.Ordinal));
+        Assert.IsFalse(File.Exists(Path.Combine(frontendRoot, "Presentation", "Chat", "ChatPromptResponseBuilder.cs")));
+        var sourceFiles = Directory.EnumerateFiles(frontendRoot, "*.cs", SearchOption.AllDirectories);
+        AssertSourceDoesNotContain(sourceFiles, "ChatPromptResponseBuilder");
+    }
+
+    [TestMethod]
     public void CodeAltaApp_DelegatesSessionStateWorkflow()
     {
         var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs"));

@@ -2072,7 +2072,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void CreateChatUserInputResponse_WhenAutoApproveEnabled_SelectsDefaultAnswers()
     {
-        var response = ChatPromptResponseBuilder.CreateResponse(
+        var response = SessionUserInputPolicy.CreateResponse(
             new AgentUserInputRequest(
                 ModelProviderIds.Copilot,
                 "session-1",
@@ -2106,7 +2106,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void CreateChatUserInputResponse_WhenChoicesIncludePositiveAndNegativeOptions_PrefersProceeding()
     {
-        var response = ChatPromptResponseBuilder.CreateResponse(
+        var response = SessionUserInputPolicy.CreateResponse(
             new AgentUserInputRequest(
                 ModelProviderIds.Copilot,
                 "session-1",
@@ -2134,7 +2134,7 @@ public sealed class CodeAltaAppTests
     [TestMethod]
     public void CreateChatUserInputResponse_WhenAutoApproveDisabled_ReturnsEmptyAnswers()
     {
-        var response = ChatPromptResponseBuilder.CreateResponse(
+        var response = SessionUserInputPolicy.CreateResponse(
             new AgentUserInputRequest(
                 ModelProviderIds.Copilot,
                 "session-1",

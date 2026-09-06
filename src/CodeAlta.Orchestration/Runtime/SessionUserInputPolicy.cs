@@ -1,9 +1,37 @@
 using CodeAlta.Agent;
 
-namespace CodeAlta.Tui.Presentation.Chat;
+namespace CodeAlta.Orchestration.Runtime;
 
-internal static class ChatPromptResponseBuilder
+/// <summary>
+/// Selects immediate user-input answers from a trusted request and captured auto-approval setting.
+/// </summary>
+/// <remarks>
+/// This policy does not present questions, own pending interactions, or authorize renderer requests.
+/// </remarks>
+public static class SessionUserInputPolicy
 {
+    /// <summary>
+    /// Creates an ordinal answer map using the existing immediate-response heuristics.
+    /// </summary>
+    /// <param name="request">The structured user-input request.</param>
+    /// <param name="autoApprove">Whether to select preferred options or nonsecret freeform defaults;
+    /// otherwise every answer is empty.</param>
+    /// <returns>Answers keyed by the literal prompt identifiers. Selected option labels are returned literally.</returns>
+    /// <remarks>
+    /// Options take precedence over secret/freeform flags, and the first highest-scoring option wins.
+    /// Without options, secret or nonfreeform prompts receive empty answers. Input records are not mutated.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="request"/>, its prompt collection, or a prompt identifier is null;
+    /// or an option label is null when auto-approval is enabled.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Prompt identifiers are duplicated under ordinal comparison, or an option label is empty or whitespace
+    /// when auto-approval is enabled.
+    /// </exception>
+    /// <exception cref="NullReferenceException">
+    /// The request form or a prompt is null, or an option is null when auto-approval is enabled.
+    /// </exception>
     public static AgentUserInputResponse CreateResponse(AgentUserInputRequest request, bool autoApprove)
     {
         ArgumentNullException.ThrowIfNull(request);
