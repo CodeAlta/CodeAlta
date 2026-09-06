@@ -64,6 +64,7 @@ public sealed class CodeAltaConfigStore
     };
 
     private readonly CatalogOptions _options;
+    private readonly TextFileCodec _textFiles;
 
     private sealed record ConfigSection(
         string Path,
@@ -77,14 +78,24 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <see cref="CatalogOptions.GlobalRoot"/> is empty.</exception>
     public CodeAltaConfigStore(CatalogOptions options)
+        : this(options, new TextFileCodec())
+    {
+    }
+
+    /// <summary>Initializes the config owner with a shared codec for nonoverwriting first-run creation.</summary>
+    /// <exception cref="ArgumentNullException">Options or codec is null.</exception>
+    /// <exception cref="ArgumentException">The global root is empty.</exception>
+    public CodeAltaConfigStore(CatalogOptions options, TextFileCodec textFiles)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(textFiles);
         if (string.IsNullOrWhiteSpace(options.GlobalRoot))
         {
             throw new ArgumentException("Global catalog root is required.", nameof(options));
         }
 
         _options = options;
+        _textFiles = textFiles;
     }
 
     /// <summary>
@@ -103,16 +114,30 @@ public sealed class CodeAltaConfigStore
     /// Creates the global user configuration from the bundled first-run template when it is missing.
     /// </summary>
     /// <returns><see langword="true"/> when a new config file was written.</returns>
+    /// <exception cref="IOException">The config cannot be read or created.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access is denied.</exception>
+    /// <exception cref="InvalidOperationException">The bundled template is unavailable.</exception>
     public bool EnsureGlobalConfigExists()
-    {
-        if (File.Exists(_options.ConfigPath))
-        {
-            return false;
-        }
+        => EnsureGlobalConfigExistsAsync().GetAwaiter().GetResult();
 
-        Directory.CreateDirectory(Path.GetDirectoryName(_options.ConfigPath)!);
-        File.WriteAllText(_options.ConfigPath, GetDefaultGlobalConfigContent());
-        return true;
+    /// <summary>Creates missing defaults through the shared conditional-save gate; never replaces a competing creator.</summary>
+    /// <inheritdoc cref="EnsureGlobalConfigExists"/>
+    public async Task<bool> EnsureGlobalConfigExistsAsync()
+    {
+        try
+        {
+            var result = await _textFiles.SaveAsync(new TextFileSaveRequest(
+                _options.ConfigPath, GetDefaultGlobalConfigContent(), new UTF8Encoding(false), false,
+                TextFileRevision.Missing)).ConfigureAwait(false);
+            return !result.IsConflict;
+        }
+        catch (IOException)
+        {
+            // A creator can win even after the codec's last revision check (File.Move is nonoverwriting).
+            // The caller must load/validate that file; an unreadable competitor still fails closed.
+            if ((await _textFiles.GetRevisionAsync(_options.ConfigPath).ConfigureAwait(false)).Exists) return false;
+            throw;
+        }
     }
 
     /// <summary>

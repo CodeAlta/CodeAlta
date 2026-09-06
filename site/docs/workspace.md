@@ -271,3 +271,7 @@ Open logs with `Ctrl+G Ctrl+L`, `/logs`, or the navigator footer. The log viewer
 </figure>
 
 If `~/.alta/config.toml` is invalid at startup, CodeAlta opens a recovery editor with TOML highlighting, an error marker, live parse feedback, `Ctrl+S` Save and Continue when valid, and `Ctrl+Q` Exit.
+
+Read, decoding and first-run creation failures also open recovery. Recovery saves keep your complete TOML text, comments, unknown settings, line endings and supported Unicode encoding/BOM. A valid TOML indicator is not a successful save: if the file changed or disappeared on disk, or saving fails, startup stays paused and your edits remain in the editor. Save can be retried after fixing an access problem; it never silently overwrites a newer file.
+
+Use **Reload** to read the current file, then reapply your edits. Reload asks before discarding unsaved text, so copy anything you want to keep first. There is no forced overwrite option. If the file could not be read or decoded, fix that problem externally and successfully reload before saving; an unreadable file is never treated as an empty baseline. A failed reload keeps your editor text but disables saving until a successful reload. Reload alone does not continue startup: choose **Save and Continue** after reviewing the result. **Exit** never saves; unsaved recovery edits are not retained after exit.

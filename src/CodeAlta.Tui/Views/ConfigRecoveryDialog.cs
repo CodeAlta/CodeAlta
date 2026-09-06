@@ -16,33 +16,41 @@ namespace CodeAlta.Tui.Views;
 
 internal sealed class ConfigRecoveryDialog
 {
-    private readonly string _configPath;
+    private readonly ConfigRecoveryService _recovery;
+    private readonly Action<Action> _confirmReload;
+    private string _baselineText;
     private readonly Action _saveAndContinue;
     private readonly Action _exit;
     private readonly CodeEditor _editor;
     private readonly Button _saveButton;
     private readonly Button _exitButton;
+    private readonly Button _reloadButton;
     private readonly State<int> _editVersion = new(0);
     private Dialog? _dialog;
     private CodeAltaConfigValidationResult _validation;
 
     public ConfigRecoveryDialog(
-        string configPath,
-        string initialText,
-        CodeAltaConfigValidationResult initialValidation,
+        ConfigRecoveryService recovery,
         Action saveAndContinue,
         Action exit)
+        : this(recovery, saveAndContinue, exit, null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(configPath);
+    }
+
+    internal ConfigRecoveryDialog(ConfigRecoveryService recovery, Action saveAndContinue, Action exit, Action<Action>? confirmReload)
+    {
+        ArgumentNullException.ThrowIfNull(recovery);
         ArgumentNullException.ThrowIfNull(saveAndContinue);
         ArgumentNullException.ThrowIfNull(exit);
 
-        _configPath = configPath;
+        _recovery = recovery;
+        _confirmReload = confirmReload ?? ConfirmReload;
         _saveAndContinue = saveAndContinue;
         _exit = exit;
-        _validation = initialValidation;
+        _baselineText = recovery.Snapshot?.Text ?? string.Empty;
+        _validation = recovery.Validate(_baselineText);
 
-        _editor = ConfigTomlEditor.Create(initialText ?? string.Empty, _configPath);
+        _editor = ConfigTomlEditor.Create(_baselineText, recovery.ConfigPath);
         _editor.TextDocument.Changed += OnEditorChanged;
         var diagnosticMargin = CodeEditor.CreateDiffIndicatorMargin(
             lineIndex => !_validation.IsValid && _validation.Line is { } line && lineIndex == line - 1
@@ -56,6 +64,8 @@ internal sealed class ConfigRecoveryDialog
 
         _exitButton = new Button($"{TerminalIcons.MdExitRun} {SR.T("Exit")}") { Tone = ControlTone.Error };
         _exitButton.Click(Exit);
+        _reloadButton = new Button(SR.T("Reload"));
+        _reloadButton.Click(RequestReload);
     }
 
     public void Show(TerminalApp app)
@@ -103,9 +113,9 @@ internal sealed class ConfigRecoveryDialog
         var heading = new VStack(
             new Markup($"[bold warning]{TerminalIcons.MdAlertCircleOutline} {SR.T("CodeAlta could not load your configuration")}[/]"),
             new TextBlock(
-                    SR.T("Fix the TOML below to continue startup. CodeAlta only parses and validates this file here; no providers, sessions, or background agent work are started until the configuration can be loaded."))
+                    SR.T("Repair the TOML and save to continue. Recovery only reads and validates configuration; it does not initialize providers, plugins or sessions."))
                 .Wrap(true),
-            new Markup($"[dim]{AnsiMarkup.Escape(_configPath)}[/]") { Wrap = true })
+            new Markup($"[dim]{AnsiMarkup.Escape(_recovery.ConfigPath)}[/]") { Wrap = true })
         {
             Spacing = 1,
             HorizontalAlignment = Align.Stretch,
@@ -123,7 +133,7 @@ internal sealed class ConfigRecoveryDialog
             HorizontalAlignment = Align.Stretch,
         };
 
-        var buttons = new HStack(_exitButton, _saveButton)
+        var buttons = new HStack(_exitButton, _reloadButton, _saveButton)
         {
             HorizontalAlignment = Align.End,
             Spacing = 2,
@@ -172,46 +182,47 @@ internal sealed class ConfigRecoveryDialog
     {
         _ = sender;
         _ = e;
-        _validation = CodeAltaConfigStore.ValidateGlobalConfigContent(GetEditorText(), _configPath);
+        _validation = _recovery.Validate(GetEditorText());
         _editVersion.Value++;
     }
 
-    private string BuildStatusMarkup()
+    internal string BuildStatusMarkup()
     {
         _ = _editVersion.Value;
 
+        var failure = _recovery.Failure is { } message
+            ? $"[error]{AnsiMarkup.Escape(message)}[/]\n"
+            : string.Empty;
+        if (_recovery.Snapshot is null)
+        {
+            failure += $"[warning]{SR.T("Reload the config successfully before saving. No readable baseline is available.")}[/]\n";
+        }
         if (_validation.IsValid)
         {
-            return $"[success]{TerminalIcons.MdCheckCircleOutline} {SR.T("Configuration can be loaded. Save and Continue is available.")}[/]";
+            return failure + $"[success]{TerminalIcons.MdCheckCircleOutline} {SR.T("TOML is valid. Startup continues only after a successful save.")}[/]";
         }
 
         var location = _validation.Line is { } line
             ? SR.T("Line {0}, column {1}: ", line, _validation.Column.GetValueOrDefault(1))
             : string.Empty;
-        return $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? SR.T("Configuration is invalid.")))}[/]";
+        return failure + $"[error]{TerminalIcons.MdAlertCircleOutline} {AnsiMarkup.Escape(location + (_validation.Message ?? SR.T("Configuration is invalid.")))}[/]";
     }
 
     internal bool CanSave()
     {
         _ = _editVersion.Value;
-        return _validation.IsValid;
+        return _validation.IsValid && _recovery.Snapshot is not null;
     }
 
-    private void SaveAndContinue()
+    internal void SaveAndContinue()
     {
         if (!CanSave())
         {
             return;
         }
 
-        try
+        if (!_recovery.Save(GetEditorText()))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_configPath)!);
-            File.WriteAllText(_configPath, GetEditorText());
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _validation = new CodeAltaConfigValidationResult(false, SR.T("Unable to save config file: {0}", ex.Message), null, null);
             _editVersion.Value++;
             return;
         }
@@ -221,7 +232,35 @@ internal sealed class ConfigRecoveryDialog
         _saveAndContinue();
     }
 
-    private void Exit()
+    internal void RequestReload()
+    {
+        if (!string.Equals(GetEditorText(), _baselineText, StringComparison.Ordinal))
+        {
+            _confirmReload(Reload);
+            return;
+        }
+        Reload();
+    }
+
+    private void ConfirmReload(Action reload)
+        => new ConfirmationDialog(SR.T("Discard Config Changes?"),
+            [SR.T("Reload discards your unsaved config edits. Copy any text you want to reapply first.")],
+            SR.T("Reload"), ControlTone.Error,
+            () => { reload(); return Task.CompletedTask; },
+            () => _dialog?.GetAbsoluteBounds(), () => _editor).Show();
+
+    private void Reload()
+    {
+        if (_recovery.Reload())
+        {
+            _baselineText = _recovery.Snapshot!.Text;
+            _editor.TextDocument.Replace(0, _editor.TextDocument.CurrentSnapshot.Length, _baselineText.AsSpan());
+            _validation = _recovery.Validate(_baselineText);
+        }
+        _editVersion.Value++;
+    }
+
+    internal void Exit()
     {
         _dialog?.Close();
         _dialog = null;

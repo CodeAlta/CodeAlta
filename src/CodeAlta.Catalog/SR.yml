@@ -1,5 +1,47 @@
 # CodeAlta string resources. English source text is the YAML key.
 # Keep language values as double-quoted YAML strings.
+"Unable to load or create config file: {0}":
+  de: "Konfigurationsdatei kann nicht geladen oder erstellt werden: {0}"
+  es: "No se puede cargar o crear el archivo de configuración: {0}"
+  fr: "Impossible de charger ou de créer le fichier de configuration : {0}"
+  ja: "設定ファイルを読み込むか作成できません: {0}"
+  zh: "无法加载或创建配置文件：{0}"
+"Reload the config successfully before saving. No readable baseline is available.":
+  de: "Laden Sie die Konfiguration vor dem Speichern erfolgreich neu. Es ist keine lesbare Ausgangsversion verfügbar."
+  es: "Recarga correctamente la configuración antes de guardar. No hay una versión de referencia legible."
+  fr: "Rechargez la configuration avec succès avant d'enregistrer. Aucune version de référence lisible n'est disponible."
+  ja: "保存する前に設定を正常に再読み込みしてください。読み取り可能な基準版がありません。"
+  zh: "保存前请成功重新加载配置。当前没有可读取的基准版本。"
+"Config changed on disk. Reload and reapply your edits; startup has not continued.":
+  de: "Die Konfiguration wurde auf dem Datenträger geändert. Laden Sie sie neu und wenden Sie Ihre Änderungen erneut an; der Start wurde nicht fortgesetzt."
+  es: "La configuración cambió en disco. Recarga y vuelve a aplicar tus cambios; el inicio no ha continuado."
+  fr: "La configuration a changé sur disque. Rechargez-la et réappliquez vos modifications ; le démarrage n'a pas repris."
+  ja: "ディスク上の設定が変更されました。再読み込みして編集を再適用してください。起動は続行されていません。"
+  zh: "磁盘上的配置已更改。请重新加载并重新应用编辑；启动尚未继续。"
+"Repair the TOML and save to continue. Recovery only reads and validates configuration; it does not initialize providers, plugins or sessions.":
+  de: "Reparieren und speichern Sie das TOML, um fortzufahren. Die Wiederherstellung liest und validiert nur die Konfiguration; sie initialisiert keine Anbieter, Plugins oder Sitzungen."
+  es: "Repara el TOML y guarda para continuar. La recuperación solo lee y valida la configuración; no inicializa proveedores, plugins ni sesiones."
+  fr: "Corrigez le TOML et enregistrez pour continuer. La récupération lit et valide uniquement la configuration ; elle n'initialise ni fournisseurs, ni plugins, ni sessions."
+  ja: "TOML を修正して保存すると続行できます。復旧処理は設定の読み取りと検証のみを行い、プロバイダー、プラグイン、セッションを初期化しません。"
+  zh: "修复 TOML 并保存以继续。恢复功能仅读取和验证配置，不初始化提供程序、插件或会话。"
+"TOML is valid. Startup continues only after a successful save.":
+  de: "Das TOML ist gültig. Der Start wird erst nach erfolgreichem Speichern fortgesetzt."
+  es: "El TOML es válido. El inicio continúa solo después de guardar correctamente."
+  fr: "Le TOML est valide. Le démarrage ne reprend qu'après un enregistrement réussi."
+  ja: "TOML は有効です。保存が成功した場合のみ起動を続行します。"
+  zh: "TOML 有效。仅在成功保存后继续启动。"
+"Discard Config Changes?":
+  de: "Konfigurationsänderungen verwerfen?"
+  es: "¿Descartar los cambios de configuración?"
+  fr: "Abandonner les modifications de configuration ?"
+  ja: "設定の変更を破棄しますか？"
+  zh: "放弃配置更改？"
+"Reload discards your unsaved config edits. Copy any text you want to reapply first.":
+  de: "Neuladen verwirft Ihre ungespeicherten Konfigurationsänderungen. Kopieren Sie zuerst den Text, den Sie erneut anwenden möchten."
+  es: "Recargar descarta los cambios de configuración sin guardar. Copia primero el texto que quieras volver a aplicar."
+  fr: "Le rechargement abandonne vos modifications non enregistrées. Copiez d'abord le texte que vous souhaitez réappliquer."
+  ja: "再読み込みすると未保存の設定編集が破棄されます。再適用したいテキストを先にコピーしてください。"
+  zh: "重新加载将放弃未保存的配置编辑。请先复制要重新应用的文本。"
 "Cannot open read-only while a save is in progress. Retry after the save finishes.":
   de: "Während des Speicherns kann die Datei nicht schreibgeschützt geöffnet werden. Versuchen Sie es danach erneut."
   es: "No se puede abrir en modo de solo lectura mientras se guarda. Inténtalo de nuevo al terminar."

@@ -24,6 +24,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     private Task<CodeAltaOwnedServices>? _ownedServicesTask;
     private CodeAltaApp? _app;
     private ConfigRecoveryDialog? _configRecoveryDialog;
+    private ConfigRecoveryService? _configRecovery;
     private Exception? _startupFailure;
     private bool _configRecoveryChecked;
     private bool _exitRequested;
@@ -181,67 +182,40 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     private bool EnsureConfigCanLoadBeforeStartup()
     {
         _configRecoveryChecked = true;
-        var configPath = GetGlobalConfigPath();
-        if (!File.Exists(configPath))
-        {
-            var configStore = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = GetGlobalRoot() });
-            configStore.EnsureGlobalConfigExists();
-            _openProvidersAfterStartup = true;
-            return true;
-        }
-
-        string content;
-        try
-        {
-            content = File.ReadAllText(configPath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ShowConfigRecoveryDialog(
-                configPath,
-                string.Empty,
-                new CodeAltaConfigValidationResult(false, SR.T("Unable to read config file: {0}", ex.Message), null, null));
-            return false;
-        }
-
-        var validation = CodeAltaConfigStore.ValidateGlobalConfigContent(content, configPath);
-        if (validation.IsValid)
-        {
-            return true;
-        }
-
-        ShowConfigRecoveryDialog(configPath, content, validation);
-        return false;
-    }
-
-    private void ShowConfigRecoveryDialog(string configPath, string content, CodeAltaConfigValidationResult validation)
-    {
         if (_rootHost.App is not { } app)
         {
             _workspaceHost.Content = BuildWorkspacePlaceholder(SR.T("CodeAlta config needs repair. Waiting for the terminal UI..."));
             _configRecoveryChecked = false;
-            return;
+            return false;
         }
 
-        _sidebarHost.Content = BuildMessage(SR.T("Config recovery"));
-        _workspaceHost.Content = BuildWorkspacePlaceholder(SR.T("Repair ~/.alta/config.toml to continue startup."));
-        _commandBarHost.Content = new Placeholder { IsVisible = false };
-        _configRecoveryDialog = new ConfigRecoveryDialog(
-            configPath,
-            content,
-            validation,
+        _configRecovery ??= new ConfigRecoveryService(GetGlobalRoot(), new TextFileCodec());
+        _configRecoveryDialog = PrepareConfigRecovery(
+            _configRecovery,
             saveAndContinue: () =>
             {
                 _configRecoveryDialog = null;
                 _startupFailure = null;
                 _ownedServicesTask = null;
+                _openProvidersAfterStartup = _configRecovery.CreatedDefault;
             },
             exit: () => _exitRequested = true);
+        _openProvidersAfterStartup = _configRecovery.CreatedDefault;
+        if (_configRecoveryDialog is null) return true;
+        _sidebarHost.Content = BuildMessage(SR.T("Config recovery"));
+        _workspaceHost.Content = BuildWorkspacePlaceholder(SR.T("Repair ~/.alta/config.toml to continue startup."));
+        _commandBarHost.Content = new Placeholder { IsVisible = false };
         _configRecoveryDialog.Show(app);
+        return false;
     }
 
-    private static string GetGlobalConfigPath()
-        => Path.Combine(GetGlobalRoot(), "config.toml");
+    // Storage-only preflight seam: tests exercise the actual route without constructing the
+    // deferred application (whose existing constructor starts update checking).
+    internal static ConfigRecoveryDialog? PrepareConfigRecovery(ConfigRecoveryService recovery, Action saveAndContinue, Action exit)
+    {
+        recovery.Reload();
+        return recovery.IsReady ? null : new ConfigRecoveryDialog(recovery, saveAndContinue, exit);
+    }
 
     private static string GetGlobalRoot()
         => Path.Combine(
