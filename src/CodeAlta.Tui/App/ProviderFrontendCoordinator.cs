@@ -314,15 +314,12 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        var manager = CreateCopilotDirectLoginManager(definition);
-        var result = await manager.LoginWithDeviceCodeAsync(
-            CreateCopilotDirectLoginOptions(definition),
-            (deviceCode, _) =>
-            {
-                reportStatus(SR.T("Opening Copilot login in your browser. Enter code {0} at {1}. Waiting for authorization...", deviceCode.UserCode, deviceCode.VerificationUri));
-                TryOpenBrowser(deviceCode.VerificationUri);
-                return ValueTask.CompletedTask;
-            },
+        var result = await LoginCopilotDirectCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select a Copilot provider first."),
+            static () => new CopilotDirectLoginManager(new HttpClient()).LoginWithDeviceCodeAsync,
+            (deviceCode, _) => ReportCopilotDirectBrowserDeviceCode(deviceCode, reportStatus, TryOpenBrowser),
             cancellationToken);
         return new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Copilot login completed"), result), 0);
     }
@@ -335,14 +332,12 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        var manager = CreateCopilotDirectLoginManager(definition);
-        var result = await manager.LoginWithDeviceCodeAsync(
-            CreateCopilotDirectLoginOptions(definition),
-            (deviceCode, _) =>
-            {
-                reportStatus(SR.T("Open {0} and enter code {1}. Waiting for Copilot authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
-                return ValueTask.CompletedTask;
-            },
+        var result = await LoginCopilotDirectCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select a Copilot provider first."),
+            static () => new CopilotDirectLoginManager(new HttpClient()).LoginWithDeviceCodeAsync,
+            (deviceCode, _) => ReportCopilotDirectDeviceCode(deviceCode, reportStatus),
             cancellationToken);
         return new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Copilot device login completed"), result), 0);
     }
@@ -353,8 +348,12 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        await CreateCopilotDirectLoginManager(definition)
-            .DeleteCredentialAsync(CreateCopilotDirectLoginOptions(definition), cancellationToken);
+        await DeleteCopilotDirectCredentialCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select a Copilot provider first."),
+            static () => new CopilotDirectLoginManager(new HttpClient()).DeleteCredentialAsync,
+            cancellationToken);
         return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned Copilot credentials for this provider."), 0);
     }
 
@@ -364,8 +363,12 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var status = await CreateCopilotDirectLoginManager(definition)
-            .GetCredentialStatusAsync(CreateCopilotDirectLoginOptions(definition), cancellationToken);
+        var status = await GetCopilotDirectCredentialStatusCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select a Copilot provider first."),
+            static () => new CopilotDirectLoginManager(new HttpClient()).GetCredentialStatusAsync,
+            cancellationToken);
         return status is null
             ? new ProviderTestResult(false, SR.T("Login required before cached Copilot credentials can be used."), 0)
             : new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Authenticated with cached Copilot credentials"), status), 0);
@@ -544,22 +547,110 @@ internal sealed class ProviderFrontendCoordinator
             CodexAuthFileReader.ResolveCodexHome());
     }
 
-    private static CopilotDirectLoginManager CreateCopilotDirectLoginManager(CodeAltaProviderDocument definition)
+    // Mandatory call-scoped seams: no injected factory can fall back to a concrete manager.
+    internal delegate ValueTask<CopilotDirectLoginResult> CopilotDirectLoginOperation(
+        CopilotDirectLoginOptions options,
+        Func<CopilotDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,
+        CancellationToken cancellationToken);
+
+    internal delegate ValueTask CopilotDirectDeleteCredentialOperation(
+        CopilotDirectLoginOptions options,
+        CancellationToken cancellationToken);
+
+    internal delegate ValueTask<CopilotDirectLoginResult?> CopilotDirectCredentialStatusOperation(
+        CopilotDirectLoginOptions options,
+        CancellationToken cancellationToken);
+
+    internal static async Task<CopilotDirectLoginResult> LoginCopilotDirectCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<CopilotDirectLoginOperation> createOperation,
+        Func<CopilotDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(onDeviceCode);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
         if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException(SR.T("Select a Copilot provider first."));
+            throw new InvalidOperationException(formatInvalidProvider());
         }
 
-        return new CopilotDirectLoginManager(new HttpClient());
+        // Preserve construction before root/options and the existing absence of manager/HttpClient disposal.
+        var operation = createOperation();
+        return await operation(CreateCopilotDirectLoginOptions(definition, getStateRootPath), onDeviceCode, cancellationToken);
     }
 
-    private CopilotDirectLoginOptions CreateCopilotDirectLoginOptions(CodeAltaProviderDocument definition)
+    internal static async Task DeleteCopilotDirectCredentialCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<CopilotDirectDeleteCredentialOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation();
+        await operation(CreateCopilotDirectLoginOptions(definition, getStateRootPath), cancellationToken);
+    }
+
+    internal static async Task<CopilotDirectLoginResult?> GetCopilotDirectCredentialStatusCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Func<CopilotDirectCredentialStatusOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation();
+        return await operation(CreateCopilotDirectLoginOptions(definition, getStateRootPath), cancellationToken);
+    }
+
+    private static CopilotDirectLoginOptions CreateCopilotDirectLoginOptions(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath)
         => new(
             definition.ProviderKey,
-            GetProviderStateRootPath(),
+            getStateRootPath(),
             definition.GitHubEnterpriseUrl,
             TryCreateUri(definition.ApiUrl));
+
+    internal static ValueTask ReportCopilotDirectBrowserDeviceCode(
+        CopilotDirectDeviceCode deviceCode,
+        Action<string> reportStatus,
+        Action<Uri> openBrowser)
+    {
+        reportStatus(SR.T("Opening Copilot login in your browser. Enter code {0} at {1}. Waiting for authorization...", deviceCode.UserCode, deviceCode.VerificationUri));
+        openBrowser(deviceCode.VerificationUri);
+        return ValueTask.CompletedTask;
+    }
+
+    internal static ValueTask ReportCopilotDirectDeviceCode(CopilotDirectDeviceCode deviceCode, Action<string> reportStatus)
+    {
+        reportStatus(SR.T("Open {0} and enter code {1}. Waiting for Copilot authorization...", deviceCode.VerificationUri, deviceCode.UserCode));
+        return ValueTask.CompletedTask;
+    }
 
     private static XaiDirectLoginManager CreateXaiDirectLoginManager(CodeAltaProviderDocument definition)
     {
@@ -587,7 +678,7 @@ internal sealed class ProviderFrontendCoordinator
         return SR.T("{0} · account/workspace: {1}.", prefix, account);
     }
 
-    private static string FormatCopilotDirectLoginMessage(string prefix, CopilotDirectLoginResult result)
+    internal static string FormatCopilotDirectLoginMessage(string prefix, CopilotDirectLoginResult result)
     {
         var expiry = result.ExpiresAt is null ? SR.T("expiry unknown") : SR.T("expires {0}", result.ExpiresAt.Value.LocalDateTime.ToString("g", CultureInfo.CurrentCulture));
         var enterprise = string.IsNullOrWhiteSpace(result.EnterpriseDomain) ? "GitHub.com" : result.EnterpriseDomain.Trim();
