@@ -14,12 +14,6 @@ namespace CodeAlta.Tui.App;
 
 internal readonly record struct ProviderTestResult(bool Success, string Message, int ModelCount);
 
-internal delegate ValueTask CodexDeviceLoginOperation(
-    Action<string, string> reportDeviceCode,
-    Func<string> formatCompletionPrefix,
-    Action<string, string?> onCompleted,
-    CancellationToken cancellationToken);
-
 internal sealed class ProviderFrontendCoordinator
 {
     private readonly CodeAltaOwnedServices? _ownedServices;
@@ -242,64 +236,15 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(reportStatus);
 
         ProviderTestResult result = default;
-        await LoginCodexDeviceCoreAsync(
+        await ConfiguredCodexAuthentication.LoginWithDeviceCodeAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Codex provider first."),
             (verificationUri, userCode) => ReportCodexDeviceCode(verificationUri, userCode, reportStatus),
             static () => SR.T("ChatGPT device-code login completed"),
             (prefix, rawAccountId) => result = FormatCodexDeviceLoginResult(prefix, rawAccountId),
-            static (providerDefinition, getStateRootPath) =>
-            {
-                var manager = new OpenAICodexSubscriptionLoginManager(
-                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
-                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
-                    providerDefinition.ProviderKey);
-                return async (reportDeviceCode, formatCompletionPrefix, onCompleted, token) =>
-                {
-                    var credential = await manager.CompleteDeviceLoginAsync(
-                        (deviceCode, _) =>
-                        {
-                            reportDeviceCode(deviceCode.VerificationUri, deviceCode.UserCode);
-                            return ValueTask.CompletedTask;
-                        },
-                        cancellationToken: token);
-                    var prefix = formatCompletionPrefix();
-                    // Approved once-only raw ID capture AFTER prefix localization, not resolver output.
-                    // The provider returns a fresh, unexposed credential with a plain auto-property.
-                    var rawAccountId = credential.AccountId;
-                    onCompleted(prefix, rawAccountId);
-                };
-            },
             cancellationToken);
         return result;
-    }
-
-    internal static async Task LoginCodexDeviceCoreAsync(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath,
-        Func<string> formatInvalidProvider,
-        Action<string, string> reportDeviceCode,
-        Func<string> formatCompletionPrefix,
-        Action<string, string?> onCompleted,
-        Func<CodeAltaProviderDocument, Func<string>, CodexDeviceLoginOperation> createOperation,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(getStateRootPath);
-        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
-        ArgumentNullException.ThrowIfNull(reportDeviceCode);
-        ArgumentNullException.ThrowIfNull(formatCompletionPrefix);
-        ArgumentNullException.ThrowIfNull(onCompleted);
-        ArgumentNullException.ThrowIfNull(createOperation);
-
-        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(formatInvalidProvider());
-        }
-
-        var operation = createOperation(definition, getStateRootPath);
-        await operation(reportDeviceCode, formatCompletionPrefix, onCompleted, cancellationToken);
     }
 
     internal static void ReportCodexDeviceCode(string verificationUri, string userCode, Action<string> reportStatus)

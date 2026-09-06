@@ -9,6 +9,12 @@ internal delegate ValueTask CodexAccountLookupOperation(
     Action<CodexAccountMetadata?> onMetadata,
     CancellationToken cancellationToken);
 
+internal delegate ValueTask CodexDeviceLoginOperation(
+    Action<string, string> reportDeviceCode,
+    Func<string> formatCompletionPrefix,
+    Action<string, string?> onCompleted,
+    CancellationToken cancellationToken);
+
 /// <summary>
 /// Non-secret metadata from one locally stored Codex credential, not remote account enumeration or authentication validation.
 /// </summary>
@@ -23,7 +29,7 @@ internal delegate ValueTask CodexAccountLookupOperation(
 public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabel);
 
 /// <summary>
-/// Composes configured Codex credential deletion and local non-secret account metadata lookup.
+/// Composes configured Codex credential deletion, local non-secret account metadata lookup and device login.
 /// </summary>
 /// <remarks>
 /// The caller owns localization and lazy root selection. The root is trusted backend input, not a
@@ -37,7 +43,8 @@ public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabe
 /// the OAuth client. No secret-bearing result or result DTO escapes deletion. Account lookup constructs
 /// only the owned credential store and reports two-string metadata synchronously after loading; it has no
 /// type, auth-source, enabled, expiry or access-token eligibility guard. TUI retains localization, root policy
-/// and the dialog's unchanged cancellation behavior. Other Codex login/authentication orchestration remains
+/// and the dialog's unchanged cancellation behavior. Device login projects only display strings through
+/// synchronous callbacks; Codex browser login and authentication-test orchestration remain
 /// TUI-owned; broader provider behavior, application lifetime and native parity remain unqualified.
 /// </remarks>
 public static class ConfiguredCodexAuthentication
@@ -151,5 +158,95 @@ public static class ConfiguredCodexAuthentication
 
         var operation = createOperation(definition, getStateRootPath);
         await operation(onMetadata, cancellationToken);
+    }
+
+    /// <summary>
+    /// Completes configured ChatGPT/Codex device login through the existing provider and reports display values.
+    /// </summary>
+    /// <param name="definition">Required original definition; its type must be exactly ordinal <c>codex</c>. No configured-account, auth-source or enabled eligibility check is added.</param>
+    /// <param name="getStateRootPath">Required lazy trusted-backend root callback, not a renderer grant or sandbox. Root/store construction and validation precede HTTP/OAuth construction, then the original key read and manager validation. Root/key values are not normalized or given a fallback here.</param>
+    /// <param name="formatInvalidProvider">Required mismatch-only localization callback, invoked before the factory or root selection.</param>
+    /// <param name="reportDeviceCode">Required synchronous callback receiving raw VerificationUri STRING first and UserCode second, without URI parsing. The provider callback token is ignored; returning does not imply a dispatcher has rendered the prompt.</param>
+    /// <param name="formatCompletionPrefix">Required callback invoked first after the manager completes, before reading the credential's raw nullable account ID.</param>
+    /// <param name="onCompleted">Required synchronous callback receiving the localized prefix first and the once-captured raw nullable account ID second. No trimming, resolver, label or account-metadata record is used; presentation runs without an intervening await.</param>
+    /// <param name="cancellationToken">Original token forwarded to device completion without an early cancellation check; TimeProvider remains unspecified.</param>
+    /// <returns>A task completing after provider request, reporting, polling, persistence and synchronous completion presentation.</returns>
+    /// <exception cref="ArgumentNullException">Definition, root, invalid-provider, report, prefix or completion callback is null, checked in that order before the factory. Provider constructors also reject null root/key values.</exception>
+    /// <exception cref="ArgumentException">The provider rejects a blank root at store construction or a blank key at later manager construction.</exception>
+    /// <exception cref="InvalidOperationException">The type is not exactly <c>codex</c>, or the provider rejects authorization or a response.</exception>
+    /// <exception cref="TimeoutException">The provider reports expired device authorization.</exception>
+    /// <exception cref="OperationCanceledException">The provider or a callback observes cancellation.</exception>
+    /// <remarks>
+    /// Required guards and exact type selection precede the deferred factory. The existing provider requests,
+    /// awaits synchronous reporting, polls, populates local metadata and persists before returning. Request,
+    /// callback, protocol and storage exceptions propagate unchanged; completion presentation can fail AFTER
+    /// persistence. The approved post-prefix ID snapshot intentionally replaces the former nonblank branch's
+    /// two plain-property reads with one; it is not arbitrary-property or task identity/stack/settlement equivalence.
+    /// No credential/protocol record or credential-capturing lazy result escapes. Transient authorization display
+    /// values and possibly personal account metadata must not acquire extra logging or persistence.
+    /// No disposal, ownership, context suppression, cancellation checks, scheduling, retry, wrapping or settlement
+    /// framework is added. Existing manager/HTTP-client non-disposal, TUI root policy and dialog cancellation remain.
+    /// Browser login and authentication testing remain TUI-owned. Inert forwarding/source checks do not qualify
+    /// real protocol/storage behavior, native parity or application lifetime.
+    /// </remarks>
+    public static Task LoginWithDeviceCodeAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<string, string> reportDeviceCode,
+        Func<string> formatCompletionPrefix,
+        Action<string, string?> onCompleted,
+        CancellationToken cancellationToken)
+        => LoginWithDeviceCodeAsync(
+            definition, getStateRootPath, formatInvalidProvider, reportDeviceCode, formatCompletionPrefix, onCompleted,
+            static (providerDefinition, getStateRootPath) =>
+            {
+                var manager = new OpenAICodexSubscriptionLoginManager(
+                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                    providerDefinition.ProviderKey);
+                return async (reportDeviceCode, formatCompletionPrefix, onCompleted, token) =>
+                {
+                    var credential = await manager.CompleteDeviceLoginAsync(
+                        (deviceCode, _) =>
+                        {
+                            reportDeviceCode(deviceCode.VerificationUri, deviceCode.UserCode);
+                            return ValueTask.CompletedTask;
+                        },
+                        cancellationToken: token);
+                    var prefix = formatCompletionPrefix();
+                    // Approved once-only raw ID capture AFTER prefix localization, not resolver output.
+                    // The provider returns a fresh, unexposed credential with a plain auto-property.
+                    var rawAccountId = credential.AccountId;
+                    onCompleted(prefix, rawAccountId);
+                };
+            },
+            cancellationToken);
+
+    internal static async Task LoginWithDeviceCodeAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<string, string> reportDeviceCode,
+        Func<string> formatCompletionPrefix,
+        Action<string, string?> onCompleted,
+        Func<CodeAltaProviderDocument, Func<string>, CodexDeviceLoginOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(reportDeviceCode);
+        ArgumentNullException.ThrowIfNull(formatCompletionPrefix);
+        ArgumentNullException.ThrowIfNull(onCompleted);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation(definition, getStateRootPath);
+        await operation(reportDeviceCode, formatCompletionPrefix, onCompleted, cancellationToken);
     }
 }
