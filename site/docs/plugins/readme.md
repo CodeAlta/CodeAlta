@@ -90,6 +90,11 @@ waiting for its worker before releasing cancellation resources. This does not
 drain pending interface updates or stop plugins, and fatal runtime errors can
 still terminate the process.
 
+Shell initialization cleanup similarly attempts its remaining stages after errors.
+It waits for the initialization task owned by the shell, not every provider
+refresh, startup history load, or queued interface action. This is not a
+complete-startup shutdown guarantee.
+
 If shared runtime startup fails, CodeAlta also attempts to clean up resources
 already acquired during that startup. This cleanup does not remove folders or
 files already created, and it does not guarantee that all background work has

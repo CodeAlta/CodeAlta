@@ -334,22 +334,22 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
 
     public async ValueTask DisposeAsync()
     {
-        _disposeCts.Cancel();
-        _initializationCts?.Cancel();
+        var initializationTask = _initializationTask;
+        var initializationCts = _initializationCts;
 
-        if (_initializationTask is not null)
-        {
-            try
-            {
-                await _initializationTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        _initializationCts?.Dispose();
-        _disposeCts.Dispose();
+        // Contain errors from our cancellation calls before joining the retained task.
+        // That task can finish without joining all independently started work.
+        // Cancelable dispatcher waits can finish before queued actions execute.
+        // Provider refresh and startup-history work remain outside this join.
+        // Release after the retained task is terminal, not after complete shutdown.
+        // Preserve serialized Start/first disposal without a new concurrency policy.
+        await DisposeInitializationAsync(
+            initializationTask,
+            _disposeCts.Cancel,
+            () => initializationCts?.Cancel(),
+            () => initializationCts?.Dispose(),
+            _disposeCts.Dispose)
+            .ConfigureAwait(false);
     }
 
     private IUiDispatcher UiDispatcher
@@ -577,5 +577,122 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
 
         merged = null;
         return false;
+    }
+
+    /// <summary>
+    /// Attempts initialization cancellation, the retained original-task join and source release in order.
+    /// </summary>
+    /// <remarks>
+    /// Validate all four mandatory callbacks synchronously, then start the local core inline.
+    /// The caller snapshots its retained task and linked source before callbacks and retains its fields.
+    /// Support never-started initialization and serialized Start/first disposal without changing admission,
+    /// scheduling, initialization tracks, token policies, fallback or monitoring. Independently attempt
+    /// own cancellation, linked cancellation, the actual original join, linked release and own release.
+    /// Release follows the retained task's terminal completion even after cancellation errors, not complete
+    /// startup shutdown. Only the join suppresses OCE unconditionally, including faulted OCE without
+    /// task/token/request classification. Callback/release OCE remains a failure; aggregates stay intact.
+    /// Rethrow a lone retained failure through EDI and multiple direct references in execution order,
+    /// without flattening or deduplication. A pending join avoids captured frontend context; completed
+    /// awaits may stay inline, with no promised thread switch. App's plain await retains later draft context.
+    /// No cache, retry, timeout, replacement task or repeated/concurrent disposal guarantee is added.
+    /// This joins only the retained initializer: interaction dispatch failure/cancellation can skip its
+    /// local startup-track join, and direct InitializeAsync calls are unretained. The None-token fallback
+    /// can hang or replace errors. Existing provider/session wrappers swallow/log errors except cache-lock;
+    /// their actual escaping-error policy, including fallible logging/finally work, remains unchanged.
+    /// Provider refresh has an independent probe-timeout token and cancelable caller waits; state posts
+    /// and dispatcher waits do not join queued action execution. A final provider reader stop can fail
+    /// in its preceding Cancel before joining; first-stop failure alone does not prove this because finally
+    /// retries the stop. Restoration/history work remains separately or discardedly retained.
+    /// These exception channels do not demonstrate an application-defined throwing registration, ordinary
+    /// CTS release failure or updater-style released-source token-read race under serialized Start/disposal.
+    /// External Cancel callers own their errors/traversals; cancellation request/completion does not join
+    /// independent callers. Queue/frame/no-op wakes are unchanged: this join does not drain actions/events
+    /// or stop providers, publishers, runtime or plugins. Default monitoring can FailFast; inert tests
+    /// characterize cleanup only if reached, not process survival. Waiting despite cancel errors can prevent
+    /// releases, drafts and later owners indefinitely instead of escaping earlier. Hidden acquisitions and
+    /// publication, earlier noncompletion, Program/admission, reader/provider/history/editor/drafts/reminder/
+    /// metadata and M2-M7 remain open, not qualified by this bounded disposal extraction.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A mandatory callback is null.</exception>
+    /// <exception cref="Exception">A lone retained original failure is rethrown through EDI.</exception>
+    /// <exception cref="OperationCanceledException">A cancellation/release callback supplies the sole retained OCE.</exception>
+    /// <exception cref="AggregateException">Multiple direct failures are reported in order, or an original aggregate is retained.</exception>
+    internal static Task DisposeInitializationAsync(
+        Task? initializationTask,
+        Action cancelDisposal,
+        Action cancelInitialization,
+        Action disposeInitializationCancellation,
+        Action disposeDisposalCancellation)
+    {
+        ArgumentNullException.ThrowIfNull(cancelDisposal);
+        ArgumentNullException.ThrowIfNull(cancelInitialization);
+        ArgumentNullException.ThrowIfNull(disposeInitializationCancellation);
+        ArgumentNullException.ThrowIfNull(disposeDisposalCancellation);
+        return CoreAsync();
+
+        async Task CoreAsync()
+        {
+            List<Exception>? failures = null;
+            try
+            {
+                cancelDisposal();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            try
+            {
+                cancelInitialization();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            if (initializationTask is not null)
+            {
+                try
+                {
+                    await initializationTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    (failures ??= []).Add(ex);
+                }
+            }
+
+            try
+            {
+                disposeInitializationCancellation();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            try
+            {
+                disposeDisposalCancellation();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            if (failures is { Count: 1 })
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failures[0]);
+            }
+
+            if (failures is { Count: > 1 })
+            {
+                throw new AggregateException(failures);
+            }
+        }
     }
 }
