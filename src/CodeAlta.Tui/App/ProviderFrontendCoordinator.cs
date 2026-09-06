@@ -14,6 +14,12 @@ namespace CodeAlta.Tui.App;
 
 internal readonly record struct ProviderTestResult(bool Success, string Message, int ModelCount);
 
+internal sealed record CodexAccountMetadata(string? AccountId, string? AccountLabel);
+
+internal delegate ValueTask CodexAccountLookupOperation(
+    Action<CodexAccountMetadata?> onMetadata,
+    CancellationToken cancellationToken);
+
 internal sealed class ProviderFrontendCoordinator
 {
     private readonly CodeAltaOwnedServices? _ownedServices;
@@ -294,15 +300,57 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var store = new FileOpenAICodexSubscriptionCredentialStore(GetProviderStateRootPath());
-        var credential = await store.LoadAsync(definition.ProviderKey, cancellationToken);
-        if (credential is null)
+        ProviderTestResult result = default;
+        await ReadCodexAccountMetadataCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            metadata => result = FormatCodexAccountMetadataResult(metadata),
+            static (providerDefinition, getStateRootPath) =>
+            {
+                var store = new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath());
+                return async (onMetadata, token) =>
+                {
+                    var credential = await store.LoadAsync(providerDefinition.ProviderKey, token);
+                    if (credential is null)
+                    {
+                        onMetadata(null);
+                        return;
+                    }
+
+                    var accountId = OpenAICodexSubscriptionAuthManager.ResolveAccountId(providerDefinition.AccountId, credential);
+                    var accountLabel = credential.AccountLabel;
+                    onMetadata(new CodexAccountMetadata(accountId, accountLabel));
+                };
+            },
+            cancellationToken);
+        return result;
+    }
+
+    internal static async Task ReadCodexAccountMetadataCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Action<CodexAccountMetadata?> onMetadata,
+        Func<CodeAltaProviderDocument, Func<string>, CodexAccountLookupOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(onMetadata);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        var operation = createOperation(definition, getStateRootPath);
+        await operation(onMetadata, cancellationToken);
+    }
+
+    internal static ProviderTestResult FormatCodexAccountMetadataResult(CodexAccountMetadata? metadata)
+    {
+        if (metadata is null)
         {
             return new ProviderTestResult(false, SR.T("Login required before account/workspace metadata can be listed."), 0);
         }
 
-        var accountId = OpenAICodexSubscriptionAuthManager.ResolveAccountId(definition.AccountId, credential);
-        var accountLabel = string.IsNullOrWhiteSpace(credential.AccountLabel) ? SR.T("ChatGPT account/workspace") : credential.AccountLabel;
+        var accountId = metadata.AccountId;
+        var accountLabel = string.IsNullOrWhiteSpace(metadata.AccountLabel) ? SR.T("ChatGPT account/workspace") : metadata.AccountLabel;
         var accountMessage = string.IsNullOrWhiteSpace(accountId)
             ? SR.T("{0}: token did not expose an account/workspace id; enter one in Account/Workspace Id if required.", accountLabel)
             : SR.T("{0}: {1}", accountLabel, accountId);
