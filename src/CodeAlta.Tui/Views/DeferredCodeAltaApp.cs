@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins;
@@ -21,6 +22,9 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     private readonly TerminalImageGraphicsPresenter _graphicsPresenter;
     private readonly CodeAltaUpdateService _updateService = new();
     private readonly PluginRuntimeManager? _prestartedPluginRuntime;
+    private readonly Lazy<Task> _disposeTask;
+    private CancellationTokenSource? _startupCancellation;
+    private CancellationToken _startupToken;
     private Task<CodeAltaOwnedServices>? _ownedServicesTask;
     private CodeAltaApp? _app;
     private ConfigRecoveryDialog? _configRecoveryDialog;
@@ -30,6 +34,8 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     private bool _exitRequested;
     private bool _openProvidersAfterStartup;
     private bool _updateToastShown;
+    private bool _runStarted;
+    private bool _stopRequested;
 
     public DeferredCodeAltaApp(PluginRuntimeManager? prestartedPluginRuntime = null)
     {
@@ -53,13 +59,21 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 CodeAltaGlobalCommandConfigurator.Configure).Root);
         _rootHost = CreateStretchHost(_toastHost);
         _rootHost.RegisterClipboardScreenshotCommand();
+        _disposeTask = CreateDeferredDisposal(
+            stopStartup: () => _stopRequested = true,
+            disposeCore: DisposeCoreAsync);
         _updateService.Start();
     }
 
     public CodeAltaUpdateCheckSnapshot UpdateCheckSnapshot => _updateService.Snapshot;
 
     public ValueTask<TerminalInstance> RunAsync(CancellationToken cancellationToken)
-        => Terminal.RunAsync(
+    {
+        _startupCancellation = BeginDeferredRun(
+            ref _runStarted, _stopRequested, cancellationToken);
+        _startupToken = _startupCancellation.Token;
+
+        return Terminal.RunAsync(
             _rootHost,
             _ => OnIteration(cancellationToken),
             new TerminalRunOptions
@@ -68,32 +82,33 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 UpdateWaitDuration = TimeSpan.FromMilliseconds(1),
             },
             cancellationToken);
+    }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => new(_disposeTask.Value);
+
+    private Task DisposeCoreAsync()
     {
-        try
-        {
-            if (_app is not null)
-            {
-                await _app.DisposeAsync();
-                return;
-            }
+        // The lazy initializer has stopped admission. Capture before cancellation callbacks run.
+        var app = _app;
+        var startupTask = _ownedServicesTask;
+        var reportedStartupFailure = _startupFailure;
+        var startupToken = _startupToken;
+        var startupCancellation = _startupCancellation;
 
-            if (_ownedServicesTask is { IsCompletedSuccessfully: true })
-            {
-                await _ownedServicesTask.Result.DisposeAsync();
-            }
-        }
-        finally
-        {
-            _updateService.Dispose();
-            _graphicsPresenter.Dispose();
-        }
+        return DisposeDeferredStartupAsync(
+            app,
+            startupTask,
+            reportedStartupFailure,
+            startupToken,
+            cancelStartup: () => startupCancellation?.Cancel(),
+            disposeUpdate: _updateService.Dispose,
+            disposePresenter: _graphicsPresenter.Dispose,
+            disposeStartupCancellation: () => startupCancellation?.Dispose());
     }
 
     private TerminalLoopResult OnIteration(CancellationToken cancellationToken)
     {
-        if (_exitRequested)
+        if (_stopRequested || _exitRequested)
         {
             return TerminalLoopResult.Stop;
         }
@@ -119,17 +134,33 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
             return TerminalLoopResult.Continue;
         }
 
-        _ownedServicesTask ??= CodeAltaOwnedServices.CreateAsync(cancellationToken, _prestartedPluginRuntime);
-        if (!_ownedServicesTask.IsCompleted)
+        if (!TryStartDeferredServices(
+                _stopRequested,
+                ref _ownedServicesTask,
+                _startupToken,
+                token => CodeAltaOwnedServices.CreateAsync(
+                    token, _prestartedPluginRuntime)))
+        {
+            return TerminalLoopResult.Stop;
+        }
+
+        // A successful admission retains the mandatory factory's non-null task.
+        var startupTask = _ownedServicesTask!;
+        if (!startupTask.IsCompleted)
         {
             // Keep async service startup behind the terminal loop so the real app is attached
             // only after the UI is already running on the main session.
             return TerminalLoopResult.Continue;
         }
 
+        if (_stopRequested)
+        {
+            return TerminalLoopResult.Stop;
+        }
+
         try
         {
-            var ownedServices = _ownedServicesTask.GetAwaiter().GetResult();
+            var ownedServices = startupTask.GetAwaiter().GetResult();
             _app = CodeAltaApp.Create(ownedServices, _updateService);
             _app.PrepareForRun();
             _toastHost.Content = _app.GetRoot();
@@ -139,7 +170,10 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 _ = _app.OpenModelProvidersAsync();
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (
+            IsExpectedDeferredStartupCancellation(
+                startupTask, ex, _startupToken,
+                _startupToken.IsCancellationRequested))
         {
             return TerminalLoopResult.Continue;
         }
@@ -194,9 +228,13 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
             _configRecovery,
             saveAndContinue: () =>
             {
+                if (_stopRequested || _ownedServicesTask is not null)
+                {
+                    return;
+                }
+
                 _configRecoveryDialog = null;
                 _startupFailure = null;
-                _ownedServicesTask = null;
                 _openProvidersAfterStartup = _configRecovery.CreatedDefault;
             },
             exit: () => _exitRequested = true);
@@ -215,6 +253,245 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     {
         recovery.Reload();
         return recovery.IsReady ? null : new ConfigRecoveryDialog(recovery, saveAndContinue, exit);
+    }
+
+    /// <summary>
+    /// Admits one terminal run and creates its independently owned, linked startup cancellation source.
+    /// </summary>
+    /// <remarks>
+    /// Run/iteration and disposal are serialized by the caller. Latch before source creation so a
+    /// failed admission cannot be retried. The caller stores the returned source before terminal entry.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">Disposal has stopped admission.</exception>
+    /// <exception cref="InvalidOperationException">A run has already been admitted.</exception>
+    internal static CancellationTokenSource BeginDeferredRun(
+        ref bool runStarted,
+        bool stopRequested,
+        CancellationToken terminalToken)
+    {
+        if (stopRequested)
+        {
+            throw new ObjectDisposedException(nameof(DeferredCodeAltaApp));
+        }
+
+        if (runStarted)
+        {
+            throw new InvalidOperationException("The deferred application can only run once.");
+        }
+
+        runStarted = true;
+        return CancellationTokenSource.CreateLinkedTokenSource(terminalToken);
+    }
+
+    /// <summary>
+    /// Retains the original startup task once, unless disposal has stopped admission.
+    /// </summary>
+    /// <remarks>
+    /// The mandatory factory must return a non-null task. No fallback, task replacement or retry is
+    /// provided. This is serialized startup admission, not concurrent iteration/disposal support.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The startup factory is null.</exception>
+    internal static bool TryStartDeferredServices<TServices>(
+        bool stopRequested,
+        ref Task<TServices>? startupTask,
+        CancellationToken startupToken,
+        Func<CancellationToken, Task<TServices>> startServices)
+        where TServices : class, IAsyncDisposable
+    {
+        ArgumentNullException.ThrowIfNull(startServices);
+
+        if (stopRequested)
+        {
+            return false;
+        }
+
+        startupTask ??= startServices(startupToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Creates the single cached Deferred disposal operation, stopping admission before its core starts.
+    /// </summary>
+    /// <remarks>
+    /// Validate both callbacks before invocation. The stop callback must be a nonthrowing assignment.
+    /// Default execution-and-publication shares pending and terminal outcomes without retries. First
+    /// access belongs to the frontend cleanup context, after the terminal run completes; it starts
+    /// inline. Same-owner recursive disposal is unsupported and may throw or self-deadlock.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A mandatory callback is null.</exception>
+    internal static Lazy<Task> CreateDeferredDisposal(
+        Action stopStartup,
+        Func<Task> disposeCore)
+    {
+        ArgumentNullException.ThrowIfNull(stopStartup);
+        ArgumentNullException.ThrowIfNull(disposeCore);
+
+        return new Lazy<Task>(async () =>
+        {
+            stopStartup();
+            await disposeCore();
+        });
+    }
+
+    /// <summary>
+    /// Requests startup cancellation and joins/disposes the exclusive returned owner before final cleanup.
+    /// </summary>
+    /// <remarks>
+    /// Capture arguments after stopping admission and before cancellation callbacks. An existing app
+    /// exclusively owns its services; otherwise join the original startup task to actual completion
+    /// and dispose its exact returned resource. An app cannot coexist with pending/failed startup in
+    /// the supported caller flow. Every later stage is attempted after faults or cancellation.
+    /// Only a join failure identical to the live-recorded startup failure or precisely expected
+    /// startup cancellation is omitted. This is not confirmation that live presentation succeeded.
+    /// Plain awaits preserve frontend cleanup context. No timeout or child-termination guarantee is
+    /// provided; callbacks and composed startup may depend on work outside this bounded traversal.
+    /// Update cleanup remains cancellation-only, not a join of its background operation.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A mandatory operation is null.</exception>
+    /// <exception cref="Exception">One retained failure is rethrown through EDI without replacement.</exception>
+    /// <exception cref="OperationCanceledException">The sole retained failure is cancellation.</exception>
+    /// <exception cref="AggregateException">Multiple direct failures are reported in execution order, without flattening.</exception>
+    internal static Task DisposeDeferredStartupAsync<TServices>(
+        IAsyncDisposable? app,
+        Task<TServices>? startupTask,
+        Exception? reportedStartupFailure,
+        CancellationToken startupToken,
+        Action cancelStartup,
+        Action disposeUpdate,
+        Action disposePresenter,
+        Action disposeStartupCancellation)
+        where TServices : class, IAsyncDisposable
+    {
+        ArgumentNullException.ThrowIfNull(cancelStartup);
+        ArgumentNullException.ThrowIfNull(disposeUpdate);
+        ArgumentNullException.ThrowIfNull(disposePresenter);
+        ArgumentNullException.ThrowIfNull(disposeStartupCancellation);
+        return CoreAsync();
+
+        async Task CoreAsync()
+        {
+            List<Exception>? failures = null;
+            // A new disposal request must not excuse an already-terminal unrequested cancellation.
+            var startupWasCompleted = startupTask?.IsCompleted == true;
+            var cancellationWasRequested = startupToken.IsCancellationRequested;
+
+            try
+            {
+                cancelStartup();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            if (app is not null)
+            {
+                // No pending wait precedes frontend disposal in this branch.
+                try
+                {
+                    await app.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    (failures ??= []).Add(ex);
+                }
+            }
+            else if (startupTask is not null)
+            {
+                TServices? returnedServices = null;
+                try
+                {
+                    returnedServices = await startupTask;
+                }
+                catch (Exception ex)
+                {
+                    var requestedAtObservation = startupWasCompleted
+                        ? cancellationWasRequested
+                        : startupToken.IsCancellationRequested;
+                    if (!ReferenceEquals(ex, reportedStartupFailure) &&
+                        !IsExpectedDeferredStartupCancellation(
+                            startupTask, ex, startupToken, requestedAtObservation))
+                    {
+                        (failures ??= []).Add(ex);
+                    }
+                }
+
+                if (returnedServices is not null)
+                {
+                    try
+                    {
+                        await returnedServices.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        (failures ??= []).Add(ex);
+                    }
+                }
+            }
+
+            try
+            {
+                disposeUpdate();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            try
+            {
+                disposePresenter();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            try
+            {
+                disposeStartupCancellation();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            if (failures is { Count: 1 })
+            {
+                ExceptionDispatchInfo.Throw(failures[0]);
+            }
+
+            if (failures is { Count: > 1 })
+            {
+                throw new AggregateException(failures);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Recognizes only canceled startup tasks carrying the exact requested, cancelable startup token.
+    /// </summary>
+    /// <remarks>
+    /// For tasks already terminal before disposal requests cancellation, the supplied observation
+    /// flag is the pre-request snapshot. For pending tasks and live polling, it is the request state
+    /// at observation. Faulted OCEs, default/unrelated tokens and nested rollback failures do not match.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The startup task or caught exception is null.</exception>
+    internal static bool IsExpectedDeferredStartupCancellation(
+        Task startupTask,
+        Exception exception,
+        CancellationToken startupToken,
+        bool cancellationRequestedAtObservation)
+    {
+        ArgumentNullException.ThrowIfNull(startupTask);
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return startupTask.IsCanceled
+            && exception is OperationCanceledException canceled
+            && startupToken.CanBeCanceled
+            && cancellationRequestedAtObservation
+            && startupToken.IsCancellationRequested
+            && canceled.CancellationToken == startupToken;
     }
 
     private static string GetGlobalRoot()

@@ -86,6 +86,12 @@ already acquired during that startup. This cleanup does not remove folders or
 files already created, and it does not guarantee that all background work has
 stopped.
 
+If you exit the terminal while its shared services are still starting, `altatui`
+requests startup cancellation and waits for that startup operation before
+finishing cleanup. Services returned after exit are still cleaned up. Shutdown
+can therefore take longer when startup or a plugin does not respond to
+cancellation; there is no forced-termination timeout.
+
 ## Source plugins
 
 Dynamic source plugins are discovered from:
