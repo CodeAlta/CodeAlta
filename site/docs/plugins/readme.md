@@ -85,6 +85,11 @@ If a terminal frontend cleanup step fails, CodeAlta attempts the remaining
 frontend cleanup steps before runtime cleanup and can report their failures
 together. A step that does not finish can still delay the rest of shutdown.
 
+Runtime event-delivery cleanup also attempts its remaining stages after failures,
+waiting for its worker before releasing cancellation resources. This does not
+drain pending interface updates or stop plugins, and fatal runtime errors can
+still terminate the process.
+
 If shared runtime startup fails, CodeAlta also attempts to clean up resources
 already acquired during that startup. This cleanup does not remove folders or
 files already created, and it does not guarantee that all background work has
