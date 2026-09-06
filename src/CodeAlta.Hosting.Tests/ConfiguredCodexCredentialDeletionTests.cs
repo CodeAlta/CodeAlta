@@ -1,10 +1,10 @@
 using CodeAlta.Catalog;
-using CodeAlta.Tui.App;
-using Coordinator = CodeAlta.Tui.App.ProviderFrontendCoordinator;
+using Authentication = CodeAlta.Hosting.ConfiguredCodexAuthentication;
 
-namespace CodeAlta.Tests;
+namespace CodeAlta.Hosting.Tests;
 
-// Only the static production-connected core is invoked, never a coordinator instance or public wrapper.
+// Original cases invoke only the static production-connected core, never a coordinator instance.
+// Added public null-input cases fail required guards before the deferred production factory.
 // Definitions/strings are synthetic; mandatory recording factories return token-only fake operations.
 // No provider credential/protocol objects, managers, clients, stores, runtime, host or root discovery.
 // These fakes establish forwarding and lazy-consumption control, NOT concrete constructor ordering
@@ -33,7 +33,7 @@ public sealed class ConfiguredCodexCredentialDeletionTests
         }
 
         var failure = await Assert.ThrowsExactlyAsync<ArgumentNullException>(() =>
-            Coordinator.DeleteCodexSubscriptionCredentialCoreAsync(
+            Authentication.DeleteCredentialAsync(
                 missing[0] ? null! : fake.Definition,
                 missing[1] ? null! : fake.GetStateRootPath,
                 missing[2] ? null! : fake.FormatInvalidProvider,
@@ -318,6 +318,30 @@ public sealed class ConfiguredCodexCredentialDeletionTests
         }
     }
 
+    [TestMethod]
+    [DataRow("definition")]
+    [DataRow("getStateRootPath")]
+    [DataRow("formatInvalidProvider")]
+    [DataRow("all")]
+    public async Task PublicRequiredArguments_ReturnFaultedTaskBeforeFactory(string missing)
+    {
+        // Null required objects are the first barrier; a mismatched synthetic type is the second.
+        // Never probe this public entry point with only an invalid key/root value.
+        var definition = new CodeAltaProviderDocument { ProviderType = "not-codex", ProviderKey = "synthetic-provider" };
+        Func<string> getRoot = () => throw new AssertFailedException("Root callback must not be invoked.");
+        Func<string> formatInvalid = () => throw new AssertFailedException("Formatter must not be invoked.");
+
+        var task = Authentication.DeleteCredentialAsync(
+            missing is "definition" or "all" ? null! : definition,
+            missing is "getStateRootPath" or "all" ? null! : getRoot,
+            missing is "formatInvalidProvider" or "all" ? null! : formatInvalid,
+            CancellationToken.None);
+
+        Assert.IsTrue(task.IsFaulted);
+        var failure = await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => task);
+        Assert.AreEqual(missing == "all" ? "definition" : missing, failure.ParamName);
+    }
+
     private sealed class RecordingDeletion
     {
         public RecordingDeletion()
@@ -376,7 +400,7 @@ public sealed class ConfiguredCodexCredentialDeletionTests
         }
 
         public Task InvokeAsync(CancellationToken cancellationToken = default)
-            => Coordinator.DeleteCodexSubscriptionCredentialCoreAsync(
+            => Authentication.DeleteCredentialAsync(
                 Definition, GetStateRootPath, FormatInvalidProvider, CreateOperation, cancellationToken);
     }
 }

@@ -39,6 +39,7 @@ public sealed class HostingCompositionBoundaryTests
             typeof(ConfiguredModelProviderRegistryBuilder), typeof(ConfiguredProviderInspection),
             typeof(ProviderInspectionTestResult), typeof(ProviderInspectionModelListResult),
             typeof(ConfiguredCopilotAuthentication), typeof(ConfiguredXaiAuthentication),
+            typeof(ConfiguredCodexAuthentication),
         }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>
             reference.Name is "alta" or "altatui" or "CodeAlta.Tui" or "CodeAlta" ||
@@ -69,6 +70,15 @@ public sealed class HostingCompositionBoundaryTests
             "LoginWithBrowserAsync", "LoginWithDeviceCodeAsync", "DeleteCredentialAsync", "GetCredentialStatusAsync",
         }, xaiAuthenticationMethods.Select(method => method.Name).ToArray());
         Assert.IsFalse(xaiAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
+        var codexAuthenticationMethods = typeof(ConfiguredCodexAuthentication).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+        CollectionAssert.AreEqual(new[] { "DeleteCredentialAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
+        Assert.AreEqual(typeof(Task), codexAuthenticationMethods[0].ReturnType);
+        CollectionAssert.AreEqual(new[]
+        {
+            typeof(CodeAlta.Catalog.CodeAltaProviderDocument), typeof(Func<string>), typeof(Func<string>), typeof(CancellationToken),
+        }, codexAuthenticationMethods[0].GetParameters().Select(parameter => parameter.ParameterType).ToArray());
+        Assert.IsFalse(codexAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
     }
 
     [TestMethod]
@@ -309,6 +319,108 @@ public sealed class HostingCompositionBoundaryTests
         var cores = source[source.IndexOf("    // Mandatory call-scoped seams:", StringComparison.Ordinal)..];
         Assert.IsFalse(cores.Contains("new XaiDirectLoginManager", StringComparison.Ordinal));
         Assert.IsFalse(cores.Contains("new HttpClient", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void CodexDeletion_PublicForwardingAndTuiWiringPreserveDeferredConstructionAndOtherLoginHelper()
+    {
+        // Source-only: these exact expressions are not executed and do not qualify real constructors/storage.
+        var root = SourceRoot();
+        var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredCodexAuthentication.cs")).Replace("\r\n", "\n");
+        var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
+        var start = source.IndexOf("    public static Task DeleteCredentialAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(start >= 0);
+        var end = source.IndexOf(';', start);
+        Assert.IsTrue(end > start);
+        var expectedPublic = "    public static Task DeleteCredentialAsync(\n"
+            + "        CodeAltaProviderDocument definition,\n"
+            + "        Func<string> getStateRootPath,\n"
+            + "        Func<string> formatInvalidProvider,\n"
+            + "        CancellationToken cancellationToken)\n"
+            + "        => DeleteCredentialAsync(\n"
+            + "            definition, getStateRootPath, formatInvalidProvider,\n"
+            + "            static (providerDefinition, getStateRootPath) => new OpenAICodexSubscriptionLoginManager(\n"
+            + "                new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),\n"
+            + "                new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n"
+            + "                providerDefinition.ProviderKey).DeleteCredentialAsync,\n"
+            + "            cancellationToken);";
+        Assert.AreEqual(expectedPublic, source[start..(end + 1)]);
+
+        var coreStart = source.IndexOf("    internal static async Task DeleteCredentialAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(coreStart >= 0);
+        var coreEnd = source.IndexOf("\n    }", coreStart, StringComparison.Ordinal);
+        Assert.IsTrue(coreEnd > coreStart);
+        var expectedCore = "    internal static async Task DeleteCredentialAsync(\n"
+            + "        CodeAltaProviderDocument definition,\n"
+            + "        Func<string> getStateRootPath,\n"
+            + "        Func<string> formatInvalidProvider,\n"
+            + "        Func<CodeAltaProviderDocument, Func<string>, CodexSubscriptionDeleteCredentialOperation> createOperation,\n"
+            + "        CancellationToken cancellationToken)\n"
+            + "    {\n"
+            + "        ArgumentNullException.ThrowIfNull(definition);\n"
+            + "        ArgumentNullException.ThrowIfNull(getStateRootPath);\n"
+            + "        ArgumentNullException.ThrowIfNull(formatInvalidProvider);\n"
+            + "        ArgumentNullException.ThrowIfNull(createOperation);\n\n"
+            + "        if (!string.Equals(definition.ProviderType, \"codex\", StringComparison.Ordinal))\n"
+            + "        {\n"
+            + "            throw new InvalidOperationException(formatInvalidProvider());\n"
+            + "        }\n\n"
+            + "        var operation = createOperation(definition, getStateRootPath);\n"
+            + "        await operation(cancellationToken);";
+        Assert.AreEqual(expectedCore, source[coreStart..coreEnd]);
+        StringAssert.Contains(source, "internal delegate ValueTask CodexSubscriptionDeleteCredentialOperation(CancellationToken cancellationToken);");
+
+        var logoutStart = tui.IndexOf("    public async Task<ProviderTestResult> LogoutCodexSubscriptionAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(logoutStart >= 0);
+        var logoutEnd = tui.IndexOf("\n    }", logoutStart, StringComparison.Ordinal);
+        Assert.IsTrue(logoutEnd > logoutStart);
+        var expectedLogout = "    public async Task<ProviderTestResult> LogoutCodexSubscriptionAsync(\n"
+            + "        CodeAltaProviderDocument definition,\n"
+            + "        CancellationToken cancellationToken = default)\n"
+            + "    {\n"
+            + "        ArgumentNullException.ThrowIfNull(definition);\n\n"
+            + "        await ConfiguredCodexAuthentication.DeleteCredentialAsync(\n"
+            + "            definition,\n"
+            + "            GetProviderStateRootPath,\n"
+            + "            static () => SR.T(\"Select a Codex provider first.\"),\n"
+            + "            cancellationToken);\n"
+            + "        return new ProviderTestResult(true, SR.T(\"Deleted CodeAlta-owned ChatGPT/Codex credentials for this provider.\"), 0);";
+        Assert.AreEqual(expectedLogout, tui[logoutStart..logoutEnd]);
+        Assert.IsFalse(tui.Contains("DeleteCodexSubscriptionCredentialCoreAsync", StringComparison.Ordinal));
+        Assert.IsFalse(tui.Contains("CodexSubscriptionDeleteCredentialOperation", StringComparison.Ordinal));
+
+        // The unchanged shared manager helper is still required by browser/device login, not duplication
+        // of deletion orchestration. Do not forbid all Codex manager construction in the TUI.
+        var expectedHelper = "    private OpenAICodexSubscriptionLoginManager CreateCodexSubscriptionLoginManager(CodeAltaProviderDocument definition)\n"
+            + "    {\n"
+            + "        if (!string.Equals(definition.ProviderType, \"codex\", StringComparison.Ordinal))\n"
+            + "        {\n"
+            + "            throw new InvalidOperationException(SR.T(\"Select a Codex provider first.\"));\n"
+            + "        }\n\n"
+            + "        return new OpenAICodexSubscriptionLoginManager(\n"
+            + "            new FileOpenAICodexSubscriptionCredentialStore(GetProviderStateRootPath()),\n"
+            + "            new OpenAICodexSubscriptionOAuthClient(new HttpClient()),\n"
+            + "            definition.ProviderKey);\n"
+            + "    }";
+        StringAssert.Contains(tui, expectedHelper);
+        foreach (var entry in new[] { "LoginCodexSubscriptionWithBrowserAsync", "LoginCodexSubscriptionWithDeviceCodeAsync" })
+        {
+            var entryStart = tui.IndexOf($"    public async Task<ProviderTestResult> {entry}(", StringComparison.Ordinal);
+            Assert.IsTrue(entryStart >= 0);
+            var entryEnd = tui.IndexOf("\n    }", entryStart, StringComparison.Ordinal);
+            Assert.IsTrue(entryEnd > entryStart);
+            StringAssert.Contains(tui[entryStart..entryEnd], "var manager = CreateCodexSubscriptionLoginManager(definition);");
+            Assert.IsFalse(tui[entryStart..entryEnd].Contains("ConfiguredCodexAuthentication", StringComparison.Ordinal));
+        }
+
+        foreach (var forbidden in new[]
+        {
+            "Environment.", "Process.", "File.", "Directory.", "Path.", "SR.T(", "ConfigureAwait(false)", "Task.Run(",
+            "ThrowIfCancellationRequested(", "Dispose(", "DisposeAsync(",
+        })
+        {
+            Assert.IsFalse(source.Contains(forbidden, StringComparison.Ordinal));
+        }
     }
 
     // Compile-time checkout path: inspect only named source/project files, never discover profile ancestors.

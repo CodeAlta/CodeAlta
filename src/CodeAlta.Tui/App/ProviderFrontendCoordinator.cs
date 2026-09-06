@@ -14,8 +14,6 @@ namespace CodeAlta.Tui.App;
 
 internal readonly record struct ProviderTestResult(bool Success, string Message, int ModelCount);
 
-internal delegate ValueTask CodexSubscriptionDeleteCredentialOperation(CancellationToken cancellationToken);
-
 internal sealed class ProviderFrontendCoordinator
 {
     private readonly CodeAltaOwnedServices? _ownedServices;
@@ -258,37 +256,12 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        await DeleteCodexSubscriptionCredentialCoreAsync(
+        await ConfiguredCodexAuthentication.DeleteCredentialAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Codex provider first."),
-            static (providerDefinition, getStateRootPath) => new OpenAICodexSubscriptionLoginManager(
-                new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
-                new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
-                providerDefinition.ProviderKey).DeleteCredentialAsync,
             cancellationToken);
         return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned ChatGPT/Codex credentials for this provider."), 0);
-    }
-
-    internal static async Task DeleteCodexSubscriptionCredentialCoreAsync(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath,
-        Func<string> formatInvalidProvider,
-        Func<CodeAltaProviderDocument, Func<string>, CodexSubscriptionDeleteCredentialOperation> createOperation,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(getStateRootPath);
-        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
-        ArgumentNullException.ThrowIfNull(createOperation);
-
-        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(formatInvalidProvider());
-        }
-
-        var operation = createOperation(definition, getStateRootPath);
-        await operation(cancellationToken);
     }
 
     public async Task<ProviderTestResult> TestCodexSubscriptionAuthenticationAsync(
