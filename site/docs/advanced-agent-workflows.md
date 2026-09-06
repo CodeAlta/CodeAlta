@@ -148,6 +148,8 @@ Start a read-only child session to inspect the build logs. Set a reminder for th
 
 Reminders are delivered through normal session queue semantics while the current CodeAlta host is still running.
 
+Each firing captures its message and target before sending, without requiring an open session tab. Edits made after that capture affect only later firings. Deleting a reminder prevents future firings, but an already captured send may still proceed; deletion does not remove queued prompts or stop a run. Repeats wait the configured delay after the previous delivery call returns, and failed delivery results also count toward the repeat limit. Completed reminders remain in `reminder list --all` until deleted. A successful delivery result is not proof that the agent finished the work, and reminder schedules do not survive restarting CodeAlta.
+
 ### Switch or create modes through prompts
 
 You can ask an agent to inspect available prompts, recommend one, create a project prompt, or switch the current session.

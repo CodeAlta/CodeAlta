@@ -5,14 +5,29 @@ namespace CodeAlta.LiveTool;
 /// <summary>
 /// Stores and runs in-process delayed prompt reminders for the live-tool command surface.
 /// </summary>
-/// <param name="services">Host services used when reminders deliver prompts.</param>
-public sealed class AltaReminderService(IServiceProvider services)
+public sealed class AltaReminderService
 {
     private static readonly TimeSpan MaximumDelayChunk = TimeSpan.FromDays(1);
 
-    private readonly IServiceProvider _services = services ?? throw new ArgumentNullException(nameof(services));
+    private readonly IServiceProvider _services;
+    private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
     private readonly Dictionary<string, ReminderEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Initializes the in-process reminder service.</summary>
+    /// <param name="services">Host services used when reminders deliver prompts.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="services" /> is <see langword="null" />.</exception>
+    public AltaReminderService(IServiceProvider services) : this(services, TimeProvider.System)
+    {
+    }
+
+    internal AltaReminderService(IServiceProvider services, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        _services = services;
+        _timeProvider = timeProvider;
+    }
 
     /// <summary>
     /// Occurs when the active reminder set or reminder metadata changes.
@@ -42,7 +57,7 @@ public sealed class AltaReminderService(IServiceProvider services)
             throw new ArgumentOutOfRangeException(nameof(request), "Reminder repeat count must be positive.");
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var descriptor = new AltaReminderDescriptor
         {
             ReminderId = "reminder-" + Guid.CreateVersion7().ToString("N", CultureInfo.InvariantCulture),
@@ -69,7 +84,10 @@ public sealed class AltaReminderService(IServiceProvider services)
 
         _ = RunReminderAsync(entry);
         OnChanged();
-        return entry.Descriptor;
+        lock (_gate)
+        {
+            return entry.Descriptor;
+        }
     }
 
     /// <summary>
@@ -95,6 +113,10 @@ public sealed class AltaReminderService(IServiceProvider services)
     /// <summary>
     /// Deletes an active or retained reminder by id.
     /// </summary>
+    /// <remarks>
+    /// Deletion prevents future firing captures. An already captured delivery may still send;
+    /// deletion does not retract queued prompts or abort a run.
+    /// </remarks>
     /// <param name="reminderId">The reminder id.</param>
     /// <param name="descriptor">Receives the deleted descriptor when found.</param>
     /// <returns><see langword="true" /> when the reminder was found and deleted.</returns>
@@ -103,6 +125,7 @@ public sealed class AltaReminderService(IServiceProvider services)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reminderId);
         ReminderEntry? entry;
+        var now = _timeProvider.GetUtcNow();
         lock (_gate)
         {
             if (!_entries.Remove(reminderId, out entry))
@@ -114,7 +137,7 @@ public sealed class AltaReminderService(IServiceProvider services)
             descriptor = entry.Descriptor with
             {
                 State = AltaReminderStates.Deleted,
-                CompletedAt = DateTimeOffset.UtcNow,
+                CompletedAt = now,
             };
             entry.Descriptor = descriptor;
         }
@@ -150,6 +173,7 @@ public sealed class AltaReminderService(IServiceProvider services)
     /// <summary>
     /// Updates the prompt content for a scheduled reminder without changing its due time.
     /// </summary>
+    /// <remarks>Updates affect firings captured after the edit, not an already captured delivery.</remarks>
     /// <param name="reminderId">The reminder id.</param>
     /// <param name="content">The replacement prompt content.</param>
     /// <param name="descriptor">Receives the updated descriptor when found.</param>
@@ -185,7 +209,7 @@ public sealed class AltaReminderService(IServiceProvider services)
         {
             while (true)
             {
-                DateTimeOffset dueAt;
+                DateTimeOffset? scheduledDueAt;
                 lock (_gate)
                 {
                     if (!ReferenceEquals(_entries.GetValueOrDefault(entry.Descriptor.ReminderId), entry) || entry.IsCancellationRequested)
@@ -193,29 +217,36 @@ public sealed class AltaReminderService(IServiceProvider services)
                         return;
                     }
 
-                    dueAt = entry.Descriptor.DueAt ?? DateTimeOffset.UtcNow;
+                    scheduledDueAt = entry.Descriptor.DueAt;
                 }
 
+                var dueAt = scheduledDueAt ?? _timeProvider.GetUtcNow();
                 while (true)
                 {
-                    var delay = dueAt - DateTimeOffset.UtcNow;
+                    var delay = dueAt - _timeProvider.GetUtcNow();
                     if (delay <= TimeSpan.Zero)
                     {
                         break;
                     }
 
-                    await Task.Delay(delay > MaximumDelayChunk ? MaximumDelayChunk : delay, entry.CancellationToken).ConfigureAwait(false);
+                    await Task.Delay(delay > MaximumDelayChunk ? MaximumDelayChunk : delay, _timeProvider, entry.CancellationToken).ConfigureAwait(false);
                 }
 
+                ReminderDeliverySnapshot snapshot;
                 lock (_gate)
                 {
                     if (!ReferenceEquals(_entries.GetValueOrDefault(entry.Descriptor.ReminderId), entry) || entry.IsCancellationRequested)
                     {
                         return;
                     }
+
+                    // This captures one local delivery attempt, not runtime admission. Later edits
+                    // affect subsequent firings; deletion cannot retract this immutable attempt.
+                    snapshot = new ReminderDeliverySnapshot(entry.Descriptor, entry.Content);
                 }
 
-                var delivery = await DeliverAsync(entry).ConfigureAwait(false);
+                var delivery = await DeliverAsync(snapshot).ConfigureAwait(false);
+                var firedAt = _timeProvider.GetUtcNow();
                 var completed = false;
                 lock (_gate)
                 {
@@ -229,13 +260,13 @@ public sealed class AltaReminderService(IServiceProvider services)
                     entry.Descriptor = entry.Descriptor with
                     {
                         FiredCount = firedCount,
-                        LastFiredAt = DateTimeOffset.UtcNow,
+                        LastFiredAt = firedAt,
                         LastExitCode = delivery.ExitCode,
                         LastError = delivery.Error,
                         LastTranscriptPreview = CreatePreview(delivery.Transcript),
                         State = completed ? AltaReminderStates.Completed : AltaReminderStates.Active,
-                        DueAt = completed ? null : DateTimeOffset.UtcNow + entry.Descriptor.Duration,
-                        CompletedAt = completed ? DateTimeOffset.UtcNow : null,
+                        DueAt = completed ? null : firedAt + entry.Descriptor.Duration,
+                        CompletedAt = completed ? firedAt : null,
                     };
                 }
 
@@ -252,6 +283,7 @@ public sealed class AltaReminderService(IServiceProvider services)
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var changed = false;
+            var completedAt = _timeProvider.GetUtcNow();
             lock (_gate)
             {
                 if (ReferenceEquals(_entries.GetValueOrDefault(entry.Descriptor.ReminderId), entry))
@@ -259,7 +291,7 @@ public sealed class AltaReminderService(IServiceProvider services)
                     entry.Descriptor = entry.Descriptor with
                     {
                         State = AltaReminderStates.Completed,
-                        CompletedAt = DateTimeOffset.UtcNow,
+                        CompletedAt = completedAt,
                         LastExitCode = AltaExitCodes.Failure,
                         LastError = ex.Message,
                         LastTranscriptPreview = CreatePreview(ex.ToString()),
@@ -279,25 +311,25 @@ public sealed class AltaReminderService(IServiceProvider services)
         }
     }
 
-    private async Task<AltaReminderDeliveryResult> DeliverAsync(ReminderEntry entry)
+    private async Task<AltaReminderDeliveryResult> DeliverAsync(ReminderDeliverySnapshot snapshot)
     {
         var dispatcher = _services.Get<AltaCommandDispatcher>() ?? new AltaCommandDispatcher(new AltaCommandRegistry(), _services);
         var caller = new AltaCallerIdentity
         {
             Kind = "reminder",
-            SourceSessionId = entry.Descriptor.SourceSessionId,
-            SourceAgentId = entry.Descriptor.SourceAgentId,
-            SourceProjectId = entry.Descriptor.SourceProjectId,
-            PluginRuntimeKey = entry.Descriptor.PluginRuntimeKey,
+            SourceSessionId = snapshot.Descriptor.SourceSessionId,
+            SourceAgentId = snapshot.Descriptor.SourceAgentId,
+            SourceProjectId = snapshot.Descriptor.SourceProjectId,
+            PluginRuntimeKey = snapshot.Descriptor.PluginRuntimeKey,
         };
 
         try
         {
             var result = await dispatcher.InvokeAsync(
-                    ["session", "send", entry.Descriptor.TargetSessionId, "--stdin", "--queue-if-busy"],
-                    entry.Content,
+                    ["session", "send", snapshot.Descriptor.TargetSessionId, "--stdin", "--queue-if-busy"],
+                    snapshot.Content,
                     caller,
-                    entry.Descriptor.Cwd,
+                    snapshot.Descriptor.Cwd,
                     cancellationToken: CancellationToken.None)
                 .ConfigureAwait(false);
             return new AltaReminderDeliveryResult(result.ExitCode, result.Error, result.Transcript);
@@ -324,6 +356,8 @@ public sealed class AltaReminderService(IServiceProvider services)
         {
         }
     }
+
+    private sealed record ReminderDeliverySnapshot(AltaReminderDescriptor Descriptor, string Content);
 
     private sealed class ReminderEntry(AltaReminderDescriptor descriptor, string content)
     {
