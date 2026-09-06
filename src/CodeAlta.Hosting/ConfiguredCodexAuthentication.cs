@@ -22,6 +22,10 @@ internal delegate ValueTask CodexBrowserLoginOperation(
     Action<string, string?> onCompleted,
     CancellationToken cancellationToken);
 
+internal delegate ValueTask CodexAuthenticationTestOperation(
+    Action<string?> onAuthenticated,
+    CancellationToken cancellationToken);
+
 /// <summary>
 /// Non-secret metadata from one locally stored Codex credential, not remote account enumeration or authentication validation.
 /// </summary>
@@ -36,7 +40,7 @@ internal delegate ValueTask CodexBrowserLoginOperation(
 public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabel);
 
 /// <summary>
-/// Composes configured Codex credential deletion, local non-secret account metadata lookup, device and browser login.
+/// Composes configured Codex credential deletion, local non-secret account metadata lookup, device/browser login and authentication testing.
 /// </summary>
 /// <remarks>
 /// The caller owns localization and lazy root selection. The root is trusted backend input, not a
@@ -52,7 +56,7 @@ public sealed record CodexAccountMetadata(string? AccountId, string? AccountLabe
 /// type, auth-source, enabled, expiry or access-token eligibility guard. TUI retains localization, root policy
 /// and the dialog's unchanged cancellation behavior. Device login projects display strings; browser login
 /// projects the existing authorization URI and raw nullable account ID through synchronous callbacks.
-/// Browser launch and presentation remain caller-owned; authentication-test orchestration remains TUI-owned.
+/// Browser launch and presentation remain caller-owned; authentication testing projects a nullable provider-resolved context ID.
 /// Broader provider behavior, application lifetime and native parity remain unqualified.
 /// </remarks>
 public static class ConfiguredCodexAuthentication
@@ -194,7 +198,7 @@ public static class ConfiguredCodexAuthentication
     /// values and possibly personal account metadata must not acquire extra logging or persistence.
     /// No disposal, ownership, context suppression, cancellation checks, scheduling, retry, wrapping or settlement
     /// framework is added. Existing manager/HTTP-client non-disposal, TUI root policy and dialog cancellation remain.
-    /// Authentication testing remains TUI-owned. Inert forwarding/source checks do not qualify
+    /// Authentication testing is composed by Hosting. Inert forwarding/source checks do not qualify
     /// real protocol/storage behavior, native parity or application lifetime.
     /// </remarks>
     public static Task LoginWithDeviceCodeAsync(
@@ -292,7 +296,7 @@ public static class ConfiguredCodexAuthentication
     /// No early cancellation, context suppression, scheduling, retry, ownership/disposal or settlement framework
     /// is added; existing manager/HTTP-client non-disposal and TUI root/dialog cancellation policies remain.
     /// Inert recording order and named-source checks do not qualify concrete protocol/listener/storage behavior,
-    /// application lifetime or native parity. Authentication-test orchestration remains TUI-owned and deferred.
+    /// application lifetime or native parity. Authentication-test orchestration is composed by Hosting.
     /// </remarks>
     public static Task LoginWithBrowserAsync(
         CodeAltaProviderDocument definition,
@@ -355,5 +359,91 @@ public static class ConfiguredCodexAuthentication
 
         var operation = createOperation(definition, getStateRootPath);
         await operation(reportAuthorization, openBrowser, formatCompletionPrefix, onCompleted, cancellationToken);
+    }
+
+    /// <summary>
+    /// Tests configured ChatGPT/Codex authentication through the existing provider without sending a model turn.
+    /// </summary>
+    /// <param name="definition">Required original definition; its type must be exactly ordinal <c>codex</c>. Key, null-only defaulted auth source and configured account ID are read during deferred construction without normalization.</param>
+    /// <param name="getStateRootPath">Required lazy trusted-backend root callback, not a renderer filesystem grant or sandbox. Its result is forwarded unchanged to credential-store validation before HTTP/OAuth construction.</param>
+    /// <param name="formatInvalidProvider">Required mismatch-only message callback, invoked before the factory or root selection.</param>
+    /// <param name="onAuthenticated">Required synchronous callback receiving the once-captured nullable provider-resolved context ID, not a raw credential ID. No credential, context, metadata record or credential-capturing lazy result escapes.</param>
+    /// <param name="cancellationToken">Original token forwarded to account-context retrieval without an early cancellation check.</param>
+    /// <returns>A task completing after provider account-context retrieval and synchronous presentation; fresh cached credentials need not undergo live validation.</returns>
+    /// <exception cref="ArgumentNullException">Definition, root, mismatch or completion callback is null, checked in that order before type selection and the factory. Provider constructors also reject null root/key values at their respective construction points.</exception>
+    /// <exception cref="ArgumentException">The provider rejects a blank root during store construction or a blank key during later manager construction.</exception>
+    /// <exception cref="InvalidOperationException">The type is not exactly <c>codex</c>, or the provider reports missing credentials or rejects authentication.</exception>
+    /// <exception cref="OperationCanceledException">The provider or a callback observes cancellation.</exception>
+    /// <remarks>
+    /// The internal mandatory-factory guard follows the four required-object guards. The deferred expression
+    /// evaluates root/store validation, HTTP/OAuth construction, original key, auth source (only null defaults
+    /// to codealta_oauth), configured account ID, then Codex-home discovery before manager/key validation.
+    /// Home discovery runs for every exact matching type, including owned, blank and unknown auth sources;
+    /// mismatch or root/store failure stops earlier, but an invalid key is not a discovery safety barrier.
+    /// After GetAccountContextAsync, the fresh sealed positional context's provider-resolved ID is read once,
+    /// then presented synchronously without an intervening await or prefix-localization step. This accepted
+    /// authentication-specific one-read projection is not arbitrary-property or task identity/stack/settlement
+    /// equivalence. IDs may be personal data; no extra logging or persistence is authorized by this boundary.
+    /// The existing provider may import external credentials, refresh, save or delete owned credentials;
+    /// codex_auth_file_readonly is not operation-wide read-only. Import/cache/storage effects can precede
+    /// expiry checks, context resolution or presentation failure. Fresh cached credentials can succeed without
+    /// live server validation; this is neither remote account enumeration nor a model-turn readiness guarantee.
+    /// Constructor, callback, protocol and storage exceptions escaping the provider propagate unchanged.
+    /// Existing provider refresh transformations remain; arbitrary error display is not guaranteed sanitized,
+    /// because the unchanged TUI can display a base exception rather than the provider's redacted outer message.
+    /// No disposal/ownership, early cancellation, context suppression, scheduling, retry, wrapping or settlement
+    /// framework is added. Existing manager/HTTP-client non-disposal and TUI root/dialog cancellation remain.
+    /// Inert forwarding and named-source assertions prove wiring, not concrete discovery, import, refresh,
+    /// storage or protocol behavior, native parity or application lifetime.
+    /// </remarks>
+    public static Task TestAuthenticationAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<string?> onAuthenticated,
+        CancellationToken cancellationToken)
+        => TestCodexAuthenticationCoreAsync(
+            definition, getStateRootPath, formatInvalidProvider, onAuthenticated,
+            static (providerDefinition, getStateRootPath) =>
+            {
+                var authManager = new OpenAICodexSubscriptionAuthManager(
+                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                    providerDefinition.ProviderKey,
+                    providerDefinition.AuthSource ?? "codealta_oauth",
+                    providerDefinition.AccountId,
+                    CodexAuthFileReader.ResolveCodexHome());
+                return async (onAuthenticated, token) =>
+                {
+                    var context = await authManager.GetAccountContextAsync(token);
+                    // Approved once-only read from the fresh sealed positional context.
+                    // This is the provider-resolved context ID, not the raw credential ID.
+                    var rawAccountId = context.AccountId;
+                    onAuthenticated(rawAccountId);
+                };
+            },
+            cancellationToken);
+
+    internal static async Task TestCodexAuthenticationCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<string?> onAuthenticated,
+        Func<CodeAltaProviderDocument, Func<string>, CodexAuthenticationTestOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(onAuthenticated);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation(definition, getStateRootPath);
+        await operation(onAuthenticated, cancellationToken);
     }
 }

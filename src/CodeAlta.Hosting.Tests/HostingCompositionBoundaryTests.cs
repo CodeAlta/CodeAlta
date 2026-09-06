@@ -72,7 +72,7 @@ public sealed class HostingCompositionBoundaryTests
         Assert.IsFalse(xaiAuthenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
         var codexAuthenticationMethods = typeof(ConfiguredCodexAuthentication).GetMethods(
             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
-        CollectionAssert.AreEquivalent(new[] { "DeleteCredentialAsync", "ReadAccountMetadataAsync", "LoginWithDeviceCodeAsync", "LoginWithBrowserAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "DeleteCredentialAsync", "ReadAccountMetadataAsync", "LoginWithDeviceCodeAsync", "LoginWithBrowserAsync", "TestAuthenticationAsync" }, codexAuthenticationMethods.Select(method => method.Name).ToArray());
         var codexDeletionMethod = codexAuthenticationMethods.Single(method => method.Name == "DeleteCredentialAsync");
         Assert.AreEqual(typeof(Task), codexDeletionMethod.ReturnType);
         CollectionAssert.AreEqual(new[]
@@ -566,7 +566,7 @@ public sealed class HostingCompositionBoundaryTests
         }
         // The preceding deletion guard retains the exact login helper and browser login caller checks.
         StringAssert.Contains(tui, "private OpenAICodexSubscriptionAuthManager CreateCodexSubscriptionAuthManager(CodeAltaProviderDocument definition)");
-        StringAssert.Contains(tui, "await TestCodexAuthenticationCoreAsync(\n            definition,\n            GetProviderStateRootPath,\n            static () => SR.T(\"Select a Codex provider first.\"),\n            rawAccountId => result = FormatCodexAuthenticationResult(rawAccountId),\n            static (providerDefinition, getStateRootPath) =>\n            {\n                var authManager = new OpenAICodexSubscriptionAuthManager(");
+        StringAssert.Contains(tui, "await ConfiguredCodexAuthentication.TestAuthenticationAsync(\n            definition,\n            GetProviderStateRootPath,\n            static () => SR.T(\"Select a Codex provider first.\"),\n            rawAccountId => result = FormatCodexAuthenticationResult(rawAccountId),\n            cancellationToken);");
         StringAssert.Contains(tui, "private string GetProviderStateRootPath()\n        => _ownedServices?.CatalogOptions.GlobalRoot\n           ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), \".alta\");");
         var adapter = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "IModelProviderDialogService.cs")).Replace("\r\n", "\n");
         StringAssert.Contains(adapter, "public Task<ProviderTestResult> ListAccountsAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)\n        => _providerUi.ListCodexSubscriptionAccountsAsync(definition, cancellationToken);");
@@ -1053,10 +1053,31 @@ public sealed class HostingCompositionBoundaryTests
     }
 
     [TestMethod]
-    public void CodexAuthenticationTest_TuiWiringPreservesExactFactoryCorePresentationAndDialog()
+    public void CodexAuthenticationTest_HostingWiringPreservesExactFactoryCorePresentationAndDialog()
     {
-        // Four named checkout sources only. These assertions prove wiring/order, not concrete
+        // Type metadata and four named checkout sources only. These assertions prove wiring/order, not concrete
         // discovery, import, refresh, storage or protocol qualification. No provider code executes.
+        var method = typeof(ConfiguredCodexAuthentication).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly)
+            .Single(candidate => candidate.Name == "TestAuthenticationAsync");
+        Assert.AreEqual(typeof(Task), method.ReturnType);
+        var parameters = method.GetParameters();
+        CollectionAssert.AreEqual(new[]
+        {
+            typeof(CodeAlta.Catalog.CodeAltaProviderDocument), typeof(Func<string>), typeof(Func<string>),
+            typeof(Action<string>), typeof(CancellationToken),
+        }, parameters.Select(parameter => parameter.ParameterType).ToArray());
+        CollectionAssert.AreEqual(new[]
+        {
+            "definition", "getStateRootPath", "formatInvalidProvider", "onAuthenticated", "cancellationToken",
+        }, parameters.Select(parameter => parameter.Name).ToArray());
+        Assert.IsFalse(parameters.Any(parameter => parameter.IsOptional));
+        var nullability = new System.Reflection.NullabilityInfoContext();
+        foreach (var parameter in parameters.Take(4))
+        {
+            Assert.AreEqual(System.Reflection.NullabilityState.NotNull, nullability.Create(parameter).ReadState);
+        }
+        Assert.AreEqual(System.Reflection.NullabilityState.Nullable, nullability.Create(parameters[3]).GenericTypeArguments[0].ReadState);
         var root = SourceRoot();
         var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
         var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredCodexAuthentication.cs")).Replace("\r\n", "\n");
@@ -1071,11 +1092,31 @@ public sealed class HostingCompositionBoundaryTests
                 ArgumentNullException.ThrowIfNull(definition);
 
                 ProviderTestResult result = default;
-                await TestCodexAuthenticationCoreAsync(
+                await ConfiguredCodexAuthentication.TestAuthenticationAsync(
                     definition,
                     GetProviderStateRootPath,
                     static () => SR.T("Select a Codex provider first."),
                     rawAccountId => result = FormatCodexAuthenticationResult(rawAccountId),
+                    cancellationToken);
+                return result;
+            }
+        """.Replace("\r\n", "\n");
+        Assert.AreEqual(expectedAuthentication, authentication);
+
+        var publicStart = source.IndexOf("    public static Task TestAuthenticationAsync(", StringComparison.Ordinal);
+        Assert.IsTrue(publicStart >= 0);
+        var coreStart = source.IndexOf("\n    internal static async Task TestCodexAuthenticationCoreAsync(", publicStart, StringComparison.Ordinal);
+        Assert.IsTrue(coreStart > publicStart);
+        var publicAuthentication = source[publicStart..coreStart];
+        var expectedPublic = """
+            public static Task TestAuthenticationAsync(
+                CodeAltaProviderDocument definition,
+                Func<string> getStateRootPath,
+                Func<string> formatInvalidProvider,
+                Action<string?> onAuthenticated,
+                CancellationToken cancellationToken)
+                => TestCodexAuthenticationCoreAsync(
+                    definition, getStateRootPath, formatInvalidProvider, onAuthenticated,
                     static (providerDefinition, getStateRootPath) =>
                     {
                         var authManager = new OpenAICodexSubscriptionAuthManager(
@@ -1095,17 +1136,15 @@ public sealed class HostingCompositionBoundaryTests
                         };
                     },
                     cancellationToken);
-                return result;
-            }
         """.Replace("\r\n", "\n");
-        Assert.AreEqual(expectedAuthentication, authentication);
+        Assert.AreEqual(expectedPublic + "\n", publicAuthentication);
 
         // Select ONLY inside authentication, not earlier browser/device/account/deletion routes.
-        var factoryStart = authentication.IndexOf("            static (providerDefinition, getStateRootPath) =>", StringComparison.Ordinal);
+        var factoryStart = publicAuthentication.IndexOf("            static (providerDefinition, getStateRootPath) =>", StringComparison.Ordinal);
         Assert.IsTrue(factoryStart >= 0);
-        var factoryEnd = authentication.IndexOf("\n            },", factoryStart, StringComparison.Ordinal);
+        var factoryEnd = publicAuthentication.IndexOf("\n            },", factoryStart, StringComparison.Ordinal);
         Assert.IsTrue(factoryEnd > factoryStart);
-        var factory = authentication[factoryStart..factoryEnd];
+        var factory = publicAuthentication[factoryStart..factoryEnd];
         var expectedConstructor = """
                         var authManager = new OpenAICodexSubscriptionAuthManager(
                             new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
@@ -1126,7 +1165,7 @@ public sealed class HostingCompositionBoundaryTests
         Assert.AreEqual(projection + "var rawAccountId = ".Length, factory.IndexOf("context.AccountId", StringComparison.Ordinal));
         Assert.AreEqual(-1, factory.IndexOf("context.AccountId", projection + "var rawAccountId = context.AccountId".Length, StringComparison.Ordinal));
 
-        var core = ReadMethod(tui, "    internal static async Task TestCodexAuthenticationCoreAsync(");
+        var core = ReadMethod(source, "    internal static async Task TestCodexAuthenticationCoreAsync(");
         var expectedCore = """
             internal static async Task TestCodexAuthenticationCoreAsync(
                 CodeAltaProviderDocument definition,
@@ -1152,7 +1191,7 @@ public sealed class HostingCompositionBoundaryTests
             }
         """.Replace("\r\n", "\n");
         Assert.AreEqual(expectedCore, core);
-        StringAssert.Contains(tui, "internal delegate ValueTask CodexAuthenticationTestOperation(\n    Action<string?> onAuthenticated,\n    CancellationToken cancellationToken);");
+        StringAssert.Contains(source, "internal delegate ValueTask CodexAuthenticationTestOperation(\n    Action<string?> onAuthenticated,\n    CancellationToken cancellationToken);");
         var expectedFormatter = """
             internal static ProviderTestResult FormatCodexAuthenticationResult(string? rawAccountId)
             {
@@ -1170,6 +1209,7 @@ public sealed class HostingCompositionBoundaryTests
         })
         {
             Assert.IsFalse(authentication.Contains(forbidden, StringComparison.Ordinal));
+            Assert.IsFalse(publicAuthentication.Contains(forbidden, StringComparison.Ordinal));
             Assert.IsFalse(core.Contains(forbidden, StringComparison.Ordinal));
         }
         foreach (var forbidden in new[]
@@ -1181,10 +1221,17 @@ public sealed class HostingCompositionBoundaryTests
         {
             Assert.IsFalse(core.Contains(forbidden, StringComparison.Ordinal));
         }
-        // Phase 1 keeps Hosting's four-method public allowlist and protected unused TUI helpers.
-        Assert.IsFalse(source.Contains("TestAuthenticationAsync(", StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains("CodexAuthenticationTestOperation", StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains("TestCodexAuthenticationCoreAsync", StringComparison.Ordinal));
+        foreach (var concrete in new[] { "OpenAICodexSubscriptionAuthManager", "FileOpenAICodexSubscriptionCredentialStore", "HttpClient", "ResolveCodexHome", "GetAccountContextAsync" })
+        {
+            Assert.IsFalse(authentication.Contains(concrete, StringComparison.Ordinal));
+        }
+        foreach (var presentation in new[] { "SR.T(", "Process.", "Environment.", "FormatCodexAuthenticationResult" })
+        {
+            Assert.IsFalse(publicAuthentication.Contains(presentation, StringComparison.Ordinal));
+        }
+        // Hosting owns the only orchestration core; protected unused TUI manager helpers remain.
+        Assert.IsFalse(tui.Contains("CodexAuthenticationTestOperation", StringComparison.Ordinal));
+        Assert.IsFalse(tui.Contains("TestCodexAuthenticationCoreAsync", StringComparison.Ordinal));
         var expectedAdapter = """
             public Task<ProviderTestResult> TestAuthenticationAsync(CodeAltaProviderDocument definition, CancellationToken cancellationToken = default)
                 => definition.ProviderType switch
