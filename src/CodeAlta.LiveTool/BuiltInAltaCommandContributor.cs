@@ -1270,6 +1270,11 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             shouldPoll = false,
             nextStep = AskNextStep,
         });
+        foreach (var error in result.NotificationErrors)
+        {
+            AltaJsonlWriter.WriteWarning(context.Stderr, context.CorrelationId, "ask.notificationFailed", $"Ask '{result.AskId}' was queued, but notification failed: {error}");
+        }
+
         return AltaExitCodes.Success;
     }
 

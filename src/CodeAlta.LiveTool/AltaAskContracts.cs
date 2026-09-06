@@ -139,6 +139,19 @@ public sealed record AltaAskQueueResult
 
     /// <summary>Gets the target source session id.</summary>
     public required string SessionId { get; init; }
+
+    /// <summary>Gets immutable observer-failure summaries. Admission is committed even when this list is nonempty.</summary>
+    public IReadOnlyList<string> NotificationErrors { get; init; } = [];
+}
+
+/// <summary>Reports an exact pending-head removal and any subsequent invalidation failures.</summary>
+public sealed record AltaAskRemovalResult
+{
+    /// <summary>Gets whether the matching head was removed. This does not indicate prompt submission or runtime admission.</summary>
+    public required bool Accepted { get; init; }
+
+    /// <summary>Gets immutable observer-failure summaries. An accepted removal remains committed even when this list is nonempty.</summary>
+    public IReadOnlyList<string> NotificationErrors { get; init; } = [];
 }
 
 /// <summary>
@@ -146,26 +159,47 @@ public sealed record AltaAskQueueResult
 /// </summary>
 public interface IAltaAskService
 {
-    /// <summary>Occurs after the pending ask queue for a session changes.</summary>
+    /// <summary>Invalidates a session's pending snapshot after a committed change; observers must requery.</summary>
+    /// <remarks>
+    /// Observers run outside queue ownership, may reenter, and are all attempted even if one throws.
+    /// Failures (including observer cancellation) are returned in the mutation result, not thrown as mutation failures.
+    /// Notifications may interleave and are not an ordered replay stream or proof that an ask is still pending.
+    /// </remarks>
     event EventHandler<AltaAskQueueChangedEventArgs>? QueueChanged;
 
-    /// <summary>Queues an ask for the target session.</summary>
+    /// <summary>Copies a validated ask's nested collections and queues the immutable snapshot for the target session.</summary>
     /// <param name="request">The validated ask request.</param>
     /// <param name="sessionId">The target session id.</param>
     /// <param name="caller">The caller identity.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The queued ask id and target session id.</returns>
+    /// <remarks>Session ids are trimmed on admission only. Cancellation is checked under ownership before admission, not after commit. Callers must not mutate input collections during this call.</remarks>
+    /// <exception cref="ArgumentNullException">The request, session id, or caller is null.</exception>
+    /// <exception cref="ArgumentException">The session id is empty or whitespace.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation is observed before admission.</exception>
     Task<AltaAskQueueResult> QueueAsync(AltaAskRequest request, string sessionId, AltaCallerIdentity caller, CancellationToken cancellationToken = default);
 
     /// <summary>Peeks at the next pending ask for a session without removing it.</summary>
     /// <param name="sessionId">The session id.</param>
-    /// <returns>The next queued ask, or <see langword="null"/> when none is pending.</returns>
+    /// <returns>The next immutable queued ask snapshot, or <see langword="null"/> when none is pending.</returns>
+    /// <exception cref="ArgumentNullException">The session id is null.</exception>
+    /// <exception cref="ArgumentException">The session id is empty or whitespace.</exception>
     AltaQueuedAsk? Peek(string sessionId);
 
-    /// <summary>Dequeues the next pending ask for a session.</summary>
+    /// <summary>Gets an immutable point-in-time FIFO snapshot for a session, independent of frontend tabs.</summary>
     /// <param name="sessionId">The session id.</param>
-    /// <returns>The dequeued ask, or <see langword="null"/> when none is pending.</returns>
-    AltaQueuedAsk? Dequeue(string sessionId);
+    /// <returns>The pending asks, or an empty snapshot. Subsequent mutations do not change this snapshot.</returns>
+    /// <exception cref="ArgumentNullException">The session id is null.</exception>
+    /// <exception cref="ArgumentException">The session id is empty or whitespace.</exception>
+    IReadOnlyList<AltaQueuedAsk> GetPending(string sessionId);
+
+    /// <summary>Removes the pending head only when both session and ask ids match exactly (ordinal, without trimming).</summary>
+    /// <param name="sessionId">The session id.</param>
+    /// <param name="askId">The expected head's ask id.</param>
+    /// <returns>An explicit removal outcome. Stale, wrong-session, and non-head keys leave pending state unchanged and do not notify.</returns>
+    /// <exception cref="ArgumentNullException">Either id is null.</exception>
+    /// <exception cref="ArgumentException">Either id is empty or whitespace.</exception>
+    AltaAskRemovalResult TryRemoveHead(string sessionId, string askId);
 }
 
 /// <summary>
@@ -175,6 +209,8 @@ public sealed class AltaAskQueueChangedEventArgs : EventArgs
 {
     /// <summary>Initializes a new instance of the <see cref="AltaAskQueueChangedEventArgs"/> class.</summary>
     /// <param name="sessionId">The session whose ask queue changed.</param>
+    /// <exception cref="ArgumentNullException">The session id is null.</exception>
+    /// <exception cref="ArgumentException">The session id is empty or whitespace.</exception>
     public AltaAskQueueChangedEventArgs(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -208,13 +244,20 @@ public sealed class AltaAskService : IAltaAskService
         {
             AskId = Guid.CreateVersion7().ToString(),
             SessionId = sessionId.Trim(),
-            Request = request,
+            Request = request with
+            {
+                Questions = Array.AsReadOnly(request.Questions.Select(static question => question with
+                {
+                    Choices = Array.AsReadOnly(question.Choices.ToArray()),
+                }).ToArray()),
+            },
             Caller = caller,
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!_queues.TryGetValue(queued.SessionId, out var queue))
             {
                 queue = new Queue<AltaQueuedAsk>();
@@ -224,8 +267,8 @@ public sealed class AltaAskService : IAltaAskService
             queue.Enqueue(queued);
         }
 
-        QueueChanged?.Invoke(this, new AltaAskQueueChangedEventArgs(queued.SessionId));
-        return Task.FromResult(new AltaAskQueueResult { AskId = queued.AskId, SessionId = queued.SessionId });
+        var errors = NotifyQueueChanged(queued.SessionId);
+        return Task.FromResult(new AltaAskQueueResult { AskId = queued.AskId, SessionId = queued.SessionId, NotificationErrors = errors });
     }
 
     /// <inheritdoc />
@@ -239,28 +282,62 @@ public sealed class AltaAskService : IAltaAskService
     }
 
     /// <inheritdoc />
-    public AltaQueuedAsk? Dequeue(string sessionId)
+    public IReadOnlyList<AltaQueuedAsk> GetPending(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        AltaQueuedAsk? queued = null;
         lock (_gate)
         {
-            if (_queues.TryGetValue(sessionId, out var queue) && queue.Count > 0)
+            return Array.AsReadOnly(_queues.TryGetValue(sessionId, out var queue) ? queue.ToArray() : []);
+        }
+    }
+
+    /// <inheritdoc />
+    public AltaAskRemovalResult TryRemoveHead(string sessionId, string askId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(askId);
+        lock (_gate)
+        {
+            if (!_queues.TryGetValue(sessionId, out var queue) || queue.Count == 0
+                || !string.Equals(queue.Peek().AskId, askId, StringComparison.Ordinal))
             {
-                queued = queue.Dequeue();
-                if (queue.Count == 0)
-                {
-                    _queues.Remove(sessionId);
-                }
+                return new AltaAskRemovalResult { Accepted = false };
+            }
+
+            queue.Dequeue();
+            if (queue.Count == 0)
+            {
+                _queues.Remove(sessionId);
             }
         }
 
-        if (queued is not null)
+        return new AltaAskRemovalResult { Accepted = true, NotificationErrors = NotifyQueueChanged(sessionId) };
+    }
+
+    private IReadOnlyList<string> NotifyQueueChanged(string sessionId)
+    {
+        var observers = QueueChanged;
+        if (observers is null)
         {
-            QueueChanged?.Invoke(this, new AltaAskQueueChangedEventArgs(sessionId));
+            return [];
         }
 
-        return queued;
+        List<string>? errors = null;
+        var args = new AltaAskQueueChangedEventArgs(sessionId);
+        foreach (EventHandler<AltaAskQueueChangedEventArgs> observer in observers.GetInvocationList())
+        {
+            try
+            {
+                observer(this, args);
+            }
+            catch (Exception ex)
+            {
+                // Return diagnostics with the committed outcome; no logger, sink, or frontend belongs to queue ownership.
+                (errors ??= []).Add(ex.Message);
+            }
+        }
+
+        return errors is null ? [] : Array.AsReadOnly(errors.ToArray());
     }
 }
 

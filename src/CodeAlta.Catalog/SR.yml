@@ -504,6 +504,12 @@
   fr: "Question annulée ; aucune réponse envoyée."
   ja: "質問をキャンセル。応答は未送信です。"
   zh: "提问已取消；未发送响应。"
+"Ask queue updated, but notification failed: {0}":
+  de: "Fragewarteschlange aktualisiert, aber Benachrichtigung fehlgeschlagen: {0}"
+  es: "Cola de preguntas actualizada, pero la notificación falló: {0}"
+  fr: "File de questions mise à jour, mais la notification a échoué : {0}"
+  ja: "質問キューは更新されましたが、通知に失敗しました: {0}"
+  zh: "提问队列已更新，但通知失败：{0}"
 "Assistant":
   de: "Assistent"
   es: "Asistente"

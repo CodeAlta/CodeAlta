@@ -14,6 +14,19 @@ public sealed class ArchitectureGuardrailTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public void AskMode_RemovesOnlyCapturedHeadAndReconcilesStalePresentation()
+    {
+        var source = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "AskModeCoordinator.cs"));
+        Assert.IsFalse(source.Contains("_askService.Dequeue(", StringComparison.Ordinal));
+        Assert.AreEqual(2, Regex.Matches(source, @"_askService\.TryRemoveHead\(ask\.SessionId, ask\.AskId\)").Count);
+        StringAssert.Contains(source, "if (removal.Accepted)");
+        StringAssert.Contains(source, "private void ReconcilePresentation(AltaQueuedAsk ask)");
+        StringAssert.Contains(source, "if (IsActive(ask))");
+        StringAssert.Contains(source, "await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId)");
+        StringAssert.Contains(source, "ReportNotificationErrors(removal)");
+    }
+
+    [TestMethod]
     public void NotesComposition_UsesDurableAdapterAndKeepsOnlyPresentationInTui()
     {
         var tui = GetCodeAltaSourceRoot();

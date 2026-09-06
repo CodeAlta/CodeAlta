@@ -630,6 +630,43 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AskCommand_NotificationFailureKeepsQueuedProtocolAndCapturedIdentity(bool explicitTarget)
+    {
+        // Only in-memory ask/registry services: root resolution takes its no-catalog fallback,
+        // and this payload has no file, so no filesystem/provider/plugin discovery is performed.
+        var service = new AltaAskService();
+        service.QueueChanged += (_, _) => throw new InvalidOperationException("in-memory invalidation failure");
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add<IAltaAskService>(service));
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "source", SourceAgentId = "agent" };
+        var target = explicitTarget ? "explicit" : "source";
+        var result = await dispatcher.InvokeAsync(
+            explicitTarget ? ["ask", "--session", target, "--stdin"] : ["ask", "--stdin"],
+            caller: caller,
+            stdin: """{"questions":[{"title":" Q ","question":"Answer?","freeform":{}}]}""");
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout);
+        var records = ReadJsonLines(result.Stdout);
+        var queued = records.Single(static line => line.GetProperty("type").GetString() == "alta.ask.queued");
+        Assert.AreEqual(target, queued.GetProperty("sessionId").GetString());
+        Assert.IsTrue(queued.GetProperty("queued").GetBoolean());
+        Assert.IsTrue(queued.GetProperty("shouldYield").GetBoolean());
+        Assert.AreEqual("stop", queued.GetProperty("recommendedAction").GetString());
+        Assert.IsFalse(queued.GetProperty("activeWaitAllowed").GetBoolean());
+        Assert.IsFalse(queued.GetProperty("shouldPoll").GetBoolean());
+        var pending = service.Peek(target)!;
+        Assert.AreEqual(queued.GetProperty("askId").GetString(), pending.AskId);
+        Assert.AreEqual(caller, pending.Caller);
+        Assert.AreEqual("Q", pending.Request.Questions[0].Title);
+        var warning = records.Single(static line => line.GetProperty("type").GetString() == "alta.warning");
+        Assert.AreEqual("ask.notificationFailed", warning.GetProperty("code").GetString());
+        StringAssert.Contains(warning.GetProperty("message").GetString(), "was queued");
+        StringAssert.Contains(warning.GetProperty("message").GetString(), "in-memory invalidation failure");
+        Assert.IsFalse(records.Any(static line => line.GetProperty("type").GetString() == "alta.error"));
+    }
+
+    [TestMethod]
     public async Task NotesCommand_SetGetClearRoundTripsMarkdown()
     {
         var notesService = new AltaNotesService();
@@ -765,8 +802,8 @@ public sealed class AltaLiveToolTests
         var second = service.QueueAsync(secondRequest, "session-a", caller).GetAwaiter().GetResult();
 
         Assert.AreEqual(first.AskId, service.Peek("session-a")!.AskId);
-        Assert.AreEqual(first.AskId, service.Dequeue("session-a")!.AskId);
-        Assert.AreEqual(second.AskId, service.Dequeue("session-a")!.AskId);
+        Assert.IsTrue(service.TryRemoveHead("session-a", first.AskId).Accepted);
+        Assert.IsTrue(service.TryRemoveHead("session-a", second.AskId).Accepted);
         Assert.IsNull(service.Peek("session-a"));
         CollectionAssert.AreEqual(new[] { "session-a", "session-a", "session-a", "session-a" }, changedSessions);
     }

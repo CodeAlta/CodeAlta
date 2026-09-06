@@ -117,6 +117,8 @@ Before editing, ask me whether to update only website docs or both website and i
 
 After queuing an ask, the agent should stop and wait. CodeAlta presents the questions in the session UI and sends your answers back as the next prompt.
 
+Pending asks retain their queued questions and choices in per-session order, independently of whether that session has an open tab. A late submit/cancel callback cannot remove a different pending ask. These queues last only for the current application process; they are not restored after restart. If notification fails after an ask is queued, CodeAlta reports a warning without undoing the ask or changing the agent's instruction to wait. Answer submission still uses the normal prompt pathway, including plugin handling; queue removal is not a guarantee of model acceptance or safe automatic retry.
+
 ### Delegate read-only research
 
 Delegation works best when each child has a narrow task and a bounded output.

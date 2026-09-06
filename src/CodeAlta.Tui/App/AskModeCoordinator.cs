@@ -182,18 +182,20 @@ internal sealed class AskModeCoordinator : IDisposable
         {
             RestoreNormalProjection(ask.SessionId);
             await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId);
-            _ = _askService.Dequeue(ask.SessionId);
-            ClearActive();
-            _ = TryPresentPendingAsk(ask.SessionId);
         }
         catch (Exception ex)
         {
             CodeAltaApp.UiLogger.Error(ex, $"Failed to submit ask response for session {ask.SessionId}");
-            _activeAskId = null;
-            _activeSessionId = null;
             _setStatus(SR.T("Failed to submit ask response: {0}", ex.Message), false, StatusTone.Error);
-            _ = TryPresentPendingAsk(ask.SessionId);
+            ReconcilePresentation(ask);
+            return;
         }
+
+        // Existing dispatch completion is not proof of runtime admission. Only remove this exact pending head.
+        // Keep post-removal presentation/diagnostics outside the send-failure handler: removal is already committed.
+        var removal = _askService.TryRemoveHead(ask.SessionId, ask.AskId);
+        ReconcilePresentation(ask);
+        ReportNotificationErrors(removal);
     }
 
     private void HandleCancelRequest(AltaQueuedAsk ask, AskQuestionFormView form, AskFileReviewView? fileReview)
@@ -237,11 +239,33 @@ internal sealed class AskModeCoordinator : IDisposable
             return;
         }
 
-        _ = _askService.Dequeue(ask.SessionId);
-        RestoreNormalProjection(ask.SessionId);
-        ClearActive();
-        _setStatus(SR.T("Ask canceled; no response was sent."), false, StatusTone.Warning);
-        _ = TryPresentPendingAsk(ask.SessionId);
+        var removal = _askService.TryRemoveHead(ask.SessionId, ask.AskId);
+        if (removal.Accepted)
+        {
+            _setStatus(SR.T("Ask canceled; no response was sent."), false, StatusTone.Warning);
+        }
+
+        ReconcilePresentation(ask);
+        ReportNotificationErrors(removal);
+    }
+
+    private void ReconcilePresentation(AltaQueuedAsk ask)
+    {
+        // A late submit/dialog callback must not tear down a newer ask's presentation either.
+        if (IsActive(ask))
+        {
+            RestoreNormalProjection(ask.SessionId);
+            ClearActive();
+            _ = TryPresentPendingAsk(ask.SessionId);
+        }
+    }
+
+    private void ReportNotificationErrors(AltaAskRemovalResult removal)
+    {
+        if (removal.NotificationErrors.Count > 0)
+        {
+            _setStatus(SR.T("Ask queue updated, but notification failed: {0}", string.Join("; ", removal.NotificationErrors)), false, StatusTone.Warning);
+        }
     }
 
     private void ShowCancelConfirmation(AltaQueuedAsk ask, AskQuestionFormView form)
