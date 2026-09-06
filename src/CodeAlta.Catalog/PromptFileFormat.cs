@@ -83,13 +83,14 @@ public static class PromptFileFormat
         }
     }
 
-    /// <summary>Serializes the management format (replace system files remain plain Markdown).</summary>
+    /// <summary>Serializes the management format (replace system files without metadata remain plain Markdown).</summary>
     /// <exception cref="ArgumentException">Kind, system id or required fields are invalid.</exception>
     /// <exception cref="ArgumentNullException">Content is null.</exception>
     public static string Serialize(PromptResourceKind kind, PromptFileContent content)
     {
         Validate(kind, content);
-        if (kind == PromptResourceKind.System && !content.Append)
+        var hasSystemMetadata = kind == PromptResourceKind.System && (Normalize(content.Name) is not null || Normalize(content.Description) is not null);
+        if (kind == PromptResourceKind.System && !content.Append && !hasSystemMetadata)
         {
             // Replace-mode system files are plain Markdown. A body containing a leading
             // closed header would be reinterpreted as metadata on the next load.
@@ -98,13 +99,13 @@ public static class PromptFileFormat
                 throw new ArgumentException("A replace-mode system prompt body cannot begin with prompt frontmatter.", nameof(content));
         }
         var builder = new StringBuilder();
-        if (kind == PromptResourceKind.Agent || content.Append)
+        if (kind == PromptResourceKind.Agent || content.Append || hasSystemMetadata)
         {
             builder.AppendLine("---");
+            AddScalar(builder, "name", content.Name);
+            AddScalar(builder, "description", content.Description);
             if (kind == PromptResourceKind.Agent)
             {
-                AddScalar(builder, "name", content.Name);
-                AddScalar(builder, "description", content.Description);
                 // Explicit default on append must not accidentally inherit a different lower system id.
                 if (content.Append || !string.Equals(Normalize(content.SystemPromptName), "default", StringComparison.OrdinalIgnoreCase))
                     AddScalar(builder, "system", content.SystemPromptName);

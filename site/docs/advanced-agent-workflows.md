@@ -158,6 +158,10 @@ Switch this session to the triage prompt for the next turn.
 
 Use [Agent Prompts](prompts.md) for file layout, frontmatter, override rules, and authoring guidance.
 
+When an agent creates a prompt, CodeAlta validates and writes the metadata and body without replacing an existing same-scope file. Raw prompt edits replace the complete file: supplied comments, unknown metadata and line endings are retained, as is an existing Unicode encoding/BOM. An edit can also create a missing file or repair malformed prompt metadata; asking only for its path does not write anything. Built-in prompts and linked paths are not writable through these commands.
+
+Changes detected after an edit command captures its file baseline cause a failure rather than an automatic overwrite/retry. This check begins when the command runs, not when the agent originally composed the replacement; ask it to reread and reconcile old content before editing. External editors can still race the final check and write. Review prompt-file diffs, especially when several tools are editing the same file.
+
 ### Activate MCP tools for a future turn
 
 MCP servers can be configured globally or per project, then activated for a session.

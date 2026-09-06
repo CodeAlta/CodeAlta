@@ -39,6 +39,18 @@ public sealed class PromptResourceSnapshot
     public TextFileSnapshot File { get; }
 }
 
+/// <summary>Owner-bound raw edit baseline; metadata need not parse to repair a Unicode file.</summary>
+public sealed class PromptResourceDocument
+{
+    internal PromptResourceDocument(PromptResourceStore owner, PromptResourceIdentity identity, TextFileSnapshot file)
+        => (Owner, Identity, File) = (owner, identity, file);
+    internal PromptResourceStore Owner { get; }
+    /// <summary>Gets the validated file identity.</summary>
+    public PromptResourceIdentity Identity { get; }
+    /// <summary>Gets complete text, encoding/BOM and byte revision (Missing for an absent file).</summary>
+    public TextFileSnapshot File { get; }
+}
+
 /// <summary>
 /// Trusted-backend CRUD over explicit prompt roots. Does not discover or assemble runtime prompts.
 /// Share the application's text codec with overlapping editors. No raw path is a renderer grant.
@@ -77,7 +89,7 @@ public sealed class PromptResourceStore
     public static void ValidateId(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        if (id is "." or ".." || id.EndsWith('.') || id.Any(static ch => !char.IsLetterOrDigit(ch) && ch is not '-' and not '_' and not '.'))
+        if (id is "." or ".." || id.EndsWith('.') || id.EndsWith(".prompt.md", StringComparison.OrdinalIgnoreCase) || id.EndsWith(".system-prompt.md", StringComparison.OrdinalIgnoreCase) || id.Any(static ch => !char.IsLetterOrDigit(ch) && ch is not '-' and not '_' and not '.'))
             throw new ArgumentException("Invalid prompt file id.", nameof(id));
         var stem = id.Split('.')[0].ToUpperInvariant();
         if (stem is "CON" or "PRN" or "AUX" or "NUL" || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal)) && stem[3] is >= '0' and <= '9'))
@@ -140,7 +152,52 @@ public sealed class PromptResourceStore
     /// <exception cref="UnauthorizedAccessException">Built-in scope, links or access denial.</exception>
     /// <exception cref="EncoderFallbackException">Content has invalid Unicode.</exception>
     public TextFileSaveResult Create(PromptResourceIdentity identity, PromptFileContent content)
-        => _textFiles.Save(new TextFileSaveRequest(CheckedPath(identity, writable: true), PromptFileFormat.Serialize(identity.Kind, content), new UTF8Encoding(false, true), false, TextFileRevision.Missing));
+        => CreateAsync(identity, content, CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>Creates using the Missing revision and non-overwriting atomic publication.</summary>
+    /// <inheritdoc cref="Create(PromptResourceIdentity, PromptFileContent)"/>
+    /// <exception cref="OperationCanceledException">Canceled before commit.</exception>
+    public Task<TextFileSaveResult> CreateAsync(PromptResourceIdentity identity, PromptFileContent content, CancellationToken cancellationToken)
+        => _textFiles.SaveAsync(new TextFileSaveRequest(CheckedPath(identity, writable: true), PromptFileFormat.Serialize(identity.Kind, content), new UTF8Encoding(false, true), false, TextFileRevision.Missing), cancellationToken);
+
+    /// <summary>Validates an editable path without reading or creating the file.</summary>
+    /// <exception cref="ArgumentException">Identity or scope is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Identity is null.</exception>
+    /// <exception cref="IOException">Path inspection fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">Built-in scope, links or access denial.</exception>
+    public string GetEditablePath(PromptResourceIdentity identity) => CheckedPath(identity, writable: true);
+
+    /// <summary>Captures a raw edit baseline before obtaining replacement text; only absence becomes Missing.</summary>
+    /// <inheritdoc cref="GetEditablePath(PromptResourceIdentity)"/>
+    /// <exception cref="DecoderFallbackException">Existing bytes are not supported Unicode.</exception>
+    /// <exception cref="OperationCanceledException">Canceled while loading.</exception>
+    public async Task<PromptResourceDocument> OpenDocumentAsync(PromptResourceIdentity identity, CancellationToken cancellationToken)
+    {
+        var path = CheckedPath(identity, writable: true);
+        TextFileSnapshot file;
+        try { file = await _textFiles.LoadAsync(path, cancellationToken).ConfigureAwait(false); }
+        catch (FileNotFoundException) { file = MissingFile(); }
+        catch (DirectoryNotFoundException) { file = MissingFile(); }
+        cancellationToken.ThrowIfCancellationRequested();
+        return new PromptResourceDocument(this, identity, file);
+
+        static TextFileSnapshot MissingFile() => new(string.Empty, new UTF8Encoding(false, true), false, default, TextFileRevision.Missing);
+    }
+
+    /// <summary>Replaces complete raw text against the captured revision, retaining encoding/BOM without parsing metadata.</summary>
+    /// <remarks>No retry/adoption on conflict. Callers must capture the document before awaiting replacement input.</remarks>
+    /// <exception cref="ArgumentException">Document belongs to another store or identity is invalid.</exception>
+    /// <exception cref="ArgumentNullException">Document or text is null.</exception>
+    /// <exception cref="IOException">Reading/staging/commit fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">Built-in scope, links or access denial.</exception>
+    /// <exception cref="EncoderFallbackException">Replacement text has invalid Unicode.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before commit.</exception>
+    public Task<TextFileSaveResult> SaveDocumentAsync(PromptResourceDocument document, string text, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!ReferenceEquals(document.Owner, this)) throw new ArgumentException("Prompt document belongs to another root owner.", nameof(document));
+        return _textFiles.SaveAsync(new TextFileSaveRequest(CheckedPath(document.Identity, writable: true), text, document.File.Encoding, document.File.HasByteOrderMark, document.File.Revision), cancellationToken);
+    }
 
     /// <summary>Saves only against the loaded byte revision.</summary>
     /// <inheritdoc cref="Save(PromptResourceSnapshot, PromptFileContent, TextFileRevision)"/>

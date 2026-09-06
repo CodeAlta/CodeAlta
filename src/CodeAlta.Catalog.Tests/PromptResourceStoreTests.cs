@@ -79,7 +79,7 @@ public sealed class PromptResourceStoreTests
     public void InvalidIdsKindsScopesRootsAndRequiredFieldsAreRejected()
     {
         using var fixture = new Fixture();
-        foreach (var id in new[] { "", ".", "..", "../escape", "a/b", "a\\b", "a:b", "a.", "CON", "NUL.txt" })
+        foreach (var id in new[] { "", ".", "..", "../escape", "a/b", "a\\b", "a:b", "a.", "CON", "NUL.txt", "a.prompt.md", "a.system-prompt.md" })
         {
             Assert.Throws<ArgumentException>(() => fixture.Store.Create(fixture.Id with { Id = id }, fixture.Content), id);
         }
@@ -172,10 +172,11 @@ public sealed class PromptResourceStoreTests
     {
         using var fixture = new Fixture();
         var id = fixture.Id with { Kind = PromptResourceKind.System };
-        fixture.Store.Create(id, fixture.Content);
+        var content = fixture.Content with { Name = null };
+        fixture.Store.Create(id, content);
         var loaded = fixture.Store.Load(id);
         var bytes = File.ReadAllBytes(fixture.Store.GetPath(id));
-        Assert.Throws<ArgumentException>(() => fixture.Store.Save(loaded, fixture.Content with { Body = "---\nmode: append\n---\ndifferent mode" }));
+        Assert.Throws<ArgumentException>(() => fixture.Store.Save(loaded, content with { Body = "---\nmode: append\n---\ndifferent mode" }));
         CollectionAssert.AreEqual(bytes, File.ReadAllBytes(fixture.Store.GetPath(id)));
     }
 
@@ -212,6 +213,51 @@ public sealed class PromptResourceStoreTests
             Assert.AreEqual("original", loaded.Content.Body);
         }
         finally { File.SetAttributes(path, FileAttributes.Normal); }
+    }
+
+    [TestMethod]
+    public void SystemMetadataRoundTripsWithoutReinterpretingNestedBodyHeader()
+    {
+        var content = new PromptFileContent("Name: \"test\"", "one\ntwo", null, "---\nmode: append\n---\nliteral body", false);
+        var text = PromptFileFormat.Serialize(PromptResourceKind.System, content);
+        Assert.AreEqual(content, PromptFileFormat.Parse(PromptResourceKind.System, text));
+    }
+
+    [TestMethod]
+    public async Task RawDocumentIsOwnerBoundRepairableAndRevisionChecked()
+    {
+        using var fixture = new Fixture();
+        using var other = new Fixture();
+        var path = fixture.Store.GetPath(fixture.Id);
+        var missing = await fixture.Store.OpenDocumentAsync(fixture.Id, CancellationToken.None);
+        Assert.AreEqual(TextFileRevision.Missing, missing.File.Revision);
+        Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(path)));
+        const string malformed = "---\r\nmode: invalid\r\n# retained\r\nunknown: value\r\n---\r\nbody";
+        Assert.IsFalse((await fixture.Store.SaveDocumentAsync(missing, malformed, CancellationToken.None)).IsConflict);
+        Assert.Throws<ArgumentException>(() => fixture.Store.Load(fixture.Id));
+        var document = await fixture.Store.OpenDocumentAsync(fixture.Id, CancellationToken.None);
+        Assert.AreEqual(malformed, document.File.Text);
+        Assert.Throws<ArgumentException>(() => other.Store.SaveDocumentAsync(document, "wrong owner", CancellationToken.None));
+        Assert.IsFalse((await fixture.Store.SaveDocumentAsync(document, "raw repair", CancellationToken.None)).IsConflict);
+        Assert.IsTrue((await fixture.Store.SaveDocumentAsync(document, "stale", CancellationToken.None)).IsConflict);
+        Assert.AreEqual("raw repair", await File.ReadAllTextAsync(path));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => fixture.Store.OpenDocumentAsync(fixture.Id with { Scope = PromptResourceScope.BuiltIn }, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task RawDocumentReadAndEncodingFailuresNeverBecomeMissing()
+    {
+        using var fixture = new Fixture();
+        var path = fixture.Store.GetPath(fixture.Id);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, [0xff]);
+        await Assert.ThrowsAsync<DecoderFallbackException>(() => fixture.Store.OpenDocumentAsync(fixture.Id, CancellationToken.None));
+        await File.WriteAllTextAsync(path, "original");
+        using (var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            await Assert.ThrowsAsync<IOException>(() => fixture.Store.OpenDocumentAsync(fixture.Id, CancellationToken.None));
+        var document = await fixture.Store.OpenDocumentAsync(fixture.Id, CancellationToken.None);
+        await Assert.ThrowsAsync<EncoderFallbackException>(() => fixture.Store.SaveDocumentAsync(document, "bad\ud800", CancellationToken.None));
+        Assert.AreEqual("original", await File.ReadAllTextAsync(path));
     }
 
     private sealed class Fixture : IDisposable

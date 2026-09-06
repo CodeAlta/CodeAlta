@@ -117,6 +117,7 @@ internal sealed class CodeAltaFrontendComposition
             sessionId => sessionStateCoordinator?.FindOpenSession(sessionId));
         var altaServices = new AltaServiceCollection()
             .Add(catalogOptions)
+            .Add(sessionCatalog.TextFiles)
             .Add(projectCatalog)
             .Add(sessionCatalog)
             .Add(runtimeService)

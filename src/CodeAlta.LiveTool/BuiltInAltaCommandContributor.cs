@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
@@ -2547,7 +2548,62 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandlePromptCreateAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options)
+    private static ValueTask<int> HandlePromptCreateAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options)
+        => HandlePromptMutationAsync(context, promptId, options, create: true);
+
+    private static ValueTask<int> HandlePromptEditAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options)
+        => HandlePromptMutationAsync(context, promptId, options, create: false);
+
+    private static async ValueTask<int> HandlePromptMutationAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options, bool create)
+    {
+        var commandPath = create ? "alta prompt create" : "alta prompt edit";
+        try
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            if (options.Scope == "all")
+            {
+                return UsageError(context, "usage.invalidScope", "Prompt mutations require --scope global or --scope project.", commandPath);
+            }
+            return create
+                ? await CreatePromptAsync(context, promptId, options).ConfigureAwait(false)
+                : await EditPromptAsync(context, promptId, options).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex) when (ex is not DecoderFallbackException and not EncoderFallbackException)
+        {
+            if (ex.ParamName == "scope" && options.Scope == "project")
+            {
+                return UsageError(context, "usage.missingProject", "Project prompt mutation requires a project root. Provide --project or invoke from a project directory.", commandPath);
+            }
+            return UsageError(context, "usage.invalidPrompt", ex.Message, commandPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DecoderFallbackException or EncoderFallbackException)
+        {
+            if (ex is UnauthorizedAccessException && options.Scope == "builtin")
+            {
+                return UsageError(context, "usage.invalidScope", ex.Message, commandPath);
+            }
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "prompt.storageFailed", AltaExitCodes.Failure, ex.Message, commandPath);
+            return AltaExitCodes.Failure;
+        }
+    }
+
+    private static PromptResourceStore CreatePromptStore(AltaCommandContext context, AgentPromptCatalogQuery query)
+    {
+        var roots = new AgentPromptCatalog().ResolveRoots(query);
+        return new PromptResourceStore(roots.ShippedPromptRoot, roots.GlobalPromptRoot, roots.ProjectPromptRoot,
+            context.Services.Get<TextFileCodec>() ?? new TextFileCodec());
+    }
+
+    private static PromptResourceIdentity GetPromptIdentity(string promptId, PromptManagementOptions options)
+        => new(options.Scope switch
+        {
+            "global" => PromptResourceScope.Global,
+            "project" => PromptResourceScope.Project,
+            "builtin" => PromptResourceScope.BuiltIn,
+            _ => throw new ArgumentException("Prompt mutations require --scope global or --scope project."),
+        }, options.System ? PromptResourceKind.System : PromptResourceKind.Agent, promptId.Trim());
+
+    private static async ValueTask<int> CreatePromptAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options)
     {
         const string CommandPath = "alta prompt create";
         if (string.IsNullOrWhiteSpace(promptId))
@@ -2555,21 +2611,21 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return UsageError(context, "usage.missingPrompt", "Prompt id is required.", CommandPath);
         }
 
-        if (options.Scope is "builtin" or "all")
-        {
-            return UsageError(context, "usage.invalidScope", "Prompt create requires --scope global or --scope project; built-in/all prompts are not editable.", CommandPath);
-        }
-
-        if (!IsSafePromptFileStem(promptId))
-        {
-            return UsageError(context, "usage.invalidPrompt", "Prompt id must be a file name without directory separators or suffixes.", CommandPath);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Content) && options.UseStdin)
+        if (options.Content is not null && options.UseStdin)
         {
             return UsageError(context, "usage.contentConflict", "Use either --content or --stdin, not both.", CommandPath);
         }
 
+        var queryResult = await BuildPromptQueryAsync(context, options.Project).ConfigureAwait(false);
+        if (queryResult.ExitCode != AltaExitCodes.Success)
+        {
+            return queryResult.ExitCode;
+        }
+
+        var store = CreatePromptStore(context, queryResult.Query!);
+        var identity = GetPromptIdentity(promptId, options);
+        // Creation always retains Missing through stdin and commit; it never adopts a file.
+        var path = store.GetEditablePath(identity);
         string? body = null;
         if (!string.IsNullOrWhiteSpace(options.Content))
         {
@@ -2586,37 +2642,17 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return UsageError(context, "usage.missingContent", "Prompt create requires a non-empty prompt body via --content or --stdin.", CommandPath);
         }
 
-        var queryResult = await BuildPromptQueryAsync(context, options.Project).ConfigureAwait(false);
-        if (queryResult.ExitCode != AltaExitCodes.Success)
-        {
-            return queryResult.ExitCode;
-        }
-
-        var catalog = new AgentPromptCatalog();
-        var directory = options.Scope == "project"
-            ? options.System ? catalog.ResolveProjectSystemPromptDirectory(queryResult.Query!) : AppendPromptSubdirectory(catalog.ResolveProjectPromptDirectory(queryResult.Query!), "agents")
-            : options.System ? catalog.ResolveGlobalSystemPromptDirectory(queryResult.Query!) : Path.Combine(catalog.ResolveGlobalPromptDirectory(queryResult.Query!), "agents");
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            return UsageError(context, "usage.missingProject", "Project prompt creation requires a project root. Provide --project or invoke from a project directory.", CommandPath);
-        }
-
         var normalizedPromptId = promptId.Trim();
-        var suffix = options.System ? ".system-prompt.md" : ".prompt.md";
-        var path = Path.Combine(directory, normalizedPromptId + suffix);
-        if (File.Exists(path))
-        {
-            return UsageError(context, "usage.promptExists", $"Prompt file already exists at '{path}'. Use `alta prompt edit` to replace it.", CommandPath);
-        }
-
         var name = NormalizeOptionalText(options.Name) ?? normalizedPromptId;
         var description = NormalizeOptionalText(options.Description);
         var systemPromptId = NormalizeOptionalText(options.SystemPromptId) ?? AgentPromptCatalog.DefaultPromptName;
-        var content = options.System
-            ? BuildSystemPromptCreateFile(body, NormalizeOptionalText(options.Name), description)
-            : BuildAgentPromptCreateFile(name, description, systemPromptId, body);
-        Directory.CreateDirectory(directory);
-        await File.WriteAllTextAsync(path, content, context.CancellationToken).ConfigureAwait(false);
+        var content = new PromptFileContent(options.System ? NormalizeOptionalText(options.Name) : name,
+            description, options.System ? null : systemPromptId, body, false);
+        var saved = await store.CreateAsync(identity, content, context.CancellationToken).ConfigureAwait(false);
+        if (saved.IsConflict)
+        {
+            return UsageError(context, "usage.promptExists", $"Prompt file already exists at '{path}'. Use `alta prompt edit` to replace it.", CommandPath);
+        }
 
         var record = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -2642,24 +2678,14 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandlePromptEditAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options)
+    private static async ValueTask<int> EditPromptAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options)
     {
         if (string.IsNullOrWhiteSpace(promptId))
         {
             return UsageError(context, "usage.missingPrompt", "Prompt id is required.", "alta prompt edit");
         }
 
-        if (options.Scope is "builtin" or "all")
-        {
-            return UsageError(context, "usage.invalidScope", "Prompt edit requires --scope global or --scope project; built-in/all prompts are not editable.", "alta prompt edit");
-        }
-
-        if (!IsSafePromptFileStem(promptId))
-        {
-            return UsageError(context, "usage.invalidPrompt", "Prompt id must be a file name without directory separators.", "alta prompt edit");
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Content) && options.UseStdin)
+        if (options.Content is not null && options.UseStdin)
         {
             return UsageError(context, "usage.contentConflict", "Use either --content or --stdin, not both.", "alta prompt edit");
         }
@@ -2670,31 +2696,21 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             return queryResult.ExitCode;
         }
 
-        var catalog = new AgentPromptCatalog();
-        var directory = options.Scope == "project"
-            ? options.System ? catalog.ResolveProjectSystemPromptDirectory(queryResult.Query!) : AppendPromptSubdirectory(catalog.ResolveProjectPromptDirectory(queryResult.Query!), "agents")
-            : options.System ? catalog.ResolveGlobalSystemPromptDirectory(queryResult.Query!) : Path.Combine(catalog.ResolveGlobalPromptDirectory(queryResult.Query!), "agents");
-        if (string.IsNullOrWhiteSpace(directory))
+        var store = CreatePromptStore(context, queryResult.Query!);
+        var identity = GetPromptIdentity(promptId, options);
+        var path = store.GetEditablePath(identity);
+        var updated = options.Content is not null || options.UseStdin;
+        if (updated)
         {
-            return UsageError(context, "usage.missingProject", "Project prompt editing requires a project root. Provide --project or invoke from a project directory.", "alta prompt edit");
-        }
-
-        var suffix = options.System ? ".system-prompt.md" : ".prompt.md";
-        var path = Path.Combine(directory, promptId.Trim() + suffix);
-        string? content = null;
-        if (!string.IsNullOrWhiteSpace(options.Content))
-        {
-            content = options.Content;
-        }
-        else if (options.UseStdin)
-        {
-            content = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
-        }
-
-        if (content is not null)
-        {
-            Directory.CreateDirectory(directory);
-            await File.WriteAllTextAsync(path, content, context.CancellationToken).ConfigureAwait(false);
+            var document = await store.OpenDocumentAsync(identity, context.CancellationToken).ConfigureAwait(false);
+            var content = options.Content ?? await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
+            var saved = await store.SaveDocumentAsync(document, content, context.CancellationToken).ConfigureAwait(false);
+            if (saved.IsConflict)
+            {
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "prompt.conflict", AltaExitCodes.Failure,
+                    "Prompt file changed after this invocation captured its baseline. No replacement was written.", "alta prompt edit");
+                return AltaExitCodes.Failure;
+            }
         }
 
         AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -2709,7 +2725,7 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             source = options.Scope,
             path,
             exists = File.Exists(path),
-            updated = content is not null,
+            updated,
         });
         return AltaExitCodes.Success;
     }
@@ -3887,62 +3903,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
         }
     }
 
-    private static string BuildAgentPromptCreateFile(string name, string? description, string systemPromptId, string body)
-    {
-        var lines = new List<string>
-        {
-            "---",
-            "name: " + ToYamlScalar(name),
-        };
-        if (!string.IsNullOrWhiteSpace(description))
-        {
-            lines.Add("description: " + ToYamlScalar(description!));
-        }
-
-        if (!string.Equals(systemPromptId, AgentPromptCatalog.DefaultPromptName, StringComparison.OrdinalIgnoreCase))
-        {
-            lines.Add("system: " + ToYamlScalar(systemPromptId));
-        }
-
-        lines.Add("---");
-        lines.Add(body.Trim());
-        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
-    }
-
-    private static string BuildSystemPromptCreateFile(string body, string? name, string? description)
-    {
-        if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(description))
-        {
-            return body.Trim() + Environment.NewLine;
-        }
-
-        var lines = new List<string> { "---" };
-        if (!string.IsNullOrWhiteSpace(name))
-        {
-            lines.Add("name: " + ToYamlScalar(name!));
-        }
-
-        if (!string.IsNullOrWhiteSpace(description))
-        {
-            lines.Add("description: " + ToYamlScalar(description!));
-        }
-
-        lines.Add("---");
-        lines.Add(body.Trim());
-        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
-    }
-
-    private static string ToYamlScalar(string value)
-    {
-        var mustQuote = value.Length == 0 ||
-            char.IsWhiteSpace(value[0]) ||
-            char.IsWhiteSpace(value[^1]) ||
-            value.Any(static ch => ch is ':' or '#' or '\'' or '"' or '[' or ']' or '{' or '}' or ',');
-        return mustQuote
-            ? '"' + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + '"'
-            : value;
-    }
-
     private static bool ScopeMatches(string? scope, AgentPromptSourceKind sourceKind)
         => (scope ?? "all") switch
         {
@@ -4017,26 +3977,6 @@ internal sealed class BuiltInAltaCommandContributor : IAltaCommandContributor
             AgentPromptSourceKind.Project => "project",
             _ => sourceKind.ToString().ToLowerInvariant(),
         };
-
-    private static string? AppendPromptSubdirectory(string? root, string subdirectory)
-        => string.IsNullOrWhiteSpace(root) ? null : Path.Combine(root, subdirectory);
-
-    private static bool IsSafePromptFileStem(string promptId)
-    {
-        if (string.IsNullOrWhiteSpace(promptId))
-        {
-            return false;
-        }
-
-        var trimmed = promptId.Trim();
-        return Path.GetFileName(trimmed) == trimmed &&
-               !trimmed.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
-               !trimmed.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal) &&
-               !string.Equals(trimmed, ".", StringComparison.Ordinal) &&
-               !string.Equals(trimmed, "..", StringComparison.Ordinal) &&
-               !trimmed.EndsWith(".prompt.md", StringComparison.OrdinalIgnoreCase) &&
-               !trimmed.EndsWith(".system-prompt.md", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -145,6 +145,8 @@ Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary. Use i
 
 Open it with `Ctrl+G Ctrl+H` or `/prompt`. The dialog opens on **Agent Prompts**, which lists built-in modes such as Default and Plan plus global/project custom prompts, shows which prompts are shadowed by overrides, and edits the selected prompt on the right. Agent prompt properties are `name`, `description`, `system`, and the Markdown body. The **System Prompt** tab lists system prompt files with the same override rules and lets you edit only global/project override bodies. Built-in prompts are displayed for inspection but are read-only; create a global or project prompt/system prompt with the same id to override one. Advanced prompt workflows can combine prompts with sessions, notes, reminders, asks, MCP, and skills; see [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/).
 
+The prompt manager edits structured fields and may normalize frontmatter. Agent-driven raw prompt edits instead replace complete supplied file text, preserving comments/unknown fields, line endings and existing Unicode encoding/BOM. Both reject detected file conflicts and use the same host storage owner. Raw command checks start when the command runs, so they do not detect that replacement text was already stale beforehand; external edits can still race the final check/write. See [Advanced Agent Workflows]({{site.basepath}}/docs/advanced-agent-workflows/) before coordinating multiple editors.
+
 ## Model browser
 
 <figure class="my-4">

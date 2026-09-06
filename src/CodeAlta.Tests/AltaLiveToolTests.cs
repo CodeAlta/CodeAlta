@@ -231,6 +231,7 @@ public sealed class AltaLiveToolTests
 
         var result = await dispatcher.InvokeAsync(
                 ["prompt", "edit", "created", "--scope", "global", "--stdin"],
+                cwd: root.Path,
                 caller: AltaCallerIdentity.Cli,
                 stdin: "---\nname: Created\n---\nCreated body.")
             .ConfigureAwait(false);
@@ -250,15 +251,18 @@ public sealed class AltaLiveToolTests
 
         var user = await dispatcher.InvokeAsync(
                 ["prompt", "create", "reviewer", "--scope", "global", "--name", "Reviewer", "--description", "Review prompt", "--system-prompt-id", "review-system", "--content", "Review the change."],
+                cwd: root.Path,
                 caller: AltaCallerIdentity.Cli)
             .ConfigureAwait(false);
         var system = await dispatcher.InvokeAsync(
                 ["prompt", "create", "review-system", "--system", "--scope", "global", "--description", "Review system", "--stdin"],
+                cwd: root.Path,
                 caller: AltaCallerIdentity.Cli,
                 stdin: "Stay concise.")
             .ConfigureAwait(false);
         var duplicate = await dispatcher.InvokeAsync(
                 ["prompt", "create", "reviewer", "--scope", "global", "--name", "Reviewer", "--content", "Replacement."],
+                cwd: root.Path,
                 caller: AltaCallerIdentity.Cli)
             .ConfigureAwait(false);
 
@@ -268,17 +272,19 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual("Reviewer", userRecord.GetProperty("name").GetString());
         Assert.AreEqual("review-system", userRecord.GetProperty("systemPromptId").GetString());
         var userText = await File.ReadAllTextAsync(userRecord.GetProperty("path").GetString()!).ConfigureAwait(false);
-        StringAssert.Contains(userText, "name: Reviewer");
-        StringAssert.Contains(userText, "description: Review prompt");
-        StringAssert.Contains(userText, "system: review-system");
-        StringAssert.Contains(userText, "Review the change.");
+        var userContent = PromptFileFormat.Parse(PromptResourceKind.Agent, userText);
+        Assert.AreEqual("Reviewer", userContent.Name);
+        Assert.AreEqual("Review prompt", userContent.Description);
+        Assert.AreEqual("review-system", userContent.SystemPromptName);
+        Assert.AreEqual("Review the change.", userContent.Body);
 
         Assert.AreEqual(AltaExitCodes.Success, system.ExitCode, system.Stderr);
         var systemRecord = ReadJsonLines(system.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.prompt.created");
         Assert.AreEqual("system", systemRecord.GetProperty("promptKind").GetString());
         var systemText = await File.ReadAllTextAsync(systemRecord.GetProperty("path").GetString()!).ConfigureAwait(false);
-        StringAssert.Contains(systemText, "description: Review system");
-        StringAssert.Contains(systemText, "Stay concise.");
+        var systemContent = PromptFileFormat.Parse(PromptResourceKind.System, systemText);
+        Assert.AreEqual("Review system", systemContent.Description);
+        Assert.AreEqual("Stay concise.", systemContent.Body);
 
         Assert.AreEqual(AltaExitCodes.Usage, duplicate.ExitCode);
     }
