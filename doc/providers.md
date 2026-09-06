@@ -8,7 +8,7 @@ A model provider is the user-facing execution configuration for an LLM endpoint/
 flowchart LR
     Config[~/.alta/config.toml - providers.*]
     Store[CodeAltaConfigStore]
-    Builder[ConfiguredModelProviderRegistryBuilder]
+    Builder[CodeAlta.Hosting - ConfiguredModelProviderRegistryBuilder]
     Registry[ModelProviderRegistry]
     Init[ModelProviderInitializationService]
     Runtime[AgentHub / SessionRuntimeService]
@@ -22,7 +22,11 @@ flowchart LR
     Catalog --> Runtime
 ```
 
-At startup, `CodeAltaOwnedServices` loads provider definitions from `CodeAltaConfigStore` and builds `ModelProviderDescriptor` entries and provider runtime factories through `ConfiguredModelProviderRegistryBuilder`. `ModelProviderInitializationService` probes each provider independently and caches readiness/model information. Session listing uses `AgentSessionCatalog` against the single configured sessions root and runs independently of provider probing.
+At startup, the TUI's `CodeAltaOwnedServices` supplies `CodeAltaConfigStore`, the state root and optional models.dev metadata service to `CodeAlta.Hosting.ConfiguredModelProviderRegistryBuilder`. The composition-only Hosting library builds `ModelProviderDescriptor` entries and lazy concrete runtime factories; registration does not start or probe providers. The same builder serves the existing TUI refresh and temporary test/model-list registration paths. `ModelProviderInitializationService` probes each provider independently and caches readiness/model information. Session listing uses `AgentSessionCatalog` against the single configured sessions root and runs independently of provider probing.
+
+Hosting also owns the raw-provider defaults resolver and bundled `ProviderDefaults/provider_defaults.toml`, copied to application output/publish directories. Provider-specific compatibility defaults and configured overrides retain their existing precedence. The global-store overload excludes disabled definitions; the document-sequence overload preserves caller ordering and disabled descriptors, leaving filtering to its caller. A registration batch shares one Codex subscription concurrency limiter. Registries, config stores and metadata services are borrowed, not newly disposed by the builder; registry replacement retains its existing cached-runtime disposal behavior and is not transactional.
+
+Provider-management UI, auth/test/refresh workflows and the background models.dev service lifetime still belong to TUI composition. Concrete authentication/protocol implementations remain in provider packages, and configuration persistence remains in Catalog. This extraction does not change startup admission, host rollback/disposal, active-run refresh safety or desktop composition.
 
 Providers that are disabled, invalid, or missing required credentials are skipped or marked unavailable without deleting their config entries.
 

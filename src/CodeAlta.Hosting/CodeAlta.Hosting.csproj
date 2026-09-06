@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="XenoAtom.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Anthropic\CodeAlta.Agent.Anthropic.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.GoogleGenAI\CodeAlta.Agent.GoogleGenAI.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Mistral\CodeAlta.Agent.Mistral.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Xai\CodeAlta.Agent.Xai.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="ProviderDefaults\provider_defaults.toml"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             TargetPath="ProviderDefaults/provider_defaults.toml" />
+    <InternalsVisibleTo Include="CodeAlta.Hosting.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+  </ItemGroup>
+
+</Project>

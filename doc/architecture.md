@@ -24,7 +24,7 @@ sequenceDiagram
     UI->>Runtime: runtime commands/events through controllers and coordinators
 ```
 
-`CodeAltaOwnedServices.CreateAsync` owns process concerns: the default `~/.alta` root, logging, model-catalog refresh, global config, and configured model-provider registration. It calls `CodeAltaHost.CreateAsync`, which composes reusable runtime services:
+`CodeAltaOwnedServices.CreateAsync` owns process concerns: the default `~/.alta` root, logging, model-catalog refresh, global config, and registration timing. It delegates configured provider descriptors/lazy factories and their bundled compatibility defaults to the composition-only `CodeAlta.Hosting` library. It calls `CodeAlta.Orchestration.Hosting.CodeAltaHost.CreateAsync`, which composes reusable runtime services:
 
 - `ProjectCatalog`, `SessionViewCatalog`, `AgentSessionCatalog`, and `SkillCatalog` from catalog/runtime stores;
 - `PluginRuntimeManager` and plugin resource adapters;
@@ -33,6 +33,8 @@ sequenceDiagram
 - `ProjectFileSearchService` for prompt attachments and file pickers.
 
 `CodeAltaHost` resolves the current directory as the visible default project. When that path is not already in the catalog, the host creates only an in-memory descriptor; `SessionRuntimeService` persists it through `ProjectCatalog` when a project session is created.
+
+`CodeAlta.Hosting` currently contains provider registration/defaults only, not a replacement `CodeAltaHost` or another lifetime owner. The TUI still owns provider-management workflows and the models.dev refresh lifetime; host rollback, borrowed plugin ownership and shutdown consolidation remain separate work. The new library references Agent, Catalog and concrete provider packages, with no frontend, Orchestration, LiveTool or plugin reference.
 
 The TUI receives these services instead of constructing runtime primitives directly. Headless and tool-driven paths can reuse `CodeAltaHost` without terminal controls. Provider initialization and session catalog loading are independent startup tracks: providers can still be probing while local sessions are visible, and session listing does not instantiate or query providers.
 
@@ -47,11 +49,15 @@ flowchart BT
     ProviderPackages[CodeAlta.Agent.*]
     LiveTool[CodeAlta.LiveTool]
     Orchestration[CodeAlta.Orchestration]
+    Hosting[CodeAlta.Hosting - provider composition]
     Frontend[CodeAlta.Tui executable - altatui]
     Tests[Tests]
 
     Plugins --> PluginApi
     ProviderPackages --> Agent
+    Hosting --> ProviderPackages
+    Hosting --> Agent
+    Hosting --> Catalog
     Orchestration --> Agent
     Orchestration --> Catalog
     Orchestration --> Plugins
@@ -59,6 +65,8 @@ flowchart BT
     LiveTool --> Catalog
     LiveTool --> Orchestration
     Frontend --> Orchestration
+    Frontend --> Hosting
+    Frontend --> ProviderPackages
     Frontend --> Catalog
     Frontend --> Agent
     Frontend --> LiveTool
@@ -73,6 +81,7 @@ Important boundary rules:
 - `CodeAlta.Orchestration` is headless and references `CodeAlta.Agent`, `CodeAlta.Catalog`, and `CodeAlta.Plugins` only.
 - Views and dialogs render state and invoke command/service interfaces; they must not call `SessionRuntimeService`, `AgentHub`, provider registries, or plugin runtime services directly.
 - Model providers own protocol adaptation, credentials, readiness, and model metadata. They do not own persisted session listing or project/session restore.
+- Configured provider registration/defaults belong in `CodeAlta.Hosting`; concrete authentication remains in provider packages and config persistence in Catalog. Its focused tests assemble descriptors and defaults without invoking concrete factories or starting a host. Existing plugin dependencies in the broader shared-host graph are not yet transitively terminal-free.
 - `IAgentSessionStore`/`AgentSessionCatalog` own provider-independent persisted session listing, history reads, and deletion for one configured sessions root.
 - `CodeAlta.Plugins.Abstractions` is the public plugin authoring surface. Runtime adapters belong in `CodeAlta.Plugins` or `CodeAlta.Orchestration`, not in the TUI. Plugins may contribute prompt parts, tools, resources, UI projections, and `alta` commands; they do not contribute independent session-owning provider runtimes.
 - Public/runtime APIs expose ids, request/response records, snapshots, handles, and events. Internal mailbox actors stay internal.

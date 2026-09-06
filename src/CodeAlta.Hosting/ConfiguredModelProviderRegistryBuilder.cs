@@ -13,17 +13,55 @@ using CodeAlta.Catalog;
 using Tomlyn.Model;
 using XenoAtom.Logging;
 
-namespace CodeAlta.Tui.App;
+namespace CodeAlta.Hosting;
 
-internal static class ConfiguredModelProviderRegistryBuilder
+/// <summary>
+/// Composes configured provider descriptors and lazy concrete runtime factories.
+/// </summary>
+/// <remarks>
+/// This builder does not start or probe providers, own the supplied registry/configuration store,
+/// or start or dispose the optional models.dev metadata service. Runtime factories borrow that
+/// metadata service, which must outlive runtimes using it. Each registration batch shares one
+/// Codex subscription concurrency limiter; a standalone registration has its own limiter.
+/// Configured credential environment variables and shipped provider-defaults content can be read
+/// while building registrations. Concrete authentication remains in the provider packages.
+/// </remarks>
+public static class ConfiguredModelProviderRegistryBuilder
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.RawApi");
 
+    /// <summary>
+    /// Registers enabled global provider definitions without models.dev metadata enrichment.
+    /// </summary>
+    /// <param name="modelProviderRegistry">The borrowed registry to update; it retains the factories and owns its cached runtimes.</param>
+    /// <param name="configStore">The borrowed Catalog store from which global provider definitions are loaded, not saved.</param>
+    /// <param name="stateRootPath">The nonblank state-root path forwarded unchanged to runtime options; no directory is created by this builder.</param>
+    /// <returns>Successfully composed descriptors in configuration-store order.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The state-root path is blank or a provider value is invalid.</exception>
+    /// <remarks>Configuration loading, definition conversion and registry replacement exceptions propagate; updates are not transactional.</remarks>
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredProviders(
+        ModelProviderRegistry modelProviderRegistry,
+        CodeAltaConfigStore configStore,
+        string stateRootPath)
+        => RegisterConfiguredProviders(modelProviderRegistry, configStore, stateRootPath, null);
+
+    /// <summary>
+    /// Registers enabled global provider definitions with optional borrowed models.dev metadata.
+    /// </summary>
+    /// <param name="modelProviderRegistry">The borrowed registry to update; it retains the factories and owns its cached runtimes.</param>
+    /// <param name="configStore">The borrowed Catalog store from which global provider definitions are loaded, not saved.</param>
+    /// <param name="stateRootPath">The nonblank state-root path forwarded unchanged to runtime options; no directory is created by this builder.</param>
+    /// <param name="modelCatalog">Optional borrowed metadata service. The caller owns its refresh and disposal lifetime.</param>
+    /// <returns>Successfully composed descriptors in configuration-store order; unsupported or missing-credential definitions are skipped.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The state-root path is blank or a provider value is invalid.</exception>
+    /// <remarks>Configuration loading, definition conversion and registry replacement exceptions propagate; updates are not transactional.</remarks>
     public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredProviders(
         ModelProviderRegistry modelProviderRegistry,
         CodeAltaConfigStore configStore,
         string stateRootPath,
-        ModelsDevCatalogService? modelCatalog = null)
+        ModelsDevCatalogService? modelCatalog)
     {
         ArgumentNullException.ThrowIfNull(modelProviderRegistry);
         ArgumentNullException.ThrowIfNull(configStore);
@@ -43,11 +81,38 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return descriptors;
     }
 
+    /// <summary>
+    /// Registers or replaces the supplied definitions without models.dev metadata enrichment.
+    /// </summary>
+    /// <param name="modelProviderRegistry">The borrowed registry to update; replacement uses its existing cached-runtime disposal semantics.</param>
+    /// <param name="definitions">Definitions to enumerate in caller order, including any disabled definitions supplied by the caller.</param>
+    /// <param name="stateRootPath">The nonblank state-root path forwarded unchanged to runtime options; no directory is created by this builder.</param>
+    /// <returns>Successfully composed descriptors in enumeration order.</returns>
+    /// <exception cref="ArgumentNullException">A required argument or an enumerated definition is null.</exception>
+    /// <exception cref="ArgumentException">The state-root path is blank or a provider value is invalid.</exception>
+    /// <remarks>Enumeration, definition conversion and registry replacement exceptions propagate; updates are not transactional.</remarks>
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterOrReplaceConfiguredProviders(
+        ModelProviderRegistry modelProviderRegistry,
+        IEnumerable<CodeAltaProviderDocument> definitions,
+        string stateRootPath)
+        => RegisterOrReplaceConfiguredProviders(modelProviderRegistry, definitions, stateRootPath, null);
+
+    /// <summary>
+    /// Registers or replaces the supplied definitions with optional borrowed models.dev metadata.
+    /// </summary>
+    /// <param name="modelProviderRegistry">The borrowed registry to update; replacement uses its existing cached-runtime disposal semantics.</param>
+    /// <param name="definitions">Definitions to enumerate in caller order, including any disabled definitions supplied by the caller.</param>
+    /// <param name="stateRootPath">The nonblank state-root path forwarded unchanged to runtime options; no directory is created by this builder.</param>
+    /// <param name="modelCatalog">Optional borrowed metadata service. The caller owns its refresh and disposal lifetime.</param>
+    /// <returns>Successfully composed descriptors in enumeration order; unsupported or missing-credential definitions are skipped.</returns>
+    /// <exception cref="ArgumentNullException">A required argument or an enumerated definition is null.</exception>
+    /// <exception cref="ArgumentException">The state-root path is blank or a provider value is invalid.</exception>
+    /// <remarks>Enumeration, definition conversion and registry replacement exceptions propagate; updates are not transactional.</remarks>
     public static IReadOnlyList<ModelProviderDescriptor> RegisterOrReplaceConfiguredProviders(
         ModelProviderRegistry modelProviderRegistry,
         IEnumerable<CodeAltaProviderDocument> definitions,
         string stateRootPath,
-        ModelsDevCatalogService? modelCatalog = null)
+        ModelsDevCatalogService? modelCatalog)
     {
         ArgumentNullException.ThrowIfNull(modelProviderRegistry);
         ArgumentNullException.ThrowIfNull(definitions);
@@ -69,6 +134,18 @@ internal static class ConfiguredModelProviderRegistryBuilder
         return descriptors;
     }
 
+    /// <summary>
+    /// Tries to compose one provider descriptor and a lazy runtime factory without registering or invoking it.
+    /// </summary>
+    /// <param name="definition">The configured provider definition to convert.</param>
+    /// <param name="stateRootPath">The nonblank state-root path forwarded unchanged to runtime options; no directory is created by this builder.</param>
+    /// <param name="modelCatalog">Optional borrowed metadata service that must outlive runtimes created by the returned factory.</param>
+    /// <param name="descriptor">The composed descriptor, or null when the definition is skipped.</param>
+    /// <param name="createRuntime">The uninvoked factory, or null when skipped. A caller invoking it owns the returned runtime unless ownership is transferred to a registry.</param>
+    /// <returns>Whether the provider type, credential settings and auth-source settings permit composing a registration. This is not readiness or full configuration validation.</returns>
+    /// <exception cref="ArgumentNullException">The definition or state-root path is null.</exception>
+    /// <exception cref="ArgumentException">The state-root path is blank or a provider value is invalid.</exception>
+    /// <remarks>Definition conversion exceptions propagate. No authentication, provider probe or metadata refresh is performed.</remarks>
     public static bool TryCreateProviderRegistration(
         CodeAltaProviderDocument definition,
         string stateRootPath,

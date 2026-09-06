@@ -1129,6 +1129,7 @@ public sealed class ArchitectureGuardrailTests
         var sourceRoot = GetSourceRoot();
         var projectNames = new[]
         {
+            "CodeAlta.Hosting",
             "CodeAlta.Orchestration",
             "CodeAlta.Plugins",
             "CodeAlta.Catalog",
@@ -1364,7 +1365,6 @@ public sealed class ArchitectureGuardrailTests
                     "App/ModelProviderInitializationCoordinator.cs" and
                     not "App/CodeAltaOwnedServices.cs" and
                     not "App/CodeAltaShellController.cs" and
-                    not "App/ConfiguredModelProviderRegistryBuilder.cs" and
                     not "App/KnownProjectImporter.cs" and
                     not "App/RuntimeEventPump.cs" and
                     not "App/ShellCatalogStateCoordinator.cs" and

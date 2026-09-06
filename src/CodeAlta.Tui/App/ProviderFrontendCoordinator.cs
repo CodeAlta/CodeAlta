@@ -7,6 +7,7 @@ using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Tui.App.Events;
 using CodeAlta.Catalog;
+using CodeAlta.Hosting;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.Presentation.Chat;
 

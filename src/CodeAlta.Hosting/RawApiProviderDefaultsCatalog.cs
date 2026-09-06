@@ -5,7 +5,7 @@ using Tomlyn.Model;
 using Tomlyn.Serialization;
 using XenoAtom.Logging;
 
-namespace CodeAlta.Tui.App;
+namespace CodeAlta.Hosting;
 
 internal static class RawApiProviderDefaultsCatalog
 {

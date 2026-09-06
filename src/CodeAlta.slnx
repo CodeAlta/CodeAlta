@@ -36,6 +36,7 @@
     <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
     <Project Path="CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
+    <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
     <Project Path="CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj" />
@@ -51,6 +52,7 @@
   <Folder Name="/tests/">
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
+    <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />

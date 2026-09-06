@@ -53,7 +53,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="ProviderDefaults\provider_defaults.toml" CopyToOutputDirectory="PreserveNewest" />
 <!-- Used when debugging locally a problem with XenoAtom -->
 <!--    <ProjectReference Include="..\..\..\XenoAtom\XenoAtom.Terminal.UI\src\XenoAtom.Terminal.UI.Extensions.Markdown\XenoAtom.Terminal.UI.Extensions.Markdown.csproj" />-->
 <!--    <ProjectReference Include="..\..\..\XenoAtom\XenoAtom.Terminal.UI\src\XenoAtom.Terminal.UI.SourceGen\XenoAtom.Terminal.UI.SourceGen.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />-->
@@ -64,6 +63,7 @@
     <ProjectReference Include="..\CodeAlta.Agent.GoogleGenAI\CodeAlta.Agent.GoogleGenAI.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Mistral\CodeAlta.Agent.Mistral.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Hosting\CodeAlta.Hosting.csproj" />
     <ProjectReference Include="..\CodeAlta.LiveTool\CodeAlta.LiveTool.csproj" />
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
