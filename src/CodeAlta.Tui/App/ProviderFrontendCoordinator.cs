@@ -14,6 +14,10 @@ namespace CodeAlta.Tui.App;
 
 internal readonly record struct ProviderTestResult(bool Success, string Message, int ModelCount);
 
+internal delegate ValueTask CodexAuthenticationTestOperation(
+    Action<string?> onAuthenticated,
+    CancellationToken cancellationToken);
+
 internal sealed class ProviderFrontendCoordinator
 {
     private readonly CodeAltaOwnedServices? _ownedServices;
@@ -286,9 +290,60 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var authManager = CreateCodexSubscriptionAuthManager(definition);
-        var context = await authManager.GetAccountContextAsync(cancellationToken);
-        var account = string.IsNullOrWhiteSpace(context.AccountId) ? SR.T("no account/workspace id in token") : context.AccountId;
+        ProviderTestResult result = default;
+        await TestCodexAuthenticationCoreAsync(
+            definition,
+            GetProviderStateRootPath,
+            static () => SR.T("Select a Codex provider first."),
+            rawAccountId => result = FormatCodexAuthenticationResult(rawAccountId),
+            static (providerDefinition, getStateRootPath) =>
+            {
+                var authManager = new OpenAICodexSubscriptionAuthManager(
+                    new FileOpenAICodexSubscriptionCredentialStore(getStateRootPath()),
+                    new OpenAICodexSubscriptionOAuthClient(new HttpClient()),
+                    providerDefinition.ProviderKey,
+                    providerDefinition.AuthSource ?? "codealta_oauth",
+                    providerDefinition.AccountId,
+                    CodexAuthFileReader.ResolveCodexHome());
+                return async (onAuthenticated, token) =>
+                {
+                    var context = await authManager.GetAccountContextAsync(token);
+                    // Approved once-only read from the fresh sealed positional context.
+                    // This is the provider-resolved context ID, not the raw credential ID.
+                    var rawAccountId = context.AccountId;
+                    onAuthenticated(rawAccountId);
+                };
+            },
+            cancellationToken);
+        return result;
+    }
+
+    internal static async Task TestCodexAuthenticationCoreAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        Action<string?> onAuthenticated,
+        Func<CodeAltaProviderDocument, Func<string>, CodexAuthenticationTestOperation> createOperation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(onAuthenticated);
+        ArgumentNullException.ThrowIfNull(createOperation);
+
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(formatInvalidProvider());
+        }
+
+        var operation = createOperation(definition, getStateRootPath);
+        await operation(onAuthenticated, cancellationToken);
+    }
+
+    internal static ProviderTestResult FormatCodexAuthenticationResult(string? rawAccountId)
+    {
+        var account = string.IsNullOrWhiteSpace(rawAccountId) ? SR.T("no account/workspace id in token") : rawAccountId;
         return new ProviderTestResult(true, SR.T("Authenticated without sending a model turn · account/workspace: {0}.", account), 0);
     }
 
