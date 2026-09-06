@@ -314,11 +314,10 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        var result = await LoginCopilotDirectCoreAsync(
+        var result = await ConfiguredCopilotAuthentication.LoginWithDeviceCodeAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Copilot provider first."),
-            static () => new CopilotDirectLoginManager(new HttpClient()).LoginWithDeviceCodeAsync,
             (deviceCode, _) => ReportCopilotDirectBrowserDeviceCode(deviceCode, reportStatus, TryOpenBrowser),
             cancellationToken);
         return new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Copilot login completed"), result), 0);
@@ -332,11 +331,10 @@ internal sealed class ProviderFrontendCoordinator
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(reportStatus);
 
-        var result = await LoginCopilotDirectCoreAsync(
+        var result = await ConfiguredCopilotAuthentication.LoginWithDeviceCodeAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Copilot provider first."),
-            static () => new CopilotDirectLoginManager(new HttpClient()).LoginWithDeviceCodeAsync,
             (deviceCode, _) => ReportCopilotDirectDeviceCode(deviceCode, reportStatus),
             cancellationToken);
         return new ProviderTestResult(true, FormatCopilotDirectLoginMessage(SR.T("Copilot device login completed"), result), 0);
@@ -348,11 +346,10 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        await DeleteCopilotDirectCredentialCoreAsync(
+        await ConfiguredCopilotAuthentication.DeleteCredentialAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Copilot provider first."),
-            static () => new CopilotDirectLoginManager(new HttpClient()).DeleteCredentialAsync,
             cancellationToken);
         return new ProviderTestResult(true, SR.T("Deleted CodeAlta-owned Copilot credentials for this provider."), 0);
     }
@@ -363,11 +360,10 @@ internal sealed class ProviderFrontendCoordinator
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var status = await GetCopilotDirectCredentialStatusCoreAsync(
+        var status = await ConfiguredCopilotAuthentication.GetCredentialStatusAsync(
             definition,
             GetProviderStateRootPath,
             static () => SR.T("Select a Copilot provider first."),
-            static () => new CopilotDirectLoginManager(new HttpClient()).GetCredentialStatusAsync,
             cancellationToken);
         return status is null
             ? new ProviderTestResult(false, SR.T("Login required before cached Copilot credentials can be used."), 0)
@@ -546,95 +542,6 @@ internal sealed class ProviderFrontendCoordinator
             definition.AccountId,
             CodexAuthFileReader.ResolveCodexHome());
     }
-
-    // Mandatory call-scoped seams: no injected factory can fall back to a concrete manager.
-    internal delegate ValueTask<CopilotDirectLoginResult> CopilotDirectLoginOperation(
-        CopilotDirectLoginOptions options,
-        Func<CopilotDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,
-        CancellationToken cancellationToken);
-
-    internal delegate ValueTask CopilotDirectDeleteCredentialOperation(
-        CopilotDirectLoginOptions options,
-        CancellationToken cancellationToken);
-
-    internal delegate ValueTask<CopilotDirectLoginResult?> CopilotDirectCredentialStatusOperation(
-        CopilotDirectLoginOptions options,
-        CancellationToken cancellationToken);
-
-    internal static async Task<CopilotDirectLoginResult> LoginCopilotDirectCoreAsync(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath,
-        Func<string> formatInvalidProvider,
-        Func<CopilotDirectLoginOperation> createOperation,
-        Func<CopilotDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(onDeviceCode);
-        ArgumentNullException.ThrowIfNull(getStateRootPath);
-        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
-        ArgumentNullException.ThrowIfNull(createOperation);
-
-        if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(formatInvalidProvider());
-        }
-
-        // Preserve construction before root/options and the existing absence of manager/HttpClient disposal.
-        var operation = createOperation();
-        return await operation(CreateCopilotDirectLoginOptions(definition, getStateRootPath), onDeviceCode, cancellationToken);
-    }
-
-    internal static async Task DeleteCopilotDirectCredentialCoreAsync(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath,
-        Func<string> formatInvalidProvider,
-        Func<CopilotDirectDeleteCredentialOperation> createOperation,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(getStateRootPath);
-        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
-        ArgumentNullException.ThrowIfNull(createOperation);
-
-        if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(formatInvalidProvider());
-        }
-
-        var operation = createOperation();
-        await operation(CreateCopilotDirectLoginOptions(definition, getStateRootPath), cancellationToken);
-    }
-
-    internal static async Task<CopilotDirectLoginResult?> GetCopilotDirectCredentialStatusCoreAsync(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath,
-        Func<string> formatInvalidProvider,
-        Func<CopilotDirectCredentialStatusOperation> createOperation,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(getStateRootPath);
-        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
-        ArgumentNullException.ThrowIfNull(createOperation);
-
-        if (!string.Equals(definition.ProviderType, "copilot", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(formatInvalidProvider());
-        }
-
-        var operation = createOperation();
-        return await operation(CreateCopilotDirectLoginOptions(definition, getStateRootPath), cancellationToken);
-    }
-
-    private static CopilotDirectLoginOptions CreateCopilotDirectLoginOptions(
-        CodeAltaProviderDocument definition,
-        Func<string> getStateRootPath)
-        => new(
-            definition.ProviderKey,
-            getStateRootPath(),
-            definition.GitHubEnterpriseUrl,
-            TryCreateUri(definition.ApiUrl));
 
     internal static ValueTask ReportCopilotDirectBrowserDeviceCode(
         CopilotDirectDeviceCode deviceCode,

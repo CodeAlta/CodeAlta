@@ -38,6 +38,7 @@ public sealed class HostingCompositionBoundaryTests
         {
             typeof(ConfiguredModelProviderRegistryBuilder), typeof(ConfiguredProviderInspection),
             typeof(ProviderInspectionTestResult), typeof(ProviderInspectionModelListResult),
+            typeof(ConfiguredCopilotAuthentication),
         }, assembly.GetExportedTypes());
         Assert.IsFalse(assembly.GetReferencedAssemblies().Any(reference =>
             reference.Name is "alta" or "altatui" or "CodeAlta.Tui" or "CodeAlta" ||
@@ -54,6 +55,13 @@ public sealed class HostingCompositionBoundaryTests
             "TryBuildActiveProviderTestResult", "TryBuildActiveProviderModelListResult", "TestProviderAsync", "ListProviderModelsAsync",
         }, inspectionMethods.Select(method => method.Name).ToArray());
         Assert.IsFalse(inspectionMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
+        var authenticationMethods = typeof(ConfiguredCopilotAuthentication).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+        CollectionAssert.AreEquivalent(new[]
+        {
+            "LoginWithDeviceCodeAsync", "DeleteCredentialAsync", "GetCredentialStatusAsync",
+        }, authenticationMethods.Select(method => method.Name).ToArray());
+        Assert.IsFalse(authenticationMethods.SelectMany(method => method.GetParameters()).Any(parameter => parameter.IsOptional));
     }
 
     [TestMethod]
@@ -105,6 +113,97 @@ public sealed class HostingCompositionBoundaryTests
             StringAssert.Contains(prefix, "ArgumentNullException.ThrowIfNull(formatSuccess);");
             StringAssert.Contains(inspection[forwarding..], $"return await {method}(definition, stateRootPath, modelCatalog, TryCreateRuntime,");
         }
+    }
+
+    [TestMethod]
+    public void CopilotAuthentication_PublicForwardingAndTuiWiringKeepConcreteWorkBehindValidatedCores()
+    {
+        var root = SourceRoot();
+        var source = File.ReadAllText(Path.Combine(root, "CodeAlta.Hosting", "ConfiguredCopilotAuthentication.cs")).Replace("\r\n", "\n");
+        var tui = File.ReadAllText(Path.Combine(root, "CodeAlta.Tui", "App", "ProviderFrontendCoordinator.cs")).Replace("\r\n", "\n");
+        foreach (var (method, returnType, hasCallback) in new[]
+        {
+            ("LoginWithDeviceCodeAsync", "Task<CopilotDirectLoginResult>", true),
+            ("DeleteCredentialAsync", "Task", false),
+            ("GetCredentialStatusAsync", "Task<CopilotDirectLoginResult?>", false),
+        })
+        {
+            var start = source.IndexOf($"    public static {returnType} {method}(", StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            var end = source.IndexOf(';', start);
+            Assert.IsTrue(end > start);
+            var callbackParameter = hasCallback ? "        Func<CopilotDirectDeviceCode, CancellationToken, ValueTask> onDeviceCode,\n" : string.Empty;
+            var callbackArgument = hasCallback ? "onDeviceCode, " : string.Empty;
+            var expected = $"    public static {returnType} {method}(\n"
+                + "        CodeAltaProviderDocument definition,\n"
+                + "        Func<string> getStateRootPath,\n"
+                + "        Func<string> formatInvalidProvider,\n"
+                + callbackParameter
+                + "        CancellationToken cancellationToken)\n"
+                + $"        => {method}(\n"
+                + "            definition, getStateRootPath, formatInvalidProvider,\n"
+                + $"            static () => new CopilotDirectLoginManager(new HttpClient()).{method},\n"
+                + $"            {callbackArgument}cancellationToken);";
+            Assert.AreEqual(expected, source[start..(end + 1)]);
+
+            // Merely passing the lambda above must not execute its constructor. The characterized
+            // internal overload performs required-object/type validation before invoking the factory.
+            var coreStart = source.IndexOf($"    internal static async {returnType} {method}(", StringComparison.Ordinal);
+            Assert.IsTrue(coreStart >= 0);
+            var coreEnd = source.IndexOf("\n    }", coreStart, StringComparison.Ordinal);
+            Assert.IsTrue(coreEnd > coreStart);
+            var core = source[coreStart..coreEnd];
+            var callbackGuard = hasCallback ? "        ArgumentNullException.ThrowIfNull(onDeviceCode);\n" : string.Empty;
+            StringAssert.Contains(core, "        ArgumentNullException.ThrowIfNull(definition);\n"
+                + callbackGuard
+                + "        ArgumentNullException.ThrowIfNull(getStateRootPath);\n"
+                + "        ArgumentNullException.ThrowIfNull(formatInvalidProvider);\n"
+                + "        ArgumentNullException.ThrowIfNull(createOperation);");
+            var typeCheck = core.IndexOf("if (!string.Equals(definition.ProviderType, \"copilot\", StringComparison.Ordinal))", StringComparison.Ordinal);
+            var construct = core.IndexOf("var operation = createOperation();", StringComparison.Ordinal);
+            var invoke = core.IndexOf("await operation(CreateCopilotDirectLoginOptions(", StringComparison.Ordinal);
+            Assert.IsTrue(typeCheck >= 0 && construct > typeCheck && invoke > construct);
+            StringAssert.Contains(core, "throw new InvalidOperationException(formatInvalidProvider());");
+        }
+
+        foreach (var (entry, method) in new[]
+        {
+            ("LoginCopilotDirectWithBrowserAsync", "LoginWithDeviceCodeAsync"),
+            ("LoginCopilotDirectWithDeviceCodeAsync", "LoginWithDeviceCodeAsync"),
+            ("LogoutCopilotDirectAsync", "DeleteCredentialAsync"),
+            ("TestCopilotDirectAuthenticationAsync", "GetCredentialStatusAsync"),
+        })
+        {
+            var start = tui.IndexOf($"    public async Task<ProviderTestResult> {entry}(", StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0);
+            var end = tui.IndexOf("\n    }", start, StringComparison.Ordinal);
+            Assert.IsTrue(end > start);
+            StringAssert.Contains(tui[start..end], $"await ConfiguredCopilotAuthentication.{method}(\n"
+                + "            definition,\n"
+                + "            GetProviderStateRootPath,\n"
+                + "            static () => SR.T(\"Select a Copilot provider first.\"),");
+        }
+
+        foreach (var removed in new[]
+        {
+            "CopilotDirectLoginManager", "CreateCopilotDirectLoginOptions", "CopilotDirectLoginOperation",
+            "CopilotDirectDeleteCredentialOperation", "CopilotDirectCredentialStatusOperation",
+            "LoginCopilotDirectCoreAsync", "DeleteCopilotDirectCredentialCoreAsync", "GetCopilotDirectCredentialStatusCoreAsync",
+        })
+        {
+            Assert.IsFalse(tui.Contains(removed, StringComparison.Ordinal));
+        }
+
+        foreach (var forbidden in new[] { "Environment.", "Process.", "SR.T(", "ConfigureAwait(false)", "Task.Run(", "ThrowIfCancellationRequested(", "new ModelProviderRegistry" })
+        {
+            Assert.IsFalse(source.Contains(forbidden, StringComparison.Ordinal));
+        }
+
+        var cores = source[source.IndexOf("    // Mandatory call-scoped seams:", StringComparison.Ordinal)..];
+        Assert.IsFalse(cores.Contains("new CopilotDirectLoginManager", StringComparison.Ordinal));
+        Assert.IsFalse(cores.Contains("new HttpClient", StringComparison.Ordinal));
+        Assert.IsFalse(cores.Contains("Dispose(", StringComparison.Ordinal));
+        Assert.IsFalse(cores.Contains("DisposeAsync(", StringComparison.Ordinal));
     }
 
     // Compile-time checkout path: inspect only named source/project files, never discover profile ancestors.
