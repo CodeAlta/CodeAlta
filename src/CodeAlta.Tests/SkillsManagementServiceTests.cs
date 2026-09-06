@@ -14,6 +14,61 @@ namespace CodeAlta.Tests;
 public sealed class SkillsManagementServiceTests
 {
     [TestMethod]
+    [DataRow(false, SkillSourceKind.Builtin)]
+    [DataRow(true, SkillSourceKind.Builtin)]
+    [DataRow(false, SkillSourceKind.Plugin)]
+    [DataRow(true, SkillSourceKind.Plugin)]
+    [DataRow(false, SkillSourceKind.UserAlta)]
+    [DataRow(true, SkillSourceKind.ProjectAlta)]
+    public async Task Dialog_SkillOpenCarriesCatalogDocumentPolicy(bool related, SkillSourceKind kind)
+    {
+        using var temp = TempDirectory.Create();
+        var root = Path.Combine(temp.Path, "builtin", "sample-skill");
+        await WriteSkillAsync(root, "sample-skill", "Bundled");
+        Directory.CreateDirectory(Path.Combine(root, "references"));
+        File.WriteAllText(Path.Combine(root, "references", "guide.md"), "guide");
+        var catalog = new SkillCatalog([new RegisteredProvider(Path.GetDirectoryName(root)!, kind)]);
+        var service = SkillsManagementCoordinatorFactory.CreateService(catalog,
+            new CatalogOptions { GlobalRoot = temp.Path }, () => null, null);
+        var descriptor = (await service.LoadAsync(SkillsManagementScope.User)).Single();
+        object? opened = null;
+        var dialog = new SkillsManagementDialog(service, (request, _) => { opened = request; return Task.CompletedTask; },
+            (_, _) => Task.CompletedTask, () => null, () => null);
+        // A stale/claimed source flag in a view model must not determine workflow policy.
+        var row = new SkillManagementRowViewModel(descriptor with { SourceKind = SkillSourceKind.Builtin }, (_, _, _) => Task.CompletedTask);
+        typeof(SkillsManagementDialog).GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(dialog, new[] { row });
+        var cell = (State<DataGridCell>)typeof(SkillsManagementDialog).GetField("_currentSkillCell", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
+        cell.Value = new DataGridCell(0, 0);
+        await (Task)typeof(SkillsManagementDialog).GetMethod(related ? "OpenSelectedRelatedFileAsync" : "OpenSelectedSkillAsync",
+            BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(dialog, null)!;
+        Assert.IsNotNull(opened);
+        Assert.IsFalse(opened is string, "Skill opens must carry backend document policy, not a raw writable path.");
+        var document = (TextFileDocument)opened;
+        Assert.AreEqual(kind == SkillSourceKind.Builtin, document.IsReadOnly);
+        Assert.AreEqual(kind, document.SkillSourceKind);
+        Assert.AreEqual("fixture:builtin", document.SkillSourceId);
+        Assert.AreEqual(related ? Path.Combine(root, "references", "guide.md") : descriptor.SkillFilePath, document.FullPath);
+
+        opened = null;
+        var arbitraryPath = Path.Combine(temp.Path, "outside.md");
+        File.WriteAllText(arbitraryPath, "not a skill");
+        row = new SkillManagementRowViewModel(descriptor with { SkillFilePath = arbitraryPath, SkillRootPath = temp.Path, SourceKind = SkillSourceKind.Builtin }, (_, _, _) => Task.CompletedTask);
+        typeof(SkillsManagementDialog).GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(dialog, new[] { row });
+        await (Task)typeof(SkillsManagementDialog).GetMethod("OpenSelectedSkillAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(dialog, null)!;
+        Assert.IsNull(opened, "A claimed builtin descriptor cannot open an undiscovered arbitrary file.");
+    }
+
+    private sealed class RegisteredProvider(string root, SkillSourceKind kind) : ISkillRootProvider
+    {
+        public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(SkillDiscoveryContext context, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>([new()
+            {
+                RootPath = root, SourceKind = kind, SourceId = "fixture:builtin",
+                Scope = SkillScopeKind.Builtin, Precedence = 4, IsTrusted = true,
+            }]);
+    }
+
+    [TestMethod]
     public void ListRelatedFiles_ReturnsAuthoringFilesUnderKnownFolders()
     {
         using var temp = TempDirectory.Create();
@@ -342,9 +397,12 @@ public sealed class SkillsManagementServiceTests
     public async Task Dialog_OpenFailureShowsFeedback()
     {
         using var temp = TempDirectory.Create();
-        var dialog = new SkillsManagementDialog(CreateService(temp.Path), (_, _) => throw new IOException("editor unavailable"),
+        var service = CreateService(temp.Path);
+        await service.CreateSkillAsync(SkillsManagementScope.User, "sample-skill", "Description");
+        var descriptor = (await service.LoadAsync(SkillsManagementScope.User)).Single();
+        var dialog = new SkillsManagementDialog(service, (_, _) => throw new IOException("editor unavailable"),
             (_, _) => Task.CompletedTask, () => null, () => null);
-        var row = new SkillManagementRowViewModel(CreateDescriptor(temp.Path), (_, _, _) => Task.CompletedTask);
+        var row = new SkillManagementRowViewModel(descriptor, (_, _, _) => Task.CompletedTask);
         typeof(SkillsManagementDialog).GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(dialog, new[] { row });
         var cell = (State<DataGridCell>)typeof(SkillsManagementDialog).GetField("_currentSkillCell", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(dialog)!;
         cell.Value = new DataGridCell(0, 0);

@@ -17,6 +17,45 @@ public sealed class TextFileCodec
 {
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
+    /// <summary>Loads a workflow document through this codec, retaining its backend path policy.</summary>
+    /// <exception cref="ArgumentNullException">The document is null.</exception>
+    /// <exception cref="IOException">Reading failed or an observed skill path is linked.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access is denied.</exception>
+    /// <exception cref="DecoderFallbackException">The file is not supported Unicode text.</exception>
+    public Task<TextFileSnapshot> LoadAsync(TextFileDocument document) => LoadAsync(document, CancellationToken.None);
+
+    /// <summary>Loads a workflow document with cancellation.</summary>
+    /// <inheritdoc cref="LoadAsync(TextFileDocument)"/>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public Task<TextFileSnapshot> LoadAsync(TextFileDocument document, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        document.ValidatePath();
+        return LoadAsync(document.FullPath, cancellationToken);
+    }
+
+    /// <summary>Conditionally saves workflow text, enforcing backend read-only policy before any I/O.</summary>
+    /// <remarks>All frontend saves, including overwrite confirmations, must retain the open document contract.</remarks>
+    /// <exception cref="ArgumentNullException">A required value is null.</exception>
+    /// <exception cref="UnauthorizedAccessException">The document is read-only or access is denied.</exception>
+    /// <exception cref="IOException">Storage failed or an observed skill path is linked.</exception>
+    /// <exception cref="ArgumentException">The encoding/BOM combination is invalid.</exception>
+    /// <exception cref="EncoderFallbackException">Text contains invalid Unicode.</exception>
+    public Task<TextFileSaveResult> SaveAsync(TextFileDocument document, string text, TextFileSnapshot format, TextFileRevision expectedRevision)
+        => SaveAsync(document, text, format, expectedRevision, CancellationToken.None);
+
+    /// <summary>Conditionally saves a workflow document with cancellation before commit.</summary>
+    /// <inheritdoc cref="SaveAsync(TextFileDocument, string, TextFileSnapshot, TextFileRevision)"/>
+    /// <exception cref="OperationCanceledException">Cancellation was requested before commit.</exception>
+    public Task<TextFileSaveResult> SaveAsync(TextFileDocument document, string text, TextFileSnapshot format, TextFileRevision expectedRevision, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(format);
+        if (document.IsReadOnly) throw new UnauthorizedAccessException("The skill document is read-only.");
+        document.ValidatePath();
+        return SaveAsync(new TextFileSaveRequest(document.FullPath, text, format.Encoding, format.HasByteOrderMark, expectedRevision), cancellationToken);
+    }
+
     /// <summary>Loads a complete file, decoding UTF-8 or BOM-bearing UTF-16/UTF-32 strictly.</summary>
     /// <param name="fullPath">Trusted local file path.</param>
     /// <returns>The decoded file and raw-byte revision.</returns>

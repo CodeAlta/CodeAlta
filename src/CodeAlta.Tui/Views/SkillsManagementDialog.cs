@@ -39,7 +39,7 @@ internal sealed class SkillsManagementDialog
     private const int SkillGridColumnCount = 5;
 
     private readonly SkillsManagementService _service;
-    private readonly Func<string, CancellationToken, Task> _openFileAsync;
+    private readonly Func<TextFileDocument, CancellationToken, Task> _openFileAsync;
     private readonly Func<string, CancellationToken, Task> _activateSkillAsync;
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
@@ -60,7 +60,7 @@ internal sealed class SkillsManagementDialog
 
     public SkillsManagementDialog(
         SkillsManagementService service,
-        Func<string, CancellationToken, Task> openFileAsync,
+        Func<TextFileDocument, CancellationToken, Task> openFileAsync,
         Func<string, CancellationToken, Task> activateSkillAsync,
         Func<Rectangle?> getBounds,
         Func<Visual?> getFocusTarget)
@@ -468,14 +468,19 @@ internal sealed class SkillsManagementDialog
             return;
         }
 
-        await OpenFileWithFeedbackAsync(relatedFiles[index].FullPath);
+        if (GetSelectedDescriptor() is { } descriptor)
+        {
+            await OpenFileWithFeedbackAsync(descriptor.SkillFilePath, relatedFiles[index].RelativePath);
+        }
     }
 
-    private async Task OpenFileWithFeedbackAsync(string path)
+    private async Task OpenFileWithFeedbackAsync(string path, string? relatedPath = null)
     {
         try
         {
-            await _openFileAsync(path, CancellationToken.None);
+            var service = _service.CaptureContext();
+            var document = await Task.Run(() => service.GetFileDocumentAsync(path, relatedPath));
+            await _openFileAsync(document, CancellationToken.None);
         }
         catch (Exception ex)
         {

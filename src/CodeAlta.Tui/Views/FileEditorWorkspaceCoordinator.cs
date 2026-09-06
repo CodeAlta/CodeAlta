@@ -82,10 +82,13 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
         => _filePickerController.ShowAsync();
 
     public Task OpenFilePathAsync(string fullPath, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+        => OpenDocumentAsync(new TextFileDocument(fullPath), cancellationToken);
 
-        var resolvedPath = Path.GetFullPath(fullPath);
+    public Task OpenDocumentAsync(TextFileDocument document, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        var resolvedPath = document.FullPath;
         if (!File.Exists(resolvedPath))
         {
             _setStatus(SR.T("Cannot open missing file '{0}'.", resolvedPath), false, StatusTone.Warning);
@@ -125,7 +128,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
                 extension.ToLowerInvariant()),
         };
 
-        return OpenFileTabAsync(item, ProjectFileAppearanceRegistry.Default.GetAppearance(item), cancellationToken);
+        return OpenFileTabAsync(item, ProjectFileAppearanceRegistry.Default.GetAppearance(item), cancellationToken, document);
     }
 
     public FileEditorTab? GetSelectedFileTab()
@@ -192,21 +195,39 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
     private async Task OpenFileTabAsync(
         ProjectFileSearchItem item,
         ProjectFileAppearance appearance,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TextFileDocument? document = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(appearance);
 
         if (_fileTabsByPath.TryGetValue(item.FullPath, out var existingTab))
         {
+            if (document is { IsReadOnly: true } && !existingTab.TryProtect(document))
+            {
+                _setStatus(SR.T("Cannot open read-only while a save is in progress. Retry after the save finishes."), false, StatusTone.Warning);
+                return;
+            }
             SelectFileTab(existingTab.TabId);
             existingTab.Focus();
+            if (existingTab.IsReadOnly)
+            {
+                _setStatus(SR.T("Read-only skill document. Unsaved text is retained for copying; saving is disabled."), false, StatusTone.Info);
+            }
             return;
         }
 
         try
         {
-            var fileTab = await FileEditorTab.CreateAsync(item, appearance, _textFiles, (message, showSpinner, tone) => _setStatus(message, showSpinner, tone), cancellationToken);
+            var fileTab = await FileEditorTab.CreateAsync(item, appearance, _textFiles, (message, showSpinner, tone) => _setStatus(message, showSpinner, tone), cancellationToken, document);
+            // Another UI open may have completed while the file was loading. Reuse through the
+            // same tightening rule rather than replacing a protected tab with this older request.
+            if (_fileTabsByPath.ContainsKey(item.FullPath))
+            {
+                await fileTab.DisposeAsync();
+                await OpenFileTabAsync(item, appearance, cancellationToken, document);
+                return;
+            }
             _fileTabsById[fileTab.TabId] = fileTab;
             _fileTabsByPath[fileTab.FullPath] = fileTab;
             _shellTabs.OpenOrGetTab(new ShellTabDescriptor
@@ -220,7 +241,7 @@ internal sealed class FileEditorWorkspaceCoordinator : IAsyncDisposable
             });
             SelectFileTab(fileTab.TabId);
             _dispatchToUiDeferred(fileTab.Focus);
-            _setStatus(SR.T("Opened '{0}' for editing.", item.Basename), false, StatusTone.Ready);
+            _setStatus(fileTab.IsReadOnly ? SR.T("Read-only skill document. Unsaved text is retained for copying; saving is disabled.") : SR.T("Opened '{0}' for editing.", item.Basename), false, StatusTone.Ready);
         }
         catch (Exception ex)
         {

@@ -374,6 +374,59 @@ public sealed class SkillManagementServiceTests
         Assert.IsTrue(descriptors.All(static descriptor => !descriptor.IsEnabled));
     }
 
+    [TestMethod]
+    [DataRow(SkillSourceKind.Builtin)]
+    [DataRow(SkillSourceKind.Plugin)]
+    [DataRow(SkillSourceKind.UserAlta)]
+    [DataRow(SkillSourceKind.ProjectAlta)]
+    public async Task SkillDocuments_EnforceCatalogPolicyAndRetainConditionalCodecSaves(SkillSourceKind kind)
+    {
+        using var fixture = new Fixture();
+        var root = Directory.CreateDirectory(Path.Combine(fixture.Root, "registered", "sample")).FullName;
+        var path = Path.Combine(root, "SKILL.md");
+        File.WriteAllText(path, "---\r\nname: sample\r\ndescription: Description\r\n---\r\n# Sample", new System.Text.UnicodeEncoding(false, true));
+        Directory.CreateDirectory(Path.Combine(root, "references"));
+        File.WriteAllText(Path.Combine(root, "references", "guide.md"), "guide");
+        var service = new SkillManagementService(new SkillCatalog([new RegisteredProvider([new()
+        {
+            RootPath = Path.GetDirectoryName(root)!, SourceKind = kind, SourceId = "fixture:registered",
+            Scope = SkillScopeKind.User, Precedence = 0, IsTrusted = true,
+        }])]), fixture.Root, null);
+        var codec = new TextFileCodec();
+        var documents = new[] { await service.GetFileDocumentAsync(path, null, null), await service.GetFileDocumentAsync(path, "references/guide.md", null) };
+        foreach (var document in documents)
+        {
+            Assert.AreEqual(kind, document.SkillSourceKind);
+            Assert.AreEqual("fixture:registered", document.SkillSourceId);
+            Assert.AreEqual(kind == SkillSourceKind.Builtin, document.IsReadOnly);
+            var snapshot = await codec.LoadAsync(document);
+            var before = File.ReadAllBytes(document.FullPath);
+            if (document.IsReadOnly)
+            {
+                await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => codec.SaveAsync(document, "programmatic edits", snapshot, snapshot.Revision));
+                await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => codec.SaveAsync(document, "overwrite", snapshot, TextFileRevision.Missing));
+                CollectionAssert.AreEqual(before, File.ReadAllBytes(document.FullPath));
+            }
+            else
+            {
+                File.WriteAllText(document.FullPath, "external");
+                var conflict = await codec.SaveAsync(document, "changed\r\n", snapshot, snapshot.Revision);
+                Assert.IsTrue(conflict.IsConflict);
+                var saved = await codec.SaveAsync(document, "changed\r\n", snapshot, conflict.CurrentRevision);
+                Assert.IsFalse(saved.IsConflict);
+                Assert.AreEqual("changed\r\n", (await codec.LoadAsync(document)).Text);
+                Assert.AreEqual(snapshot.HasByteOrderMark, saved.Snapshot.HasByteOrderMark);
+                Assert.AreEqual(snapshot.Encoding.CodePage, saved.Snapshot.Encoding.CodePage);
+            }
+        }
+
+        foreach (var malformed in new[] { "", "../SKILL.md", "references/../SKILL.md", "references\\guide.md", "/references/guide.md", "references//guide.md", "assets/missing", "references/guide.md:stream" })
+        {
+            await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.GetFileDocumentAsync(path, malformed, null));
+        }
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.GetFileDocumentAsync(Path.Combine(fixture.Root, "arbitrary.md"), null, null));
+    }
+
     private sealed class RegisteredProvider(IReadOnlyList<SkillRootRegistration> roots) : ISkillRootProvider
     {
         public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(SkillDiscoveryContext context, CancellationToken cancellationToken = default)

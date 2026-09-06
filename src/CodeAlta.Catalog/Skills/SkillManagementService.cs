@@ -151,6 +151,41 @@ public sealed class SkillManagementService
             .ThenBy(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase).Take(128).ToArray();
     }
 
+    /// <summary>Resolves a skill file or conventional related resource to a backend-owned editor policy.</summary>
+    /// <remarks>
+    /// Re-discovers the exact skill path in the captured context; no caller-supplied descriptor or
+    /// source flag grants a path. Related paths must exactly match a listed resource and contain no
+    /// rooted, traversal, stream, or alternate-separator components. Observed links are rejected;
+    /// external root/link replacement races remain outside this trusted workflow's guarantees.
+    /// Plugin source alone does not establish bundled immutability, so plugin skills remain writable.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The skill is not discovered or the resource request is malformed/unlisted.</exception>
+    /// <exception cref="InvalidOperationException">A required discovery root is absent.</exception>
+    /// <exception cref="IOException">Discovery failed or the document has a linked path.</exception>
+    /// <exception cref="UnauthorizedAccessException">Storage access is denied.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public async Task<TextFileDocument> GetFileDocumentAsync(string skillFilePath, string? relatedPath, string? projectRoot, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(skillFilePath);
+        if (relatedPath is not null && (relatedPath.Contains('\\') || relatedPath.Contains(':') ||
+            relatedPath.Split('/').Any(static part => part is "" or "." or "..")))
+        {
+            throw new ArgumentException("The related skill resource path is malformed.", nameof(relatedPath));
+        }
+
+        var fullPath = Path.GetFullPath(skillFilePath);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var descriptors = await LoadAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false);
+        var descriptor = descriptors.FirstOrDefault(candidate => string.Equals(candidate.SkillFilePath, fullPath, comparison))
+            ?? throw new ArgumentException("The skill file is not available in this context.", nameof(skillFilePath));
+        var path = relatedPath is null ? descriptor.SkillFilePath :
+            ListRelatedFiles(descriptor, cancellationToken).FirstOrDefault(file => string.Equals(file.RelativePath, relatedPath, StringComparison.Ordinal))?.FullPath
+            ?? throw new ArgumentException("The related skill resource is not available.", nameof(relatedPath));
+        var document = new TextFileDocument(path, descriptor.SourceKind, descriptor.SourceId);
+        document.ValidatePath();
+        return document;
+    }
+
     private SkillEnablementUpdateResult UpdateEnablement(SkillEnablementScope scope, string? projectRoot, IReadOnlyList<string> names, bool? enabled)
     {
         ArgumentNullException.ThrowIfNull(names);

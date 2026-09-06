@@ -23,6 +23,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
     private readonly Button _reloadButton;
     private readonly State<bool> _wordWrap = new(true);
     private readonly TextFileCodec _textFiles;
+    private TextFileDocument _document;
+    private int _pendingSaves;
     private TextFileSnapshot _snapshot;
     private TextFileRevision? _conflictingRevision;
     private bool _suppressEditorChanged;
@@ -33,6 +35,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         ProjectFileSearchItem item,
         ProjectFileAppearance appearance,
         TextFileCodec textFiles,
+        TextFileDocument document,
         TextFileSnapshot snapshot,
         Action<string, bool, StatusTone> setStatus)
     {
@@ -46,6 +49,8 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         TabId = CreateTabId(item.FullPath);
         _setStatus = setStatus;
         _textFiles = textFiles;
+        _document = document;
+        IsReadOnly = document.IsReadOnly;
         _snapshot = snapshot;
         _sessionState = new FileEditorSessionState(snapshot.Text, snapshot.LastWriteTimeUtc);
 
@@ -53,7 +58,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         Editor.TextDocument.Changed += OnEditorDocumentChanged;
         _saveButton = new Button(SR.T("Save")) { Tone = ControlTone.Success };
         _saveButton.Click(() => _ = SaveAsync());
-        _saveButton.IsEnabled(() => IsDirty);
+        _saveButton.IsEnabled(() => IsDirty && !IsReadOnly);
 
         _reloadButton = new Button(SR.T("Reload")) { Tone = ControlTone.Warning };
         _reloadButton.Click(() => _ = ReloadAsync(confirmWhenDirty: true));
@@ -82,6 +87,24 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
     public Visual Root { get; }
 
     [Bindable]
+    public partial bool IsReadOnly { get; private set; }
+
+    public bool TryProtect(TextFileDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!string.Equals(document.FullPath, FullPath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The protection request must identify this editor document.", nameof(document));
+        }
+        if (IsReadOnly || !document.IsReadOnly) return true;
+        if (_pendingSaves != 0) return false;
+        _document = document;
+        IsReadOnly = true;
+        UpdateUiState(); // Do not replace text, undo history, saved snapshot or conflict revision.
+        return true;
+    }
+
+    [Bindable]
     public partial bool IsDirty { get; private set; }
 
     [Bindable]
@@ -98,15 +121,17 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         ProjectFileAppearance appearance,
         TextFileCodec textFiles,
         Action<string, bool, StatusTone> setStatus,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TextFileDocument? document = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(appearance);
         ArgumentNullException.ThrowIfNull(textFiles);
         ArgumentNullException.ThrowIfNull(setStatus);
 
-        var snapshot = await textFiles.LoadAsync(item.FullPath, cancellationToken);
-        return new FileEditorTab(item, appearance, textFiles, snapshot, setStatus);
+        document ??= new TextFileDocument(item.FullPath);
+        var snapshot = await textFiles.LoadAsync(document, cancellationToken);
+        return new FileEditorTab(item, appearance, textFiles, document, snapshot, setStatus);
     }
 
     public void Focus()
@@ -138,6 +163,15 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         {
             await closeTabAsync();
             return true;
+        }
+
+        if (IsReadOnly)
+        {
+            ShowActionDialog(SR.T("Unsaved changes"),
+                [SR.T("Read-only skill document. Unsaved text is retained for copying; saving is disabled.")],
+                [new DialogAction(SR.T("Cancel"), ControlTone.Default, static () => Task.CompletedTask),
+                 new DialogAction(SR.T("Discard"), ControlTone.Error, closeTabAsync)]);
+            return false;
         }
 
         ShowActionDialog(
@@ -305,12 +339,16 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
     internal async Task<TextFileSaveResult> SaveCurrentTextAsync(TextFileRevision expectedRevision)
     {
-        var result = await _textFiles.SaveAsync(new TextFileSaveRequest(
-            FullPath,
-            GetEditorText(),
-            _snapshot.Encoding,
-            _snapshot.HasByteOrderMark,
-            expectedRevision));
+        _pendingSaves++;
+        TextFileSaveResult result;
+        try
+        {
+            result = await _textFiles.SaveAsync(_document, GetEditorText(), _snapshot, expectedRevision);
+        }
+        finally
+        {
+            _pendingSaves--;
+        }
 
         if (result.IsConflict)
         {
@@ -349,7 +387,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
         try
         {
-            var snapshot = await _textFiles.LoadAsync(FullPath);
+            var snapshot = await _textFiles.LoadAsync(_document);
             _snapshot = snapshot;
             _conflictingRevision = null;
             ReplaceEditorDocument(snapshot.Text);
@@ -419,7 +457,9 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
         _suppressEditorChanged = true;
         try
         {
-            Editor.TextDocument = new TextDocument(text);
+            Editor.TextDocument.Changed -= OnEditorDocumentChanged;
+            Editor.TextDocument = new FileEditorTextDocument(text, () => IsReadOnly);
+            Editor.TextDocument.Changed += OnEditorDocumentChanged;
             Editor.GoToLine(currentLine, currentColumn);
             Editor.ClearUndoHistory();
         }
@@ -441,7 +481,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
             Wrap = false,
             IsSelectable = false,
         };
-        var shortcutText = new Markup($"[dim]{SR.T("Ctrl+S Save · Ctrl+F Find · Ctrl+H Replace · Ctrl+G Go to line")}[/]")
+        var shortcutText = new Markup(() => $"[dim]{(IsReadOnly ? SR.T("Read-only · Ctrl+C Copy · Ctrl+F Find · Ctrl+G Go to line") : SR.T("Ctrl+S Save · Ctrl+F Find · Ctrl+H Replace · Ctrl+G Go to line"))}[/]")
         {
             Wrap = false,
         };
@@ -475,12 +515,25 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
     private CodeEditor CreateEditor(ProjectFileSearchItem item, string text)
     {
         var editor = CodeEditorFactory.Create(
-            text,
+            null,
             new CodeEditorFactoryOptions
             {
                 FileName = item.FullPath,
                 WordWrapState = _wordWrap,
             });
+        editor.TextDocument = new FileEditorTextDocument(text, () => IsReadOnly);
+        foreach (var command in editor.Commands.Where(static command => command.Id is
+            "TextEditor.Undo" or "TextEditor.Redo" or "TextEditor.Cut" or "TextEditor.Paste" or "TextEditor.Replace").ToArray())
+        {
+            editor.RemoveCommand(command.Id);
+            editor.AddCommand(new Command
+            {
+                Id = command.Id, LabelMarkup = command.LabelMarkup, DescriptionMarkup = command.DescriptionMarkup,
+                Gesture = command.Gesture, Importance = command.Importance, Presentation = command.Presentation,
+                CanExecute = visual => !IsReadOnly && command.CanExecuteFor(visual),
+                Execute = visual => { if (!IsReadOnly) command.Execute(visual); },
+            });
+        }
         editor.AddCommand(
             new Command
             {
@@ -494,7 +547,7 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
                 {
                     var ignored = SaveAsync();
                 },
-                CanExecute = _ => IsDirty,
+                CanExecute = _ => IsDirty && !IsReadOnly,
             });
         editor.AddCommand(
             new Command
@@ -545,6 +598,13 @@ internal sealed partial class FileEditorTab : IAsyncDisposable
 
     private string BuildStatusText()
     {
+        if (IsReadOnly)
+        {
+            var status = SR.T("Read-only") + (IsDirty ? "*" : string.Empty);
+            return !ExistsOnDisk ? status + " · " + SR.T("Deleted on disk") :
+                HasExternalChanges ? status + " · " + SR.T("Changed on disk · reload available") : status;
+        }
+
         if (!ExistsOnDisk)
         {
             return IsDirty

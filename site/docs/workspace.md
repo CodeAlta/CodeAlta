@@ -248,7 +248,11 @@ CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and pro
 
 **New skill** creates `SKILL.md` plus `scripts/`, `references/`, and `assets/` folders under `<project>/.alta/skills/<name>` (Current Project, or Combined with a selected project) or `~/.alta/skills/<name>` (User, or Combined without a project). Names use lowercase Unicode letters/digits and single hyphens, up to 64 characters; portable reserved device names are rejected. Supply a description of up to 1024 characters. Creation requires an available root and rejects linked/reparse paths and existing files or directories rather than overwriting them. A canceled or failed creation before publication does not leave a partially created final skill.
 
-Enablement edits preserve TOML comments and unknown settings. Project and Both require a selected project before any config changes are written. Both is not a transaction: a later project-file I/O failure can leave the global change applied. Built-in skill provenance is shown, but the current generic file editor does not enforce read-only opening for built-in skills; do not edit bundled skill files to customize them. Create your own project or user skill instead.
+Enablement edits preserve TOML comments and unknown settings. Project and Both require a selected project before any config changes are written. Both is not a transaction: a later project-file I/O failure can leave the global change applied.
+
+**Open SKILL.md** and **Open related** open built-in skills as read-only in the normal file editor. You can inspect, select, copy, and find text, but typing, replacement, Save, and Ctrl+S cannot change bundled files. Create your own project or user skill to customize one. User/project and plugin-contributed skills remain editable, with the usual external-change/overwrite confirmation.
+
+If the same file is already open, a built-in skill open makes that tab read-only without discarding unsaved text or conflict state; copy pending edits elsewhere, or explicitly discard them when closing. Ordinary file opens do not make a protected tab writable again. If a save is already running, the read-only open is refused with a retry message until it finishes. Protection applies to this open-document workflow, not to external editors or arbitrary trusted file tools.
 
 ## Logs viewer
 

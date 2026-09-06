@@ -1,5 +1,29 @@
 # CodeAlta string resources. English source text is the YAML key.
 # Keep language values as double-quoted YAML strings.
+"Cannot open read-only while a save is in progress. Retry after the save finishes.":
+  de: "Während des Speicherns kann die Datei nicht schreibgeschützt geöffnet werden. Versuchen Sie es danach erneut."
+  es: "No se puede abrir en modo de solo lectura mientras se guarda. Inténtalo de nuevo al terminar."
+  fr: "Impossible d’ouvrir en lecture seule pendant l’enregistrement. Réessayez une fois terminé."
+  ja: "保存中は読み取り専用で開けません。保存完了後に再試行してください。"
+  zh: "保存过程中无法以只读方式打开。请在保存完成后重试。"
+"Read-only":
+  de: "Schreibgeschützt"
+  es: "Solo lectura"
+  fr: "Lecture seule"
+  ja: "読み取り専用"
+  zh: "只读"
+"Read-only skill document. Unsaved text is retained for copying; saving is disabled.":
+  de: "Schreibgeschütztes Skill-Dokument. Ungespeicherter Text bleibt zum Kopieren erhalten; Speichern ist deaktiviert."
+  es: "Documento de habilidad de solo lectura. El texto sin guardar se conserva para copiarlo; guardar está desactivado."
+  fr: "Document de compétence en lecture seule. Le texte non enregistré reste disponible à la copie ; l’enregistrement est désactivé."
+  ja: "読み取り専用のスキル文書です。未保存のテキストはコピー用に保持され、保存は無効です。"
+  zh: "只读技能文档。未保存的文本将保留供复制；保存已禁用。"
+"Read-only · Ctrl+C Copy · Ctrl+F Find · Ctrl+G Go to line":
+  de: "Schreibgeschützt · Ctrl+C Kopieren · Ctrl+F Suchen · Ctrl+G Gehe zu Zeile"
+  es: "Solo lectura · Ctrl+C Copiar · Ctrl+F Buscar · Ctrl+G Ir a línea"
+  fr: "Lecture seule · Ctrl+C Copier · Ctrl+F Rechercher · Ctrl+G Aller à la ligne"
+  ja: "読み取り専用 · Ctrl+C コピー · Ctrl+F 検索 · Ctrl+G 行に移動"
+  zh: "只读 · Ctrl+C 复制 · Ctrl+F 查找 · Ctrl+G 转到行"
 " session info":
   de: "Sitzungsinfo"
   es: "información de la sesión"

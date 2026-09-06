@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using CodeAlta.Tui.Views;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Geometry;
@@ -7,14 +8,14 @@ namespace CodeAlta.Tui.App;
 internal sealed class SkillsManagementCoordinator
 {
     private readonly SkillsManagementService _service;
-    private readonly Func<string, CancellationToken, Task> _openFileAsync;
+    private readonly Func<TextFileDocument, CancellationToken, Task> _openFileAsync;
     private readonly Func<string, CancellationToken, Task> _activateSkillAsync;
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
 
     public SkillsManagementCoordinator(
         SkillsManagementService service,
-        Func<string, CancellationToken, Task> openFileAsync,
+        Func<TextFileDocument, CancellationToken, Task> openFileAsync,
         Func<string, CancellationToken, Task> activateSkillAsync,
         Func<Rectangle?> getBounds,
         Func<Visual?> getFocusTarget)

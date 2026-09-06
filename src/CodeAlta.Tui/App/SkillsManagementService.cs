@@ -59,6 +59,9 @@ internal sealed class SkillsManagementService
 
     public IReadOnlyList<SkillRelatedFile> ListRelatedFiles(SkillDescriptor descriptor, CancellationToken cancellationToken = default)
         => _backend.ListRelatedFiles(descriptor, cancellationToken);
+
+    public Task<TextFileDocument> GetFileDocumentAsync(string skillFilePath, string? relatedPath, CancellationToken cancellationToken = default)
+        => _backend.GetFileDocumentAsync(skillFilePath, relatedPath, _getSelectedProject()?.ProjectPath, cancellationToken);
 }
 
 internal enum SkillsManagementScope
