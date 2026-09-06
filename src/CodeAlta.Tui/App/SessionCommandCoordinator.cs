@@ -102,7 +102,7 @@ internal sealed class SessionCommandCoordinator
         _promptComposerViewModel = promptComposerViewModel;
         _getAlwaysEnqueue = getAlwaysEnqueue ?? (() => _promptComposerViewModel.AlwaysEnqueue);
         _pluginHostBridge = pluginHostBridge;
-        var permissionRequests = new SessionPermissionRequestCoordinator(sessionSelection, commandContext, uiDispatcher);
+        var permissionRequests = new SessionPermissionRequestCoordinator(sessionSelection, commandContext, uiDispatcher, runtimeService.Permissions);
         var userInputRequests = new SessionUserInputRequestCoordinator(sessionSelection, commandContext);
         _executionOptionsFactory = new SessionExecutionOptionsFactory(catalogOptions, modelProviderStates, sessionSelection, permissionRequests, userInputRequests, getPreferredAgentPromptId, altaServices);
         _promptDispatchCoordinator = new SessionPromptDispatchCoordinator(

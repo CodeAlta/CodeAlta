@@ -86,6 +86,8 @@ internal sealed class SessionExecutionOptionsFactory
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackSessionId);
 
+        // Trusted provider callback association, not renderer authorization. Explicit provider identity
+        // retains precedence over the captured draft/session fallback, including transient draft keys.
         return (request, cancellationToken) => _permissionRequests.HandleAsync(
             string.IsNullOrWhiteSpace(request.SessionId) ? fallbackSessionId : request.SessionId,
             request,

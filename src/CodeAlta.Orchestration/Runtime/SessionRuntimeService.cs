@@ -64,7 +64,11 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         _catalogOptions = catalogOptions;
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
+        Permissions = new SessionPermissionService();
     }
+
+    /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
+    public SessionPermissionService Permissions { get; }
 
     /// <summary>
     /// Gets the skill catalog used when building instructions and activating skills.
@@ -1439,6 +1443,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         }
 
         _disposed = true;
+        // Approval waits must finish before joining actors/runs that may be awaiting their callbacks.
+        await Permissions.DisposeAsync().ConfigureAwait(false);
         _events.Complete();
         await _sessionActors.DisposeAsync().ConfigureAwait(false);
 

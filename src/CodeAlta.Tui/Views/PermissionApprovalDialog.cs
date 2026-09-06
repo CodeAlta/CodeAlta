@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Agent;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Tui.Presentation.Formatting;
 using CodeAlta.Tui.Presentation.Styling;
 using XenoAtom.Terminal;
@@ -13,28 +14,30 @@ using XenoAtom.Terminal.UI.Styling;
 
 namespace CodeAlta.Tui.Views;
 
-internal sealed class PermissionApprovalDialog
+internal sealed class PermissionApprovalDialog : IDisposable
 {
-    private readonly AgentPermissionRequest _request;
-    private readonly TaskCompletionSource<AgentPermissionDecision> _tcs;
-    private readonly Func<Rectangle?> _getBounds;
+    private readonly SessionPermissionService _permissions;
+    private readonly SessionPermissionHandle _handle;
     private readonly Func<Visual?> _getFocusTarget;
     private readonly Dialog _dialog;
+    private Task<bool>? _resolution;
+    private bool _disposed;
 
     public PermissionApprovalDialog(
         AgentPermissionRequest request,
-        TaskCompletionSource<AgentPermissionDecision> tcs,
+        SessionPermissionService permissions,
+        SessionPermissionHandle handle,
         Func<Rectangle?> getBounds,
         Func<Visual?> getFocusTarget)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(tcs);
+        ArgumentNullException.ThrowIfNull(permissions);
+        ArgumentNullException.ThrowIfNull(handle);
         ArgumentNullException.ThrowIfNull(getBounds);
         ArgumentNullException.ThrowIfNull(getFocusTarget);
 
-        _request = request;
-        _tcs = tcs;
-        _getBounds = getBounds;
+        _permissions = permissions;
+        _handle = handle;
         _getFocusTarget = getFocusTarget;
 
         var markdown = ChatMarkdownFormatter.FormatChatPermissionRequestMarkdown(request);
@@ -109,13 +112,33 @@ internal sealed class PermissionApprovalDialog
     public void Show()
         => _dialog.Show();
 
+    // The coordinator joins this task; button handlers never create unobserved background work.
+    public Task Resolution => _resolution ?? Task.CompletedTask;
+
     private void SetResult(AgentPermissionDecisionKind kind)
     {
-        _tcs.TrySetResult(new AgentPermissionDecision(kind));
+        if (_disposed || _resolution is not null)
+        {
+            return;
+        }
+
+        _resolution = _permissions.ResolveAsync(_handle, kind).AsTask();
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        var app = _dialog.App;
         _dialog.Close();
         if (_getFocusTarget() is { } focusTarget)
         {
-            _dialog.App?.Focus(focusTarget);
+            app?.Focus(focusTarget);
         }
     }
 }

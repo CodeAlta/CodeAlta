@@ -16,6 +16,28 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class SessionExecutionOptionsFactoryTests
 {
+    private readonly SessionPermissionService _permissions = new();
+
+    [TestCleanup]
+    public async Task CleanupPermissionsAsync() => await _permissions.DisposeAsync();
+
+    [TestMethod]
+    public void PermissionCancellationBeforeUiShow_DoesNotPresentStaleDialog()
+    {
+        using var temp = TestTempDirectory.Create();
+        using var terminal = new PermissionTerminalFixture();
+        using var cancellation = new CancellationTokenSource();
+        var dispatcher = new CancelingPermissionUiDispatcher(cancellation.Cancel) { ExecuteCanceledAction = true };
+        var project = CreateProject("project-a", temp.Path);
+        var options = CreateFactory(temp.Path, project, dispatcher, autoApprove: false)
+            .BuildPreferredExecutionOptions(ModelProviderIds.Codex, temp.Path, [temp.Path], project);
+
+        var decision = options.OnPermissionRequest(CreatePermissionRequest("session-a"), cancellation.Token).GetAwaiter().GetResult();
+
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, decision.Kind);
+        Assert.AreEqual(0, terminal.DialogCount, "Cancellation before queued UI work must not leave a stale modal.");
+    }
+
     [TestMethod]
     public void BuildPreferredExecutionOptions_CopiesInputRoots()
     {
@@ -160,7 +182,7 @@ public sealed class SessionExecutionOptionsFactoryTests
                 [ModelProviderIds.Codex.Value] = providerState,
             },
             selection,
-            new SessionPermissionRequestCoordinator(selection, CreateCommandContext(uiDispatcher), uiDispatcher),
+            new SessionPermissionRequestCoordinator(selection, CreateCommandContext(uiDispatcher), uiDispatcher, _permissions),
             new SessionUserInputRequestCoordinator(selection, CreateCommandContext(uiDispatcher)),
             () => " preferred-prompt ");
 
@@ -225,7 +247,7 @@ public sealed class SessionExecutionOptionsFactoryTests
             catalogOptions,
             new Dictionary<string, ModelProviderState>(StringComparer.OrdinalIgnoreCase),
             selection,
-            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher),
+            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher, _permissions),
             new SessionUserInputRequestCoordinator(selection, commandContext));
 
         var options = factory.BuildExecutionOptions(session, tab);
@@ -282,7 +304,7 @@ public sealed class SessionExecutionOptionsFactoryTests
             catalogOptions,
             new Dictionary<string, ModelProviderState>(StringComparer.OrdinalIgnoreCase),
             selection,
-            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher),
+            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher, _permissions),
             new SessionUserInputRequestCoordinator(selection, commandContext));
 
         var options = factory.BuildExecutionOptions(session, tab);
@@ -482,7 +504,7 @@ public sealed class SessionExecutionOptionsFactoryTests
         Assert.IsFalse(Directory.EnumerateFileSystemEntries(temp.Path).Any(), "Assembly must not discover or persist runtime state.");
     }
 
-    private static SessionExecutionOptionsFactory CreateFactory(
+    private SessionExecutionOptionsFactory CreateFactory(
         string globalRoot,
         ProjectDescriptor selectedProject,
         IUiDispatcher? uiDispatcher = null,
@@ -522,7 +544,7 @@ public sealed class SessionExecutionOptionsFactoryTests
                 },
             },
             selection,
-            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher),
+            new SessionPermissionRequestCoordinator(selection, commandContext, uiDispatcher, _permissions),
             new SessionUserInputRequestCoordinator(selection, commandContext),
             null,
             services);
@@ -700,6 +722,8 @@ public sealed class SessionExecutionOptionsFactoryTests
 
         public int PermissionDialogInvokeCount { get; private set; }
 
+        public bool ExecuteCanceledAction { get; init; }
+
         public bool CheckAccess() => true;
 
         public void Post(Action action)
@@ -714,6 +738,10 @@ public sealed class SessionExecutionOptionsFactoryTests
 
             PermissionDialogInvokeCount++;
             _cancelPermissionRequest();
+            if (ExecuteCanceledAction)
+            {
+                action();
+            }
             return Task.CompletedTask;
         }
 

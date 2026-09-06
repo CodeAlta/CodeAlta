@@ -1516,6 +1516,25 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void Permissions_AreRuntimeOwnedAndDisposedBeforeJoiningRuns()
+    {
+        var frontendRoot = GetCodeAltaSourceRoot();
+        var runtime = File.ReadAllText(Path.Combine(frontendRoot, "..", "CodeAlta.Orchestration", "Runtime", "SessionRuntimeService.cs"));
+        var coordinator = File.ReadAllText(Path.Combine(frontendRoot, "App", "SessionCommandCoordinator.cs"));
+        var adapter = File.ReadAllText(Path.Combine(frontendRoot, "App", "SessionPermissionRequestCoordinator.cs"));
+        var dialog = File.ReadAllText(Path.Combine(frontendRoot, "Views", "PermissionApprovalDialog.cs"));
+        Assert.IsTrue(runtime.Contains("Permissions = new SessionPermissionService();", StringComparison.Ordinal));
+        Assert.IsTrue(coordinator.Contains("uiDispatcher, runtimeService.Permissions)", StringComparison.Ordinal));
+        Assert.IsFalse(adapter.Contains("TaskCompletionSource", StringComparison.Ordinal));
+        Assert.IsFalse(dialog.Contains("TaskCompletionSource", StringComparison.Ordinal));
+        var disposal = runtime[runtime.IndexOf("public async ValueTask DisposeAsync()", StringComparison.Ordinal)..];
+        var cancel = disposal.IndexOf("await Permissions.DisposeAsync()", StringComparison.Ordinal);
+        Assert.IsGreaterThanOrEqualTo(0, cancel);
+        Assert.IsTrue(cancel < disposal.IndexOf("await _sessionActors.DisposeAsync()", StringComparison.Ordinal));
+        Assert.IsTrue(cancel < disposal.IndexOf("await entry.DisposeAsync(_agentHub)", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void CodeAltaApp_DelegatesSessionStateWorkflow()
     {
         var appSource = File.ReadAllText(Path.Combine(GetCodeAltaSourceRoot(), "App", "CodeAltaApp.cs"));

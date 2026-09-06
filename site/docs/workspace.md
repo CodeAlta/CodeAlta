@@ -212,6 +212,12 @@ Open it with `Ctrl+G Ctrl+T` or the session info icon. The report summarizes sel
 
 Open it with `Ctrl+G Ctrl+W` or `/settings`. Workspace settings cover the selected workspace/project behavior and are separate from the model-provider editor. You can also choose the UI language from **Auto**, English, Spanish, French, German, Japanese, and Simplified Chinese; language changes are saved with the workspace settings and fully apply after restarting CodeAlta.
 
+### Tool permissions
+
+**Auto-approve** is enabled by default. When enabled, permission requests are approved once automatically. Disable it to review requests using **Allow Once**, **Allow for Session**, or **Deny**; press `Escape` to cancel. Provider/runtime policy still governs what each approval permits.
+
+When a waiting request is canceled, its permission dialog closes; a canceled request queued for display does not appear afterward. An old dialog response cannot approve a later request that reuses the same provider interaction ID. Permission completion does not depend on an open session tab, and dismissing presentation alone is not an approval.
+
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-workspace-settings-with-language.png" alt="CodeAlta Workspace Settings dialog showing theme, recent sessions, language, and auto-approve options" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Workspace Settings dialog includes the language selector and a restart notice for fully applying language changes.</figcaption>
