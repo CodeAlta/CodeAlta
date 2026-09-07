@@ -108,7 +108,7 @@ public sealed class FileEditorWorkspaceCleanupSourceTests
                         }
             """);
         RequireOnce(shell, """
-                public async ValueTask DisposeAsync()
+                private async ValueTask DisposeFrontendAndOwnedServicesAsync()
                 {
                     Exception? frontendFailure = null;
                     try
@@ -138,6 +138,12 @@ public sealed class FileEditorWorkspaceCleanupSourceTests
                         ExceptionDispatchInfo.Throw(frontendFailure);
                     }
                 }
+            """);
+        RequireOnce(shell, """
+                public async ValueTask DisposeAsync()
+                    => await DisposeRemindersThenFrontendAsync(
+                        () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
+                        DisposeFrontendAndOwnedServicesAsync);
             """);
     }
 

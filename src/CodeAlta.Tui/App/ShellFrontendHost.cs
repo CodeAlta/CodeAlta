@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using CodeAlta.LiveTool;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 
@@ -20,11 +21,23 @@ internal interface IShellFrontendHostLifecycle
 internal sealed class ShellFrontendHost : IAsyncDisposable
 {
     private readonly IShellFrontendHostLifecycle _lifecycle;
+    private AltaReminderService? _reminders;
 
     public ShellFrontendHost(IShellFrontendHostLifecycle lifecycle)
     {
         ArgumentNullException.ThrowIfNull(lifecycle);
         _lifecycle = lifecycle;
+    }
+
+    internal void OwnReminders(AltaReminderService reminders)
+    {
+        ArgumentNullException.ThrowIfNull(reminders);
+        if (_reminders is not null)
+        {
+            throw new InvalidOperationException("Reminder ownership already transferred.");
+        }
+
+        _reminders = reminders;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -41,6 +54,47 @@ internal sealed class ShellFrontendHost : IAsyncDisposable
         => _lifecycle.Tick(cancellationToken);
 
     public async ValueTask DisposeAsync()
+        => await DisposeRemindersThenFrontendAsync(
+            () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
+            DisposeFrontendAndOwnedServicesAsync);
+
+    internal static Task DisposeRemindersThenFrontendAsync(
+        Func<ValueTask> disposeReminders,
+        Func<ValueTask> disposeExisting)
+    {
+        ArgumentNullException.ThrowIfNull(disposeReminders);
+        ArgumentNullException.ThrowIfNull(disposeExisting);
+        return CoreAsync();
+
+        async Task CoreAsync()
+        {
+            Exception? reminderFailure = null;
+            try
+            {
+                await disposeReminders();
+            }
+            catch (Exception ex)
+            {
+                reminderFailure = ex;
+            }
+
+            try
+            {
+                await disposeExisting();
+            }
+            catch (Exception ex) when (reminderFailure is not null)
+            {
+                throw new AggregateException(reminderFailure, ex);
+            }
+
+            if (reminderFailure is not null)
+            {
+                ExceptionDispatchInfo.Throw(reminderFailure);
+            }
+        }
+    }
+
+    private async ValueTask DisposeFrontendAndOwnedServicesAsync()
     {
         Exception? frontendFailure = null;
         try

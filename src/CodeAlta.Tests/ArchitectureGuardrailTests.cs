@@ -752,9 +752,9 @@ public sealed class ArchitectureGuardrailTests
         {
             "App/CodeAltaShellController.cs:73:_initializationTask = Task.Run(",
             "App/CodeAltaShellController.cs:448:var startupProviderLoadTask = Task.Run(",
-            "App/CodeAltaApp.cs:348:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:379:_ = PersistViewStateAsync();",
-            "App/CodeAltaApp.cs:457:_ = OpenModelProvidersAsync();",
+            "App/CodeAltaApp.cs:349:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:380:_ = PersistViewStateAsync();",
+            "App/CodeAltaApp.cs:458:_ = OpenModelProvidersAsync();",
             "App/RuntimeEventPump.cs:34:_pumpTask = Task.Run(",
             "App/ShellSessionStateCoordinator.cs:317:_ = RestoreStartupSessionHistoryAsync(sessionId, cancellationToken);",
             "App/ShellSessionStateCoordinator.cs:328:_ = PersistViewStateAsync();",

@@ -152,6 +152,8 @@ Each firing captures its message and target before sending, without requiring an
 
 If a reminder change succeeds but notifying the interface fails, CodeAlta reports a warning rather than pretending the change failed. Observer errors do not replace delivery results or cancel repeats. `reminder list` and opening/refreshing the TUI reminder dialog can show the latest retained notification failure, including one for a completed or deleted reminder. This single process-only snapshot is overwritten by the next failed notification pass; it is historical feedback, not a current delivery failure or complete history. Successful notifications do not clear it, and warnings may be shortened or omitted by output limits. Feedback is queried rather than guaranteed to appear immediately.
 
+When a successfully created TUI frontend shuts down, its reminder service stops accepting changes and waits for retained reminder workers before frontend/runtime cleanup. It requests cancellation, but an already captured send may still proceed; queued prompts and agent runs are not withdrawn or joined by this worker cleanup. Listing remains available during shutdown, and an `Active` entry can be historical rather than still scheduled. An unfinished worker can delay shutdown without a forced timeout. This applies to the frontend's own reminder service, not every independently created host service or failed frontend construction.
+
 ### Switch or create modes through prompts
 
 You can ask an agent to inspect available prompts, recommend one, create a project prompt, or switch the current session.

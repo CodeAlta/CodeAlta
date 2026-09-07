@@ -85,6 +85,15 @@ If a terminal frontend cleanup step fails, CodeAlta attempts the remaining
 frontend cleanup steps before runtime cleanup and can report their failures
 together. A step that does not finish can still delay the rest of shutdown.
 
+For a successfully created terminal frontend, shutdown first stops new reminder
+creation, edits and deletions, requests cancellation, and waits for its retained
+reminder workers, including workers whose reminders were deleted. A terminal
+reminder cleanup failure still allows the remaining cleanup to be attempted;
+an unfinished worker can delay it indefinitely. This does not retract captured
+sends, remove queued prompts, stop agent runs or drain queued interface actions.
+It does not cover reminders created outside the frontend's owned service or
+resources hidden by failed frontend construction.
+
 Editor cleanup also attempts the remaining open editors if closing the file picker
 or an earlier editor fails. This does not wait for every pending file load, save,
 or search, and it does not roll back file changes already made.

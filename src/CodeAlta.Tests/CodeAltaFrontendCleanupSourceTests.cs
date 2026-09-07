@@ -203,7 +203,7 @@ public sealed class CodeAltaFrontendCleanupSourceTests
         var shell = ReadSource("CodeAlta.Tui/App/ShellFrontendHost.cs");
         // Preserve the entire existing traversal, including late owned-services lookup and errors.
         RequireOnce(shell, """
-                public async ValueTask DisposeAsync()
+                private async ValueTask DisposeFrontendAndOwnedServicesAsync()
                 {
                     Exception? frontendFailure = null;
                     try
@@ -234,8 +234,28 @@ public sealed class CodeAltaFrontendCleanupSourceTests
                     }
                 }
             """);
-        var shellCleanup = Scope(shell, "    public async ValueTask DisposeAsync()", "\n    }\n");
-        Reject(shellCleanup, "ConfigureAwait(", ".Flatten(", "Task.Run(", "Task.WhenAny(", ".Wait(", ".WaitAsync(", "GetAwaiter().GetResult()");
+        RequireOnce(shell, """
+                public async ValueTask DisposeAsync()
+                    => await DisposeRemindersThenFrontendAsync(
+                        () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
+                        DisposeFrontendAndOwnedServicesAsync);
+            """);
+
+        var shellCleanup = Scope(
+            shell,
+            "    private async ValueTask DisposeFrontendAndOwnedServicesAsync()",
+            "\n    }\n");
+        Reject(shellCleanup,
+            "ConfigureAwait(", ".Flatten(", "Task.Run(", "Task.WhenAny(",
+            ".Wait(", ".WaitAsync(", "GetAwaiter().GetResult()");
+
+        var reminderCleanup = Scope(
+            shell,
+            "    internal static Task DisposeRemindersThenFrontendAsync(",
+            "\n    }\n");
+        Reject(reminderCleanup,
+            "ConfigureAwait(", ".Flatten(", "Task.Run(", "Task.WhenAny(",
+            ".Wait(", ".WaitAsync(", "GetAwaiter().GetResult()");
 
         var deferred = ReadSource("CodeAlta.Tui/Views/DeferredCodeAltaApp.cs");
         var iteration = Scope(deferred, "    private TerminalLoopResult OnIteration(", "\n    }\n");

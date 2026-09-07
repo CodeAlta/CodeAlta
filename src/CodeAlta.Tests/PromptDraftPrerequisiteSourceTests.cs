@@ -254,7 +254,31 @@ public sealed class PromptDraftPrerequisiteSourceTests
 
         // Entire Shell source protects all seven independent stages AND the outer owned-services
         // routing/error policy. App's exact adapter still discards only the view-state result.
-        Assert.IsTrue(string.Equals(OriginalShell + "\n", shell, StringComparison.Ordinal));
+        const string reminderImport = "using CodeAlta.LiveTool;\n";
+        const string reminderField = "    private AltaReminderService? _reminders;\n";
+        const string renamedTraversal =
+            "    private async ValueTask DisposeFrontendAndOwnedServicesAsync()";
+
+        RequireOnce(shell, reminderImport);
+        RequireOnce(shell, reminderField);
+        RequireOnce(shell, ExpectedReminderOwnership + "\n\n");
+        RequireOnce(shell, ExpectedReminderAdapterAndCore + "\n\n");
+        RequireOnce(shell, renamedTraversal);
+
+        var originalShell = shell
+            .Replace(reminderImport, "", StringComparison.Ordinal)
+            .Replace(reminderField, "", StringComparison.Ordinal)
+            .Replace(ExpectedReminderOwnership + "\n\n", "", StringComparison.Ordinal)
+            .Replace(ExpectedReminderAdapterAndCore + "\n\n", "", StringComparison.Ordinal)
+            .Replace(renamedTraversal,
+                "    public async ValueTask DisposeAsync()", StringComparison.Ordinal);
+
+        Assert.IsTrue(string.Equals(
+            OriginalShell + "\n", originalShell, StringComparison.Ordinal));
+        Assert.AreEqual(
+            6_324,
+            System.Text.Encoding.UTF8.GetByteCount(
+                originalShell.Replace("\n", "\r\n", StringComparison.Ordinal)));
         RequireOnce(app, ExpectedFrontendAdapter);
         RequireOnce(app, "    public async ValueTask DisposeAsync()\n        => await _frontendHost.DisposeAsync();");
         RequireOnce(app, "    IAsyncDisposable? IShellFrontendHostLifecycle.OwnedServices => _ownedServices;");
@@ -859,6 +883,62 @@ public sealed class PromptDraftPrerequisiteSourceTests
                 }
             }
         }
+        """;
+
+    private const string ExpectedReminderOwnership = """
+            internal void OwnReminders(AltaReminderService reminders)
+            {
+                ArgumentNullException.ThrowIfNull(reminders);
+                if (_reminders is not null)
+                {
+                    throw new InvalidOperationException("Reminder ownership already transferred.");
+                }
+
+                _reminders = reminders;
+            }
+        """;
+
+    private const string ExpectedReminderAdapterAndCore = """
+            public async ValueTask DisposeAsync()
+                => await DisposeRemindersThenFrontendAsync(
+                    () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
+                    DisposeFrontendAndOwnedServicesAsync);
+
+            internal static Task DisposeRemindersThenFrontendAsync(
+                Func<ValueTask> disposeReminders,
+                Func<ValueTask> disposeExisting)
+            {
+                ArgumentNullException.ThrowIfNull(disposeReminders);
+                ArgumentNullException.ThrowIfNull(disposeExisting);
+                return CoreAsync();
+
+                async Task CoreAsync()
+                {
+                    Exception? reminderFailure = null;
+                    try
+                    {
+                        await disposeReminders();
+                    }
+                    catch (Exception ex)
+                    {
+                        reminderFailure = ex;
+                    }
+
+                    try
+                    {
+                        await disposeExisting();
+                    }
+                    catch (Exception ex) when (reminderFailure is not null)
+                    {
+                        throw new AggregateException(reminderFailure, ex);
+                    }
+
+                    if (reminderFailure is not null)
+                    {
+                        ExceptionDispatchInfo.Throw(reminderFailure);
+                    }
+                }
+            }
         """;
 
     private const string OriginalShell = """

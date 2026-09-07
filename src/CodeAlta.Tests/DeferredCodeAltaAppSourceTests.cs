@@ -302,7 +302,17 @@ public sealed class DeferredCodeAltaAppSourceTests
         Reject(frontendCleanup, "async ()", "ThrowIfFailed", "PersistenceResult", "IsConflict", "Succeeded", "reportStatus: true");
 
         var shell = ReadSource("CodeAlta.Tui/App/ShellFrontendHost.cs");
-        var shellCleanup = Scope(shell, "    public async ValueTask DisposeAsync()", "\n    }\n");
+        RequireOnce(shell, """
+                public async ValueTask DisposeAsync()
+                    => await DisposeRemindersThenFrontendAsync(
+                        () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
+                        DisposeFrontendAndOwnedServicesAsync);
+            """);
+
+        var shellCleanup = Scope(
+            shell,
+            "    private async ValueTask DisposeFrontendAndOwnedServicesAsync()",
+            "\n    }\n");
         RequireOrdered(shellCleanup,
             "await _lifecycle.DisposeFrontendAsync();",
             "frontendFailure = ex;",

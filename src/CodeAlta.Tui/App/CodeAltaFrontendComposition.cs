@@ -64,6 +64,7 @@ internal sealed class CodeAltaFrontendComposition
         ICodeAltaShell shell,
         KnownProjectImporter knownProjectImporter,
         CodeAltaApp frontend,
+        ShellFrontendHost reminderOwner,
         ProjectDescriptor? currentProject = null,
         PluginHostBridge? pluginHostBridge = null,
         IModelProviderRegistry? modelProviderRegistry = null,
@@ -79,6 +80,7 @@ internal sealed class CodeAltaFrontendComposition
         ArgumentNullException.ThrowIfNull(shell);
         ArgumentNullException.ThrowIfNull(knownProjectImporter);
         ArgumentNullException.ThrowIfNull(frontend);
+        ArgumentNullException.ThrowIfNull(reminderOwner);
 
         var shellViewModel = new CodeAltaShellViewModel();
         var sidebarViewModel = new SidebarViewModel();
@@ -140,6 +142,7 @@ internal sealed class CodeAltaFrontendComposition
         var altaRegistry = new AltaCommandRegistry();
         var altaDispatcher = new AltaCommandDispatcher(altaRegistry, altaServices);
         var reminderService = new AltaReminderService(altaServices);
+        reminderOwner.OwnReminders(reminderService);
         pluginHostBridge?.Alta?.SetDispatcher(altaDispatcher);
         altaServices
             .Add(altaRegistry)
