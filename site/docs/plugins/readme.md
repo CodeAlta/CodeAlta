@@ -89,6 +89,12 @@ Editor cleanup also attempts the remaining open editors if closing the file pick
 or an earlier editor fails. This does not wait for every pending file load, save,
 or search, and it does not roll back file changes already made.
 
+If waiting to save a prompt draft fails, its work chain still waits for the
+previous draft operation before finishing that failed attempt. This can delay
+error reporting and shutdown while an earlier save is pending. It does not
+guarantee that every draft is saved: failures while preparing a flush remain a
+separate limitation, and file changes already made are not rolled back.
+
 Runtime event-delivery cleanup also attempts its remaining stages after failures,
 waiting for its worker before releasing cancellation resources. This does not
 drain pending interface updates or stop plugins, and fatal runtime errors can

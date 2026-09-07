@@ -172,18 +172,10 @@ internal sealed class SessionPromptDraftPersistenceCoordinator : IAsyncDisposabl
     {
         try
         {
-            if (delay is not null)
-            {
-                try
-                {
-                    await Task.Delay(_saveDelay, delay.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (delay.IsCancellationRequested)
-                {
-                }
-            }
-
-            await previous.ConfigureAwait(false);
+            await JoinDraftPrerequisitesAsync(
+                previous,
+                delay is null ? static () => Task.CompletedTask : () => Task.Delay(_saveDelay, delay.Token),
+                delay is null ? static () => false : () => delay.IsCancellationRequested).ConfigureAwait(false);
             string? text;
             TextFileRevision revision;
             lock (_syncRoot)
@@ -258,6 +250,89 @@ internal sealed class SessionPromptDraftPersistenceCoordinator : IAsyncDisposabl
         public bool IsDirty => Version != AcknowledgedVersion;
         public Exception? Error { get; set; }
         public CancellationTokenSource? Delay { get; set; }
+    }
+
+    /// <summary>
+    /// Joins the original delay and previous prompt-draft prerequisites without owning their resources.
+    /// </summary>
+    /// <remarks>
+    /// All mandatory arguments receive synchronous validation in signature order before the local core
+    /// starts inline. Retain previous before invoking the delay factory once, retain its original task,
+    /// and treat a returned null task as a seam-contract failure, not concrete Task.Delay behavior.
+    /// The delay-only OCE filter evaluates the predicate once only for delay acquisition or await OCE:
+    /// true suppresses, false retains; a throwing predicate is filter false under C# semantics and retains
+    /// the original OCE, not a new predicate error. Never suppress or classify previous cancellation.
+    /// After every terminal delay outcome, including acquisition/null failure, independently await previous.
+    /// A lone original error uses EDI; an aggregate contains direct ordered [delay, previous] errors,
+    /// preserving nested and repeated references without flatten or dedup operations.
+    /// This intentionally changes exceptional ordering: error storage, logging and local source release
+    /// now wait for previous after terminal delay failure, and both errors reach the unchanged outer catch.
+    /// That outer catch ordinarily stores/logs rather than propagates; logger/finally precedence is unchanged.
+    /// Awaits suppress infrastructure context capture, not a forced thread switch for completed tasks;
+    /// the frontend plain-await caller retains its own context boundary. Pending delay noncompletion
+    /// prevents reaching previous, and pending previous blocks completion. No timeout or termination is added.
+    /// Only supplied original tasks are joined: hidden descendants and adapter/invocation setup are excluded.
+    /// Observe setup, partial flush retention in QueueFlush, reentrant admission, concurrent delete/edit, UI rollback
+    /// and callback invalidation remain open. This is not complete draft shutdown or broader owner cleanup.
+    /// </remarks>
+    /// <param name="previous">The mandatory original predecessor task, retained and independently joined.</param>
+    /// <param name="waitDelay">The mandatory factory invoked once inline to acquire the original delay task.</param>
+    /// <param name="isDelayCancellationRequested">The mandatory delay-only cancellation filter predicate.</param>
+    /// <exception cref="ArgumentNullException">A mandatory argument is null; thrown synchronously in signature order.</exception>
+    /// <exception cref="InvalidOperationException">The delay operation returned a null task; joined with any previous failure.</exception>
+    /// <exception cref="OperationCanceledException">The lone retained failure is an unsuppressed delay or previous OCE.</exception>
+    /// <exception cref="Exception">A lone original failure is rethrown through EDI after both prerequisites terminate.</exception>
+    /// <exception cref="AggregateException">Multiple direct original failures remain ordered without flattening or deduplication.</exception>
+    internal static Task JoinDraftPrerequisitesAsync(
+        Task previous,
+        Func<Task> waitDelay,
+        Func<bool> isDelayCancellationRequested)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        ArgumentNullException.ThrowIfNull(waitDelay);
+        ArgumentNullException.ThrowIfNull(isDelayCancellationRequested);
+        return CoreAsync();
+
+        async Task CoreAsync()
+        {
+            List<Exception>? failures = null;
+            try
+            {
+                var delayTask = waitDelay();
+                if (delayTask is null)
+                {
+                    throw new InvalidOperationException("The delay operation returned a null task.");
+                }
+
+                await delayTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (isDelayCancellationRequested())
+            {
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            try
+            {
+                await previous.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
+
+            if (failures is { Count: 1 })
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failures[0]);
+            }
+
+            if (failures is { Count: > 1 })
+            {
+                throw new AggregateException(failures);
+            }
+        }
     }
 }
 
