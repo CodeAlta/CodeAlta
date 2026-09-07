@@ -643,6 +643,65 @@ The four historical LF byte/hash baselines remain unchanged and were matched onl
 
 **Next sole-child assignment is read-only preservation compatibility design**, before more file-search design/implementation. Compare the smallest scoped attribute approach with strict checkout-aware in-memory reconstruction; enumerate exact affected named paths/readers/raw literals, expected LF/CRLF contracts, complete historical inverses and mutation rejection requirements. Return an exact proposed correction and inert source-only verification inventory when supportable, or a precise remaining decision. Preserve all production bodies, existing lifetime error/ownership policies, App budget, scheduling allowances and historical whole-original proofs. No actual attributes/config/source/fixture edits, line-ending rewrites, staging, commits, builds/tests/discovery, source-assembly/concrete service/UI/CTS/logger execution, protected artifact/HOME/cache reads, network or compaction. Parent must audit before any corrective implementation. This is a verification prerequisite, not permission for a repository-wide test rewrite. Same child is confirmed inactive/not running, queue0/children0; initial small status caps suppressed its large recoverable-summary record, and a larger bounded read confirmed state without a new writer. Coordinator may resume for this assignment; later pause/stop still takes precedence. M2–M7 remain open.
 
+#### Accepted checkout contract and failing-before-fix evidence
+
+Parent independently accepts the attributes-only recommendation from child run `01a07d3e-3d21-7402-a734-a21420de1899`, content `msg_001d5e3be608e515016a9f0b178cfc87d2a1258b1c39d46c82`. No parser, literal, C#/XML, historical hash, baseline occurrence-count or inverse change is approved; no new negative-test seams or test-side model are needed for this representation-only correction. The existing mandatory source guards supply regression coverage. Attributes are not encoding validators, and older workspace reader/conditional-inverse behavior is not silently upgraded. This pins a finite existing contract on every platform, not a platform skip or repository-wide style policy.
+
+Parent re-read catalog1–119/746–840, reminder145–244/1129–1202, test project/assembly hooks/build props/global SDK selection and complete attributes. Independent literal-baseline extraction found catalog12 and reminder21 entries,29 unique direct paths with consistent shared ending contracts; adding the two catalog fixtures gives31. All31 strict UTF-8/no BOM/final-newline/uniform-ending/byte-round-trip checks passed, and each explicit LF content matched the corresponding binary HEAD blob. Exactly12 files need CRLF→LF;19 need no rewrite. All ten catalog and twelve reminder unchanged-route renderings matched their frozen byte counts/line counts/hashes. Changed reminder production/guard original hashes were not incorrectly compared without their inverse maps. `git check-attr` for all31 found text:auto and eol/filter/working-tree-encoding unspecified. No user content, file or Git state was changed during this audit.
+
+Before correction, parent rebuilt only `CodeAlta.Tests.csproj` Release with --no-restore:0 warnings/errors. After source audit, ran only these exact FQNs, joined with FullyQualifiedName equality OR terms (not a class filter):
+
+```text
+CodeAlta.Tests.ModelsDevCatalogLifetimeSourceTests.Start_SourceWiring_StopsAdmissionBeforeTokenCaptureAndScheduling
+CodeAlta.Tests.ModelsDevCatalogLifetimeSourceTests.Dispose_SourceWiring_SharesOneStopSnapshotAndCancellation
+CodeAlta.Tests.ModelsDevCatalogLifetimeSourceTests.Dispose_SourceWiring_UsesMandatoryLoggerFreeCore
+CodeAlta.Tests.ModelsDevCatalogLifetimeSourceTests.Preservation_InvertsOnlyApprovedCatalogLifetimeChanges
+CodeAlta.Tests.ModelsDevCatalogLifetimeSourceTests.Preservation_OwnershipAndExistingGuardsRemainUnchanged
+```
+
+Result: **5 failed /0 passed /0 skipped**, exit1. First four failed at CatalogLiteral773 (`literal.Contains('\r')`); the unchanged-route case failed at AssertEncoding765 for `CodeAltaOwnedServicesLifetimeTests.cs`. This establishes the compiled-literal representation issue for this build, superseding prior source-only uncertainty. No concrete catalog/reminder/search/UI/runtime tests ran. Source reads and writerless assembly logging are nonzero I/O. Logs are `C:\Users\alexa\AppData\Local\Temp\codealta-parent-eol-phase-a-build-20260907-01.log` and `codealta-parent-eol-phase-a-tests-20260907-01.log`; historical catalog integration remains unchanged, and post-fix tests are still pending.
+
+**Frozen attributes map:** old `.gitattributes` actual bytes159, four logical lines/three CRLF separators, no BOM and **no final newline**, SHA256 `5808EBAC8AE32E5A5F3C837ABD532F31B6CF28608315EAAF5E2B6D59275B3DF8`. Preserve all those bytes as the prefix. Append two CRLF separators, then exactly the following comment/rules joined with CRLF, with **no final newline**. Whole new file has37 logical lines/36 CRLF separators. This explicit EOF recipe corrects the ambiguity in the child code fence; no existing terminal newline may be assumed.
+
+```gitattributes
+# Exact checkout contracts for accepted catalog/reminder preservation guards.
+/src/CodeAlta.Agent/ModelCatalog/AgentModelMetadataEnricher.cs text eol=crlf
+/src/CodeAlta.Agent/ModelCatalog/ModelsDevCatalogService.cs text eol=crlf
+/src/CodeAlta.Hosting/ConfiguredModelProviderRegistryBuilder.cs text eol=crlf
+/src/CodeAlta.Hosting/ConfiguredProviderInspection.cs text eol=lf
+/src/CodeAlta.LiveTool/AltaReminderService.cs text eol=crlf
+/src/CodeAlta.LiveTool/AltaServiceCollection.cs text eol=lf
+/src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs text eol=crlf
+/src/CodeAlta.Orchestration/Hosting/CodeAltaHost.cs text eol=crlf
+/src/CodeAlta.Tests/AltaReminderLifetimeSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/ArchitectureGuardrailTests.cs text eol=crlf
+/src/CodeAlta.Tests/CodeAltaFrontendCleanupSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/CodeAltaOwnedServicesLifetimeTests.cs text eol=lf
+/src/CodeAlta.Tests/DeferredCodeAltaAppSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/FileEditorWorkspaceCleanupSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/ModelsDevCatalogLifetimeSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/ModelsDevCatalogLifetimeTests.cs text eol=lf
+/src/CodeAlta.Tests/ModelsDevCatalogTests.cs text eol=crlf
+/src/CodeAlta.Tests/PromptDraftPrerequisiteSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/RuntimeEventPumpSourceTests.cs text eol=lf
+/src/CodeAlta.Tui/App/CodeAltaApp.cs text eol=crlf
+/src/CodeAlta.Tui/App/CodeAltaFrontendComposition.cs text eol=crlf
+/src/CodeAlta.Tui/App/CodeAltaOwnedServices.cs text eol=crlf
+/src/CodeAlta.Tui/App/CodeAltaShellController.cs text eol=crlf
+/src/CodeAlta.Tui/App/ProviderFrontendCoordinator.cs text eol=crlf
+/src/CodeAlta.Tui/App/ReminderUiCoordinator.cs text eol=lf
+/src/CodeAlta.Tui/App/RuntimeEventPump.cs text eol=crlf
+/src/CodeAlta.Tui/App/SessionPromptDraftPersistenceCoordinator.cs text eol=lf
+/src/CodeAlta.Tui/App/ShellFrontendHost.cs text eol=crlf
+/src/CodeAlta.Tui/Program.cs text eol=crlf
+/src/CodeAlta.Tui/Views/DeferredCodeAltaApp.cs text eol=crlf
+/src/CodeAlta.Tui/Views/FileEditorWorkspaceCoordinator.cs text eol=crlf
+```
+
+Only12 existing checkouts may be re-rendered, to their exact historical LF conventions: `ConfiguredProviderInspection`, `AltaReminderLifetimeSourceTests`, `CodeAltaFrontendCleanupSourceTests`, `CodeAltaOwnedServicesLifetimeTests`, `DeferredCodeAltaAppSourceTests`, `FileEditorWorkspaceCleanupSourceTests`, `ModelsDevCatalogLifetimeSourceTests`, `ModelsDevCatalogLifetimeTests`, `PromptDraftPrerequisiteSourceTests`, `RuntimeEventPumpSourceTests`, `ReminderUiCoordinator`, and `SessionPromptDraftPersistenceCoordinator` at the explicit paths above. No rewrite of the other19 paths. Each candidate must be solely ordinal CRLF→LF and invert to every pre-write byte; fresh HEAD/index equality, unchanged normalized content, strict encoding, actual filter/encoding attributes and expected candidate hashes are required before a named checkout-index refresh. Stop on any drift, staged user change, unexpected filter or inability to preserve attributes EOF. No blanket normalization, reset, add --renormalize or config change.
+
+Same sole child may implement only that attributes append and those12 verified checkout representations, then stop for parent audit. Use apply_patch for the attributes edit; the bounded Git checkout operation is only for already-verified content-identical representations. No builds/tests/discovery, C# execution, source/fixture semantic edits, historical hash rebasing, extra child, reminder changes, artifacts/HOME/cache reads, staging/commits or compaction. Parent retains docs, actual-byte/whole-inverse review, explicit filtered verification and scoped integration. Source/architecture/error/lifetime policies and App47026-byte budget remain unchanged. The broader proposed test inventory is not execution-authorized by this five-method regression run. M2–M7 remain open.
+
 ### M2 reminder observer-isolation checkpoint
 
 The bounded feedback slice is accepted. `AltaReminderService` keeps its existing CRUD signatures as forwarding wrappers and adds per-operation diagnostic overloads plus `GetLastNotificationFailure()`. Mutation context is captured under the instance gate; each notification pass captures its subscriber delegate once and attempts every callback individually outside ownership. Observer exceptions, including cancellation, cannot retract committed mutations, replace delivery fields or stop repeat scheduling. Timer/dispatch cancellation and captured-firing semantics remain unchanged.
