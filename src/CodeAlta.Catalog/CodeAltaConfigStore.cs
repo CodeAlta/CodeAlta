@@ -956,6 +956,11 @@ public sealed class CodeAltaConfigStore
         definition.AuthSource = NormalizeCodexSubscriptionAuthSource(definition.AuthSource);
         definition.AccountId = NormalizeText(definition.AccountId);
         definition.TextVerbosity = NormalizeCodexSubscriptionTextVerbosity(definition.TextVerbosity);
+        definition.ServiceTier = NormalizeText(definition.ServiceTier)?.ToLowerInvariant() switch
+        {
+            "fast" => "priority",
+            var tier => tier,
+        };
         definition.ModelDiscovery = NormalizeCodexSubscriptionModelDiscovery(definition.ModelDiscovery);
         definition.ResponseTransport = NormalizeCodexSubscriptionResponseTransport(definition.ResponseTransport);
         definition.InstallationIdSource = NormalizeCodexSubscriptionInstallationIdSource(definition.InstallationIdSource);
@@ -1284,6 +1289,11 @@ public sealed class CodeAltaConfigStore
 
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
+        if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "service_tier", definition.ServiceTier);
+        }
+
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) &&
             !string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal) &&
             !string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal))
@@ -1499,6 +1509,11 @@ public sealed class CodeAltaConfigStore
 
     private static void ValidateCodexSubscriptionFields(CodeAltaProviderDocument definition)
     {
+        if (definition.ServiceTier is not (null or "default" or "priority"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} service_tier must be one of: default, priority, fast (alias for priority).");
+        }
+
         if (definition.MaxConcurrentRequests is <= 0)
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} max_concurrent_requests must be greater than zero.");
@@ -1758,6 +1773,11 @@ public sealed class CodeAltaConfigStore
                 definition.TextVerbosity = null;
             }
 
+            if (definition.ServiceTier == "default")
+            {
+                definition.ServiceTier = null;
+            }
+
             if (definition.IncludeEncryptedReasoning == true)
             {
                 definition.IncludeEncryptedReasoning = null;
@@ -1868,6 +1888,7 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.AccountId) ||
                definition.MaxConcurrentRequests is not null ||
                !string.IsNullOrWhiteSpace(definition.TextVerbosity) ||
+               !string.IsNullOrWhiteSpace(definition.ServiceTier) ||
                definition.IncludeEncryptedReasoning is not null ||
                !string.IsNullOrWhiteSpace(definition.ModelDiscovery) ||
                !string.IsNullOrWhiteSpace(definition.ResponseTransport) ||
@@ -1957,6 +1978,7 @@ public sealed class CodeAltaConfigStore
             AccountId = definition.AccountId,
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
+            ServiceTier = definition.ServiceTier,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
             ModelDiscovery = definition.ModelDiscovery,
             ResponseTransport = definition.ResponseTransport,

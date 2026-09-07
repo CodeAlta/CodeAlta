@@ -413,6 +413,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("codealta_oauth", provider.AuthSource);
         Assert.AreEqual(16, provider.MaxConcurrentRequests);
         Assert.AreEqual("medium", provider.TextVerbosity);
+        Assert.IsNull(provider.ServiceTier);
         Assert.IsTrue(provider.IncludeEncryptedReasoning);
         Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
         Assert.AreEqual("websocket_with_http_fallback", provider.ResponseTransport);
@@ -466,6 +467,59 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    [DataRow(null, null)]
+    [DataRow("default", null)]
+    [DataRow("priority", "priority")]
+    [DataRow(" FAST ", "priority")]
+    public void CodexSubscriptionServiceTier_NormalizesAndRoundTrips(string? configured, string? expected)
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, "[providers.codex]\ntype = \"codex\"\n" +
+            (configured is null ? "" : $"service_tier = \"{configured}\"\n"));
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        Assert.AreEqual(expected, provider.ServiceTier);
+
+        store.SaveGlobalProviderDefinitions([provider]);
+
+        Assert.AreEqual(expected,
+            store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().ServiceTier);
+        var saved = File.ReadAllText(path);
+        if (expected == "priority")
+        {
+            StringAssert.Contains(saved, "service_tier = \"priority\"");
+        }
+        else
+        {
+            Assert.IsFalse(saved.Contains("service_tier", StringComparison.Ordinal));
+        }
+        Assert.AreEqual(expected, provider.ServiceTier, "Saving must not mutate the caller's document.");
+    }
+
+    [TestMethod]
+    [DataRow("codex", "prioroty")]
+    [DataRow("codex", "flex")]
+    [DataRow("openai-responses", "priority")]
+    [DataRow("openai-chat", "default")]
+    [DataRow("copilot", "priority")]
+    [DataRow("xai", "priority")]
+    [DataRow("anthropic", "priority")]
+    public void LoadGlobalProviderDefinitions_RejectsUnsupportedServiceTier(string providerType, string tier)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), $$"""
+            [providers.test]
+            type = "{{providerType}}"
+            service_tier = "{{tier}}"
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var exception = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(exception.InnerException?.Message, "providers.test");
+        StringAssert.Contains(exception.InnerException?.Message, "service_tier");
+    }
+
+    [TestMethod]
     public void SaveGlobalProviderDefinitions_CodexSubscriptionPreservesExplicitLegacyBetaOptIn()
     {
         using var temp = TempDirectory.Create();
@@ -515,7 +569,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             model = "gpt-5.3-codex"
 
             [providers.codex.extra_body]
-            suspicious = true
+            service_tier = "priority"
             """);
 
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });

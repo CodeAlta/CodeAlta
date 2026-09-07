@@ -90,22 +90,31 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
-    public void ResponsesLiteRequest_HasMatchingHttpAndWebSocketPayloadProperties()
+    [DataRow(null, true)]
+    [DataRow("priority", true)]
+    [DataRow(null, false)]
+    [DataRow("priority", false)]
+    public void ResponsesRequest_HasMatchingHttpAndWebSocketPayloadProperties(string? tier, bool lite)
     {
-        static OpenAI.Responses.CreateResponseOptions CreateOptions()
+        OpenAI.Responses.CreateResponseOptions CreateOptions()
         {
             var options = new OpenAI.Responses.CreateResponseOptions
             {
                 Model = "gpt-5.6-sol",
                 Instructions = "Developer instructions",
                 StreamingEnabled = true,
+                ServiceTier = tier is null ? (OpenAI.Responses.ResponseServiceTier?)null : new OpenAI.Responses.ResponseServiceTier(tier),
+                ParallelToolCallsEnabled = true,
             };
             options.InputItems.Add(OpenAI.Responses.ResponseItem.CreateUserMessageItem("Hello"));
             options.Tools.Add(OpenAI.Responses.ResponseTool.CreateFunctionTool(
                 "inspect_file",
                 BinaryData.FromString("""{"type":"object","properties":{}}"""),
                 strictModeEnabled: true));
-            CodexResponsesLiteRequestBuilder.Apply(options, options.Instructions);
+            if (lite)
+            {
+                CodexResponsesLiteRequestBuilder.Apply(options, options.Instructions);
+            }
             return options;
         }
 
@@ -128,6 +137,12 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
         Assert.AreEqual(http.RootElement.EnumerateObject().Count() + 1, webSocket.RootElement.EnumerateObject().Count());
         Assert.AreEqual("response.create", webSocket.RootElement.GetProperty("type").GetString());
+        Assert.AreEqual(!lite, http.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+        Assert.AreEqual(tier is not null, http.RootElement.TryGetProperty("service_tier", out var serviceTier));
+        if (tier is not null)
+        {
+            Assert.AreEqual(tier, serviceTier.GetString());
+        }
         foreach (var property in http.RootElement.EnumerateObject())
         {
             Assert.IsTrue(webSocket.RootElement.TryGetProperty(property.Name, out var webSocketProperty));
@@ -873,6 +888,9 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsTrue(visibleModels.All(static model => model.Capabilities?.ContainsKey("maxOutputTokens") == false));
         Assert.IsTrue(visibleModels.All(static model => Equals(true, model.Capabilities?["listable"])));
         Assert.IsTrue(visibleModels.All(static model => Equals(false, model.Capabilities?["hidden"])));
+        Assert.IsTrue(visibleModels.All(static model => !CodexSubscriptionModelCapabilities.FromModel(model).SupportsPriorityServiceTier));
+        Assert.IsTrue(visibleModels.All(static model => Equals(
+            !CodexSubscriptionModelCapabilities.FromModel(model).UseResponsesLite, model.Capabilities?["supportsParallelToolCalls"])));
         Assert.IsTrue(visibleModels.Where(static model => model.Id.StartsWith("gpt-5.6-", StringComparison.Ordinal)).All(
             static model => Equals(true, model.Capabilities?["useResponsesLite"])));
         Assert.AreEqual(
@@ -926,7 +944,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(true, models[0].Capabilities?["supportsTextVerbosity"]);
         Assert.AreEqual(true, models[0].Capabilities?["supportsReasoningSummaries"]);
         Assert.AreEqual(true, models[0].Capabilities?["supportVerbosity"]);
-        Assert.AreEqual(false, models[0].Capabilities?["supportsParallelToolCalls"]);
+        Assert.AreEqual(true, models[0].Capabilities?["supportsParallelToolCalls"]);
         Assert.AreEqual(true, models[0].Capabilities?["supportsImageDetailOriginal"]);
         Assert.AreEqual(false, models[0].Capabilities?["useResponsesLite"]);
         Assert.AreEqual("\"models-fixture-etag\"", models[0].Capabilities?["etag"]);
@@ -1086,6 +1104,49 @@ public sealed class OpenAICodexSubscriptionPipelineTests
     }
 
     [TestMethod]
+    [DataRow("", "", false, false)]
+    [DataRow(",\"supports_parallel_tool_calls\":null", ",\"service_tiers\":null", false, false)]
+    [DataRow(",\"supports_parallel_tool_calls\":false", ",\"service_tiers\":[{\"id\":\"priority\"}]", false, true)]
+    [DataRow(",\"supports_parallel_tool_calls\":true", ",\"service_tiers\":[{\"id\":\"default\"}]", false, false)]
+    [DataRow("", ",\"service_tiers\":\"priority\"", true, false)]
+    [DataRow(",\"supports_parallel_tool_calls\":null", ",\"service_tiers\":{}", true, false)]
+    [DataRow(",\"supports_parallel_tool_calls\":false", ",\"service_tiers\":[null,42,\"priority\",{}, {\"id\":true}]", true, false)]
+    [DataRow(",\"supports_parallel_tool_calls\":true", ",\"service_tiers\":[null,{\"id\":\"priority\"}]", true, true)]
+    public async Task ModelDiscovery_UsesEffectiveParallelPolicyAndAdvertisedServiceTiers(
+        string legacyParallel, string serviceTiers, bool lite, bool supportsPriority)
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent($$"""
+                {"models":[{"slug":"test-model","supported_in_api":true,
+                "use_responses_lite":{{(lite ? "true" : "false")}}{{legacyParallel}}{{serviceTiers}}}]}
+                """),
+        };
+        using var httpClient = new HttpClient(new RecordingHttpMessageHandler(response));
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            CodexSubscriptionHttpClient = httpClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ModelDiscovery = "codex_endpoint" },
+        };
+
+        var model = (await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None)
+            .ConfigureAwait(false)).Single();
+
+        Assert.AreEqual(!lite, model.Capabilities?["supportsParallelToolCalls"]);
+        Assert.AreEqual(supportsPriority, CodexSubscriptionModelCapabilities.FromModel(model).SupportsPriorityServiceTier);
+        var tiers = Assert.IsInstanceOfType<IReadOnlyList<string>>(model.Capabilities?["serviceTiers"]);
+        Assert.AreEqual(supportsPriority, tiers.Contains("priority"));
+        var roundTripped = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(model, AgentJsonSerializerContext.Default.AgentModelInfo),
+            AgentJsonSerializerContext.Default.AgentModelInfo);
+        Assert.AreEqual(supportsPriority, CodexSubscriptionModelCapabilities.FromModel(roundTripped).SupportsPriorityServiceTier);
+    }
+
+    [TestMethod]
     public async Task ModelDiscovery_UsesCurrentSummaryCapabilityAndBackwardCompatibleDefault()
     {
         using var temp = TempDirectory.Create();
@@ -1158,12 +1219,13 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         var malformed = models.Single(static model => model.Id == "gpt-5.5");
         Assert.AreEqual(false, malformed.Capabilities?["supportsReasoningSummaries"]);
         Assert.AreEqual(false, malformed.Capabilities?["supportVerbosity"]);
-        Assert.AreEqual(false, malformed.Capabilities?["supportsParallelToolCalls"]);
+        Assert.AreEqual(true, malformed.Capabilities?["supportsParallelToolCalls"]);
         Assert.AreEqual(false, malformed.Capabilities?["supportsImageDetailOriginal"]);
         Assert.AreEqual(false, malformed.Capabilities?["useResponsesLite"]);
 
         var omitted = models.Single(static model => model.Id == "gpt-5.4");
         Assert.AreEqual(true, omitted.Capabilities?["supportsReasoningSummaries"]);
+        Assert.AreEqual(true, omitted.Capabilities?["supportsParallelToolCalls"]);
     }
 
     [TestMethod]

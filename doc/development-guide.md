@@ -111,6 +111,7 @@ flowchart LR
 - Provider-specific request defaults, compatibility profiles, and header/body defaults should live in the copied provider-defaults content file unless they require code-backed message transformation or SDK integration.
 - Keep `config.toml` backward compatible: existing `extra_body`, `profile`, `compaction`, and `model_overrides` semantics remain authoritative over built-in defaults.
 - Do not add script-like provider transforms to config. Complex message restructuring must stay in code behind narrow, named compatibility flags.
+- Codex subscription prompts allow parallel tool calls independently of legacy discovery metadata, except Responses Lite, which forces false. This request policy must not be confused with host tool-handler concurrency. Subscription fast routing must remain opt-in and require an advertised `priority` service tier; do not infer premium support from static fallback data.
 
 ## MCP Configuration And Runtime Boundaries
 

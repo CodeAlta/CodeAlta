@@ -101,7 +101,7 @@ Provider-type-specific fields and restrictions:
 | `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
-| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
+| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 
@@ -392,6 +392,26 @@ model_discovery = "codex_endpoint_with_static_fallback"
 ```
 
 Codex credentials are stored in CodeAlta-owned state through its login flow. It does not accept `api_key`, `api_key_env`, or arbitrary `extra_body`.
+
+#### Optional fast routing
+
+Fast routing is off by default. To opt in, add `service_tier` to your existing Codex provider table in `~/.alta/config.toml` (also available through the provider's advanced TOML editor):
+
+```toml
+[providers.codex]
+type = "codex"
+service_tier = "priority" # "fast" is an alias
+```
+
+CodeAlta sends `service_tier: "priority"` only when subscription model discovery advertises a `priority` service tier for the selected model. If it is unsupported or discovery metadata is missing—including static discovery/fallback—CodeAlta omits the tier and reports a warning that standard routing is being used. It does not probe eligibility with premium requests. Actual availability, latency, and charging depend on the model, account, and service; this is not a speed or entitlement guarantee.
+
+Set `service_tier = "default"` or remove the setting to return to standard routing. Standard routing omits the request field; saves normalize `fast` to `priority` and may omit explicit `default`. Other values and top-level `service_tier` on non-Codex providers are rejected. Subscription `extra_body`, `request`, and `model_request` restrictions remain unchanged.
+
+This setting applies **provider-wide**, including all sessions, child sessions, and compaction summaries using that provider, over both WebSocket and HTTP. Fast routing may increase subscription usage or cost. It does not change reasoning effort or implement Codex's separate `ultra` delegation policy.
+
+Regular Codex requests allow multiple tool calls in one model response, regardless of the obsolete `supports_parallel_tool_calls` model field. Responses Lite still disables that request flag. This is model-side batching, not concurrent host tool execution: CodeAlta continues to await tool handlers sequentially. `max_concurrent_requests` limits subscription requests, not handler concurrency or service tier.
+
+#### Reasoning behavior
 
 CodeAlta follows Codex's ordered per-model reasoning-effort catalog for recognized inference values. GPT-5.6 Sol, Terra, and Luna support `max` as their highest inference effort in the static fallback catalog. CodeAlta does not expose Codex's `ultra` client tier because CodeAlta does not implement its separate proactive delegation policy. A reasoning-summary part whose body, after an optional bold heading, is exactly `<!-- -->` has no body while streaming, then is hidden from completed chat history with that heading. Literal comments in real prose or fenced examples and raw session data are retained.
 

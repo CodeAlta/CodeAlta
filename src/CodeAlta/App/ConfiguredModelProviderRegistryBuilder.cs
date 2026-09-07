@@ -355,6 +355,7 @@ internal static class ConfiguredModelProviderRegistryBuilder
                 AccountId = NormalizeText(definition.AccountId),
                 MaxConcurrentRequests = definition.MaxConcurrentRequests ?? 16,
                 TextVerbosity = NormalizeText(definition.TextVerbosity) ?? "medium",
+                ServiceTier = definition.ServiceTier,
                 IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning ?? true,
                 ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? "codex_endpoint_with_static_fallback",
                 ResponseTransport = NormalizeText(definition.ResponseTransport) ?? "websocket_with_http_fallback",

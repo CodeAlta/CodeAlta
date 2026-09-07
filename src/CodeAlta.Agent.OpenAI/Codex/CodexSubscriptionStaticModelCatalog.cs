@@ -58,7 +58,7 @@ internal static class CodexSubscriptionStaticModelCatalog
                 ["supportVerbosity"] = true,
                 ["supportsTools"] = true,
                 ["supportsImageInput"] = model.SupportsImageInput,
-                ["supportsParallelToolCalls"] = true,
+                ["supportsParallelToolCalls"] = !model.UseResponsesLite,
                 ["supportsImageDetailOriginal"] = model.SupportsImageDetailOriginal,
                 ["useResponsesLite"] = model.UseResponsesLite,
                 ["defaultTextVerbosity"] = model.DefaultTextVerbosity,

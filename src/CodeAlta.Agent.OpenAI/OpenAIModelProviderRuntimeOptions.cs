@@ -211,6 +211,8 @@ public sealed class OpenAIProtocolTraceOptions
 /// </summary>
 public sealed class OpenAICodexSubscriptionOptions
 {
+    private string? _serviceTier;
+
     internal bool EnableSequentialCutoffReasoningSummaries { get; set; }
 
     /// <summary>
@@ -232,6 +234,24 @@ public sealed class OpenAICodexSubscriptionOptions
     /// Gets or sets the configured text verbosity.
     /// </summary>
     public string TextVerbosity { get; set; } = "medium";
+
+    /// <summary>
+    /// Gets or sets the provider-wide subscription routing tier. <c>priority</c> (alias <c>fast</c>)
+    /// requests fast routing only when the model advertises it; null or <c>default</c> omits the tier.
+    /// Includes child sessions and compaction and may increase subscription usage or cost.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value is not default, priority, fast, null, or whitespace.</exception>
+    public string? ServiceTier
+    {
+        get => _serviceTier;
+        set => _serviceTier = value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "default" => "default",
+            "priority" or "fast" => "priority",
+            _ => throw new ArgumentException("Codex service tier must be default, priority, or fast (alias for priority).", nameof(value)),
+        };
+    }
 
     /// <summary>
     /// Gets or sets whether encrypted reasoning continuity should be requested.

@@ -121,6 +121,16 @@ internal sealed class OpenAIResponsesTurnExecutor(
                              turnState,
                              requestContext));
                     var fullOptions = await CreateRequestPayloadAsync(request, requestContext, cancellationToken).ConfigureAwait(false);
+                    if (attempt == 1 && provider.CodexSubscription?.ServiceTier == "priority" && fullOptions.ServiceTier is null)
+                    {
+                        var message = $"Codex provider '{provider.ProviderKey}' requested fast routing, but model '{request.ModelId}' does not advertise priority in service_tiers (or discovery metadata is unavailable); using standard routing.";
+                        Logger.Warn($"{message}");
+                        await onSessionUpdate(new AgentTurnSessionUpdate
+                        {
+                            Kind = AgentSessionUpdateKind.Warning,
+                            Message = message,
+                        }, cancellationToken).ConfigureAwait(false);
+                    }
                     LogCodexDiagnostic("request", request, attempt);
                     WriteCodexConsoleDiagnostic(
                         provider,
@@ -1416,7 +1426,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
         // The Codex subscription responses endpoint currently rejects max_output_tokens.
         options.MaxOutputTokenCount = null;
         var modelCapabilities = CodexSubscriptionModelCapabilities.FromModel(request.ModelInfo);
-        options.ParallelToolCallsEnabled = modelCapabilities.SupportsParallelToolCalls;
+        // Regular Codex prompts allow multiple tool calls regardless of legacy model metadata.
+        // The Responses Lite builder below retains its protocol-specific false override.
+        options.ParallelToolCallsEnabled = true;
+        // Explicit nullable null avoids the SDK's implicit string-to-tier conversion.
+        options.ServiceTier = codexOptions.ServiceTier == "priority" && modelCapabilities.SupportsPriorityServiceTier
+            ? new ResponseServiceTier("priority")
+            : (ResponseServiceTier?)null;
         options.ToolChoice ??= ResponseToolChoice.CreateAutoChoice();
 
         if (codexOptions.IncludeEncryptedReasoning &&

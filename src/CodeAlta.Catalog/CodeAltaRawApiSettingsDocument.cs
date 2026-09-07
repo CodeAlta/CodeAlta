@@ -353,6 +353,14 @@ public sealed class CodeAltaProviderDocument
     public string? TextVerbosity { get; set; }
 
     /// <summary>
+    /// Gets or sets the Codex subscription service tier: <c>priority</c> (alias <c>fast</c>)
+    /// opts into fast routing when advertised by the model; <c>default</c> or null uses standard routing.
+    /// Applies provider-wide, including child sessions and compaction, and may increase subscription usage or cost.
+    /// </summary>
+    [JsonPropertyName("service_tier")]
+    public string? ServiceTier { get; set; }
+
+    /// <summary>
     /// Gets or sets whether encrypted reasoning continuity should be requested for the Codex subscription provider.
     /// </summary>
     [JsonPropertyName("include_encrypted_reasoning")]

@@ -13,6 +13,7 @@ using System.Text.Json;
 using CodeAlta.App;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI;
@@ -2131,7 +2132,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_AppliesTrustedCodexModelCapabilitiesToRequest()
+    [DataRow("absent")]
+    [DataRow("null")]
+    [DataRow("false")]
+    [DataRow("true")]
+    public async Task OpenAIResponsesTurnExecutor_AppliesTrustedCodexModelCapabilitiesToRequest(string legacyParallel)
     {
         var responsesClient = new RecordingOpenAIResponseClient(
         [
@@ -2148,6 +2153,16 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 TextVerbosity = "high",
             },
         });
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["source"] = "codex-endpoint",
+            ["supportsReasoningSummaries"] = false,
+            ["supportVerbosity"] = false,
+        };
+        if (legacyParallel != "absent")
+        {
+            capabilities["supportsParallelToolCalls"] = legacyParallel == "null" ? null : bool.Parse(legacyParallel);
+        }
         var request = CreateCodexTurnRequest() with
         {
             ModelId = "gpt-5.6-sol",
@@ -2155,22 +2170,125 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ModelInfo = new AgentModelInfo(
                 "gpt-5.6-sol",
                 SupportedReasoningEfforts: [AgentReasoningEffort.Low],
-                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["source"] = "codex-endpoint",
-                    ["supportsReasoningSummaries"] = false,
-                    ["supportVerbosity"] = false,
-                    ["supportsParallelToolCalls"] = false,
-                }),
+                Capabilities: capabilities),
         };
 
         _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         using var document = JsonDocument.Parse(responsesClient.Requests[0].SerializedOptions);
-        Assert.IsFalse(document.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+        Assert.IsTrue(document.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
         Assert.IsFalse(document.RootElement.TryGetProperty("text", out _));
         Assert.IsTrue(document.RootElement.TryGetProperty("reasoning", out var reasoning));
         Assert.IsFalse(reasoning.TryGetProperty("summary", out _));
+    }
+
+    [TestMethod]
+    [DataRow(false, null, true)]
+    [DataRow(false, "priority", true)]
+    [DataRow(false, "priority", false)]
+    [DataRow(true, null, true)]
+    [DataRow(true, "priority", true)]
+    [DataRow(true, "priority", false)]
+    public async Task OpenAIResponsesTurnExecutor_CompactionUsesProviderTierAndParallelPolicy(bool lite, string? tier, bool supported)
+    {
+        var client = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-compaction-tier", "gpt-5.4", "Summary.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => client,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ResponseTransport = "http", ServiceTier = tier },
+        });
+        var turn = CreateCodexTurnRequest();
+        var summaryExecutor = new AgentTurnExecutorCompactionSummaryExecutor(executor);
+        var request = new AgentCompactionSummaryRequest(
+            turn.ProviderId, turn.Provider, turn.SessionId, "gpt-5.4",
+            new AgentModelInfo("gpt-5.4", Capabilities: new Dictionary<string, object?>
+            {
+                ["useResponsesLite"] = lite,
+                ["serviceTiers"] = supported ? new[] { "priority" } : Array.Empty<string>(),
+                ["supportsParallelToolCalls"] = false,
+            }),
+            turn.WorkingDirectory, turn.State, "Summarize the conversation.", "Conversation to summarize.", 1000);
+
+        var summary = await summaryExecutor.ExecuteAsync(request).ConfigureAwait(false);
+
+        Assert.AreEqual("Summary.", summary.Summary);
+        using var payload = JsonDocument.Parse(client.Requests.Single().SerializedOptions);
+        Assert.AreEqual(tier is not null && supported, payload.RootElement.TryGetProperty("service_tier", out var serviceTier));
+        if (tier is not null && supported)
+        {
+            Assert.AreEqual("priority", serviceTier.GetString());
+        }
+        Assert.AreEqual(!lite, payload.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+        Assert.IsFalse(payload.RootElement.TryGetProperty("max_output_tokens", out _));
+    }
+
+    [TestMethod]
+    [DataRow(null, "[\"priority\"]", false, false)]
+    [DataRow("default", "[\"priority\"]", false, false)]
+    [DataRow("priority", "[\"priority\"]", true, false)]
+    [DataRow("fast", "[\"priority\"]", true, false)]
+    [DataRow("priority", "[\"default\"]", false, true)]
+    [DataRow("priority", null, false, true)]
+    [DataRow("priority", "null", false, true)]
+    [DataRow("priority", "\"priority\"", false, true)]
+    [DataRow("priority", "[null,42,{}]", false, true)]
+    public async Task OpenAIResponsesTurnExecutor_OnlyRequestsOptedInAdvertisedPriorityTier(
+        string? configured, string? advertisedJson, bool sendsPriority, bool warns)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-tier", "gpt-5.4", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                ResponseTransport = "http",
+                ServiceTier = configured,
+            },
+        });
+        var capabilities = new Dictionary<string, object?> { ["source"] = "codex-endpoint" };
+        if (advertisedJson is not null)
+        {
+            using var advertised = JsonDocument.Parse(advertisedJson);
+            capabilities["serviceTiers"] = advertised.RootElement.Clone();
+        }
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.4",
+            ModelInfo = new AgentModelInfo("gpt-5.4", Capabilities: capabilities),
+        };
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        _ = await executor.ExecuteTurnAsync(
+            request,
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                updates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual(sendsPriority, payload.RootElement.TryGetProperty("service_tier", out var tier));
+        if (sendsPriority)
+        {
+            Assert.AreEqual("priority", tier.GetString());
+        }
+        Assert.IsTrue(payload.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+        Assert.AreEqual(warns ? 1 : 0, updates.Count);
+        if (warns)
+        {
+            Assert.AreEqual(AgentSessionUpdateKind.Warning, updates[0].Kind);
+            StringAssert.Contains(updates[0].Message, "does not advertise priority");
+            StringAssert.Contains(updates[0].Message, "standard routing");
+        }
     }
 
     [TestMethod]
@@ -3087,7 +3205,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_CodexResponsesLiteRebuildsPayloadForHttpFallback()
+    [DataRow(true, null)]
+    [DataRow(true, "priority")]
+    [DataRow(false, null)]
+    [DataRow(false, "priority")]
+    public async Task OpenAIResponsesTurnExecutor_CodexRebuildsPayloadForHttpFallback(bool lite, string? tier)
     {
         var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
             WithZeroRetryAfter(new HttpRequestException("WebSocket unavailable.")),
@@ -3104,6 +3226,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ServiceTier = tier,
             },
         });
         var request = CreateCodexTurnRequest() with
@@ -3113,7 +3236,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 "gpt-5.6-sol",
                 Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["useResponsesLite"] = true,
+                    ["useResponsesLite"] = lite,
+                    ["serviceTiers"] = new[] { "priority" },
                 }),
         };
 
@@ -3125,10 +3249,20 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(6, webSocketSession.RequestCount);
         Assert.AreEqual(1, responsesClient.Requests.Count);
         Assert.AreEqual("Fallback answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
-        using var serializedRequest = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
-        Assert.AreEqual(
-            "additional_tools",
-            serializedRequest.RootElement.GetProperty("input")[0].GetProperty("type").GetString());
+        foreach (var payload in webSocketSession.SerializedRequests.Append(responsesClient.Requests.Single().SerializedOptions))
+        {
+            using var serializedRequest = JsonDocument.Parse(payload);
+            Assert.AreEqual(!lite, serializedRequest.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+            Assert.AreEqual(tier is not null, serializedRequest.RootElement.TryGetProperty("service_tier", out var serviceTier));
+            if (tier is not null)
+            {
+                Assert.AreEqual("priority", serviceTier.GetString());
+            }
+            if (lite)
+            {
+                Assert.AreEqual("additional_tools", serializedRequest.RootElement.GetProperty("input")[0].GetProperty("type").GetString());
+            }
+        }
     }
 
     [TestMethod]
@@ -3843,7 +3977,9 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketReceivesFullReconnectPayloadForContinuation()
+    [DataRow(null)]
+    [DataRow("priority")]
+    public async Task OpenAIResponsesTurnExecutor_CodexWebSocketReceivesFullReconnectPayloadForContinuation(string? tier)
     {
         var webSocketSession = new RecordingOpenAIResponsesWebSocketSession(
         [
@@ -3868,6 +4004,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 Experimental = true,
+                ServiceTier = tier,
             },
         });
         var firstUserMessage = new AgentConversationMessage(
@@ -3875,6 +4012,10 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             [new AgentMessagePart.Text("First prompt")]);
         var firstRequest = CreateCodexTurnRequest() with
         {
+            ModelInfo = new AgentModelInfo("gpt-5.3-codex", Capabilities: new Dictionary<string, object?>
+            {
+                ["serviceTiers"] = new[] { "priority" },
+            }),
             Conversation = [firstUserMessage],
             CanUseProviderContinuation = true,
         };
@@ -3885,6 +4026,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             .ConfigureAwait(false);
         var secondRequest = CreateCodexTurnRequest() with
         {
+            ModelInfo = firstRequest.ModelInfo,
             CanUseProviderContinuation = true,
             Conversation =
             [
@@ -3907,6 +4049,16 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual("response-ws-live-1", webSocketSession.Requests[1].PreviousResponseId);
         Assert.IsNull(webSocketSession.Requests[1].ReconnectPreviousResponseId);
         Assert.IsTrue(webSocketSession.Requests[1].ReconnectInputItemCount > webSocketSession.Requests[1].InputItemCount);
+        foreach (var payload in webSocketSession.SerializedRequests.Concat(webSocketSession.SerializedReconnectRequests))
+        {
+            using var document = JsonDocument.Parse(payload);
+            Assert.AreEqual(tier is not null, document.RootElement.TryGetProperty("service_tier", out var serviceTier));
+            if (tier is not null)
+            {
+                Assert.AreEqual("priority", serviceTier.GetString());
+            }
+            Assert.IsTrue(document.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+        }
     }
 
     [TestMethod]
@@ -5260,6 +5412,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Model = options?.Model,
                 Instructions = options?.Instructions,
                 ParallelToolCallsEnabled = options?.ParallelToolCallsEnabled,
+                ServiceTier = options?.ServiceTier,
                 StoredOutputEnabled = options?.StoredOutputEnabled,
                 PreviousResponseId = options?.PreviousResponseId,
                 MaxOutputTokenCount = options?.MaxOutputTokenCount,
@@ -5340,6 +5493,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         public int DisposeCount { get; private set; }
 
         public List<WebSocketRequestRecord> Requests { get; } = [];
+        public List<string> SerializedRequests { get; } = [];
+        public List<string> SerializedReconnectRequests { get; } = [];
 
         public AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
             CreateResponseOptions options,
@@ -5348,6 +5503,11 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         {
             _ = cancellationToken;
             RequestCount++;
+            SerializedRequests.Add(SerializeModel(options));
+            if (reconnectOptions is not null)
+            {
+                SerializedReconnectRequests.Add(SerializeModel(reconnectOptions));
+            }
             Requests.Add(new WebSocketRequestRecord(
                 options.PreviousResponseId,
                 options.InputItems.Count,
@@ -5552,6 +5712,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         public Action<OpenAIResponsesWebSocketSideChannelEvent>? SideChannelReceived { get; set; }
 
         public int RequestCount { get; private set; }
+        public List<string> SerializedRequests { get; } = [];
 
         public AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
             CreateResponseOptions options,
@@ -5563,7 +5724,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             RequestCount++;
             if (serializeOptions)
             {
-                _ = SerializeModel(options);
+                SerializedRequests.Add(SerializeModel(options));
             }
 
             throw exception;
