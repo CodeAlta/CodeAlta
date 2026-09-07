@@ -2,3 +2,36 @@
 * text=auto
 *.sh text eol=lf
 *.verified.txt text eol=lf working-tree-encoding=UTF-8
+
+# Exact checkout contracts for accepted catalog/reminder preservation guards.
+/src/CodeAlta.Agent/ModelCatalog/AgentModelMetadataEnricher.cs text eol=crlf
+/src/CodeAlta.Agent/ModelCatalog/ModelsDevCatalogService.cs text eol=crlf
+/src/CodeAlta.Hosting/ConfiguredModelProviderRegistryBuilder.cs text eol=crlf
+/src/CodeAlta.Hosting/ConfiguredProviderInspection.cs text eol=lf
+/src/CodeAlta.LiveTool/AltaReminderService.cs text eol=crlf
+/src/CodeAlta.LiveTool/AltaServiceCollection.cs text eol=lf
+/src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs text eol=crlf
+/src/CodeAlta.Orchestration/Hosting/CodeAltaHost.cs text eol=crlf
+/src/CodeAlta.Tests/AltaReminderLifetimeSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/ArchitectureGuardrailTests.cs text eol=crlf
+/src/CodeAlta.Tests/CodeAltaFrontendCleanupSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/CodeAltaOwnedServicesLifetimeTests.cs text eol=lf
+/src/CodeAlta.Tests/DeferredCodeAltaAppSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/FileEditorWorkspaceCleanupSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/ModelsDevCatalogLifetimeSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/ModelsDevCatalogLifetimeTests.cs text eol=lf
+/src/CodeAlta.Tests/ModelsDevCatalogTests.cs text eol=crlf
+/src/CodeAlta.Tests/PromptDraftPrerequisiteSourceTests.cs text eol=lf
+/src/CodeAlta.Tests/RuntimeEventPumpSourceTests.cs text eol=lf
+/src/CodeAlta.Tui/App/CodeAltaApp.cs text eol=crlf
+/src/CodeAlta.Tui/App/CodeAltaFrontendComposition.cs text eol=crlf
+/src/CodeAlta.Tui/App/CodeAltaOwnedServices.cs text eol=crlf
+/src/CodeAlta.Tui/App/CodeAltaShellController.cs text eol=crlf
+/src/CodeAlta.Tui/App/ProviderFrontendCoordinator.cs text eol=crlf
+/src/CodeAlta.Tui/App/ReminderUiCoordinator.cs text eol=lf
+/src/CodeAlta.Tui/App/RuntimeEventPump.cs text eol=crlf
+/src/CodeAlta.Tui/App/SessionPromptDraftPersistenceCoordinator.cs text eol=lf
+/src/CodeAlta.Tui/App/ShellFrontendHost.cs text eol=crlf
+/src/CodeAlta.Tui/Program.cs text eol=crlf
+/src/CodeAlta.Tui/Views/DeferredCodeAltaApp.cs text eol=crlf
+/src/CodeAlta.Tui/Views/FileEditorWorkspaceCoordinator.cs text eol=crlf
