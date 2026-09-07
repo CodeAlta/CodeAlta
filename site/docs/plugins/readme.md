@@ -130,6 +130,14 @@ check and waits for its operation before releasing its resources. This happens
 after application/startup cleanup; an unresponsive earlier cleanup stage can
 delay that request. It does not add a forced shutdown deadline or install updates.
 
+Model-metadata cleanup stops new background refresh starts and waits for the
+retained refresh before releasing its owned resources. It still attempts eligible
+resource cleanup after cancellation or refresh failures; repeated cleanup calls
+share the same result rather than retrying. A refresh that does not finish can
+delay shutdown indefinitely. This does not guarantee cache persistence or roll
+back resources hidden by failed construction, and caller-supplied HTTP clients
+remain the caller's responsibility.
+
 ## Source plugins
 
 Dynamic source plugins are discovered from:

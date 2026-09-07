@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.ModelCatalog;
@@ -30,6 +31,8 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
     private readonly bool _ownsHttpClient;
     private readonly CancellationTokenSource _disposeCts = new();
     private Task? _backgroundRefreshTask;
+    private readonly Lazy<Task> _disposeTask;
+    private bool _stopping;
     private volatile ModelsDevDatabase _currentDatabase;
 
     /// <summary>
@@ -43,6 +46,7 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
 
     internal ModelsDevCatalogService(ModelsDevDatabase? initialDatabase, ModelsDevCatalogServiceOptions? options)
     {
+        _disposeTask = new Lazy<Task>(DisposeCoreAsync);
         options ??= new ModelsDevCatalogServiceOptions();
         _snapshotFilePath = string.IsNullOrWhiteSpace(options.SnapshotFilePath)
             ? Path.Combine(AppContext.BaseDirectory, DefaultSnapshotFileName)
@@ -70,16 +74,23 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
     /// <summary>
     /// Starts the non-blocking background refresh loop.
     /// </summary>
+    /// <remarks>
+    /// Before disposal starts, repeated calls do nothing once a refresh task has been retained,
+    /// even if that task has completed. Calls after the stop decision are rejected.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The catalog has stopped admitting background refreshes.</exception>
     public void StartBackgroundRefresh()
     {
         lock (_gate)
         {
+            ObjectDisposedException.ThrowIf(_stopping, this);
             if (_backgroundRefreshTask is not null)
             {
                 return;
             }
 
-            _backgroundRefreshTask = Task.Run(() => RefreshLoopAsync(_disposeCts.Token));
+            var token = _disposeCts.Token;
+            _backgroundRefreshTask = Task.Run(() => RefreshLoopAsync(token));
         }
     }
 
@@ -105,33 +116,39 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
         [NotNullWhen(true)] out ModelsDevModelDefinition? model)
         => _currentDatabase.TryGetModel(providerId, modelId, out model);
 
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        _disposeCts.Cancel();
+    /// <summary>
+    /// Stops refresh admission, requests cancellation, joins the selected refresh task, and releases owned resources.
+    /// </summary>
+    /// <returns>The shared cleanup outcome; later calls do not retry failed stages.</returns>
+    /// <remarks>
+    /// One cleanup operation captures the retained refresh task under the start gate before requesting cancellation.
+    /// An OperationCanceledException from joining that task is suppressed regardless of its task state.
+    /// Other cancellation or join failures are retained; after the selected task terminates, source release and
+    /// owned HTTP client release are attempted independently. A pending selected task prevents both releases.
+    /// Failures retain cancellation, join, source, then owned-client order; one is rethrown and multiple failures
+    /// are aggregated without flattening. Borrowed clients are not released, and the database remains queryable.
+    /// This does not guarantee external dependency termination, constructor rollback, or recursive disposal safety.
+    /// </remarks>
+    /// <exception cref="Exception">A single non-cancellation cleanup failure is rethrown.</exception>
+    /// <exception cref="OperationCanceledException">The only retained cleanup failure is cancellation.</exception>
+    /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
+    public ValueTask DisposeAsync() => new(_disposeTask.Value);
 
-        Task? refreshTask;
+    private async Task DisposeCoreAsync()
+    {
+        Task? original;
         lock (_gate)
         {
-            refreshTask = _backgroundRefreshTask;
+            _stopping = true;
+            original = _backgroundRefreshTask;
         }
 
-        if (refreshTask is not null)
-        {
-            try
-            {
-                await refreshTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        _disposeCts.Dispose();
-        if (_ownsHttpClient)
-        {
-            _httpClient.Dispose();
-        }
+        await ModelsDevCatalogLifetime.DisposeRefreshAsync(
+            original,
+            _disposeCts.Cancel,
+            _disposeCts.Dispose,
+            _httpClient.Dispose,
+            _ownsHttpClient).ConfigureAwait(false);
     }
 
     private ModelsDevDatabase LoadInitialDatabase()
@@ -295,4 +312,106 @@ public sealed class ModelsDevCatalogServiceOptions
     /// Gets or sets the HTTP client used for background refreshes.
     /// </summary>
     public HttpClient? HttpClient { get; init; }
+}
+
+/// <summary>
+/// Performs the catalog's selected-refresh cleanup using supplied operations.
+/// </summary>
+internal static class ModelsDevCatalogLifetime
+{
+    /// <summary>
+    /// Requests cancellation, joins the supplied original, then attempts eligible resource releases.
+    /// </summary>
+    /// <param name="original">The actual retained refresh task, or null when refresh was never started.</param>
+    /// <param name="cancel">The mandatory cancellation operation.</param>
+    /// <param name="releaseSource">The mandatory source-release operation.</param>
+    /// <param name="releaseHttpClient">The mandatory HTTP client-release operation, including when borrowed.</param>
+    /// <param name="ownsHttpClient">Whether to invoke the HTTP client-release operation.</param>
+    /// <returns>The cleanup task, started inline after synchronous callback validation.</returns>
+    /// <remarks>
+    /// Validates callbacks in parameter order and allocates storage for at most four direct failures before callbacks.
+    /// Only OperationCanceledException from the original join is suppressed, including from a faulted original.
+    /// Callback failures, including cancellation, are retained. A pending original prevents resource release even
+    /// after cancellation failure. After terminal join, source and owned-client releases are attempted independently.
+    /// Failures are reported in cancellation, original, source, then owned-client order: one via exception dispatch
+    /// information, multiple via a direct aggregate without flattening or deduplication. A lone callback cancellation
+    /// can produce a canceled cleanup task. This operation does not bound synchronous callbacks or pending work,
+    /// recover allocation/setup failures, establish external dependency termination, or support recursive disposal.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A mandatory callback is null; validation throws synchronously.</exception>
+    /// <exception cref="Exception">A single non-cancellation cleanup failure is rethrown by the returned task.</exception>
+    /// <exception cref="OperationCanceledException">The only retained cleanup failure is callback cancellation.</exception>
+    /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
+    internal static Task DisposeRefreshAsync(
+        Task? original,
+        Action cancel,
+        Action releaseSource,
+        Action releaseHttpClient,
+        bool ownsHttpClient)
+    {
+        ArgumentNullException.ThrowIfNull(cancel);
+        ArgumentNullException.ThrowIfNull(releaseSource);
+        ArgumentNullException.ThrowIfNull(releaseHttpClient);
+
+        return DisposeCoreAsync();
+
+        async Task DisposeCoreAsync()
+        {
+            var failures = new List<Exception>(4);
+            try
+            {
+                cancel();
+            }
+            catch (Exception exception)
+            {
+                failures.Add(exception);
+            }
+
+            if (original is not null)
+            {
+                try
+                {
+                    await original.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(exception);
+                }
+            }
+
+            try
+            {
+                releaseSource();
+            }
+            catch (Exception exception)
+            {
+                failures.Add(exception);
+            }
+
+            if (ownsHttpClient)
+            {
+                try
+                {
+                    releaseHttpClient();
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(exception);
+                }
+            }
+
+            if (failures.Count == 1)
+            {
+                ExceptionDispatchInfo.Throw(failures[0]);
+            }
+
+            if (failures.Count > 1)
+            {
+                throw new AggregateException(failures);
+            }
+        }
+    }
 }
