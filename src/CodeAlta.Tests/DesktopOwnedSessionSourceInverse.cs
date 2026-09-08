@@ -28,10 +28,12 @@ internal static class DesktopOwnedSessionSourceInverse
     internal static string RestoreInput(string path, string source) => path is
         Project or Cli or App or Boot or Workspace or Main or Styles or Architecture or HistoryTests or
         WorkspaceTests or Host or OwnerInverse or OwnerTests or Lifetime or DesktopProject or OrchestrationAssemblyInfo
-        ? Restore(path, source) : source;
+        ? Restore(path, source)
+        : path == RuntimeEventForwardingSourceInverse.Runtime ? RuntimeEventForwardingSourceInverse.Restore(path, source) : source;
 
     internal static string Restore(string path, string source)
     {
+        if (path == DesktopProject) source = RuntimeEventForwardingSourceInverse.Restore(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         foreach (var (before, after, count) in Edits(path))
         {

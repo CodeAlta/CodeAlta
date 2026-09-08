@@ -8,6 +8,8 @@ CodeAlta is a terminal workspace for agentic coding. It brings model-provider se
 
 The development desktop includes an opt-in [workspace snapshot browser](src/CodeAlta/README.md#browse-a-task-owned-catalog-copy), bounded persisted-event history, and separately consented [existing-session text submission](src/CodeAlta/README.md#explicit-owned-text-submission) for trusted task-owned roots. Submission receipts are not live-run or conversation completion; full agent workflows and native qualification remain incomplete. This is not shared-profile startup. Continue using `altatui` for normal agent workflows.
 
+Shared-runtime [provider-event forwarding ownership](doc/runtime-provider-event-forwarding.md) now retains admitted callback work through queue/parent bookkeeping and shutdown joins. It does not add live Desktop streaming, event replay or guaranteed shutdown of noncooperative providers.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>

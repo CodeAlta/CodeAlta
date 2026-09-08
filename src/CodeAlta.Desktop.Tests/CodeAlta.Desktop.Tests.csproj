@@ -18,5 +18,6 @@
     <Compile Include="../CodeAlta.Tests/SessionDiscoveryScopeSourceInverse.cs" Link="SessionDiscoveryScopeSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/OwnedSessionCommandSourceInverse.cs" Link="OwnedSessionCommandSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/DesktopOwnedSessionSourceInverse.cs" Link="DesktopOwnedSessionSourceInverse.cs" />
+    <Compile Include="../CodeAlta.Tests/RuntimeEventForwardingSourceInverse.cs" Link="RuntimeEventForwardingSourceInverse.cs" />
   </ItemGroup>
 </Project>

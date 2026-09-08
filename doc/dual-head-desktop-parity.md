@@ -1656,3 +1656,50 @@ platform qualification, plugin CLR loading, broad suite or website build was adm
 lease retention is source-reviewed, not termination proof; five seconds remains diagnostic.
 Website remote-theme acquisition, M2 races/file-search and broader M3–M7 parity remain open.
 The same sole child continues read-only on the next M4 projection prerequisite; no M8 is defined.
+
+## Runtime forwarding ownership prerequisite — 2026-09-08
+
+After `67bb503e`, the same source-only writer implemented three-original/six-new-file
+forwarding ownership. The parent audited actual Runtime/helper/fixture/inverse code
+and executed only exact method filters. All nine
+`CodeAlta.Orchestration.Tests.OwnedProviderEventForwardingTests` method identities
+listed in the plan's forwarding admission entry passed; all ten
+`CodeAlta.Orchestration.Tests.SessionRuntimeForwardingLifetimeTests` admitted
+identities passed, with the pending-prompt replacement method admitted/run first.
+The latter execute real Host/Runtime/Hub and cached SQLite journal I/O only under
+fresh explicit fixture roots with one registered fake provider. No plugins, probes,
+configured provider, credentials, network, default home or frontend/native app ran.
+All fixture roots remain; timeout is diagnostic, never permission to release data.
+
+Four exact `CodeAlta.Tests.RuntimeEventForwardingSourceTests` methods passed:
+`Runtime_OwnsBodiesTailsAndCapturedAttachmentUses`,
+`Fixtures_KeepControlledOwnershipAndClosedRoots`,
+`Preservation_RestoresWholeOriginalsAndRejectsDrift`, and
+`Preservation_ClosesReaderMapsAndInheritedGateways`. Ten direct named source inputs,
+zero transitive content reads and a zero-read inverse reconstruct three frozen
+originals: 95 ordered context tuples / 96 occurrences / nine newline variants.
+Missing/duplicate/drift/unknown/already-restored negatives pass. Separately run exact
+`CodeAlta.Desktop.Tests.DesktopOwnedSessionSourceTests.Boundaries_RestoreWholeOriginalsAndHistoricalReaders`
+passed, retaining its 16/42/48 preservation and 30-direct/19-inherited reader maps.
+
+Intermediate failures were fixture-only: CS8601 on nullable ProviderKey seeding
+(parent first misidentified WorkingDirectory), then one of nine helper methods
+failed because separate canceled-task awaits did not preserve exception identity.
+Explicit fixture input validation and exact-task/type expected-cancellation tracking
+fixed these; no production policy or historical assertion was weakened. Targeted
+main, runtime-test and Desktop Release builds passed without warnings/errors,
+using no restore and disabled frontend targets.
+The final full Release solution build likewise passed with zero warnings/errors;
+all four new source methods passed again after fixture and documentation corrections.
+
+Full callback tails remain runtime-owned while captured attachment uses determine
+retirement. Setup/retirement transitions are joined outside actors; abort starts
+before work joins, and late handles/subscription receipts remain owned. Unconfirmed
+unsubscribe skips provider Stop and faults runtime shutdown before actor/event
+teardown. The unchanged outer Host nevertheless continues Hub/registry disposal
+after settled runtime failure: runtime reference retention is not an outer lifetime
+guarantee. See [forwarding boundaries](runtime-provider-event-forwarding.md).
+Unbounded retained work/failures/actors, upstream callback-drain limitations and the
+lossy competing-reader runtime stream remain explicit. This is not revisioned
+projection, M4/live parity, native qualification or completed M3–M7. Website theme
+acquisition and prior M2/file-search deferrals remain open; M8 remains undefined.

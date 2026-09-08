@@ -33,6 +33,11 @@ Receipts describe submission, not live-run completion; **Abort submission** is n
 Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
 agent parity remain unqualified; continue using `altatui` for normal workflows.
 
+The shared runtime retains admitted provider-event work through queue/parent
+bookkeeping and shutdown joins. This does not add live Desktop streaming or event
+replay. Noncooperative work can keep shutdown pending; failed runtime cleanup does
+not guarantee that every outer Host/provider dependency remains alive.
+
 > [!IMPORTANT]
 > CodeAlta is currently distributed as preview `0.x` releases before the final `1.0`. Expect behavior, configuration shape, screenshots, and extension APIs to evolve between preview versions; review release notes before upgrading a workflow you depend on.
 
