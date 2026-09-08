@@ -82,6 +82,7 @@ public sealed class PluginKeyBindingExtractionSourceTests
         source = SourceTestText.DecodeSource(Encoding.UTF8.GetBytes(source));
         if (path is "CodeAlta.Plugins.Abstractions/PluginContributions.cs" or "CodeAlta.Tests/PluginUiContentExtractionSourceTests.cs")
             source = PluginNeutralContractSourceInverse.Restore(path, source);
+        source = PluginMcpBackendSeparationSourceInverse.RestoreKeyBindingInput(path, source);
         (string Before, string After)[] edits = path switch
         {
             "CodeAlta.Plugins.Abstractions/PluginContributions.cs" =>

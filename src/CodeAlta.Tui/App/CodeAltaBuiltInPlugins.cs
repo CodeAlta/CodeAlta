@@ -29,7 +29,7 @@ internal static class CodeAltaBuiltInPlugins
             Description = SR.T("Connects CodeAlta to configured Model Context Protocol servers."),
             EnabledByDefault = true,
             PluginType = typeof(McpPlugin),
-            Factory = static () => new McpPlugin(),
+            Factory = static () => new McpPlugin(McpTerminalContributions.CreatePresentation),
         });
         registry.Add(new BuiltInPluginDefinition
         {

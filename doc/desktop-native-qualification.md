@@ -41,6 +41,19 @@ no initialization/authentication/query/CLI ran, and no native attachment, picker
 accessor was constructed. The actual activation lifecycle and native TUI remain unqualified;
 this does not add desktop GitHub presentation or complete MCP/Statistics separation.
 
+MCP now has a separately qualified backend/presentation extraction: 13 lifecycle-uninitialized
+backend/delegate cases, eight new source methods, eight GitHub source methods, eight profile
+source methods and two Desktop history/assembly methods passed. The parent audited constructors,
+fieldless management helpers, stateless presentation seams and every admitted read/call route
+before execution. Two targeted and solution Release builds passed without warnings; MCP's
+refreshed cached-only assets contain no terminal, optional TUI or NeoAstra libraries. The intact
+dialog/bindable-row move compiled in the TUI, but neither native status test was executed.
+No management, activation-state, configuration, content, visual, command-handler, binding,
+dispatcher, OAuth or runtime operation ran. Existing revision subscription/lifetime and deferred
+status read order remain source-preserved, not natively qualified. Statistics separation,
+actual backend loading/activation without terminal assemblies and desktop MCP parity remain open.
+Exact cases, preservation manifests and log names are recorded in the parity ledger.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

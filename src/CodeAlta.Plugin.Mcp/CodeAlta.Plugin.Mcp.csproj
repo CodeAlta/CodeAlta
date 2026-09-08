@@ -14,12 +14,11 @@
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.Core" />
     <PackageReference Include="Tomlyn" />
-    <PackageReference Include="XenoAtom.Terminal.UI" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
-    <ProjectReference Include="..\CodeAlta.Plugins.Tui\CodeAlta.Plugins.Tui.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="altatui" />
   </ItemGroup>
 </Project>

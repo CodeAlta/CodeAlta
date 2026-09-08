@@ -35,7 +35,13 @@ Generated profile/policy/API stamps participate in the existing manifest hashes.
 
 `CodeAlta.Plugin.GitHub` contains the backend; its parameterless constructor supplies no prompt UI. TUI composition injects the existing neutral prompt contribution into that same instance and owns the picker/attachment/parser/binding-accessor code. A custom head may supply `Func<GitHubPlugin, IEnumerable<PluginPromptEditorContribution>>`; enumeration invokes it with the backend, while attachment construction remains deferred. Do not duplicate backend initialization/authentication, transfer backend disposal to attachments, or infer desktop picker support from this extraction.
 
-Registered built-in factories now create the actual activated instance. Supply a matching concrete plugin type and explicit `PluginType` where known; legacy metadata resolution may otherwise invoke the factory separately. Supplied activation factories do not retry or fall back after null/throw/cancellation. Direct factory exceptions are not wrapped like reflection constructor failures; existing runtime failure/cancellation/cleanup policy remains. Source-plugin reflection activation is unchanged. MCP/Statistics separation and real activation/native qualification remain separate work.
+Registered built-in factories now create the actual activated instance. Supply a matching concrete plugin type and explicit `PluginType` where known; legacy metadata resolution may otherwise invoke the factory separately. Supplied activation factories do not retry or fall back after null/throw/cancellation. Direct factory exceptions are not wrapped like reflection constructor failures; existing runtime failure/cancellation/cleanup policy remains. Source-plugin reflection activation is unchanged. Statistics separation and real activation/native qualification remain separate work.
+
+## Built-in MCP composition
+
+The parameterless `McpPlugin` supplies backend contributions and portable status without native revision state or an interactive management command. TUI composition borrows its existing management/activation owners for the command, status button, dialog, bindable rows and icons; do not create another backend or duplicate initialization. This uses an internal neutral presentation carrier and assembly-wide friendship to `altatui`, not a supported public activation-state API or a reverse project reference.
+
+Keep contribution enumeration and native decoration free of content/configuration evaluation. Decoration retains the exact portable callback and metadata. Initial native status resolution and later independent markup/tone reads remain deferred; revision state and its existing subscription move together without a new disposal/unsubscription policy. Backend command/prompt/runtime work is unchanged. Do not infer desktop MCP management, real activation/loading, authentication or native qualification from the extraction.
 
 ## Dialogs and prompt-editor anchors
 

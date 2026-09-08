@@ -130,7 +130,7 @@ public sealed class PluginUiContentExtractionSourceTests
     }
 
     private static string Read(string path)
-        => PluginAuthoringProfileSourceInverse.RestoreUiContentInput(path, SourceTestText.DecodeSource(File.ReadAllBytes(SourcePath(path))));
+        => PluginAuthoringProfileSourceInverse.RestoreUiContentInput(path, PluginMcpBackendSeparationSourceInverse.RestoreUiContentInput(path, SourceTestText.DecodeSource(File.ReadAllBytes(SourcePath(path)))));
 
     private static string ReplaceOnce(string source, string after, string before, string path)
     {

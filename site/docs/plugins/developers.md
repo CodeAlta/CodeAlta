@@ -134,7 +134,21 @@ specify `PluginType` when known to avoid the legacy metadata-time factory call.
 A null or throwing activation factory does not trigger reflection fallback.
 Direct factory exceptions differ from reflection constructor wrapping; existing
 cancellation and cleanup rules still apply. Source-plugin reflection activation
-is unchanged. MCP and Statistics backend/presentation separation remains open.
+is unchanged. Statistics backend/presentation separation remains open.
+
+## Built-in MCP presentation
+
+The parameterless `McpPlugin` provides backend contributions and portable status,
+but no native controls or interactive management command. The TUI explicitly
+composes its existing MCP Servers command, status button and dialog around the
+same backend-owned management and activation services. This internal built-in
+wiring is not a public activation-state API for source plugins.
+
+Enumerating contributions does not evaluate status or read configuration. Native
+status decoration preserves the portable callback and adds deferred rendering;
+backend commands, prompt discovery and explicit management operations retain
+their existing behavior. This migration does not add desktop MCP management or
+establish native, authentication or installed-plugin qualification.
 
 ## Typed keyboard shortcuts
 

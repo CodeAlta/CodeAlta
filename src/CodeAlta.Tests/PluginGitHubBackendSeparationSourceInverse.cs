@@ -28,6 +28,7 @@ internal static class PluginGitHubBackendSeparationSourceInverse
     internal static string Restore(string path, string source)
     {
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
+        source = PluginMcpBackendSeparationSourceInverse.RestoreGitHubInput(path, source);
         foreach (var (before, after) in Edits(path))
         {
             var expected = SourceTestText.Canonicalize(after);

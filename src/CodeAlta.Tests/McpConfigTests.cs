@@ -850,7 +850,7 @@ public sealed class McpConfigTests
             """
             { "mcpServers": { "docs": { "url": "https://example.test/mcp" } } }
             """);
-        var plugin = new McpPlugin();
+        var plugin = new McpPlugin(McpTerminalContributions.CreatePresentation);
         var statusContribution = plugin.GetUiContributions().OfType<PluginVisualContribution>().Single();
         var visual = statusContribution.CreateVisual!(CreateVisualContext(project.Path, "session-a"));
         Assert.IsNotNull(visual);
@@ -906,7 +906,7 @@ public sealed class McpConfigTests
         var activationState = new McpActivationState();
         var statusRevision = new State<int>(0);
         activationState.Changed += _ => statusRevision.Value++;
-        var visual = McpPlugin.CreateStatusIndicator(
+        var visual = McpTerminalContributions.CreateStatusIndicator(
             CreateVisualContext(project.Path, "session-a"),
             new McpManagementService(),
             activationState,
@@ -918,7 +918,7 @@ public sealed class McpConfigTests
         var scopeKey = McpActivationState.ResolveScopeKey("session-a", project.Path);
         activationState.ActivateServers(scopeKey, ["docs"]);
         Assert.AreEqual(1, statusRevision.Value);
-        var pendingVisual = McpPlugin.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(), activationState, statusRevision)!;
+        var pendingVisual = McpTerminalContributions.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(), activationState, statusRevision)!;
         Assert.AreEqual(
             "MCP 1/1 · tools pending",
             ReadStatusPlainText(pendingVisual));
@@ -926,7 +926,7 @@ public sealed class McpConfigTests
 
         activationState.UpdateToolCounts(scopeKey, new Dictionary<string, int>(StringComparer.Ordinal) { ["docs"] = 7 });
         Assert.AreEqual(2, statusRevision.Value);
-        var activeVisual = McpPlugin.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(), activationState, statusRevision)!;
+        var activeVisual = McpTerminalContributions.CreateStatusIndicator(CreateVisualContext(project.Path, "session-a"), new McpManagementService(), activationState, statusRevision)!;
         Assert.AreEqual(
             "MCP 1/1 · active tools 7",
             ReadStatusPlainText(activeVisual));

@@ -10,6 +10,7 @@ internal static class PluginNeutralContractSourceInverse
     {
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         source = PluginGitHubBackendSeparationSourceInverse.RestoreNeutralInput(path, source);
+        source = PluginMcpBackendSeparationSourceInverse.RestoreNeutralInput(path, source);
         source = PluginAuthoringProfileSourceInverse.RestoreNeutralInput(path, source);
         foreach (var (before, after) in Edits(path))
         {
