@@ -134,7 +134,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// This cannot recover resources hidden by a throwing constructor or unpublished plugin activation
     /// state, and does not guarantee termination of work left active by failed child cleanup.
     /// </remarks>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> or its plugin startup feedback is null.</exception>
     /// <exception cref="Exception">Creation failed and rollback succeeded; the original exception is propagated.</exception>
     /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
     /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions are retained in that order without flattening.</exception>
@@ -143,6 +143,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.PluginStartupFeedback);
 
         PluginRuntimeManager? pluginRuntime = null;
         ModelProviderRegistry? modelProviderRegistry = null;
@@ -189,6 +190,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                             },
                             SafeMode = options.PluginSafeMode,
                             IsHeadless = options.IsHeadless,
+                            StartupFeedback = options.PluginStartupFeedback,
                             WaitForEnterAfterBuildLiveOutput = options.WaitForEnterAfterPluginLiveOutput,
                             RawArguments = options.RawArguments,
                             BuiltIns = options.PluginBuiltIns,

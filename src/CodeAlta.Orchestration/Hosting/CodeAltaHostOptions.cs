@@ -44,6 +44,10 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public bool WaitForEnterAfterPluginLiveOutput { get; init; }
 
+    /// <summary>Gets borrowed plugin startup presentation; defaults to silent feedback for every host.</summary>
+    /// <remarks>Validated even when plugins are prestarted or disabled; never disposed by the host.</remarks>
+    public IPluginStartupFeedback PluginStartupFeedback { get; init; } = new SilentPluginStartupFeedback();
+
     /// <summary>
     /// Gets built-in plugins to activate as part of shared host composition.
     /// </summary>

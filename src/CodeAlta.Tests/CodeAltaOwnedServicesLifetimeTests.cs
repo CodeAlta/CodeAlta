@@ -89,6 +89,7 @@ public sealed class CodeAltaOwnedServicesLifetimeTests
         // Exact named-checkout wiring evidence only; no owner, metadata refresh or startup is executed.
         var source = File.ReadAllText(Path.Combine(SourceRoot(), "CodeAlta.Tui", "App", "CodeAltaOwnedServices.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
+        source = PluginFeedbackExtractionSourceTests.Restore("CodeAlta.Tui/App/CodeAltaOwnedServices.cs", source);
         var create = Scope(source, "    public static async Task<CodeAltaOwnedServices> CreateAsync(", "\n    }\n");
         RequireOnce(create, "ModelsDevCatalogService? modelsDevCatalogService = null;");
         Assert.IsTrue(create.StartsWith("""

@@ -54,17 +54,18 @@ public sealed class CodeAltaHostLifetimeTests
         // Exact named-checkout wiring evidence only; no concrete creation or rollback is executed.
         var source = File.ReadAllText(Path.Combine(SourceRoot(), "CodeAlta.Orchestration", "Hosting", "CodeAltaHost.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
+        source = PluginFeedbackExtractionSourceTests.Restore("CodeAlta.Orchestration/Hosting/CodeAltaHost.cs", source);
         var create = Scope(source, "    public static async Task<CodeAltaHost> CreateAsync(", "\n    }\n");
         RequireOnce(create, "PluginRuntimeManager? pluginRuntime = null;");
-        Assert.IsTrue(create.StartsWith("""
+        Assert.IsTrue(create.StartsWith(SourceTestText.Canonicalize("""
                 public static async Task<CodeAltaHost> CreateAsync(
                     CodeAltaHostOptions options,
                     CancellationToken cancellationToken = default)
-            """ + "\n", StringComparison.Ordinal));
+            """) + "\n", StringComparison.Ordinal));
 
         // Returned objects are tracked before the next fallible step; flags start unowned.
         var setup = Scope(create, "    {\n", "        try\n");
-        Assert.AreEqual("""
+        Assert.AreEqual(SourceTestText.Canonicalize("""
                 {
                     ArgumentNullException.ThrowIfNull(options);
 
@@ -74,11 +75,11 @@ public sealed class CodeAltaHostLifetimeTests
                     SessionRuntimeService? runtimeService = null;
                     var ownsPluginRuntime = false;
                     var ownsLogging = false;
-            """ + "\n\n", setup);
+            """) + "\n\n", setup);
 
         // Freeze evaluation order, durable bootstrap effects, original option reads and successful transfer.
         var acquisition = Scope(create, "        try\n", "        catch (Exception creationFailure)\n");
-        Assert.AreEqual("""
+        Assert.AreEqual(SourceTestText.Canonicalize("""
                     try
                     {
                         var globalRoot = string.IsNullOrWhiteSpace(options.GlobalRoot)
@@ -171,10 +172,10 @@ public sealed class CodeAltaHostLifetimeTests
                             ownsLogging,
                             currentProject);
                     }
-            """ + "\n", acquisition);
+            """) + "\n", acquisition);
 
         var rollback = Scope(create, "        catch (Exception creationFailure)\n", "\n        }");
-        Assert.AreEqual("""
+        Assert.AreEqual(SourceTestText.Canonicalize("""
                     catch (Exception creationFailure)
                     {
                         await RollbackHostCreationAsync(
@@ -187,7 +188,7 @@ public sealed class CodeAltaHostLifetimeTests
                             ownsPluginRuntime,
                             ownsLogging).ConfigureAwait(false);
                         throw;
-            """, rollback);
+            """), rollback);
         Assert.IsTrue(create.EndsWith(rollback + "\n        }", StringComparison.Ordinal));
     }
 
@@ -866,6 +867,7 @@ public sealed class CodeAltaHostLifetimeTests
 
     private static void RequireOnce(string source, string expected)
     {
+        expected = SourceTestText.Canonicalize(expected);
         var first = source.IndexOf(expected, StringComparison.Ordinal);
         Assert.IsTrue(first >= 0, $"Missing expected wiring: {expected}");
         Assert.AreEqual(first, source.LastIndexOf(expected, StringComparison.Ordinal), $"Duplicate wiring: {expected}");

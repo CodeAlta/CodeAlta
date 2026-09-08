@@ -111,6 +111,18 @@ Runtime status separates plugin diagnostics from conversation history. Diagnosti
 
 Open plugin management with `Ctrl+G Ctrl+N` or the command palette (search for `plugins` or `plugin`). The dialog shows enablement, diagnostics, properties, contributions, and source/README actions. `--plugins-status` provides a headless discovery/config summary.
 
+## Host-selected startup feedback (pre-release migration)
+
+`PluginRuntimeManagerOptions.StartupFeedback` and `CodeAltaHostOptions.PluginStartupFeedback` now accept a borrowed `IPluginStartupFeedback`. Each options instance defaults to `SilentPluginStartupFeedback`, including nonheadless callers. Setting `IsHeadless = false` alone no longer selects terminal presentation. Null feedback is rejected before mutable startup, including host calls with prestarted or disabled plugins; the runtime/host never disposes the supplied port.
+
+The shared port and `IPluginStartupProgress` live in `CodeAlta.Plugins`. Headless startup and empty build-request lists bypass presentation and invoke the original startup operation with null progress. For other routes, the selected port receives the original requests, operation, summary factory and cancellation token. Silent feedback does not invoke the summary factory or wait for acknowledgement. Discovery/build/activation order and scheduler progress subscription lifetime remain runtime responsibilities.
+
+The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback`. Both Program's prestart and the owned-services/host fallback explicitly inject it, preserving the existing TUI display, redirected-terminal fallback and `--plugins-wait-for-enter` behavior. The public `BuildWithInteractiveLiveAsync` helper moved from `PluginStartupFeedbackReporter` to this terminal adapter. This is a pre-release API move with no shared-to-TUI forwarding dependency; shared hosts and backend plugins should use the neutral port rather than reference the TUI.
+
+`PluginChangeNotificationService` also requires an explicit `Action<string>` sink when `Interactive` is true; it no longer falls back to global `ToastService`. Headless defaults remain unchanged. The sink is borrowed and still executes under the existing gate after status publication. If it throws, the published status is retained and the exception escapes. This extraction does not add watcher/toast integration where none existed.
+
+**Lifetime limits:** normal terminal-driver return joins the original startup operation, even if cancellation stopped the display. A live-driver or completion-summary exception still takes precedence and can escape without that join. Feedback is not a termination guarantee or a new cleanup owner. The remaining terminal types in plugin abstractions, contribution adapters and shared build/loading dependency lists are not removed by this feedback-only extraction.
+
 ## Contribution areas
 
 `PluginBase` exposes virtual methods for:

@@ -52,7 +52,7 @@ public sealed class CodeAltaStartupAdmissionSourceTests
         => AssertOriginal(RestoreProgram(program), 21957, 500, true,
             "46C722923838E1D25BE806A1C39684F20FA53261A1DD744DB45707E17A9BD2D3");
 
-    internal static string RestoreProgram(string program) => Invert(program, ProgramEdits());
+    internal static string RestoreProgram(string program) => Invert(PluginFeedbackExtractionSourceTests.Restore("CodeAlta.Tui/Program.cs", program), ProgramEdits());
 
     internal static string RestoreDeferredGuard(string source)
     {
@@ -68,6 +68,7 @@ public sealed class CodeAltaStartupAdmissionSourceTests
 
     internal static string RestoreCatalogRoute(string path, string source)
     {
+        source = PluginFeedbackExtractionSourceTests.RestoreCatalogInput(path, source);
         if (string.Equals(path, "CodeAlta.Tests/DeferredCodeAltaAppSourceTests.cs", StringComparison.Ordinal))
         {
             return RestoreDeferredGuard(source);

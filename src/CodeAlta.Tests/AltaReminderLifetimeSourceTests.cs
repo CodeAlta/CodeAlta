@@ -131,6 +131,8 @@ public sealed class AltaReminderLifetimeSourceTests
         foreach (var baseline in FrozenRoutes())
         {
             var source = ReadSource(baseline);
+            if (baseline.Path is "CodeAlta.Tui/App/CodeAltaOwnedServices.cs" or "CodeAlta.Orchestration/Hosting/CodeAltaHost.cs")
+                source = PluginFeedbackExtractionSourceTests.Restore(baseline.Path, source);
             AssertBaseline(string.Equals(baseline.Path, "CodeAlta.Tui/Program.cs", StringComparison.Ordinal)
                 ? CodeAltaStartupAdmissionSourceTests.RestoreProgram(source)
                 : source, baseline);

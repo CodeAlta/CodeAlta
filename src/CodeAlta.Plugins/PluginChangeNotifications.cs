@@ -1,5 +1,3 @@
-using XenoAtom.Terminal.UI.Controls;
-
 namespace CodeAlta.Plugins;
 
 /// <summary>
@@ -47,10 +45,14 @@ public sealed class PluginChangeNotificationService
     /// Initializes a new instance of the <see cref="PluginChangeNotificationService"/> class.
     /// </summary>
     /// <param name="options">Notification options.</param>
-    /// <param name="toastSink">Optional toast sink used by tests or host-specific UI plumbing; defaults to <see cref="ToastService.Show(string, ToastSeverity)"/>.</param>
+    /// <param name="toastSink">Borrowed host sink, required for interactive notifications; no implicit terminal fallback.</param>
+    /// <remarks>The sink still runs under the existing gate after status publication. Its exception
+    /// escapes without rolling back status; this service neither dispatches UI work nor owns the sink.</remarks>
+    /// <exception cref="ArgumentNullException">Interactive options require a non-null <paramref name="toastSink"/>.</exception>
     public PluginChangeNotificationService(PluginChangeNotificationOptions? options = null, Action<string>? toastSink = null)
     {
         _options = options ?? new PluginChangeNotificationOptions();
+        if (_options.Interactive) ArgumentNullException.ThrowIfNull(toastSink);
         _toastSink = toastSink;
     }
 
@@ -121,14 +123,7 @@ public sealed class PluginChangeNotificationService
             _lastNotification = notification;
             if (_options.Interactive)
             {
-                if (_toastSink is not null)
-                {
-                    _toastSink(message);
-                }
-                else
-                {
-                    ToastService.Show(message, ToastSeverity.Info);
-                }
+                _toastSink!(message); // Validated for interactive options at construction.
             }
             else if (_options.HeadlessLogging)
             {

@@ -35,6 +35,10 @@ public sealed record PluginRuntimeManagerOptions
 
     /// <summary>Gets a value indicating whether interactive plugin build live output should wait for Enter after builds complete.</summary>
     public bool WaitForEnterAfterBuildLiveOutput { get; init; }
+
+    /// <summary>Gets borrowed startup presentation; the default is silent even for nonheadless callers.</summary>
+    /// <remarks>The runtime never disposes this port. Hosts must explicitly inject frontend feedback.</remarks>
+    public IPluginStartupFeedback StartupFeedback { get; init; } = new SilentPluginStartupFeedback();
 }
 
 /// <summary>
@@ -97,12 +101,13 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
     /// <param name="options">Startup options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The startup result.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> or its startup feedback is null.</exception>
     public async ValueTask<PluginRuntimeManagerStartResult> StartAsync(
         PluginRuntimeManagerOptions options,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.StartupFeedback);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var diagnostics = new List<PluginRuntimeDiagnostic>();
@@ -169,23 +174,20 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
         var plan = new PluginStartupPlanner().PlanSourceBuilds(packages, globalConfig, projectConfig, options.SafeMode);
         diagnostics.AddRange(plan.Diagnostics);
 
-        if (!options.IsHeadless && plan.BuildRequests.Count > 0)
-        {
-            return await PluginStartupFeedbackReporter.RunWithInteractiveLiveAsync(
-                    plan.BuildRequests,
-                    options.WaitForEnterAfterBuildLiveOutput,
-                    CompleteStartupAsync,
-                    static (result, elapsed) => PluginStartupFeedbackReporter.BuildStartupSummary(
-                        result.BuildResults,
-                        result.ActivePlugins.Count(static plugin => plugin.SourcePackage is not null),
-                        elapsed),
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
+        return await PluginStartupFeedbackRouting.RunAsync(
+                plan.BuildRequests,
+                options.StartupFeedback,
+                CompleteStartupAsync,
+                static (result, elapsed) => PluginStartupFeedbackReporter.BuildStartupSummary(
+                    result.BuildResults,
+                    result.ActivePlugins.Count(static plugin => plugin.SourcePackage is not null),
+                    elapsed),
+                options.IsHeadless,
+                options.WaitForEnterAfterBuildLiveOutput,
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        return await CompleteStartupAsync(null, cancellationToken).ConfigureAwait(false);
-
-        async ValueTask<PluginRuntimeManagerStartResult> CompleteStartupAsync(PluginStartupFeedbackReporter.PluginBuildLiveStatus? liveStatus, CancellationToken token)
+        async ValueTask<PluginRuntimeManagerStartResult> CompleteStartupAsync(IPluginStartupProgress? liveStatus, CancellationToken token)
         {
             await BuildAndActivateSourcePluginsAsync(liveStatus, token).ConfigureAwait(false);
             lock (_lock)
@@ -205,7 +207,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
             };
         }
 
-        async ValueTask BuildAndActivateSourcePluginsAsync(PluginStartupFeedbackReporter.PluginBuildLiveStatus? liveStatus, CancellationToken token)
+        async ValueTask BuildAndActivateSourcePluginsAsync(IPluginStartupProgress? liveStatus, CancellationToken token)
         {
             if (plan.BuildRequests.Count == 0)
             {

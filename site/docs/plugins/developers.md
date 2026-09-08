@@ -18,6 +18,27 @@ registration, diagnostics, and unload are handled by the plugin runtime.
 > Build and load only source plugins you trust. Building can execute SDK,
 > NuGet, and MSBuild logic; loading executes .NET code in the CodeAlta process.
 
+## Custom host startup feedback
+
+If you embed the plugin runtime, startup presentation is now explicit:
+`PluginRuntimeManagerOptions.StartupFeedback` (or
+`CodeAltaHostOptions.PluginStartupFeedback`) defaults to silent feedback, even
+when the host is nonheadless. Supply a borrowed `IPluginStartupFeedback` to
+present progress. The normal TUI already injects its terminal adapter on both
+startup routes, so its startup display and Enter acknowledgement are unchanged.
+
+The pre-release `BuildWithInteractiveLiveAsync` helper moved from
+`PluginStartupFeedbackReporter` to
+`CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback`. Keep backend plugins and
+shared hosts on the neutral port rather than adding a TUI dependency.
+Interactive `PluginChangeNotificationService` construction now requires an
+explicit notification sink; there is no implicit global toast fallback.
+Ordinary source-plugin contribution methods do not need changes for this step.
+
+Feedback does not own the runtime or guarantee termination: a terminal-display
+or completion-summary failure can still escape before the startup operation is
+joined. This change does not make every plugin contract frontend-neutral.
+
 ## Source plugin layout
 
 Create one package directory per plugin under a global or project plugin root:

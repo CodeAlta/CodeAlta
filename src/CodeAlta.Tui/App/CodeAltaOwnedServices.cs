@@ -150,6 +150,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         GlobalRoot = homeRoot,
                         CurrentProjectPath = Environment.CurrentDirectory,
                         IsHeadless = false,
+                        PluginStartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),
                         HasInteractiveUi = true,
                         PluginSafeMode = pluginBootstrapOptions.PluginSafeMode,
                         RawArguments = rawArguments,
