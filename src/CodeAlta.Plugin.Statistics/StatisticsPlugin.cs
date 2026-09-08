@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Ansi;
 using XenoAtom.CommandLine;
 using XenoAtom.Terminal.UI;
@@ -127,14 +128,14 @@ public sealed class StatisticsPlugin : PluginBase
     private static PluginDerivedSessionEvent CreateProjection(string sessionId, PendingTurn turn)
     {
         var statistics = TurnStatisticsBuilder.BuildTurn(turn.Key, turn.SessionId, turn.RunId, turn.Events);
-        return new PluginDerivedSessionEvent
+        return new PluginTerminalDerivedSessionEvent
         {
             EventId = $"statistics:{EscapeEventId(sessionId)}:{EscapeEventId(turn.Key)}",
             Timestamp = turn.Timestamp,
             Markdown = StatisticsMarkdownRenderer.RenderTurnSummary(statistics),
             DetailSections =
             [
-                new PluginDerivedSessionEventDetailSection
+                new PluginTerminalDerivedSessionEventDetailSection
                 {
                     Header = "Detailed statistics",
                     Markdown = StatisticsMarkdownRenderer.RenderTurnDetails(statistics),

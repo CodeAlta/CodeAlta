@@ -76,7 +76,7 @@ Content callbacks remain synchronous and their exceptions escape. Renderer ordin
 
 Generated source-plugin targets reference `CodeAlta.Plugins.Tui` with an MSBuild `Exists` condition and `Private=false`; hosts without that assembly do not gain it merely by generating targets. The shared assembly-name list includes the optional assembly, without a shared-project reference or eager terminal load. Generated target changes participate in the existing manifest hash invalidation. Installed-tool contents, actual default-ALC identity, absent-assembly behavior and regenerated source-plugin builds still need execution qualification.
 
-**Remaining boundary:** Abstractions still has terminal dependencies for dialogs, prompt attachments and projections. Command shortcuts use the neutral definitions below, but existing builtin plugins still mix backend and terminal code. The optional authoring assembly does not establish a terminal-free dependency closure, backend-only builtin loading, or desktop panel parity.
+**Remaining boundary:** Abstractions still has terminal dependencies for dialogs and prompt editor hosts. Command shortcuts and session-event projection data use neutral definitions, but existing builtin plugins still mix backend and terminal code. The optional authoring assembly does not establish a terminal-free dependency closure, backend-only builtin loading, or desktop panel parity.
 
 ## Typed key bindings (pre-release migration)
 
@@ -255,6 +255,26 @@ Relative paths are resolved from the plugin package directory. Project-scoped pl
 Plugins can contribute transient derived timeline cards through `GetSessionEventProjections()` (legacy API name). Projections are replayed from canonical normalized event history and can also run live as new events arrive. They may provide Markdown fallback content, XenoAtom visuals, collapsed detail sections, and dynamic content that starts with a placeholder and refreshes after background computation.
 
 Projection output is not written to canonical conversation history. Store plugin-owned durable state through `IPluginStateStore` when a plugin needs persistence.
+
+The neutral `PluginDerivedSessionEvent`, `PluginDerivedSessionEventDetailSection` and
+`PluginDynamicDerivedSessionEventContent` expose Markdown, details, identities and change
+notifications without native factories. For rich terminal cards, reference the optional
+`CodeAlta.Plugins.Tui` assembly/namespace and use `PluginTerminalDerivedSessionEvent`,
+`PluginTerminalDerivedSessionEventDetailSection` and
+`PluginTerminalDynamicDerivedSessionEventContent`. The terminal variants retain
+`VisualFactory`; the detail variant also has `HeaderVisualFactory`.
+`PluginSessionEventVisualFactory` and `PluginSessionEventVisualContext` moved to that
+optional namespace. This is a pre-release API break; migrate native initializers and
+dynamic-content overrides, not the canonical projection handler or backend computation.
+
+Keep meaningful Markdown/header fallback fields even when supplying native factories.
+Factories are borrowed and invoked later by terminal rendering; a native failure does not
+cause a second fallback invocation. Initial upsert prefers a dynamic native factory over
+the event's static factory; a later dynamic refresh uses only the dynamic factory, so null
+clears the previous native factory. This preserves existing behavior rather than changing
+notification or resource ownership. `Payload` remains an opaque in-process object, **not a
+desktop wire schema**. This contract split does not add desktop transient projection
+rendering, terminal-free builtin loading, or background-task/unload guarantees.
 
 ## Background tasks and unload
 

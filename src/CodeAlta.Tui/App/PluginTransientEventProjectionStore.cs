@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 
 namespace CodeAlta.Tui.App;
 
@@ -71,7 +72,7 @@ internal sealed class PluginTransientEventProjectionStore
             {
                 Markdown = ResolveMarkdown(existing),
                 DetailSections = existing.DynamicContent.DetailSections,
-                VisualFactory = existing.DynamicContent.VisualFactory,
+                VisualFactory = (existing.DynamicContent as PluginTerminalDynamicDerivedSessionEventContent)?.VisualFactory,
             };
             var changed = !Equals(existing, updated);
             _events[eventId] = updated;
@@ -118,7 +119,7 @@ internal sealed class PluginTransientEventProjectionStore
         => derivedEvent.DynamicContent?.DetailSections ?? derivedEvent.DetailSections;
 
     private static PluginSessionEventVisualFactory? ResolveVisualFactory(PluginDerivedSessionEvent derivedEvent)
-        => derivedEvent.DynamicContent?.VisualFactory ?? derivedEvent.VisualFactory;
+        => (derivedEvent.DynamicContent as PluginTerminalDynamicDerivedSessionEventContent)?.VisualFactory ?? (derivedEvent as PluginTerminalDerivedSessionEvent)?.VisualFactory;
 }
 
 internal sealed record PluginTransientEventProjection(

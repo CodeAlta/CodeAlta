@@ -400,6 +400,21 @@ canonical normalized event history. Projection output is not written to
 conversation history. Use `IPluginStateStore` when plugin-owned data needs
 persistence.
 
+Native session-event factories now live in the optional `CodeAlta.Plugins.Tui`
+namespace. Use `PluginTerminalDerivedSessionEvent` for native cards,
+`PluginTerminalDerivedSessionEventDetailSection` for native detail/header factories,
+and `PluginTerminalDynamicDerivedSessionEventContent` for dynamic native content.
+`PluginSessionEventVisualFactory` and `PluginSessionEventVisualContext` also moved there.
+Their neutral base contracts retain Markdown, details, identity and change notifications.
+Migrate native initializers/overrides and keep useful Markdown/header fallback text; do not
+duplicate the projection's backend calculation for each frontend.
+
+Factories are deferred and borrowed, not automatically disposed. A native factory error
+does not retry through portable rendering. Initial upsert prefers dynamic over static
+native content; a later dynamic refresh returning no factory clears the native override.
+Opaque `Payload` objects are in-process plugin data, not desktop RPC values. This migration
+does not yet make builtin plugins terminal-free or add desktop transient-card rendering.
+
 ## Safe authoring notes
 
 - Use `Services.Tasks.Run(...)` or the `PluginBase.Tasks` shortcut for

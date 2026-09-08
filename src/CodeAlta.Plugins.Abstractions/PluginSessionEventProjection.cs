@@ -1,5 +1,4 @@
 using CodeAlta.Agent;
-using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins.Abstractions;
 
@@ -12,13 +11,6 @@ namespace CodeAlta.Plugins.Abstractions;
 public delegate ValueTask<IReadOnlyList<PluginDerivedSessionEvent>> PluginSessionEventProjectionHandler(
     PluginSessionEventProjectionContext context,
     CancellationToken cancellationToken);
-
-/// <summary>
-/// Creates a host-rendered visual for a plugin-derived session event or detail section.
-/// </summary>
-/// <param name="context">The visual rendering context.</param>
-/// <returns>The visual to render.</returns>
-public delegate Visual PluginSessionEventVisualFactory(PluginSessionEventVisualContext context);
 
 /// <summary>
 /// Describes a plugin contribution that can project replayed and live canonical session events into transient events.
@@ -72,30 +64,9 @@ public sealed record PluginSessionEventProjectionContext
 }
 
 /// <summary>
-/// Provides host context to a plugin visual factory.
-/// </summary>
-public sealed record PluginSessionEventVisualContext
-{
-    /// <summary>Gets the plugin-stable derived event identifier.</summary>
-    public required string EventId { get; init; }
-
-    /// <summary>Gets the optional renderer target/schema name.</summary>
-    public string? RenderTarget { get; init; }
-
-    /// <summary>Gets the current fallback Markdown for the visual being rendered.</summary>
-    public string? Markdown { get; init; }
-
-    /// <summary>Gets the optional structured payload.</summary>
-    public object? Payload { get; init; }
-
-    /// <summary>Gets the detail section header when rendering a detail section.</summary>
-    public string? DetailHeader { get; init; }
-}
-
-/// <summary>
 /// Describes a plugin-owned transient session event projection result.
 /// </summary>
-public sealed record PluginDerivedSessionEvent
+public record PluginDerivedSessionEvent
 {
     /// <summary>Gets the plugin-stable derived event identifier.</summary>
     public required string EventId { get; init; }
@@ -114,11 +85,6 @@ public sealed record PluginDerivedSessionEvent
 
     /// <summary>Gets optional Markdown detail sections that the frontend may render collapsed by default.</summary>
     public IReadOnlyList<PluginDerivedSessionEventDetailSection> DetailSections { get; init; } = [];
-
-    /// <summary>
-    /// Gets an optional visual factory for advanced frontend rendering that replaces the default Markdown card content. <see cref="Markdown"/> remains the clipboard and fallback representation.
-    /// </summary>
-    public PluginSessionEventVisualFactory? VisualFactory { get; init; }
 
     /// <summary>
     /// Gets optional dynamic Markdown content for projections that complete asynchronously after the event is first rendered.
@@ -147,11 +113,6 @@ public abstract class PluginDynamicDerivedSessionEventContent
     /// <summary>Gets the current detail sections.</summary>
     public virtual IReadOnlyList<PluginDerivedSessionEventDetailSection> DetailSections => [];
 
-    /// <summary>
-    /// Gets an optional visual factory for advanced frontend rendering that replaces the default Markdown card content. <see cref="Markdown"/> remains the clipboard and fallback representation.
-    /// </summary>
-    public virtual PluginSessionEventVisualFactory? VisualFactory => null;
-
     /// <summary>Raises the <see cref="Changed"/> event.</summary>
     protected void NotifyChanged() => Changed?.Invoke(this, EventArgs.Empty);
 }
@@ -159,21 +120,11 @@ public abstract class PluginDynamicDerivedSessionEventContent
 /// <summary>
 /// Describes a plugin-derived Markdown detail section for a transient session event.
 /// </summary>
-public sealed record PluginDerivedSessionEventDetailSection
+public record PluginDerivedSessionEventDetailSection
 {
     /// <summary>Gets the section header.</summary>
     public required string Header { get; init; }
 
     /// <summary>Gets the section Markdown.</summary>
     public required string Markdown { get; init; }
-
-    /// <summary>
-    /// Gets an optional visual factory for advanced frontend rendering. <see cref="Markdown"/> remains the clipboard and fallback representation.
-    /// </summary>
-    public PluginSessionEventVisualFactory? VisualFactory { get; init; }
-
-    /// <summary>
-    /// Gets an optional visual factory for rendering the collapsible detail header. <see cref="Header"/> remains the fallback header text.
-    /// </summary>
-    public PluginSessionEventVisualFactory? HeaderVisualFactory { get; init; }
 }

@@ -9,6 +9,7 @@ using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Tui.Presentation.Timeline;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using CodeAlta.Tui.Threading;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
@@ -720,7 +721,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         var tab = CreateOpenSessionState(session);
         var renderCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observer = new DerivedProjectionObserver(
-            () => new PluginDerivedSessionEvent
+            () => new PluginTerminalDerivedSessionEvent
             {
                 EventId = "stats",
                 Markdown = "statistics",
@@ -860,7 +861,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
             => Task.FromResult(new SessionViewPluginDerivedEventProjectionResult([createEvent()], []));
     }
 
-    private sealed class RecordingDynamicProjectionContent(OpenSessionState tab) : PluginDynamicDerivedSessionEventContent
+    private sealed class RecordingDynamicProjectionContent(OpenSessionState tab) : PluginTerminalDynamicDerivedSessionEventContent
     {
         private TaskCompletionSource<bool> _renderCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _version;

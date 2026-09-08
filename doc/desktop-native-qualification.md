@@ -18,6 +18,14 @@ No native process or real catalog/journal was opened. The 256 KiB page/128 KiB r
 do not bound catalog discovery, prove transactional revisions or guarantee shutdown joining.
 Historical native results below do not qualify the new history UI or current packaged assets.
 
+The terminal session-event presentation extraction subsequently passed16 new exact inert/source
+cases and two desktop source/assembly regressions, plus targeted/solution Release builds.
+Native factories and context moved into optional Plugins.Tui, with unchanged deferred TUI
+rendering semantics and statistics calculation bodies. No Visual/coordinator/runtime was
+constructed by those tests; rich-rendering fixtures were adapted for compilation but excluded
+from execution. This is contract/routing evidence, not actual native presentation, installed
+plugin loading, terminal-free builtin closure or desktop transient-card qualification.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

@@ -405,10 +405,10 @@ internal sealed class SessionRuntimeEventCoordinator
     private static bool IsPluginProjectionVersionCurrent(OpenSessionState tab, long expectedVersion)
         => Volatile.Read(ref tab.Session.PluginProjectionVersion) == expectedVersion;
 
-    private static Func<Visual>? CreatePluginVisualFactory(PluginTransientEventProjection projection)
+    internal static Func<Visual>? CreatePluginVisualFactory(PluginTransientEventProjection projection)
         => projection.VisualFactory is null
             ? null
-            : () => projection.VisualFactory(new PluginSessionEventVisualContext
+            : () => projection.VisualFactory(new CodeAlta.Plugins.Tui.PluginSessionEventVisualContext
             {
                 EventId = projection.EventId,
                 RenderTarget = projection.RenderTarget,
@@ -416,12 +416,12 @@ internal sealed class SessionRuntimeEventCoordinator
                 Payload = projection.Payload,
             });
 
-    private static Func<Visual>? CreatePluginDetailVisualFactory(
+    internal static Func<Visual>? CreatePluginDetailVisualFactory(
         PluginTransientEventProjection projection,
         PluginDerivedSessionEventDetailSection section)
-        => section.VisualFactory is null
+        => section is not CodeAlta.Plugins.Tui.PluginTerminalDerivedSessionEventDetailSection { VisualFactory: { } factory }
             ? null
-            : () => section.VisualFactory(new PluginSessionEventVisualContext
+            : () => factory(new CodeAlta.Plugins.Tui.PluginSessionEventVisualContext
             {
                 EventId = projection.EventId,
                 RenderTarget = projection.RenderTarget,
@@ -430,12 +430,12 @@ internal sealed class SessionRuntimeEventCoordinator
                 DetailHeader = section.Header,
             });
 
-    private static Func<Visual>? CreatePluginDetailHeaderVisualFactory(
+    internal static Func<Visual>? CreatePluginDetailHeaderVisualFactory(
         PluginTransientEventProjection projection,
         PluginDerivedSessionEventDetailSection section)
-        => section.HeaderVisualFactory is null
+        => section is not CodeAlta.Plugins.Tui.PluginTerminalDerivedSessionEventDetailSection { HeaderVisualFactory: { } factory }
             ? null
-            : () => section.HeaderVisualFactory(new PluginSessionEventVisualContext
+            : () => factory(new CodeAlta.Plugins.Tui.PluginSessionEventVisualContext
             {
                 EventId = projection.EventId,
                 RenderTarget = projection.RenderTarget,

@@ -29,6 +29,23 @@ Author `PluginCommandContribution.KeyBinding` with `new PluginKeyBinding(...)` c
 
 The TUI's optional mapper preserves modifier bits and maps Ctrl letters to terminal encoding. Unsupported scalars leave the entire binding unbound without removing the command or changing its visibility. Structural conflict keys use stroke kinds/identities/modifiers/order rather than display text, and warnings do not resolve collisions. Native dispatch/timing remains unchanged; Meta is retained for matching but omitted by the existing native hint formatter. Do not claim desktop shortcut routing, IME/physical-key semantics, or cross-terminal delivery from this contract migration.
 
+## Session-event presentation
+
+Keep canonical projection calculations in one `GetSessionEventProjections()` handler.
+Neutral `PluginDerivedSessionEvent`, `PluginDerivedSessionEventDetailSection` and
+`PluginDynamicDerivedSessionEventContent` carry Markdown/details/data/notifications, not
+terminal factories. Native event/detail/dynamic variants are
+`PluginTerminalDerivedSessionEvent`, `PluginTerminalDerivedSessionEventDetailSection` and
+`PluginTerminalDynamicDerivedSessionEventContent` in optional `CodeAlta.Plugins.Tui`.
+`PluginSessionEventVisualFactory` and `PluginSessionEventVisualContext` moved there too.
+Migrate old native initializers/overrides and retain useful Markdown/header fallbacks.
+
+Native factories are borrowed and invoked later; failure does not invoke a second fallback.
+Initial upsert selects dynamic native content before static; dynamic refresh uses only the
+dynamic factory, so null clears a previous native factory. Payload remains opaque in-process
+data, not an RPC schema. Do not claim desktop transient projections, backend-only builtin
+loading or unload/resource-lifetime safety from this contract extraction.
+
 ## Samples
 
 Copy one of the `samples/*` folders to `~/.alta/plugins/<sample-name>/` or `<project>/.alta/plugins/<sample-name>/`; it will be discovered, built, and loaded on the next startup unless disabled in TOML:

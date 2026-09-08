@@ -4,6 +4,52 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M3 follow-up: optional terminal session-event presentation — 2026-09-08
+
+The same sole child delivered ten scoped code/test files against `bbe583e8`, fixtures first
+and without execution. Native event/detail/dynamic factory contracts and visual context now
+live in `CodeAlta.Plugins.Tui`. Neutral base records retain Markdown, details, identities,
+timestamps, opaque in-process payloads and notifications. Statistics still calculates each
+projection once, with unchanged cache, Markdown and native renderer bodies; its optional
+presentation dependency is now explicit. This is not backend-only builtin loading.
+
+Parent audited all actual changed sources, both new fixtures and their called historical
+source helpers. The actual in-memory projection store and subscription are admitted here
+because they own only a lock/dictionary/event references; explicit nonblank Markdown avoids
+localization fallback. Inert tests construct no durable store, catalog, coordinator, native
+visual, plugin/runtime host or provider. Deferred callbacks capture context then throw literal
+errors; one documented null sentinel checks forwarding, not visual consumer behavior.
+
+**16 new exact parameterless cases passed**, including the final child corrections to getter
+prefix assertions and nested preservation entry points. Exact methods are the twelve in
+`CodeAlta.Tests.PluginSessionEventPresentationTests` (`NeutralProjection_PreservesDataWithoutInvokingNativeFactories`,
+`Apply_PrefersDynamicFactoryAndRetainsStaticFallback`, `Apply_PreservesDynamicGetterOrderAndFailure`,
+`RefreshDynamic_NullFactoryClearsStaticFallback`, `RefreshDynamic_PreservesGetterOrderAndFailure`,
+`ProjectionStore_PreservesUpsertRemoveAndEquality`, `DynamicContent_PreservesNotificationsAndSubscriptionDisposal`,
+`CardFactory_DefersInvocationAndPreservesContext`, `DetailFactory_DefersInvocationAndPreservesSectionContext`,
+`HeaderFactory_DefersInvocationAndPreservesSectionContext`, `FactoryAbsence_ReturnsNullWithoutConstructingContext`,
+`FactoryFailure_PropagatesWithoutFallback`) and four in `CodeAlta.Tests.PluginSessionEventProjectionSourceTests`
+(`Contracts_IsolateTerminalFactoriesInOptionalAssembly`, `SharedProjectionAndStatistics_RetainBackendLogic`,
+`TuiRouting_PreservesFactoryPrecedenceAndDeferredContexts`, `Preservation_RestoresCompleteOriginalsAndFrozenChains`).
+Two additional exact desktop checks passed: `DesktopHistorySourceTests.Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains`
+and `DesktopArchitectureTests.DesktopAssembly_HasNoTerminalOrHostCompositionReferences`.
+
+Twenty-four mandatory inverses reconstruct seven entire originals under LF/CRLF/mixed input.
+Parent independently matched raw-Git anchors and reversed context diffs for all seven, then
+checked old fixtures, history/workspace chains, architecture, guide and attributes unchanged.
+The unchanged keybinding/UI-content/feedback preservation routes also executed. App remains
+47,026 bytes; coordinator line anchors281/624 remain unchanged without padding. Offline
+source-disabled NuGet graph refresh used cached dependencies; targeted/final solution Release
+builds passed with zero warnings/errors and no dependency fetching or application launch.
+
+Migration docs, public developer guide and builtin authoring skill now describe the API break.
+Apply still prefers dynamic over static factories; refresh still uses dynamic only, so null
+clears the previous native factory. Context construction/invocation remain deferred with no
+new native-failure fallback, threading, notification, subscription or lifetime policy.
+Actual rich statistics/native rendering, installed source-plugin loading, full suites and
+website build remain unqualified. Dialog/prompt-host contracts, remaining assembly references,
+builtin backend separation and full M3–M7 parity remain open.
+
 ## Latest M4 checkpoint: bounded persisted-event history — 2026-09-08
 
 Session selection now calls generated `workspace.history` using the same retained session
