@@ -43,6 +43,7 @@
     <Project Path="CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <Project Path="CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions/CodeAlta.Plugins.Abstractions.csproj" />
+    <Project Path="CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj" />
     <Project Path="CodeAlta.Plugins/CodeAlta.Plugins.csproj" />
   </Folder>
   <Folder Name="/main/">

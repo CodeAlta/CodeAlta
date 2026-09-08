@@ -8,7 +8,6 @@ A plugin usually references only `CodeAlta.Plugins.Abstractions`, inherits from 
 
 ```csharp
 using CodeAlta.Plugins.Abstractions;
-using XenoAtom.Terminal.UI.Controls;
 using CliCommand = XenoAtom.CommandLine.Command;
 
 [Plugin(DisplayName = "Hello Plugin", Description = "Adds a command, prompt note, and status row.")]
@@ -39,7 +38,11 @@ public sealed class HelloPlugin : PluginBase
     public override IEnumerable<PluginUiContribution> GetUiContributions()
     {
         yield return PluginUi.SessionStatus("Hello", "active");
-        yield return PluginUi.Visual(PluginUiRegion.SessionFooter, static _ => new Markup("[dim]Hello plugin[/]"));
+        yield return new PluginContentContribution
+        {
+            Region = PluginUiRegion.SessionFooter,
+            CreateContent = static _ => new PluginRenderResult { Text = "Hello plugin" },
+        };
     }
 }
 ```
@@ -53,6 +56,27 @@ Authoring rules:
 - `PluginScope` is assigned by the runtime from the load location: user root packages are global; project root packages are project-scoped.
 - Contributions are declarative records returned by virtual methods. The runtime owns contribution handles, registration, removal, diagnostics, and ordering.
 - Plugins receive `PluginRuntimeContext`, `IPluginServices`, and a `XenoAtom.Logging.Logger` owned by the host.
+
+## Portable region content and terminal rendering (pre-release migration)
+
+`PluginContentContribution` supplies a required `CreateContent` callback returning a portable `PluginRenderResult` (`Markdown` or `Text`). It uses the existing `CommandBar`, `SessionFooter`, and `SessionStatus` regions and the existing `GetUiContributions` registration, scope, and ordering rules. `PluginUi.Content` is the convenience factory. This is not a new workspace-panel or navigation framework.
+
+Native visual authoring moves to the optional `CodeAlta.Plugins.Tui` assembly and namespace:
+
+- Replace `PluginUi.Visual` with `PluginTui.Visual`, or construct `PluginVisualContribution` from the optional assembly. Supply a nonnull portable `CreateContent` callback as well as the direct visual or visual factory.
+- `PluginRenderResult.Visual` and `PluginRenderResult.FromVisual` are removed. Shared `PluginRenderer` callbacks, including `PluginAgentToolContribution.Renderer`, now return only portable content.
+- For native renderer contributions, use `PluginTerminalRendererContribution` / `PluginTui.Renderer`, with both a portable `Renderer` and a terminal callback returning `PluginTerminalRenderResult`.
+- Shared adapter callers replace `CreateVisuals` with `CreateContent`; portable `RenderAsync` remains available. Terminal materialization belongs to the borrowing frontend adapter, not the shared runtime.
+
+`PluginAdapterOperationOptions.SupportsTerminalVisuals` is a call-scoped presentation capability, defaulting to false. The TUI bridge explicitly enables it. It is not a permission grant, and does not imply support for custom dialogs or prompt-editor attachments. Headless and explicitly noninteractive calls retain their UI bypass.
+
+Without terminal support, only the portable callback runs. With terminal support, a direct visual takes precedence over its factory, without constructing a visual context. A selected native callback returning null means no item; a native exception does not trigger fallback. A portable callback may intentionally return null for absence, but terminal-only actions should provide explanatory text rather than claim unsupported functionality succeeded. MCP's portable status uses its existing plain status label; the native management button/dialog remains terminal-specific.
+
+Content callbacks remain synchronous and their exceptions escape. Renderer ordinary failures are diagnosed and traversal continues; cancellation exceptions escape. Renderer contexts are invalidated only after successful callback completion, including a null result, not in a new finally block. These adapters borrow the shared runtime and add no lifetime owner.
+
+Generated source-plugin targets reference `CodeAlta.Plugins.Tui` with an MSBuild `Exists` condition and `Private=false`; hosts without that assembly do not gain it merely by generating targets. The shared assembly-name list includes the optional assembly, without a shared-project reference or eager terminal load. Generated target changes participate in the existing manifest hash invalidation. Installed-tool contents, actual default-ALC identity, absent-assembly behavior and regenerated source-plugin builds still need execution qualification.
+
+**Remaining boundary:** Abstractions still has terminal dependencies for commands/shortcuts, dialogs, prompt attachments and projections. Existing builtin plugins still mix backend and terminal code. The optional authoring assembly does not establish a terminal-free dependency closure, backend-only builtin loading, or desktop panel parity.
 
 ## Source plugin layout
 

@@ -281,6 +281,10 @@ public sealed class PluginRootBuildFileGenerator
             targets.AppendLine("    </Reference>");
         }
 
+        targets.AppendLine("    <Reference Include=\"CodeAlta.Plugins.Tui\" Condition=\"Exists('$(CodeAltaExeFolder)\\CodeAlta.Plugins.Tui.dll')\">");
+        targets.AppendLine("      <HintPath>$(CodeAltaExeFolder)\\CodeAlta.Plugins.Tui.dll</HintPath>");
+        targets.AppendLine("      <Private>false</Private>");
+        targets.AppendLine("    </Reference>");
         targets.AppendLine("  </ItemGroup>");
         targets.AppendLine("  <ItemGroup>");
         foreach (var packageName in options.SharedPackageNames.OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))

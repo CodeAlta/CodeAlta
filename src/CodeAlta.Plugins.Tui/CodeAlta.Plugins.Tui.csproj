@@ -3,23 +3,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>Built-in Model Context Protocol configuration plugin for CodeAlta.</Description>
+    <Description>Optional terminal presentation contracts for CodeAlta plugins.</Description>
     <Authors>Alexandre Mutel</Authors>
-    <PackageTags>codealta;plugin;mcp;model-context-protocol;agentic;ai</PackageTags>
+    <PackageTags>codealta;plugins;terminal</PackageTags>
     <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
     <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
   </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol.Core" />
-    <PackageReference Include="Tomlyn" />
     <PackageReference Include="XenoAtom.Terminal.UI" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
-    <ProjectReference Include="..\CodeAlta.Plugins.Tui\CodeAlta.Plugins.Tui.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 </Project>

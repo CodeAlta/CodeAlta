@@ -163,7 +163,7 @@ public delegate ValueTask<string?> PluginSystemPromptContentProvider(PluginSyste
 /// <summary>Delegate for tool renderers.</summary>
 /// <param name="context">The renderer context.</param>
 /// <param name="cancellationToken">A token to cancel rendering.</param>
-/// <returns>A rendered visual or markdown fallback.</returns>
+/// <returns>Portable Markdown or text content, or null for intentional absence.</returns>
 public delegate ValueTask<PluginRenderResult?> PluginRenderer(PluginRendererContext context, CancellationToken cancellationToken);
 
 /// <summary>Delegate for before-compaction hooks.</summary>

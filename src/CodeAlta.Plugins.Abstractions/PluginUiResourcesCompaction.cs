@@ -1,5 +1,3 @@
-using XenoAtom.Terminal.UI;
-
 namespace CodeAlta.Plugins.Abstractions;
 
 /// <summary>Base type for UI contributions.</summary>
@@ -26,14 +24,11 @@ public enum PluginUiRegion
     SessionStatus,
 }
 
-/// <summary>Describes a visual UI contribution.</summary>
-public sealed record PluginVisualContribution : PluginUiContribution
+/// <summary>Describes portable UI-region content.</summary>
+public record PluginContentContribution : PluginUiContribution
 {
-    /// <summary>Gets a direct visual supplied by the plugin.</summary>
-    public Visual? Visual { get; init; }
-
-    /// <summary>Gets a factory used to create or rebuild the visual.</summary>
-    public Func<PluginVisualContext, Visual?>? CreateVisual { get; init; }
+    /// <summary>Gets the portable content callback. A null result intentionally contributes no content.</summary>
+    public required Func<PluginVisualContext, PluginRenderResult?> CreateContent { get; init; }
 }
 
 /// <summary>Describes a status UI contribution.</summary>
@@ -75,7 +70,7 @@ public enum PluginStatusTone
 }
 
 /// <summary>Describes a renderer contribution.</summary>
-public sealed record PluginRendererContribution : PluginUiContribution
+public record PluginRendererContribution : PluginUiContribution
 {
     /// <summary>Gets the renderer target kind or schema.</summary>
     public string? Target { get; init; }
@@ -87,23 +82,11 @@ public sealed record PluginRendererContribution : PluginUiContribution
 /// <summary>Represents a renderer result.</summary>
 public sealed record PluginRenderResult
 {
-    /// <summary>Gets an optional rendered visual.</summary>
-    public Visual? Visual { get; init; }
-
     /// <summary>Gets optional markdown content.</summary>
     public string? Markdown { get; init; }
 
     /// <summary>Gets optional plain text fallback content.</summary>
     public string? Text { get; init; }
-
-    /// <summary>Creates a visual render result.</summary>
-    /// <param name="visual">The visual.</param>
-    /// <returns>The render result.</returns>
-    public static PluginRenderResult FromVisual(Visual visual)
-    {
-        ArgumentNullException.ThrowIfNull(visual);
-        return new PluginRenderResult { Visual = visual };
-    }
 
     /// <summary>Creates a markdown render result.</summary>
     /// <param name="markdown">The markdown content.</param>

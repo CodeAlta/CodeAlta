@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 using CodeAlta.Plugin.Mcp;
@@ -71,6 +72,21 @@ public sealed class McpPlugin : PluginBase
             Name = "mcp-status",
             Order = 100,
             CreateVisual = context => CreateStatusIndicator(context, _managementService, _activationState, _statusRevision),
+            CreateContent = context =>
+            {
+                var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
+                var snapshot = ResolveStatusSnapshot(_managementService, projectPath);
+                if (!snapshot.Summary.HasConfiguration && snapshot.Summary.ConfiguredServerCount == 0 && snapshot.Summary.InvalidSourceCount == 0)
+                {
+                    return null;
+                }
+
+                var activationScope = ResolveActivationScopeKey(context, projectPath);
+                return new PluginRenderResult
+                {
+                    Text = CreateStatusLabel(snapshot, _activationState.GetToolCounts(activationScope), _activationState.GetActiveServers(activationScope)),
+                };
+            },
         };
     }
 

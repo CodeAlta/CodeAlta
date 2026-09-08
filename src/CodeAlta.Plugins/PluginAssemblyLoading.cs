@@ -111,6 +111,7 @@ public sealed class PluginAssemblyLoader
     public static IReadOnlyList<string> DefaultHostSharedAssemblyNames { get; } =
     [
         "CodeAlta.Plugins.Abstractions",
+        "CodeAlta.Plugins.Tui",
         "CodeAlta.Agent",
         "CodeAlta.Catalog",
         "Microsoft.Extensions.AI.Abstractions",

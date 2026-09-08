@@ -192,25 +192,12 @@ public static class Prompt
 /// </summary>
 public static class PluginUi
 {
-    /// <summary>Creates a visual contribution.</summary>
-    public static PluginVisualContribution Visual(PluginUiRegion region, Visual visual, string? name = null, int order = 0)
+    /// <summary>Creates portable UI-region content. A null callback result intentionally contributes nothing.</summary>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="createContent"/> is null.</exception>
+    public static PluginContentContribution Content(PluginUiRegion region, Func<PluginVisualContext, PluginRenderResult?> createContent, string? name = null, int order = 0)
     {
-        ArgumentNullException.ThrowIfNull(visual);
-        return new PluginVisualContribution { Region = region, Name = name, Order = order, Visual = visual };
-    }
-
-    /// <summary>Creates a visual contribution from a context factory.</summary>
-    public static PluginVisualContribution Visual(PluginUiRegion region, Func<PluginVisualContext, Visual?> factory, string? name = null, int order = 0)
-    {
-        ArgumentNullException.ThrowIfNull(factory);
-        return new PluginVisualContribution { Region = region, Name = name, Order = order, CreateVisual = factory };
-    }
-
-    /// <summary>Creates a visual contribution from a factory.</summary>
-    public static PluginVisualContribution Visual(PluginUiRegion region, Func<Visual?> factory, string? name = null, int order = 0)
-    {
-        ArgumentNullException.ThrowIfNull(factory);
-        return Visual(region, _ => factory(), name, order);
+        ArgumentNullException.ThrowIfNull(createContent);
+        return new PluginContentContribution { Region = region, Name = name, Order = order, CreateContent = createContent };
     }
 
     /// <summary>Creates a status item contribution.</summary>

@@ -15,6 +15,14 @@ Dynamic plugins load in a collectible `AssemblyLoadContext`. CodeAlta public ass
 
 Use `/plugins`, `/plugin`, or the command palette to inspect descriptors, source paths, README files, state, diagnostics, contribution summaries, source-change notifications, and enable/disable/rebuild/reload/clean actions. Interactive startup shows source-plugin build/activation progress in a transient `Terminal.Live` region using the built-in `Spinner` control while work is running and colored state icons per package; `--plugins-wait-for-enter` pauses the live region after source plugin startup finishes, shows the concise build/activation timing summary there, and continues after Enter before discarding the region. Failed source-plugin builds are still printed with source paths and full per-plugin diagnostics plus captured stdout/stderr tails are written to `~/.alta/logs/codealta.log`. Use `--no-plugins`, `--plugin-safe-mode`, or `CODEALTA_DISABLE_PLUGINS=1` when a source plugin breaks startup. Use `--plugins-status` for a headless config/discovery summary.
 
+## Region content and terminal authoring
+
+Use `PluginContentContribution` / `PluginUi.Content` with a required `CreateContent` callback returning portable `PluginRenderResult` Markdown or text for the existing three UI regions. Native visual authoring now lives in the optional `CodeAlta.Plugins.Tui` assembly/namespace: migrate `PluginUi.Visual` to `PluginTui.Visual` and supply a portable callback alongside the native visual/factory. Native renderer contributions use `PluginTerminalRendererContribution` / `PluginTui.Renderer` with both portable and terminal callbacks; shared `PluginRenderResult.Visual` / `FromVisual` are removed. Agent-tool renderer callbacks remain portable.
+
+The TUI explicitly enables call-scoped `SupportsTerminalVisuals`; other callers default to portable selection, and headless/noninteractive UI bypasses remain. This capability is not a security permission or dialog/prompt-editor capability. Direct visuals precede factories. Selected native null results mean absence, and native errors never cause fallback. Portable callbacks must be nonnull; they may return null for intentional absence. Explain terminal-only actions in fallback text rather than imply an unsupported action succeeded.
+
+Generated targets conditionally reference the optional assembly with MSBuild `Exists` and `Private=false`; do not add a TUI executable reference or modify generated root files. Other abstraction contracts and builtin implementations still have terminal dependencies: this slice does not establish backend-only loading or desktop parity. Source samples remain trusted executable code; do not copy them into a live plugin root merely to inspect them.
+
 ## Samples
 
 Copy one of the `samples/*` folders to `~/.alta/plugins/<sample-name>/` or `<project>/.alta/plugins/<sample-name>/`; it will be discovered, built, and loaded on the next startup unless disabled in TOML:

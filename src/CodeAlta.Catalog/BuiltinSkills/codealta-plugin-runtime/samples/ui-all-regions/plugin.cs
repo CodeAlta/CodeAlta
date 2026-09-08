@@ -1,4 +1,5 @@
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI.Controls;
 
 [Plugin("ui-all-regions", DisplayName = "UI All Regions", Description = "Contributes sample UI hooks for every PluginUiRegion.")]
@@ -21,7 +22,8 @@ public sealed class UiAllRegionsPlugin : PluginBase
     {
         foreach (var region in Enum.GetValues<PluginUiRegion>())
         {
-            yield return PluginUi.Visual(region, static context => new Markup($"[dim]plugin-ui:{context.Region}[/]"), $"visual-{region}");
+            yield return PluginTui.Visual(region, static context => new Markup($"[dim]plugin-ui:{context.Region}[/]"),
+                static context => new PluginRenderResult { Text = $"plugin-ui:{context.Region}" }, $"visual-{region}");
         }
 
         yield return new PluginStatusContribution

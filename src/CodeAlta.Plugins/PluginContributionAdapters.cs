@@ -3,7 +3,6 @@ using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
-using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins;
 
@@ -38,6 +37,9 @@ public sealed record PluginAdapterOperationOptions
 
     /// <summary>Gets a value indicating whether an interactive UI is available.</summary>
     public bool HasInteractiveUi { get; init; }
+
+    /// <summary>Gets whether this call explicitly supports optional terminal visuals. Defaults to false.</summary>
+    public bool SupportsTerminalVisuals { get; init; }
 
     /// <summary>Gets a value indicating whether the caller is running without a frontend UI.</summary>
     public bool IsHeadless { get; init; }
@@ -767,33 +769,27 @@ public sealed class PluginContributionAdapterService
         return items;
     }
 
-    /// <summary>Creates visuals from applicable visual UI contributions.</summary>
-    public IReadOnlyList<Visual> CreateVisuals(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion region, PluginAdapterOperationOptions? options = null)
+    /// <summary>Creates portable content from applicable UI-region contributions.</summary>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activePlugins"/> is null.</exception>
+    public IReadOnlyList<PluginRenderResult> CreateContent(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion region, PluginAdapterOperationOptions? options = null)
+        => CreateContent(activePlugins, region, static (content, createContext) =>
+        {
+            ArgumentNullException.ThrowIfNull(content.CreateContent);
+            return content.CreateContent(createContext());
+        }, options);
+
+    /// <summary>Materializes applicable content through the shared traversal, with lazy operation context creation.</summary>
+    /// <typeparam name="TResult">The frontend's materialized result type.</typeparam>
+    /// <exception cref="ArgumentNullException">Thrown when the active plugins or materializer is null.</exception>
+    public IReadOnlyList<TResult> CreateContent<TResult>(IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion region,
+        Func<PluginContentContribution, Func<PluginVisualContext>, TResult?> materialize, PluginAdapterOperationOptions? options = null) where TResult : class
     {
         ArgumentNullException.ThrowIfNull(activePlugins);
-        if (IsHeadlessOrNonInteractive(options))
-        {
-            return [];
-        }
-
-        var visuals = new List<Visual>();
-        foreach (var registration in GetRegistrations(PluginPoint.Ui, options))
-        {
-            if (registration.Contribution is not PluginVisualContribution visualContribution ||
-                visualContribution.Region != region ||
-                !TryGetActivePlugin(activePlugins, registration, out var active))
-            {
-                continue;
-            }
-
-            var visual = visualContribution.Visual ?? visualContribution.CreateVisual?.Invoke(CreateVisualContext(active, options, region, default));
-            if (visual is not null)
-            {
-                visuals.Add(visual);
-            }
-        }
-
-        return visuals;
+        ArgumentNullException.ThrowIfNull(materialize);
+        if (IsHeadlessOrNonInteractive(options)) return [];
+        return PluginUiContentRouting.CreateContent<ActivePluginInstance, TResult>(GetRegistrations(PluginPoint.Ui, options), region, options,
+            registration => TryGetActivePlugin(activePlugins, registration, out var active) ? active : null,
+            (_, content, active) => materialize(content, () => CreateVisualContext(active, options, region, default)));
     }
 
     /// <summary>Runs renderer contributions for a UI region/target and returns rendered payloads.</summary>
@@ -804,43 +800,28 @@ public sealed class PluginContributionAdapterService
         object? payload,
         PluginAdapterOperationOptions? options = null,
         CancellationToken cancellationToken = default)
+        => await RenderAsync(activePlugins, region, target, payload, static (renderer, context, token) => renderer.Renderer(context, token), options, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Invokes frontend renderer selection through the shared traversal and diagnostic policy.</summary>
+    /// <typeparam name="TResult">The frontend's renderer result type.</typeparam>
+    /// <exception cref="ArgumentNullException">Thrown when the active plugins or renderer selector is null.</exception>
+    public ValueTask<(IReadOnlyList<TResult> Results, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> RenderAsync<TResult>(
+        IReadOnlyList<ActivePluginInstance> activePlugins, PluginUiRegion region, string? target, object? payload,
+        Func<PluginRendererContribution, PluginRendererContext, CancellationToken, ValueTask<TResult?>> render,
+        PluginAdapterOperationOptions? options = null, CancellationToken cancellationToken = default) where TResult : class
     {
         ArgumentNullException.ThrowIfNull(activePlugins);
-        if (IsHeadlessOrNonInteractive(options))
-        {
-            return ([], []);
-        }
-
-        var results = new List<PluginRenderResult>();
-        var diagnostics = new List<PluginRuntimeDiagnostic>();
-        foreach (var registration in GetRegistrations(PluginPoint.Ui, options))
-        {
-            if (registration.Contribution is not PluginRendererContribution renderer ||
-                renderer.Region != region ||
-                !RendererTargetMatches(renderer.Target, target) ||
-                !TryGetActivePlugin(activePlugins, registration, out var active))
-            {
-                continue;
-            }
-
-            var context = CreateRendererContext(active, options, target, payload, cancellationToken);
-            try
-            {
-                var result = await renderer.Renderer(context, cancellationToken).ConfigureAwait(false);
-                context.Invalidate();
-                if (result is not null)
-                {
-                    results.Add(result);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+        ArgumentNullException.ThrowIfNull(render);
+        if (IsHeadlessOrNonInteractive(options)) return ValueTask.FromResult<(IReadOnlyList<TResult>, IReadOnlyList<PluginRuntimeDiagnostic>)>(([], []));
+        return PluginUiContentRouting.RenderAsync<ActivePluginInstance, TResult>(GetRegistrations(PluginPoint.Ui, options), region, target, options,
+            registration => TryGetActivePlugin(activePlugins, registration, out var active)
+                ? (active, CreateRendererContext(active, options, target, payload, cancellationToken)) : null,
+            render,
+            (registration, active, ex) =>
             {
                 LogCallbackFailure(active, "Renderer contribution failed.", ex);
-                diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(registration, "Renderer contribution failed.", ex)));
-            }
-        }
-
-        return (results, diagnostics);
+                return AddDiagnostic(CreateCallbackDiagnostic(registration, "Renderer contribution failed.", ex));
+            }, cancellationToken);
     }
 
     private IReadOnlyList<PluginContributionRegistration> GetRegistrations(PluginPoint point, PluginAdapterOperationOptions? options)
@@ -909,10 +890,6 @@ public sealed class PluginContributionAdapterService
 
     private static bool IsHeadlessOrNonInteractive(PluginAdapterOperationOptions? options)
         => options is not null && (options.IsHeadless || !options.HasInteractiveUi);
-
-    private static bool RendererTargetMatches(string? rendererTarget, string? requestedTarget)
-        => string.IsNullOrWhiteSpace(rendererTarget) ||
-            string.Equals(rendererTarget, requestedTarget, StringComparison.OrdinalIgnoreCase);
 
     private async ValueTask<PluginPromptResult?> InvokePromptProcessorAsync(PluginContributionRegistration registration, PluginPromptProcessorContribution processor, PluginPromptSubmittingContext context, List<PluginRuntimeDiagnostic> diagnostics, CancellationToken cancellationToken)
     {

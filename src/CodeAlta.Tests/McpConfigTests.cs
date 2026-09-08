@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.CommandLine;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;

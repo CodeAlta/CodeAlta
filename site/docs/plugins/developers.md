@@ -39,6 +39,47 @@ Feedback does not own the runtime or guarantee termination: a terminal-display
 or completion-summary failure can still escape before the startup operation is
 joined. This change does not make every plugin contract frontend-neutral.
 
+## Portable content and terminal visuals
+
+Region content can now use `PluginContentContribution` (or `PluginUi.Content`)
+with a required `CreateContent` callback returning `PluginRenderResult` text or
+Markdown. Contributions still use `GetUiContributions` and the existing
+command-bar, session-footer, and session-status regions.
+
+```csharp
+yield return new PluginContentContribution
+{
+    Region = PluginUiRegion.SessionFooter,
+    CreateContent = static _ => new PluginRenderResult { Text = "Hello plugin" },
+};
+```
+
+For terminal visuals, reference the optional `CodeAlta.Plugins.Tui` assembly
+and import its namespace. Replace `PluginUi.Visual` with `PluginTui.Visual`.
+`PluginVisualContribution` now lives in that assembly and also requires a
+portable `CreateContent` callback. For terminal renderer contributions, use
+`PluginTerminalRendererContribution` or `PluginTui.Renderer`, supplying both
+the portable renderer and the native callback. Shared `PluginRenderResult`
+no longer has `Visual` or `FromVisual`; use `PluginTerminalRenderResult` for
+native renderer output. Agent-tool renderer callbacks remain portable.
+
+The TUI explicitly enables the call-scoped `SupportsTerminalVisuals`
+capability. Other callers default to portable callbacks; this capability is
+not a permission grant or a claim that dialogs and prompt attachments work.
+Headless and noninteractive UI bypasses remain in place. Direct native
+visuals take precedence over factories. Selected native null results mean
+no item, and native failures do not silently switch to the portable callback.
+Provide useful text explaining terminal-only actions rather than pretending
+an unsupported action succeeded. A portable callback may return null when
+absence is intentional, but the callback itself must not be null.
+
+Generated source-plugin targets conditionally reference the optional assembly
+when it exists beside the host executable, with `Private=false`. Do not add a
+reference to the TUI executable or edit generated root files to author visuals.
+This is a pre-release migration, not a claim of complete terminal-free plugin
+dependencies or desktop rendering parity; other plugin contracts and builtin
+implementations still contain terminal-specific code.
+
 ## Source plugin layout
 
 Create one package directory per plugin under a global or project plugin root:

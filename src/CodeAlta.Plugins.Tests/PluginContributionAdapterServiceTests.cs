@@ -144,7 +144,7 @@ public sealed class PluginContributionAdapterServiceTests
         var headlessOptions = new PluginAdapterOperationOptions { IsHeadless = true, HasInteractiveUi = false };
 
         var status = adapter.GetStatusItems([active], headlessOptions);
-        var visuals = adapter.CreateVisuals([active], PluginUiRegion.CommandBar, headlessOptions);
+        var visuals = adapter.CreateContent([active], PluginUiRegion.CommandBar, headlessOptions);
         var (renderResults, renderDiagnostics) = await adapter.RenderAsync([active], PluginUiRegion.SessionFooter, "sample", new { value = 1 }, headlessOptions);
 
         Assert.AreEqual(0, status.Count);

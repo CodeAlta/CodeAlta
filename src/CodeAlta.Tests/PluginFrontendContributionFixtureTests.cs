@@ -1,6 +1,7 @@
 using CodeAlta.Tui.App;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI.Controls;
 
 namespace CodeAlta.Tests;
@@ -98,6 +99,7 @@ public sealed class PluginFrontendContributionFixtureTests
             {
                 Region = PluginUiRegion.CommandBar,
                 CreateVisual = static _ => new Markup("[dim]fixture[/]"),
+                CreateContent = static _ => new PluginRenderResult { Text = "fixture" },
             };
         }
     }

@@ -71,6 +71,7 @@
     <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Tui\CodeAlta.Plugins.Tui.csproj" />
   </ItemGroup>
 
   <ItemGroup>

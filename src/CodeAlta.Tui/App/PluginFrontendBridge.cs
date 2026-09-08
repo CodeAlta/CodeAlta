@@ -1,6 +1,8 @@
 using CodeAlta.Catalog;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
+using CodeAlta.Tui.Plugins;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Tui.App;
@@ -9,6 +11,7 @@ internal sealed class PluginFrontendBridge
 {
     private readonly PluginRuntimeManager _runtime;
     private readonly Func<ProjectDescriptor?> _getCurrentProject;
+    private readonly TerminalPluginContributionAdapter _terminalAdapter;
 
     public PluginFrontendBridge(PluginRuntimeManager runtime, Func<ProjectDescriptor?> getCurrentProject)
     {
@@ -17,6 +20,7 @@ internal sealed class PluginFrontendBridge
 
         _runtime = runtime;
         _getCurrentProject = getCurrentProject;
+        _terminalAdapter = new TerminalPluginContributionAdapter(runtime.Adapter);
     }
 
     public IReadOnlyList<PluginResolvedResourceContribution> GetResources()
@@ -46,14 +50,14 @@ internal sealed class PluginFrontendBridge
             .ToArray();
 
     public IReadOnlyList<Visual> CreateVisuals(PluginUiRegion region, string? sessionId = null)
-        => _runtime.Adapter.CreateVisuals(_runtime.ActivePlugins, region, CreateOptions(sessionId));
+        => _terminalAdapter.CreateVisuals(_runtime.ActivePlugins, region, CreateOptions(sessionId));
 
-    public Task<(IReadOnlyList<PluginRenderResult> Results, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> RenderAsync(
+    public Task<(IReadOnlyList<PluginTerminalRenderResult> Results, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> RenderAsync(
         PluginUiRegion region,
         string? target,
         object? payload,
         CancellationToken cancellationToken = default)
-        => _runtime.Adapter.RenderAsync(_runtime.ActivePlugins, region, target, payload, CreateOptions(), cancellationToken).AsTask();
+        => _terminalAdapter.RenderAsync(_runtime.ActivePlugins, region, target, payload, CreateOptions(), cancellationToken).AsTask();
 
     public async Task<PluginCommandResult> ExecuteCommandAsync(PluginCommandContribution contribution, CancellationToken cancellationToken = default)
     {
@@ -75,6 +79,7 @@ internal sealed class PluginFrontendBridge
             ProjectPath = project?.ProjectPath,
             SessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId,
             HasInteractiveUi = true,
+            SupportsTerminalVisuals = true,
         };
     }
 }

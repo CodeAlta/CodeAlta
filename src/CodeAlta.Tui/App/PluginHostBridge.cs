@@ -9,6 +9,7 @@ using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Tui.App;
@@ -55,7 +56,7 @@ internal sealed class PluginHostBridge
     public IReadOnlyList<Visual> CreateVisuals(PluginUiRegion region, string? sessionId = null)
         => _frontend.CreateVisuals(region, sessionId);
 
-    public Task<(IReadOnlyList<PluginRenderResult> Results, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> RenderAsync(
+    public Task<(IReadOnlyList<PluginTerminalRenderResult> Results, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> RenderAsync(
         PluginUiRegion region,
         string? target,
         object? payload,
