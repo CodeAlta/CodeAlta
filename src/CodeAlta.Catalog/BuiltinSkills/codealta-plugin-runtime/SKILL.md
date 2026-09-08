@@ -21,7 +21,13 @@ Use `PluginContentContribution` / `PluginUi.Content` with a required `CreateCont
 
 The TUI explicitly enables call-scoped `SupportsTerminalVisuals`; other callers default to portable selection, and headless/noninteractive UI bypasses remain. This capability is not a security permission or dialog/prompt-editor capability. Direct visuals precede factories. Selected native null results mean absence, and native errors never cause fallback. Portable callbacks must be nonnull; they may return null for intentional absence. Explain terminal-only actions in fallback text rather than imply an unsupported action succeeded.
 
-Generated targets conditionally reference the optional assembly with MSBuild `Exists` and `Private=false`; do not add a TUI executable reference or modify generated root files. Other abstraction contracts and builtin implementations still have terminal dependencies: this slice does not establish backend-only loading or desktop parity. Source samples remain trusted executable code; do not copy them into a live plugin root merely to inspect them.
+Generated targets conditionally reference the optional assembly with MSBuild `Exists` and `Private=false`; do not add a TUI executable reference or modify generated root files. Abstractions no longer exposes terminal types or references terminal packages, but builtin implementations and generated source-plugin build/shared-assembly policy still have terminal dependencies. This does not establish backend-only builtin loading, headless source-plugin closure or desktop parity. Source samples remain trusted executable code; do not copy them into a live plugin root merely to inspect them.
+
+## Dialogs and prompt-editor anchors
+
+Native custom requests use `PluginTui.CustomDialog` / `PluginTerminalDialogRequest.Content`, replacing `PluginUi.CustomDialog` / the removed neutral request `Content`. `PluginDialogLayout` also moved to `CodeAlta.Plugins.Tui`. Neutral requests retain text, buttons, selection and metadata. Generic dialog operations currently have only no-op services: `HasInteractiveUi` is false, non-result completion does not prove presentation, and result operations return null when unsupported. Do not invent a generic dialog backend; MCP/GitHub still use their native paths.
+
+`IPluginPromptEditorHost` is neutral; its old `Visual` property moved to optional `IPluginTerminalPromptEditorHost`. Use `PluginTui.PromptEditor(name, attach, placeholderText, order)` to defer a terminal callback until the host implements that interface. Unsupported hosts receive null without invoking the callback; terminal null/exception does not trigger fallback. Returned attachments remain host-owned, not factory-owned. No desktop picker or lifetime guarantee is added. Do not advertise a picker from metadata alone after attachment is declined.
 
 ## Typed command shortcuts
 

@@ -1,4 +1,4 @@
-using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Geometry;
 

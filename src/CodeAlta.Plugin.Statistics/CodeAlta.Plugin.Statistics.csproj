@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="XenoAtom.Terminal.UI.Extensions.Markdown" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins.Tui\CodeAlta.Plugins.Tui.csproj" />
   </ItemGroup>

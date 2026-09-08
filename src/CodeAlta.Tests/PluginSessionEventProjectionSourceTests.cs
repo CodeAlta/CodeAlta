@@ -97,7 +97,7 @@ public sealed class PluginSessionEventProjectionSourceTests
                 source = Undo(source, "        return new PluginTerminalDerivedSessionEvent\n", "        return new PluginDerivedSessionEvent\n");
                 return Undo(source, "                new PluginTerminalDerivedSessionEventDetailSection\n", "                new PluginDerivedSessionEventDetailSection\n");
             case "CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj":
-                return Undo(source, NewProjectReference, OldProjectReference);
+                return Undo(PluginNeutralContractSourceInverse.Restore(path, source), NewProjectReference, OldProjectReference);
             case "CodeAlta.Plugins.Tests/StatisticsPluginTests.cs":
                 source = Undo(source, NewUsing, OldUsing);
                 source = Undo(source, "var cardVisualFactory = Assert.IsInstanceOfType<PluginTerminalDerivedSessionEvent>(result[0]).VisualFactory;", "var cardVisualFactory = result[0].VisualFactory;");

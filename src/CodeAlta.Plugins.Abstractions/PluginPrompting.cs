@@ -1,5 +1,4 @@
 using CodeAlta.Agent;
-using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins.Abstractions;
 
@@ -48,9 +47,6 @@ public interface IPluginPromptEditorHost
 
     /// <summary>Raised when the prompt editor is accepted.</summary>
     event EventHandler? Accepted;
-
-    /// <summary>Gets the editor visual, used as an anchor for plugin-owned UI.</summary>
-    Visual Visual { get; }
 
     /// <summary>Gets the prompt editor project path, when known.</summary>
     string? ProjectPath { get; }

@@ -1,5 +1,4 @@
 using XenoAtom.Terminal;
-using XenoAtom.Terminal.Graphics;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.DataGrid;

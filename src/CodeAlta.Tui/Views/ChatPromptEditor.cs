@@ -1,13 +1,14 @@
 using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Input;
 
 namespace CodeAlta.Tui.Views;
 
-internal sealed class ChatPromptEditor : PromptEditor, IProjectFileReferencePopupHost, IPluginPromptEditorHost
+internal sealed class ChatPromptEditor : PromptEditor, IProjectFileReferencePopupHost, IPluginTerminalPromptEditorHost
 {
     private readonly Action<string> _onAccepted;
     private readonly Action? _onOpenHelp;
@@ -141,7 +142,7 @@ internal sealed class ChatPromptEditor : PromptEditor, IProjectFileReferencePopu
 
     Visual IProjectFileReferencePopupHost.Visual => this;
 
-    Visual IPluginPromptEditorHost.Visual => this;
+    Visual IPluginTerminalPromptEditorHost.Visual => this;
 
     string? IPluginPromptEditorHost.ProjectPath => _getPromptReferenceProjectRoot?.Invoke();
 

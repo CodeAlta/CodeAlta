@@ -1,6 +1,5 @@
 using System.Text.Json;
 using CodeAlta.Agent;
-using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins.Abstractions;
 

@@ -76,9 +76,10 @@ absence is intentional, but the callback itself must not be null.
 Generated source-plugin targets conditionally reference the optional assembly
 when it exists beside the host executable, with `Private=false`. Do not add a
 reference to the TUI executable or edit generated root files to author visuals.
+Abstractions no longer exposes terminal types or references terminal packages.
 This is a pre-release migration, not a claim of complete terminal-free plugin
-dependencies or desktop rendering parity; other plugin contracts and builtin
-implementations still contain terminal-specific code.
+loading or desktop rendering parity: builtin implementations and generated
+source-plugin build/shared-assembly policy still contain terminal dependencies.
 
 ## Typed keyboard shortcuts
 
@@ -309,21 +310,38 @@ plugin UI services, prompt/session services, or a plugin-owned dialog/workflow.
 UI contributions are optional frontend features. Headless hosts can ignore them
 or provide no-op services through `IPluginUiService.HasInteractiveUi == false`.
 When constructing a `XenoAtom.Terminal.UI.Controls.Dialog` directly, use
-`PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate so
+`CodeAlta.Plugins.Tui.PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate so
 custom dialogs keep CodeAlta's responsive sizing behavior.
+
+For custom native request content, migrate `PluginUi.CustomDialog` to
+`PluginTui.CustomDialog` and use `PluginTerminalDialogRequest.Content` instead of
+the removed neutral request property. This describes a request, not a working
+dialog presenter. Generic dialog operations currently have only a no-op service:
+`HasInteractiveUi` is false, non-result completion does not prove presentation,
+and result-bearing operations return null when unsupported. Existing MCP/GitHub
+dialogs retain their separate native paths.
 
 ## Prompt editor attachments
 
 `GetPromptEditorContributions()` attaches plugin-owned behavior to prompt
-editors. The host exposes a small editor host: prompt text, caret index,
-project path, editor-state events, accepted events, focus, and the editor
-visual as an anchor. The plugin owns trigger detection, popup/dialog/control
-choices, insertion behavior, and presentation.
+editors. The neutral `IPluginPromptEditorHost` exposes prompt text, caret index,
+project path, editor-state events, accepted events and focus. A native visual
+anchor is available only through optional
+`CodeAlta.Plugins.Tui.IPluginTerminalPromptEditorHost.Visual`.
+
+Use `PluginTui.PromptEditor(name, attach, placeholderText, order)` for terminal
+attachments. Its deferred callback runs only for a terminal host; other hosts
+receive null without constructing native UI. Native null means the attachment
+was declined, and errors propagate without fallback. The factory does not take
+ownership of the returned attachment. The plugin still owns trigger detection,
+popup/control choices, insertion behavior and presentation. This migration adds
+no desktop picker.
 
 A prompt-editor contribution can set
 `PluginPromptEditorContribution.PlaceholderText` with a short placeholder
 segment such as `[#] to reference a GitHub issue`. CodeAlta adds applicable
-plugin segments to the ready prompt placeholder.
+plugin segments to the ready prompt placeholder. Do not advertise a picker on
+an unsupported host merely because the contribution supplies placeholder text.
 
 Keep prompt-editor callbacks cancellable and avoid long synchronous work so
 typing stays responsive.

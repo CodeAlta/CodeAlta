@@ -2,7 +2,7 @@ using XenoAtom.Terminal.UI;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 
-namespace CodeAlta.Plugins.Abstractions;
+namespace CodeAlta.Plugins.Tui;
 
 /// <summary>
 /// Provides layout helpers for plugin-owned dialogs.

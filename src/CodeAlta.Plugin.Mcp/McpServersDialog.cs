@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Ansi;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;

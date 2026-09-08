@@ -76,7 +76,7 @@ Content callbacks remain synchronous and their exceptions escape. Renderer ordin
 
 Generated source-plugin targets reference `CodeAlta.Plugins.Tui` with an MSBuild `Exists` condition and `Private=false`; hosts without that assembly do not gain it merely by generating targets. The shared assembly-name list includes the optional assembly, without a shared-project reference or eager terminal load. Generated target changes participate in the existing manifest hash invalidation. Installed-tool contents, actual default-ALC identity, absent-assembly behavior and regenerated source-plugin builds still need execution qualification.
 
-**Remaining boundary:** Abstractions still has terminal dependencies for dialogs and prompt editor hosts. Command shortcuts and session-event projection data use neutral definitions, but existing builtin plugins still mix backend and terminal code. The optional authoring assembly does not establish a terminal-free dependency closure, backend-only builtin loading, or desktop panel parity.
+**Dependency boundary:** Abstractions no longer exposes terminal types or references terminal packages. Native dialog content/layout, prompt-editor anchors, shortcuts and session-event factories belong in the optional authoring assembly. Builtin plugins still mix backend and terminal code, and generated source-plugin build/shared-assembly policy still includes terminal dependencies. This contract separation does not establish backend-only builtin loading, headless source-plugin build/load closure, or desktop panel parity.
 
 ## Typed key bindings (pre-release migration)
 
@@ -194,7 +194,9 @@ Low-ceremony factories are available through `Command`, `Startup`, `Prompt`, `Pl
 
 UI-only contributions remain frontend responsibilities. Headless hosts can ignore them or expose no-op services through `IPluginUiService.HasInteractiveUi == false`.
 
-When a plugin constructs a `XenoAtom.Terminal.UI.Controls.Dialog` directly, use `PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate (for example, `() => PluginDialogLayout.ResolveDialogBounds(anchor)`) so the dialog keeps the same centered, responsive sizing behavior as built-in dialogs, including cases where the dialog is sized after it is attached to the app.
+When a plugin constructs a `XenoAtom.Terminal.UI.Controls.Dialog` directly, use `CodeAlta.Plugins.Tui.PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate (for example, `() => PluginDialogLayout.ResolveDialogBounds(anchor)`) so the dialog keeps the same centered, responsive sizing behavior as built-in dialogs, including cases where the dialog is sized after it is attached to the app.
+
+`PluginDialogRequest` retains neutral text, selection, button and metadata fields. For native custom content, migrate `PluginUi.CustomDialog(title, visual)` to `PluginTui.CustomDialog(title, visual)` and `PluginDialogRequest.Content` to `PluginTerminalDialogRequest.Content`. These APIs describe requests; they do not install a dialog presenter. Currently the generic dialog operations have only the no-op service implementation: `HasInteractiveUi` is false, `ShowDialogAsync` validates/cancels but does not present anything, and `ShowDialogForResultAsync` returns null when unsupported. Completion is not proof of presentation. Existing MCP/GitHub native dialogs use their separate terminal paths.
 
 ## Prompt and instruction processing
 
@@ -208,11 +210,13 @@ The built-in `codealta-plugin-runtime` skill includes an `instruction-path-norma
 
 ## Prompt-editor attachments
 
-Plugins can implement `PluginBase.GetPromptEditorContributions()` to attach plugin-owned behavior to prompt editors. The host exposes only a small editor host (`Text`, `CaretIndex`, `ProjectPath`, editor-state/accepted events, focus, and the editor visual as an anchor); the plugin owns trigger detection, popup/dialog/control choices, insertion behavior, and any plugin-specific presentation. This keeps CodeAlta from hardcoding a generic issue picker or recreating `XenoAtom.Terminal.UI` abstractions in the plugin API.
+Plugins can implement `PluginBase.GetPromptEditorContributions()` to attach plugin-owned behavior to prompt editors. The neutral `IPluginPromptEditorHost` exposes `Text`, `CaretIndex`, `ProjectPath`, editor-state/accepted events and focus. Native anchors now belong to `CodeAlta.Plugins.Tui.IPluginTerminalPromptEditorHost.Visual`; plugins own trigger detection, popup/dialog/control choices, insertion behavior and presentation.
+
+For terminal attachments, use `PluginTui.PromptEditor(name, attach, placeholderText, order)`. It returns the existing neutral contribution and defers the callback until `Attach` receives an `IPluginTerminalPromptEditorHost`. Other hosts receive null without invoking the callback. Terminal callback null means declined attachment; exceptions propagate without fallback. The factory does not dispose returned attachments or change host attachment lifetimes. Neither `SupportsTerminalVisuals` nor `HasInteractiveUi` substitutes for this typed host check. GitHub uses this route; no desktop picker or prompt host is introduced by the migration.
 
 Prompt-editor contributions can set `PluginPromptEditorContribution.PlaceholderText` to add a short segment to the ready prompt placeholder while the contribution applies. Phrase it like the built-in segments, for example `[#] to reference a GitHub issue`; CodeAlta inserts plugin segments after project-file guidance and before send/new-line/steer guidance.
 
-Keep attachments cancellable and avoid long synchronous work so typing in the prompt stays responsive. Headless hosts can skip prompt-editor attachments.
+Keep attachments cancellable and avoid long synchronous work so typing in the prompt stays responsive. Headless hosts can skip prompt-editor attachments. Do not advertise a picker merely because contribution metadata exists when its attachment was declined.
 
 ## `alta` live-tool integration
 

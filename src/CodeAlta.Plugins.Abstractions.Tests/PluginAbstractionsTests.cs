@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI.Controls;
 using XenoAtom.Terminal.UI.Geometry;
 using CliCommand = XenoAtom.CommandLine.Command;

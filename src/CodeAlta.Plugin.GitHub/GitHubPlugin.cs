@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.GitHub;
@@ -203,12 +204,10 @@ public sealed class GitHubPlugin : PluginBase
     /// <inheritdoc />
     public override IEnumerable<PluginPromptEditorContribution> GetPromptEditorContributions()
     {
-        yield return new PluginPromptEditorContribution
-        {
-            Name = "GitHub issue prompt picker",
-            PlaceholderText = "[#] to reference a GitHub issue",
-            Attach = host => new GitHubIssuePromptAttachment(this, host),
-        };
+        yield return PluginTui.PromptEditor(
+            "GitHub issue prompt picker",
+            host => new GitHubIssuePromptAttachment(this, host),
+            "[#] to reference a GitHub issue");
     }
 
     internal string? GetSelectedProjectPath()

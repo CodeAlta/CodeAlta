@@ -1,5 +1,4 @@
 using CodeAlta.Agent;
-using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins.Abstractions;
 
@@ -257,18 +256,6 @@ public static class PluginUi
             Kind = PluginDialogKind.Selection,
             Title = title,
             SelectionItems = items,
-        };
-    }
-
-    /// <summary>Creates a custom visual dialog request.</summary>
-    public static PluginDialogRequest CustomDialog(string title, Visual content)
-    {
-        ArgumentNullException.ThrowIfNull(content);
-        return new PluginDialogRequest
-        {
-            Kind = PluginDialogKind.Custom,
-            Title = title,
-            Content = content,
         };
     }
 

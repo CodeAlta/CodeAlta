@@ -83,4 +83,50 @@ public static class PluginTui
         ArgumentNullException.ThrowIfNull(renderer);
         return new PluginTerminalRendererContribution { Region = region, Target = target, Name = name, Order = order, TerminalRenderer = terminalRenderer, Renderer = renderer };
     }
+
+    /// <summary>Creates a custom terminal dialog request, not a guarantee of host presentation.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <param name="content">The custom terminal content.</param>
+    /// <returns>The terminal request. Unsupported hosts may ignore it or return no result.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="content"/> is null.</exception>
+    public static PluginTerminalDialogRequest CustomDialog(string title, Visual content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return new PluginTerminalDialogRequest
+        {
+            Kind = PluginDialogKind.Custom,
+            Title = title,
+            Content = content,
+        };
+    }
+
+    /// <summary>Creates a prompt contribution that attaches only to a terminal prompt host.</summary>
+    /// <param name="name">The contribution name.</param>
+    /// <param name="attach">The deferred attachment callback.</param>
+    /// <param name="placeholderText">Optional guidance for hosts where the contribution applies.</param>
+    /// <param name="order">The ordering hint.</param>
+    /// <returns>A neutral contribution whose attachment is declined on unsupported hosts.</returns>
+    /// <remarks>
+    /// A null attachment does not advertise a supported action. The caller owns any returned attachment;
+    /// this factory does not dispose it. Native null results and exceptions never invoke a fallback.
+    /// The returned attach handler rejects a null host before checking terminal support.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="name"/> or <paramref name="attach"/> is null, or the returned handler receives a null host.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is empty or whitespace.</exception>
+    public static PluginPromptEditorContribution PromptEditor(string name, Func<IPluginTerminalPromptEditorHost, IAsyncDisposable?> attach, string? placeholderText = null, int order = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(attach);
+        return new PluginPromptEditorContribution
+        {
+            Name = name,
+            PlaceholderText = placeholderText,
+            Order = order,
+            Attach = host =>
+            {
+                ArgumentNullException.ThrowIfNull(host);
+                return host is IPluginTerminalPromptEditorHost terminal ? attach(terminal) : null;
+            },
+        };
+    }
 }

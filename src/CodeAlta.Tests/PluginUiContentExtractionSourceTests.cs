@@ -85,6 +85,8 @@ public sealed class PluginUiContentExtractionSourceTests
                     "CodeAlta.Plugin.Mcp/McpPlugin.cs" => PluginKeyBindingExtractionSourceTests.RestorePreExtraction(path, canonical),
                     _ => canonical,
                 };
+                if (path == "CodeAlta.Plugins.Abstractions/PluginFactories.cs")
+                    canonical = PluginNeutralContractSourceInverse.Restore(path, canonical);
                 if (path == "CodeAlta.Plugins/PluginContributionAdapters.cs")
                 {
                     // Compose the legacy async-boundary correction with the frozen extraction inverses.

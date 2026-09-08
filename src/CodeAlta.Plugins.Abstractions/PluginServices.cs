@@ -1,6 +1,5 @@
 using CodeAlta.Agent;
 using XenoAtom.Logging;
-using XenoAtom.Terminal.UI;
 
 namespace CodeAlta.Plugins.Abstractions;
 
@@ -185,6 +184,7 @@ public interface IPluginUiService
     /// <param name="request">The dialog request.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>A task representing asynchronous UI work.</returns>
+    /// <remarks>Unsupported hosts may complete without presenting UI. Completion is not confirmation that the dialog was shown.</remarks>
     ValueTask ShowDialogAsync(PluginDialogRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Shows a custom dialog request and returns a response when the host supports result-bearing dialogs.</summary>
@@ -375,16 +375,13 @@ public sealed record PluginSelectItem<T>
 /// <summary>
 /// Describes a dialog request supplied by a plugin.
 /// </summary>
-public sealed record PluginDialogRequest
+public record PluginDialogRequest
 {
     /// <summary>Gets the dialog title.</summary>
     public required string Title { get; init; }
 
     /// <summary>Gets optional dialog text.</summary>
     public string? Message { get; init; }
-
-    /// <summary>Gets optional custom dialog content.</summary>
-    public Visual? Content { get; init; }
 
     /// <summary>Gets initial text for input or editor dialogs.</summary>
     public string? InitialText { get; init; }

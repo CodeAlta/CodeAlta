@@ -1,4 +1,4 @@
-using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 
 namespace CodeAlta.Plugin.GitHub;
 
@@ -6,7 +6,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
 {
     private const int MaximumResults = 50;
     private readonly GitHubPlugin _plugin;
-    private readonly IPluginPromptEditorHost _host;
+    private readonly IPluginTerminalPromptEditorHost _host;
     private readonly GitHubIssuePickerDialog _dialog;
     private readonly object _stateGate = new();
     private IReadOnlyList<GitHubIssueReferenceItem> _allItems = [];
@@ -17,7 +17,7 @@ internal sealed class GitHubIssuePromptAttachment : IAsyncDisposable
     private long _updateGeneration;
     private CancellationTokenSource? _queryCancellation;
 
-    public GitHubIssuePromptAttachment(GitHubPlugin plugin, IPluginPromptEditorHost host)
+    public GitHubIssuePromptAttachment(GitHubPlugin plugin, IPluginTerminalPromptEditorHost host)
     {
         ArgumentNullException.ThrowIfNull(plugin);
         ArgumentNullException.ThrowIfNull(host);

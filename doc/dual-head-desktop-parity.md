@@ -4,6 +4,54 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M3 follow-up: remaining neutral contract and package separation — 2026-09-08
+
+The same sole child implemented the dialog/layout/prompt-host closure, fixtures first and
+source-only. `PluginDialogRequest` and `IPluginPromptEditorHost` are neutral;
+custom content/layout and the native editor anchor live in optional Plugins.Tui.
+GitHub uses the actual deferred `PluginTui.PromptEditor` factory, with typed host admission,
+exact forwarding, null/exception preservation and no factory-owned disposal. Generic dialog
+operations remain unsupported no-ops; no frontend dialog presenter was invented.
+
+Parent independently reviewed production, all new fixture/helper bodies and affected historical
+chains. Twenty-three raw-Git anchors and complete context-diff reconstructions passed against
+`6f2c1967`. The first targeted build then exposed one unused Graphics import in the GitHub
+picker (CS0234). Parent verified its Color is the UI type, supplied a 24th Git anchor and
+authorized only removal of that import plus its mandatory inverse. No extra dependency was added.
+Final preservation covers **24 complete originals, 34 mandatory edits and 72 newline variants**,
+including the moved layout from its real destination and entire historical fixtures.
+
+**16 exact new parameterless tests passed, zero skips/failures.** Under
+`CodeAlta.Tests.PluginNeutralContractTests`, the selected methods were:
+`NeutralDialogs_PreserveDataAndFactoryDefaults`, `NeutralDialogs_PreserveValidationOrder`,
+`TerminalDialogFactory_RejectsNullContent`, `PromptEditorFactory_PreservesMetadataAndDefersAttach`,
+`PromptEditorAttach_DeclinesUnsupportedHostWithoutInvocation`, `PromptEditorAttach_ForwardsExactTerminalHostOnce`,
+`PromptEditorAttach_PreservesNullAndExceptionWithoutFallback`, `PromptEditorAttach_ReturnsAttachmentWithoutOwningDisposal`,
+`NoopDialogs_RemainUnsupportedAndDoNotReadContent`, `NoopDialogs_PreserveValidationBeforeCancellation`,
+and `Layout_ResolvesSizesWithoutVisualConstruction`. Under `CodeAlta.Tests.PluginNeutralContractSourceTests`:
+`Contracts_IsolateRemainingTerminalTypesInOptionalAssembly`, `Routes_UseTypedPromptAdmissionAndPreserveNativeConsumers`,
+`Dependencies_RemoveOnlyUnusedContractPackages`, `Preservation_RestoresCompleteOriginalsAcrossNewlineVariants`,
+and `Preservation_ComposesEveryFrozenHistoricalChain`.
+
+Two separately selected desktop checks also passed:
+`CodeAlta.Desktop.Tests.DesktopHistorySourceTests.Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains`
+and `CodeAlta.Desktop.Tests.DesktopArchitectureTests.DesktopAssembly_HasNoTerminalOrHostCompositionReferences`.
+Thus the actual desktop history/workspace preservation chain ran, not merely a source assertion
+that it exists. All selections used exact FQN equality, matching Release outputs and no restore.
+Targeted and full solution Release builds passed with zero warnings/errors after the import fix.
+NuGet graph refresh used the task-owned source-disabled config and existing cache, with audit and
+frontend dependency restoration disabled. Named resolved assets for Abstractions, Plugins and
+Orchestration contain no terminal, optional-TUI or NeoAstra libraries. This is resolved build-graph
+evidence, not installed-plugin or runtime-load qualification.
+
+The 11 inert methods use DTOs, throwing fake hosts, a fake disposable, geometry values and the
+explicitly admitted stateless no-op UI leaf. No native control, editor, plugin/runtime host,
+catalog or provider is constructed. Source reads and the existing writerless test logging hooks
+remain nonzero I/O. Noop/App/guide/attributes/architecture and source-plugin build/loading policy
+remain unchanged. Migration docs and builtin skill are updated. Website, native/rich layout,
+default-profile, installed packages and full-suite execution remain excluded. Source-plugin
+profiles, builtin backend separation, desktop presentation and the remaining M3–M7 work are open.
+
 ## M3 follow-up: optional terminal session-event presentation — 2026-09-08
 
 The same sole child delivered ten scoped code/test files against `bbe583e8`, fixtures first

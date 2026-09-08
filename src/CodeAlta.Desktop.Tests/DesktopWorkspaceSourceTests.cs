@@ -96,7 +96,13 @@ public sealed class DesktopWorkspaceSourceTests
         StringAssert.Contains(Read("CodeAlta/frontend/src/main.tsx"), "cache/cache.sqlite3");
     }
 
-    private static string Read(string path) => DesktopHistorySourceTests.RestoreWorkspaceSource(path, SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(DesktopArchitectureTests.SourceRoot, path))));
+    private static string Read(string path)
+    {
+        var source = SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(DesktopArchitectureTests.SourceRoot, path)));
+        if (path is "CodeAlta.Tests/PluginKeyBindingExtractionSourceTests.cs" or "CodeAlta.Tests/PluginUiContentExtractionSourceTests.cs" or "CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj")
+            source = PluginNeutralContractSourceInverse.Restore(path, source);
+        return DesktopHistorySourceTests.RestoreWorkspaceSource(path, source);
+    }
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     private static IEnumerable<string> Representations(string text)
     {

@@ -82,7 +82,7 @@ public sealed class DesktopHistorySourceTests
             "CodeAlta/frontend/src/main.tsx" => Undo(Undo(Undo(Undo(source, HistoryComponent, ""),
                 NewImport, OldImport), NewDescription, OldDescription), HistoryMount, ""),
             "CodeAlta/frontend/src/style.css" => Undo(source, HistoryStyles, ""),
-            "CodeAlta.Desktop.Tests/DesktopWorkspaceSourceTests.cs" => Undo(source, NewSourceRead, OldSourceRead),
+            "CodeAlta.Desktop.Tests/DesktopWorkspaceSourceTests.cs" => Undo(PluginNeutralContractSourceInverse.Restore(path, source), NewSourceRead, OldSourceRead),
             _ => source
         };
     }
