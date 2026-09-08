@@ -66,6 +66,19 @@ with only its explicit-composition call changed, but remains excluded from execu
 Source reconstruction preserves calculation/cache/portable formatting and native control
 order; it does not qualify actual rendering, builtin loading or desktop Statistics parity.
 
+The subsequent explicit-home/instruction-ancestry prerequisite passed ten inert lexical-path
+and nine new source methods,32 inherited source methods, the exact runtime abort source guard
+and two Desktop history/assembly methods (54 exact cases). Targeted and solution Release builds
+passed without warnings. The negative duplicate-source test initially omitted a final newline;
+its input was corrected without weakening the strict decoder or expected occurrence failure.
+This does not admit real-host execution. In particular, the host's builtin skill provider still
+walks assembly ancestors for source/copied content, and skill scanning can reach Git
+repository/configuration discovery. Lexical project containment does not address reparse
+points. Provider-event forwarding and actor reply-wait cancellation also require separate
+lifetime auditing before owned-command fixtures can establish shutdown joining. Existing
+headless fixtures, historical native results and a temporary `GlobalRoot` do not close these
+routes. No Desktop activation, event reader or command owner is added by this prerequisite.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

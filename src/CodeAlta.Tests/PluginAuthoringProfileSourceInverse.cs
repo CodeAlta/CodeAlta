@@ -8,6 +8,7 @@ internal static class PluginAuthoringProfileSourceInverse
 {
     internal static string Restore(string path, string source)
     {
+        source = SessionDiscoveryScopeSourceInverse.RestoreProfileInput(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         source = PluginGitHubBackendSeparationSourceInverse.RestoreProfileInput(path, source);
         source = PluginMcpBackendSeparationSourceInverse.RestoreProfileInput(path, source);

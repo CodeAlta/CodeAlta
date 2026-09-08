@@ -1426,3 +1426,65 @@ Preservation covers ten complete originals (one whole-fixture move), six new fil
 Source-disabled cached-only restore refreshed Statistics/TUI/main-test/runtime-test assets with NuGet audit disabled. Statistics has16 transitive libraries and Plugins.Tests37; neither graph contains terminal, optional-TUI or NeoAstra libraries. Both targeted and full-solution Release builds passed0 warnings/errors with `--no-restore` and both NeoAstra frontend targets disabled. Exact tests used `--no-build --no-restore` and `FullyQualifiedName=` filters. Logs: `%TEMP%/codealta-parent-statistics-{restore,main-build,inert-tests,source-tests,PluginMcpBackendSeparationSourceTests,PluginGitHubBackendSeparationSourceTests,PluginAuthoringProfileSourceTests,desktop-build,desktop-tests,solution-build}-20260908.log`. No verification command failed.
 
 Migration docs and bundled skill are updated. App remains47,026 bytes, strictly below47,064; guide/attributes/strict decoder/architecture guard and unrelated work remain preserved. Website qualification remains deferred because its theme can require remote acquisition. This closes the bounded Statistics extraction, not all M3–M7 work: actual builtin loading/activation without terminal assemblies, native behavior, desktop adapters/runtime ownership and full parity remain unqualified.
+
+## Explicit discovery-home and instruction-ancestry prerequisite (2026-09-08)
+
+After Statistics `4a57dfea`, the same sole child implemented nine originals/four new files,
+fixtures first and without execution. Parent independently audited and qualified the result.
+`SessionDiscoveryScope` supplies immutable fully qualified home/boundary paths; scoped host
+creation requires explicit global/project roots before bootstrap. Runtime derives its scope
+from the exact template provider without changing its constructor signature. The provider's
+old four-optional-argument constructor forwards to its new overload with null scope.
+Three runtime and two template home expressions, and both builder discovery contexts, carry
+the scope. Supplied working/project roots are validated before persistence, filtering,
+prompt-catalog early returns and instruction probes. Existing callers retain ambient defaults.
+
+The production instruction walk uses the source-linked pure ancestry implementation.
+Scoped walks include the boundary and stop there. Parent identified and required preservation
+of the legacy unscoped trailing-separator entry; the corresponding inert regression passes.
+File selection, ordering and deduplication remain source-preserved. This is lexical policy,
+not link/reparse protection, filesystem ownership, tool authorization or a sandbox.
+
+Parent-selected exact cases (54 passed, zero failed/skipped after the correction below):
+
+| Fixture | Exact methods |
+| --- | --- |
+| `CodeAlta.Desktop.Tests.SessionDiscoveryScopeTests` | `Constructor_RejectsMissingOrNonAbsoluteRoots`; `Constructor_NormalizesLexicalRootsAndPreservesVolumeRoots`; `ValidateHostRoots_RequiresExplicitAbsoluteGlobalAndProjectRoots`; `ValidateHostRoots_DoesNotDeriveDiscoveryHomeOrBoundary`; `ValidateProjectPath_AcceptsBoundaryAndDescendants`; `ValidateProjectPath_RejectsSiblingPrefixesAndNormalizedEscapes`; `ValidateProjectPath_UsesPlatformPathComparison`; `GetInstructionAncestors_ScopedWalkIncludesBoundaryInRootToLeafOrder`; `GetInstructionAncestors_RejectsInvalidRootsWithoutExistenceChecks`; `GetInstructionAncestors_UnscopedWalkPreservesFullAncestry` |
+| `CodeAlta.Tests.SessionDiscoveryScopeSourceTests` | `Host_ValidatesScopeBeforeBootstrapAndPropagatesSameInstance`; `Constructors_PreserveExistingSignaturesAndAmbientFallback`; `Runtime_ValidatesBeforePersistenceAndDiscoveryAndReplacesThreeHomeReads`; `TemplateProvider_ValidatesBeforeSkillsAndPropagatesScopeAndBothHomeReads`; `PromptBuilder_ValidatesEveryRootBeforeDiscoveryOrExistenceProbes`; `InstructionWalk_UsesProductionPureAncestryAndPreservesSelectionOrder`; `Preservation_RestoresAllNineWholeOriginalsAcrossNewlineRepresentations`; `Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges`; `Preservation_NewestPreMapsPreserveInheritedChains` |
+| Historical source checks | The eight previously qualified exact methods in each Statistics, MCP, GitHub and authoring-profile source fixture, enumerated above. Parent checked the four whole fixtures against HEAD before selecting their32 individual equality operands. |
+| Runtime source guard | `CodeAlta.Tests.ArchitectureGuardrailTests.SessionRuntimeService_AbortRoutesThroughPerSessionActor` |
+| Desktop checks | `CodeAlta.Desktop.Tests.DesktopHistorySourceTests.Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains`; `CodeAlta.Desktop.Tests.DesktopArchitectureTests.DesktopAssembly_HasNoTerminalOrHostCompositionReferences` |
+
+The inert methods use only synthetic absolute strings and the production scope's lexical
+methods; no directories, filesystem probes, environment/profile lookup or runtime objects.
+The new source fixture reads exactly ten allowlisted files: its nine originals plus the new
+production scope. Its invoked inverse methods only transform supplied strings (zero transitive
+content reads). Separately selected historical fixtures retain their previously audited named
+read inventories and checkout-marker probes; main-test writerless logging remains active.
+
+All nine anchors independently match strict canonical raw Git
+`4a57dfeaf313cc63b517a05448fffcb8d1e7a5a0`. The new helper owns43 occurrence-checked tuples,
+51 replacement occurrences and27 whole-original LF/CRLF/mixed reconstructions. Pre-maps precede
+the existing Decode statements, preserving old fragment adjacency: Profile restores Host/Options,
+MCP restores whole Profile inverse, Statistics restores whole MCP inverse/Desktop project.
+Unknown direct restoration fails; no optional inverses, hash/payload rebasing or historical
+reader substitution. Full inherited and Desktop preservation chains pass.
+
+First source run returned nine passes/one failure: its duplicate-input negative test appended
+a partial signature without a final newline. The strict decoder correctly rejected that input
+before the intended duplicate-count assertion. The sole child added final LF to that test input;
+expected exception, decoder, production and inverses stayed unchanged. Rebuild and all ten exact
+source/abort cases then passed. Both targeted and full-solution Release builds passed zero
+warnings/errors using `--no-restore` with both NeoAstra frontend targets disabled. Tests used
+`--no-build --no-restore` and individual `FullyQualifiedName=` operands. No restore or acquisition
+was needed. Logs/filters: `%TEMP%/codealta-parent-discovery-*` (desktop/main builds, inert,
+source/retest, historical, Desktop regressions and solution build).
+
+App47026 remains below47064; guide/attributes/decoder/architecture guard and unrelated work
+remain preserved. Runtime docs and qualification evidence are updated; no end-user frontend
+behavior changed. Website remains unrun because of remote-theme acquisition. Real host/storage,
+providers, native/plugin loading and Desktop session activation remain excluded. Builtin-skill
+assembly-ancestor lookup and Git-config discovery are still ambient paths; actor waiter
+cancellation and discarded provider-event forwarding require separate lifetime closure.
+The next same-child assignment is read-only real-host owned-command closure, not an authorized
+runtime fixture or another writing slice. This prerequisite does not complete M3–M7.

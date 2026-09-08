@@ -139,6 +139,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
     /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions are retained in that order without flattening.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the plugin authoring profile is invalid, before host acquisition.</exception>
+    /// <exception cref="ArgumentException">Scoped host roots are missing, not absolute, or the project is outside the instruction boundary.</exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
         CancellationToken cancellationToken = default)
@@ -146,6 +147,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.PluginStartupFeedback);
         if (!Enum.IsDefined(options.PluginAuthoringProfile)) throw new ArgumentOutOfRangeException(nameof(options.PluginAuthoringProfile));
+        options.DiscoveryScope?.ValidateHostRoots(options.GlobalRoot, options.CurrentProjectPath);
 
         PluginRuntimeManager? pluginRuntime = null;
         ModelProviderRegistry? modelProviderRegistry = null;
@@ -214,7 +216,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 new BuiltInCodeAltaSkillRootProvider(),
                 new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
             ]);
-            var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions);
+            var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope);
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);

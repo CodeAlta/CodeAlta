@@ -32,17 +32,19 @@ public sealed class SystemPromptBuilder
     /// <returns>The composed prompt bundle.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="request"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when required prompt content is missing or invalid.</exception>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public SystemPromptBundle Build(SystemPromptBuildRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ProviderKey);
         ArgumentNullException.ThrowIfNull(request.Session);
+        ValidateDiscoveryPaths(request);
 
         var diagnostics = new List<SystemPromptDiagnostic>();
         var projectRoot = NormalizeOptionalRoot(request.Project?.ProjectPath ?? FirstNonBlank(request.ProjectRoots));
         var roots = _contentLocator.GetRoots(new SystemPromptDiscoveryContext
         {
-            UserProfileRoot = request.UserProfileRoot,
+            UserProfileRoot = request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot,
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = projectRoot is not null,
@@ -579,7 +581,7 @@ public sealed class SystemPromptBuilder
     {
         var prompts = new AgentPromptCatalog(_contentLocator).ListEffectivePrompts(new AgentPromptCatalogQuery
         {
-            UserProfileRoot = request.UserProfileRoot,
+            UserProfileRoot = request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot,
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = projectRoot is not null,
@@ -622,9 +624,37 @@ public sealed class SystemPromptBuilder
     private static string? ResolveEffectiveSystemPromptName(ResourceResolution promptResolution)
         => LastNonBlank(promptResolution.Applied.Select(static resource => resource.Resource.SystemPromptName));
 
+    private static void ValidateDiscoveryPaths(SystemPromptBuildRequest request)
+    {
+        if (request.DiscoveryScope is not { } scope)
+        {
+            return;
+        }
+
+        if (request.Session.WorkingDirectory is not null)
+        {
+            scope.ValidateProjectPath(request.Session.WorkingDirectory, nameof(request.Session.WorkingDirectory));
+        }
+
+        if (request.WorkingDirectory is not null)
+        {
+            scope.ValidateProjectPath(request.WorkingDirectory, nameof(request.WorkingDirectory));
+        }
+
+        if (request.Project?.ProjectPath is not null)
+        {
+            scope.ValidateProjectPath(request.Project.ProjectPath, nameof(request.Project.ProjectPath));
+        }
+
+        foreach (var root in request.ProjectRoots)
+        {
+            scope.ValidateProjectPath(root, nameof(request.ProjectRoots));
+        }
+    }
+
     private static string? BuildProjectContext(SystemPromptBuildRequest request, string? projectRoot, List<SystemPromptDiagnostic> diagnostics, out IReadOnlyList<string> files)
     {
-        var selectedFiles = EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot]);
+        var selectedFiles = EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot], request.DiscoveryScope);
         files = selectedFiles;
         if (selectedFiles.Count == 0)
         {
@@ -663,8 +693,21 @@ public sealed class SystemPromptBuilder
         return builder.Length == 0 ? null : builder.ToString();
     }
 
-    private static IReadOnlyList<string> EnumerateProjectInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots)
+    private static IReadOnlyList<string> EnumerateProjectInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots, SessionDiscoveryScope? discoveryScope)
     {
+        if (discoveryScope is not null)
+        {
+            if (workingDirectory is not null)
+            {
+                discoveryScope.ValidateProjectPath(workingDirectory, nameof(workingDirectory));
+            }
+
+            foreach (var root in projectRoots)
+            {
+                discoveryScope.ValidateProjectPath(root, nameof(projectRoots));
+            }
+        }
+
         var files = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var candidateRelativePaths = new[]
@@ -681,23 +724,8 @@ public sealed class SystemPromptBuilder
                 return;
             }
 
-            var current = Path.GetFullPath(root);
-            var stack = new Stack<string>();
-            while (!string.IsNullOrWhiteSpace(current))
+            foreach (var directory in SessionDiscoveryScope.GetInstructionAncestors(root, discoveryScope))
             {
-                stack.Push(current);
-                var parent = Directory.GetParent(current);
-                if (parent is null)
-                {
-                    break;
-                }
-
-                current = parent.FullName;
-            }
-
-            while (stack.Count > 0)
-            {
-                var directory = stack.Pop();
                 var selectedFile = candidateRelativePaths
                     .Select(relativePath => Path.Combine(directory, relativePath))
                     .Where(File.Exists)
@@ -955,6 +983,9 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets the optional user profile root used to resolve <c>~/.alta</c>.</summary>
     public string? UserProfileRoot { get; init; }
+
+    /// <summary>Gets optional explicit home and lexical instruction ancestry limits; not a filesystem sandbox.</summary>
+    public SessionDiscoveryScope? DiscoveryScope { get; init; }
 
     /// <summary>Gets the optional CodeAlta user-global root used to resolve prompt overrides.</summary>
     public string? UserCodeAltaRoot { get; init; }

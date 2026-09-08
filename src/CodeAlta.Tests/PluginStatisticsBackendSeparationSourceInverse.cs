@@ -23,6 +23,7 @@ internal static class PluginStatisticsBackendSeparationSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        source = SessionDiscoveryScopeSourceInverse.RestoreStatisticsInput(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         foreach (var (before, after) in Edits(path))
         {

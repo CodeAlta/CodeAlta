@@ -29,6 +29,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     private readonly ProjectCatalog _projectCatalog;
     private readonly SessionViewCatalog _sessionViewCatalog;
     private readonly AgentInstructionTemplateProvider _instructionTemplateProvider;
+    private readonly SessionDiscoveryScope? _discoveryScope;
     private readonly CatalogOptions _catalogOptions;
     private readonly CodeAltaConfigStore _configStore;
     private readonly SkillCatalog _skillCatalog;
@@ -61,6 +62,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         _projectCatalog = projectCatalog;
         _sessionViewCatalog = sessionViewCatalog;
         _instructionTemplateProvider = instructionTemplateProvider;
+        _discoveryScope = instructionTemplateProvider.DiscoveryScope;
         _catalogOptions = catalogOptions;
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
@@ -569,6 +571,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Creates a new global session and returns its descriptor.
     /// </summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public async Task<SessionViewDescriptor> CreateGlobalSessionAsync(
         SessionExecutionOptions options,
         string? title,
@@ -578,6 +581,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Creates a new global session with optional durable lineage and returns its descriptor.
     /// </summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public async Task<SessionViewDescriptor> CreateGlobalSessionAsync(
         SessionExecutionOptions options,
         string? title,
@@ -586,6 +590,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ValidateDiscoveryPaths(null, options);
 
         var now = DateTimeOffset.UtcNow;
         var session = new SessionViewDescriptor
@@ -624,6 +629,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Creates a new project session and returns its descriptor.
     /// </summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public async Task<SessionViewDescriptor> CreateProjectSessionAsync(
         ProjectDescriptor project,
         SessionExecutionOptions options,
@@ -634,6 +640,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Creates a new project session with optional durable lineage and returns its descriptor.
     /// </summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public async Task<SessionViewDescriptor> CreateProjectSessionAsync(
         ProjectDescriptor project,
         SessionExecutionOptions options,
@@ -644,6 +651,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
+
+        ValidateDiscoveryPaths(null, options, project);
 
         var requestedProjectId = project.Id;
         var previousProject = await _projectCatalog.GetByPathAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
@@ -721,6 +730,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Ensures that the session has an active coordinator session.
     /// </summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public async Task<AgentSessionHandleId> EnsureCoordinatorSessionAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
@@ -747,8 +757,10 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.WorkingDirectory);
+        ValidateDiscoveryPaths(session, options);
 
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
+        ValidateDiscoveryPaths(session, options, project);
         RuntimeSessionEntry? existing = null;
         var pendingAgentPromptId = default(string?);
         if (!string.IsNullOrWhiteSpace(session.SessionId) &&
@@ -942,6 +954,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Sends input to the coordinator session for a session.
     /// </summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public async Task<AgentRunId> SendAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
@@ -1078,7 +1091,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The run identifier that received the activated skill content.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty or a supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     /// <exception cref="KeyNotFoundException">Thrown when the requested skill cannot be resolved.</exception>
     public async Task<AgentRunId> ActivateSkillAsync(
         SessionViewDescriptor session,
@@ -1121,7 +1134,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The resolved activation payload.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty or a supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     /// <exception cref="KeyNotFoundException">Thrown when the requested skill cannot be resolved.</exception>
     public async Task<SkillActivation> CreateSkillActivationAsync(
         SessionViewDescriptor session,
@@ -1133,6 +1146,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(skillName);
 
+        ValidateDiscoveryPaths(session, options);
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
         var query = BuildSkillCatalogQuery(project, options.ProjectRoots);
         return await _skillCatalog.ActivateAsync(query, skillName, cancellationToken).ConfigureAwait(false)
@@ -1328,8 +1342,49 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         }
     }
 
+    private void ValidateDiscoveryPaths(SessionViewDescriptor? session, SessionExecutionOptions? options, ProjectDescriptor? project = null)
+    {
+        if (_discoveryScope is null)
+        {
+            return;
+        }
+
+        if (session?.WorkingDirectory is not null)
+        {
+            _discoveryScope.ValidateProjectPath(session.WorkingDirectory, nameof(session.WorkingDirectory));
+        }
+
+        if (options is not null)
+        {
+            _discoveryScope.ValidateProjectPath(options.WorkingDirectory, nameof(options.WorkingDirectory));
+            foreach (var root in options.ProjectRoots)
+            {
+                _discoveryScope.ValidateProjectPath(root, nameof(options.ProjectRoots));
+            }
+        }
+
+        ValidateDiscoveryProjectRoot(project?.ProjectPath);
+    }
+
+    private void ValidateDiscoveryProjectRoot(string? projectRoot)
+    {
+        if (_discoveryScope is not null && projectRoot is not null)
+        {
+            _discoveryScope.ValidateProjectPath(projectRoot, nameof(projectRoot));
+        }
+    }
+
     private SkillCatalogQuery BuildSkillCatalogQuery(ProjectDescriptor? project, IReadOnlyList<string> projectRoots)
     {
+        if (_discoveryScope is not null)
+        {
+            ValidateDiscoveryProjectRoot(project?.ProjectPath);
+            foreach (var root in projectRoots)
+            {
+                _discoveryScope.ValidateProjectPath(root, nameof(projectRoots));
+            }
+        }
+
         var resolvedProjectRoots = new List<string>();
         if (!string.IsNullOrWhiteSpace(project?.ProjectPath))
         {
@@ -1351,7 +1406,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             {
                 ProjectRoots = resolvedProjectRoots,
                 UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-                UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             },
             GlobalDisabledSkillNames = _configStore.LoadGlobalDisabledSkillNames(),
             ProjectDisabledSkillNames = _configStore.LoadProjectDisabledSkillNames(project?.ProjectPath ?? resolvedProjectRoots.FirstOrDefault()),
@@ -2432,6 +2487,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
     private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot)
     {
+        ValidateDiscoveryProjectRoot(projectRoot);
         var normalized = NormalizeOptionalText(promptId);
         if (normalized is null)
         {
@@ -2443,7 +2499,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
         return new AgentPromptCatalog().ListEffectivePrompts(query)
             .Any(prompt => string.Equals(prompt.PromptName, normalized, StringComparison.OrdinalIgnoreCase))
@@ -2453,6 +2509,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
     private AgentPromptUsageInfo? ResolveAgentPromptUsage(SystemPromptBundle? promptBundle, string? projectRoot)
     {
+        ValidateDiscoveryProjectRoot(projectRoot);
         var promptName = NormalizeOptionalText(promptBundle?.Manifest.Composition.AgentPromptName);
         if (promptName is null)
         {
@@ -2464,7 +2521,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
         var descriptor = new AgentPromptCatalog().ResolvePrompt(query, promptName);
         if (descriptor is null)

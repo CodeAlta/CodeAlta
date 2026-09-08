@@ -63,6 +63,31 @@ The TUI's creation route carries the explicitly captured project to this policy.
 
 These APIs accept trusted backend policy inputs. They are not renderer authorization, filesystem grants, or new tool approvals: an application boundary must authorize renderer requests and resolve their descriptors before calling them. LiveTool and UI services are supplied by adapters, not located or referenced by Orchestration.
 
+### Explicit prompt and skill discovery roots
+
+`CodeAltaHostOptions.DiscoveryScope` is an opt-in `SessionDiscoveryScope` with two independent,
+fully qualified paths: `UserProfileRoot` for prompt/skill home inputs, and
+`InstructionAncestorRoot` for instruction-file ancestry. `GlobalRoot` remains the separate
+catalog/configuration root; it is not used to infer either scope path. Scoped host creation
+requires explicit absolute `GlobalRoot` and `CurrentProjectPath`, with the latter inside the
+instruction boundary, before bootstrap or other host acquisition.
+
+The template provider retains the scope, and `SessionRuntimeService` derives it from that
+same provider. Runtime creation/discovery and prompt construction validate supplied working
+directories and project roots before persistence or discovery. Relative, blank, sibling-prefix
+and normalized `..` escapes are rejected rather than silently filtered out. Instruction files
+are visited from the permitted boundary through the leaf, including the boundary; existing
+selection and deduplication rules remain. Callers without a scope retain the previous home
+defaults and full ancestor walk. The runtime constructor and the template provider's original
+constructor remain available.
+
+This is a **lexical discovery policy, not a filesystem sandbox or ownership grant**. It does
+not resolve links/reparse points, bound builtin-skill source lookup or Git configuration
+discovery, isolate plugins/providers/authentication, or authorize tools. A scoped host is not
+automatically safe to execute against arbitrary roots. Real-host fixtures still need separate
+discovery, storage, provider and lifetime admission; this plumbing alone does not enable
+Desktop startup, owned commands or event subscriptions.
+
 ### Immediate user-input policy
 
 Orchestration's pure `SessionUserInputPolicy.CreateResponse` owns the existing immediate answer selection. With AutoApprove disabled, every prompt receives an empty answer. When enabled, nonempty options are scored by the existing case-insensitive substring keywords and question heuristics; the first highest-scoring option wins and its label is returned literally, including whitespace. Options take precedence even for secret prompts. Without options, secret or nonfreeform prompts receive empty answers; other prompts receive `No preference. Use your best judgment and continue.` Answer identifiers retain ordinal comparison and duplicate identifiers still fail. The policy does not mutate the supplied form.

@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
@@ -13,6 +14,10 @@ public sealed class CodeAltaHostOptions
     /// Gets the global CodeAlta data root. When unset, the host uses the user's <c>.alta</c> directory.
     /// </summary>
     public string? GlobalRoot { get; init; }
+
+    /// <summary>Gets optional explicit home and lexical instruction ancestry limits.</summary>
+    /// <remarks>Requires explicit absolute global/project roots; does not isolate plugins, providers, authentication or filesystem links.</remarks>
+    public SessionDiscoveryScope? DiscoveryScope { get; init; }
 
     /// <summary>
     /// Gets the project path used to seed the project catalog. When unset, the current directory is used.

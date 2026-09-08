@@ -15,6 +15,8 @@ public sealed class AgentInstructionTemplateProvider
     private readonly CodeAltaConfigStore? _configStore;
     private readonly SystemPromptBuilder _promptBuilder;
 
+    internal SessionDiscoveryScope? DiscoveryScope { get; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentInstructionTemplateProvider"/> class.
     /// </summary>
@@ -26,7 +28,25 @@ public sealed class AgentInstructionTemplateProvider
         CatalogOptions? catalogOptions = null,
         ISystemPromptContentLocator? contentLocator = null,
         CodeAltaConfigStore? configStore = null)
+        : this(skillCatalog, catalogOptions, contentLocator, configStore, discoveryScope: null)
     {
+    }
+
+    /// <summary>Initializes instruction discovery with an optional explicit lexical scope.</summary>
+    /// <param name="skillCatalog">Optional skill catalog.</param>
+    /// <param name="catalogOptions">Optional catalog roots.</param>
+    /// <param name="contentLocator">Optional prompt content locator.</param>
+    /// <param name="configStore">Optional configuration store.</param>
+    /// <param name="discoveryScope">Optional explicit discovery home and instruction ancestry boundary.</param>
+    /// <remarks>Working and project paths are validated when building instructions; invalid scoped paths throw <see cref="ArgumentException"/> before prompt or skill discovery.</remarks>
+    public AgentInstructionTemplateProvider(
+        SkillCatalog? skillCatalog,
+        CatalogOptions? catalogOptions,
+        ISystemPromptContentLocator? contentLocator,
+        CodeAltaConfigStore? configStore,
+        SessionDiscoveryScope? discoveryScope)
+    {
+        DiscoveryScope = discoveryScope;
         _skillCatalog = skillCatalog;
         _catalogOptions = catalogOptions;
         _configStore = configStore ?? (catalogOptions is not null && !string.IsNullOrWhiteSpace(catalogOptions.GlobalRoot)
@@ -43,6 +63,7 @@ public sealed class AgentInstructionTemplateProvider
     /// <param name="model">The selected model id, if known.</param>
     /// <param name="selectedPromptName">The selected agent prompt name, if any.</param>
     /// <returns>The file-backed instruction bundle selected for the session.</returns>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public AgentInstructionBundle BuildCoordinatorInstructions(
         SessionViewDescriptor session,
         ProjectDescriptor? project,
@@ -68,6 +89,7 @@ public sealed class AgentInstructionTemplateProvider
     /// <param name="model">The selected model id, if known.</param>
     /// <param name="selectedPromptName">The selected agent prompt name, if any.</param>
     /// <returns>The file-backed instruction bundle selected for the session.</returns>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public AgentInstructionBundle BuildGeneralInstructions(
         SessionViewDescriptor session,
         ProjectDescriptor? project,
@@ -85,12 +107,15 @@ public sealed class AgentInstructionTemplateProvider
         };
     }
 
+    /// <summary>Validates scoped paths before composing skills and file-backed prompt content.</summary>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     private SystemPromptBundle BuildPromptBundle(
         SessionViewDescriptor session,
         ProjectDescriptor? project,
         string? model = null,
         string? selectedPromptName = null)
     {
+        ValidateDiscoveryPaths(session, project);
         var projectRoots = string.IsNullOrWhiteSpace(project?.ProjectPath)
             ? Array.Empty<string>()
             : [project.ProjectPath];
@@ -105,10 +130,29 @@ public sealed class AgentInstructionTemplateProvider
             WorkingDirectory = session.WorkingDirectory,
             ProjectRoots = projectRoots,
             SelectedPromptName = selectedPromptName ?? session.AgentPromptId,
-            UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
+            DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project),
         });
+    }
+
+    private void ValidateDiscoveryPaths(SessionViewDescriptor session, ProjectDescriptor? project)
+    {
+        if (DiscoveryScope is null)
+        {
+            return;
+        }
+
+        if (session.WorkingDirectory is not null)
+        {
+            DiscoveryScope.ValidateProjectPath(session.WorkingDirectory, nameof(session.WorkingDirectory));
+        }
+
+        if (project?.ProjectPath is not null)
+        {
+            DiscoveryScope.ValidateProjectPath(project.ProjectPath, nameof(project.ProjectPath));
+        }
     }
 
     private string? BuildSkillsDeveloperInstructions(
@@ -188,7 +232,7 @@ public sealed class AgentInstructionTemplateProvider
         {
             ProjectRoots = projectRoots,
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
-            UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
     }
 
