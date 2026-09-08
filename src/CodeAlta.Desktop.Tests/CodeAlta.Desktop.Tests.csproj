@@ -14,5 +14,6 @@
     <Compile Include="../CodeAlta.Tests/PluginAuthoringProfileSourceInverse.cs" Link="PluginAuthoringProfileSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/PluginGitHubBackendSeparationSourceInverse.cs" Link="PluginGitHubBackendSeparationSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/PluginMcpBackendSeparationSourceInverse.cs" Link="PluginMcpBackendSeparationSourceInverse.cs" />
+    <Compile Include="../CodeAlta.Tests/PluginStatisticsBackendSeparationSourceInverse.cs" Link="PluginStatisticsBackendSeparationSourceInverse.cs" />
   </ItemGroup>
 </Project>

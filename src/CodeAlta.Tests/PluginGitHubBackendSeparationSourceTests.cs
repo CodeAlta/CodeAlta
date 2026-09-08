@@ -53,7 +53,7 @@ public sealed class PluginGitHubBackendSeparationSourceTests
         foreach (var name in new[] { "GitHub", "Mcp", "Statistics" })
             RequireOnce(registration, "            PluginType = typeof(" + name + "Plugin),\n");
         RequireOnce(PluginMcpBackendSeparationSourceInverse.Restore("CodeAlta.Tui/App/CodeAltaBuiltInPlugins.cs", registration), "            Factory = static () => new McpPlugin(),\n");
-        RequireOnce(registration, "            Factory = static () => new StatisticsPlugin(),\n");
+        RequireOnce(PluginStatisticsBackendSeparationSourceInverse.Restore("CodeAlta.Tui/App/CodeAltaBuiltInPlugins.cs", registration), "            Factory = static () => new StatisticsPlugin(),\n");
     }
 
     [TestMethod]

@@ -50,9 +50,21 @@ refreshed cached-only assets contain no terminal, optional TUI or NeoAstra libra
 dialog/bindable-row move compiled in the TUI, but neither native status test was executed.
 No management, activation-state, configuration, content, visual, command-handler, binding,
 dispatcher, OAuth or runtime operation ran. Existing revision subscription/lifetime and deferred
-status read order remain source-preserved, not natively qualified. Statistics separation,
-actual backend loading/activation without terminal assemblies and desktop MCP parity remain open.
+status read order remain source-preserved, not natively qualified. Actual backend
+loading/activation without terminal assemblies and desktop MCP parity remain open.
 Exact cases, preservation manifests and log names are recorded in the parity ledger.
+
+Statistics backend/presentation separation subsequently passed12 new literal/inert and8 new
+source methods,24 inherited MCP/GitHub/profile source methods and2 Desktop history/assembly
+methods. Parent admission covered normally constructed lifecycle-uninitialized Statistics,
+neutral context/handle/event records and synchronous empty/incomplete/Idle-only projection;
+Details/Usage stayed null. No services, JSON, provider lookup, legacy dynamic helper, CLI,
+runtime, native text callback or visual factory ran. Two targeted and solution Release builds
+passed without warnings; cached-only Statistics and runtime-test assets contain no terminal,
+Plugins.Tui or NeoAstra libraries. The existing native fixture moved intact into TUI tests
+with only its explicit-composition call changed, but remains excluded from execution.
+Source reconstruction preserves calculation/cache/portable formatting and native control
+order; it does not qualify actual rendering, builtin loading or desktop Statistics parity.
 
 ## Preserved M0 evidence
 

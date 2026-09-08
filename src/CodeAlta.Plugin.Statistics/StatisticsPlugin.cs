@@ -4,14 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Plugins.Tui;
-using XenoAtom.Ansi;
 using XenoAtom.CommandLine;
-using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Controls;
-using XenoAtom.Terminal.UI.Extensions.Markdown;
-using XenoAtom.Terminal.UI.Geometry;
-using XenoAtom.Terminal.UI.Styling;
 using Command = XenoAtom.CommandLine.Command;
 
 namespace CodeAlta.Plugin.Statistics;
@@ -25,6 +18,19 @@ public sealed class StatisticsPlugin : PluginBase
     private const string ProjectionName = "statistics";
     private const string RenderTarget = "codealta.statistics.turn.v1";
     private readonly ConcurrentDictionary<string, PluginDerivedSessionEvent> _turnProjectionCache = new(StringComparer.Ordinal);
+    private readonly Func<PluginDerivedSessionEvent, StatisticsPresentation, PluginDerivedSessionEvent>? _decorateProjection;
+
+    /// <summary>Initializes a Statistics backend without terminal presentation.</summary>
+    public StatisticsPlugin()
+    {
+    }
+
+    // Decoration is deferred to each existing cache candidate, not contribution enumeration.
+    internal StatisticsPlugin(Func<PluginDerivedSessionEvent, StatisticsPresentation, PluginDerivedSessionEvent> decorateProjection)
+    {
+        ArgumentNullException.ThrowIfNull(decorateProjection);
+        _decorateProjection = decorateProjection;
+    }
 
     /// <inheritdoc />
     public override IEnumerable<PluginSessionEventProjectionContribution> GetSessionEventProjections()
@@ -125,24 +131,22 @@ public sealed class StatisticsPlugin : PluginBase
         return _turnProjectionCache.GetOrAdd(cacheKey, _ => CreateProjection(sessionId, turn));
     }
 
-    private static PluginDerivedSessionEvent CreateProjection(string sessionId, PendingTurn turn)
+    private PluginDerivedSessionEvent CreateProjection(string sessionId, PendingTurn turn)
     {
         var statistics = TurnStatisticsBuilder.BuildTurn(turn.Key, turn.SessionId, turn.RunId, turn.Events);
-        return new PluginTerminalDerivedSessionEvent
+        var projection = new PluginDerivedSessionEvent
         {
             EventId = $"statistics:{EscapeEventId(sessionId)}:{EscapeEventId(turn.Key)}",
             Timestamp = turn.Timestamp,
             Markdown = StatisticsMarkdownRenderer.RenderTurnSummary(statistics),
             DetailSections =
             [
-                new PluginTerminalDerivedSessionEventDetailSection
+                new PluginDerivedSessionEventDetailSection
                 {
                     Header = "Detailed statistics",
                     Markdown = StatisticsMarkdownRenderer.RenderTurnDetails(statistics),
-                    VisualFactory = _ => StatisticsVisualRenderer.RenderTurnDetails(statistics),
                 },
             ],
-            VisualFactory = _ => StatisticsVisualRenderer.RenderTurnCard(statistics),
             RenderTarget = RenderTarget,
             Payload = new
             {
@@ -165,6 +169,17 @@ public sealed class StatisticsPlugin : PluginBase
                 Status = "ready",
             },
         };
+        if (_decorateProjection is null)
+        {
+            return projection;
+        }
+
+        return _decorateProjection(projection, new StatisticsPresentation(
+            StatisticsMarkdownRenderer.TurnStatisticsTitle,
+            () => StatisticsMarkdownRenderer.RenderTurnSummarySuffix(statistics),
+            () => StatisticsMarkdownRenderer.RenderMetricTable(statistics),
+            () => StatisticsMarkdownRenderer.RenderUsageTable(statistics),
+            () => StatisticsMarkdownRenderer.RenderToolBucketTable(statistics)));
     }
 
     /// <summary>
@@ -1569,67 +1584,9 @@ public sealed class StatisticsPlugin : PluginBase
                 turns.Sum(static item => item.ToolOutput.Characters));
     }
 
-    private static class StatisticsVisualRenderer
-    {
-        public static Visual RenderTurnCard(TurnStatistics turn)
-            => new Collapsible(
-                CreateHeaderMarkup(StatisticsMarkdownRenderer.RenderTurnSummaryMarkup(turn)),
-                RenderTurnDetails(turn))
-            {
-                IsExpanded = false,
-            };
-
-        public static Visual RenderTurnDetails(TurnStatistics turn)
-        {
-            var tables = new List<Visual>
-            {
-                CreateTable(StatisticsMarkdownRenderer.RenderMetricTable(turn)),
-            };
-
-            var usageTable = StatisticsMarkdownRenderer.RenderUsageTable(turn);
-            if (!string.IsNullOrWhiteSpace(usageTable))
-            {
-                tables.Add(CreateTable(usageTable));
-            }
-
-            var toolBucketTable = StatisticsMarkdownRenderer.RenderToolBucketTable(turn);
-            if (!string.IsNullOrWhiteSpace(toolBucketTable))
-            {
-                tables.Add(CreateTable(toolBucketTable));
-            }
-
-            return new WrapHStack(tables.ToArray())
-                .Spacing(1)
-                .RunSpacing(1)
-                .MeasureMode(WrapMeasureMode.ConstrainToRun)
-                .HorizontalAlignment(Align.Stretch);
-        }
-
-        private static Markup CreateHeaderMarkup(string markup)
-            => new(markup)
-            {
-                Wrap = false,
-                HorizontalAlignment = Align.Stretch,
-                VerticalAlignment = Align.Start,
-            };
-
-        private static Visual CreateTable(string markdown)
-            => new MarkdownControl(markdown.Trim())
-            {
-                HorizontalAlignment = Align.Start,
-                VerticalAlignment = Align.Start,
-                Options = MarkdownRenderOptions.Default with
-                {
-                    TableStyle = TableStyle.Minimal,
-                    WrapCodeBlocks = true,
-                    MaxCodeBlockHeight = 14,
-                },
-            };
-    }
-
     private static class StatisticsMarkdownRenderer
     {
-        private const string TurnStatisticsTitle = "Turn statistics";
+        internal const string TurnStatisticsTitle = "Turn statistics";
 
         public static string RenderTurnSummary(TurnStatistics turn)
         {
@@ -1641,10 +1598,7 @@ public sealed class StatisticsPlugin : PluginBase
             return builder.ToString();
         }
 
-        public static string RenderTurnSummaryMarkup(TurnStatistics turn)
-            => $"[bold]{TurnStatisticsTitle}[/]{AnsiMarkup.Escape(RenderTurnSummarySuffix(turn))}";
-
-        private static string RenderTurnSummarySuffix(TurnStatistics turn)
+        internal static string RenderTurnSummarySuffix(TurnStatistics turn)
         {
             var inputTokenSource = turn.ReportedInputTokens is not null ? "provider aggregate" : "estimated heuristic";
             var builder = new StringBuilder();

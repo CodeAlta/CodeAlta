@@ -59,7 +59,7 @@ public sealed class PluginNeutralContractSourceTests
         Assert.IsFalse(References(abstractions, "PackageReference").Any(name => name.StartsWith("XenoAtom.Terminal", StringComparison.Ordinal)));
         Assert.IsFalse(References(abstractions, "ProjectReference").Any(name => name.Contains("Plugins.Tui", StringComparison.Ordinal)));
         Assert.IsFalse(References(Project("CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj"), "ProjectReference").Any(name => name.Contains("CodeAlta.Plugins.Tui.csproj", StringComparison.Ordinal)));
-        Assert.IsTrue(References(Project("CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj"), "PackageReference").Contains("XenoAtom.Terminal.UI.Extensions.Markdown"));
+        Assert.IsFalse(References(Project("CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj"), "PackageReference").Any(name => name.StartsWith("XenoAtom.Terminal", StringComparison.Ordinal)));
         Assert.IsTrue(References(Project("CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj"), "ProjectReference").Any(name => name.Contains("CodeAlta.Plugins.Tui.csproj", StringComparison.Ordinal)));
         Assert.IsTrue(References(Project("CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj"), "PackageReference").Contains("XenoAtom.Terminal.UI"));
         Assert.IsFalse(References(Project("CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj"), "PackageReference").Any(name => name.StartsWith("XenoAtom.Terminal", StringComparison.Ordinal)));

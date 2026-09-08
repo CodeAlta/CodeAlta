@@ -39,6 +39,7 @@ internal static class PluginMcpBackendSeparationSourceInverse
     internal static string Restore(string path, string source)
     {
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
+        source = PluginStatisticsBackendSeparationSourceInverse.RestoreMcpInput(path, source);
         foreach (var (before, after) in Edits(path))
         {
             var expected = SourceTestText.Canonicalize(after);

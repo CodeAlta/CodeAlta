@@ -28,7 +28,7 @@ public sealed class PluginSessionEventProjectionSourceTests
         StringAssert.Contains(shared, "projected.AddRange(contributionEvents);");
         Assert.IsFalse(shared.Contains("Plugins.Tui", StringComparison.Ordinal));
         Assert.IsFalse(shared.Contains("VisualFactory", StringComparison.Ordinal));
-        var statistics = Read("CodeAlta.Plugin.Statistics/StatisticsPlugin.cs");
+        var statistics = PluginStatisticsBackendSeparationSourceInverse.Restore("CodeAlta.Plugin.Statistics/StatisticsPlugin.cs", Read("CodeAlta.Plugin.Statistics/StatisticsPlugin.cs"));
         StringAssert.Contains(statistics, "return new PluginTerminalDerivedSessionEvent");
         StringAssert.Contains(statistics, "new PluginTerminalDerivedSessionEventDetailSection");
         StringAssert.Contains(statistics, "VisualFactory = _ => StatisticsVisualRenderer.RenderTurnCard(statistics)");
@@ -74,6 +74,7 @@ public sealed class PluginSessionEventProjectionSourceTests
 
     private static string Restore(string path, string source)
     {
+        source = PluginStatisticsBackendSeparationSourceInverse.RestoreProjectionInput(path, source);
         switch (path)
         {
             case "CodeAlta.Plugins.Abstractions/PluginSessionEventProjection.cs":
@@ -124,7 +125,7 @@ public sealed class PluginSessionEventProjectionSourceTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CodeAlta.slnx"))) directory = directory.Parent;
         Assert.IsNotNull(directory);
-        return SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(directory.FullName, path)));
+        return SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(directory.FullName, PluginStatisticsBackendSeparationSourceInverse.CurrentPath(path))));
     }
 
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));

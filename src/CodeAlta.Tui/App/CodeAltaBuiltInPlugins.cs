@@ -38,7 +38,7 @@ internal static class CodeAltaBuiltInPlugins
             Description = SR.T("Projects transient per-turn and session statistics from normalized agent events."),
             EnabledByDefault = true,
             PluginType = typeof(StatisticsPlugin),
-            Factory = static () => new StatisticsPlugin(),
+            Factory = static () => new StatisticsPlugin(StatisticsTerminalContributions.DecorateProjection),
         });
         return registry;
     }

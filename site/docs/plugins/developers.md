@@ -134,7 +134,7 @@ specify `PluginType` when known to avoid the legacy metadata-time factory call.
 A null or throwing activation factory does not trigger reflection fallback.
 Direct factory exceptions differ from reflection constructor wrapping; existing
 cancellation and cleanup rules still apply. Source-plugin reflection activation
-is unchanged. Statistics backend/presentation separation remains open.
+is unchanged.
 
 ## Built-in MCP presentation
 
@@ -149,6 +149,19 @@ status decoration preserves the portable callback and adds deferred rendering;
 backend commands, prompt discovery and explicit management operations retain
 their existing behavior. This migration does not add desktop MCP management or
 establish native, authentication or installed-plugin qualification.
+
+## Built-in Statistics presentation
+
+The parameterless `StatisticsPlugin` emits portable Markdown summaries/details
+and the existing payload without requiring terminal UI assemblies. The TUI
+explicitly adds deferred native cards and detail tables around the same backend
+projection. Calculations, event identifiers, cache behavior and live-tool commands
+remain in the backend; terminal controls and ANSI styling belong to the TUI.
+
+This built-in wiring is internal, not a public statistics-model API. Native
+formatting remains deferred; cached events retain their presentation. Concurrent
+cache candidates may each be decorated. The migration does not add desktop
+Statistics cards or establish native or installed-plugin qualification.
 
 ## Typed keyboard shortcuts
 

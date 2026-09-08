@@ -66,7 +66,7 @@ public sealed class StatisticsPluginTests
     [TestMethod]
     public async Task Projection_EmitsCompletedTurnCardWithEstimatedStatsAndShellBucket()
     {
-        var plugin = new StatisticsPlugin();
+        var plugin = new StatisticsPlugin(StatisticsTerminalContributions.DecorateProjection);
         var contribution = plugin.GetSessionEventProjections().Single();
         var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
         var events = CreateTurnEvents(startedAt, includeCompletedAssistant: true, includeUsage: false, runId: new AgentRunId("run-1"));
