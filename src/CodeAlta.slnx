@@ -57,6 +57,7 @@
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
+    <Project Path="CodeAlta.Tests.LockProbe/CodeAlta.Tests.LockProbe.csproj" />
     <Project Path="CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
   </Folder>
   <Folder Name="/tools/">

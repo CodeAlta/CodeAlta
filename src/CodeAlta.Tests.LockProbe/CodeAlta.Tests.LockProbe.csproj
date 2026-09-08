@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <UseAppHost>true</UseAppHost>
+    <Description>Explicit-path linked-source lock qualification only; not a CodeAlta application.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- No Hosting reference/provider closure. This qualifies linked source, not the shipped binary. -->
+    <Compile Include="..\CodeAlta.Hosting\CodeAltaSingleInstanceGuard.cs" Link="CodeAltaSingleInstanceGuard.cs" />
+  </ItemGroup>
+</Project>
