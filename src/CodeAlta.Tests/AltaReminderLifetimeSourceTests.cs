@@ -117,7 +117,7 @@ public sealed class AltaReminderLifetimeSourceTests
         AssertBaseline(Invert(ReadSource(Composition), CompositionEdits()), Composition);
         AssertBaseline(Invert(ReadSource(FrontendGuard), FrontendGuardEdits()), FrontendGuard);
         AssertBaseline(Invert(ReadSource(WorkspaceGuard), WorkspaceGuardEdits()), WorkspaceGuard);
-        AssertBaseline(Invert(ReadSource(DeferredGuard), DeferredGuardEdits()), DeferredGuard);
+        AssertBaseline(Invert(CodeAltaStartupAdmissionSourceTests.RestoreDeferredGuard(ReadSource(DeferredGuard)), DeferredGuardEdits()), DeferredGuard);
         AssertBaseline(Invert(ReadSource(PromptGuard), PromptGuardEdits()), PromptGuard);
         AssertBaseline(Invert(ReadSource(ArchitectureGuard), ArchitectureEdits()), ArchitectureGuard);
     }
@@ -131,7 +131,9 @@ public sealed class AltaReminderLifetimeSourceTests
         foreach (var baseline in FrozenRoutes())
         {
             var source = ReadSource(baseline);
-            AssertBaseline(source, baseline);
+            AssertBaseline(string.Equals(baseline.Path, "CodeAlta.Tui/Program.cs", StringComparison.Ordinal)
+                ? CodeAltaStartupAdmissionSourceTests.RestoreProgram(source)
+                : source, baseline);
             if (string.Equals(baseline.Path,
                 "CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs", StringComparison.Ordinal))
             {
@@ -1131,19 +1133,14 @@ public sealed class AltaReminderLifetimeSourceTests
         var root = Path.GetFullPath(Path.Combine(
             Path.GetDirectoryName(sourceFile) ?? throw new AssertFailedException("Missing fixture source directory."), ".."));
         var bytes = File.ReadAllBytes(Path.Combine(root, baseline.Path));
-        var text = new UTF8Encoding(false, true).GetString(bytes);
-        Assert.IsFalse(text.StartsWith("\uFEFF", StringComparison.Ordinal), baseline.Path + ": BOM");
-        Assert.IsTrue(text.EndsWith("\n", StringComparison.Ordinal), baseline.Path + ": final newline");
-        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        Assert.IsFalse(normalized.Contains('\r'), baseline.Path + ": lone CR");
-        Assert.IsTrue(string.Equals(text,
-            baseline.CrLf ? normalized.Replace("\n", "\r\n", StringComparison.Ordinal) : normalized,
-            StringComparison.Ordinal), baseline.Path + ": mixed or changed line endings");
-        return normalized;
+        // Validate actual UTF-8/BOM/final newline; LF, CRLF and mixed pairs are equivalent content.
+        return SourceTestText.DecodeSource(bytes);
     }
 
     private static byte[] Encode(string normalized, Baseline baseline)
     {
+        // Historical rendering, not actual checkout bytes.
+        normalized = SourceTestText.Canonicalize(normalized);
         Assert.IsFalse(normalized.StartsWith("\uFEFF", StringComparison.Ordinal));
         Assert.IsFalse(normalized.Contains('\r'));
         Assert.IsTrue(normalized.EndsWith("\n", StringComparison.Ordinal));
@@ -1162,11 +1159,16 @@ public sealed class AltaReminderLifetimeSourceTests
 
     private static string Invert(string future, Edit[] edits)
     {
+        future = SourceTestText.Canonicalize(future);
         // Later edits may contain earlier additions (XML and inserted constants, for example).
         // Reverse exact replacements; never remove an unvalidated source-derived interval.
         for (var index = edits.Length - 1; index >= 0; index--)
         {
-            var edit = edits[index];
+            var edit = edits[index] with
+            {
+                Before = SourceTestText.Canonicalize(edits[index].Before),
+                After = SourceTestText.Canonicalize(edits[index].After),
+            };
             RequireCount(future, edit.After, edit.Count);
             future = future.Replace(edit.After, edit.Before, StringComparison.Ordinal);
         }
@@ -1178,6 +1180,8 @@ public sealed class AltaReminderLifetimeSourceTests
 
     private static void RequireCount(string source, string expected, int count)
     {
+        source = SourceTestText.Canonicalize(source);
+        expected = SourceTestText.Canonicalize(expected);
         Assert.IsTrue(expected.Length > 0);
         var actual = 0;
         var offset = 0;
@@ -1192,6 +1196,7 @@ public sealed class AltaReminderLifetimeSourceTests
 
     private static string Indent(string text, int spaces)
     {
+        text = SourceTestText.Canonicalize(text);
         var padding = new string(' ', spaces);
         // Preserve empty lines as empty: baseline raw-string literals have no blank-line spaces.
         return string.Join("\n", text.Split('\n').Select(line => line.Length == 0 ? "" : padding + line));

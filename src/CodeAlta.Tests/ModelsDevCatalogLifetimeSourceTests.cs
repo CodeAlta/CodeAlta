@@ -15,7 +15,7 @@ namespace CodeAlta.Tests;
 /// All other helpers operate only on supplied text/bytes. No assembly loading, production calls,
 /// concrete catalog, CTS, client, timer, owner, UI, logger, config, home or artifact access occurs.
 /// Reads are nonzero I/O; later test-assembly logging is not initialization-free qualification.
-/// LF literals explicitly reconstruct CRLF catalog text, including a final newline. Complete
+/// Source and literals use canonical LF content; recorded hashes use explicit historical renderings. Complete
 /// original and E1-E6 XML/member anchors are frozen; inverses require each entire NEW literal.
 /// Missing future contracts must fail, not silently accept the unchanged original catalog.
 /// </remarks>
@@ -68,7 +68,9 @@ public sealed class ModelsDevCatalogLifetimeSourceTests
         foreach (var baseline in FrozenRoutes())
         {
             var source = ReadSource(baseline);
-            AssertBaseline(source, baseline);
+            // Actual checkout bytes were checked by ReadSource; compare reconstructed originals below.
+            var restored = CodeAltaStartupAdmissionSourceTests.RestoreCatalogRoute(baseline.Path, source.Text);
+            AssertBaseline(restored, baseline);
         }
     }
 
@@ -106,7 +108,7 @@ public sealed class ModelsDevCatalogLifetimeSourceTests
             "6E5707B44DCDE30CC3925059D6789FF11380B74FC3F5F8C4524D83ED786D43A1"),
     ];
 
-    // E1-E6 in accepted forward order. Every literal includes exactly one final CRLF via CatalogLiteral.
+    // E1-E6 in accepted forward order. Every canonical literal includes one final LF via CatalogLiteral.
     private static Edit[] CatalogEdits() =>
     [
         new(CatalogLiteral(OldImports), CatalogLiteral(NewImports)),
@@ -757,50 +759,52 @@ public sealed class ModelsDevCatalogLifetimeSourceTests
 
     private static void AssertEncoding(Source source, Baseline baseline)
     {
-        Assert.IsFalse(source.Text.StartsWith("\uFEFF", StringComparison.Ordinal), baseline.Path + ": BOM");
-        Assert.IsTrue(source.Text.EndsWith("\n", StringComparison.Ordinal), baseline.Path + ": final newline");
-        var lf = source.Text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        Assert.IsFalse(lf.Contains('\r'), baseline.Path + ": lone CR");
-        var expected = baseline.CrLf ? lf.Replace("\n", "\r\n", StringComparison.Ordinal) : lf;
-        Assert.IsTrue(string.Equals(source.Text, expected, StringComparison.Ordinal), baseline.Path + ": exact line endings");
-        CollectionAssert.AreEqual(Encode(expected), source.Bytes, baseline.Path + ": raw encoding round trip");
+        // Strictly decode actual bytes before any canonical-content or historical-byte comparison.
+        var canonical = SourceTestText.DecodeSource(source.Bytes);
+        Assert.AreEqual(canonical, SourceTestText.Canonicalize(source.Text), baseline.Path + ": decoded content");
+        CollectionAssert.AreEqual(Encode(source.Text), source.Bytes, baseline.Path + ": actual encoding round trip");
     }
 
     private static byte[] Encode(string text) => new UTF8Encoding(false, true).GetBytes(text);
 
     private static string CatalogLiteral(string literal)
     {
-        Assert.IsFalse(literal.Contains('\r'), "Frozen fixture literals must use LF.");
+        literal = SourceTestText.Canonicalize(literal);
         Assert.IsFalse(literal.EndsWith("\n", StringComparison.Ordinal), "Raw literals exclude the final newline.");
-        return literal.Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
+        return literal + "\n";
     }
 
-    private static void AssertBaseline(Source source, Baseline baseline)
+    private static void AssertBaseline(string text, Baseline baseline)
     {
-        AssertEncoding(source, baseline);
-        Assert.AreEqual(baseline.Bytes, source.Bytes.Length, baseline.Path + ": whole byte count");
-        Assert.AreEqual(baseline.Lines, source.Text.Count(static character => character == '\n'), baseline.Path + ": line count");
-        Assert.IsTrue(string.Equals(baseline.Hash, Convert.ToHexString(SHA256.HashData(source.Bytes)),
-            StringComparison.Ordinal), baseline.Path + ": whole raw-byte hash");
+        var canonical = SourceTestText.Canonicalize(text);
+        Assert.IsTrue(canonical.EndsWith('\n'), baseline.Path + ": final newline");
+        var historical = SourceTestText.HistoricalBytes(canonical, baseline.CrLf);
+        Assert.AreEqual(baseline.Bytes, historical.Length, baseline.Path + ": whole historical byte count");
+        Assert.AreEqual(baseline.Lines, canonical.Count(static character => character == '\n'), baseline.Path + ": line count");
+        Assert.IsTrue(string.Equals(baseline.Hash, Convert.ToHexString(SHA256.HashData(historical)),
+            StringComparison.Ordinal), baseline.Path + ": whole historical content hash");
     }
 
     private static void AssertAcceptedCatalog(Source source)
     {
+        AssertEncoding(source, Catalog);
+        var canonical = SourceTestText.Canonicalize(source.Text);
         var edits = CatalogEdits();
-        var restored = Invert(source.Text, edits);
+        var restored = Invert(canonical, edits);
         var original = CatalogLiteral(OriginalCatalog);
         Assert.IsTrue(string.Equals(original, restored, StringComparison.Ordinal), "Whole original catalog text");
-        CollectionAssert.AreEqual(Encode(original), Encode(restored), "Every reconstructed original byte");
-        AssertBaseline(new Source(restored, Encode(restored)), Catalog);
+        CollectionAssert.AreEqual(Encode(original), Encode(restored), "Every reconstructed canonical original byte");
+        AssertBaseline(restored, Catalog);
 
         var forward = Forward(original, edits);
-        Assert.IsTrue(string.Equals(forward, source.Text, StringComparison.Ordinal), "Only the six approved catalog edits");
-        CollectionAssert.AreEqual(Encode(forward), source.Bytes, "Every accepted future checkout byte");
-        AssertBaseline(source, FutureCatalog);
+        Assert.IsTrue(string.Equals(forward, canonical, StringComparison.Ordinal), "Only the six approved catalog edits");
+        CollectionAssert.AreEqual(Encode(forward), Encode(canonical), "Every accepted canonical future byte");
+        AssertBaseline(canonical, FutureCatalog);
     }
 
     private static string Forward(string original, Edit[] edits)
     {
+        original = SourceTestText.Canonicalize(original);
         foreach (var edit in edits)
         {
             RequireOnce(original, edit.Before);
@@ -812,6 +816,7 @@ public sealed class ModelsDevCatalogLifetimeSourceTests
 
     private static string Invert(string future, Edit[] edits)
     {
+        future = SourceTestText.Canonicalize(future);
         // Entire literal inverses E6 -> E1, including all XML and the complete E6 options anchor.
         // Requiring NEW before replacement prevents an unchanged-baseline preservation pass.
         for (var index = edits.Length - 1; index >= 0; index--)
@@ -826,6 +831,8 @@ public sealed class ModelsDevCatalogLifetimeSourceTests
 
     private static void RequireOnce(string source, string expected)
     {
+        source = SourceTestText.Canonicalize(source);
+        expected = SourceTestText.Canonicalize(expected);
         Assert.IsTrue(expected.Length > 0);
         var actual = 0;
         var offset = 0;

@@ -83,10 +83,17 @@ internal sealed class CodeAltaCliOptions
             pluginCommandLineContributions);
     }
 
+    internal static CommandApp CreatePlainCommandApp(Func<CodeAltaCliOptions, ValueTask<int>> execute)
+    {
+        ArgumentNullException.ThrowIfNull(execute);
+        return CreateCommandAppCore(new ParseState(), execute, plainOutput: true);
+    }
+
     private static CommandApp CreateCommandAppCore(
         ParseState state,
         Func<CodeAltaCliOptions, ValueTask<int>> execute,
-        IReadOnlyList<CommandNode>? pluginCommandLineContributions = null)
+        IReadOnlyList<CommandNode>? pluginCommandLineContributions = null,
+        bool plainOutput = false)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(execute);
@@ -97,12 +104,14 @@ internal sealed class CodeAltaCliOptions
             "altatui",
             config: new CommandConfig
             {
-                OutputFactory = static _ => new TerminalVisualCommandOutput(new TerminalVisualOutputOptions
-                {
-                    UseTableForOptions = true,
-                    SectionGroupMinWidth = 70,
-                    ErrorGroupMinWidth = 70,
-                }),
+                OutputFactory = plainOutput
+                    ? static _ => DefaultCommandOutput.Instance
+                    : static _ => new TerminalVisualCommandOutput(new TerminalVisualOutputOptions
+                    {
+                        UseTableForOptions = true,
+                        SectionGroupMinWidth = 70,
+                        ErrorGroupMinWidth = 70,
+                    }),
             })
         {
             new CommandUsage(),

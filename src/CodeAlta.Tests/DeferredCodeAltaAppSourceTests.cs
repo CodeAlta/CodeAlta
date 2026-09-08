@@ -141,18 +141,18 @@ public sealed class DeferredCodeAltaAppSourceTests
             "_openProvidersAfterStartup = _configRecovery.CreatedDefault;");
 
         // Preserve Program's serialized loop-then-dispose and borrowed-plugin owner.
-        // This does not fix early logging/plugin admission or Program's CTS lifetime.
+        // Admission is checked separately; Program's CTS lifetime remains unchanged.
         var program = ReadSource("CodeAlta.Tui/Program.cs");
+        CodeAltaStartupAdmissionSourceTests.RequireProgramAdmission(program);
         var programRun = Scope(program, "    internal static async ValueTask<int> RunAsync(", "\n    }\n");
         RequireOrdered(programRun,
-            "using var singleInstanceGuard = CodeAltaSingleInstanceGuard.Acquire();",
             "var cancellationTokenSource = new CancellationTokenSource();",
             "await using var app = new DeferredCodeAltaApp(prestartedPluginRuntime);",
             "Program.ThrowIfCurrentThreadIsNotMainThread(mainThreadId);",
             "await app.RunAsync(cancellationTokenSource.Token);",
             "PrintUpdateAvailableMessage(app.UpdateCheckSnapshot);",
             "return 0;");
-        var commandLine = Scope(program, "    var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None);", "\ncatch (CodeAltaAlreadyRunningException ex)");
+        var commandLine = Scope(program, "            var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None);", "\n        catch (CodeAltaAlreadyRunningException ex)");
         RequireOrdered(commandLine,
             "var pluginCommandLineContributions = Program.GetPluginCommandLineContributions(commandLinePluginRuntime);",
             "options => Program.RunAsync(options, mainThreadId, commandLinePluginRuntime),",
@@ -458,8 +458,7 @@ public sealed class DeferredCodeAltaAppSourceTests
     // No upward discovery, profile access, localization or logging initialization is performed.
     // Named source reads and existing assembly-level logging are not zero I/O.
     private static string ReadSource(string relativePath)
-        => File.ReadAllText(Path.Combine(SourceRoot(), relativePath))
-            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(SourceRoot(), relativePath)));
 
     private static string SourceRoot([CallerFilePath] string sourceFile = "")
         => Path.GetFullPath(Path.Combine(
@@ -467,6 +466,9 @@ public sealed class DeferredCodeAltaAppSourceTests
 
     private static string Scope(string source, string startAnchor, string endAnchor)
     {
+        source = SourceTestText.Canonicalize(source);
+        startAnchor = SourceTestText.Canonicalize(startAnchor);
+        endAnchor = SourceTestText.Canonicalize(endAnchor);
         var start = source.IndexOf(startAnchor, StringComparison.Ordinal);
         Assert.IsTrue(start >= 0, $"Missing source anchor: {startAnchor}");
         var end = source.IndexOf(endAnchor, start + startAnchor.Length, StringComparison.Ordinal);
@@ -476,6 +478,8 @@ public sealed class DeferredCodeAltaAppSourceTests
 
     private static void RequireOnce(string source, string expected)
     {
+        source = SourceTestText.Canonicalize(source);
+        expected = SourceTestText.Canonicalize(expected);
         var first = source.IndexOf(expected, StringComparison.Ordinal);
         Assert.IsTrue(first >= 0, $"Missing expected wiring: {expected}");
         Assert.AreEqual(first, source.LastIndexOf(expected, StringComparison.Ordinal), $"Duplicate wiring: {expected}");
@@ -483,6 +487,8 @@ public sealed class DeferredCodeAltaAppSourceTests
 
     private static void RequireOrdered(string source, params string[] expected)
     {
+        source = SourceTestText.Canonicalize(source);
+        expected = Array.ConvertAll(expected, SourceTestText.Canonicalize);
         var previous = -1;
         foreach (var item in expected)
         {
@@ -495,6 +501,8 @@ public sealed class DeferredCodeAltaAppSourceTests
 
     private static void Reject(string source, params string[] forbidden)
     {
+        source = SourceTestText.Canonicalize(source);
+        forbidden = Array.ConvertAll(forbidden, SourceTestText.Canonicalize);
         foreach (var item in forbidden)
         {
             Assert.IsFalse(source.Contains(item, StringComparison.Ordinal), $"Unexpected wiring: {item}");

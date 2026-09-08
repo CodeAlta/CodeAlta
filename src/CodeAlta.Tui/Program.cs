@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodeAlta.Hosting;
 using CodeAlta.Tui;
 using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
@@ -13,60 +14,85 @@ using XenoAtom.Terminal;
 var mainThreadId = Environment.CurrentManagedThreadId;
 try
 {
-    var homeRoot = Program.GetDefaultHomeRoot();
-    CodeAltaLogging.Initialize(homeRoot);
-
-    // Plugin runtime startup ordering: register MSBuild before any plugin build service, pipe-logger
-    // event payload, or Microsoft.Build type can be touched. Safe-mode raw args/environment are
-    // still read by host-owned code before dynamic plugins are built or loaded.
-    // Disabled for now until https://github.com/dotnet/sdk/pull/54172 is merged
-    // //CodeAltaPluginRuntimeStartup.RegisterMsBuildDefaults();
-    using var session = Terminal.Open();
-
-    _ = PluginRuntimeConfigResolver.IsSafeModeEnabled(args);
-    var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None);
-    try
-    {
-        var pluginCommandLineContributions = Program.GetPluginCommandLineContributions(commandLinePluginRuntime);
-        var command = CodeAltaCliOptions.CreateCommandApp(
-            options => Program.RunAsync(options, mainThreadId, commandLinePluginRuntime),
-            pluginCommandLineContributions);
-        return command.RunAsync(args).AsTask().GetAwaiter().GetResult();
-    }
-    finally
-    {
-        if (commandLinePluginRuntime is not null)
-        {
-            commandLinePluginRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-    }
-}
-catch (CodeAltaAlreadyRunningException ex)
-{
-    Terminal.WriteMarkupLine($"[bright-red]{AnsiMarkup.Escape(ex.Message)}[/]");
-    return 1;
+    return CodeAltaStartupAdmission.Run(
+        args,
+        Program.RunEarlyCommand,
+        static () => CodeAltaSingleInstanceGuard.Acquire(),
+        () => Program.RunAdmittedStartup(args, mainThreadId));
 }
 catch (Exception ex)
 {
-    try
-    {
-        LogManager.GetLogger("CodeAlta.Program").Error(ex, "Top-level exception");
-    }
-    catch
-    {
-    }
-
-    CodeAltaCrashReporter.ReportFatalException("Top-level exception", ex);
-    Terminal.WriteLine(ex.ToString());
+    // Admission/early-output failures must not initialize logging, crash reporting or Terminal.
+    Console.Error.WriteLine(ex.Message);
     return 1;
-}
-finally
-{
-    LogManager.Shutdown();
 }
 
 internal partial class Program
 {
+    internal static int RunEarlyCommand(string argument)
+    {
+        var command = CodeAltaCliOptions.CreatePlainCommandApp(
+            static _ => throw new InvalidOperationException("Early commands must not enter mutable startup."));
+        return command.RunAsync([argument]).AsTask().GetAwaiter().GetResult();
+    }
+
+    internal static int RunAdmittedStartup(string[] args, int mainThreadId)
+    {
+        try
+        {
+            var homeRoot = Program.GetDefaultHomeRoot();
+            CodeAltaLogging.Initialize(homeRoot);
+
+            // Plugin runtime startup ordering: register MSBuild before any plugin build service, pipe-logger
+            // event payload, or Microsoft.Build type can be touched. Safe-mode raw args/environment are
+            // still read by host-owned code before dynamic plugins are built or loaded.
+            // Disabled for now until https://github.com/dotnet/sdk/pull/54172 is merged
+            // //CodeAltaPluginRuntimeStartup.RegisterMsBuildDefaults();
+            using var session = Terminal.Open();
+
+            _ = PluginRuntimeConfigResolver.IsSafeModeEnabled(args);
+            var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None);
+            try
+            {
+                var pluginCommandLineContributions = Program.GetPluginCommandLineContributions(commandLinePluginRuntime);
+                var command = CodeAltaCliOptions.CreateCommandApp(
+                    options => Program.RunAsync(options, mainThreadId, commandLinePluginRuntime),
+                    pluginCommandLineContributions);
+                return command.RunAsync(args).AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                if (commandLinePluginRuntime is not null)
+                {
+                    commandLinePluginRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+            }
+        }
+        catch (CodeAltaAlreadyRunningException ex)
+        {
+            Terminal.WriteMarkupLine($"[bright-red]{AnsiMarkup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                LogManager.GetLogger("CodeAlta.Program").Error(ex, "Top-level exception");
+            }
+            catch
+            {
+            }
+
+            CodeAltaCrashReporter.ReportFatalException("Top-level exception", ex);
+            Terminal.WriteLine(ex.ToString());
+            return 1;
+        }
+        finally
+        {
+            LogManager.Shutdown();
+        }
+    }
+
     internal static async ValueTask<int> RunAsync(CodeAltaCliOptions options, int mainThreadId, PluginRuntimeManager? prestartedPluginRuntime = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -76,7 +102,6 @@ internal partial class Program
             return PrintPluginsStatus(options.PluginSafeMode);
         }
 
-        using var singleInstanceGuard = CodeAltaSingleInstanceGuard.Acquire();
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Defer async app startup until the terminal loop is already running so XenoAtom keeps the UI

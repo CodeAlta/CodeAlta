@@ -403,9 +403,9 @@ public sealed class CodeAltaUpdateServiceSourceTests
         Reject(about, "new CodeAltaUpdateService(", "updateService.Dispose", "updateService?.Dispose", "updateService.Start(", "updateService?.Start(");
 
         var program = ReadSource("CodeAlta.Tui/Program.cs");
+        CodeAltaStartupAdmissionSourceTests.RequireProgramAdmission(program);
         var run = Scope(program, "    internal static async ValueTask<int> RunAsync(", "\n    }\n");
         RequireOrdered(run,
-            "using var singleInstanceGuard = CodeAltaSingleInstanceGuard.Acquire();",
             "var cancellationTokenSource = new CancellationTokenSource();",
             "await using var app = new DeferredCodeAltaApp(prestartedPluginRuntime);",
             "Program.ThrowIfCurrentThreadIsNotMainThread(mainThreadId);",
@@ -489,8 +489,7 @@ public sealed class CodeAltaUpdateServiceSourceTests
     // No upward discovery, profile access, localization or logging setup is performed.
     // Named source reads and existing writerless assembly logging are not zero I/O.
     private static string ReadSource(string relativePath)
-        => File.ReadAllText(Path.Combine(SourceRoot(), relativePath))
-            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(SourceRoot(), relativePath)));
 
     private static string SourceRoot([CallerFilePath] string sourceFile = "")
         => Path.GetFullPath(Path.Combine(
@@ -498,6 +497,9 @@ public sealed class CodeAltaUpdateServiceSourceTests
 
     private static string Scope(string source, string startAnchor, string endAnchor)
     {
+        source = SourceTestText.Canonicalize(source);
+        startAnchor = SourceTestText.Canonicalize(startAnchor);
+        endAnchor = SourceTestText.Canonicalize(endAnchor);
         var start = source.IndexOf(startAnchor, StringComparison.Ordinal);
         Assert.IsTrue(start >= 0, $"Missing source anchor: {startAnchor}");
         var end = source.IndexOf(endAnchor, start + startAnchor.Length, StringComparison.Ordinal);
@@ -507,6 +509,8 @@ public sealed class CodeAltaUpdateServiceSourceTests
 
     private static void RequireOnce(string source, string expected)
     {
+        source = SourceTestText.Canonicalize(source);
+        expected = SourceTestText.Canonicalize(expected);
         var first = source.IndexOf(expected, StringComparison.Ordinal);
         Assert.IsTrue(first >= 0, $"Missing expected wiring: {expected}");
         Assert.AreEqual(first, source.LastIndexOf(expected, StringComparison.Ordinal), $"Duplicate wiring: {expected}");
@@ -514,6 +518,8 @@ public sealed class CodeAltaUpdateServiceSourceTests
 
     private static void RequireOrdered(string source, params string[] expected)
     {
+        source = SourceTestText.Canonicalize(source);
+        expected = Array.ConvertAll(expected, SourceTestText.Canonicalize);
         var previous = -1;
         foreach (var item in expected)
         {
@@ -526,6 +532,8 @@ public sealed class CodeAltaUpdateServiceSourceTests
 
     private static void Reject(string source, params string[] forbidden)
     {
+        source = SourceTestText.Canonicalize(source);
+        forbidden = Array.ConvertAll(forbidden, SourceTestText.Canonicalize);
         foreach (var item in forbidden)
         {
             Assert.IsFalse(source.Contains(item, StringComparison.Ordinal), $"Unexpected wiring: {item}");

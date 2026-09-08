@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using CodeAlta.Hosting;
 
 namespace CodeAlta.Tests;
 

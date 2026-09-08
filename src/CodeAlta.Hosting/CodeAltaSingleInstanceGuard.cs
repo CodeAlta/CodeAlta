@@ -2,9 +2,14 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 
-namespace CodeAlta.Tui;
+namespace CodeAlta.Hosting;
 
-internal sealed class CodeAltaSingleInstanceGuard : IDisposable
+/// <summary>Acquires the existing alta.lock admission guard for shared application state.</summary>
+/// <remarks>
+/// This extraction preserves the existing PID/stale-file algorithm, including its unqualified
+/// process-inspection and deletion races. It does not establish cross-process or cross-head safety.
+/// </remarks>
+public sealed class CodeAltaSingleInstanceGuard : IDisposable
 {
     private const string LockFileName = "alta.lock";
     private const int PidReadRetryCount = 20;
@@ -18,11 +23,26 @@ internal sealed class CodeAltaSingleInstanceGuard : IDisposable
         LockFilePath = lockFilePath;
     }
 
+    /// <summary>Gets the absolute path of the acquired lock file.</summary>
     public string LockFilePath { get; }
 
+    /// <summary>Acquires the existing guard under the default user-profile .alta directory.</summary>
+    /// <returns>The caller-owned guard.</returns>
+    /// <exception cref="InvalidOperationException">The user profile directory is unavailable.</exception>
+    /// <exception cref="CodeAltaAlreadyRunningException">The lock file could not be acquired.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the lock directory or file is denied.</exception>
+    /// <exception cref="IOException">The directory or PID write fails.</exception>
     public static CodeAltaSingleInstanceGuard Acquire()
         => Acquire(GetDefaultLockFilePath());
 
+    /// <summary>Acquires the existing guard at an explicitly supplied lock-file path.</summary>
+    /// <param name="lockFilePath">The lock-file path; automation must supply a task-owned path.</param>
+    /// <returns>The caller-owned guard.</returns>
+    /// <exception cref="ArgumentNullException">The path is null.</exception>
+    /// <exception cref="ArgumentException">The path is empty, whitespace or invalid.</exception>
+    /// <exception cref="CodeAltaAlreadyRunningException">The lock file could not be acquired.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the lock directory or file is denied.</exception>
+    /// <exception cref="IOException">The directory or PID write fails.</exception>
     public static CodeAltaSingleInstanceGuard Acquire(string lockFilePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lockFilePath);
@@ -48,6 +68,8 @@ internal sealed class CodeAltaSingleInstanceGuard : IDisposable
         }
     }
 
+    /// <summary>Releases this guard and attempts to remove its lock file; repeated calls are ignored.</summary>
+    /// <exception cref="IOException">The underlying stream could not be disposed.</exception>
     public void Dispose()
     {
         if (_disposed)
@@ -178,14 +200,19 @@ internal sealed class CodeAltaSingleInstanceGuard : IDisposable
     }
 }
 
-internal sealed class CodeAltaAlreadyRunningException : Exception
+/// <summary>Reports that the existing shared-state lock could not be acquired.</summary>
+public sealed class CodeAltaAlreadyRunningException : Exception
 {
+    /// <summary>Initializes a lock-acquisition failure with the observed owner information.</summary>
+    /// <param name="processId">The recorded process ID, or null when it could not be read.</param>
+    /// <param name="innerException">The underlying acquisition failure.</param>
     public CodeAltaAlreadyRunningException(int? processId, Exception? innerException)
         : base(CreateMessage(processId), innerException)
     {
         ProcessId = processId;
     }
 
+    /// <summary>Gets the recorded process ID, or null when it could not be read.</summary>
     public int? ProcessId { get; }
 
     private static string CreateMessage(int? processId)
