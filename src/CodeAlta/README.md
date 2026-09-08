@@ -4,10 +4,10 @@
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
 
-**This is an in-development workspace browser, not an agent frontend.** Use `CodeAlta.Tui`
-(`altatui`) for sending prompts and running agents. Without catalog opt-in, only the boot
-surface is available. No provider, plugin, configuration or default profile is initialized.
-Shared application ownership/composition is intentionally deferred.
+**This is an in-development workspace browser with a separately opted-in text-submission mode,
+not full agent parity.** Use `CodeAlta.Tui` (`altatui`) for normal agent workflows. Without
+catalog opt-in, only the boot surface is available and no provider, plugin, configuration or
+default profile is initialized. Catalog browsing alone does not compose a runtime host.
 
 ```powershell
 dotnet build -c Release
@@ -76,6 +76,40 @@ Length/time detects ordinary changes, not same-stamp rewrites or every external-
 race. Selecting another session, changing page or closing the view cancels the waiter and
 suppresses late results. These checks do not establish native shutdown safety, reparse
 isolation, bounded catalog discovery, live recovery or full timeline parity.
+
+## Explicit owned text submission
+
+An additional experimental mode borrows command and cached-read services from one shared host:
+
+```text
+alta --data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-trusted-copy> --allow-catalog-cache --allow-owned-host --project-root <existing-absolute-project-directory> --discovery-home <existing-absolute-discovery-directory> --instruction-root <existing-absolute-project-ancestor> --builtin-skill-root <existing-absolute-directory>
+```
+
+All flags are required together. The added roots must exist, be absolute and stay outside
+`.alta`; browser data must not overlap project/discovery/builtin roots. The instruction root
+is an inclusive ancestor of the project. No profile or HOME inference is performed. These
+lexical checks and the copy's `alta.lock` are not a reparse sandbox or race-free ownership proof.
+
+**This consent is broader than browsing:** lock/project/journal/cache/provider-state writes,
+configuration/instruction/skill reads and configured-provider registration are permitted.
+Registration can read declared credential environment variables and shipped defaults; later
+submissions can authenticate and use provider storage/network. Plugins and probes remain off.
+Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
+
+Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied,
+user input is cancelled, and this path does not expose tools, plugins or live events. **Refresh
+submissions** explicitly retrieves receipts; **Abort submission** targets one pending send,
+not a later run. Submitted means dispatch completed, not that the conversation/run completed.
+An uncertain response retains the exact epoch/key/session/text for explicit retry, never
+automatic resend. Epoch mismatch disables mutations across selection changes; reload recovers
+receipts, not prompt text. The host retains at most256 receipts, paged64 at a time.
+
+Actual cached-store reads are host-owned (eight active reads, excess rejected); cancelling an
+RPC wait does not stop them. Shutdown joins command/read work before runtime dependencies.
+Five seconds triggers a pending diagnostic, not termination. Unconfirmed host/native cleanup
+keeps the lease; external termination is not confirmed cleanup. Managed fake-provider and
+helper tests pass, but configured-provider behavior, React mounting and this mode's native
+lifecycle remain unqualified. See [runtime contracts](../../doc/runtime.md#explicit-desktop-submissions-and-owned-reads).
 
 Build outputs use `bin/desktop` and `obj/desktop` to avoid reusing the pre-rename TUI residue.
 Generated frontend contracts/client remain build-only inputs under `obj/neoastra`.

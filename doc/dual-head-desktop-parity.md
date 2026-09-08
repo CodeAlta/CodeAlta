@@ -1586,3 +1586,73 @@ No frontend/default-profile/real-provider startup, website acquisition, plugin l
 broader native qualification occurred. The same child continues read-only on the next useful
 M4 Desktop operation/lifecycle vertical while the parent integrates this bounded slice; M3–M7
 are not complete.
+
+### Explicit Desktop text submission and owned cached reads — 2026-09-08
+
+Implemented separately consented existing-session text submission, submission-specific abort,
+bounded receipt recovery and direct cached workspace/history reads. Browser/catalog-only modes
+remain unchanged. `CodeAltaHost` owns both commands and reads; Desktop borrows them rather than
+creating another application owner. The full CLI/root/consent and shutdown limitations are in
+[`src/CodeAlta/README.md`](../src/CodeAlta/README.md#explicit-owned-text-submission) and
+[`runtime.md`](runtime.md#explicit-desktop-submissions-and-owned-reads).
+
+Read admission retains eight actual uncancelled operations, rejects excess and joins both
+command/read drains before runtime dependencies. Presentation remains bounded at200 projects,
+500 sessions/700KiB; underlying enumeration is not bounded by those limits. Receipt references
+are retained before projection, never evicted, capped by the host's256-receipt owner; pages
+contain64 rows. Expected epochs validate before mutations. Canonical lowercase36-unit GUIDs
+and Unicode/string bounds support6400 bytes/row plus8192 envelope bytes (417792 total), below
+448KiB. Actual generated-JSON worst-case tests pass. NeoAstra's208KiB setting limits owned-host
+inbound frames only, not responses or individual methods.
+
+Frontend retries retain exactly epoch/key/session/text; refresh is manual, no polling or
+automatic resend. App owns epoch validity across panel remounts. Stale selection/unmount
+suppresses late success/failure callbacks. Reload recovers receipts, not prompt text; labels
+distinguish submission dispatch from run completion. No runtime event reader was introduced.
+
+The parent independently audited written fixtures, read/I/O closure and cleanup before exact
+execution. **40 C# cases plus five TypeScript helper cases passed, zero failures/skips.** C#
+commands used `dotnet test <project> -c Release --no-build --no-restore` with explicit
+`FullyQualifiedName=` disjunctions, never suite/class filters:
+
+- `CodeAlta.Orchestration.Tests.OwnedSessionWorkspaceTests`: `Snapshot_FullyJoinsDirectReadsAfterCallerCancellation`, `ReadCapacity_RejectsWithoutLaunchingAdditionalWork`, `Disposal_AttemptsAllReadsAndObservesFailures`, `History_RetainsActualReadThroughWaiterCancellation`, `HostDisposal_ClosesReadAdmissionAndStartsBothDrains`, `HostDisposal_JoinsReadsBeforeRuntimeDependencies`, `HostDisposal_AttemptsRuntimeAfterSettledReadFailure`.
+- `CodeAlta.Desktop.Tests.DesktopOwnedSessionTests`: `OwnedFlags_RequireCompleteExplicitConsentBeforeAcquisition`, `LegacyBranches_DoNotComposeOwnedHost`, `StaleEpoch_RejectsBeforeOwnerAdmission`, `Admission_RetainsReceiptAndPreservesOwnerReplay`, `ReceiptPages_BoundWorstCaseGeneratedJson`, `Shutdown_RetainsLeaseUntilAllOwnedWorkIsConfirmed`, `OwnedRpc_UsesRealHostCachedStoreAndFakeProvider`.
+- `CodeAlta.Desktop.Tests.DesktopOwnedSessionSourceTests`: `Composition_UsesSingleHostAndOnlyCachedDirectReads`, `Frontend_PreservesLegacyHistoryAndUsesEpochBoundMutations`, `Boundaries_RestoreWholeOriginalsAndHistoricalReaders`.
+- `CodeAlta.Desktop.Tests.SessionDiscoveryScopeTests`: `Constructor_RejectsMissingOrNonAbsoluteRoots`, `Constructor_NormalizesLexicalRootsAndPreservesVolumeRoots`, `ValidateHostRoots_RequiresExplicitAbsoluteGlobalAndProjectRoots`, `ValidateHostRoots_DoesNotDeriveDiscoveryHomeOrBoundary`, `ValidateProjectPath_AcceptsBoundaryAndDescendants`, `ValidateProjectPath_RejectsSiblingPrefixesAndNormalizedEscapes`, `ValidateProjectPath_UsesPlatformPathComparison`, `GetInstructionAncestors_ScopedWalkIncludesBoundaryInRootToLeafOrder`, `GetInstructionAncestors_RejectsInvalidRootsWithoutExistenceChecks`, `GetInstructionAncestors_UnscopedWalkPreservesFullAncestry`.
+- `CodeAlta.Tests.OwnedSessionCommandSourceTests`: `Requests_AreScalarOnlyAndOwnerDoesNotExposeHost`, `Host_UsesExplicitBuiltInRootWithoutChangingDefaultProviders`, `Runtime_SplitsWaitAndExecutionTokensWithLiveGuardedCalls`, `Resolver_UsesDirectStoreAndExistingRecoveryHelpers`, `Owner_RetainsPreparationSendAndAbortAndJoinsBeforeHostDisposal`, `Preservation_RestoresAllEightWholeOriginalsAcrossNewlineRepresentations`, `Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges`, `Preservation_NewestPreMapPreservesInheritedChains`.
+- `CodeAlta.Tests.CodeAltaHostLifetimeTests.HostOwner_SourceWiring_UsesSingleNamedDisposalFactory`.
+- `CodeAlta.Desktop.Tests.DesktopArchitectureTests`: `DesktopAssembly_HasNoTerminalOrHostCompositionReferences`, `DesktopAndTui_HaveSeparatePackageIdentityAndRidIntent`, `DesktopDefaultItems_ExcludeOldOutputsAndFrontendBuildArtifacts`, `NativeLifecycle_KeepsDispatcherAliveAndResetsExitCodeOnDisposalFailure`.
+
+The two real Desktop fixtures seed/read back production journals and cache rows under unique
+explicit roots, register only a literal fake provider, disable plugins/probes and supply empty
+plugin environment/fixture-local Git discovery. Actual tasks/receipts precede assertions;
+cleanup releases gates, starts independent five-second observations and preserves failures.
+Final snapshots follow settled producers; failed/unconfirmed roots are never deleted. The old
+failed owned-command fixture root remains untouched. Other selected cases use literal callbacks,
+DTOs, lexical paths, named source reads or already-loaded assembly metadata, not native startup.
+
+Cached `tsx` ran only `sessionOperations.test.ts` with an anchored exact-name pattern: `uncertain
+retry preserves epoch key session and exact text`; `stale selection and unmount suppress
+callbacks`; `epoch mismatch never resends`; `receipt recovery exposes no prompt text`; `refresh
+is explicit and never submits`. Controlled gates release in `finally`; retained work and fault
+observations receive independent five-second cleanup joins. Cached `tsc --noEmit` passed.
+
+Intermediate compilation failures were fixed without suppressions: three explicit retained-task
+discards; initially unfinished inverse linkage; wrong generated export alias; duplicate
+source-linked/imported scope type; redundant constant-only assertion. Desktop now tests the
+actual Orchestration scope via test friendship. Final Release solution build passed zero
+warnings/errors with `--no-restore -p:NeoAstraBuildFrontend=false
+-p:NeoAstraRestoreFrontendDependencies=false`. No dependency acquisition or frontend build ran.
+
+Parent matched16 whole originals to raw Git `b069dbdb`;42 context-bearing occurrence-checked
+inverse edits and48 LF/CRLF/mixed reconstructions pass, with missing/duplicate/drift/unknown/
+already-restored rejection and complete History→Workspace/owner/discovery chains. The new
+source fixture has30 direct/19 inherited content paths; the inverse reads no files. Original
+15 hashes/40 edits and all historical frozen payloads remain unchanged. App47,026<47,064;
+guide, attributes, main guard and strict decoder remain unchanged, as does unrelated work.
+
+No configured-provider/auth/network/default-profile run, React mounting, native close/package/
+platform qualification, plugin CLR loading, broad suite or website build was admitted. Native
+lease retention is source-reviewed, not termination proof; five seconds remains diagnostic.
+Website remote-theme acquisition, M2 races/file-search and broader M3–M7 parity remain open.
+The same sole child continues read-only on the next M4 projection prerequisite; no M8 is defined.

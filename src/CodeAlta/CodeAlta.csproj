@@ -28,6 +28,9 @@
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
     <ProjectReference Include="../CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="../CodeAlta.Agent/CodeAlta.Agent.csproj" />
+    <ProjectReference Include="../CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
+    <ProjectReference Include="../CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
   </ItemGroup>
   <Target Name="CodeAltaExcludeBuildOnlyContractSource" AfterTargets="NeoAstraCollectRpcArtifacts">
     <!-- Keep generated contracts for TS checking/build and runtime JSON metadata, not TS source in the tool. -->

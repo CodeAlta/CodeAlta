@@ -1,4 +1,9 @@
 using CodeAlta.Desktop.Rpc;
+using System.Collections.Frozen;
+using CodeAlta.Catalog;
+using CodeAlta.Hosting;
+using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using NeoAstra;
 using NeoAstra.Rpc;
 
@@ -6,10 +11,17 @@ namespace CodeAlta.Desktop;
 
 internal sealed class DesktopApplication(DesktopLaunchOptions options)
 {
+    private CodeAltaSingleInstanceGuard? _lease;
+    private Task<CodeAltaHost>? _hostCreation;
+    private Task? _hostDisposal;
+    private Task? _closeFlow;
+    private bool _nativeConfirmed;
+    private readonly List<Task> _diagnosticWaits = [];
     internal int ExitCode { get; private set; } = 1;
 
     internal static int Run(DesktopLaunchOptions options)
     {
+        if (options.Owned is not null) return RunOwned(options);
         Directory.CreateDirectory(options.DataRoot);
         var desktop = new DesktopApplication(options);
         var result = NeoApplication.Run(new NeoApplicationOptions
@@ -24,6 +36,210 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
     internal static bool IsApplicationDocument(Uri uri) =>
         uri.IsAbsoluteUri && uri.Scheme == "app" && uri.Host == "codealta" && uri.Port == -1 &&
         string.IsNullOrEmpty(uri.UserInfo) && uri.AbsolutePath == "/index.html" && string.IsNullOrEmpty(uri.Query);
+
+    private static int RunOwned(DesktopLaunchOptions options)
+    {
+        var desktop = new DesktopApplication(options);
+        try
+        {
+            desktop._lease = CodeAltaSingleInstanceGuard.Acquire(Path.Combine(options.CatalogRoot!, "alta.lock"));
+            Directory.CreateDirectory(options.DataRoot);
+            var result = NeoApplication.Run(new NeoApplicationOptions
+            {
+                ApplicationName = "CodeAlta", ShutdownMode = NeoApplicationShutdownMode.Explicit,
+            }, desktop.RunOwnedAsync);
+            // A native loop ending externally is NOT evidence that host work terminated.
+            if (CanReleaseOwnedLease(desktop._hostCreation, desktop._hostDisposal, desktop._nativeConfirmed)) desktop._lease.Dispose();
+            else Console.Error.WriteLine("Owned shutdown unconfirmed; the application did not release its lease.");
+            return result == 0 ? desktop.ExitCode : result;
+        }
+        catch (Exception)
+        {
+            Console.Error.WriteLine("Owned desktop startup or native lifetime failed; termination is not confirmed.");
+            return 1;
+        }
+        finally { GC.KeepAlive(desktop); } // Strong owner/lease lifetime across the synchronous native loop.
+    }
+
+    internal static bool CanReleaseOwnedLease(Task? creation, Task? disposal, bool nativeConfirmed)
+        => nativeConfirmed && ((creation is null && disposal is null) ||
+            (creation?.IsCompletedSuccessfully == true && disposal?.IsCompletedSuccessfully == true));
+
+    private async Task AwaitOwnedAsync(Task task, NeoWindow window)
+    {
+        var diagnostic = task.WaitAsync(TimeSpan.FromSeconds(5));
+        _diagnosticWaits.Add(diagnostic);
+        try { await diagnostic; }
+        catch (TimeoutException) { window.Title = "CodeAlta — owned work pending; lease retained"; }
+        await task; // The timeout above never substitutes for joining the actual work.
+    }
+
+    private async ValueTask RunOwnedAsync(NeoApplication application)
+    {
+        var roots = options.Owned!;
+        var closeRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowClose = false;
+        var shutdownUnconfirmed = false;
+        SessionOperationsService? operations = null;
+        NeoWindow? window = null;
+        IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null;
+        var bodyFailed = false;
+        try
+        {
+            window = application.CreateWindow(new NeoWindowOptions
+            {
+                Label = "main", Title = "CodeAlta — starting owned text-only host", Width = 1000, Height = 760, IsVisible = false,
+            });
+            application.MainWindow = window;
+            window.Closed += (_, _) => closed.TrySetResult();
+            window.CloseRequested += request =>
+            {
+                if (!allowClose)
+                {
+                    request.Cancel();
+                    operations?.CloseAdmission();
+                    closeRequested.TrySetResult();
+                    if (!shutdownUnconfirmed) window.Title = "CodeAlta — shutdown pending; lease retained";
+                }
+                return ValueTask.CompletedTask; // Never await host cleanup inside the native deadline.
+            };
+            window.Show();
+            var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot! };
+            _hostCreation = CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = options.CatalogRoot, CurrentProjectPath = roots.Project,
+                DiscoveryScope = new SessionDiscoveryScope(roots.Home, roots.Instructions), BuiltInSkillRoot = roots.Builtin,
+                OwnedCommandReceiptCapacity = 256, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
+                StartPlugins = false, OwnsLogging = false, IsHeadless = true,
+                ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
+                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
+            }, CancellationToken.None);
+            // The retained application flow reacts even while a native acquisition is awaiting.
+            // No native callback awaits this work; a close during host creation waits its actual result.
+            _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation);
+            await AwaitOwnedAsync(_hostCreation, window);
+            var host = await _hostCreation;
+            if (!closeRequested.Task.IsCompleted)
+            {
+                var epoch = Guid.NewGuid().ToString("D");
+                operations = new SessionOperationsService(host.Commands, epoch);
+                var assets = Path.Combine(AppContext.BaseDirectory, "assets");
+                var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
+                var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
+                {
+                    UserDataRoot = Path.Combine(options.DataRoot, "webview"),
+                    CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
+                });
+                var environment = await creatingEnvironment;
+                environmentLifetime = environment;
+                if (!closeRequested.Task.IsCompleted)
+                {
+                    // Owned-only host-wide inbound UTF-8 framing cap, not a per-method/response limit.
+                    var builder = new NeoRpcBuilder(new NeoRpcOptions
+                    {
+                        ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 208 * 1024,
+                    });
+                    builder.AddBootService(new BootService(epoch));
+                    builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
+                    builder.AddSessionOperationsService(operations);
+                    var rpc = builder.Build();
+                    rpcLifetime = rpc;
+                    var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions
+                    {
+                        ViewLabel = "main",
+                        BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
+                        BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
+                    });
+                    var view = await creatingView;
+                    viewLifetime = view;
+                    if (!closeRequested.Task.IsCompleted)
+                    {
+                        view.NavigationRequested = request => ValueTask.FromResult(new NeoNavigationDecision(
+                            IsApplicationDocument(request.Uri) ? NeoDecisionAction.Allow : NeoDecisionAction.Cancel));
+                        view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
+                        bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
+                        var navigation = view.NavigateAsync(new Uri("app://codealta/index.html"));
+                        await navigation;
+                    }
+                }
+            }
+            await closeRequested.Task;
+        }
+        catch (Exception)
+        {
+            bodyFailed = true;
+            closeRequested.TrySetResult();
+        }
+        operations?.CloseAdmission();
+        if (_closeFlow is not null)
+        {
+            try
+            {
+                if (window is not null) await AwaitOwnedAsync(_closeFlow, window);
+                else await _closeFlow;
+            }
+            catch (Exception) { bodyFailed = true; }
+        }
+        var hostConfirmed = _hostCreation is null ||
+            (_hostCreation.IsCompletedSuccessfully && _hostDisposal?.IsCompletedSuccessfully == true);
+        if (!hostConfirmed)
+        {
+            shutdownUnconfirmed = true;
+            if (window is not null) window.Title = "CodeAlta — shutdown unconfirmed; native resources and lease retained";
+            Console.Error.WriteLine("Owned host termination is unconfirmed. Admission is closed; ordinary close is blocked. External termination is not confirmed cleanup.");
+            if (window is not null) await closed.Task;
+            GC.KeepAlive(bindingLifetime);
+            GC.KeepAlive(viewLifetime);
+            GC.KeepAlive(rpcLifetime);
+            GC.KeepAlive(environmentLifetime);
+            GC.KeepAlive(window);
+            return; // No native-resource disposal, lease release or ForceShutdown on this path.
+        }
+        var nativeFailed = false;
+        foreach (var resource in new[] { bindingLifetime, viewLifetime, rpcLifetime, environmentLifetime })
+        {
+            if (resource is null) continue;
+            try
+            {
+                var disposal = resource.DisposeAsync();
+                await disposal;
+            }
+            catch (Exception) { nativeFailed = true; }
+        }
+        if (nativeFailed)
+        {
+            shutdownUnconfirmed = true;
+            if (window is not null) window.Title = "CodeAlta — native shutdown unconfirmed; lease retained";
+            Console.Error.WriteLine("Native resource cleanup failed after host joining; lease release is not confirmed.");
+            if (window is not null) await closed.Task;
+            GC.KeepAlive(bindingLifetime);
+            GC.KeepAlive(viewLifetime);
+            GC.KeepAlive(rpcLifetime);
+            GC.KeepAlive(environmentLifetime);
+            GC.KeepAlive(window);
+            return;
+        }
+        if (window is not null)
+        {
+            allowClose = true;
+            window.Close();
+            await closed.Task;
+            try { var disposal = window.DisposeAsync(); await disposal; }
+            catch (Exception) { Console.Error.WriteLine("Native window disposal failed; lease retained."); return; }
+        }
+        ExitCode = bodyFailed ? 1 : 0;
+        _nativeConfirmed = true;
+        application.ForceShutdown(); // Only after confirmed host and native-resource disposal.
+    }
+
+    private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation)
+    {
+        await closeRequested;
+        var host = await creation;
+        _hostDisposal = host.DisposeAsync().AsTask();
+        await _hostDisposal;
+    }
 
     private async ValueTask RunAsync(NeoApplication application)
     {

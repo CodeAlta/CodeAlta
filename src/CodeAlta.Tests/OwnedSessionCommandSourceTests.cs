@@ -152,20 +152,22 @@ public sealed class OwnedSessionCommandSourceTests
         {
             var source = Read(path);
             var restored = Inverse.Restore(path, source);
+            source = ReadCurrent(path);
             Assert.AreEqual(path is Inverse.Host or Inverse.Options or Inverse.Runtime or Inverse.Desktop or Inverse.Profile ? restored : source,
                 Inverse.RestoreDiscoveryInput(path, source), path);
             Assert.AreEqual(path is Inverse.Lifetime ? restored : source, Inverse.RestoreLifetimeInput(path, source), path);
         }
         foreach (var path in new[] { Inverse.Host, Inverse.Options, Inverse.Runtime, Inverse.Desktop, Inverse.Profile })
-            SessionDiscoveryScopeSourceInverse.Restore(path, Read(path));
+            SessionDiscoveryScopeSourceInverse.Restore(path, ReadCurrent(path));
 
         var lifetime = Read(Inverse.Lifetime);
         var expected = Inverse.Restore(Inverse.Lifetime, lifetime);
+        lifetime = ReadCurrent(Inverse.Lifetime);
         Assert.AreEqual(expected, PluginAuthoringProfileSourceInverse.RestoreUiContentInput(Inverse.Lifetime, lifetime));
         Assert.AreEqual(expected, PluginAuthoringProfileSourceInverse.RestoreFeedbackInput(Inverse.Lifetime, lifetime));
         // This consumer performs its own older lifetime inverse after the profile pre-map.
         PluginFeedbackExtractionSourceTests.Restore(Inverse.Lifetime, lifetime);
-        PluginFeedbackExtractionSourceTests.Restore(Inverse.Host, Read(Inverse.Host));
+        PluginFeedbackExtractionSourceTests.Restore(Inverse.Host, ReadCurrent(Inverse.Host));
         PluginMcpBackendSeparationSourceInverse.Restore(Inverse.Profile, Read(Inverse.Profile));
         PluginGitHubBackendSeparationSourceInverse.Restore(Inverse.Profile, Read(Inverse.Profile));
         const string untouched = "not a source document";
@@ -198,5 +200,8 @@ public sealed class OwnedSessionCommandSourceTests
     }
 
     private static string Read(string path, [CallerFilePath] string caller = "")
+        => DesktopOwnedSessionSourceInverse.RestoreInput(path, ReadCurrent(path, caller));
+
+    private static string ReadCurrent(string path, [CallerFilePath] string caller = "")
         => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(caller)!, "..", path)));
 }

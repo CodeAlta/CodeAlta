@@ -17,6 +17,18 @@ internal sealed partial class WorkspaceService
 {
     private readonly Func<CancellationToken, Task<WorkspaceSnapshot>>? _read;
 
+    internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads)
+    {
+        ArgumentNullException.ThrowIfNull(reads);
+        _readHistory = reads.ReadHistoryPageAsync;
+        _read = async token =>
+        {
+            var actual = reads.ReadSnapshotAsync(token);
+            var snapshot = await actual.ConfigureAwait(false);
+            return ProjectSnapshot(snapshot.Projects, snapshot.Sessions);
+        };
+    }
+
     internal WorkspaceService(string? catalogRoot)
     {
         if (catalogRoot is null) return;

@@ -16,7 +16,7 @@
     <Compile Include="../CodeAlta.Tests/PluginMcpBackendSeparationSourceInverse.cs" Link="PluginMcpBackendSeparationSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/PluginStatisticsBackendSeparationSourceInverse.cs" Link="PluginStatisticsBackendSeparationSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/SessionDiscoveryScopeSourceInverse.cs" Link="SessionDiscoveryScopeSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Orchestration/Runtime/SessionDiscoveryScope.cs" Link="SessionDiscoveryScope.cs" />
     <Compile Include="../CodeAlta.Tests/OwnedSessionCommandSourceInverse.cs" Link="OwnedSessionCommandSourceInverse.cs" />
+    <Compile Include="../CodeAlta.Tests/DesktopOwnedSessionSourceInverse.cs" Link="DesktopOwnedSessionSourceInverse.cs" />
   </ItemGroup>
 </Project>

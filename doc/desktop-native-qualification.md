@@ -2,8 +2,9 @@
 
 The production entrypoint is now [`src/CodeAlta`](../src/CodeAlta/README.md): package `CodeAlta`,
 assembly/command `alta`, ordinary `Exe`, published centrally pinned NeoAstra **0.1.0**. It is an
-**in-development boot/workspace surface**, not an agent backend. The TUI remains `CodeAlta.Tui` / `altatui`.
-Desktop declares six non-musl RIDs; TUI retains eight. No default-profile/provider/plugin startup is enabled.
+**in-development desktop surface**, not a parity-complete agent frontend. The TUI remains `CodeAlta.Tui` / `altatui`.
+Desktop declares six non-musl RIDs; TUI retains eight. Default-profile startup remains disabled;
+the separately consented owned-host integration below is still undergoing qualification.
 
 The later workspace browser adds explicit catalog-copy/cache-write opt-in; see its
 [operator constraints](../src/CodeAlta/README.md#browse-a-task-owned-catalog-copy). This has
@@ -111,6 +112,44 @@ receipt retries/capacity and dependency-disposal ordering. Eight exact owned sou
 and the Release solution build also passed again. No failed root was cleaned up. These bounded
 tests do not qualify either frontend, real providers, provider-event projection, noncooperative
 termination or native UI; they do not establish termination of the original failed fixture.
+
+### Desktop owned-session integration: managed qualification
+
+The new explicit owned-host mode composes one existing host and borrows its command and direct
+cached-read services. It requires separate owned-host consent and explicit project, discovery,
+instruction-boundary and builtin-skill roots, in addition to the existing browser/catalog-copy
+arguments. Configured registration may read credential environment variables and shipped
+defaults; later submissions may authenticate or access provider storage/network. This source
+composition is **not** permission to execute configured providers during qualification.
+
+After independent body/closure/cleanup review and exact-method admission, the parent passed
+seven literal workspace/read-drain/host-stage methods, seven Desktop operation methods
+(including two real Host/cached-store/fake-provider routes), three new source methods, ten
+unchanged lexical scope methods, eight owned-command source regressions, one host-lifetime
+source regression and four Desktop architecture checks: **40 C# cases**, zero failures/skips.
+All five exact submission-helper tests and cached TypeScript checking also passed. The fake
+fixtures use fresh explicit roots, fixture-local discovery/Git metadata and an empty plugin
+environment; failed or unconfirmed cleanup retains its root. No configured provider, React
+mounting or native application process ran. Exact identities/admissions are in the plan/parity
+ledger. The Release solution build and generated contract checking passed with no warnings or
+errors, no restore, and frontend build/restore targets disabled.
+
+Intermediate failures were corrected, not hidden: three retained-task discards, unfinished
+inverse linkage, the generated export alias, duplicate linked/imported `SessionDiscoveryScope`,
+and one redundant constant assertion. Desktop tests now use the actual Orchestration scope type
+via test friendship; no warning suppression or historical assertion weakening. All16 raw-Git
+anchors,42 context-bearing inverse edits and48 LF/CRLF/mixed reconstructions passed, including
+complete historical reader chains. App remains47,026 bytes and protected sources are unchanged.
+
+Parent source review corrected early native-resource disposal on host failure, padded GUIDs
+that invalidated byte accounting, fixture cleanup ordering, and stale-epoch presentation/retry
+handling. NeoAstra's 208-KiB setting is an owned-host **inbound frame** limit; the separate
+448-KiB receipt response budget relies on bounded validated DTO projection, not a nonexistent
+per-response transport option. Native close callbacks signal retained application flow rather
+than waiting inside NeoAstra's cancellation deadline. Failed/unconfirmed cleanup must keep the
+lease and acquired native resources, and five seconds only triggers a diagnostic. These are
+source-reviewed contracts, not current native lifecycle or noncooperative-termination proof.
+Website validation remains deferred because its configured theme can require remote acquisition.
 
 ## Preserved M0 evidence
 

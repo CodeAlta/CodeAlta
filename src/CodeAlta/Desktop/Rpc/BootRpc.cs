@@ -8,12 +8,20 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("boot", Version = 1)]
 internal sealed class BootService
 {
+    private readonly string? _epoch;
+    internal BootService() { }
+    internal BootService(string epoch) { _epoch = epoch; }
     [NeoRpcMethod("status")]
-    public BootStatus Status(BootRequest request) => new("in-development", "CodeAlta", DesktopCommandLine.Version, false);
+    public BootStatus Status(BootRequest request) => _epoch is null
+        ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
+        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch };
 }
 
 internal sealed record BootRequest;
-internal sealed record BootStatus(string State, string ProductName, string Version, bool HostAvailable);
+internal sealed record BootStatus(string State, string ProductName, string Version, bool HostAvailable)
+{
+    public string? HostEpoch { get; init; }
+}
 
 [JsonSerializable(typeof(BootRequest))]
 [JsonSerializable(typeof(BootStatus))]
@@ -23,5 +31,10 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(WorkspaceSession))]
 [JsonSerializable(typeof(HistoryRequest))]
 [JsonSerializable(typeof(HistoryResponse))]
+[JsonSerializable(typeof(SessionSendRequest))]
+[JsonSerializable(typeof(SessionAbortRequest))]
+[JsonSerializable(typeof(SessionReceiptRequest))]
+[JsonSerializable(typeof(SessionAdmission))]
+[JsonSerializable(typeof(SessionReceiptPage))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal sealed partial class DesktopJsonContext : JsonSerializerContext;

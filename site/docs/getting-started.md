@@ -11,7 +11,7 @@ The CodeAlta terminal workspace is packaged as the .NET global tool `CodeAlta.Tu
 > [!NOTE]
 > This development branch documents the terminal package rename. The commands below apply once `CodeAlta.Tui` is released; older releases used `CodeAlta` / `alta`. The replacement desktop head is still in development. Existing `~/.alta` state is not renamed or migrated by the terminal rename.
 
-The development desktop includes an opt-in workspace snapshot browser, not agent execution.
+The development desktop includes an opt-in workspace snapshot browser. Browsing alone does not enable agent execution.
 It accepts `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`.
 Use only a trusted task-owned copy, with non-overlapping roots outside `.alta`: the opt-in
 allows SQLite cache/sidecar writes. Do not use a production profile. The browser shows
@@ -21,6 +21,17 @@ replaces the displayed page. Deltas and completed content remain separate record
 shortened previews or omitted payloads are marked. The bounded reader supports UTF-8
 LF/CRLF journals, with a 128 KiB record limit; unsupported or oversized records are not
 silently skipped. If the journal changes, restart history rather than refreshing the catalog.
+
+A separate experimental owned-host mode adds existing-session text submission and explicit
+receipt refresh/retry. It additionally requires `--allow-owned-host`, `--project-root`,
+`--discovery-home`, `--instruction-root` and `--builtin-skill-root`, all with explicit existing
+absolute roots (the instruction root includes the project). This broader consent permits
+configuration/discovery reads, journal/provider-state writes and configured-provider
+registration; submissions may authenticate or use provider storage/network. Do not use a
+production profile. Plugins/probes stay off, permissions are denied and user input is cancelled.
+Receipts describe submission, not live-run completion; **Abort submission** is not general
+Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
+agent parity remain unqualified; continue using `altatui` for normal workflows.
 
 > [!IMPORTANT]
 > CodeAlta is currently distributed as preview `0.x` releases before the final `1.0`. Expect behavior, configuration shape, screenshots, and extension APIs to evolve between preview versions; review release notes before upgrading a workflow you depend on.

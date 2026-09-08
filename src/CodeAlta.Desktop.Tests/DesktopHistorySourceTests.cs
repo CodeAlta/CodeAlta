@@ -96,7 +96,7 @@ public sealed class DesktopHistorySourceTests
         return source.Replace(after, before, StringComparison.Ordinal);
     }
 
-    private static string Read(string path) => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(DesktopArchitectureTests.SourceRoot, path)));
+    private static string Read(string path) => DesktopOwnedSessionSourceInverse.RestoreInput(path, SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(DesktopArchitectureTests.SourceRoot, path))));
     private static IEnumerable<string> Representations(string text)
     {
         yield return text;

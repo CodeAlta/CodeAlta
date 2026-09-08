@@ -21,3 +21,5 @@ dd { margin: 0 0 .7rem; }
 .history-records li { border-top: 1px solid currentColor; padding-block: .75rem; overflow-wrap: anywhere; }
 .history-records pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
 .history-controls { display: flex; gap: 1rem; }
+.owned-session textarea { display: block; box-sizing: border-box; width: 100%; min-height: 8rem; font: inherit; margin-block: .5rem; }
+.owned-session button { font: inherit; margin-block: .5rem; }

@@ -105,6 +105,12 @@ public sealed class DesktopWorkspaceSourceTests
     private static string Read(string path)
     {
         var source = SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(DesktopArchitectureTests.SourceRoot, path)));
+        // This project already enters the inherited current-input gateway; never restore it twice.
+        source = path switch
+        {
+            "CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" => source,
+            _ => DesktopOwnedSessionSourceInverse.RestoreInput(path, source),
+        };
         if (path is "CodeAlta.Tests/PluginKeyBindingExtractionSourceTests.cs" or "CodeAlta.Tests/PluginUiContentExtractionSourceTests.cs" or "CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj")
             source = PluginNeutralContractSourceInverse.Restore(path, source);
         return DesktopHistorySourceTests.RestoreWorkspaceSource(path, source);

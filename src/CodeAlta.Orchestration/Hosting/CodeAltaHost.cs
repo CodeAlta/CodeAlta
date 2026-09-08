@@ -53,6 +53,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         PluginRuntime = pluginRuntime;
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);
+        WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore);
         _disposeTask = CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,
@@ -110,6 +111,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>Gets the host-owned text-send and abort admission service; completion is not transcript completion.</summary>
     public OwnedSessionCommandService Commands { get; }
+
+    /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
+    public OwnedSessionWorkspace WorkspaceReads { get; }
 
     /// <summary>
     /// Gets the project-file search service.
@@ -386,7 +390,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// </summary>
     /// <returns>The same underlying operation for repeated or concurrent callers, including its terminal failure.</returns>
     /// <remarks>
-    /// Joins owned commands, then attempts runtime, hub, registry, owned plugin and owned logging cleanup in order, even after a stage fails.
+    /// Joins owned commands and workspace reads, then attempts runtime, hub, registry, owned plugin and owned logging cleanup in order, even after a stage fails.
     /// A lone failure is rethrown unchanged; multiple failures retain their direct references in execution order,
     /// without flattening aggregates. Cancellation is recorded like other failures and does not skip later stages.
     /// There are no retries or hard timeout guarantees. Reentrant disposal of this same host is unsupported.
@@ -399,32 +403,38 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
-        Exception? commandFailure = null;
+        await DisposeOwnedWorkAsync(
+            () => Commands.DisposeAsync().AsTask(),
+            () => WorkspaceReads.DisposeAsync().AsTask(),
+            RuntimeService.DisposeAsync).ConfigureAwait(false);
+    }
+
+    // Mandatory callback seam for this existing host stage, not a replacement lifetime owner.
+    internal static async ValueTask DisposeOwnedWorkAsync(
+        Func<Task> disposeCommands, Func<Task> disposeReads, Func<ValueTask> disposeRuntime)
+    {
+        ArgumentNullException.ThrowIfNull(disposeCommands);
+        ArgumentNullException.ThrowIfNull(disposeReads);
+        ArgumentNullException.ThrowIfNull(disposeRuntime);
+        // Close read admission first, then signal commands; retain both before either await.
+        var reads = Start(disposeReads);
+        var commands = Start(disposeCommands);
+        var failures = new List<Exception>();
+        try { await commands.ConfigureAwait(false); } catch (Exception ex) { failures.Add(ex); }
+        try { await reads.ConfigureAwait(false); } catch (Exception ex) { failures.Add(ex); }
         try
         {
-            await Commands.DisposeAsync().ConfigureAwait(false);
+            var runtime = disposeRuntime();
+            await runtime.ConfigureAwait(false);
         }
-        catch (Exception ex)
-        {
-            commandFailure = ex;
-        }
+        catch (Exception ex) { failures.Add(ex); }
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException(failures);
 
-        try
+        static Task Start(Func<Task> operation)
         {
-            await RuntimeService.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception runtimeFailure)
-        {
-            if (commandFailure is not null)
-            {
-                throw new AggregateException(commandFailure, runtimeFailure);
-            }
-            throw;
-        }
-
-        if (commandFailure is not null)
-        {
-            ExceptionDispatchInfo.Capture(commandFailure).Throw();
+            try { return operation(); }
+            catch (Exception ex) { return Task.FromException(ex); }
         }
     }
 

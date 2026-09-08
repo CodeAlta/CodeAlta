@@ -119,9 +119,62 @@ The owned route passed 17 exact real-host tests using a registered fake provider
 roots and an empty plugin environment map. Tests cover retries, capacity, caller cancellation,
 attachment-aware abort, provider faults, deny/cancel interactions and disposal ordering. The
 fixture initially failed because a view header alone did not seed an agent summary; it now
-uses existing store APIs and validates durable readback before creating the host. This API is
-not wired into Desktop or TUI activation yet. Real providers, event projection, noncooperative
+uses existing store APIs and validates durable readback before creating the host. The separate
+Desktop integration below has separate fake-provider qualification; these earlier tests alone do
+not qualify that integration. TUI activation, real providers, event projection, noncooperative
 shutdown and frontend/native parity remain unqualified.
+
+### Explicit Desktop submissions and owned reads
+
+The in-development Desktop owned mode borrows `Commands` and `WorkspaceReads` from one
+`CodeAltaHost`. It requires the existing browser/catalog/cache-consent arguments plus all of
+`--allow-owned-host`, `--project-root`, `--discovery-home`, `--instruction-root` and
+`--builtin-skill-root`. Every root is explicit and absolute; the instruction root must include
+the project. This is not default-profile startup or proof of task ownership or reparse isolation.
+Browser-only and catalog-copy-only modes retain their existing behavior.
+
+Owned-mode consent includes lock, project catalog, journal, cache and provider-state writes;
+configuration, instruction and skill reads; and configured-provider registration, which can read
+declared credential environment variables and shipped defaults. Registration is lazy, not
+provider readiness. A later submission can invoke provider authentication, storage and network
+access. Plugins and probes remain disabled, and the plugin environment map is explicitly empty;
+that map does not isolate provider environments.
+
+`WorkspaceReads` retains at most eight actual uncancelled reads, rejecting excess admission
+rather than queuing. Caller cancellation stops only the wait. Snapshot reads fully consume the
+host journal's cached session store directly, including final cache writes, without
+`AgentSessionCatalog`, an uncached fallback or invalidation. History uses that same store's
+bounded page reader. The existing 200-project/500-session/700-KiB projection limits do not bound
+the underlying catalog enumeration. Host shutdown closes read admission, starts command and
+read drainage before awaiting either, joins both, and only then attempts runtime disposal.
+Settled failures preserve command/read/runtime order; noncooperative work can remain pending.
+
+Desktop mutations validate an expected host epoch before owner admission. The transport keeps
+only owner receipt references, never a second execution queue or retry policy. Up to 256 receipts
+remain available in stable 64-row pages for that epoch; reload recovers receipts, not prompt text.
+The owned RPC host uses a 208-KiB inbound frame ceiling, while validated receipt projection and
+generated-JSON checks establish a separate 448-KiB response budget. This is not a per-response
+limit supplied by NeoAstra. Text is limited to 32,768 UTF-16 units; identities are validated rather
+than silently trimmed or truncated.
+
+**Refresh submissions** is explicit. An uncertain send retains its exact epoch, retry key,
+session and text for deliberate retry; there is no polling or automatic resend. A host-epoch
+mismatch latches mutation invalidation across panel remounts and requires reload, not rekeying
+the old request. Labels describe submission
+pending/submitted/failed/cancelled, never a completed conversation. **Abort submission** targets
+one pending owned send, not an arbitrary later run or a general Stop-agent command. No runtime
+event reader or live projection is added by this vertical.
+
+The explicit catalog-copy lease belongs to the Desktop application through the synchronous
+native loop. A cancellable close signals retained shutdown work without awaiting it inside the
+native close callback. Five seconds is a diagnostic threshold, not termination: unconfirmed
+host cleanup must retain the lease and acquired native resources. Only confirmed cleanup permits
+normal final close and lease release. External/noncancellable termination is not successful
+cleanup. Native lifecycle behavior remains unqualified. Separately audited tests passed for
+real host/cached-store RPC reads and submission/replay with a registered fake provider, seven
+literal read/drain cases, generated DTO bounds, and five frontend helper cases. These do not
+execute configured providers, mount React, or prove native close behavior; see the
+[qualification record](desktop-native-qualification.md#desktop-owned-session-integration-managed-qualification).
 
 ### Immediate user-input policy
 
