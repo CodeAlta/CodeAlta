@@ -97,17 +97,23 @@ public static partial class PluginPackageVersionProvider
 /// </summary>
 public sealed record PluginRootBuildFileOptions
 {
+    /// <summary>Gets the explicit assembly authoring profile; reusable callers default to Neutral.</summary>
+    /// <remarks>Rich source-plugin hosts must select Terminal explicitly, independently of interactivity.</remarks>
+    public PluginAuthoringProfile AuthoringProfile { get; init; } = PluginAuthoringProfile.Neutral;
+
     /// <summary>Gets the folder containing the running CodeAlta assemblies.</summary>
     public required string CodeAltaExeFolder { get; init; }
 
     /// <summary>Gets the global.json object content to mirror into plugin roots.</summary>
     public required string GlobalJsonContent { get; init; }
 
-    /// <summary>Gets host CodeAlta assemblies referenced from the default load context.</summary>
-    public IReadOnlyList<string> HostAssemblyNames { get; init; } = PluginRootBuildFileGenerator.DefaultHostAssemblyNames;
+    /// <summary>Gets additional host assembly references, or null to use only the profile defaults.</summary>
+    /// <remarks>Migration: lists are now nullable and additive, not replacement defaults. Mandatory identities remain shared; Neutral rejects terminal names.</remarks>
+    public IReadOnlyList<string>? HostAssemblyNames { get; init; }
 
-    /// <summary>Gets shared external authoring package names referenced with runtime and native assets excluded.</summary>
-    public IReadOnlyList<string> SharedPackageNames { get; init; } = PluginRootBuildFileGenerator.DefaultSharedPackageNames;
+    /// <summary>Gets additional authoring packages with runtime/native assets excluded, or null for profile defaults.</summary>
+    /// <remarks>Migration: select Terminal for the former rich defaults. Explicit lists extend, rather than remove, the profile's mandatory references.</remarks>
+    public IReadOnlyList<string>? SharedPackageNames { get; init; }
 
     /// <summary>Gets shared package versions written to generated <c>Directory.Packages.props</c>.</summary>
     public IReadOnlyList<PluginPackageVersion> PackageVersions { get; init; } = [];
@@ -152,7 +158,7 @@ public sealed class PluginRootBuildFileGenerator
         "CodeAlta.Catalog",
     ];
 
-    /// <summary>Gets the default shared external package references.</summary>
+    /// <summary>Gets the Terminal compatibility catalog of shared external package references.</summary>
     public static IReadOnlyList<string> DefaultSharedPackageNames { get; } =
     [
         "Microsoft.Extensions.AI.Abstractions",
@@ -174,6 +180,8 @@ public sealed class PluginRootBuildFileGenerator
     /// <returns>The generation result.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="root"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="FormatException">Thrown when <see cref="PluginRootBuildFileOptions.GlobalJsonContent"/> is not a JSON object.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the authoring profile is invalid.</exception>
+    /// <exception cref="ArgumentException">Thrown when an additional reference is invalid or incompatible with the profile; validation precedes root mutation.</exception>
     public async ValueTask<PluginRootBuildFileGenerationResult> GenerateAsync(
         PluginRoot root,
         PluginRootBuildFileOptions options,
@@ -184,6 +192,7 @@ public sealed class PluginRootBuildFileGenerator
         ArgumentException.ThrowIfNullOrWhiteSpace(root.RootPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.CodeAltaExeFolder);
         ArgumentNullException.ThrowIfNull(options.GlobalJsonContent);
+        PluginAuthoringPolicy.ValidateBuildOptions(options);
 
         Directory.CreateDirectory(root.RootPath);
         var written = new List<string>();
@@ -249,8 +258,13 @@ public sealed class PluginRootBuildFileGenerator
     }
 
     private static IReadOnlyList<GeneratedFile> CreateFiles(PluginRootBuildFileOptions options)
+        => CreateFilesCore(options, PluginRuntimePathService.NormalizeDirectory(options.CodeAltaExeFolder));
+
+    internal static IReadOnlyList<GeneratedFile> CreateFilesCore(PluginRootBuildFileOptions options, string normalizedCodeAltaExeFolder)
     {
-        var codeAltaExeFolder = XmlEscape(PluginRuntimePathService.NormalizeDirectory(options.CodeAltaExeFolder));
+        PluginAuthoringPolicy.ValidateBuildOptions(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(normalizedCodeAltaExeFolder);
+        var codeAltaExeFolder = XmlEscape(normalizedCodeAltaExeFolder);
         var packageVersions = options.PackageVersions.ToDictionary(static version => version.Include, StringComparer.OrdinalIgnoreCase);
         var props = $"""
 {GeneratedXmlHeader}
@@ -265,6 +279,9 @@ public sealed class PluginRootBuildFileGenerator
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <CodeAltaExeFolder Condition="'$(CodeAltaExeFolder)' == ''">{codeAltaExeFolder}</CodeAltaExeFolder>
     <CodeAltaPluginRoot>$(MSBuildThisFileDirectory)</CodeAltaPluginRoot>
+    <CodeAltaPluginAuthoringProfile>{options.AuthoringProfile}</CodeAltaPluginAuthoringProfile>
+    <CodeAltaPluginAuthoringPolicyVersion>{PluginAuthoringPolicy.PolicyVersion}</CodeAltaPluginAuthoringPolicyVersion>
+    <CodeAltaPluginHostApiVersion>{PluginAuthoringPolicy.HostApiVersion}</CodeAltaPluginHostApiVersion>
   </PropertyGroup>
 </Project>
 """;
@@ -273,7 +290,7 @@ public sealed class PluginRootBuildFileGenerator
         targets.AppendLine(GeneratedXmlHeader);
         targets.AppendLine("<Project>");
         targets.AppendLine("  <ItemGroup>");
-        foreach (var assemblyName in options.HostAssemblyNames.OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
+        foreach (var assemblyName in PluginAuthoringPolicy.GetHostReferences(options.AuthoringProfile, options.HostAssemblyNames).OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
         {
             targets.AppendLine($"    <Reference Include=\"{XmlEscape(assemblyName)}\">");
             targets.AppendLine($"      <HintPath>$(CodeAltaExeFolder)\\{XmlEscape(assemblyName)}.dll</HintPath>");
@@ -281,13 +298,9 @@ public sealed class PluginRootBuildFileGenerator
             targets.AppendLine("    </Reference>");
         }
 
-        targets.AppendLine("    <Reference Include=\"CodeAlta.Plugins.Tui\" Condition=\"Exists('$(CodeAltaExeFolder)\\CodeAlta.Plugins.Tui.dll')\">");
-        targets.AppendLine("      <HintPath>$(CodeAltaExeFolder)\\CodeAlta.Plugins.Tui.dll</HintPath>");
-        targets.AppendLine("      <Private>false</Private>");
-        targets.AppendLine("    </Reference>");
         targets.AppendLine("  </ItemGroup>");
         targets.AppendLine("  <ItemGroup>");
-        foreach (var packageName in options.SharedPackageNames.OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
+        foreach (var packageName in PluginAuthoringPolicy.GetPackageReferences(options.AuthoringProfile, options.SharedPackageNames).OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
         {
             if (packageVersions.TryGetValue(packageName, out var packageVersion))
             {
@@ -402,7 +415,7 @@ public sealed class PluginRootBuildFileGenerator
     private static string SecurityElementEscape(string value)
         => System.Security.SecurityElement.Escape(value) ?? string.Empty;
 
-    private sealed record GeneratedFile(string FileName, string Content, string Marker);
+    internal sealed record GeneratedFile(string FileName, string Content, string Marker);
 
     private enum GeneratedFileWriteStatus
     {

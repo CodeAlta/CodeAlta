@@ -73,13 +73,45 @@ Provide useful text explaining terminal-only actions rather than pretending
 an unsupported action succeeded. A portable callback may return null when
 absence is intentional, but the callback itself must not be null.
 
-Generated source-plugin targets conditionally reference the optional assembly
-when it exists beside the host executable, with `Private=false`. Do not add a
-reference to the TUI executable or edit generated root files to author visuals.
-Abstractions no longer exposes terminal types or references terminal packages.
-This is a pre-release migration, not a claim of complete terminal-free plugin
-loading or desktop rendering parity: builtin implementations and generated
-source-plugin build/shared-assembly policy still contain terminal dependencies.
+Do not add a reference to the TUI executable or edit generated root files to
+author visuals. Abstractions no longer exposes terminal types or references
+terminal packages. Builtin implementations still combine backend and terminal
+code; this migration does not establish desktop rendering parity.
+
+## Source-plugin authoring profiles
+
+Reusable host, generator and loader APIs now default to
+`PluginAuthoringProfile.Neutral`. This omits host-injected terminal packages and
+the optional TUI assembly. Normal neutral loading checks dependency metadata
+and refuses terminal dependencies or dependencies it cannot inspect.
+
+Custom hosts that support existing rich source plugins must explicitly choose
+`PluginAuthoringProfile.Terminal`: use `PluginRuntimeManagerOptions.AuthoringProfile`
+or `CodeAltaHostOptions.PluginAuthoringProfile`. Direct generator callers set
+`PluginRootBuildFileOptions.AuthoringProfile`; loader/context constructors also
+have explicit-profile overloads. Use the same profile for generation and loading.
+The TUI already chooses Terminal in both startup routes, including CLI usage.
+Interactivity and the presence of an optional DLL do not choose the profile.
+Supplying a prestarted runtime does not restart or reprofile it.
+
+Terminal includes the optional assembly with `Private=false` and the existing
+five terminal authoring packages. Terminal assembly identities remain shared
+with the host, not privately copied into a plugin load context. A missing
+dependency is not a signal to silently switch to Neutral.
+
+Generation-option reference lists are now nullable and additive: null uses
+profile defaults, and explicit names extend them. Loader shared-name lists are
+also additive; mandatory identities cannot be removed, and Neutral rejects
+terminal entries. The legacy `DefaultSharedPackageNames` and
+`DefaultHostSharedAssemblyNames` properties describe Terminal compatibility,
+not Neutral defaults.
+
+Profile changes update generated inputs and invalidate existing build manifests.
+If generation fails for a root, its packages are not built or loaded from cache;
+fix the reported problem rather than editing generated files. These profiles
+are compatibility policy, not a sandbox or a restriction on packages requested
+by trusted source. Installed-plugin and real loading qualification remain separate
+from this pre-release API migration; desktop plugin hosting is not added here.
 
 ## Typed keyboard shortcuts
 

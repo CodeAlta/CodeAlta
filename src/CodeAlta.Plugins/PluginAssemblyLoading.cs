@@ -11,30 +11,64 @@ public sealed class PluginAssemblyLoadContext : AssemblyLoadContext
 {
     private readonly AssemblyDependencyResolver _resolver;
     private readonly IReadOnlySet<string> _hostSharedAssemblyNames;
+    private readonly PluginAuthoringProfile _authoringProfile;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginAssemblyLoadContext"/> class.
     /// </summary>
     /// <param name="mainAssemblyPath">The plugin output assembly path.</param>
     /// <param name="hostSharedAssemblyNames">Assembly simple names that must resolve from the default load context.</param>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="mainAssemblyPath"/> is empty.</exception>
+    /// <exception cref="ArgumentException">Thrown when the main path or an additional name is invalid, or a name requires Terminal.</exception>
+    /// <remarks>Defaults to Neutral. Additional shared names cannot remove mandatory identities; rich hosts must select Terminal.</remarks>
     public PluginAssemblyLoadContext(string mainAssemblyPath, IEnumerable<string>? hostSharedAssemblyNames = null)
-        : base($"CodeAlta.Plugin:{Path.GetFileNameWithoutExtension(mainAssemblyPath)}:{Guid.NewGuid():N}", isCollectible: true)
+        : this(mainAssemblyPath, PluginAuthoringProfile.Neutral, hostSharedAssemblyNames)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(mainAssemblyPath);
-        _resolver = new AssemblyDependencyResolver(mainAssemblyPath);
-        _hostSharedAssemblyNames = new HashSet<string>(
-            hostSharedAssemblyNames ?? PluginAssemblyLoader.DefaultHostSharedAssemblyNames,
-            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Creates a collectible context using an explicit authoring profile.</summary>
+    /// <param name="mainAssemblyPath">The plugin output assembly path.</param>
+    /// <param name="authoringProfile">The host's assembly authoring profile, not its interactivity.</param>
+    /// <exception cref="ArgumentException">Thrown when the main path is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the profile is invalid, before context creation.</exception>
+    public PluginAssemblyLoadContext(string mainAssemblyPath, PluginAuthoringProfile authoringProfile)
+        : this(mainAssemblyPath, authoringProfile, null)
+    {
+    }
+
+    /// <summary>Creates a context with additional shared identities; mandatory profile identities cannot be removed.</summary>
+    /// <param name="mainAssemblyPath">The plugin output assembly path.</param>
+    /// <param name="authoringProfile">The explicit host authoring profile.</param>
+    /// <param name="hostSharedAssemblyNames">Additional shared names, or null for the profile defaults.</param>
+    /// <exception cref="ArgumentException">Thrown when a path/name is invalid or an additional name conflicts with Neutral.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the profile is invalid, before context creation.</exception>
+    public PluginAssemblyLoadContext(string mainAssemblyPath, PluginAuthoringProfile authoringProfile, IEnumerable<string>? hostSharedAssemblyNames)
+        : this(CreateOptions(mainAssemblyPath, authoringProfile, hostSharedAssemblyNames))
+    {
+    }
+
+    private PluginAssemblyLoadContext((string Path, PluginAuthoringProfile Profile, string[] SharedNames) options)
+        : base($"CodeAlta.Plugin:{Path.GetFileNameWithoutExtension(options.Path)}:{Guid.NewGuid():N}", isCollectible: true)
+    {
+        _authoringProfile = options.Profile;
+        _hostSharedAssemblyNames = new HashSet<string>(options.SharedNames, StringComparer.OrdinalIgnoreCase);
+        _resolver = new AssemblyDependencyResolver(options.Path);
+    }
+
+    private static (string Path, PluginAuthoringProfile Profile, string[] SharedNames) CreateOptions(
+        string path, PluginAuthoringProfile profile, IEnumerable<string>? additionalNames)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return (path, profile, PluginAuthoringPolicy.GetSharedAssemblies(profile, additionalNames));
     }
 
     /// <inheritdoc />
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        if (!string.IsNullOrWhiteSpace(assemblyName.Name) && _hostSharedAssemblyNames.Contains(assemblyName.Name))
+        if (IsHostShared(assemblyName))
         {
             return AssemblyLoadContext.Default.Assemblies.FirstOrDefault(assembly =>
-                string.Equals(assembly.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase));
+                string.Equals(assembly.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase))
+                ?? AssemblyLoadContext.Default.LoadFromAssemblyName(assemblyName);
         }
 
         var assemblyPath = ResolveManagedAssemblyPath(assemblyName);
@@ -54,15 +88,27 @@ public sealed class PluginAssemblyLoadContext : AssemblyLoadContext
     /// <param name="assemblyName">The assembly name to resolve.</param>
     /// <returns>The resolved assembly path, or <see langword="null" /> when the dependency is host-shared or unresolved.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="assemblyName" /> is <see langword="null" />.</exception>
+    /// <exception cref="FileLoadException">Thrown when a terminal assembly is requested under Neutral; reserved identities never resolve privately.</exception>
     public string? ResolveManagedAssemblyPath(AssemblyName assemblyName)
     {
         ArgumentNullException.ThrowIfNull(assemblyName);
-        if (!string.IsNullOrWhiteSpace(assemblyName.Name) && _hostSharedAssemblyNames.Contains(assemblyName.Name))
+        if (IsHostShared(assemblyName))
         {
             return null;
         }
 
         return _resolver.ResolveAssemblyToPath(assemblyName);
+    }
+
+    internal void ValidateMainAssembly(string mainAssemblyPath)
+        => PluginAssemblyReferenceAdmission.Inspect(mainAssemblyPath, _authoringProfile, _hostSharedAssemblyNames, _resolver.ResolveAssemblyToPath);
+
+    private bool IsHostShared(AssemblyName assemblyName)
+    {
+        var binding = PluginAuthoringPolicy.ClassifyAssembly(_authoringProfile, assemblyName.Name ?? string.Empty, _hostSharedAssemblyNames);
+        if (binding == PluginAssemblyBinding.Forbidden)
+            throw new FileLoadException($"Assembly '{assemblyName.Name}' requires the Terminal authoring profile.");
+        return binding == PluginAssemblyBinding.Host;
     }
 
     /// <summary>
@@ -107,7 +153,7 @@ public sealed record PluginAssemblyLoadResult
 /// </summary>
 public sealed class PluginAssemblyLoader
 {
-    /// <summary>Gets the default host-shared assembly simple names.</summary>
+    /// <summary>Gets the Terminal compatibility catalog of host-shared assembly simple names.</summary>
     public static IReadOnlyList<string> DefaultHostSharedAssemblyNames { get; } =
     [
         "CodeAlta.Plugins.Abstractions",
@@ -125,14 +171,36 @@ public sealed class PluginAssemblyLoader
     ];
 
     private readonly IReadOnlyList<string> _hostSharedAssemblyNames;
+    private readonly PluginAuthoringProfile _authoringProfile;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginAssemblyLoader"/> class.
     /// </summary>
     /// <param name="hostSharedAssemblyNames">Assembly simple names shared with the host default load context.</param>
+    /// <remarks>Defaults to Neutral. Lists now add shared identities instead of replacing the mandatory defaults.</remarks>
+    /// <exception cref="ArgumentException">Thrown when an additional name is invalid or requires Terminal.</exception>
     public PluginAssemblyLoader(IEnumerable<string>? hostSharedAssemblyNames = null)
+        : this(PluginAuthoringProfile.Neutral, hostSharedAssemblyNames)
     {
-        _hostSharedAssemblyNames = (hostSharedAssemblyNames ?? DefaultHostSharedAssemblyNames).ToArray();
+    }
+
+    /// <summary>Creates a loader for an explicit host authoring profile.</summary>
+    /// <param name="authoringProfile">The assembly profile, independent of presentation capabilities.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the profile is invalid.</exception>
+    public PluginAssemblyLoader(PluginAuthoringProfile authoringProfile)
+        : this(authoringProfile, null)
+    {
+    }
+
+    /// <summary>Creates a loader retaining mandatory profile identities alongside additional shared names.</summary>
+    /// <param name="authoringProfile">The explicit authoring profile.</param>
+    /// <param name="hostSharedAssemblyNames">Additional shared names, or null for profile defaults.</param>
+    /// <exception cref="ArgumentException">Thrown when an additional name is invalid or conflicts with Neutral.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the profile is invalid.</exception>
+    public PluginAssemblyLoader(PluginAuthoringProfile authoringProfile, IEnumerable<string>? hostSharedAssemblyNames)
+    {
+        _hostSharedAssemblyNames = PluginAuthoringPolicy.GetSharedAssemblies(authoringProfile, hostSharedAssemblyNames);
+        _authoringProfile = authoringProfile;
     }
 
     /// <summary>
@@ -182,7 +250,8 @@ public sealed class PluginAssemblyLoader
         PluginAssemblyLoadContext? loadContext = null;
         try
         {
-            loadContext = new PluginAssemblyLoadContext(outputAssemblyPath, _hostSharedAssemblyNames);
+            loadContext = new PluginAssemblyLoadContext(outputAssemblyPath, _authoringProfile, _hostSharedAssemblyNames);
+            loadContext.ValidateMainAssembly(outputAssemblyPath);
             var assembly = loadContext.LoadFromAssemblyPath(outputAssemblyPath);
             return new PluginAssemblyLoadResult
             {

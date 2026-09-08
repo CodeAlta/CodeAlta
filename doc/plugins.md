@@ -74,9 +74,28 @@ Without terminal support, only the portable callback runs. With terminal support
 
 Content callbacks remain synchronous and their exceptions escape. Renderer ordinary failures are diagnosed and traversal continues; cancellation exceptions escape. Renderer contexts are invalidated only after successful callback completion, including a null result, not in a new finally block. These adapters borrow the shared runtime and add no lifetime owner.
 
-Generated source-plugin targets reference `CodeAlta.Plugins.Tui` with an MSBuild `Exists` condition and `Private=false`; hosts without that assembly do not gain it merely by generating targets. The shared assembly-name list includes the optional assembly, without a shared-project reference or eager terminal load. Generated target changes participate in the existing manifest hash invalidation. Installed-tool contents, actual default-ALC identity, absent-assembly behavior and regenerated source-plugin builds still need execution qualification.
+Source-plugin compilation and loading use an explicit authoring profile, described below. Assembly compatibility is independent of call-scoped presentation support: allowing terminal references does not authorize a native callback or make an unsupported dialog work.
 
-**Dependency boundary:** Abstractions no longer exposes terminal types or references terminal packages. Native dialog content/layout, prompt-editor anchors, shortcuts and session-event factories belong in the optional authoring assembly. Builtin plugins still mix backend and terminal code, and generated source-plugin build/shared-assembly policy still includes terminal dependencies. This contract separation does not establish backend-only builtin loading, headless source-plugin build/load closure, or desktop panel parity.
+**Dependency boundary:** Abstractions no longer exposes terminal types or references terminal packages. Native dialog content/layout, prompt-editor anchors, shortcuts and session-event factories belong in the optional authoring assembly. Builtin plugins still mix backend and terminal code. Contract and source-profile separation do not establish backend-only builtin loading, desktop panel parity or installed/runtime qualification.
+
+## Source-plugin authoring profiles (pre-release migration)
+
+`CodeAlta.Plugins.PluginAuthoringProfile` has two values:
+
+| Profile | Host-generated authoring references | Managed dependency policy |
+| --- | --- | --- |
+| `Neutral` (reusable API default) | Existing neutral CodeAlta assemblies and nonterminal shared packages; no optional TUI assembly or terminal packages | Normal plugin loading preflights reachable managed metadata and refuses `CodeAlta.Plugins.Tui` and the `XenoAtom.Terminal` assembly family. |
+| `Terminal` | The neutral references, optional `CodeAlta.Plugins.Tui` with `Private=false`, and all five existing terminal authoring packages | Terminal identities resolve through the host/default context, never a private plugin copy. |
+
+Custom hosts preserving rich source plugins must set `PluginRuntimeManagerOptions.AuthoringProfile` or `CodeAltaHostOptions.PluginAuthoringProfile` to `Terminal`. Direct generator callers set `PluginRootBuildFileOptions.AuthoringProfile`; direct loader/context callers use the explicit-profile constructor overloads. Keep generation and loading on the same profile. The TUI explicitly selects Terminal in both its early plugin bootstrap and shared-host composition, including noninteractive/CLI usage. Neither `IsHeadless`, a selected tab nor the presence of a stale DLL chooses a profile. A borrowed `PrestartedPluginRuntime` is neither restarted nor reprofiled by host options.
+
+`HostAssemblyNames` and `SharedPackageNames` on generation options are now nullable **additional** lists: null selects the profile defaults, and explicit entries extend rather than replace them. Loader/context shared-name lists are likewise additive; mandatory identities cannot be removed. Neutral rejects explicit terminal entries. The existing `DefaultSharedPackageNames` and `DefaultHostSharedAssemblyNames` properties remain Terminal compatibility catalogs, not the effective Neutral defaults. Select Terminal rather than passing those full catalogs to a Neutral host.
+
+Generated properties stamp the profile, authoring-policy version and host API version. The existing four generated-file hashes invalidate build manifests when these inputs change; no new cache schema or cleanup is required. A root whose generation reports failure is excluded from scheduling and cached loading, with its diagnostics retained; successfully generated roots continue. Do not edit marker-protected generated files or copy a terminal assembly into a neutral root as a workaround.
+
+The normal loader checks the main artifact's declared identity before loading it for either profile. Neutral additionally inspects reachable nonplatform dependency metadata without constructing plugin objects or enumerating types. It does not grant platform status to arbitrary `System.*` names or all trusted-platform-assembly entries. Unknown/uninspectable dependencies and dependencies requiring executable resolution callbacks are refused rather than guessed portable. This does not change general discovery/activation/unload guarantees, and low-level ALC APIs are not a sandbox.
+
+**Trusted-code and qualification limits:** Profiles remove host-injected terminal dependencies; they do not police arbitrary packages or transitive restore graphs requested by trusted plugin source. Asset exclusions are not a pre-restore acquisition policy. Builtin separation, real metadata/CLR behavior, regenerated rich source builds, packaged contents and default-profile startup still require their own qualification. No desktop plugin host or renderer-sidecar discovery is introduced by this migration.
 
 ## Typed key bindings (pre-release migration)
 

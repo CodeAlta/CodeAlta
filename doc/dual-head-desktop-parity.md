@@ -4,6 +4,85 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M3 follow-up: explicit source-plugin authoring profiles — 2026-09-08
+
+The same sole child implemented Neutral/Terminal source-plugin profiles against `85c25ff2`,
+without executing generation, discovery, loading or tests. Reusable APIs default to Neutral;
+both actual TUI startup paths explicitly choose Terminal, including noninteractive usage.
+Generation and loading share the profile; borrowed prestarted runtimes are not reprofiled.
+Reference overrides are validated additive simple names, not replacement lists or MSBuild
+expressions. Existing terminal package versions and runtime/native asset exclusions remain.
+Deterministic profile/policy/API properties feed the existing four generated-file hashes.
+Roots with reported generation failures cannot reach scheduling or cached loading, while
+successful requests preserve order, object identity and the existing root comparer.
+
+The normal loader preflights reserved main-artifact identity for both profiles. Neutral also
+traverses reachable managed metadata before type discovery, within existing structured Load
+diagnostics and conditional unload. Parent review corrected a resolution-domain issue:
+dependencies of Default-resolved assemblies must resolve Default-only, not through the
+plugin's private resolver. Visitation retains that domain, so a clean private dependency
+cannot mask a terminal Default dependency. Only the actual core-library path is skipped;
+System-prefixed names and all TPA entries are not platform grants. Missing, malformed or
+uninspectable dependencies are explicit failures; executable resolver callbacks are not run.
+
+Parent independently read all new production/fixture/inverse bodies and actual routing.
+**14 exact inert and eight exact source methods passed**, using FQN equality and Release
+`--no-build --no-restore`. The inert class is
+`CodeAlta.Plugins.Tests.PluginAuthoringProfileTests`; the exact methods are:
+
+- `NeutralProfile_ExcludesAllTerminalAuthoringReferences`
+- `TerminalProfile_PreservesAllRichAuthoringReferences`
+- `ExplicitOverrides_CannotBypassReservedIdentities`
+- `InvalidProfile_IsRejectedBeforeRendering`
+- `GeneratedFiles_AreIndependentOfPhysicalDllPresence`
+- `GeneratedFiles_ProfileStampChangesDeterministically`
+- `ManagedNames_NeutralRejectsTerminalFamily`
+- `ManagedNames_TerminalRequiresHostIdentity`
+- `ReferenceAdmission_RejectsDirectTerminalReference`
+- `ReferenceAdmission_RejectsTransitiveTerminalReference`
+- `ReferenceAdmission_HandlesCyclesWithoutRepeatedReads`
+- `ReferenceAdmission_RejectsUninspectablePrivateDependency`
+- `GenerationAdmission_ExcludesFailedRootsAndPreservesRequestIdentity`
+- `GenerationAdmission_AllFailedRootsProduceNoBuildRequests`
+
+The source class is `CodeAlta.Tests.PluginAuthoringProfileSourceTests`; exact methods are
+`Routes_PropagateExplicitProfileThroughBothTuiEntries`,
+`Routes_UseOneProfileForGenerationAndTheExistingLoader`,
+`Generation_FailedRootsCannotReachBuildOrCachedLoad`,
+`Cache_UsesStampedGeneratedFilesBeforeBothFastPaths`,
+`Loader_PreflightsMetadataBeforeDiscoveryWithoutActivation`,
+`Loading_ReservesTerminalIdentityWithoutPrivateFallback`,
+`Preservation_RestoresCompleteOriginalsAcrossNewlineVariants`, and
+`Preservation_ComposesEveryFrozenHistoricalChain`.
+
+Fixtures use literal normalized facts, inert DTOs/AssemblyName values, recording callbacks
+and in-memory rendering/XML/JSON/hash operations at actual production cores. They do not
+construct generators, runtimes, hosts, ADRs, ALCs or PE readers. Historical source chains and
+writerless test-assembly logging retain their prior admission; source/Git/assembly reads are
+nonzero I/O. Targeted Plugins.Tests/Main.Tests/Desktop.Tests and full solution Release builds
+passed with zero warnings/errors and no restore, with frontend build/dependency targets
+disabled. Actual Desktop history→workspace preservation initially exposed a missing whole-
+feedback-fixture inverse. The same child corrected only the Workspace frozen-read loop and
+added its complete mandatory inverse, preserving the existing reader/adjacency anchor.
+Both profile preservation methods and the separately selected exact Desktop methods
+`DesktopHistorySourceTests.Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains`
+and `DesktopArchitectureTests.DesktopAssembly_HasNoTerminalOrHostCompositionReferences`
+then passed. The final inventory is **12 complete originals, 41 mandatory inverse edits,
+36 LF/CRLF/mixed reconstructions and 18 direct profile-source reads**, plus all inherited
+historical read maps. Parent independently checked the approved raw-Git hashes; no old
+hash/payload was rebased. App remains47,026 bytes, strictly below47,064; guide, attributes,
+strict decoder and unrelated work are preserved. A separate audit script stopped when it
+mistakenly required a final newline in the intentionally newline-less `.gitattributes`;
+the existing policy and file were retained, not normalized. No real profile/credential,
+catalog, plugin-source acquisition, frontend restore or native operation was executed.
+
+These are compatibility and source-preservation checks, not real metadata/CLR/loading,
+source compilation, native UI, installed-package or default-profile qualification. Profiles
+do not prevent arbitrary trusted source from requesting terminal packages during restore,
+and inherited direct ALC entry points are not sandboxed. Builtin backend/renderer separation,
+desktop plugin hosting and remaining M3–M7 work stay open. Website qualification remains
+blocked by the remote-theme/offline constraint. No push, publish or merge is authorized.
+
 ## M3 follow-up: remaining neutral contract and package separation — 2026-09-08
 
 The same sole child implemented the dialog/layout/prompt-host closure, fixtures first and

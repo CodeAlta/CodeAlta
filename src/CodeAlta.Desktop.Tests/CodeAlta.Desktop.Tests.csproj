@@ -11,5 +11,6 @@
     <ProjectReference Include="../CodeAlta/CodeAlta.csproj" />
     <Compile Include="../CodeAlta.Tests/SourceTestText.cs" Link="SourceTestText.cs" />
     <Compile Include="../CodeAlta.Tests/PluginNeutralContractSourceInverse.cs" Link="PluginNeutralContractSourceInverse.cs" />
+    <Compile Include="../CodeAlta.Tests/PluginAuthoringProfileSourceInverse.cs" Link="PluginAuthoringProfileSourceInverse.cs" />
   </ItemGroup>
 </Project>

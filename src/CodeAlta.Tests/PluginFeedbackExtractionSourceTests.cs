@@ -66,6 +66,7 @@ public sealed class PluginFeedbackExtractionSourceTests
     internal static string Restore(string path, string source)
     {
         source = Canonical(source);
+        source = PluginAuthoringProfileSourceInverse.RestoreFeedbackInput(path, source);
         return RestoreCore(path, source);
     }
 

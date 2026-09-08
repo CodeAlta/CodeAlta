@@ -138,12 +138,14 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="Exception">Creation failed and rollback succeeded; the original exception is propagated.</exception>
     /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
     /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions are retained in that order without flattening.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the plugin authoring profile is invalid, before host acquisition.</exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.PluginStartupFeedback);
+        if (!Enum.IsDefined(options.PluginAuthoringProfile)) throw new ArgumentOutOfRangeException(nameof(options.PluginAuthoringProfile));
 
         PluginRuntimeManager? pluginRuntime = null;
         ModelProviderRegistry? modelProviderRegistry = null;
@@ -191,6 +193,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                             SafeMode = options.PluginSafeMode,
                             IsHeadless = options.IsHeadless,
                             StartupFeedback = options.PluginStartupFeedback,
+                            AuthoringProfile = options.PluginAuthoringProfile,
                             WaitForEnterAfterBuildLiveOutput = options.WaitForEnterAfterPluginLiveOutput,
                             RawArguments = options.RawArguments,
                             BuiltIns = options.PluginBuiltIns,

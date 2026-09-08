@@ -26,6 +26,12 @@ constructed by those tests; rich-rendering fixtures were adapted for compilation
 from execution. This is contract/routing evidence, not actual native presentation, installed
 plugin loading, terminal-free builtin closure or desktop transient-card qualification.
 
+The later source-plugin authoring profiles default reusable APIs to Neutral and explicitly
+retain Terminal in both TUI routes. Their inert rendering/name/metadata-graph tests do not
+execute PE inspection, assembly resolution/loading, source compilation, plugin activation or
+native startup. These profiles do not enable desktop hosting or separate builtin backends;
+neither historical native results nor successful managed builds qualify those operations.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

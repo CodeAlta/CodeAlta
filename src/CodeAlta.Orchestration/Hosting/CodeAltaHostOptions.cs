@@ -48,6 +48,10 @@ public sealed class CodeAltaHostOptions
     /// <remarks>Validated even when plugins are prestarted or disabled; never disposed by the host.</remarks>
     public IPluginStartupFeedback PluginStartupFeedback { get; init; } = new SilentPluginStartupFeedback();
 
+    /// <summary>Gets the source-plugin authoring profile for runtimes started by this host; defaults to Neutral.</summary>
+    /// <remarks>Terminal hosts must opt in independently of interactivity. A supplied prestarted runtime remains borrowed and is not reprofiled.</remarks>
+    public PluginAuthoringProfile PluginAuthoringProfile { get; init; } = PluginAuthoringProfile.Neutral;
+
     /// <summary>
     /// Gets built-in plugins to activate as part of shared host composition.
     /// </summary>

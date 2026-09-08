@@ -181,6 +181,7 @@ internal partial class Program
                     SafeMode = pluginBootstrapOptions.PluginSafeMode,
                     IsHeadless = false,
                     StartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),
+                    AuthoringProfile = PluginAuthoringProfile.Terminal,
                     WaitForEnterAfterBuildLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
                     RawArguments = args,
                     BuiltIns = CodeAltaBuiltInPlugins.All,

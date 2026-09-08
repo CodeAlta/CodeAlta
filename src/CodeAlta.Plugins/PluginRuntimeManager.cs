@@ -9,6 +9,10 @@ namespace CodeAlta.Plugins;
 /// </summary>
 public sealed record PluginRuntimeManagerOptions
 {
+    /// <summary>Gets the explicit source-plugin authoring profile; defaults to Neutral.</summary>
+    /// <remarks>Terminal hosts must opt in even on noninteractive or CLI paths. This does not select presentation capabilities.</remarks>
+    public PluginAuthoringProfile AuthoringProfile { get; init; } = PluginAuthoringProfile.Neutral;
+
     /// <summary>Gets the global CodeAlta home directory.</summary>
     public required string GlobalRoot { get; init; }
 
@@ -102,12 +106,14 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The startup result.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> or its startup feedback is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the authoring profile is invalid, before startup acquires resources.</exception>
     public async ValueTask<PluginRuntimeManagerStartResult> StartAsync(
         PluginRuntimeManagerOptions options,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.StartupFeedback);
+        PluginAuthoringPolicy.Validate(options.AuthoringProfile);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var diagnostics = new List<PluginRuntimeDiagnostic>();
@@ -217,15 +223,19 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
             liveStatus?.MarkPreparing();
             var generationOptions = new PluginRootBuildFileOptions
             {
+                AuthoringProfile = options.AuthoringProfile,
                 CodeAltaExeFolder = AppContext.BaseDirectory,
                 GlobalJsonContent = ResolveGlobalJsonContent(),
                 PackageVersions = ResolvePackageVersions(),
             };
+            var successfulRoots = new List<string>();
             foreach (var root in plan.BuildRequests.Select(static request => request.Package.Root).DistinctBy(static root => root.RootPath, StringComparer.OrdinalIgnoreCase))
             {
                 var generation = await new PluginRootBuildFileGenerator().GenerateAsync(root, generationOptions, token).ConfigureAwait(false);
                 diagnostics.AddRange(generation.Diagnostics);
+                if (generation.Succeeded) successfulRoots.Add(root.RootPath);
             }
+            var admittedBuildRequests = PluginAuthoringPolicy.FilterBuildRequests(plan.BuildRequests, successfulRoots);
 
             liveStatus?.MarkBuilding();
             var cacheRoot = Path.Combine(options.GlobalRoot, "cache");
@@ -243,7 +253,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
 
             try
             {
-                buildResults.AddRange(await scheduler.BuildAsync(plan.BuildRequests, token).ConfigureAwait(false));
+                buildResults.AddRange(await scheduler.BuildAsync(admittedBuildRequests, token).ConfigureAwait(false));
             }
             finally
             {
@@ -255,7 +265,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
 
             liveStatus?.MarkBuildsCompleted();
             liveStatus?.MarkActivating();
-            var loader = new PluginAssemblyLoader();
+            var loader = new PluginAssemblyLoader(options.AuthoringProfile);
             var typeDiscovery = new PluginTypeDiscoveryService();
             foreach (var buildResult in buildResults)
             {
@@ -360,7 +370,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
         {
             ApplicationName = "CodeAlta",
             Version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "0.0.0",
-            HostApiVersion = "1.0.0",
+            HostApiVersion = PluginAuthoringPolicy.HostApiVersion,
             UserDataDirectory = options.GlobalRoot,
             IsHeadless = options.IsHeadless,
         };
