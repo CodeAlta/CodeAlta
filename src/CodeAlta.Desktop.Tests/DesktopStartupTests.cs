@@ -46,7 +46,8 @@ public sealed class DesktopStartupTests
         var exit = DesktopCommandLine.Run(["--data-root", root], TextWriter.Null, TextWriter.Null, actual =>
         {
             calls++;
-            Assert.AreEqual(root, actual);
+            Assert.AreEqual(root, actual.DataRoot);
+            Assert.IsNull(actual.CatalogRoot);
             Assert.IsFalse(Directory.Exists(root));
             return 7;
         });

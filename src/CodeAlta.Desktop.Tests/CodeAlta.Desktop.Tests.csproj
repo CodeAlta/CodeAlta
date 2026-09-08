@@ -9,5 +9,6 @@
     <PackageReference Include="MSTest" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="../CodeAlta/CodeAlta.csproj" />
+    <Compile Include="../CodeAlta.Tests/SourceTestText.cs" Link="SourceTestText.cs" />
   </ItemGroup>
 </Project>

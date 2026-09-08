@@ -4,14 +4,14 @@ using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop;
 
-internal sealed class DesktopApplication(string root)
+internal sealed class DesktopApplication(DesktopLaunchOptions options)
 {
     internal int ExitCode { get; private set; } = 1;
 
-    internal static int Run(string root)
+    internal static int Run(DesktopLaunchOptions options)
     {
-        Directory.CreateDirectory(root);
-        var desktop = new DesktopApplication(root);
+        Directory.CreateDirectory(options.DataRoot);
+        var desktop = new DesktopApplication(options);
         var result = NeoApplication.Run(new NeoApplicationOptions
         {
             ApplicationName = "CodeAlta",
@@ -41,11 +41,12 @@ internal sealed class DesktopApplication(string root)
             var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
             await using var environment = await application.CreateEnvironmentAsync(new NeoEnvironmentOptions
             {
-                UserDataRoot = Path.Combine(root, "webview"),
+                UserDataRoot = Path.Combine(options.DataRoot, "webview"),
                 CustomSchemes = [NeoCustomScheme.Application("app", new NeoManifestResourceProvider(assets, manifest))],
             });
             var builder = new NeoRpcBuilder(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true });
             builder.AddBootService(new BootService());
+            builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             await using var rpc = builder.Build();
             window.Show();
             await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions

@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { WorkspaceSnapshot } from "#neoastra";
+import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
+
+const empty: WorkspaceSnapshot = {
+  configured: true, projects: [], sessions: [], projectsTruncated: false,
+  sessionsTruncated: false, displayTextTruncated: false,
+};
+const signal = { aborted: false } as AbortSignal;
+
+test("workspace loading transitions to populated snapshot", async () => {
+  const states: WorkspaceState[] = [];
+  const snapshot: WorkspaceSnapshot = { ...empty, projects: [{ id: "p", name: "Project", path: "/p", archived: false }] };
+  await loadWorkspace(async (request, options) => {
+    assert.deepEqual(request, {});
+    assert.equal(options.signal, signal);
+    return snapshot;
+  }, signal, state => states.push(state));
+  assert.deepEqual(states, [{ kind: "loading" }, { kind: "ready", snapshot }]);
+});
+
+test("workspace distinguishes unconfigured from empty", async () => {
+  const states: WorkspaceState[] = [];
+  await loadWorkspace(async () => ({ ...empty, configured: false }), signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "unconfigured" });
+  await loadWorkspace(async () => empty, signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "ready", snapshot: empty });
+});
+
+test("workspace reports read failure without exposing exception details", async () => {
+  const states: WorkspaceState[] = [];
+  await loadWorkspace(async () => { throw new Error("private path / credentials / locked cache"); }, signal, state => states.push(state));
+  const state = states.at(-1);
+  assert.equal(state?.kind, "error");
+  if (state?.kind === "error") {
+    assert.match(state.message, /close.*relaunch/i);
+    assert.doesNotMatch(state.message, /private|credentials/);
+  }
+});
+
+test("workspace ignores completion after abort", async () => {
+  const states: WorkspaceState[] = [];
+  let aborted = false;
+  const controlled = { get aborted() { return aborted; } } as AbortSignal;
+  const original = loadWorkspace(async () => empty, controlled, state => states.push(state));
+  aborted = true;
+  await original;
+  assert.deepEqual(states, [{ kind: "loading" }]);
+  await loadWorkspace(async () => { assert.fail("must not start after abort"); }, controlled, state => states.push(state));
+  assert.equal(states.length, 1);
+});
+
+test("workspace ignores failure after abort", async () => {
+  const states: WorkspaceState[] = [];
+  let aborted = false;
+  const controlled = { get aborted() { return aborted; } } as AbortSignal;
+  const original = loadWorkspace(async () => { throw new Error("late failure"); }, controlled, state => states.push(state));
+  aborted = true;
+  await original;
+  assert.deepEqual(states, [{ kind: "loading" }]);
+});
+
+test("workspace groups by exact persisted path and keeps global or unmatched sessions", () => {
+  const session = { id: "s", title: "Saved title", workspacePath: "/p", providerKey: null, updatedAt: "2026-01-01T00:00:00Z" };
+  const snapshot: WorkspaceSnapshot = {
+    ...empty, projects: [{ id: "p", name: "Project", path: "/p", archived: false }],
+    sessions: [session, { ...session, id: "global", workspacePath: null }, { ...session, id: "unmatched", workspacePath: "/other" }],
+  };
+  assert.deepEqual(sessionsForProject(snapshot, "p").map(value => value.id), ["s"]);
+  assert.deepEqual(sessionsForProject(snapshot, null).map(value => value.id), ["global", "unmatched"]);
+});
+
+test("workspace shows truncation without implying paging", () => {
+  assert.equal(workspaceNotice(empty), null);
+  assert.match(workspaceNotice({ ...empty, projectsTruncated: true })!, /not paging/i);
+  assert.match(workspaceNotice({ ...empty, sessionsTruncated: true })!, /whole catalog/i);
+  assert.match(workspaceNotice({ ...empty, displayTextTruncated: true })!, /shortened/i);
+});

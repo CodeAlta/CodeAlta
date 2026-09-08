@@ -2,8 +2,14 @@
 
 The production entrypoint is now [`src/CodeAlta`](../src/CodeAlta/README.md): package `CodeAlta`,
 assembly/command `alta`, ordinary `Exe`, published centrally pinned NeoAstra **0.1.0**. It is an
-**in-development boot surface**, not an agent backend. The TUI remains `CodeAlta.Tui` / `altatui`.
-Desktop declares six non-musl RIDs; TUI retains eight. No profile/provider/plugin startup is enabled.
+**in-development boot/workspace surface**, not an agent backend. The TUI remains `CodeAlta.Tui` / `altatui`.
+Desktop declares six non-musl RIDs; TUI retains eight. No default-profile/provider/plugin startup is enabled.
+
+The later workspace browser adds explicit catalog-copy/cache-write opt-in; see its
+[operator constraints](../src/CodeAlta/README.md#browse-a-task-owned-catalog-copy). This has
+not been native-qualified by the historical boot/fixture runs below. Its managed/source
+checks do not qualify real cache access, shared ownership, current run state or shutdown
+joining; the new browser root and catalog copy remain separate from the active profile.
 
 ## Preserved M0 evidence
 

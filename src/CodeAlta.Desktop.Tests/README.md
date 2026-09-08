@@ -3,7 +3,14 @@
 `CodeAlta.Desktop.Tests` is an MSTest project in the normal solution. Managed tests cover early
 help/version/argument admission without native initialization, the boot RPC's generated JSON,
 controlled navigation, frontend/package identity, dependency direction and structural lifecycle
-guards. There is no backend projection at M1b; do not add a fake application runtime to test one.
+guards. The first workspace vertical also covers actual CLI admission and durable-catalog
+projection seams using inert inputs, plus generated RPC/frontend source wiring. It does not
+construct real catalogs, SQLite, providers or a native application in behavioral fixtures.
+
+For current scoped qualification, use only independently audited exact method filters with
+`--no-build --no-restore`; the historical broad commands below are not isolation authorization.
+The exact vertical inventory and remaining gaps are recorded in
+[the parity ledger](../../doc/dual-head-desktop-parity.md). Native scripts remain separate.
 
 ```powershell
 dotnet test src/CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj -c Release
@@ -27,8 +34,8 @@ dotnet test src/CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj -c Release 
 the isolated [M0 native smoke fixture](NativeSmoke/README.md), preserving generated RPC/channel
 cancellation, lazy local assets/CM/Radix/Mermaid, dialogs and canceled/approved native close checks.
 The fixture is outside the release solution; its source/assets cannot enter the production package.
-The pinned npm graph is preserved for both consumers; the production entry only imports React and
-its boot contract, so smoke-only libraries are not in its runtime bundle.
+The pinned npm graph is preserved for both consumers; the production entry imports React and
+its boot/workspace contracts, not the smoke-only visual libraries.
 
 These scripts retain their unique evidence roots, local package feed/tool installs and native browser
 cache. They do not clean user profiles or ignored original prototype artifacts. Never publish the

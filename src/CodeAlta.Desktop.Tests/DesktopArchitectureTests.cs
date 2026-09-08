@@ -24,7 +24,8 @@ public sealed class DesktopArchitectureTests
         foreach (var reference in assembly.GetReferencedAssemblies())
         {
             Assert.IsFalse(reference.Name!.StartsWith("XenoAtom", StringComparison.Ordinal));
-            Assert.IsFalse(reference.Name.StartsWith("CodeAlta", StringComparison.Ordinal), reference.Name);
+            if (reference.Name.StartsWith("CodeAlta", StringComparison.Ordinal))
+                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }
@@ -41,7 +42,8 @@ public sealed class DesktopArchitectureTests
         CollectionAssert.AreEquivalent(new[] { "win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64" }, rids);
         Assert.AreEqual(8, tui.Descendants("RuntimeIdentifiers").Single().Value.Split(';').Length);
         Assert.AreEqual("altatui", tui.Descendants("ToolCommandName").Single().Value);
-        Assert.AreEqual(0, desktop.Descendants("ProjectReference").Count());
+        CollectionAssert.AreEqual(new[] { "../CodeAlta.Catalog/CodeAlta.Catalog.csproj" },
+            desktop.Descendants("ProjectReference").Select(value => value.Attribute("Include")!.Value).ToArray());
         var outputs = XDocument.Load(Path.Combine(SourceRoot, "CodeAlta", "Directory.Build.props"));
         Assert.AreEqual("bin/desktop/", outputs.Descendants("BaseOutputPath").Single().Value);
         Assert.AreEqual("obj/desktop/", outputs.Descendants("BaseIntermediateOutputPath").Single().Value);

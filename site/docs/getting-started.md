@@ -11,6 +11,12 @@ The CodeAlta terminal workspace is packaged as the .NET global tool `CodeAlta.Tu
 > [!NOTE]
 > This development branch documents the terminal package rename. The commands below apply once `CodeAlta.Tui` is released; older releases used `CodeAlta` / `alta`. The replacement desktop head is still in development. Existing `~/.alta` state is not renamed or migrated by the terminal rename.
 
+The development desktop includes an opt-in workspace snapshot browser, not agent execution.
+It accepts `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`.
+Use only a trusted task-owned copy, with non-overlapping roots outside `.alta`: the opt-in
+allows SQLite cache/sidecar writes. Do not use a production profile. The browser shows
+persisted project/session metadata, not live runs; use `altatui` for agent workflows.
+
 > [!IMPORTANT]
 > CodeAlta is currently distributed as preview `0.x` releases before the final `1.0`. Expect behavior, configuration shape, screenshots, and extension APIs to evolve between preview versions; review release notes before upgrading a workflow you depend on.
 

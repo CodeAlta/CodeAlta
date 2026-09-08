@@ -1,7 +1,19 @@
 :root { color-scheme: dark light; font-family: system-ui, sans-serif; }
 body { margin: 0; }
-main { max-width: 46rem; margin: 10vh auto; padding: 2rem; line-height: 1.6; }
+main { max-width: 76rem; margin: 2vh auto; padding: 2rem; line-height: 1.6; }
 h1 { font-size: 2.5rem; margin-bottom: .5rem; }
 .badge { font-weight: 600; }
 .detail { font-size: .9rem; }
 code { font-family: ui-monospace, monospace; }
+.workspace-grid { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr); gap: 2rem; }
+.choices { padding: 0; list-style: none; }
+.choices li { margin-block: .4rem; }
+.choices button { width: 100%; padding: .6rem .8rem; text-align: left; font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: .35rem; overflow-wrap: anywhere; cursor: pointer; }
+.choices button[aria-pressed="true"] { border-width: 3px; font-weight: 600; }
+button:focus-visible { outline: 3px solid Highlight; outline-offset: 3px; }
+.path, dd, code { overflow-wrap: anywhere; }
+.notice, [role="alert"] { border-inline-start: .25rem solid currentColor; padding-inline-start: 1rem; }
+.session-details { border-top: 1px solid currentColor; margin-top: 1.5rem; }
+dt { font-weight: 600; }
+dd { margin: 0 0 .7rem; }
+@media (max-width: 45rem) { .workspace-grid { grid-template-columns: 1fr; } main { padding: 1rem; } }
