@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
-using CodeAlta.Plugins.Tui;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.GitHub;
@@ -20,6 +19,22 @@ public sealed class GitHubPlugin : PluginBase
     private const string InstallGhUrl = "https://github.com/cli/cli#installation";
     private bool _ghAvailable;
     private HttpClient? _httpClient;
+    private readonly Func<GitHubPlugin, IEnumerable<PluginPromptEditorContribution>>? _createPromptEditorContributions;
+
+    /// <summary>Initializes a GitHub backend without prompt-editor presentation.</summary>
+    public GitHubPlugin()
+    {
+    }
+
+    /// <summary>Initializes a GitHub backend with explicitly composed prompt-editor contributions.</summary>
+    /// <param name="createPromptEditorContributions">A factory receiving this backend when contributions are enumerated.</param>
+    /// <remarks>The factory and its sequence are not evaluated during construction. Attachments borrow this backend; runtime initialization and disposal remain owned by the plugin runtime.</remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="createPromptEditorContributions"/> is null.</exception>
+    public GitHubPlugin(Func<GitHubPlugin, IEnumerable<PluginPromptEditorContribution>> createPromptEditorContributions)
+    {
+        ArgumentNullException.ThrowIfNull(createPromptEditorContributions);
+        _createPromptEditorContributions = createPromptEditorContributions;
+    }
 
     /// <inheritdoc />
     public override async ValueTask InitializeAsync(CancellationToken cancellationToken = default)
@@ -204,13 +219,21 @@ public sealed class GitHubPlugin : PluginBase
     /// <inheritdoc />
     public override IEnumerable<PluginPromptEditorContribution> GetPromptEditorContributions()
     {
-        yield return PluginTui.PromptEditor(
-            "GitHub issue prompt picker",
-            host => new GitHubIssuePromptAttachment(this, host),
-            "[#] to reference a GitHub issue");
+        if (_createPromptEditorContributions is null)
+        {
+            yield break;
+        }
+
+        foreach (var contribution in _createPromptEditorContributions(this))
+        {
+            yield return contribution;
+        }
     }
 
-    internal string? GetSelectedProjectPath()
+    /// <summary>Gets the selected project path from this backend's runtime workspace.</summary>
+    /// <returns>The selected project path, or null when no project is selected.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when no runtime context has been attached.</exception>
+    public string? GetSelectedProjectPath()
         => Services.Workspace.SelectedProjectPath;
 
     private static string? ResolveProjectPath(string? projectPath)

@@ -176,6 +176,9 @@ public sealed record PluginActivationOptions
 
     /// <summary>Gets the activation generation.</summary>
     public int ActivationGeneration { get; init; } = 1;
+
+    /// <summary>Gets the explicitly composed built-in factory; source plugins retain type-based activation.</summary>
+    internal Func<PluginBase>? BuiltInFactory { get; init; }
 }
 
 /// <summary>
@@ -235,10 +238,15 @@ public sealed class PluginRuntimeActivator
         PluginBase? instance = null;
         try
         {
-            instance = (PluginBase?)Activator.CreateInstance(discoveredType.Type);
+            instance = CreateInstance(options.BuiltInFactory, () => (PluginBase?)Activator.CreateInstance(discoveredType.Type));
             if (instance is null)
             {
                 throw new InvalidOperationException($"Failed to instantiate plugin type '{discoveredType.Type.FullName}'.");
+            }
+
+            if (instance.GetType() != discoveredType.Type)
+            {
+                throw new InvalidOperationException($"Plugin factory returned type '{instance.GetType().FullName}' instead of '{discoveredType.Type.FullName}'.");
             }
 
             var logger = LogManager.GetLogger($"CodeAlta.Plugin.{discoveredType.Descriptor.RuntimeKey}");
@@ -306,6 +314,10 @@ public sealed class PluginRuntimeActivator
             return new PluginActivationResult { Diagnostics = diagnostics };
         }
     }
+
+    // No retry or reflection fallback after a supplied factory returns null or throws (including cancellation).
+    internal static PluginBase? CreateInstance(Func<PluginBase>? builtInFactory, Func<PluginBase?> createFromType)
+        => builtInFactory is not null ? builtInFactory() : createFromType();
 
     private IReadOnlyList<PluginContributionRegistration> CollectContributions(
         PluginDescriptor descriptor,

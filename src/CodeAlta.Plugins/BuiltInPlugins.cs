@@ -19,7 +19,13 @@ public sealed record BuiltInPluginDefinition
     /// <summary>Gets a value indicating whether the built-in plugin is enabled by default.</summary>
     public bool EnabledByDefault { get; init; } = true;
 
-    /// <summary>Gets the factory used to create a plugin instance.</summary>
+    /// <summary>Gets the factory invoked once per built-in activation attempt.</summary>
+    /// <remarks>
+    /// Return a new instance of the resolved concrete plugin type. Metadata resolution can also invoke this
+    /// factory when <see cref="PluginType"/> is omitted; this is not an exactly-once lifetime guarantee.
+    /// Activation invokes the factory directly, without reflection's constructor-exception wrapping.
+    /// Factory cancellation follows the runtime's existing cancellation exclusion, not a reflection fallback.
+    /// </remarks>
     public required Func<PluginBase> Factory { get; init; }
 
     /// <summary>Gets the concrete plugin type, when known without invoking the factory.</summary>
@@ -46,6 +52,7 @@ public sealed record BuiltInPluginDefinition
 
     /// <summary>Resolves the concrete plugin type.</summary>
     /// <returns>The concrete plugin type.</returns>
+    /// <remarks>Without an explicit type, a factory declared to return <see cref="PluginBase"/> is invoked on each resolution. Specify <see cref="PluginType"/> to avoid metadata-time construction.</remarks>
     public Type ResolvePluginType()
         => PluginType ?? (Factory.Method.ReturnType == typeof(PluginBase) ? Factory().GetType() : Factory.Method.ReturnType);
 }

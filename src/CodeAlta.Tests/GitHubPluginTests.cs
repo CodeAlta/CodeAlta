@@ -168,7 +168,7 @@ public sealed class GitHubPluginTests
     [TestMethod]
     public void PluginContributesPromptEditorAttachment()
     {
-        var contribution = new GitHubPlugin().GetPromptEditorContributions().Single();
+        var contribution = new GitHubPlugin(GitHubTerminalContributions.CreatePromptEditorContributions).GetPromptEditorContributions().Single();
 
         Assert.AreEqual("GitHub issue prompt picker", contribution.Name);
         Assert.AreEqual("[#] to reference a GitHub issue", contribution.PlaceholderText);

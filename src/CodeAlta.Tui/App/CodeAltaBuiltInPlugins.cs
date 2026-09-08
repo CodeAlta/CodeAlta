@@ -20,7 +20,7 @@ internal static class CodeAltaBuiltInPlugins
             Description = SR.T("Adds a GitHub issue prompt picker and exposes the GitHub CLI when available."),
             EnabledByDefault = true,
             PluginType = typeof(GitHubPlugin),
-            Factory = static () => new GitHubPlugin(),
+            Factory = static () => new GitHubPlugin(GitHubTerminalContributions.CreatePromptEditorContributions),
         });
         registry.Add(new BuiltInPluginDefinition
         {

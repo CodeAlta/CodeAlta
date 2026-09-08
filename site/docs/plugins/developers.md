@@ -113,6 +113,29 @@ are compatibility policy, not a sandbox or a restriction on packages requested
 by trusted source. Installed-plugin and real loading qualification remain separate
 from this pre-release API migration; desktop plugin hosting is not added here.
 
+## Built-in GitHub presentation
+
+The GitHub backend no longer requires terminal UI assemblies. Its parameterless
+constructor provides backend operations without prompt presentation; the TUI
+explicitly injects its existing `#` picker contribution into the same plugin
+instance. The dialog, attachment, prompt parser and binding accessors belong to
+the TUI. This does not add a desktop picker or change GitHub authentication,
+network queries, the `gh` tool or backend disposal.
+
+Custom heads can pass a
+`Func<GitHubPlugin, IEnumerable<PluginPromptEditorContribution>>` to the backend
+constructor. The callback runs during contribution enumeration, receives the
+same backend, and should return contributions through the existing neutral
+contract. Attachments borrow the backend; they must not initialize or dispose it.
+
+For custom built-in registrations, `BuiltInPluginDefinition.Factory` now creates
+the actual activated instance. Return the exact registered plugin type, and
+specify `PluginType` when known to avoid the legacy metadata-time factory call.
+A null or throwing activation factory does not trigger reflection fallback.
+Direct factory exceptions differ from reflection constructor wrapping; existing
+cancellation and cleanup rules still apply. Source-plugin reflection activation
+is unchanged. MCP and Statistics backend/presentation separation remains open.
+
 ## Typed keyboard shortcuts
 
 Plugin command shortcuts now use neutral key definitions rather than terminal

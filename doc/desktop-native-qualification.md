@@ -32,6 +32,15 @@ execute PE inspection, assembly resolution/loading, source compilation, plugin a
 native startup. These profiles do not enable desktop hosting or separate builtin backends;
 neither historical native results nor successful managed builds qualify those operations.
 
+GitHub's backend/picker separation now also has parent-qualified inert composition and
+source evidence: six factory-selection, six uninitialized-backend composition, eight new
+source, eight profile-source and two Desktop preservation/assembly methods passed. Targeted
+and solution Release builds passed; refreshed cached-only assets contain no terminal,
+optional TUI or NeoAstra libraries in GitHub's backend graph. No backend context was attached,
+no initialization/authentication/query/CLI ran, and no native attachment, picker or binding
+accessor was constructed. The actual activation lifecycle and native TUI remain unqualified;
+this does not add desktop GitHub presentation or complete MCP/Statistics separation.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

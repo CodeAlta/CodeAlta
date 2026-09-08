@@ -13,9 +13,7 @@
 
   <ItemGroup>
     <PackageReference Include="XenoAtom.Logging" />
-    <PackageReference Include="XenoAtom.Terminal.UI" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
-    <ProjectReference Include="..\CodeAlta.Plugins.Tui\CodeAlta.Plugins.Tui.csproj" />
   </ItemGroup>
 </Project>

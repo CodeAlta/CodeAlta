@@ -165,7 +165,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
                     discovered,
                     sourcePackage: null,
                     loadContext: null,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory },
                     cancellationToken)
                 .ConfigureAwait(false);
             diagnostics.AddRange(activation.Diagnostics);

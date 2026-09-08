@@ -56,11 +56,11 @@ internal sealed class GitHubIssuePickerDialog
         using (_document.BeginUpdate())
         {
             _document
-                .AddColumn(new DataGridColumnInfo<string>("id", "🐙 Issue", true, GitHubIssueReferenceItem.Accessor.Id))
-                .AddColumn(new DataGridColumnInfo<string>("title", "📝 Title", true, GitHubIssueReferenceItem.Accessor.Title))
-                .AddColumn(new DataGridColumnInfo<string>("state", "🚦 State", true, GitHubIssueReferenceItem.Accessor.State))
-                .AddColumn(new DataGridColumnInfo<string>("updated", "🕒 Updated", true, GitHubIssueReferenceItem.Accessor.Updated))
-                .AddColumn(new DataGridColumnInfo<string>("link", "🔗 Link", true, GitHubIssueReferenceItem.Accessor.Link));
+                .AddColumn(new DataGridColumnInfo<string>("id", "🐙 Issue", true, GitHubIssueReferenceAccessors.Id))
+                .AddColumn(new DataGridColumnInfo<string>("title", "📝 Title", true, GitHubIssueReferenceAccessors.Title))
+                .AddColumn(new DataGridColumnInfo<string>("state", "🚦 State", true, GitHubIssueReferenceAccessors.State))
+                .AddColumn(new DataGridColumnInfo<string>("updated", "🕒 Updated", true, GitHubIssueReferenceAccessors.Updated))
+                .AddColumn(new DataGridColumnInfo<string>("link", "🔗 Link", true, GitHubIssueReferenceAccessors.Link));
         }
 
         _grid = new DataGridControl { View = new DataGridDocumentView(_document) }
@@ -422,7 +422,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "id",
             Header = new TextBlock("🐙 Issue"),
-            TypedValueAccessor = GitHubIssueReferenceItem.Accessor.Id,
+            TypedValueAccessor = GitHubIssueReferenceAccessors.Id,
             Width = GridLength.Auto,
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildIdCell, null),
@@ -431,7 +431,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "title",
             Header = new TextBlock("📝 Title"),
-            TypedValueAccessor = GitHubIssueReferenceItem.Accessor.Title,
+            TypedValueAccessor = GitHubIssueReferenceAccessors.Title,
             Width = GridLength.Star(1),
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildTitleCell, null),
@@ -440,7 +440,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "state",
             Header = new TextBlock("🚦 State"),
-            TypedValueAccessor = GitHubIssueReferenceItem.Accessor.State,
+            TypedValueAccessor = GitHubIssueReferenceAccessors.State,
             Width = GridLength.Auto,
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildStateCell, null),
@@ -449,7 +449,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "updated",
             Header = new TextBlock("🕒 Updated"),
-            TypedValueAccessor = GitHubIssueReferenceItem.Accessor.Updated,
+            TypedValueAccessor = GitHubIssueReferenceAccessors.Updated,
             Width = GridLength.Auto,
             Sortable = true,
             CellTemplate = new DataTemplate<string>(BuildUpdatedCell, null),
@@ -458,7 +458,7 @@ internal sealed class GitHubIssuePickerDialog
         {
             Key = "link",
             Header = new TextBlock("🔗 Link"),
-            TypedValueAccessor = GitHubIssueReferenceItem.Accessor.Link,
+            TypedValueAccessor = GitHubIssueReferenceAccessors.Link,
             Width = GridLength.Auto,
             Sortable = false,
             CellTemplate = new DataTemplate<string>(BuildLinkCell, null),

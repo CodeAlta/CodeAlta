@@ -35,7 +35,7 @@ public sealed class PluginNeutralContractSourceTests
         RequireOnce(chat, "internal sealed class ChatPromptEditor : PromptEditor, IProjectFileReferencePopupHost, IPluginTerminalPromptEditorHost\n");
         RequireOnce(chat, "    Visual IPluginTerminalPromptEditorHost.Visual => this;\n");
         RequireOnce(chat, ChatAttachmentLoop);
-        RequireOnce(Read("CodeAlta.Plugin.GitHub/GitHubPlugin.cs"), PluginNeutralContractSourceInverse.NewGitHubContribution);
+        RequireOnce(PluginGitHubBackendSeparationSourceInverse.Restore("CodeAlta.Plugin.GitHub/GitHubPlugin.cs", Read("CodeAlta.Plugin.GitHub/GitHubPlugin.cs")), PluginNeutralContractSourceInverse.NewGitHubContribution);
         RequireOnce(Read("CodeAlta.Plugin.GitHub/GitHubIssuePromptAttachment.cs"), "    public GitHubIssuePromptAttachment(GitHubPlugin plugin, IPluginTerminalPromptEditorHost host)\n");
         foreach (var path in new[]
         {
@@ -58,11 +58,12 @@ public sealed class PluginNeutralContractSourceTests
         var abstractions = Project("CodeAlta.Plugins.Abstractions/CodeAlta.Plugins.Abstractions.csproj");
         Assert.IsFalse(References(abstractions, "PackageReference").Any(name => name.StartsWith("XenoAtom.Terminal", StringComparison.Ordinal)));
         Assert.IsFalse(References(abstractions, "ProjectReference").Any(name => name.Contains("Plugins.Tui", StringComparison.Ordinal)));
-        Assert.IsTrue(References(Project("CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj"), "ProjectReference").Any(name => name.Contains("CodeAlta.Plugins.Tui.csproj", StringComparison.Ordinal)));
+        Assert.IsFalse(References(Project("CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj"), "ProjectReference").Any(name => name.Contains("CodeAlta.Plugins.Tui.csproj", StringComparison.Ordinal)));
         Assert.IsTrue(References(Project("CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj"), "PackageReference").Contains("XenoAtom.Terminal.UI.Extensions.Markdown"));
         Assert.IsTrue(References(Project("CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj"), "ProjectReference").Any(name => name.Contains("CodeAlta.Plugins.Tui.csproj", StringComparison.Ordinal)));
-        foreach (var path in new[] { "CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj", "CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj", "CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj" })
+        foreach (var path in new[] { "CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj", "CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" })
             Assert.IsTrue(References(Project(path), "PackageReference").Contains("XenoAtom.Terminal.UI"), path);
+        Assert.IsFalse(References(Project("CodeAlta.Plugin.GitHub/CodeAlta.Plugin.GitHub.csproj"), "PackageReference").Any(name => name.StartsWith("XenoAtom.Terminal", StringComparison.Ordinal)));
         var terminalPackages = References(Project("CodeAlta.Tui/CodeAlta.Tui.csproj"), "PackageReference");
         foreach (var package in new[] { "XenoAtom.Terminal.UI", "XenoAtom.Terminal.UI.Extensions.CodeEditor.TextMateSharp", "XenoAtom.Terminal.UI.Extensions.Markdown", "XenoAtom.Terminal.UI.Extensions.Screenshot", "XenoAtom.Terminal.UI.Graphics" })
             Assert.IsTrue(terminalPackages.Contains(package), package);
@@ -134,7 +135,7 @@ public sealed class PluginNeutralContractSourceTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CodeAlta.slnx"))) directory = directory.Parent;
         Assert.IsNotNull(directory);
-        return Path.Combine(directory.FullName, path);
+        return Path.Combine(directory.FullName, PluginGitHubBackendSeparationSourceInverse.CurrentPath(path));
     }
 
     private const string TerminalDialogContract = """

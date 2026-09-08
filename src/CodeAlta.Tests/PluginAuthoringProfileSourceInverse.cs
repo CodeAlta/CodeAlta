@@ -9,6 +9,7 @@ internal static class PluginAuthoringProfileSourceInverse
     internal static string Restore(string path, string source)
     {
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
+        source = PluginGitHubBackendSeparationSourceInverse.RestoreProfileInput(path, source);
         foreach (var (before, after) in Edits(path))
         {
             var expected = SourceTestText.Canonicalize(after);
