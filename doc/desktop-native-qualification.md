@@ -11,6 +11,13 @@ not been native-qualified by the historical boot/fixture runs below. Its managed
 checks do not qualify real cache access, shared ownership, current run state or shutdown
 joining; the new browser root and catalog copy remain separate from the active profile.
 
+The subsequent bounded-history route likewise has only managed/source/frontend-helper
+qualification: 19 new exact C# cases, four workspace source regressions and eight TS cases
+passed, with generated-contract/TypeScript/Vite and targeted/solution Release builds.
+No native process or real catalog/journal was opened. The 256 KiB page/128 KiB record bounds
+do not bound catalog discovery, prove transactional revisions or guarantee shutdown joining.
+Historical native results below do not qualify the new history UI or current packaged assets.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

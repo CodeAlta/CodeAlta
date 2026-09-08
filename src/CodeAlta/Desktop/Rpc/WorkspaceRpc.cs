@@ -13,7 +13,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// Row/string/wire limits bound the response, not the underlying whole-catalog scan or shared snapshot load.
 /// </remarks>
 [NeoRpcService("workspace", Version = 1)]
-internal sealed class WorkspaceService
+internal sealed partial class WorkspaceService
 {
     private readonly Func<CancellationToken, Task<WorkspaceSnapshot>>? _read;
 
@@ -24,7 +24,9 @@ internal sealed class WorkspaceService
         var options = new CatalogOptions { GlobalRoot = catalogRoot };
         var projects = new ProjectCatalog(options);
         var journals = new SessionViewJournalStore(options);
-        IAgentSessionCatalog sessions = new AgentSessionCatalog(journals.CreateSessionStore());
+        var store = journals.CreateSessionStore();
+        IAgentSessionCatalog sessions = new AgentSessionCatalog(store);
+        _readHistory = store.ReadHistoryPageAsync;
         _read = cancellationToken => ReadAsync(projects.LoadAsync,
             token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), cancellationToken);
     }

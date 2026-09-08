@@ -15,7 +15,12 @@ The development desktop includes an opt-in workspace snapshot browser, not agent
 It accepts `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`.
 Use only a trusted task-owned copy, with non-overlapping roots outside `.alta`: the opt-in
 allows SQLite cache/sidecar writes. Do not use a production profile. The browser shows
-persisted project/session metadata, not live runs; use `altatui` for agent workflows.
+persisted project/session metadata and bounded event-history pages, not live runs; use
+`altatui` for agent workflows. Selecting a session loads its first history page; Next page
+replaces the displayed page. Deltas and completed content remain separate records, and
+shortened previews or omitted payloads are marked. The bounded reader supports UTF-8
+LF/CRLF journals, with a 128 KiB record limit; unsupported or oversized records are not
+silently skipped. If the journal changes, restart history rather than refreshing the catalog.
 
 > [!IMPORTANT]
 > CodeAlta is currently distributed as preview `0.x` releases before the final `1.0`. Expect behavior, configuration shape, screenshots, and extension APIs to evolve between preview versions; review release notes before upgrading a workflow you depend on.

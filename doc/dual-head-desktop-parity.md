@@ -4,6 +4,40 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## Latest M4 checkpoint: bounded persisted-event history — 2026-09-08
+
+Session selection now calls generated `workspace.history` using the same retained session
+store as catalog browsing. The shared reader frames at most 256 KiB plus five probe bytes,
+limits each record to 128 KiB and each page to 100 physical records (including blank/excluded
+snapshot records). A partial boundary record is left for the next page. Managed FileStream
+read-ahead is disabled only for this route; complete-history APIs remain unchanged.
+Versioned session-bound cursors carry decimal-string offsets/length/time stamps. Before/after
+checks reject detected changes; lexical containment rejects out-of-copy journal opens after
+existing cache/discovery resolution. Earlier existence probes, reparse points, same-stamp
+rewrites, external races and catalog/discovery costs remain outside these guarantees.
+
+The desktop replaces one displayed page rather than accumulating rows. Persisted deltas,
+completed content, activity phases and notes remain distinct; preview truncation, payload
+omission and malformed-final-tail omission are explicit. Unknown/unsupported, oversized or
+interior-corrupt records do not silently advance. Failure responses hide infrastructure
+exception text. Abort and keyed request state suppress stale publications; restart clears
+paging, not the retained catalog snapshot. This is not transcript reconstruction or live parity.
+
+Parent independently audited all 19 new exact C# methods and eight TS tests before execution:
+**19 new C# + four existing workspace source regressions + eight TS tests passed**. Inert
+streams/literal callbacks exercise mandatory production seams without store/catalog/SQLite,
+provider/runtime/native acquisition. Source tests reconstruct six complete `4b63ee2f`
+originals under LF/CRLF/mixed input, then the unchanged nine-original workspace chain.
+Parent separately matched raw-Git anchors and reconstructed all six using occurrence-checked
+context diffs; App remains 47,026 bytes and guide/attributes/older fixture sources unchanged.
+Targeted and solution Release builds, generated contract validation, TypeScript checking and
+cached Vite production build passed, without restore/fetch/install or application launch.
+
+No actual cache/history access, React mounting/visual lifecycle, native/package/platform,
+full-suite or website qualification was added. The site still lacks an approved offline
+remote-theme route. Catalog cancellation/teardown and revision limitations remain. M3 closure,
+M4 execution/recovery, M5–M7 parity and deferred M2/file-search gates remain open; no M8 exists.
+
 ## Scope and evidence rules
 
 - Target identities are desktop `CodeAlta` → `alta` and terminal `CodeAlta.Tui` → `altatui`, sharing .NET application/runtime services and durable state. Terminal identity is implemented at M1a; desktop and shared-service extraction remain in progress.

@@ -347,6 +347,51 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
         await UpsertCacheFromFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Reads one bounded page of persisted events without materializing complete history.</summary>
+    /// <param name="sessionId">Durable catalog identity, not necessarily an event's provider/runtime identity.</param>
+    /// <param name="cursor">A previous page's continuation, or null to start at the beginning.</param>
+    /// <param name="cancellationToken">Cancels lookup, gate admission and asynchronous reads.</param>
+    /// <returns>At most 100 physical records' projected events and an optional continuation.</returns>
+    /// <remarks>
+    /// Journal input is bounded to 256 KiB plus five probe bytes per page; records to 128 KiB.
+    /// Only UTF-8 LF/CRLF journals are supported here. Existing complete-history readers are unchanged.
+    /// Lookup retains normal cache errors and directory discovery; those costs are not bounded by paging.
+    /// Containment guards the history open, not earlier cache existence probes or copied-cache metadata.
+    /// File length/time detects changes, not same-stamp rewrites or all external-writer races.
+    /// The shared gate is in-process only; lexical containment does not isolate reparse points.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The session identifier is empty.</exception>
+    /// <exception cref="AgentSessionHistoryException">The cursor, journal format, revision or resolved path cannot be used.</exception>
+    /// <exception cref="IOException">Journal access fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">Journal access is denied.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public async Task<AgentSessionHistoryPage> ReadHistoryPageAsync(
+        string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        AgentJournalHistoryReader.ValidateCursor(sessionId, cursor);
+        var path = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (path is null) throw new AgentSessionHistoryException("missing_session");
+        return await AgentJournalHistoryReader.OpenContainedAsync(_layout.SessionsRootPath, path, (containedPath, token) =>
+            _journalFile.WithPathLockAsync(containedPath, async () =>
+            {
+                await using var stream = await OpenHistoryReadStreamAsync(containedPath, token).ConfigureAwait(false);
+                return await AgentJournalHistoryReader.ReadAsync(stream, sessionId, cursor, () =>
+                {
+                    var stamp = GetFileStamp(containedPath);
+                    return stamp is null ? throw new AgentSessionHistoryException("history_changed")
+                        : new AgentJournalHistoryReader.Stamp(stamp.Value.Length, stamp.Value.LastWriteTimeUtc.Ticks);
+                }, token).ConfigureAwait(false);
+            }, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Disable managed read-ahead so the stream requests respect the page-plus-probe byte budget.
+    private static Task<FileStream> OpenHistoryReadStreamAsync(string path, CancellationToken cancellationToken)
+        => AgentSessionJournalFile.RetryFileOperationAsync(
+            () => Task.FromResult(new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, bufferSize: 1, useAsync: true)),
+            ReadRetryTime, cancellationToken);
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<AgentEvent>> ReadEventsAsync(
         string protocolFamily,

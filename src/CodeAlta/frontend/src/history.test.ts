@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { HistoryResponse } from "#neoastra";
+import { loadHistory, historyMessage, type HistoryState } from "./history";
+
+const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
+const request = { sessionId: "s", cursor: null };
+const signal = { aborted: false } as AbortSignal;
+
+test("selection loads persisted history", async () => {
+  const states: HistoryState[] = [];
+  await loadHistory(async (actual, options) => {
+    assert.deepEqual(actual, request);
+    assert.equal(options.signal, signal);
+    return page;
+  }, request, signal, state => states.push(state));
+  assert.deepEqual(states.map(state => state.kind), ["loading", "ready"]);
+});
+
+test("selection change suppresses stale success", async () => {
+  const states: HistoryState[] = [];
+  let aborted = false;
+  const controlled = { get aborted() { return aborted; } } as AbortSignal;
+  const original = loadHistory(async () => page, request, controlled, state => states.push(state));
+  aborted = true;
+  await original;
+  assert.equal(states.length, 1);
+});
+
+test("selection change suppresses stale failure", async () => {
+  const states: HistoryState[] = [];
+  let aborted = false;
+  const controlled = { get aborted() { return aborted; } } as AbortSignal;
+  const original = loadHistory(async () => { throw new Error("late private failure"); }, request, controlled, state => states.push(state));
+  aborted = true;
+  await original;
+  assert.equal(states.length, 1);
+});
+
+test("reselection does not revive an old request", async () => {
+  const states: HistoryState[] = [];
+  let aborted = false;
+  const oldSignal = { get aborted() { return aborted; } } as AbortSignal;
+  const original = loadHistory(async () => ({ ...page, status: "missing_session" }), request, oldSignal, state => states.push(state));
+  aborted = true;
+  await loadHistory(async () => page, request, signal, state => states.push(state));
+  await original;
+  assert.equal(states.at(-1)?.kind, "ready");
+  await loadHistory(async () => { assert.fail("aborted request started"); }, request, oldSignal, state => states.push(state));
+  assert.equal(states.length, 3);
+});
+
+test("paging replaces rather than accumulates rows", async () => {
+  const entry: HistoryResponse["entries"][number] = {
+    offset: "0", eventType: "contentDelta", providerId: "p", sessionId: "runtime", runId: null,
+    timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: "content",
+    activityId: null, parentActivityId: null, name: null, text: "delta", textTruncated: false, bodyOmitted: false,
+  };
+  let current: HistoryState | undefined;
+  await loadHistory(async () => ({ ...page, entries: [entry] }), request, signal, state => { current = state; });
+  const next = { ...request, cursor: { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" } };
+  const replacement = { ...page, entries: [{ ...entry, offset: "10", eventType: "contentCompleted", text: "final" }] };
+  await loadHistory(async () => replacement, next, signal, state => { current = state; });
+  assert.deepEqual(current, { kind: "ready", request: next, page: replacement });
+});
+
+test("history change resets the cursor", async () => {
+  const states: HistoryState[] = [];
+  const old = { ...request, cursor: { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" } };
+  await loadHistory(async () => ({ ...page, status: "history_changed" }), old, signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "error", request: old, code: "history_changed" });
+  assert.match(historyMessage("history_changed"), /restart/i);
+  // Explicit restart, not an automatic retry loop; the actual button is source-guarded.
+  await loadHistory(async (actual) => { assert.equal(actual.cursor, null); return page; }, request, signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "ready", request, page });
+});
+
+test("empty pages preserve continuation", async () => {
+  const next = { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" };
+  const states: HistoryState[] = [];
+  await loadHistory(async () => ({ ...page, next }), request, signal, state => states.push(state));
+  const last = states.at(-1);
+  assert.equal(last?.kind, "ready");
+  if (last?.kind === "ready") assert.deepEqual(last.page.next, next);
+});
+
+test("history displays structured failures and omission notices", async () => {
+  const states: HistoryState[] = [];
+  await loadHistory(async () => { throw new Error("private/cache"); }, request, signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "error", request, code: "read_failed" });
+  assert.doesNotMatch(historyMessage("read_failed"), /private/);
+  assert.match(historyMessage("unsupported_format"), /UTF-8/);
+  await loadHistory(async () => ({ ...page, tailOmitted: true }), request, signal, state => states.push(state));
+  const last = states.at(-1);
+  if (last?.kind !== "ready") assert.fail("missing page");
+  assert.equal(last.page.tailOmitted, true);
+});

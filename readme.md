@@ -6,7 +6,7 @@ CodeAlta is a terminal workspace for agentic coding. It brings model-provider se
 
 > On this development branch, the terminal package is renamed to `CodeAlta.Tui` / `altatui`. Installation commands below describe that package once released. Existing releases used `CodeAlta` / `alta`; the replacement desktop head is still in development. Shared `~/.alta` state and the in-session `alta` tool keep their identities.
 
-The development desktop now includes an opt-in [workspace snapshot browser](src/CodeAlta/README.md#browse-a-task-owned-catalog-copy) for a trusted task-owned catalog copy. It requires separate explicit roots and cache-write consent; it is not shared-profile startup or an agent execution frontend. Continue using `altatui` for agent workflows.
+The development desktop now includes an opt-in [workspace snapshot browser](src/CodeAlta/README.md#browse-a-task-owned-catalog-copy) and bounded persisted-event history for a trusted task-owned catalog copy. History pages preserve separate deltas/completed records, not a reconstructed conversation or live run. It requires separate explicit roots and cache-write consent; it is not shared-profile startup or an agent execution frontend. Continue using `altatui` for agent workflows.
 
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">

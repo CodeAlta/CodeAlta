@@ -2,6 +2,8 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { boot, workspace, type BootStatus } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
+import { loadHistory, historyMessage, type HistoryState } from "./history";
+import type { HistoryRequest } from "#neoastra";
 import "./style.css";
 
 function App() {
@@ -28,7 +30,7 @@ function App() {
   return <main>
     <h1>CodeAlta</h1>
     <p className="badge">Desktop — in development</p>
-    <p>Browse persisted workspace metadata from a trusted task-owned <strong>COPY</strong>. This is not live session state: sending, resuming, events and history are not connected.</p>
+    <p>Browse persisted workspace metadata from a trusted task-owned <strong>COPY</strong>. Read-only persisted history is available on selection. This is not live session state: sending, resuming and live events are not connected.</p>
     <p>Use <code>altatui</code> for current agent functionality.</p>
     <p role="status">{error ?? (status ? `Desktop bridge ready · ${status.version}` : "Initializing desktop bridge…")}</p>
     <p className="detail">Browser storage uses the separate new <code>--data-root</code>. Catalog browsing requires <code>--catalog-root</code> and <code>--allow-catalog-cache</code>: the shared loader may write <code>cache/cache.sqlite3</code> and SQLite sidecars in that copy. No default or production profile is opened. Path spelling does not prove ownership or isolate reparse points.</p>
@@ -74,10 +76,51 @@ function App() {
             <dt>Configured provider key</dt><dd>{selectedSession.providerKey || "Not recorded"}</dd>
             <dt>Persisted update time</dt><dd>{selectedSession.updatedAt}</dd>
           </dl>
+          <History key={selectedSession.id} sessionId={selectedSession.id} />
         </section>}
       </>}
     </section>
   </main>;
+}
+
+function History({ sessionId }: { sessionId: string }) {
+  const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
+  const [state, setState] = useState<HistoryState>();
+  useEffect(() => {
+    const abort = new AbortController();
+    void loadHistory(workspace.history, request, abort.signal, setState);
+    return () => abort.abort();
+  }, [request]);
+  const current = state?.request === request ? state : undefined;
+  const page = current?.kind === "ready" ? current.page : undefined;
+  return <section aria-labelledby="history-heading">
+    <h3 id="history-heading">Persisted event history</h3>
+    <p className="detail">One bounded page in journal order, not a reconstructed conversation. Deltas and completed content remain separate records. UTF-8 LF/CRLF only; payloads may be omitted or previews shortened. This does not refresh the catalog.</p>
+    <p className="detail">Length/time checks detect changes, not same-stamp rewrites or all external-writer races. Canceling history forwards cancellation but does not guarantee stopping catalog loads or joining work on window close.</p>
+    {(!current || current.kind === "loading") && <p role="status">Loading persisted history…</p>}
+    {current?.kind === "error" && <p role="alert">{historyMessage(current.code)}</p>}
+    {page && <>
+      {page.entries.length === 0 && <p role="status">No visible events in this page. Metadata and blank records still count toward its read limit.</p>}
+      {page.tailOmitted && <p role="status">The malformed final journal record was omitted; this is not complete history.</p>}
+      <ol className="history-records">
+        {page.entries.map(entry => <li key={entry.offset}>
+          <strong>{entry.eventType}{entry.kind ? ` · ${entry.kind}` : ""}{entry.phase ? ` · ${entry.phase}` : ""}</strong>
+          <div className="detail">{entry.timestamp} · byte {entry.offset} · provider {entry.providerId} · recorded session {entry.sessionId}{entry.runId ? ` · run ${entry.runId}` : ""}</div>
+          {entry.contentId && <div className="detail">Content: {entry.contentId}</div>}
+          {entry.activityId && <div className="detail">Activity: {entry.activityId}</div>}
+          {entry.parentActivityId && <div className="detail">Parent activity: {entry.parentActivityId}</div>}
+          {entry.name && <p>{entry.name}</p>}
+          {entry.text !== null && <pre>{entry.text}</pre>}
+          {entry.textTruncated && <p className="detail">Display preview shortened.</p>}
+          {entry.bodyOmitted && <p className="detail">Additional stored payload omitted. No action is available for this record.</p>}
+        </li>)}
+      </ol>
+    </>}
+    <div className="history-controls">
+      <button type="button" onClick={() => setRequest({ sessionId, cursor: null })}>Restart history</button>
+      {page?.next && <button type="button" onClick={() => setRequest({ sessionId, cursor: page.next })}>Next page</button>}
+    </div>
+  </section>;
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);

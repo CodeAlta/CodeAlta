@@ -35,7 +35,17 @@ the isolated [M0 native smoke fixture](NativeSmoke/README.md), preserving genera
 cancellation, lazy local assets/CM/Radix/Mermaid, dialogs and canceled/approved native close checks.
 The fixture is outside the release solution; its source/assets cannot enter the production package.
 The pinned npm graph is preserved for both consumers; the production entry imports React and
-its boot/workspace contracts, not the smoke-only visual libraries.
+its boot/workspace/history contracts, not the smoke-only visual libraries.
+
+The bounded-history slice was verified with 19 individually audited C# methods (10 inert
+stream/containment, five RPC projection/callback, four named-source checks), four existing
+workspace source regressions and eight tests in `frontend/src/history.test.ts`. Contract
+generation/checking, TypeScript checking, cached Vite production build and targeted/solution
+Release builds passed without dependency fetching. These tests do not construct stores,
+catalogs, SQLite, runtime or native hosts. They do not qualify actual copied-cache access,
+renderer mounting/visual interaction, transactional revisions or shutdown joining. Source
+checks preserve six entire originals and the preceding workspace inverse chain; frontend
+helper tests plus source wiring are not DOM/React lifecycle tests.
 
 These scripts retain their unique evidence roots, local package feed/tool installs and native browser
 cache. They do not clean user profiles or ignored original prototype artifacts. Never publish the

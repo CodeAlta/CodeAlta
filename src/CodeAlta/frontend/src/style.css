@@ -17,3 +17,7 @@ button:focus-visible { outline: 3px solid Highlight; outline-offset: 3px; }
 dt { font-weight: 600; }
 dd { margin: 0 0 .7rem; }
 @media (max-width: 45rem) { .workspace-grid { grid-template-columns: 1fr; } main { padding: 1rem; } }
+.history-records { padding-inline-start: 1.5rem; }
+.history-records li { border-top: 1px solid currentColor; padding-block: .75rem; overflow-wrap: anywhere; }
+.history-records pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+.history-controls { display: flex; gap: 1rem; }

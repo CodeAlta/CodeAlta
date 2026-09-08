@@ -33,6 +33,11 @@ Both catalog options are required together. The roots must not overlap, and neit
 under a `.alta` path component. Path spelling does not prove ownership or protect against
 symlinks/reparse points: do not point this mode at a production profile or an untrusted tree.
 Preparing the copy is an explicit operator action; the application does not copy a profile.
+Prepare it without copying `cache/cache.sqlite3` or its sidecars: existing cache rows can
+contain absolute paths into the original tree. Normal shared cache creation then indexes
+the copy. The desktop does not silently repair copied cache paths or switch discovery
+strategies after an error; history refuses resolved paths outside the copy's sessions root.
+Existing cache lookup can still probe whether a stored path exists before that refusal.
 
 **This is not read-only filesystem access.** The opt-in permits the shared durable catalog
 to create, rebuild and update `cache/cache.sqlite3` and SQLite sidecars in the copy. It does
@@ -47,6 +52,30 @@ or run-abort contract. Relaunch with a fresh browser data directory to load anot
 Canceling an RPC waiter does not stop the shared catalog's background load. Existing RPC
 teardown waits only a bounded time, so cache work can outlive bridge teardown; complete
 native lifecycle qualification remains open.
+
+### Persisted event history
+
+Selecting a session loads a bounded page of its persisted canonical events. Next-page
+navigation replaces the current page rather than growing an unbounded transcript in the
+browser. Content deltas, completed content and activity phases remain distinct records;
+this is not a reconstructed conversation or a live stream. Permissions and other stored
+requests are historical records, not actionable approvals. Previews can be shortened or
+omitted explicitly; arbitrary provider payloads are not sent to the frontend.
+
+The shared reader limits page input to 256 KiB, individual records to 128 KiB and work to
+100 physical records, plus bounded framing probes. Blank and metadata-only records count,
+so an empty visible page can still offer continuation. UTF-8 journals with optional BOM
+and LF/CRLF framing are supported; other legacy encodings/framing and oversized records
+surface explicit limitations instead of unbounded reads. A malformed final record may be
+omitted with a notice; interior corruption is an error. Existing complete-history readers
+are unchanged.
+
+Cursors belong to one session and journal length/time stamp. A detected change requires
+restarting history from the beginning; it does not refresh the shared session catalog.
+Length/time detects ordinary changes, not same-stamp rewrites or every external-writer
+race. Selecting another session, changing page or closing the view cancels the waiter and
+suppresses late results. These checks do not establish native shutdown safety, reparse
+isolation, bounded catalog discovery, live recovery or full timeline parity.
 
 Build outputs use `bin/desktop` and `obj/desktop` to avoid reusing the pre-rename TUI residue.
 Generated frontend contracts/client remain build-only inputs under `obj/neoastra`.
