@@ -111,6 +111,8 @@ internal sealed partial class WorkspaceService
             }
             var provider = value.ProviderId.Value;
             var run = value.RunId?.Value;
+            ValidateIdentity(provider, 256, required: true);
+            ValidateIdentity(value.SessionId, 256, required: true);
             var identityCost = 0;
             foreach (var id in new[] { provider, value.SessionId, run, kind, phase, contentId, activityId, parentId })
             {

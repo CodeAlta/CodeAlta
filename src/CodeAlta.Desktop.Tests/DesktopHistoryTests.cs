@@ -106,6 +106,23 @@ public sealed class DesktopHistoryTests
     }
 
     [TestMethod]
+    public void Projection_RejectsMissingRequiredEventIdentities()
+    {
+        foreach (var value in new AgentEvent[]
+        {
+            new AgentErrorEvent(default, "runtime", DateTimeOffset.UnixEpoch, "error"),
+            new AgentErrorEvent(new("p"), null!, DateTimeOffset.UnixEpoch, "error"),
+            new AgentErrorEvent(new("p"), "", DateTimeOffset.UnixEpoch, "error"),
+            new AgentErrorEvent(new("p"), " ", DateTimeOffset.UnixEpoch, "error"),
+        })
+        {
+            // Missing JSON constructor arguments can yield these values despite nonnullable annotations.
+            Assert.ThrowsExactly<InvalidDataException>(() => WorkspaceService.ProjectHistory(
+                new AgentSessionHistoryPage([new AgentSessionHistoryEntry(0, value)], null, false)));
+        }
+    }
+
+    [TestMethod]
     public void Projection_BoundsGeneratedJsonAndMarksOmissions()
     {
         var text = new string('\u0001', 120_000) + "😀";

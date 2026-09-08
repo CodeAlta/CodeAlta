@@ -38,6 +38,18 @@ full-suite or website qualification was added. The site still lacks an approved 
 remote-theme route. Catalog cancellation/teardown and revision limitations remain. M3 closure,
 M4 execution/recovery, M5–M7 parity and deferred M2/file-search gates remain open; no M8 exists.
 
+### History identity follow-up
+
+Parent review found that a default provider ID or missing event session ID could produce
+null required strings in the generated response despite C# nonnullable annotations. The
+new exact inert method `CodeAlta.Desktop.Tests.DesktopHistoryTests.Projection_RejectsMissingRequiredEventIdentities`
+failed before the fix (expected validation exception, none thrown). Projection now requires
+both identities before creating rows; the existing RPC failure mapping withholds the page
+without exposing infrastructure details. Rebuilt targeted Release/contract checking passed;
+that method plus the nine previously audited history desktop methods passed10/10. Existing
+source inverses remain unchanged. This adds one regression case to the history evidence,
+not new native/cache/DOM or full-suite qualification.
+
 ## Scope and evidence rules
 
 - Target identities are desktop `CodeAlta` → `alta` and terminal `CodeAlta.Tui` → `altatui`, sharing .NET application/runtime services and durable state. Terminal identity is implemented at M1a; desktop and shared-service extraction remain in progress.
