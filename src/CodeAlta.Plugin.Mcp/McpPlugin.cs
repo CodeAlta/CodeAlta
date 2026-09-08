@@ -26,13 +26,9 @@ public sealed class McpPlugin : PluginBase
     private readonly McpManagementService _managementService = new();
     private readonly State<int> _statusRevision = new(0);
 
-    private static readonly PluginKeyBinding ManageServersKeyBinding = new()
-    {
-        DisplayText = "Ctrl+G Ctrl+Y",
-        Sequence = new KeySequence(
-            new KeyGesture(TerminalChar.CtrlG, TerminalModifiers.Ctrl),
-            new KeyGesture(TerminalChar.CtrlY, TerminalModifiers.Ctrl)),
-    };
+    private static readonly PluginKeyBinding ManageServersKeyBinding = new(
+        new PluginKeyGesture('G', PluginKeyModifiers.Ctrl),
+        new PluginKeyGesture('Y', PluginKeyModifiers.Ctrl));
 
     /// <summary>
     /// Initializes a new instance of the <see cref="McpPlugin"/> class.

@@ -138,7 +138,7 @@ public sealed class PluginContributionRegistryTests
             new PluginCommandContribution
             {
                 Name = "same-command",
-                KeyBinding = new PluginKeyBinding { DisplayText = "Ctrl+X" },
+                KeyBinding = new PluginKeyBinding(new PluginKeyGesture('X', PluginKeyModifiers.Ctrl)),
                 Handler = static (_, _) => ValueTask.FromResult(PluginCommandResult.Handled),
             },
         ], 1);

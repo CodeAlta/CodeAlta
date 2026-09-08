@@ -3,7 +3,9 @@ using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using CodeAlta.Tui.Models;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI;
+using XenoAtom.Terminal.UI.Input;
 
 namespace CodeAlta.Tui.Frontend.Commands;
 
@@ -18,9 +20,15 @@ internal static class PluginShellCommandAdapter
         }
     }
 
-    private static ShellCommand CreateCommand(PluginCommandContribution contribution)
+    internal static ShellCommand CreateCommand(PluginCommandContribution contribution)
     {
         ArgumentNullException.ThrowIfNull(contribution);
+        KeyGesture? gesture = null;
+        KeySequence? sequence = null;
+        if (contribution.KeyBinding is { } binding)
+        {
+            PluginTerminalKeyBindingMapper.TryMap(binding, out gesture, out sequence);
+        }
         return new ShellCommand
         {
             Id = $"Plugin.{contribution.Name}",
@@ -30,8 +38,8 @@ internal static class PluginShellCommandAdapter
             Placement = ResolvePlacement(contribution.Placement),
             Name = contribution.Name,
             SearchText = contribution.SearchText,
-            Gesture = contribution.KeyBinding?.Gesture,
-            Sequence = contribution.KeyBinding?.Sequence,
+            Gesture = gesture,
+            Sequence = sequence,
             ShowInCommandBar = contribution.ShowInCommandBar,
             ShowInCommandPalette = contribution.ShowInCommandPalette,
             ShowInHelp = contribution.ShowInHelp,

@@ -23,6 +23,12 @@ The TUI explicitly enables call-scoped `SupportsTerminalVisuals`; other callers 
 
 Generated targets conditionally reference the optional assembly with MSBuild `Exists` and `Private=false`; do not add a TUI executable reference or modify generated root files. Other abstraction contracts and builtin implementations still have terminal dependencies: this slice does not establish backend-only loading or desktop parity. Source samples remain trusted executable code; do not copy them into a live plugin root merely to inspect them.
 
+## Typed command shortcuts
+
+Author `PluginCommandContribution.KeyBinding` with `new PluginKeyBinding(...)` containing one to four neutral `PluginKeyGesture` strokes. A stroke is a `PluginKey` named key or a character/`System.Text.Rune`, with explicit `PluginKeyModifiers` flags. For Ctrl+G then Ctrl+Y, use `new PluginKeyBinding(new PluginKeyGesture('G', PluginKeyModifiers.Ctrl), new PluginKeyGesture('Y', PluginKeyModifiers.Ctrl))`. Do not use the removed `DisplayText`/terminal `Gesture`/terminal `Sequence` initializer API or raw control-character constants. Unbound commands use null. Definitions validate keys/modifiers/scalars/length, reject default strokes, normalize only letters invariantly and copy their inputs.
+
+The TUI's optional mapper preserves modifier bits and maps Ctrl letters to terminal encoding. Unsupported scalars leave the entire binding unbound without removing the command or changing its visibility. Structural conflict keys use stroke kinds/identities/modifiers/order rather than display text, and warnings do not resolve collisions. Native dispatch/timing remains unchanged; Meta is retained for matching but omitted by the existing native hint formatter. Do not claim desktop shortcut routing, IME/physical-key semantics, or cross-terminal delivery from this contract migration.
+
 ## Samples
 
 Copy one of the `samples/*` folders to `~/.alta/plugins/<sample-name>/` or `<project>/.alta/plugins/<sample-name>/`; it will be discovered, built, and loaded on the next startup unless disabled in TOML:

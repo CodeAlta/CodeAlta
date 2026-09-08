@@ -76,7 +76,27 @@ Content callbacks remain synchronous and their exceptions escape. Renderer ordin
 
 Generated source-plugin targets reference `CodeAlta.Plugins.Tui` with an MSBuild `Exists` condition and `Private=false`; hosts without that assembly do not gain it merely by generating targets. The shared assembly-name list includes the optional assembly, without a shared-project reference or eager terminal load. Generated target changes participate in the existing manifest hash invalidation. Installed-tool contents, actual default-ALC identity, absent-assembly behavior and regenerated source-plugin builds still need execution qualification.
 
-**Remaining boundary:** Abstractions still has terminal dependencies for commands/shortcuts, dialogs, prompt attachments and projections. Existing builtin plugins still mix backend and terminal code. The optional authoring assembly does not establish a terminal-free dependency closure, backend-only builtin loading, or desktop panel parity.
+**Remaining boundary:** Abstractions still has terminal dependencies for dialogs, prompt attachments and projections. Command shortcuts use the neutral definitions below, but existing builtin plugins still mix backend and terminal code. The optional authoring assembly does not establish a terminal-free dependency closure, backend-only builtin loading, or desktop panel parity.
+
+## Typed key bindings (pre-release migration)
+
+`PluginCommandContribution.KeyBinding` now uses neutral `PluginKeyBinding` definitions. Construct a binding from one to four `PluginKeyGesture` strokes, each containing either a `PluginKey` named key or one Unicode scalar, plus explicit `PluginKeyModifiers` (`Ctrl`, `Alt`, `Shift`, `Meta`). For example, MCP's shortcut becomes:
+
+```csharp
+new PluginKeyBinding(
+    new PluginKeyGesture('G', PluginKeyModifiers.Ctrl),
+    new PluginKeyGesture('Y', PluginKeyModifiers.Ctrl))
+```
+
+The old `DisplayText`, terminal `Gesture`, and terminal `Sequence` initializer properties are removed. Use `KeyBinding = null` for an unbound command; a display label alone no longer defines a shortcut. Author Ctrl letters as ordinary letters plus `Ctrl`, not raw terminal control characters. Definitions reject undefined named keys, unknown modifier bits, control characters, invalid surrogate input, default gestures, empty bindings and bindings longer than four strokes. Bindings copy their input, so subsequent array changes cannot mutate registered definitions.
+
+Letter scalars are normalized using invariant uppercase; non-letter scalars are preserved. Named Space and character space remain distinct, as do all modifier masks. One stroke routes as an ordinary gesture, not as a one-element native sequence. Generated text includes Meta but is presentation only: there is no parser, physical-key/scan-code identity, platform-primary-modifier alias or grapheme/IME contract.
+
+The optional `PluginTerminalKeyBindingMapper.TryMap` maps named keys and modifier bits explicitly, translating Ctrl+A–Z to terminal control-character encoding. Supplementary scalars remain valid neutral data but cannot fit the terminal character representation. An unsupported stroke rejects the entire mapping with both outputs null; the TUI retains the command unbound, with unchanged handlers, placement and visibility flags. It does not force palette visibility or manufacture a shortcut hint. Successful mapping establishes representability, not delivery by every OS, terminal protocol or keyboard. The existing native hint formatter omits Meta even though matching retains it, and may show a leading `+` for Meta-only gestures; this display limitation remains unfixed.
+
+Shared conflict diagnostics now use one structural key per binding: `keybinding:<count>:<kind><six-digit-hex-identity>/<two-digit-hex-modifiers>;...`, with `N` for named keys and `U` for scalars. Stroke order, kind and complete modifiers participate; display text does not. Equivalent definitions produce one binding warning rather than separate label/gesture/sequence warnings. Command-name conflicts remain separate and first. Warnings do not remove commands or change native dispatch precedence; no prefix-conflict detection or override policy was added.
+
+No desktop keyboard router, RPC projection, focus policy, sequence timer or command executor is introduced by this contract migration. Native gesture-before-prefix routing and sequence cancellation/timing remain frontend responsibilities. Other plugin contracts still carry terminal dependencies.
 
 ## Source plugin layout
 

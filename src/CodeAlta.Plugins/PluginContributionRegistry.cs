@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins;
@@ -279,25 +281,15 @@ public sealed class PluginContributionRegistry
         }
     }
 
-    private static IEnumerable<ContributionConflictKey> GetConflictKeys(PluginContributionRegistration registration)
+    internal static IEnumerable<ContributionConflictKey> GetConflictKeys(PluginContributionRegistration registration)
     {
         switch (registration.Contribution)
         {
             case PluginCommandContribution command:
                 yield return new ContributionConflictKey("command", $"command:{command.Name}", command.Name);
-                if (command.KeyBinding?.DisplayText is { Length: > 0 } displayText)
+                if (command.KeyBinding is { } binding)
                 {
-                    yield return new ContributionConflictKey("keybinding", $"keybinding:{displayText}", displayText);
-                }
-
-                if (command.KeyBinding?.Gesture is { } gesture)
-                {
-                    yield return new ContributionConflictKey("keybinding", $"keybinding-gesture:{gesture}", gesture.ToString() ?? string.Empty);
-                }
-
-                if (command.KeyBinding?.Sequence is { } sequence)
-                {
-                    yield return new ContributionConflictKey("keybinding", $"keybinding-sequence:{sequence}", sequence.ToString() ?? string.Empty);
+                    yield return new ContributionConflictKey("keybinding", GetBindingConflictKey(binding), binding.ToString());
                 }
 
                 yield break;
@@ -331,6 +323,20 @@ public sealed class PluginContributionRegistry
         {
             yield return new ContributionConflictKey("natural-name", $"{registration.Handle.Point}:{registration.Handle.NaturalName}", registration.Handle.NaturalName);
         }
+    }
+
+    private static string GetBindingConflictKey(PluginKeyBinding binding)
+    {
+        var builder = new StringBuilder("keybinding:");
+        builder.Append(binding.Count.ToString(CultureInfo.InvariantCulture)).Append(':');
+        foreach (var stroke in binding.Gestures)
+        {
+            builder.Append(stroke.Character is null ? 'N' : 'U');
+            var identity = stroke.Character is { } character ? character.Value : (int)stroke.Key;
+            builder.Append(identity.ToString("X6", CultureInfo.InvariantCulture)).Append('/');
+            builder.Append(((int)stroke.Modifiers).ToString("X2", CultureInfo.InvariantCulture)).Append(';');
+        }
+        return builder.ToString();
     }
 
     private static PluginLoadUnitKind GetLoadUnitKind(PluginDescriptor descriptor)
@@ -383,5 +389,5 @@ public sealed class PluginContributionRegistry
             _ => null,
         };
 
-    private sealed record ContributionConflictKey(string Kind, string Value, string DisplayName);
+    internal sealed record ContributionConflictKey(string Kind, string Value, string DisplayName);
 }

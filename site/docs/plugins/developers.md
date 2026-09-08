@@ -80,6 +80,41 @@ This is a pre-release migration, not a claim of complete terminal-free plugin
 dependencies or desktop rendering parity; other plugin contracts and builtin
 implementations still contain terminal-specific code.
 
+## Typed keyboard shortcuts
+
+Plugin command shortcuts now use neutral key definitions rather than terminal
+structs or display strings. Set `PluginCommandContribution.KeyBinding` to a
+binding with one to four strokes, for example:
+
+```csharp
+new PluginKeyBinding(
+    new PluginKeyGesture('G', PluginKeyModifiers.Ctrl),
+    new PluginKeyGesture('Y', PluginKeyModifiers.Ctrl))
+```
+
+Use `PluginKey` for named keys, or a character / `System.Text.Rune` for one
+Unicode scalar. Modifiers are explicit `Ctrl`, `Alt`, `Shift`, and `Meta` flags;
+Ctrl is not automatically translated to Command/Super. Letter case is
+normalized invariantly, while non-letter scalars and named-key identities stay
+distinct. Input arrays are copied. Invalid keys/modifiers, raw control
+characters, invalid surrogates, default strokes, and empty or overlong bindings
+are rejected when constructing the definition.
+
+This replaces the old `DisplayText`, `Gesture`, and `Sequence` initializer API.
+Use `KeyBinding = null` for no shortcut, and ordinary letters plus `Ctrl` rather
+than terminal control-character constants. One stroke is a single gesture;
+two to four form a sequence. Display text no longer determines conflicts:
+diagnostics compare typed strokes, order and all modifiers, without resolving
+collisions or removing commands.
+
+The TUI maps these definitions through the optional terminal assembly. If any
+stroke is unsupported, such as a supplementary Unicode scalar, the whole
+binding is left unbound; the command and its existing visibility rules remain.
+Mapping success does not guarantee the terminal or operating system delivers
+the shortcut. Meta participates in matching, but the current native shortcut
+hint formatter omits it. This migration does not add desktop keyboard routing,
+IME handling, or a new sequence-timing policy.
+
 ## Source plugin layout
 
 Create one package directory per plugin under a global or project plugin root:

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using XenoAtom.Terminal.UI;
-using XenoAtom.Terminal.UI.Input;
 
 namespace CodeAlta.Plugins.Abstractions;
 
@@ -267,19 +266,6 @@ public enum PluginCommandPlacement
     PromptEditor = 2,
     /// <summary>The workspace root command scope.</summary>
     WorkspaceRoot = 4,
-}
-
-/// <summary>Describes a plugin key binding.</summary>
-public sealed record PluginKeyBinding
-{
-    /// <summary>Gets display text for the binding.</summary>
-    public required string DisplayText { get; init; }
-
-    /// <summary>Gets a single-key gesture.</summary>
-    public KeyGesture? Gesture { get; init; }
-
-    /// <summary>Gets a multi-key sequence.</summary>
-    public KeySequence? Sequence { get; init; }
 }
 
 /// <summary>Describes when a command is available.</summary>

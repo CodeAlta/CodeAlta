@@ -79,6 +79,12 @@ public sealed class PluginUiContentExtractionSourceTests
             foreach (var source in Representations(Read(path)))
             {
                 var canonical = SourceTestText.DecodeSource(Encoding.UTF8.GetBytes(source));
+                canonical = path switch
+                {
+                    "CodeAlta.Plugins.Abstractions/PluginContributions.cs" => PluginKeyBindingExtractionSourceTests.RestorePreExtraction(path, canonical),
+                    "CodeAlta.Plugin.Mcp/McpPlugin.cs" => PluginKeyBindingExtractionSourceTests.RestorePreExtraction(path, canonical),
+                    _ => canonical,
+                };
                 if (path == "CodeAlta.Plugins/PluginContributionAdapters.cs")
                 {
                     // Compose the legacy async-boundary correction with the frozen extraction inverses.
