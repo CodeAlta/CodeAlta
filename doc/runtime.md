@@ -88,6 +88,41 @@ automatically safe to execute against arbitrary roots. Real-host fixtures still 
 discovery, storage, provider and lifetime admission; this plumbing alone does not enable
 Desktop startup, owned commands or event subscriptions.
 
+### Host-owned text commands (in development)
+
+`CodeAltaHost.Commands` owns text-send and abort admission against that host's existing
+runtime. Requests contain scalar identity/text values, not mutable descriptors, execution
+options, tools or callbacks. Preparation resolves the durable session directly and captures
+its execution policy; this bounded route supplies no tools, denies permission requests and
+cancels user-input requests. Existing TUI policy and direct runtime callers are unchanged.
+
+Admission reserves one owned send per session before lookup. Client request IDs are ordinal;
+send identity uses a case-insensitive session ID and exact text. Matching retries return the
+same receipt. `OwnedCommandReceiptCapacity` defaults to 256; receipts are retained for the
+owner's lifetime rather than evicted, and new requests, including abort receipts, are rejected
+when full. Disposal can still initiate control without allocating another receipt.
+
+Caller cancellation governs admission only. Accepted preparation, send, cancellation and
+attachment-aware abort work are retained by the owner; a session slot remains occupied until
+its send and control settle. Host disposal closes admission and joins commands before runtime
+dependencies. Noncooperative preparation can keep that join pending indefinitely. Receipt
+completion describes the returned send/control operation, **not transcript or provider-turn
+completion**; it does not add an event reader or govern callers that bypass this service.
+
+`BuiltInSkillRoot` optionally supplies an absolute builtin-skill root without assembly-ancestor
+lookup. Null preserves the existing default. Neither it nor `DiscoveryScope` isolates Git,
+plugins, authentication or ambient environment reads. `PluginEnvironment` optionally supplies
+a map copied with case-insensitive keys for host-created plugin adapter operations; null
+retains the ambient snapshot. It does not isolate process or provider environments.
+
+The owned route passed 17 exact real-host tests using a registered fake provider, fresh explicit
+roots and an empty plugin environment map. Tests cover retries, capacity, caller cancellation,
+attachment-aware abort, provider faults, deny/cancel interactions and disposal ordering. The
+fixture initially failed because a view header alone did not seed an agent summary; it now
+uses existing store APIs and validates durable readback before creating the host. This API is
+not wired into Desktop or TUI activation yet. Real providers, event projection, noncooperative
+shutdown and frontend/native parity remain unqualified.
+
 ### Immediate user-input policy
 
 Orchestration's pure `SessionUserInputPolicy.CreateResponse` owns the existing immediate answer selection. With AutoApprove disabled, every prompt receives an empty answer. When enabled, nonempty options are scored by the existing case-insensitive substring keywords and question heuristics; the first highest-scoring option wins and its label is returned literally, including whitespace. Options take precedence even for secret prompts. Without options, secret or nonfreeform prompts receive empty answers; other prompts receive `No preference. Use your best judgment and continue.` Answer identifiers retain ordinal comparison and duplicate identifiers still fail. The policy does not mutate the supplied form.

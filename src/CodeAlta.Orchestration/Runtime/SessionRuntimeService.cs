@@ -263,6 +263,33 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         return descriptor;
     }
 
+    internal async Task<SessionViewDescriptor?> ResolveOwnedSessionAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore()
+            .GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var session = TryCreateRecoverableSession(metadata, projects);
+        if (session is not null)
+        {
+            if (metadata.ViewState is not null)
+            {
+                ApplyCachedSessionLocalState(session, metadata.ViewState);
+            }
+            else
+            {
+                await ApplyPersistedSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        return session;
+    }
+
     /// <summary>
     /// Lists recoverable user-facing sessions from the session catalog.
     /// </summary>
@@ -951,6 +978,18 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         return sessionHandleId;
     }
 
+    private async Task PublishRunSubmittedIfStillInFlightAsync(
+        SessionViewDescriptor session,
+        AgentRunId runId,
+        DateTimeOffset runStartedAt,
+        CancellationToken cancellationToken)
+    {
+        if (await MarkActiveRunIfStillInFlightAsync(session.SessionId, runId, runStartedAt, cancellationToken).ConfigureAwait(false))
+        {
+            PublishRunSubmittedEvent(session.SessionId, runId, runStartedAt);
+        }
+    }
+
     /// <summary>
     /// Sends input to the coordinator session for a session.
     /// </summary>
@@ -960,6 +999,20 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         SessionExecutionOptions options,
         AgentSendOptions sendOptions,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(sendOptions);
+
+        return await SendAsync(session, options, sendOptions, cancellationToken, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<AgentRunId> SendAsync(
+        SessionViewDescriptor session,
+        SessionExecutionOptions options,
+        AgentSendOptions sendOptions,
+        CancellationToken cancellationToken,
+        CancellationToken coordinationCancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -977,7 +1030,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
                         return ensuredHandleId;
                     },
-                    cancellationToken)
+                    coordinationCancellationToken)
                 .ConfigureAwait(false);
 
             if (sessionStateUpdated)
@@ -987,10 +1040,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
             var runStartedAt = DateTimeOffset.UtcNow;
             var runId = await _agentHub.RunAsync(sessionHandleId, sendOptions, cancellationToken).ConfigureAwait(false);
-            if (await MarkActiveRunIfStillInFlightAsync(session.SessionId, runId, runStartedAt, cancellationToken).ConfigureAwait(false))
-            {
-                PublishRunSubmittedEvent(session.SessionId, runId, runStartedAt);
-            }
+            await PublishRunSubmittedIfStillInFlightAsync(session, runId, runStartedAt, coordinationCancellationToken).ConfigureAwait(false);
 
             return runId;
         }

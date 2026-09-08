@@ -31,12 +31,12 @@ internal static class PluginAuthoringProfileSourceInverse
         "CodeAlta.Plugins/PluginRuntimeManager.cs" or "CodeAlta.Orchestration/Hosting/CodeAltaHostOptions.cs" or
         "CodeAlta.Orchestration/Hosting/CodeAltaHost.cs" or "CodeAlta.Tui/Program.cs" or
         "CodeAlta.Tui/App/CodeAltaOwnedServices.cs" or "CodeAlta.Tests/PluginFeedbackExtractionSourceTests.cs"
-        ? Restore(path, source) : source;
+        ? Restore(path, source) : OwnedSessionCommandSourceInverse.RestoreLifetimeInput(path, source);
 
     internal static string RestoreFeedbackInput(string path, string source) => path is
         "CodeAlta.Plugins/PluginRuntimeManager.cs" or "CodeAlta.Orchestration/Hosting/CodeAltaHostOptions.cs" or
         "CodeAlta.Orchestration/Hosting/CodeAltaHost.cs" or "CodeAlta.Tui/Program.cs" or "CodeAlta.Tui/App/CodeAltaOwnedServices.cs"
-        ? Restore(path, source) : source;
+        ? Restore(path, source) : OwnedSessionCommandSourceInverse.RestoreLifetimeInput(path, source);
 
     internal static string RestoreNeutralInput(string path, string source) => path is
         "CodeAlta.Tests/PluginUiContentExtractionSourceTests.cs" or "CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" or

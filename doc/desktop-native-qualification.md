@@ -79,6 +79,39 @@ lifetime auditing before owned-command fixtures can establish shutdown joining. 
 headless fixtures, historical native results and a temporary `GlobalRoot` do not close these
 routes. No Desktop activation, event reader or command owner is added by this prerequisite.
 
+Follow-on cached-package metadata inspection confirms that the restored Glob1.0.0 library
+short-circuits ambient Git-config discovery only when both required keys are supplied by the
+local repository config. Selected SQLite/SQLitePCLRaw output artifacts also match their cached
+package assets; pooling-disabled connections still use process-owned library infrastructure,
+including a prune timer. These are decompiler/hash checks, not execution, native-load or
+shutdown qualification. The real-host command fixture remains unadmitted pending its complete
+content/store/provider and task-ownership audit; see the parity ledger for exact artifacts.
+The parent additionally confirmed that the unchanged Host calls `CreatePluginOperationOptions`
+even with `StartPlugins=false`, and that helper snapshots all ambient environment variables.
+Explicit fixture roots and a fake-only registry do not suppress that read. Real-host execution
+therefore remains unadmitted under the no-credential-read restriction; no environment values
+were inspected, substituted or logged during this source audit.
+
+The owned-command follow-up adds an explicit copied `PluginEnvironment` map; null retains
+the ambient default and the option does not isolate a process or provider. After source and
+pure checks plus a clean Release build, the parent admitted only
+`OwnedSessionCommandServiceTests.AdmitSend_UsesRealHostRuntimeAndRegisteredSessionProvider`
+with fresh explicit roots, an empty environment map, disabled plugins and a fake-only provider
+registry. Its first run failed with timeout observations; there is no successful real-host
+qualification. The failed fixture root is retained (exact path in the plan). Its journal has
+only a view header, whereas direct agent-store recovery requires a summary snapshot; the
+fixture awaited provider readiness before checking its receipt. Source predicts
+`Failed / preparation_failed`, but that result was not logged by the failed run.
+
+After fixture-only correction and independent parent review, the first exact method passed.
+Parent then separately admitted the remaining 16 named real-route methods on the same isolated
+route (the full inventory is in the plan). All 17 real methods plus five pure methods passed,
+including valid summary/local-state readback, actual fake-provider resume/fallback/send/abort,
+receipt retries/capacity and dependency-disposal ordering. Eight exact owned source methods
+and the Release solution build also passed again. No failed root was cleaned up. These bounded
+tests do not qualify either frontend, real providers, provider-event projection, noncooperative
+termination or native UI; they do not establish termination of the original failed fixture.
+
 ## Preserved M0 evidence
 
 The throwaway source location `src/prototypes/CodeAlta.Desktop.Probe` was retired in M1b by moving

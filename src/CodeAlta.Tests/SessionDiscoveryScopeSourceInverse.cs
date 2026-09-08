@@ -25,6 +25,7 @@ internal static class SessionDiscoveryScopeSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        source = OwnedSessionCommandSourceInverse.RestoreDiscoveryInput(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         foreach (var (before, after, count) in Edits(path))
         {

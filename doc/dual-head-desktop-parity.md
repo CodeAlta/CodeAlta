@@ -1488,3 +1488,101 @@ assembly-ancestor lookup and Git-config discovery are still ambient paths; actor
 cancellation and discarded provider-event forwarding require separate lifetime closure.
 The next same-child assignment is read-only real-host owned-command closure, not an authorized
 runtime fixture or another writing slice. This prerequisite does not complete M3–M7.
+
+## Owned-command prerequisite audit (2026-09-08, not execution admission)
+
+Discovery was committed as `9d17c067`. The same sole child remains read-only while the parent
+closes real-host content, store, provider and lifetime routes. No command owner or Desktop
+activation has been implemented in this follow-on audit.
+
+Parent used the already installed ILSpy command with `--disable-updatecheck`, without fetching
+tools or loading/executing target code. Decompiled `RepositoryDiscovery` and `GitConfigReader`
+from the actual Orchestration.Tests output match the relevant local-source control flow:
+an existing skill-root `.git/config` with valid `core.ignorecase` and relative
+`core.excludesfile = fixture.ignore` returns before the lazy iterator accesses ambient Git
+configuration/home. Every existing fixture skill root needs that local repository boundary;
+nonexistent roots are skipped before discovery. This is not a general filesystem sandbox.
+
+The following SHA256 values matched output and the assets-selected cached package files:
+
+| Artifact | Package asset | SHA256 |
+| --- | --- | --- |
+| `XenoAtom.Glob.dll` | Glob1.0.0, `lib/net10.0` | `6783F04D89389907260B7EF8A395F790CEBD188C227367E10FC0AE76BB07901B` |
+| `Microsoft.Data.Sqlite.dll` | Sqlite.Core10.0.11, `lib/net8.0` | `4ABD9C2A61E580EB853E93CA8953A3CEF2C05714AE28D2D1859D4DBC5E5700BC` |
+| `SQLitePCLRaw.batteries_v2.dll` | bundle_e_sqlite3 2.1.12, `lib/netstandard2.0` | `815CE410C9EAB531DD219318E3BA16C5E38E83D361CFBBDBB4BBCA222C497B0B` |
+| `SQLitePCLRaw.provider.e_sqlite3.dll` | provider_e_sqlite3 2.1.12, `lib/net6.0` | `DF996BCAE63C2CABCFE8D4B9C5110EB39A2A4706178B07D875665391C6EB3995` |
+| `e_sqlite3.dll` | lib.e_sqlite3 2.1.12, `runtimes/win-x64/native` | `B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E` |
+
+An initial provider comparison incorrectly selected netstandard2.0 and failed; the restored
+assets explicitly select net6.0, whose comparison passed without changing files. Decompiled
+SqliteConnection initializes Batteries and probes WinRT application-data types on Windows;
+the selected provider uses `DllImport("e_sqlite3")`. The existing cache opens explicit absolute
+database paths with private cache, pooling disabled and zero busy timeout. Nevertheless,
+SqliteConnectionFactory has process-wide state and a prune timer even without pooling. These
+library facts are not proof of actual native resolution, fixture isolation or host shutdown.
+
+Parent and child independently confirmed that joining whole Runtime.Send also waits its
+`ClearActiveRun(None)` actor query after cancellation, but does not necessarily observe a
+faulted original reply task whose waiter was canceled. The proposed narrow owner route therefore
+retains initial preparation with no waiter cancellation and separates coordination-wait from
+provider-execution cancellation internally, preserving the public Send contract and real Abort
+route. Direct journal lookup avoids AgentSessionCatalog's unretained listing load. This remains
+a specification decision: six originals were anchored, but no new fixture execution, production
+edit, default-root startup, provider authentication, native activation or broader parity is claimed.
+
+Subsequent source handoff closes six originals/five new files and is authorized for the same
+sole writer, without any execution. The parent rejected the proposed private-host wrapper:
+the existing CodeAltaHost will own Commands and join it before runtime/dependency disposal.
+The new service will not create a host or expose one; configured real provider registration,
+not a test-only allowed-provider policy, determines available providers. Receipt capacity
+defaults to256 and validates before acquisition. The new fixtures remain subject to complete
+parent audit and exact-method admission after implementation. Seven shipped content files
+matched their tracked sources and exact output inventory; only coordinator, both agent prompts
+and the default system prompt are read by the proposed route. Cached Logging1.2.0 metadata
+also confirms GetLogger does not initialize a processor when no manager is initialized;
+fixture host logging ownership stays off. None of these checks executes the real-host fixture.
+
+### Owned-command implementation and first qualification attempt
+
+The implemented source inventory is eight existing files plus five new files. Existing Host
+owns `Commands`; admission retains immutable text-send/abort receipts, reserves an active
+session before lookup, and joins preparation, send and attachment-aware control before runtime
+disposal. The direct resolver uses the existing journal store and recovery helpers. Public
+runtime Send and actual Abort behavior remain intact; coordination waits are separated from
+owned execution cancellation. This is not Desktop activation or transcript completion.
+
+The final preservation inventory has eight unchanged anchors and 26 mandatory context-bearing
+inverse tuples/occurrences, including the unchanged historical lifetime readers and frozen
+chains. Parent requalification passed 55 exact source methods, two Desktop history/assembly
+methods, five pure methods and a clean Release solution build. Explicit `PluginEnvironment`
+copies a supplied map with case-insensitive keys; null preserves the ambient snapshot default.
+It is not process/provider isolation.
+
+After the separate complete route audit, parent admitted only
+`CodeAlta.Orchestration.Tests.OwnedSessionCommandServiceTests.AdmitSend_UsesRealHostRuntimeAndRegisteredSessionProvider`.
+Its first run failed with eight timeout observations (one failed, zero passed). The fixture
+root remains retained as recorded in the plan. Parent and child independently traced a
+header-only seeding defect: the direct store requires a genuine agent summary, and view-header
+cache writes cannot insert a row. Source predicts `Failed / preparation_failed`, but the
+test awaited provider readiness without logging that receipt. No provider-deadlock or
+shutdown-success claim follows from this failure. Same-child fixture-only correction seeds
+summary/local state through existing APIs, verifies readback and races readiness against its
+receipt. Parent review/re-admission and all other real-route qualification remain pending.
+
+Final correction and qualification: only the new runtime fixture changed. One journal seeds
+header, genuine agent summary and local state, followed by retained metadata/cache readback.
+All 19 readiness observations race their receipt and report stable outcome/code on early
+completion; bare notifications are not mistaken for executable work. Unexpected admissions
+are retained before assertions. Cleanup joins finite, independently bounded observations and
+deletes roots only with confirmed work and zero failures.
+
+Parent reviewed the correction and existing API I/O closure, rebuilt, and re-admitted the first
+real method, which passed. Following separate review/admission of each remaining method, the
+exact 17 real-route plus five pure methods passed with no failures/skips. The eight exact owned
+source methods and full Release solution build passed again (zero warnings/errors), preserving
+the previously qualified historical chains. App remains 47,026 bytes; guide, attributes,
+architecture guard and strict decoder are unchanged. The original failed root is retained.
+No frontend/default-profile/real-provider startup, website acquisition, plugin loading or
+broader native qualification occurred. The same child continues read-only on the next useful
+M4 Desktop operation/lifecycle vertical while the parent integrates this bounded slice; M3–M7
+are not complete.

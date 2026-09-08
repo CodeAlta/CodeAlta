@@ -12,6 +12,7 @@ public sealed class CodeAltaHostLifetimeTests
         // Wiring evidence only: read this named checkout file, never construct a host.
         var source = File.ReadAllText(Path.Combine(SourceRoot(), "CodeAlta.Orchestration", "Hosting", "CodeAltaHost.cs"))
             .Replace("\r\n", "\n", StringComparison.Ordinal);
+        source = OwnedSessionCommandSourceInverse.Restore("CodeAlta.Orchestration/Hosting/CodeAltaHost.cs", source);
         var fields = Scope(source, "public sealed class CodeAltaHost : IAsyncDisposable", "    private CodeAltaHost(");
         RequireOnce(fields, "private readonly Lazy<Task> _disposeTask;");
         var constructor = Scope(source, "    private CodeAltaHost(", "    public CatalogOptions CatalogOptions");

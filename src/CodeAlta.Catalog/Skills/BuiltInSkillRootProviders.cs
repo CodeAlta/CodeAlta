@@ -125,6 +125,25 @@ public sealed class UserCommonSkillRootProvider : ISkillRootProvider
 /// </summary>
 public sealed class BuiltInCodeAltaSkillRootProvider : ISkillRootProvider
 {
+    private readonly string? _rootPath;
+
+    /// <summary>Uses the unchanged application/source builtin discovery route.</summary>
+    public BuiltInCodeAltaSkillRootProvider()
+    {
+    }
+
+    /// <summary>Uses one explicit absolute builtin root without ancestor discovery or existence probes.</summary>
+    /// <exception cref="ArgumentException">The root is blank or not fully qualified.</exception>
+    public BuiltInCodeAltaSkillRootProvider(string rootPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        if (!Path.IsPathFullyQualified(rootPath))
+        {
+            throw new ArgumentException("The builtin skill root must be fully qualified.", nameof(rootPath));
+        }
+        _rootPath = Path.GetFullPath(rootPath);
+    }
+
     /// <inheritdoc />
     public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(
         SkillDiscoveryContext context,
@@ -132,7 +151,7 @@ public sealed class BuiltInCodeAltaSkillRootProvider : ISkillRootProvider
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
-        var rootPath = ResolveRootPath();
+        var rootPath = _rootPath ?? ResolveRootPath();
         return ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>(
         [
             new SkillRootRegistration

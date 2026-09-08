@@ -17,5 +17,6 @@
     <Compile Include="../CodeAlta.Tests/PluginStatisticsBackendSeparationSourceInverse.cs" Link="PluginStatisticsBackendSeparationSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/SessionDiscoveryScopeSourceInverse.cs" Link="SessionDiscoveryScopeSourceInverse.cs" />
     <Compile Include="../CodeAlta.Orchestration/Runtime/SessionDiscoveryScope.cs" Link="SessionDiscoveryScope.cs" />
+    <Compile Include="../CodeAlta.Tests/OwnedSessionCommandSourceInverse.cs" Link="OwnedSessionCommandSourceInverse.cs" />
   </ItemGroup>
 </Project>

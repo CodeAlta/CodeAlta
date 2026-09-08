@@ -19,6 +19,16 @@ public sealed class CodeAltaHostOptions
     /// <remarks>Requires explicit absolute global/project roots; does not isolate plugins, providers, authentication or filesystem links.</remarks>
     public SessionDiscoveryScope? DiscoveryScope { get; init; }
 
+    /// <summary>Gets an explicit absolute builtin skill root; null preserves application/source discovery.</summary>
+    public string? BuiltInSkillRoot { get; init; }
+
+    /// <summary>Gets the positive owner-lifetime receipt limit; full owners reject new requests without evicting retry protection.</summary>
+    public int OwnedCommandReceiptCapacity { get; init; } = 256;
+
+    /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
+    /// <remarks>This does not isolate the process or provider environment.</remarks>
+    public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }
+
     /// <summary>
     /// Gets the project path used to seed the project catalog. When unset, the current directory is used.
     /// </summary>

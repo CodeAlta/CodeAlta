@@ -37,7 +37,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         PluginRuntimeManager pluginRuntime,
         bool ownsPluginRuntime,
         bool ownsLogging,
-        ProjectDescriptor currentProject)
+        ProjectDescriptor currentProject,
+        int ownedCommandReceiptCapacity)
     {
         CatalogOptions = catalogOptions;
         ProjectCatalog = projectCatalog;
@@ -51,8 +52,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ProjectFileSearchService = projectFileSearchService;
         PluginRuntime = pluginRuntime;
         CurrentProject = currentProject;
+        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);
         _disposeTask = CreateHostDisposal(
-            RuntimeService.DisposeAsync,
+            DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,
             ModelProviderRegistry.DisposeAsync,
             PluginRuntime.DisposeAsync,
@@ -106,6 +108,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// </summary>
     public SessionRuntimeService RuntimeService { get; }
 
+    /// <summary>Gets the host-owned text-send and abort admission service; completion is not transcript completion.</summary>
+    public OwnedSessionCommandService Commands { get; }
+
     /// <summary>
     /// Gets the project-file search service.
     /// </summary>
@@ -140,6 +145,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions are retained in that order without flattening.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the plugin authoring profile is invalid, before host acquisition.</exception>
     /// <exception cref="ArgumentException">Scoped host roots are missing, not absolute, or the project is outside the instruction boundary.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Owned receipt capacity is not positive, before host acquisition.</exception>
+    /// <exception cref="ArgumentException">An explicit builtin skill root is blank or not fully qualified.</exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
         CancellationToken cancellationToken = default)
@@ -148,6 +155,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options.PluginStartupFeedback);
         if (!Enum.IsDefined(options.PluginAuthoringProfile)) throw new ArgumentOutOfRangeException(nameof(options.PluginAuthoringProfile));
         options.DiscoveryScope?.ValidateHostRoots(options.GlobalRoot, options.CurrentProjectPath);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.OwnedCommandReceiptCapacity);
+        var builtInSkillRootProvider = options.BuiltInSkillRoot is null
+            ? new BuiltInCodeAltaSkillRootProvider()
+            : new BuiltInCodeAltaSkillRootProvider(options.BuiltInSkillRoot);
 
         PluginRuntimeManager? pluginRuntime = null;
         ModelProviderRegistry? modelProviderRegistry = null;
@@ -213,7 +224,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 new ProjectCommonSkillRootProvider(),
                 new UserCodeAltaSkillRootProvider(),
                 new UserCommonSkillRootProvider(),
-                new BuiltInCodeAltaSkillRootProvider(),
+                builtInSkillRootProvider,
                 new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
             ]);
             var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope);
@@ -248,7 +259,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 pluginRuntime,
                 ownsPluginRuntime,
                 ownsLogging,
-                currentProject);
+                currentProject,
+                options.OwnedCommandReceiptCapacity);
         }
         catch (Exception creationFailure)
         {
@@ -350,7 +362,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         return string.IsNullOrWhiteSpace(slug) ? "project" : slug;
     }
 
-    private static PluginAdapterOperationOptions CreatePluginOperationOptions(
+    internal static PluginAdapterOperationOptions CreatePluginOperationOptions(
         CodeAltaHostOptions options,
         CatalogOptions catalogOptions,
         ProjectDescriptor currentProject)
@@ -361,7 +373,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
             HasInteractiveUi = options.HasInteractiveUi && !options.IsHeadless,
             IsHeadless = options.IsHeadless,
             ConfigurationPaths = [Path.Combine(catalogOptions.GlobalRoot, "config.toml")],
-            Environment = Environment.GetEnvironmentVariables()
+            Environment = options.PluginEnvironment is not null
+                ? new Dictionary<string, string?>(options.PluginEnvironment, StringComparer.OrdinalIgnoreCase)
+                : Environment.GetEnvironmentVariables()
                 .Cast<System.Collections.DictionaryEntry>()
                 .Where(static entry => entry.Key is string)
                 .ToDictionary(static entry => (string)entry.Key, static entry => entry.Value?.ToString(), StringComparer.OrdinalIgnoreCase),
@@ -372,7 +386,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// </summary>
     /// <returns>The same underlying operation for repeated or concurrent callers, including its terminal failure.</returns>
     /// <remarks>
-    /// Attempts runtime, hub, registry, owned plugin and owned logging cleanup in order, even after a stage fails.
+    /// Joins owned commands, then attempts runtime, hub, registry, owned plugin and owned logging cleanup in order, even after a stage fails.
     /// A lone failure is rethrown unchanged; multiple failures retain their direct references in execution order,
     /// without flattening aggregates. Cancellation is recorded like other failures and does not skip later stages.
     /// There are no retries or hard timeout guarantees. Reentrant disposal of this same host is unsupported.
@@ -382,6 +396,37 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
     /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
     public ValueTask DisposeAsync() => new(_disposeTask.Value);
+
+    private async ValueTask DisposeCommandsAndRuntimeAsync()
+    {
+        Exception? commandFailure = null;
+        try
+        {
+            await Commands.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            commandFailure = ex;
+        }
+
+        try
+        {
+            await RuntimeService.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception runtimeFailure)
+        {
+            if (commandFailure is not null)
+            {
+                throw new AggregateException(commandFailure, runtimeFailure);
+            }
+            throw;
+        }
+
+        if (commandFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(commandFailure).Throw();
+        }
+    }
 
     /// <summary>
     /// Creates a lazy, single-execution host cleanup operation from mandatory, caller-supplied operations.
