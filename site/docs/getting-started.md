@@ -38,7 +38,7 @@ CodeAlta stores user state under `~/.alta/`, including configuration, logs, cach
 
 Run `altatui --help` (or `altatui -h`) or `altatui --version` with no additional arguments to print built-in information without initializing application state, logging, the terminal workspace, or plugins. Early help lists built-in options only.
 
-All other invocations, including `--plugins-status`, plugin commands, and help combined with other arguments, acquire the shared `~/.alta/alta.lock` before mutable startup. The lock remains held through application, plugin, and logging cleanup. If admission fails, the command reports an error without starting plugins. Close the existing instance before retrying; do not delete an active instance's lock file.
+All other invocations, including `--plugins-status`, plugin commands, and help combined with other arguments, acquire the shared `~/.alta/alta.lock` before mutable startup. The lock remains held through application, plugin, and logging cleanup. If admission fails, the command reports an error without starting plugins. Access-denied or other unexpected owner-inspection errors are not treated as evidence that the owner has exited; startup conservatively refuses to reclaim that lock. Close the existing instance before retrying; do not delete an active instance's lock file.
 
 ## Terminal font requirement
 

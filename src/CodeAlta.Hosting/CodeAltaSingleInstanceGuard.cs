@@ -4,10 +4,10 @@ using System.Text;
 
 namespace CodeAlta.Hosting;
 
-/// <summary>Acquires the existing alta.lock admission guard for shared application state.</summary>
+/// <summary>Guards shared application state with conservative process-liveness inspection.</summary>
 /// <remarks>
-/// This extraction preserves the existing PID/stale-file algorithm, including its unqualified
-/// process-inspection and deletion races. It does not establish cross-process or cross-head safety.
+/// Unknown process inspection fails closed. PID/stale-file deletion and release races remain
+/// unqualified; this does not establish cross-process or cross-head safety.
 /// </remarks>
 public sealed class CodeAltaSingleInstanceGuard : IDisposable
 {
@@ -133,25 +133,59 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     }
 
     private static bool IsProcessRunning(int processId)
-        => IsProcessRunning(processId, Process.GetProcessById, static process => process.HasExited);
+        => IsProcessRunning<Process>(processId, Process.GetProcessById, static process => process.HasExited);
 
-    internal static bool IsProcessRunning(
+    /// <summary>Returns false only for lookup absence or observed exit followed by successful release.</summary>
+    /// <remarks>
+    /// For a positive PID, the .NET GetProcessById adapter reports a missing process via ArgumentException.
+    /// Only that lookup-stage exception establishes absence; inspection and release errors fail closed.
+    /// Invalid PIDs and null resources are unknown. Every acquired resource is released once, without retry.
+    /// Observed process absence is not ownership evidence or authority over the current lock pathname.
+    /// </remarks>
+    internal static bool IsProcessRunning<TProcess>(
         int processId,
-        Func<int, Process> getProcessById,
-        Func<Process, bool> hasExited)
+        Func<int, TProcess?> getProcessById,
+        Func<TProcess, bool> hasExited)
+        where TProcess : class, IDisposable
     {
         ArgumentNullException.ThrowIfNull(getProcessById);
         ArgumentNullException.ThrowIfNull(hasExited);
 
+        if (processId <= 0)
+        {
+            return true;
+        }
+
+        TProcess? process;
         try
         {
-            using var process = getProcessById(processId);
-            return !hasExited(process);
+            process = getProcessById(processId);
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
         catch
         {
-            // Process.HasExited can throw (for example, access denied while opening the process).
-            return false;
+            return true;
+        }
+
+        if (process is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            using (process)
+            {
+                return !hasExited(process);
+            }
+        }
+        catch
+        {
+            // An inspection or release failure must never authorize stale-file reclamation.
+            return true;
         }
     }
 

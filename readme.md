@@ -61,7 +61,7 @@ CodeAlta also expects a current [Nerd Fonts](https://www.nerdfonts.com/) patched
 
 ## 📖 Documentation
 
-`altatui --help` (or `-h`) and `altatui --version`, each used alone, print built-in information without initializing application state or plugins. Other command paths, including `--plugins-status` and plugin commands, acquire the shared `~/.alta/alta.lock` before mutable startup and retain it through cleanup. Plugin-specific or combined help invocations follow that guarded path.
+`altatui --help` (or `-h`) and `altatui --version`, each used alone, print built-in information without initializing application state or plugins. Other command paths, including `--plugins-status` and plugin commands, acquire the shared `~/.alta/alta.lock` before mutable startup and retain it through cleanup. Plugin-specific or combined help invocations follow that guarded path. If inspecting the recorded owner fails, startup conservatively refuses to reclaim its lock.
 
 The prompt manager preserves unsaved edits on external-file conflicts and requires confirmation before retrying; built-ins stay read-only and same-scope creation never overwrites an existing prompt.
 
