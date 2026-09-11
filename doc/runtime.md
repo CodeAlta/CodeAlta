@@ -61,6 +61,27 @@ null text/lifecycle/catalog payloads are counted as unsupported (null/invalid se
 as omitted) while original event delivery remains unchanged; this is not generic fault rollback
 or a guarantee of recovery from allocation/process failure.
 
+The original `StreamEventsAsync` route is **exclusive per runtime publisher**, not broadcast.
+Admission is claimed on the first `MoveNextAsync`, not when obtaining a sequence or enumerator;
+a competing consumer receives `InvalidOperationException` without touching the queue. A pre-canceled
+token neither claims admission nor consumes an event. Admission adds only short claim/release
+bookkeeping under the existing publisher gate; no asynchronous reads or yields run under it.
+
+Dispose the original-event enumerator on detach. Only actual enumeration termination/disposal
+releases its claim: cancellation or publisher completion does **not** release a reader suspended
+at a yield. After admission, underlying channel semantics remain in force: buffered events may
+still be yielded after cancellation. There is no added per-item cancellation check that consumes
+and then drops an original event. Completion still drains accepted events, and a successor can
+consume the remaining buffer without replay. Abandoned enumerators can prevent a successor from
+being admitted until they are disposed; cancellation alone is not a join.
+
+This prerequisite leaves TUI pumping, after-input queue draining, compatible adjacent-delta merging,
+history, rich rendering and original plugin/effect inputs unchanged. Accepted events retain original
+references and FIFO order up to that existing TUI merge boundary; newest-event drops still apply.
+Exclusivity does not acknowledge UI/plugin effects, recover missed history, bound the TUI queue or
+join asynchronous plugin work. Detaching the reader does not stop a run or the runtime. Independent
+Display observations do not consume original events, and their revisions are not effect watermarks.
+
 `Display.ObserveAsync` admits on first enumeration: registration and initial snapshot capture
 are atomic. Each owner has a new `Epoch`; every publication and the final close increments one
 global `Revision`. Subsequent messages are **full replacements**, not events or append deltas.

@@ -4,6 +4,33 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: exclusive original-event reader — 2026-09-11
+
+`SessionRuntimeEventPublisher` now admits one original-event reader per instance at first
+enumeration. A competing reader throws before touching the channel; rejected/unstarted iterators
+cannot release the incumbent's claim. Admission uses the existing short gate only for claim/release,
+with no asynchronous read/yield under it. Completion and cancellation do not release a suspended
+reader: actual iterator termination/disposal does. Successors consume the remaining buffer without
+replay. Pre-canceled admission consumes nothing; after admission, existing channel behavior may
+still yield buffered events after cancellation. Abandoned enumerators therefore require disposal.
+
+Parent reviewed the implementation, XML/runtime documentation and all eleven new in-memory
+cases. Child reported an observed pre-fix regression: a completed, prebuffered publisher allowed
+the second reader to steal the second original object instead of throwing. Parent independently
+passed the cached Release solution build (zero warnings/errors) and **53 focused tests, zero
+failures/skips**: 26 publisher/projection, 13 current main-source and 14 Desktop current-source/RPC.
+Logs: `%TEMP%/codealta-parent-exclusive-reader-*-20260911.log`. No real host/provider/discovery,
+native/app launch, installs/restores, broad suite or website acquisition was executed.
+
+The generic channel/drop policy, Display, TUI pump and shell merging, history, reducers and plugin
+routes are unchanged. Original references/FIFO hold at this stream boundary, not universally after
+the existing TUI adjacent-delta merge. This guard prevents silent competing consumption; it does
+not deliver dropped effects, drain the UI queue, join asynchronous plugin work, or establish replay,
+an authoritative recovery snapshot or full TUI migration. Display revisions are not raw-event
+watermarks, and its baseline must not be combined with an unrevisioned raw stream as a recovery
+handshake. Next is a bounded actor-owned active-state/snapshot recommendation using the existing
+runtime query/entry/queue owners, rather than expanding evictable Display into authoritative state.
+
 ## M4 checkpoint: scoped source-test cleanup — 2026-09-11
 
 All eleven reconstruction-only methods listed in the historical checkpoints below are now

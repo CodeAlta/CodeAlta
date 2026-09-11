@@ -110,6 +110,22 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Streams sanitized runtime events across all active sessions.
     /// </summary>
+    /// <param name="cancellationToken">Cancels admission or channel reads; buffered events may still be yielded after admission.</param>
+    /// <returns>The exclusive original-event sequence, not a broadcast or recoverable display snapshot.</returns>
+    /// <remarks>
+    /// Admission occurs on the first enumeration move, not when obtaining the sequence or enumerator.
+    /// A pre-canceled token neither claims admission nor consumes buffered events. Only one enumerator may
+    /// be active; use <see cref="Display"/> for independent bounded display observations instead of a competing reader.
+    /// Dispose the enumerator on detach. Admission is released only after actual enumeration termination or
+    /// disposal; cancellation or runtime completion alone does not release an enumerator suspended at a yield.
+    /// After admission, underlying channel cancellation semantics apply: available buffered events may be
+    /// yielded despite cancellation. Completion drains accepted events; a successor consumes remaining events,
+    /// without replay. Original object references and accepted-event order are preserved by this stream,
+    /// but newest publications can still be dropped under pressure. Enumeration is not acknowledgement of
+    /// frontend/plugin effects, a history recovery guarantee, or ownership of a run. Detach does not stop the runtime.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Another original-event enumerator owns admission.</exception>
+    /// <exception cref="OperationCanceledException">Admission or a channel read is canceled.</exception>
     public IAsyncEnumerable<SessionRuntimeEvent> StreamEventsAsync(CancellationToken cancellationToken = default)
         => _events.ReadAllAsync(cancellationToken);
 
