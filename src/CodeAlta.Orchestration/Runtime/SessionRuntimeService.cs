@@ -858,6 +858,13 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    internal Task<AgentSessionHandleId> EnsureOwnedCoordinatorSessionAsync(SessionViewDescriptor session, SessionExecutionOptions options)
+        => AdmitAsync(async () =>
+        {
+            var entry = await ResolveCoordinatorEntryAsync(session, options, ownedCommand: true).ConfigureAwait(false);
+            return entry.SessionHandleId;
+        }, CancellationToken.None);
+
     private void ReserveSessionIdentity(SessionViewDescriptor session)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -869,7 +876,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         }
     }
 
-    private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false)
+    private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false, bool ownedCommand = false)
     {
         ReserveSessionIdentity(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -880,7 +887,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             var prepared = await actor.QueryAsync(
                 actorCancellationToken => history && _entries.TryGetValue(session.SessionId, out var active) && !active.IsTerminated && !active.Attachment.IsRetiring
                     ? ValueTask.FromResult(new CoordinatorPreparation(active, null))
-                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken),
+                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand),
                 CancellationToken.None).ConfigureAwait(false);
             if (prepared.Entry is not null) return prepared.Entry;
             await prepared.Transition!.ConfigureAwait(false);
@@ -889,7 +896,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
     // Actor prepare only: callers join the returned ticket outside the mailbox.
     private async ValueTask<CoordinatorPreparation> EnsureCoordinatorSessionCoreAsync(
-        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken)
+        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false)
     {
         actorCancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
@@ -897,6 +904,11 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
         var prompt = NormalizeOptionalText(existing?.PendingAgentPromptId) ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
+        // Carry a matching but incompatible entry to send admission without consuming its pending
+        // prompt or updating the descriptor. Admission rechecks under the actor and owns rejection.
+        if (ownedCommand && existing is not null && !existing.Attachment.IsRetiring
+            && !HasOwnedCommandDefaults(existing) && existing.Matches(options, prompt))
+            return new CoordinatorPreparation(existing, null);
         // Preserve validation/instruction-build-before-retirement behavior. The body is retained.
         ArgumentException.ThrowIfNullOrWhiteSpace(options.WorkingDirectory);
         ValidateDiscoveryPaths(session, options);
@@ -1051,6 +1063,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
             session.SessionId, sessionHandleId.ToString(),
             () => _agentHub.AbortAsync(sessionHandleId, CancellationToken.None),
             () => _agentHub.StopSessionAsync(sessionHandleId, CancellationToken.None));
+        // A retirement before this assignment cannot have a bound owned send: publication is later.
+        attachment.CloseOwnedPermissions = () => Permissions.InvalidateOwnedAttachmentAsync(attachment);
         try
         {
         session.ProviderId = options.ProviderId.Value;
@@ -1191,7 +1205,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
     private async Task<AgentRunId> SendOwnedBodyAsync(
         SessionViewDescriptor session, SessionExecutionOptions options, AgentSendOptions sendOptions,
-        CancellationToken cancellationToken, CancellationToken coordinationCancellationToken)
+        CancellationToken cancellationToken, CancellationToken coordinationCancellationToken,
+        SessionPermissionService.OwnedPermissionExecution? permissionExecution = null, bool ownedCommand = false)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -1199,11 +1214,12 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
         RuntimeSessionEntry? capturedEntry = null;
         OwnedProviderEventForwarding.Use? handleUse = null;
+        var ownedDefaultsRejected = false;
         try
         {
             while (true)
             {
-            var candidate = await ResolveCoordinatorEntryAsync(session, options).ConfigureAwait(false);
+            var candidate = await ResolveCoordinatorEntryAsync(session, options, ownedCommand: ownedCommand).ConfigureAwait(false);
             GetActorForWork(session.SessionId);
             var sessionStateUpdated = false;
             var sessionHandleId = await _sessionActors.GetOrCreate(session.SessionId).QueryAsync(
@@ -1216,6 +1232,13 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                             return default(AgentSessionHandleId);
                         handleUse = candidate.Attachment.TryAcquireHandleUse();
                         if (handleUse is null) return default(AgentSessionHandleId);
+                        // Matches deliberately ignores callbacks. Reject before taking ownership of
+                        // any run/start/prompt state; a different caller may already have an active run.
+                        if (ownedCommand && !HasOwnedCommandDefaults(candidate))
+                        {
+                            ownedDefaultsRejected = true;
+                            return default(AgentSessionHandleId);
+                        }
                         candidate.PendingAgentPromptId = null;
                         capturedEntry = candidate;
                         session.MarkStarted(DateTimeOffset.UtcNow);
@@ -1225,6 +1248,8 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                     },
                     coordinationCancellationToken)
                 .ConfigureAwait(false);
+            if (ownedDefaultsRejected)
+                throw new InvalidOperationException("Owned command requires denying session defaults.");
             if (handleUse is null) continue;
 
             if (sessionStateUpdated)
@@ -1234,13 +1259,36 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
             var runStartedAt = DateTimeOffset.UtcNow;
             using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, candidate.Attachment.Cancellation.Token);
-            var runId = await RunCapturedAsync(sessionHandleId, sendOptions, execution.Token).ConfigureAwait(false);
+            AgentRunId runId;
+            try
+            {
+                if (permissionExecution is not null)
+                {
+                    if (!await Permissions.BindOwnedExecutionAsync(permissionExecution, _runtimeInstanceId,
+                        candidate.Attachment, candidate.ProviderId).ConfigureAwait(false))
+                        throw new OperationCanceledException("Owned permission execution cannot bind to this attachment.");
+                    sendOptions = new AgentSendOptions
+                    {
+                        Input = sendOptions.Input,
+                        AskId = sendOptions.AskId,
+                        OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
+                    };
+                }
+                runId = await RunCapturedAsync(sessionHandleId, sendOptions, execution.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                // Closes only this interaction window, not a claim that the provider is quiescent.
+                // Owner-controlled deliveries finish before the linked source and handle use release.
+                if (permissionExecution is not null) await Permissions.CloseOwnedExecutionAsync(permissionExecution).ConfigureAwait(false);
+            }
             await PublishRunSubmittedIfStillInFlightAsync(session, runId, runStartedAt, coordinationCancellationToken, candidate).ConfigureAwait(false);
 
             return runId;
             }
         }
-        catch (OperationCanceledException)
+        // A policy refusal fails only the owned command receipt, never another caller's run.
+        catch (OperationCanceledException) when (!ownedDefaultsRejected)
         {
             var activeRunId = await ClearCapturedRunAsync(capturedEntry).ConfigureAwait(false);
             PublishRunFinishedEvent(
@@ -1251,14 +1299,30 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 DateTimeOffset.UtcNow);
             throw;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ownedDefaultsRejected && ex is not OperationCanceledException)
         {
             await ClearCapturedRunAsync(capturedEntry).ConfigureAwait(false);
             PublishRuntimeFailureEvent(session, ex);
             throw;
         }
-        finally { handleUse?.Dispose(); }
+        finally
+        {
+            try
+            {
+                if (permissionExecution is not null) await Permissions.CloseOwnedExecutionAsync(permissionExecution).ConfigureAwait(false);
+            }
+            finally { handleUse?.Dispose(); }
+        }
     }
+
+    internal Task<AgentRunId> SendOwnedCommandAsync(SessionViewDescriptor session, SessionExecutionOptions options,
+        AgentSendOptions sendOptions, SessionPermissionService.OwnedPermissionExecution? permissionExecution, CancellationToken cancellationToken)
+        => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution, ownedCommand: true), CancellationToken.None);
+
+    // Fixed default-policy check only; per-operation association remains in the permission mailbox.
+    private bool HasOwnedCommandDefaults(RuntimeSessionEntry candidate)
+        => ReferenceEquals(candidate.OnPermissionRequest, Permissions.OwnedDefaultPermissionHandler)
+            && ReferenceEquals(candidate.OnUserInputRequest, Permissions.OwnedDefaultUserInputHandler);
 
     private async Task<AgentRunId> RunCapturedAsync(AgentSessionHandleId sessionHandleId, AgentSendOptions sendOptions, CancellationToken cancellationToken)
     {
@@ -1596,6 +1660,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                 .ConfigureAwait(false);
             if (result.Succeeded)
             {
+                await Permissions.InvalidateOwnedAttachmentAsync(capturedEntry!.Attachment).ConfigureAwait(false);
                 using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, capturedEntry!.Attachment.Cancellation.Token);
                 await _agentHub.AbortAsync(capturedEntry.SessionHandleId, execution.Token).ConfigureAwait(false);
             }

@@ -15,6 +15,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private readonly ProjectCatalog _projects;
     private readonly CatalogOptions _catalog;
     private readonly int _capacity;
+    private readonly bool _reviewPermissions;
     private readonly Dictionary<string, ReceiptEntry> _receipts = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, SendOperation> _operations = [];
     private readonly Dictionary<string, SendOperation> _active = new(StringComparer.OrdinalIgnoreCase);
@@ -24,7 +25,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private Task? _disposeTask;
 
     internal OwnedSessionCommandService(
-        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity)
+        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(projects);
@@ -34,6 +35,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         _projects = projects;
         _catalog = catalog;
         _capacity = capacity;
+        _reviewPermissions = reviewPermissions;
     }
 
     /// <summary>Reserves an immutable text submission without doing catalog or provider work inline.</summary>
@@ -172,11 +174,21 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                 }
                 else
                 {
-                    operation.Send = _runtime.SendAsync(prepared.Session, prepared.Options,
-                        new AgentSendOptions { Input = AgentInput.Text(operation.Request.Text) },
-                        operation.Execution.Token, CancellationToken.None);
-                    var runId = await operation.Send.ConfigureAwait(false);
-                    result = new(OwnedSessionCommandOutcome.Completed, runId);
+                    if (_reviewPermissions)
+                        operation.PermissionExecution = await _runtime.Permissions.CreateOwnedExecutionAsync(
+                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token).ConfigureAwait(false);
+                    if (_reviewPermissions && operation.PermissionExecution is null)
+                    {
+                        result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_unavailable");
+                    }
+                    else
+                    {
+                        var sendOptions = new AgentSendOptions { Input = AgentInput.Text(operation.Request.Text) };
+                        operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
+                            operation.PermissionExecution, operation.Execution.Token);
+                        var runId = await operation.Send.ConfigureAwait(false);
+                        result = new(OwnedSessionCommandOutcome.Completed, runId);
+                    }
                 }
             }
         }
@@ -189,6 +201,16 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         {
             RecordFailure(ex, cleanup: false);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "send_failed");
+        }
+        // Also covers runtime admission failure before its body acquires a handle use.
+        if (operation.PermissionExecution is { } permission)
+        {
+            try { await _runtime.Permissions.CloseOwnedExecutionAsync(permission).ConfigureAwait(false); }
+            catch (Exception ex)
+            {
+                RecordFailure(ex, cleanup: true);
+                result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_close_failed");
+            }
         }
         // Also releases a control waiter if setup failed before publishing preparation.
         operation.Attachment.TrySetResult(null);
@@ -220,9 +242,9 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                 session, project, _catalog.GlobalRoot, default, session.ModelId, session.ReasoningEffort, session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
                 policy, [],
-                static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
-                static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true)));
-            await _runtime.EnsureCoordinatorSessionAsync(session, options, CancellationToken.None).ConfigureAwait(false);
+                _runtime.Permissions.OwnedDefaultPermissionHandler,
+                _runtime.Permissions.OwnedDefaultUserInputHandler);
+            await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
             return new Prepared(session, options);
         }
         catch (Exception ex)
@@ -238,6 +260,17 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         var failed = operation.CancellationFailed;
         var attached = false;
 
+        try
+        {
+            // StartControl already initiated source cancellation independently. Close this exact
+            // operation before preparation/provider/cancellation joins, including provider None tokens.
+            if (_reviewPermissions) await _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            failed = true;
+            RecordFailure(ex, cleanup: true);
+        }
         try
         {
             attached = await operation.Attachment.Task.ConfigureAwait(false) is not null;
@@ -317,6 +350,11 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private async Task DisposeCoreAsync(SendOperation[] operations, Task launch)
     {
         await launch.ConfigureAwait(false);
+        if (_reviewPermissions)
+        {
+            try { await _runtime.Permissions.CloseOwnedAdmissionAsync().ConfigureAwait(false); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        }
         foreach (var operation in operations)
         {
             if (operation.Control is not null)
@@ -357,6 +395,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         internal Task Work { get; set; } = Task.CompletedTask;
         internal Task<Prepared?>? Preparation { get; set; }
         internal Task<AgentRunId>? Send { get; set; }
+        internal SessionPermissionService.OwnedPermissionExecution? PermissionExecution { get; set; }
         internal Task? Control { get; set; }
         internal Task Cancellation { get; set; } = Task.CompletedTask;
         internal bool CancelRequested { get; set; }

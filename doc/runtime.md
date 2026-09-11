@@ -267,8 +267,9 @@ Desktop startup, owned commands or event subscriptions.
 `CodeAltaHost.Commands` owns text-send and abort admission against that host's existing
 runtime. Requests contain scalar identity/text values, not mutable descriptors, execution
 options, tools or callbacks. Preparation resolves the durable session directly and captures
-its execution policy; this bounded route supplies no tools, denies permission requests and
-cancels user-input requests. Existing TUI policy and direct runtime callers are unchanged.
+its execution policy; this bounded route supplies no custom tools, defaults to denying permission
+requests and cancels user-input requests. The explicit backend-only permission opt-in below
+does not change preparation/session callbacks, existing TUI policy or direct runtime callers.
 
 Admission reserves one owned send per session before lookup. Client request IDs are ordinal;
 send identity uses a case-insensitive session ID and exact text. Matching retries return the
@@ -368,6 +369,71 @@ The TUI coordinator is a presentation adapter. It checks pending state again ins
 
 Pending summaries remain available without an open tab and outside the bounded/lossy runtime timeline. They copy only immutable identity and scalar command/file preview data; mutable provider collections and raw JSON payloads are not retained as authoritative state. These are trusted in-process application contracts, not renderer grants, full payload replay or durable restart recovery. This bounded permission slice does not implement shared pending user-input/`alta ask` workflows, renderer reattachment, general host admission/shutdown changes, or whole-runtime close/reload stress qualification. In particular, the terminal loop must still service queued presentation work while it is being joined; full application exit ordering is a separate lifecycle qualification.
 
+#### Opt-in owned command permission lifetime (backend only)
+
+`CodeAltaHostOptions.ReviewOwnedCommandPermissions` defaults to **false**. When explicitly enabled,
+an owned text send can register a plain command request for manual resolution in the same
+`SessionPermissionService` mailbox. No frontend enables the option or supplies a presenter in
+this slice. Hosts enabling it must resolve through the trusted permission owner or cancel the
+operation. Preparation and persistent session callbacks always deny; user input remains canceled.
+Only providers honoring `AgentSendOptions.OnPermissionRequest` can participate. Ignoring the
+per-send hook leaves the provider's permission path denial-only.
+
+Coordinator matching intentionally does not compare callbacks. Therefore every owned send, including
+with opt-in disabled, checks that its captured attachment was prepared with the owner's fixed
+denial/canceled-input callbacks. A matching coordinator with different defaults fails the send before
+provider invocation rather than inheriting those defaults or silently replacing the coordinator.
+This conservative callback-identity check establishes only the fixed default policy; it is not the
+per-operation association, which remains the mailbox-owned execution record below.
+For a matching coordinator with incompatible defaults, owned preparation preserves its pending
+prompt and send admission rejects before clearing that prompt or changing run/start state. The
+rejection reports failure on the owned command receipt, not a session-wide error or run-terminal
+event attributable to a pre-existing run. Any allocated permission execution still closes before
+the acquired handle use releases; the existing attachment and active run are left intact.
+
+The command owner creates one record for the immutable receipt operation ID and canonical
+session ID with that operation's execution token. Runtime send acquisition binds the record once
+to the runtime identity and actual attachment while holding its handle use, then passes a delegate
+capturing that record through `AgentHub.RunAsync`. There is no current-run lookup, nullable-run
+inference, token-equality association or mutable latest callback. A retained delegate cannot
+rebind its record or join a later send on a reused coordinator. Receipt replay does not recreate
+the record. A provider run ID, including null, is only part of the fresh attempt handle.
+
+Admission requires an exact session and bound provider identity and an `AgentCommandPermissionRequest`
+with complete nonblank command and working directory. `ApprovalId`, `Actions`, `Network`,
+`ProposedExecPolicyAmendment` and `ProposedNetworkPolicyAmendments` must all be null (not empty
+collections). Fields are validated without truncation or normalization: well-formed UTF-16, no
+NUL, and no controls or surrounding whitespace in identity fields. Conservative limits, in UTF-16
+code units, are 128 for session/provider/interaction/run identities, 4,096 for command, 1,024 for
+directory and 1,024 for optional reason. Other typed requests and raw/generic requests deny.
+Only **Allow Once**, **Deny** and **Cancel** resolve owned records; the existing trusted
+`ResolveAsync` cannot grant **Allow for Session** on them. Immutable validated scalar snapshots
+are retained rather than mutable request collections.
+
+The mailbox rechecks the exact association and command, attachment and callback cancellation on
+resolution as well as registration, even when the provider passes `CancellationToken.None`.
+Invalidation cancels pending attempts and denies later callbacks. A decision accepted before
+invalidation remains accepted; an earlier cancellation/invalidation rejects a later approval.
+Send return/failure/cancellation closes the window in runtime `finally`, joining only owner-controlled
+delivery cleanup before linked-source disposal and handle-use release. Exact-operation abort closes
+before preparation/provider/cancellation joins. Attachment retirement invalidates before handle-use
+joins while preserving independently initiated cancellation and abort. Command-owner disposal closes
+owned admission without disposing shared TUI permissions. Runtime shutdown still initiates permission
+disposal and attachment retirement concurrently and retains the existing failed-retirement behavior.
+Closure is **not** provider quiescence, tool-effect acknowledgment, durable recovery or a general
+shutdown deadline; noncooperative provider/preparation work can still prevent termination.
+
+Limits per permission service are 64 live owned execution records, 128 owned pending/delivering
+attempts total and four per execution. Excess requests deterministically deny; inability to allocate
+an execution fails the owned send with `permission_unavailable`. Completed delivery bookkeeping is
+removed and closed records leave the live index; cleanup still in flight counts against attempt
+capacity. There are no permission tombstones or growing completed-task lists. These limits do **not**
+bound legacy trusted TUI pending state, externally retained delegates/requests, receipt history,
+mailbox callers waiting for admission, provider memory or total process heap. Parent-audited isolated
+backend fixtures exercise these lifetimes with fake providers and inert decisions; see the
+[parity ledger](dual-head-desktop-parity.md) for verification evidence. They do not qualify
+native/frontend or real-provider behavior.
+
 ## Provider initialization
 
 `IModelProviderRegistry` lists configured `ModelProviderDescriptor` values and creates provider runtimes. `IModelProviderInitializationService` starts provider probes eagerly after provider descriptors/configuration are available. Each provider probe owns its success/failure state and model list cache:
@@ -450,7 +516,7 @@ CodeAlta-runtime providers can receive host-injected tools. Current built-ins ar
 
 Mutation and shell tools flow through host permission handling. Tool schemas are bridged to provider-specific declarations, including strict-schema normalization where required. A user-input/request tool is intentionally not registered as a local raw-API built-in until host UI pause/resume semantics are implemented.
 
-`AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions remain denied; this API alone enables no Desktop approval route or runtime execution/attachment binding.
+`AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions default to denial; the backend opt-in described above supplies runtime execution/attachment binding. This API alone enables no Desktop approval route.
 
 The `alta` live tool is injected for CodeAlta-managed sessions on any configured provider when the in-process runtime is available. See [`alta` live tool](live-tool.md).
 

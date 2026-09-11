@@ -229,10 +229,14 @@ public sealed class OwnedSessionCommandServiceTests
     }, holdPreparation: true);
 
     [TestMethod]
-    public Task Abort_DuringCreationWaitsForAttachmentAndCallsActualAbort() => Fixture.RunAsync(async f =>
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task Abort_DuringCreationWaitsForAttachmentAndCallsActualAbort(bool reviewPermissions) => Fixture.RunAsync(async f =>
     {
+        f.Provider.RequestPreparationPermission = true;
         var send = f.Send();
         await f.ObserveReadiness(f.Provider.PreparationStarted.Task, send, "preparation");
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, f.Provider.PreparationDecision);
         var abort = f.Abort(send);
         Assert.IsFalse(abort.Completion.IsCompleted);
         Assert.AreEqual(0, f.Provider.Aborts);
@@ -243,7 +247,7 @@ public sealed class OwnedSessionCommandServiceTests
         f.Provider.ReleaseAbort.TrySetResult();
         await f.Observe(abort.Completion);
         await f.Observe(send.Completion);
-    }, holdPreparation: true);
+    }, holdPreparation: true, reviewPermissions: reviewPermissions);
 
     [TestMethod]
     public Task Abort_DuringSendUsesReservedRuntimeRoute() => Fixture.RunAsync(async f =>
@@ -331,7 +335,9 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    public Task Interactions_DenyPermissionAndCancelUserInput() => Fixture.RunAsync(async f =>
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task Interactions_DenyPermissionAndCancelUserInput(bool reviewPermissions) => Fixture.RunAsync(async f =>
     {
         f.Provider.RequestInteractions = true;
         var send = f.Send();
@@ -341,7 +347,177 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsTrue(f.Provider.Options!.Tools is null || f.Provider.Options.Tools.Count == 0);
         f.Provider.ReleaseSend.TrySetResult();
         await f.Observe(send.Completion);
+    }, reviewPermissions: reviewPermissions);
+
+    [TestMethod]
+    public Task OwnedPermission_DefaultAndPreparationRemainDenied() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.RequestPreparationPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, f.Provider.PreparationDecision);
+        Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        var denied = f.Permission(f.Provider.Options!.OnPermissionRequest);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(denied)).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(send.Completion);
     });
+
+    [TestMethod]
+    public Task OwnedPermission_OptInUsesActualPerSendCallbackWithNullRunAndNoneToken() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.RequestPreparationPermission = true;
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, f.Provider.PreparationDecision);
+        Assert.IsNotNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        var pending = f.Track(f.Provider.SendPermission!);
+        var handle = await f.PendingHandle();
+        Assert.IsNull(handle.RunId);
+        Assert.AreEqual(f.SessionId, handle.SessionId);
+        Assert.IsFalse(await f.Observe(f.Host.RuntimeService.Permissions.ResolveAsync(handle, AgentPermissionDecisionKind.AllowForSession).AsTask()));
+        Assert.IsTrue(await f.Observe(f.Host.RuntimeService.Permissions.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce).AsTask()));
+        // Decision is inert data: this fake never executes a tool, shell or model turn.
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(pending)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(f.Provider.Options!.OnPermissionRequest))).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(send.Completion);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task OwnedPermission_SendReturnCancelsPendingAndOldDelegateCannotJoinReusedCoordinator(bool failSend) => Fixture.RunAsync(async f =>
+    {
+        f.Provider.FailSend = failSend;
+        var first = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, first, "first send");
+        var old = f.Provider.FirstSendOptions!.OnPermissionRequest!;
+        var pending = f.Permission(old);
+        var oldHandle = await f.PendingHandle();
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(first.Completion);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+        f.Provider.FailSend = false;
+        var second = f.Send("second");
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, second, "second send");
+        Assert.AreEqual(1, f.Provider.Resumes, "The actual coordinator must be reused.");
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(old))).Kind);
+        var current = f.Permission(f.Provider.SecondSendOptions!.OnPermissionRequest!);
+        var handle = await f.PendingHandle();
+        Assert.AreNotEqual(oldHandle.AttemptId, handle.AttemptId);
+        Assert.IsFalse(await f.Observe(f.Host.RuntimeService.Permissions.ResolveAsync(oldHandle, AgentPermissionDecisionKind.AllowOnce).AsTask()));
+        await f.Observe(f.Host.RuntimeService.Permissions.CancelAsync(handle).AsTask());
+        await f.Observe(current);
+        f.Provider.ReleaseSecondSend.TrySetResult();
+        await f.Observe(second.Completion);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    public Task OwnedPermission_AbortStartsWhileProviderCancellationCallbackIsHeld() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!);
+        await f.PendingHandle();
+        f.Provider.AbortDependency = pending;
+        var entered = f.NewGate();
+        var release = f.NewGate();
+        var registration = f.Provider.SendToken.Register(() =>
+        {
+            entered.TrySetResult();
+            if (!release.Task.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("Held provider cancellation expired.");
+        });
+        try
+        {
+            var abort = f.Abort(send);
+            await f.Observe(entered.Task);
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+            await f.ObserveReadiness(f.Provider.AbortStarted.Task, abort, "independent abort");
+            release.TrySetResult();
+            f.Provider.ReleaseAbort.TrySetResult();
+            f.Provider.ReleaseSend.TrySetResult();
+            await f.Observe(abort.Completion);
+            await f.Observe(send.Completion);
+        }
+        finally { release.TrySetResult(); registration.Dispose(); }
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    public Task OwnedPermission_AbortCancelsBeforeDependentProviderJoin() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!);
+        await f.PendingHandle();
+        f.Provider.AbortDependency = pending;
+        var abort = f.Abort(send);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+        await f.ObserveReadiness(f.Provider.AbortStarted.Task, abort, "abort after permission");
+        f.Provider.ReleaseAbort.TrySetResult();
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(abort.Completion);
+        await f.Observe(send.Completion);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    public Task OwnedPermission_DetachCancelsBeforeRetirementJoins() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var callback = f.Provider.FirstSendOptions!.OnPermissionRequest!;
+        var pending = f.Permission(callback);
+        await f.PendingHandle();
+        f.Provider.AbortDependency = pending;
+        var detach = f.Track(f.Host.RuntimeService.DetachRuntimeSessionAsync(f.SessionId));
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(callback))).Kind);
+        f.Provider.ReleaseAbort.TrySetResult();
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(detach);
+        await f.Observe(send.Completion);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task OwnedPermission_ShutdownCancelsBeforeDependentJoins(bool directRuntime) => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var callback = f.Provider.FirstSendOptions!.OnPermissionRequest!;
+        var pending = f.Permission(callback);
+        await f.PendingHandle();
+        f.Provider.AbortDependency = pending;
+        var disposal = directRuntime ? f.Track(f.Host.RuntimeService.DisposeAsync().AsTask()) : f.BeginDisposal();
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(callback))).Kind);
+        f.Provider.ReleaseAbort.TrySetResult();
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(send.Completion);
+        await f.Observe(disposal);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    public Task OwnedPermission_CommandShutdownDoesNotDisposeTrustedTuiPermissions() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!);
+        await f.PendingHandle();
+        f.Provider.AbortDependency = pending;
+        var disposal = f.Track(f.Host.Commands.DisposeAsync().AsTask());
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+        f.Provider.ReleaseAbort.TrySetResult();
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(send.Completion);
+        await f.Observe(disposal);
+        var tui = await f.Observe(f.Host.RuntimeService.Permissions.RegisterAsync(f.SessionId, f.Provider.CommandRequest(), false, CancellationToken.None));
+        _ = f.Track(tui.Completion);
+        Assert.IsTrue(await f.Observe(f.Host.RuntimeService.Permissions.ResolveAsync(tui.Snapshot.Handle, AgentPermissionDecisionKind.AllowForSession).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowForSession, (await f.Observe(tui.Completion)).Kind);
+    }, reviewPermissions: true);
 
     // Constructed only inside a selected real-route test. All gates and tasks are instance-owned.
     private sealed class Fixture
@@ -366,12 +542,12 @@ public sealed class OwnedSessionCommandServiceTests
         internal ControlledProvider Provider { get; } = new();
         internal CodeAltaHost Host => _host ?? throw new InvalidOperationException("Host setup has not completed.");
 
-        internal static async Task RunAsync(Func<Fixture, Task> body, int capacity = 256, bool holdPreparation = false)
+        internal static async Task RunAsync(Func<Fixture, Task> body, int capacity = 256, bool holdPreparation = false, bool reviewPermissions = false)
         {
             var fixture = new Fixture();
             try
             {
-                fixture._setup = fixture.Track(fixture.SetupAsync(capacity, holdPreparation));
+                fixture._setup = fixture.Track(fixture.SetupAsync(capacity, holdPreparation, reviewPermissions));
                 await fixture.Observe(fixture._setup);
                 var launch = fixture.NewGate();
                 fixture._body = fixture.Track(fixture.RunBodyAsync(body, launch.Task));
@@ -387,7 +563,11 @@ public sealed class OwnedSessionCommandServiceTests
                 await fixture.CleanupAsync();
             }
             if (fixture._failures.Count > 0)
-                throw new AggregateException("Owned fixture failures; roots retained at " + fixture._root, fixture._failures);
+            {
+                var failure = new AggregateException("Owned fixture failures; roots retained at " + fixture._root, fixture._failures);
+                failure.Data["RetainedFixture"] = fixture;
+                throw failure;
+            }
         }
 
         private async Task RunBodyAsync(Func<Fixture, Task> body, Task launch)
@@ -396,7 +576,7 @@ public sealed class OwnedSessionCommandServiceTests
             await Track(body(this)).ConfigureAwait(false);
         }
 
-        private async Task SetupAsync(int capacity, bool holdPreparation)
+        private async Task SetupAsync(int capacity, bool holdPreparation, bool reviewPermissions)
         {
             // Parent must admit these runtime I/O routes only after auditing this complete fixture.
             // Check existing ancestry before side effects; this is not a reparse-race sandbox.
@@ -483,6 +663,7 @@ public sealed class OwnedSessionCommandServiceTests
                 DiscoveryScope = new SessionDiscoveryScope(home, _root),
                 BuiltInSkillRoot = builtin,
                 OwnedCommandReceiptCapacity = capacity,
+                ReviewOwnedCommandPermissions = reviewPermissions,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 StartPlugins = false,
                 OwnsLogging = false,
@@ -515,6 +696,14 @@ public sealed class OwnedSessionCommandServiceTests
         }
 
         internal OwnedSessionCommandReceipt Send(string id = "send") => Accept(AdmitSend(new(id, SessionId, "text")));
+        internal Task<AgentPermissionDecision> Permission(AgentPermissionRequestHandler handler)
+            => Track(handler(Provider.CommandRequest(), CancellationToken.None));
+
+        internal async Task<SessionPermissionHandle> PendingHandle()
+        {
+            var pending = await Observe(Host.RuntimeService.Permissions.ListAsync().AsTask());
+            return pending.Single().Handle;
+        }
         internal OwnedSessionCommandReceipt Abort(OwnedSessionCommandReceipt send, string id = "abort")
             => Accept(AdmitAbort(new(id, send.OperationId)));
 
@@ -645,6 +834,15 @@ public sealed class OwnedSessionCommandServiceTests
         internal bool FailPreparation { get; set; }
         internal bool FailSend { get; set; }
         internal bool RequestInteractions { get; set; }
+        internal bool RequestPreparationPermission { get; set; }
+        internal bool RequestPerSendPermission { get; set; }
+        internal Task<AgentPermissionDecision>? SendPermission { get; private set; }
+        internal AgentPermissionDecisionKind? PreparationDecision { get; private set; }
+        internal AgentSendOptions? FirstSendOptions { get; private set; }
+        internal AgentSendOptions? SecondSendOptions { get; private set; }
+        internal Task? AbortDependency { get; set; }
+        internal AgentCommandPermissionRequest CommandRequest() => new(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
+            null, "owned-permission", null, "inert fixture command", Options!.WorkingDirectory, null, "fixture", null, null, null);
         internal TaskCompletionSource PreparationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleasePreparation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -693,6 +891,8 @@ public sealed class OwnedSessionCommandServiceTests
             {
                 LastSessionId = sessionId;
                 Options = options;
+                if (RequestPreparationPermission)
+                    PreparationDecision = (await options.OnPermissionRequest(CommandRequest(), CancellationToken.None).ConfigureAwait(false)).Kind;
                 PreparationStarted.TrySetResult();
                 await ReleasePreparation.Task.ConfigureAwait(false);
                 if (FailPreparation) throw new InvalidOperationException("Controlled preparation failure.");
@@ -750,6 +950,8 @@ public sealed class OwnedSessionCommandServiceTests
                     var send = Interlocked.Increment(ref owner._sends);
                     owner.Input = options.Input;
                     owner.SendToken = cancellationToken;
+                    if (send == 1) owner.FirstSendOptions = options;
+                    else owner.SecondSendOptions = options;
                     if (owner.RequestInteractions)
                     {
                         var permission = owner.Options!.OnPermissionRequest(new AgentGenericPermissionRequest(ProviderId, SessionId, DateTimeOffset.UtcNow, null, "permission", "fixture", default), cancellationToken);
@@ -758,7 +960,11 @@ public sealed class OwnedSessionCommandServiceTests
                         try { await input.ConfigureAwait(false); }
                         catch (OperationCanceledException) { owner.InputCancelled = true; }
                     }
+                    if (owner.RequestPerSendPermission)
+                        owner.SendPermission = (options.OnPermissionRequest ?? owner.Options!.OnPermissionRequest)(owner.CommandRequest(), CancellationToken.None);
                     (send == 1 ? owner.SendStarted : owner.SecondSendStarted).TrySetResult();
+                    if (owner.SendPermission is { } sendPermission)
+                        owner.PermissionDecision = (await sendPermission.ConfigureAwait(false)).Kind;
                     await (send == 1 ? owner.ReleaseSend.Task : owner.ReleaseSecondSend.Task).ConfigureAwait(false);
                     cancellationToken.ThrowIfCancellationRequested();
                     if (owner.FailSend) throw new InvalidOperationException("Controlled provider fault.");
@@ -772,6 +978,7 @@ public sealed class OwnedSessionCommandServiceTests
                 try
                 {
                     Interlocked.Increment(ref owner._aborts);
+                    if (owner.AbortDependency is { } dependency) await dependency.ConfigureAwait(false);
                     owner.AbortStarted.TrySetResult();
                     await owner.ReleaseAbort.Task.ConfigureAwait(false);
                 }

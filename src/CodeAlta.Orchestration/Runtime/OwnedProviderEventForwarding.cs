@@ -122,11 +122,16 @@ internal sealed class OwnedProviderEventForwarding
         // Neither cancellation callbacks nor abort are awaited before the other is initiated.
         var cancelStage = new RetirementStage(attachment.Cancellation.CancelAsync);
         var abortStage = new RetirementStage(attachment.Abort);
+        var permissionStage = new RetirementStage(attachment.CloseOwnedPermissions ?? (() => Task.CompletedTask));
         var cancellation = cancelStage.Work;
         var abort = abortStage.Work;
         attachment.Controls = [cancellation, abort];
         cancelStage.Launch();
         abortStage.Launch();
+        permissionStage.Launch();
+        // A permission waiting on a provider-supplied None token must not hold a handle use forever.
+        // Cancellation and abort above still start independently, before this owner-only join.
+        await CaptureAsync(attachment.Ordinal, 0, permissionStage.Work, attachment.Identity).ConfigureAwait(false);
         await attachment.Setup.Task.ConfigureAwait(false);
         await WaitUsesAsync(attachment, projection: false).ConfigureAwait(false);
         await CaptureAsync(attachment.Ordinal, 1, cancellation, attachment.Identity).ConfigureAwait(false);
@@ -149,9 +154,9 @@ internal sealed class OwnedProviderEventForwarding
         {
             // An attempted closure is not a receipt of successful unsubscription. Keep the
             // provider handle, cancellation source, attachment, and runtime dependencies alive.
-            foreach (var stage in new[] { cancelStage, abortStage, unsubscribeStage })
+            foreach (var stage in new[] { cancelStage, abortStage, permissionStage, unsubscribeStage })
                 await stage.Observer.ConfigureAwait(false);
-            throw new AggregateException(new[] { cancellation, abort, unsubscribe }
+            throw new AggregateException(new[] { cancellation, abort, permissionStage.Work, unsubscribe }
                 .Where(task => !task.IsCompletedSuccessfully)
                 .Select(task => task.Exception?.GetBaseException() ?? new TaskCanceledException(task)));
         }
@@ -160,7 +165,7 @@ internal sealed class OwnedProviderEventForwarding
         attachment.StopWork = stop;
         stopStage.Launch();
         await CaptureAsync(attachment.Ordinal, 4, stop, attachment.Identity).ConfigureAwait(false);
-        foreach (var stage in new[] { cancelStage, abortStage, unsubscribeStage, stopStage })
+        foreach (var stage in new[] { cancelStage, abortStage, permissionStage, unsubscribeStage, stopStage })
             await stage.Observer.ConfigureAwait(false);
         lock (_gate)
         {
@@ -170,7 +175,7 @@ internal sealed class OwnedProviderEventForwarding
             Pulse();
         }
         if (attachment.Stopped) attachment.Cancellation.Dispose();
-        var failed = new[] { cancellation, abort, unsubscribe, stop }.Where(task => !task.IsCompletedSuccessfully).ToArray();
+        var failed = new[] { cancellation, abort, permissionStage.Work, unsubscribe, stop }.Where(task => !task.IsCompletedSuccessfully).ToArray();
         if (failed.Length != 0)
             throw new AggregateException(failed.Select(task => task.Exception?.GetBaseException() ?? new TaskCanceledException(task)));
     }
@@ -308,6 +313,7 @@ internal sealed class OwnedProviderEventForwarding
         internal AttachmentIdentity Identity { get; }
         internal Func<Task> Abort { get; set; }
         internal Func<Task> Stop { get; }
+        internal Func<Task>? CloseOwnedPermissions { get; set; }
         internal CancellationTokenSource Cancellation { get; } = new();
         internal TaskCompletionSource Setup { get; } = NewCompletion();
         internal Task[] Controls { get; set; } = [];

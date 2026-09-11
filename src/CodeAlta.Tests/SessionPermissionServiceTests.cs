@@ -210,4 +210,237 @@ public sealed class SessionPermissionServiceTests
     internal static AgentCommandPermissionRequest Request() => new(
         new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, new AgentRunId("run"), "interaction",
         null, "echo preview", null, null, "test reason", null, null, null);
+
+    [TestMethod]
+    public async Task OwnedPermission_ValidatesCompletePayloadAndRestrictsTrustedResolution()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var request = Request() with { RunId = null, WorkingDirectory = "Q:\\fixture" };
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        try
+        {
+            var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+            Assert.IsNotNull(execution);
+            Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+            foreach (var invalid in new AgentPermissionRequest[]
+            {
+                new AgentGenericPermissionRequest(new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, null, "interaction", "commandExecution", default),
+                new AgentFileChangePermissionRequest(new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, null, "interaction", "Q:\\fixture", null),
+                request with { SessionId = "other" }, request with { ProviderId = new ModelProviderId("other") },
+                request with { SessionId = "SESSION" },
+                request with { Kind = "other" },
+                request with { InteractionId = " " }, request with { RunId = new AgentRunId("bad\ud800") },
+                request with { RunId = new AgentRunId(new string('x', SessionPermissionService.OwnedIdentityLimit + 1)) },
+                request with { Command = " " }, request with { WorkingDirectory = null },
+                request with { Command = new string('x', SessionPermissionService.OwnedCommandLimit + 1) },
+                request with { WorkingDirectory = new string('x', SessionPermissionService.OwnedDirectoryLimit + 1) },
+                request with { Reason = new string('x', SessionPermissionService.OwnedReasonLimit + 1) },
+                request with { InteractionId = new string('x', SessionPermissionService.OwnedIdentityLimit + 1) },
+                request with { InteractionId = " padded" }, request with { InteractionId = "bad\0id" },
+                request with { WorkingDirectory = "bad\udc00" }, request with { Command = "bad\0command" },
+                request with { Reason = "bad\ud800" }, request with { ApprovalId = "approval" },
+                request with { Actions = [] }, request with { Network = new("host", "https") },
+                request with { ProposedExecPolicyAmendment = [] }, request with { ProposedNetworkPolicyAmendments = [] },
+            })
+            {
+                var denied = service.HandleOwnedCommandAsync(execution, invalid, CancellationToken.None);
+                deliveries.Add(denied);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            }
+            request = request with
+            {
+                Command = new string('x', SessionPermissionService.OwnedCommandLimit - 2) + "\U0001f600",
+                WorkingDirectory = new string('x', SessionPermissionService.OwnedDirectoryLimit),
+                Reason = new string('x', SessionPermissionService.OwnedReasonLimit),
+                InteractionId = new string('x', SessionPermissionService.OwnedIdentityLimit),
+            };
+            var pending = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
+            deliveries.Add(pending);
+            var snapshot = (await service.ListAsync()).Single();
+            Assert.AreEqual(request.Command, snapshot.Command);
+            Assert.AreEqual(request.WorkingDirectory, snapshot.WorkingDirectory);
+            Assert.AreEqual(request.Reason, snapshot.Reason);
+            var handle = snapshot.Handle;
+            Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowForSession));
+            Assert.IsTrue(await service.IsPendingAsync(handle));
+            Assert.IsTrue(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce));
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            await service.CloseOwnedExecutionAsync(execution);
+            Assert.IsFalse(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+        }
+        finally
+        {
+            await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, []);
+        }
+    }
+
+    [TestMethod]
+    public async Task OwnedPermission_GlobalCapacityReclaimsCompletedAttemptsAndExecutions()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        try
+        {
+            var request = Request() with { WorkingDirectory = "Q:\\fixture" };
+            SessionPermissionService.OwnedPermissionExecution? first = null;
+            for (var i = 0; i < SessionPermissionService.OwnedPendingLimit / SessionPermissionService.OwnedPendingPerExecutionLimit; i++)
+            {
+                var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+                Assert.IsNotNull(execution);
+                first ??= execution;
+                Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+                for (var j = 0; j < SessionPermissionService.OwnedPendingPerExecutionLimit; j++)
+                    deliveries.Add(service.HandleOwnedCommandAsync(execution, request, CancellationToken.None));
+            }
+            Assert.AreEqual(SessionPermissionService.OwnedPendingLimit, (await service.ListAsync()).Count);
+            var extra = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+            Assert.IsNotNull(extra);
+            Assert.IsTrue(await service.BindOwnedExecutionAsync(extra, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+            var denied = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
+            deliveries.Add(denied);
+            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            await service.CloseOwnedExecutionAsync(first!);
+            var reclaimed = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
+            deliveries.Add(reclaimed);
+            Assert.AreEqual(SessionPermissionService.OwnedPendingLimit - SessionPermissionService.OwnedPendingPerExecutionLimit + 1,
+                (await service.ListAsync()).Count);
+            await service.CloseOwnedExecutionAsync(extra);
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await reclaimed.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            // Individually closed records do not exhaust the live execution cap or need tombstones.
+            for (var i = 0; i < SessionPermissionService.OwnedExecutionLimit * 2; i++)
+            {
+                var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+                Assert.IsNotNull(execution);
+                await service.CloseOwnedExecutionAsync(execution);
+            }
+        }
+        finally
+        {
+            await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, []);
+        }
+    }
+
+    [TestMethod]
+    public async Task OwnedPermission_AssociationAndCancellationResolutionOrderingAreAuthoritative()
+    {
+        var service = new SessionPermissionService();
+        await using var other = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        var cancellations = new List<CancellationTokenSource>();
+        try
+        {
+            Assert.IsNull(await service.CreateOwnedExecutionAsync(Guid.Empty, "session", CancellationToken.None));
+            Assert.IsNull(await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "bad\ud800", CancellationToken.None));
+            for (var i = 0; i < 12; i++)
+            {
+                var cancellation = new CancellationTokenSource();
+                cancellations.Add(cancellation);
+                var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", cancellation.Token);
+                Assert.IsNotNull(execution);
+                Assert.IsNull(await service.CreateOwnedExecutionAsync(execution.OperationId, "session", cancellation.Token));
+                Assert.IsFalse(await other.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+                Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+                Assert.IsFalse(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+                var request = Request() with { RunId = null, WorkingDirectory = "Q:\\fixture", Command = "inert \U0001f600" };
+                var wrongOwner = other.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
+                deliveries.Add(wrongOwner);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await wrongOwner.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                var pending = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
+                deliveries.Add(pending);
+                var handle = (await service.ListAsync()).Single().Handle;
+                Assert.IsFalse(await service.ResolveAsync(handle with { AttemptId = Guid.NewGuid() }, AgentPermissionDecisionKind.AllowOnce));
+                if (i % 3 == 0) cancellation.Cancel();
+                var response = service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce).AsTask();
+                if (i % 3 == 1) Assert.IsTrue(await response); // Accepted before invalidation remains accepted.
+                cancellation.Cancel(); // Other iterations race cancellation against the queued response.
+                var accepted = await response;
+                if (i % 3 == 0) Assert.IsFalse(accepted);
+                await service.CloseOwnedExecutionAsync(execution);
+                Assert.AreEqual(accepted ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Cancel,
+                    (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+                Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce));
+                var late = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
+                deliveries.Add(late);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await late.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            }
+        }
+        finally
+        {
+            await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, cancellations);
+        }
+    }
+
+    [TestMethod]
+    public async Task OwnedPermission_CapacityAndCancellationReleaseBookkeeping()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var cancellation = new CancellationTokenSource();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        try
+        {
+            var executions = new List<SessionPermissionService.OwnedPermissionExecution>();
+            for (var i = 0; i < SessionPermissionService.OwnedExecutionLimit; i++)
+            {
+                var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", cancellation.Token);
+                Assert.IsNotNull(execution);
+                executions.Add(execution);
+            }
+            Assert.IsNull(await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", cancellation.Token));
+            var first = executions[0];
+            Assert.IsTrue(await service.BindOwnedExecutionAsync(first, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+            for (var i = 0; i < SessionPermissionService.OwnedPendingPerExecutionLimit; i++)
+                deliveries.Add(service.HandleOwnedCommandAsync(first, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None));
+            var overflow = service.HandleOwnedCommandAsync(first, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None);
+            deliveries.Add(overflow);
+            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await overflow.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            var handles = (await service.ListAsync()).Select(snapshot => snapshot.Handle).ToArray();
+            cancellation.Cancel();
+            foreach (var handle in handles)
+                Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce));
+            await service.CloseOwnedAdmissionAsync();
+            await Task.WhenAll(deliveries).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(0, (await service.ListAsync()).Count);
+            Assert.IsNull(await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None));
+            // Closing owned admission must not dispose or change trusted TUI registration.
+            var tui = await service.RegisterAsync("session", Request(), true, CancellationToken.None);
+            Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await tui.Completion).Kind);
+        }
+        finally
+        {
+            await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, [cancellation]);
+        }
+    }
+
+    private static async Task CloseOwnedFixtureAsync(SessionPermissionService service, OwnedProviderEventForwarding forwarding,
+        OwnedProviderEventForwarding.Attachment attachment, List<Task<AgentPermissionDecision>> deliveries, IReadOnlyList<CancellationTokenSource> sources)
+    {
+        var disposal = service.DisposeAsync().AsTask();
+        var completion = Task.WhenAll(deliveries.Cast<Task>().Append(disposal));
+        Task? retirement = null;
+        try
+        {
+            await completion.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = forwarding.RetireAsync(attachment);
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            foreach (var source in sources) source.Dispose();
+        }
+        catch (Exception error)
+        {
+            // Failed/timed-out cleanup is not permission to release sources or lose the original work.
+            error.Data["RetainedOwnedPermissionFixture"] = new { service, forwarding, attachment, deliveries, sources, disposal, completion, retirement };
+            throw;
+        }
+    }
 }

@@ -38,7 +38,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         bool ownsPluginRuntime,
         bool ownsLogging,
         ProjectDescriptor currentProject,
-        int ownedCommandReceiptCapacity)
+        int ownedCommandReceiptCapacity,
+        bool reviewOwnedCommandPermissions)
     {
         CatalogOptions = catalogOptions;
         ProjectCatalog = projectCatalog;
@@ -52,7 +53,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ProjectFileSearchService = projectFileSearchService;
         PluginRuntime = pluginRuntime;
         CurrentProject = currentProject;
-        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);
+        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions);
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore);
         _disposeTask = CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
@@ -264,7 +265,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ownsPluginRuntime,
                 ownsLogging,
                 currentProject,
-                options.OwnedCommandReceiptCapacity);
+                options.OwnedCommandReceiptCapacity,
+                options.ReviewOwnedCommandPermissions);
         }
         catch (Exception creationFailure)
         {

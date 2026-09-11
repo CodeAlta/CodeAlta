@@ -25,6 +25,19 @@ public sealed class CodeAltaHostOptions
     /// <summary>Gets the positive owner-lifetime receipt limit; full owners reject new requests without evicting retry protection.</summary>
     public int OwnedCommandReceiptCapacity { get; init; } = 256;
 
+    /// <summary>
+    /// Gets whether owned text sends may request bounded, manually resolved plain-command permissions.
+    /// Defaults to false. Preparation and session-level callbacks still deny permission requests.
+    /// </summary>
+    /// <remarks>
+    /// Only providers honoring the per-send permission callback can participate. This option supplies
+    /// no presenter, automatic approval, renderer authorization, or restart recovery. A host enabling
+    /// it must resolve pending requests through its trusted permission owner or cancel the operation.
+    /// Owned sends reject a reused coordinator with different session-level interaction callbacks,
+    /// even when this option is disabled, rather than inheriting another caller's default policy.
+    /// </remarks>
+    public bool ReviewOwnedCommandPermissions { get; init; }
+
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>
     public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }

@@ -65,6 +65,203 @@ public sealed class SessionPermissionService : IAsyncDisposable
     private readonly TaskCompletionSource _shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _stopped;
     private int _disposeStarted;
+    internal const int OwnedExecutionLimit = 64;
+    internal const int OwnedPendingLimit = 128;
+    internal const int OwnedPendingPerExecutionLimit = 4;
+    internal const int OwnedIdentityLimit = 128;
+    internal const int OwnedCommandLimit = 4096;
+    internal const int OwnedDirectoryLimit = 1024;
+    internal const int OwnedReasonLimit = 1024;
+    private readonly Dictionary<Guid, OwnedPermissionExecution> _ownedExecutions = [];
+    private readonly HashSet<PendingPermission> _ownedDeliveries = [];
+    private bool _ownedAdmissionClosed;
+
+    // Immutable denial-policy capabilities, not per-send or mutable latest-callback associations.
+    // Owned sends reject a reused coordinator whose session defaults came from another caller.
+    internal AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
+        = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny));
+    internal AgentUserInputRequestHandler OwnedDefaultUserInputHandler { get; }
+        = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true));
+
+    // Only the command owner creates one of these per immutable receipt. Closed records are removed
+    // from the service; retained delegates hold their closed record, never a lookup of the latest send.
+    internal sealed class OwnedPermissionExecution(SessionPermissionService owner, Guid operationId, string sessionId, CancellationToken token)
+    {
+        internal SessionPermissionService Owner { get; } = owner;
+        internal Guid OperationId { get; } = operationId;
+        internal string SessionId { get; } = sessionId;
+        internal CancellationToken ExecutionToken { get; set; } = token;
+        internal CancellationToken AttachmentToken { get; set; }
+        internal OwnedProviderEventForwarding.Attachment? Attachment { get; set; }
+        internal Guid RuntimeId { get; set; }
+        internal long AttachmentOrdinal { get; set; }
+        internal string? ProviderId { get; set; }
+        internal bool Bound { get; set; }
+        internal bool Closed { get; set; }
+        internal HashSet<PendingPermission> Deliveries { get; } = [];
+        internal Task? Closure { get; set; }
+    }
+
+    internal ValueTask<OwnedPermissionExecution?> CreateOwnedExecutionAsync(Guid operationId, string sessionId, CancellationToken token)
+        => ExecuteAsync<OwnedPermissionExecution?>(() =>
+        {
+            if (_stopped || _ownedAdmissionClosed || token.IsCancellationRequested || operationId == Guid.Empty
+                || !ValidOwnedText(sessionId, OwnedIdentityLimit, required: true, identity: true)
+                || _ownedExecutions.Count >= OwnedExecutionLimit || _ownedExecutions.ContainsKey(operationId)) return null;
+            var execution = new OwnedPermissionExecution(this, operationId, sessionId, token);
+            _ownedExecutions.Add(operationId, execution);
+            return execution;
+        }, null);
+
+    internal ValueTask<bool> BindOwnedExecutionAsync(OwnedPermissionExecution execution, Guid runtimeId,
+        OwnedProviderEventForwarding.Attachment attachment, ModelProviderId providerId)
+        => ExecuteAsync(() =>
+        {
+            if (!Owns(execution) || execution.Bound || execution.Closed || _ownedAdmissionClosed
+                || execution.ExecutionToken.IsCancellationRequested || runtimeId == Guid.Empty || attachment.IsRetiring
+                || !string.Equals(attachment.Identity.SessionId, execution.SessionId, StringComparison.Ordinal)
+                || !ValidOwnedText(providerId.Value, OwnedIdentityLimit, required: true, identity: true)) return false;
+            execution.Bound = true;
+            execution.RuntimeId = runtimeId;
+            execution.AttachmentOrdinal = attachment.Ordinal;
+            execution.ProviderId = providerId.Value;
+            execution.Attachment = attachment;
+            execution.AttachmentToken = attachment.Cancellation.Token;
+            return true;
+        }, false);
+
+    internal async Task<AgentPermissionDecision> HandleOwnedCommandAsync(OwnedPermissionExecution execution,
+        AgentPermissionRequest request, CancellationToken cancellationToken)
+    {
+        var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
+        {
+            if (!CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
+                || _ownedDeliveries.Count >= OwnedPendingLimit || execution.Deliveries.Count >= OwnedPendingPerExecutionLimit) return null;
+            var command = (AgentCommandPermissionRequest)request;
+            var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
+            var snapshot = new SessionPermissionSnapshot(handle, request.ProviderId, request.Timestamp, request.Kind,
+                command.Command, command.WorkingDirectory, command.Reason, null);
+            var pending = new PendingPermission(snapshot,
+                new(TaskCreationOptions.RunContinuationsAsynchronously), cancellationToken, execution);
+            _pending.Add(handle, pending);
+            execution.Deliveries.Add(pending);
+            _ownedDeliveries.Add(pending);
+            // Starts an asynchronous wait, never awaits a decision in the mailbox. The bounded delivery
+            // remains owned until its linked source is disposed and its cleanup message is observed.
+            pending.Delivery = DeliverOwnedAsync(pending, execution.ExecutionToken, execution.AttachmentToken);
+            return pending.Delivery;
+        }, null).ConfigureAwait(false);
+        return delivery is null ? new(AgentPermissionDecisionKind.Deny) : await delivery.ConfigureAwait(false);
+    }
+
+    // Keep retained provider delegates independent of a runtime send's compiler-generated closure
+    // (which also owns captured entries, handle uses and linked cancellation sources).
+    internal AgentPermissionRequestHandler CreateOwnedCommandHandler(OwnedPermissionExecution execution)
+        => (request, token) => HandleOwnedCommandAsync(execution, request, token);
+
+    private async Task<AgentPermissionDecision> DeliverOwnedAsync(PendingPermission pending,
+        CancellationToken executionToken, CancellationToken attachmentToken)
+    {
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(executionToken, attachmentToken, pending.CancellationToken);
+            return await AwaitDecisionAsync(pending.Snapshot.Handle, pending.Completion.Task, linked.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A failed cancellation registration must not leave an untracked pending entry.
+            await CancelAsync(pending.Snapshot.Handle).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            await ExecuteAsync(() =>
+            {
+                pending.OwnedExecution!.Deliveries.Remove(pending);
+                _ownedDeliveries.Remove(pending);
+                return true;
+            }, false).ConfigureAwait(false);
+        }
+    }
+
+    internal Task CloseOwnedExecutionAsync(OwnedPermissionExecution execution)
+        => JoinOwnedClosureAsync(() => ReferenceEquals(execution.Owner, this) ? CloseOwned(execution) : Task.CompletedTask);
+
+    internal Task InvalidateOwnedOperationAsync(Guid operationId)
+        => JoinOwnedClosureAsync(() => _ownedExecutions.TryGetValue(operationId, out var execution) ? CloseOwned(execution) : Task.CompletedTask);
+
+    internal Task InvalidateOwnedAttachmentAsync(OwnedProviderEventForwarding.Attachment attachment)
+        => JoinOwnedClosureAsync(() => Task.WhenAll(_ownedExecutions.Values
+            .Where(execution => ReferenceEquals(execution.Attachment, attachment)).ToArray().Select(CloseOwned)));
+
+    internal Task CloseOwnedAdmissionAsync()
+        => JoinOwnedClosureAsync(() =>
+        {
+            _ownedAdmissionClosed = true;
+            foreach (var execution in _ownedExecutions.Values.ToArray()) _ = CloseOwned(execution);
+            return Task.WhenAll(_ownedDeliveries.Select(pending => pending.Delivery!));
+        });
+
+    private async Task JoinOwnedClosureAsync(Func<Task> close)
+    {
+        var completion = await ExecuteAsync(close, Task.CompletedTask).ConfigureAwait(false);
+        await completion.ConfigureAwait(false);
+        // A concurrently disposed service owns all remaining completions. Do not release a caller's
+        // source/handle on ExecuteAsync's stopped fallback before that shutdown has actually joined.
+        if (Volatile.Read(ref _disposeStarted) != 0) await _shutdown.Task.ConfigureAwait(false);
+    }
+
+    private Task CloseOwned(OwnedPermissionExecution execution)
+    {
+        if (execution.Closure is not null) return execution.Closure;
+        if (!Owns(execution)) return Task.CompletedTask;
+        execution.Closed = true;
+        _ownedExecutions.Remove(execution.OperationId);
+        var deliveries = execution.Deliveries.ToArray();
+        foreach (var pending in deliveries) Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.Cancel);
+        execution.Attachment = null;
+        execution.ExecutionToken = default;
+        execution.AttachmentToken = default;
+        return execution.Closure = Task.WhenAll(deliveries.Select(pending => pending.Delivery!));
+    }
+
+    private bool Owns(OwnedPermissionExecution execution)
+        => ReferenceEquals(execution.Owner, this) && _ownedExecutions.TryGetValue(execution.OperationId, out var current)
+            && ReferenceEquals(current, execution);
+
+    private bool CanUse(OwnedPermissionExecution execution)
+        => !_stopped && !_ownedAdmissionClosed && Owns(execution) && execution.Bound && !execution.Closed
+            && !execution.ExecutionToken.IsCancellationRequested && !execution.AttachmentToken.IsCancellationRequested
+            && execution.Attachment is { IsRetiring: false };
+
+    private bool IsCanceled(PendingPermission pending)
+        => pending.CancellationToken.IsCancellationRequested || (pending.OwnedExecution is { } execution && !CanUse(execution));
+
+    private static bool Eligible(OwnedPermissionExecution execution, AgentPermissionRequest request)
+        => request is AgentCommandPermissionRequest command
+            && request.Kind == "commandExecution" && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
+            && ValidOwnedText(request.InteractionId, OwnedIdentityLimit, required: true, identity: true)
+            && (request.RunId is null || ValidOwnedText(request.RunId.Value.Value, OwnedIdentityLimit, required: true, identity: true))
+            && ValidOwnedText(command.Command, OwnedCommandLimit, required: true)
+            && ValidOwnedText(command.WorkingDirectory, OwnedDirectoryLimit, required: true)
+            && ValidOwnedText(command.Reason, OwnedReasonLimit, required: false)
+            && command.ApprovalId is null && command.Actions is null && command.Network is null
+            && command.ProposedExecPolicyAmendment is null && command.ProposedNetworkPolicyAmendments is null;
+
+    private static bool ValidOwnedText(string? value, int limit, bool required, bool identity = false)
+    {
+        if (value is null) return !required;
+        if (value.Length > limit || ((required || identity) && string.IsNullOrWhiteSpace(value))) return false;
+        if (identity && !value.AsSpan().Trim().SequenceEqual(value.AsSpan())) return false;
+        for (var i = 0; i < value.Length; i++)
+        {
+            var character = value[i];
+            if (character == '\0' || (identity && char.IsControl(character))) return false;
+            if (!char.IsSurrogate(character)) continue;
+            if (!char.IsHighSurrogate(character) || ++i == value.Length || !char.IsLowSurrogate(value[i])) return false;
+        }
+        return true;
+    }
 
     /// <summary>
     /// Registers a trusted callback association. AutoApprove retains the existing AllowOnce policy.
@@ -119,7 +316,7 @@ public sealed class SessionPermissionService : IAsyncDisposable
     public ValueTask<IReadOnlyList<SessionPermissionSnapshot>> ListAsync()
         => ExecuteAsync<IReadOnlyList<SessionPermissionSnapshot>>(
             () => Array.AsReadOnly(_pending.Values
-                .Where(static entry => !entry.CancellationToken.IsCancellationRequested)
+                .Where(entry => !IsCanceled(entry))
                 .Select(static entry => entry.Snapshot).ToArray()),
             Array.Empty<SessionPermissionSnapshot>());
 
@@ -131,7 +328,7 @@ public sealed class SessionPermissionService : IAsyncDisposable
     public ValueTask<bool> IsPendingAsync(SessionPermissionHandle handle)
     {
         ArgumentNullException.ThrowIfNull(handle);
-        return ExecuteAsync(() => _pending.TryGetValue(handle, out var entry) && !entry.CancellationToken.IsCancellationRequested, false);
+        return ExecuteAsync(() => _pending.TryGetValue(handle, out var entry) && !IsCanceled(entry), false);
     }
 
     /// <summary>
@@ -139,7 +336,8 @@ public sealed class SessionPermissionService : IAsyncDisposable
     /// Resolution checks the caller token in the mailbox: cancellation already signaled at that check completes Cancel
     /// and rejects a non-Cancel response regardless of cleanup-message ordering. Cancellation after that check does not
     /// revoke an accepted decision. The mailbox serializes competing responses and entry removal.
-    /// This narrow use case preserves the four existing TUI choices; provider policy amendments remain provider-owned.
+    /// Preserves the four existing TUI choices. Opt-in owned command attempts allow only AllowOnce, Deny and Cancel;
+    /// this trusted route cannot grant AllowForSession on them. Provider policy amendments remain provider-owned.
     /// </summary>
     /// <exception cref="ArgumentNullException">The handle is null.</exception>
     public ValueTask<bool> ResolveAsync(SessionPermissionHandle handle, AgentPermissionDecisionKind decision)
@@ -186,18 +384,35 @@ public sealed class SessionPermissionService : IAsyncDisposable
 
         try
         {
-            await _actor.AskAsync(_ =>
+            var ownedCompletion = await _actor.AskAsync(actorCancellationToken =>
             {
                 _stopped = true;
+                _ownedAdmissionClosed = true;
+                foreach (var execution in _ownedExecutions.Values.ToArray()) _ = CloseOwned(execution);
+                var owned = Task.WhenAll(_ownedDeliveries.Select(pending => pending.Delivery!));
                 foreach (var entry in _pending.Values)
                 {
                     entry.Completion.SetResult(new(AgentPermissionDecisionKind.Cancel));
                 }
 
                 _pending.Clear();
-                return ValueTask.FromResult(true);
+                return ValueTask.FromResult(owned);
             }).ConfigureAwait(false);
-            await _actor.StopAsync().ConfigureAwait(false);
+            try { await ownedCompletion.ConfigureAwait(false); }
+            finally
+            {
+                try
+                {
+                    // Delivery cleanup uses the stopped fallback during disposal; release its bounded indexes here.
+                    await _actor.AskAsync(_ =>
+                    {
+                        foreach (var pending in _ownedDeliveries) pending.OwnedExecution!.Deliveries.Remove(pending);
+                        _ownedDeliveries.Clear();
+                        return ValueTask.FromResult(true);
+                    }).ConfigureAwait(false);
+                }
+                finally { await _actor.StopAsync().ConfigureAwait(false); }
+            }
         }
         finally
         {
@@ -221,12 +436,15 @@ public sealed class SessionPermissionService : IAsyncDisposable
 
     private bool Complete(SessionPermissionHandle handle, AgentPermissionDecisionKind decision)
     {
-        if (!_pending.Remove(handle, out var entry))
+        if (!_pending.TryGetValue(handle, out var entry))
         {
             return false;
         }
 
-        var canceled = entry.CancellationToken.IsCancellationRequested;
+        var canceled = IsCanceled(entry);
+        if (!canceled && entry.OwnedExecution is not null
+            && decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel)) return false;
+        _pending.Remove(handle);
         entry.Completion.SetResult(new(canceled ? AgentPermissionDecisionKind.Cancel : decision));
         return !canceled || decision == AgentPermissionDecisionKind.Cancel;
     }
@@ -252,6 +470,14 @@ public sealed class SessionPermissionService : IAsyncDisposable
         }
     }
 
-    private sealed record PendingPermission(
-        SessionPermissionSnapshot Snapshot, TaskCompletionSource<AgentPermissionDecision> Completion, CancellationToken CancellationToken);
+    internal sealed class PendingPermission(
+        SessionPermissionSnapshot snapshot, TaskCompletionSource<AgentPermissionDecision> completion, CancellationToken cancellationToken,
+        OwnedPermissionExecution? ownedExecution = null)
+    {
+        internal SessionPermissionSnapshot Snapshot { get; } = snapshot;
+        internal TaskCompletionSource<AgentPermissionDecision> Completion { get; } = completion;
+        internal CancellationToken CancellationToken { get; } = cancellationToken;
+        internal OwnedPermissionExecution? OwnedExecution { get; } = ownedExecution;
+        internal Task<AgentPermissionDecision>? Delivery { get; set; }
+    }
 }

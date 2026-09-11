@@ -385,6 +385,82 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         Assert.AreEqual(0, f.Provider.EarlyDisposals);
     });
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task OwnedPermission_RejectsCoordinatorWithDifferentSessionDefaults(bool reviewPermissions) => Fixture.Run(async f =>
+    {
+        // Same execution configuration, but this non-owned caller installed different callbacks.
+        // These remain inert denial/cancellation handlers; no real tool is involved.
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var original = f.Provider.Latest;
+        // Same prompt as the live configuration: normal matching would consume this pending choice.
+        await f.Wait(f.Runtime.SetActiveSessionAgentPromptIdAsync(f.Session.SessionId, "default"));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("pre-existing-run"));
+        var before = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.AreEqual("pre-existing-run", before.Entry!.ActiveRunId);
+        Assert.AreEqual("default", before.Entry.PendingAgentPromptId);
+        var startedAt = f.Session.StartedAt;
+        var status = f.Session.Status;
+        Assert.IsNull(startedAt, "The original-event fixture must not have marked a send started.");
+        var admission = f.Commands.AdmitSend(new("different-defaults", f.Session.SessionId, "inert input"));
+        if (admission.Receipt is { } admitted) _ = f.Track(admitted.Completion);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, admission.Kind);
+        var result = await f.Wait(admission.Receipt!.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
+        Assert.AreEqual("send_failed", result.Code, "Rejection must reach send admission without consuming preparation state.");
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        Assert.AreSame(original, f.Provider.Latest, "Do not silently replace another caller's coordinator.");
+        Assert.AreEqual(1, f.Provider.AttachmentCount);
+        Assert.IsNull(original.LastSend, "The provider must not receive an owned send on different defaults.");
+        Assert.AreEqual(startedAt, f.Session.StartedAt);
+        Assert.AreEqual(status, f.Session.Status);
+        var observed = new List<SessionRuntimeEvent>();
+        // Null run on the trailing marker cannot restore a run cleared by a faulty rejection path.
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, null, observed);
+        Assert.IsFalse(observed.Any(value => value is SessionAgentEvent
+            { Event: AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown } }));
+        Assert.IsFalse(observed.Any(value => value is SessionLifecycleRuntimeEvent
+            { Event.Kind: SessionLifecycleEventKind.RunFailed or SessionLifecycleEventKind.RunAborted
+                or SessionLifecycleEventKind.RunCompleted or SessionLifecycleEventKind.RunSubmitted or SessionLifecycleEventKind.SessionStarted }));
+        Assert.IsFalse(observed.Any(value => value is SessionCatalogRuntimeEvent { Session.StartedAt: not null }),
+            "A rejected owned send must not publish a started catalog snapshot for its resolved descriptor.");
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+    }, reviewPermissions: reviewPermissions);
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task OwnedPermission_ReplacementAndDirectAbortInvalidateActualAttachment(bool replacement) => Fixture.Run(async f =>
+    {
+        var admission = f.Commands.AdmitSend(new("owned-permission", f.Session.SessionId, "inert fixture input"));
+        if (admission.Receipt is { } admitted) _ = f.Track(admitted.Completion);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, admission.Kind);
+        var receipt = admission.Receipt!;
+        await f.Ready(f.Provider.SendStarted.Task);
+        var original = f.Provider.Latest;
+        var callback = original.LastSend!.OnPermissionRequest;
+        Assert.IsNotNull(callback);
+        var request = new AgentCommandPermissionRequest(original.ProviderId, original.SessionId, DateTimeOffset.UtcNow,
+            null, "pending", null, "inert command", original.WorkspacePath, null, null, null, null, null);
+        var pending = f.Track(callback(request, CancellationToken.None));
+        var handle = (await f.Wait(f.Runtime.Permissions.ListAsync().AsTask())).Single().Handle;
+        original.AbortDependency = pending;
+        f.Provider.HoldAbort = true;
+        var control = f.Track(replacement
+            ? f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("replacement-model"))
+            : f.Runtime.AbortAsync(f.Session.SessionId));
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Wait(pending)).Kind);
+        await f.Ready(f.Provider.AbortStarted.Task);
+        Assert.IsFalse(await f.Wait(f.Runtime.Permissions.ResolveAsync(handle, AgentPermissionDecisionKind.AllowOnce).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Wait(callback(request, CancellationToken.None))).Kind);
+        f.Provider.ReleaseAbort.TrySetResult();
+        await f.Wait(control);
+        await f.Wait(receipt.Completion);
+        if (replacement) Assert.AreNotSame(original, f.Provider.Latest);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+    }, reviewPermissions: true);
+
     private sealed class HeldEmptyTools : IReadOnlyList<AgentToolDefinition>
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -422,6 +498,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal SessionViewDescriptor Session { get; private set; } = null!;
         internal SessionViewJournalStore Journal { get; private set; } = null!;
         internal SessionRuntimeService Runtime { get { lock (_gate) return _host!.RuntimeService; } }
+        internal OwnedSessionCommandService Commands { get { lock (_gate) return _host!.Commands; } }
         internal SessionExecutionOptions Options => OptionsFor("fixture-model");
         internal SessionExecutionOptions OptionsFor(string model, IReadOnlyList<AgentToolDefinition>? tools = null) => new()
         {
@@ -435,12 +512,12 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             OnUserInputRequest = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true)),
         };
 
-        internal static async Task Run(Func<Fixture, Task> body)
+        internal static async Task Run(Func<Fixture, Task> body, bool reviewPermissions = false)
         {
             var f = new Fixture();
             try
             {
-                await f.Wait(f.Start(f.Setup, setup: true));
+                await f.Wait(f.Start(() => f.Setup(reviewPermissions), setup: true));
                 await f.Wait(f.Start(() => body(f), setup: false));
             }
             catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
@@ -504,7 +581,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal async Task ExpectCancellation(Task task)
             => Expected(await Assert.ThrowsAsync<OperationCanceledException>(() => task));
 
-        internal async Task EmitAndObserve(AgentSessionUpdateKind kind, AgentRunId? runId)
+        internal async Task EmitAndObserve(AgentSessionUpdateKind kind, AgentRunId? runId, List<SessionRuntimeEvent>? observed = null)
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var marker = Guid.NewGuid().ToString();
@@ -513,12 +590,15 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             async Task Observe()
             {
                 await foreach (var value in Runtime.StreamEventsAsync(cancellation.Token))
+                {
+                    observed?.Add(value);
                     if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent update } && update.Message == marker) return;
+                }
                 Assert.Fail("The actual runtime did not forward the fixture state event.");
             }
         }
 
-        private async Task Setup()
+        private async Task Setup(bool reviewPermissions)
         {
             for (var node = new DirectoryInfo(Path.GetDirectoryName(_root)!); node is not null; node = node.Parent)
                 if ((node.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Reparse fixture ancestry.");
@@ -549,6 +629,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                 DiscoveryScope = new SessionDiscoveryScope(home, _root), BuiltInSkillRoot = builtin,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 StartPlugins = false, OwnsLogging = false, IsHeadless = true,
+                ReviewOwnedCommandPermissions = reviewPermissions,
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider.Descriptor, Provider.CreateRuntime),
             }));
             var host = await creation;
@@ -708,6 +789,8 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             internal TaskCompletionSource SendStarted { get; } = NewGate();
             internal TaskCompletionSource SendFinished { get; } = NewGate();
             internal AgentSessionCreateOptions Options => options;
+            internal AgentSendOptions? LastSend { get; private set; }
+            internal Task? AbortDependency { get; set; }
             public ModelProviderId ProviderId => owner.Descriptor.ProviderId;
             public string SessionId => id;
             public string? WorkspacePath => options.WorkingDirectory;
@@ -731,6 +814,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                 try
                 {
                     var count = Interlocked.Increment(ref owner._sends);
+                    LastSend = send;
                     (count == 1 ? owner.SendStarted : owner.SecondSendStarted).TrySetResult();
                     SendStarted.TrySetResult();
                     // Abort, not cancellation alone, releases this controlled provider operation.
@@ -742,6 +826,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
             public async Task AbortAsync(CancellationToken cancellationToken = default)
             {
+                if (AbortDependency is { } dependency) await dependency.ConfigureAwait(false);
                 owner.AbortStarted.TrySetResult();
                 if (owner.HoldAbort) await owner.ReleaseAbort.Task.ConfigureAwait(false);
                 owner.ReleaseSend.TrySetResult();

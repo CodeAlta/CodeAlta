@@ -36,11 +36,11 @@ public sealed class OwnedSessionCommandSourceTests
     public void Host_UsesExplicitBuiltInRootWithoutChangingDefaultProviders()
     {
         var host = Read(Host);
-        RequireOnce(host, "Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);");
+        RequireOnce(host, "Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions);");
         RequireOnce(host, "public OwnedSessionCommandService Commands { get; }");
         RequireOnce(host, "        _disposeTask = CreateHostDisposal(\n            DisposeCommandsAndRuntimeAsync,\n            AgentHub.DisposeAsync,");
-        RequireOnce(host, "                currentProject,\n                options.OwnedCommandReceiptCapacity);");
-        Before(host, "Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);", "_disposeTask = CreateHostDisposal(");
+        RequireOnce(host, "                currentProject,\n                options.OwnedCommandReceiptCapacity,\n                options.ReviewOwnedCommandPermissions);");
+        Before(host, "Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions);", "_disposeTask = CreateHostDisposal(");
         Before(host, "ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.OwnedCommandReceiptCapacity);", "Directory.CreateDirectory(globalRoot);");
         Before(host, "new BuiltInCodeAltaSkillRootProvider(options.BuiltInSkillRoot);", "Directory.CreateDirectory(globalRoot);");
         // The current host joins both retained work owners before disposing the runtime, including on failure.
@@ -52,6 +52,7 @@ public sealed class OwnedSessionCommandSourceTests
         StringAssert.Contains(host, "if (failures.Count > 1) throw new AggregateException(failures);");
         var options = Read(Options);
         StringAssert.Contains(options, "public int OwnedCommandReceiptCapacity { get; init; } = 256;");
+        RequireOnce(options, "public bool ReviewOwnedCommandPermissions { get; init; }");
         RequireOnce(options, "public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }");
         RequireOnce(host, "internal static PluginAdapterOperationOptions CreatePluginOperationOptions(");
         StringAssert.Contains(host, "Environment = options.PluginEnvironment is not null\n                ? new Dictionary<string, string?>(options.PluginEnvironment, StringComparer.OrdinalIgnoreCase)\n                : Environment.GetEnvironmentVariables()");
@@ -97,8 +98,9 @@ public sealed class OwnedSessionCommandSourceTests
         Before(owner, "operation.Work = RunSendAsync(operation);", "operation.Launch.TrySetResult();");
         StringAssert.Contains(owner, "await operation.Launch.Task.ConfigureAwait(false);");
         StringAssert.Contains(owner, "operation.Preparation = PrepareAsync(operation);");
-        StringAssert.Contains(owner, "EnsureCoordinatorSessionAsync(session, options, CancellationToken.None)");
-        StringAssert.Contains(owner, "operation.Execution.Token, CancellationToken.None");
+        StringAssert.Contains(owner, "EnsureOwnedCoordinatorSessionAsync(session, options)");
+        StringAssert.Contains(owner, "operation.PermissionExecution, operation.Execution.Token");
+        Assert.IsFalse(owner.Contains("_runtime.SendAsync(", StringComparison.Ordinal));
         StringAssert.Contains(owner, "await _runtime.AbortAsync(operation.SessionId, CancellationToken.None)");
         StringAssert.Contains(owner, "operation.Control = RunControlAsync(operation);");
         StringAssert.Contains(owner, "operation.Cancellation = operation.Execution.CancelAsync();");
@@ -108,6 +110,39 @@ public sealed class OwnedSessionCommandSourceTests
         Before(owner, "_closed = true;", "_disposeTask = DisposeCoreAsync(");
         StringAssert.Contains(owner, "await operation.Work.ConfigureAwait(false);");
         StringAssert.Contains(owner, "await control.ConfigureAwait(false);");
+    }
+
+    [TestMethod]
+    public void OwnedPermission_UsesReceiptAndCapturedAttachmentWithoutChangingPreparationPolicy()
+    {
+        var owner = Read(Owner);
+        StringAssert.Contains(owner, "operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token");
+        StringAssert.Contains(owner, "_runtime.Permissions.OwnedDefaultPermissionHandler");
+        StringAssert.Contains(owner, "_runtime.Permissions.OwnedDefaultUserInputHandler");
+        var permissions = Read("CodeAlta.Orchestration/Runtime/SessionPermissionService.cs");
+        StringAssert.Contains(permissions, "static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny))");
+        StringAssert.Contains(permissions, "static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true))");
+        Before(owner, "await _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId)", "attached = await operation.Attachment.Task");
+        Before(owner, "await _runtime.Permissions.CloseOwnedAdmissionAsync()", "await operation.Work.ConfigureAwait(false)");
+        var runtime = Read(Runtime);
+        StringAssert.Contains(runtime, "Permissions.BindOwnedExecutionAsync(permissionExecution, _runtimeInstanceId,");
+        StringAssert.Contains(runtime, "candidate.Attachment, candidate.ProviderId)");
+        StringAssert.Contains(runtime, "OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution)");
+        StringAssert.Contains(runtime, "OnPermissionRequest = options.OnPermissionRequest,");
+        StringAssert.Contains(runtime, "await Permissions.CloseOwnedExecutionAsync(permissionExecution)");
+        StringAssert.Contains(runtime, "ReferenceEquals(candidate.OnPermissionRequest, Permissions.OwnedDefaultPermissionHandler)");
+        StringAssert.Contains(runtime, "ReferenceEquals(candidate.OnUserInputRequest, Permissions.OwnedDefaultUserInputHandler)");
+        var send = runtime[runtime.IndexOf("    private async Task<AgentRunId> SendOwnedBodyAsync(", StringComparison.Ordinal)..
+            runtime.IndexOf("    internal Task<AgentRunId> SendOwnedCommandAsync(", StringComparison.Ordinal)];
+        Before(send, "ownedDefaultsRejected = true;", "candidate.PendingAgentPromptId = null;");
+        Before(send, "ownedDefaultsRejected = true;", "capturedEntry = candidate;");
+        Before(send, "ownedDefaultsRejected = true;", "session.MarkStarted(");
+        StringAssert.Contains(send, "catch (OperationCanceledException) when (!ownedDefaultsRejected)");
+        StringAssert.Contains(send, "catch (Exception ex) when (!ownedDefaultsRejected && ex is not OperationCanceledException)");
+        var preparation = runtime[runtime.IndexOf("    private async ValueTask<CoordinatorPreparation> EnsureCoordinatorSessionCoreAsync(", StringComparison.Ordinal)..
+            runtime.IndexOf("    private async ValueTask<AgentSessionHandleId> CreateCoordinatorSessionAsync(", StringComparison.Ordinal)];
+        Before(preparation, "!HasOwnedCommandDefaults(existing)", "session.AgentPromptId = prompt;");
+        Before(preparation, "!HasOwnedCommandDefaults(existing)", "existing.PendingAgentPromptId = null;");
     }
 
     private static void RequireOnce(string source, string fragment)

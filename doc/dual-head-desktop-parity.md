@@ -4,6 +4,61 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: backend owned permission execution/attachment lifetime — 2026-09-11
+
+`CodeAltaHostOptions.ReviewOwnedCommandPermissions` is explicit and defaults **OFF**. No RPC or
+Desktop consumer enables it. The existing `SessionPermissionService` mailbox owns each actual
+receipt operation's canonical session/token association, binds it once to the runtime and acquired
+attachment, and supplies the callback through the real `AgentHub.RunAsync` send route. Preparation
+and persistent session callbacks deny; user input remains canceled. Retained delegates cannot join
+a later send or replacement, including callbacks with null run IDs and `CancellationToken.None`.
+
+Owned requests require exact session/provider identity, complete validated plain-command scalar
+payloads and no approval/action/network/amendment extensions. Only Allow Once, Deny and Cancel
+are accepted, including through trusted resolution. Bounds are 64 live executions, 128 total
+pending/delivering owned attempts, four per execution; UTF-16 limits are 128 identity, 4,096 command
+and 1,024 directory/reason units, without truncation. These do not bound legacy TUI pending state,
+externally retained callbacks, waiting mailbox callers or process heap.
+
+Send closure joins owner-controlled delivery cleanup before linked-source/handle-use release.
+Operation abort, attachment retirement and shutdown close the appropriate admission before dependent
+joins; cancellation and abort initiation remain independent, and runtime shutdown still initiates
+permission disposal and retirement concurrently. Command disposal does not dispose the shared TUI
+permission owner. Closed permissions are **not** provider quiescence, command execution or effect
+acknowledgment; noncooperative provider/preparation work can still prevent termination.
+
+Coordinator matching still ignores callbacks. Every owned send (OFF and ON) conservatively rejects
+a matching coordinator with different defaults, even independently supplied equivalent denial/input
+delegates. Parent review found and required correction of rejection after run/start mutation: owned
+preparation and actor admission now preserve the existing pending prompt, attachment and recorded
+run, and rejection fails only the owned receipt without publishing misleading run/error events.
+The actual-path OFF/ON regression checks full runtime snapshot equality and original event output.
+Parent also required the failed owned fixture object to be retained in exception data.
+
+**Independent verification:** all changed actual-path fixtures were audited before the first build:
+fresh explicit home/global/project/builtin roots, disabled plugins/empty plugin environment,
+registered fake-only providers, throwing probe/turn-executor routes, inert permission decisions,
+five-second observers and retained cleanup ownership. Mailbox internal binding tests are owner/
+payload/capacity/race evidence, not substitutes for the actual host/send/attachment route.
+
+- Cached targeted Orchestration.Tests and main CodeAlta.Tests Release builds passed with zero
+  warnings/errors (`--no-restore`; main build used `BuildProjectReferences=false`). Initial compiler
+  failures were corrected narrowly: a lambda `_` parameter/discard collision (CS0029), then three
+  deliberately retained task results requiring explicit discards (CS4014). Warning policy unchanged.
+- **81 distinct focused cases passed, zero failures/skips:** 54 audited owned-command/forwarding
+  cases, 22 mailbox/current-source cases and five previously audited actual-Agent per-send cases.
+  The 18 new/extended actual-path permission cases also passed separately before the 54-case run.
+  Coverage includes denial defaults, actual per-send approval as inert data, stale delegates after
+  return/failure/reuse, held cancellation callbacks, abort/detach/replacement, direct-runtime/host/
+  command shutdown, preserved trusted TUI decisions, payload/decision bounds and cancellation races.
+- Parent reviewed the final scoped diff and whitespace. Original TUI/plugin/event-reader routes,
+  Agent callback selection and provider implementations are unchanged by this backend slice.
+
+No full solution/suite, frontend/site, native/app, subprocess tool, default-root, real-provider,
+auth/network, install or restore execution ran for this slice. This is backend-only qualification;
+the actual Desktop permission consumer and wider shared-effect/interaction migration still require
+separate scope and review. **M4/full desktop parity remain incomplete.**
+
 ## M4 checkpoint: explicit per-send permission callback prerequisite — 2026-09-11
 
 `AgentSendOptions.OnPermissionRequest` is now an optional callback override for each send's
@@ -11,8 +66,8 @@ in-process `AgentSession` built-in tool definitions. Null keeps the existing ses
 The runtime does not mutate session options or retain a mutable latest callback; custom tools and
 user-input handling are unchanged. Other provider sessions must explicitly support the option.
 This is callback selection only: retained tool definitions retain their original callback, not an
-automatically canceled lease. Owned command preparation still denies permission requests, and
-there is no owned permission execution/attachment binding, RPC or Desktop approval UI yet.
+automatically canceled lease. This prerequisite alone added no owned execution/attachment binding;
+the later backend checkpoint above supplies that binding without RPC or Desktop approval UI.
 
 Parent audited the entire new fixture before executing: actual `AgentSession`, scripted turns,
 fresh explicit work/store roots, precomposed instructions, supplied model metadata and disabled
@@ -25,8 +80,8 @@ sequential sends, retained original tool callback, unchanged session/custom-tool
 options) and **19 existing pure permission/current-source cases**, zero failures/skips. Cached
 targeted and solution Release builds passed zero warnings/errors, no restore and frontend
 acquisition disabled. No broad suite, native/app/default-root/real-provider/network or website
-execution ran. The next prerequisite is a bounded, authoritative per-execution/attachment
-permission lifetime using this explicit association; **M4/full parity remain incomplete**.
+execution ran. The subsequent backend checkpoint above qualifies a bounded per-execution/attachment
+permission lifetime using this association; **M4/full parity remain incomplete**.
 
 ## M4 checkpoint: manual selected-session current-runtime observation — 2026-09-11
 
@@ -72,9 +127,9 @@ effect/TUI migration, richer recovery and pending interaction parity remain open
 Next candidate is opt-in plain command permission review through the existing `SessionPermissionService`
 used by TUI, limited to Allow once / Deny / Cancel. Parent confirmed a lifetime prerequisite: callbacks
 can occur before attachment publication, abort waits for preparation, host shutdown joins commands
-before runtime permissions, and coordinator reuse does not compare callbacks. No interactive owned
-callback or Desktop approval route has been enabled. A concrete cancellation/retirement/reuse binding
-and isolated fake-provider tests must precede enabling waits; unbound requests remain denied.
+before runtime permissions, and coordinator reuse does not compare callbacks. The later backend
+checkpoint above qualifies opt-in cancellation/retirement/reuse binding with isolated fake-provider
+tests. No Desktop approval route is enabled; unbound requests remain denied.
 
 ## M4 checkpoint: exclusive original-event reader — 2026-09-11
 
