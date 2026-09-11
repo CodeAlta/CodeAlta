@@ -45,6 +45,13 @@ execution, broad suite or website acquisition ran. Current-state observations ac
 effects and provide no replay or atomic Display/history/original-stream handshake. Actual shared
 effect/TUI migration, richer recovery and pending interaction parity remain open; **M4 is incomplete**.
 
+Next candidate is opt-in plain command permission review through the existing `SessionPermissionService`
+used by TUI, limited to Allow once / Deny / Cancel. Parent confirmed a lifetime prerequisite: callbacks
+can occur before attachment publication, abort waits for preparation, host shutdown joins commands
+before runtime permissions, and coordinator reuse does not compare callbacks. No interactive owned
+callback or Desktop approval route has been enabled. A concrete cancellation/retirement/reuse binding
+and isolated fake-provider tests must precede enabling waits; unbound requests remain denied.
+
 ## M4 checkpoint: exclusive original-event reader — 2026-09-11
 
 `SessionRuntimeEventPublisher` now admits one original-event reader per instance at first
