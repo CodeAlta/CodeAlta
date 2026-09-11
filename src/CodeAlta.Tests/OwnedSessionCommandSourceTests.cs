@@ -1,21 +1,17 @@
 using System.Runtime.CompilerServices;
-using System.Text;
-using Inverse = CodeAlta.Tests.OwnedSessionCommandSourceInverse;
 
 namespace CodeAlta.Tests;
 
-/// <summary>Ten named content inputs (eight originals and two new production files); inverse calls perform no transitive content reads.</summary>
+/// <summary>Named current-source ownership and authorization guards; no host or runtime execution.</summary>
 [TestClass]
 public sealed class OwnedSessionCommandSourceTests
 {
     private const string Owner = "CodeAlta.Orchestration/Runtime/OwnedSessionCommandService.cs";
     private const string Contracts = "CodeAlta.Orchestration/Runtime/OwnedSessionCommandContracts.cs";
-    internal static IReadOnlyList<string> DirectContentPaths =>
-    [
-        Inverse.Host, Inverse.Options, Inverse.Builtin, Inverse.Runtime,
-        Inverse.Discovery, Inverse.Desktop, Inverse.Lifetime, Inverse.Profile, Owner, Contracts,
-    ];
-    internal static IReadOnlyList<string> TransitiveContentPaths => [];
+    private const string Host = "CodeAlta.Orchestration/Hosting/CodeAltaHost.cs";
+    private const string Options = "CodeAlta.Orchestration/Hosting/CodeAltaHostOptions.cs";
+    private const string Builtin = "CodeAlta.Catalog/Skills/BuiltInSkillRootProviders.cs";
+    private const string Runtime = "CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs";
 
     [TestMethod]
     public void Requests_AreScalarOnlyAndOwnerDoesNotExposeHost()
@@ -39,7 +35,7 @@ public sealed class OwnedSessionCommandSourceTests
     [TestMethod]
     public void Host_UsesExplicitBuiltInRootWithoutChangingDefaultProviders()
     {
-        var host = Read(Inverse.Host);
+        var host = Read(Host);
         RequireOnce(host, "Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);");
         RequireOnce(host, "public OwnedSessionCommandService Commands { get; }");
         RequireOnce(host, "        _disposeTask = CreateHostDisposal(\n            DisposeCommandsAndRuntimeAsync,\n            AgentHub.DisposeAsync,");
@@ -47,26 +43,31 @@ public sealed class OwnedSessionCommandSourceTests
         Before(host, "Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity);", "_disposeTask = CreateHostDisposal(");
         Before(host, "ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.OwnedCommandReceiptCapacity);", "Directory.CreateDirectory(globalRoot);");
         Before(host, "new BuiltInCodeAltaSkillRootProvider(options.BuiltInSkillRoot);", "Directory.CreateDirectory(globalRoot);");
-        Before(host, "await Commands.DisposeAsync()", "await RuntimeService.DisposeAsync()");
-        StringAssert.Contains(host, "throw new AggregateException(commandFailure, runtimeFailure);");
-        StringAssert.Contains(Read(Inverse.Options), "public int OwnedCommandReceiptCapacity { get; init; } = 256;");
-        RequireOnce(Read(Inverse.Options), Inverse.PluginEnvironmentOption);
-        RequireOnce(host, Inverse.PluginOptionsSignature.Replace("private static", "internal static", StringComparison.Ordinal));
-        RequireOnce(host, Inverse.ExplicitPluginEnvironmentAssignment);
+        // The current host joins both retained work owners before disposing the runtime, including on failure.
+        StringAssert.Contains(host, "() => Commands.DisposeAsync().AsTask(),");
+        StringAssert.Contains(host, "() => WorkspaceReads.DisposeAsync().AsTask(),");
+        StringAssert.Contains(host, "RuntimeService.DisposeAsync).ConfigureAwait(false);");
+        Before(host, "await commands.ConfigureAwait(false)", "var runtime = disposeRuntime();");
+        Before(host, "await reads.ConfigureAwait(false)", "var runtime = disposeRuntime();");
+        StringAssert.Contains(host, "if (failures.Count > 1) throw new AggregateException(failures);");
+        var options = Read(Options);
+        StringAssert.Contains(options, "public int OwnedCommandReceiptCapacity { get; init; } = 256;");
+        RequireOnce(options, "public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }");
+        RequireOnce(host, "internal static PluginAdapterOperationOptions CreatePluginOperationOptions(");
+        StringAssert.Contains(host, "Environment = options.PluginEnvironment is not null\n                ? new Dictionary<string, string?>(options.PluginEnvironment, StringComparer.OrdinalIgnoreCase)\n                : Environment.GetEnvironmentVariables()");
         RequireOnce(host, "var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);");
-        var builtin = Read(Inverse.Builtin);
+        Before(host, "modelProviderRegistry = new ModelProviderRegistry();", "options.ConfigureModelProviders?.Invoke(modelProviderRegistry);");
+        Before(host, "options.ConfigureModelProviders?.Invoke(modelProviderRegistry);", "agentHub = new AgentHub(");
+        var builtin = Read(Builtin);
         StringAssert.Contains(builtin, "var rootPath = _rootPath ?? ResolveRootPath();");
         StringAssert.Contains(builtin, "SourceId = \"builtin:codealta\"");
         StringAssert.Contains(builtin, "Precedence = 4");
-        Inverse.Restore(Inverse.Host, host);
-        Inverse.Restore(Inverse.Builtin, builtin);
     }
 
     [TestMethod]
     public void Runtime_SplitsWaitAndExecutionTokensWithLiveGuardedCalls()
     {
-        // Current ownership guard; do not reconstruct a historical runtime merely to inspect token separation.
-        var runtime = ReadCurrent(Inverse.Runtime);
+        var runtime = Read(Runtime);
         RequireOnce(runtime, "AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None), coordinationCancellationToken)");
         StringAssert.Contains(runtime, ".WaitAsync(coordinationCancellationToken)");
         RequireOnce(runtime, "CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, candidate.Attachment.Cancellation.Token)");
@@ -77,7 +78,7 @@ public sealed class OwnedSessionCommandSourceTests
     [TestMethod]
     public void Resolver_UsesDirectStoreAndExistingRecoveryHelpers()
     {
-        var runtime = ReadCurrent(Inverse.Runtime);
+        var runtime = Read(Runtime);
         var start = runtime.IndexOf("    private async Task<SessionViewDescriptor?> ResolveOwnedSessionBodyAsync(", StringComparison.Ordinal);
         Assert.IsTrue(start >= 0);
         var end = runtime.IndexOf("\n    }", start, StringComparison.Ordinal);
@@ -109,90 +110,6 @@ public sealed class OwnedSessionCommandSourceTests
         StringAssert.Contains(owner, "await control.ConfigureAwait(false);");
     }
 
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests and current runtime ownership guards; replace/remove this inverse chain before M4 completion.")]
-    public void Preservation_RestoresAllEightWholeOriginalsAcrossNewlineRepresentations()
-    {
-        Assert.AreEqual(8, Inverse.Originals.Count);
-        Assert.AreEqual(10, DirectContentPaths.Distinct(StringComparer.Ordinal).Count());
-        Assert.AreEqual(0, TransitiveContentPaths.Count);
-        Assert.AreEqual(26, Inverse.Originals.Sum(item => Inverse.Edits(item.Path).Count));
-        Assert.AreEqual(26, Inverse.Originals.Sum(item => Inverse.Edits(item.Path).Sum(edit => edit.Count)));
-        foreach (var (path, hash) in Inverse.Originals)
-        {
-            foreach (var source in Representations(Read(path)))
-                Assert.AreEqual(hash, Inverse.Hash(Inverse.Restore(path, source)), path);
-        }
-    }
-
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests and current runtime ownership guards; replace/remove this inverse chain before M4 completion.")]
-    public void Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges()
-    {
-        foreach (var (path, _) in Inverse.Originals)
-        {
-            var source = Read(path);
-            foreach (var (_, after, _) in Inverse.Edits(path))
-            {
-                var edit = SourceTestText.Canonicalize(after);
-                Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, source.Replace(edit, "", StringComparison.Ordinal)), path);
-                Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, source + edit + "\n"), path);
-            }
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, "// unrelated drift\n" + source), path);
-            var original = Inverse.Restore(path, source);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, original), path);
-        }
-        Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore("unknown.cs", "// unknown\n"));
-    }
-
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests and current runtime ownership guards; replace/remove this inverse chain before M4 completion.")]
-    public void Preservation_NewestPreMapPreservesInheritedChains()
-    {
-        RequireOnce(Read(Inverse.Discovery), Inverse.RestoreStart + Inverse.DiscoveryHook);
-        RequireOnce(Read(Inverse.Desktop), SessionDiscoveryScopeSourceInverse.StatisticsLink + SessionDiscoveryScopeSourceInverse.NewLinks + Inverse.OwnerLink);
-        RequireOnce(Read(Inverse.Lifetime), Inverse.LifetimeHook + Inverse.LifetimeAnchor);
-        foreach (var (path, _) in Inverse.Originals)
-        {
-            var source = Read(path);
-            var restored = Inverse.Restore(path, source);
-            source = ReadCurrent(path);
-            Assert.AreEqual(path is Inverse.Host or Inverse.Options or Inverse.Runtime or Inverse.Desktop or Inverse.Profile ? restored : source,
-                Inverse.RestoreDiscoveryInput(path, source), path);
-            Assert.AreEqual(path is Inverse.Lifetime ? restored : source, Inverse.RestoreLifetimeInput(path, source), path);
-        }
-        foreach (var path in new[] { Inverse.Host, Inverse.Options, Inverse.Runtime, Inverse.Desktop, Inverse.Profile })
-            SessionDiscoveryScopeSourceInverse.Restore(path, ReadCurrent(path));
-
-        var lifetime = Read(Inverse.Lifetime);
-        var expected = Inverse.Restore(Inverse.Lifetime, lifetime);
-        lifetime = ReadCurrent(Inverse.Lifetime);
-        Assert.AreEqual(expected, PluginAuthoringProfileSourceInverse.RestoreUiContentInput(Inverse.Lifetime, lifetime));
-        Assert.AreEqual(expected, PluginAuthoringProfileSourceInverse.RestoreFeedbackInput(Inverse.Lifetime, lifetime));
-        // This consumer performs its own older lifetime inverse after the profile pre-map.
-        PluginFeedbackExtractionSourceTests.Restore(Inverse.Lifetime, lifetime);
-        PluginFeedbackExtractionSourceTests.Restore(Inverse.Host, ReadCurrent(Inverse.Host));
-        PluginMcpBackendSeparationSourceInverse.Restore(Inverse.Profile, Read(Inverse.Profile));
-        PluginGitHubBackendSeparationSourceInverse.Restore(Inverse.Profile, Read(Inverse.Profile));
-        const string untouched = "not a source document";
-        Assert.AreSame(untouched, Inverse.RestoreDiscoveryInput("unmapped", untouched));
-        Assert.AreSame(untouched, Inverse.RestoreLifetimeInput("unmapped", untouched));
-    }
-
-    private static IEnumerable<string> Representations(string source)
-    {
-        yield return source;
-        yield return source.Replace("\n", "\r\n", StringComparison.Ordinal);
-        var mixed = new StringBuilder();
-        var crlf = false;
-        foreach (var character in source)
-        {
-            if (character == '\n' && (crlf = !crlf)) mixed.Append('\r');
-            mixed.Append(character);
-        }
-        yield return mixed.ToString();
-    }
-
     private static void RequireOnce(string source, string fragment)
         => Assert.AreEqual(1, source.Split(SourceTestText.Canonicalize(fragment), StringSplitOptions.None).Length - 1, fragment);
 
@@ -204,8 +121,5 @@ public sealed class OwnedSessionCommandSourceTests
     }
 
     private static string Read(string path, [CallerFilePath] string caller = "")
-        => DesktopOwnedSessionSourceInverse.RestoreInput(path, ReadCurrent(path, caller));
-
-    private static string ReadCurrent(string path, [CallerFilePath] string caller = "")
         => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(caller)!, "..", path)));
 }

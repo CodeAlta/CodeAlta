@@ -1,32 +1,29 @@
 using System.Runtime.CompilerServices;
-using System.Text;
-using Inverse = CodeAlta.Tests.SessionDiscoveryScopeSourceInverse;
 
 namespace CodeAlta.Tests;
 
-/// <summary>Named source reads and pure inverse checks only; never constructs a host or runtime.</summary>
+/// <summary>Named current-source scope guards only; never constructs a host or runtime or probes discovery roots.</summary>
 [TestClass]
 public sealed class SessionDiscoveryScopeSourceTests
 {
     private const string ScopePath = "CodeAlta.Orchestration/Runtime/SessionDiscoveryScope.cs";
-
-    // Complete content-read inventory for these nine methods. The called inverse entry points
-    // transform supplied strings only: their transitive content-read inventory is empty.
-    internal static IReadOnlyList<string> DirectContentPaths =>
-    [
-        Inverse.Options, Inverse.Host, Inverse.Runtime, Inverse.Template, Inverse.Builder,
-        Inverse.Profile, Inverse.Mcp, Inverse.Statistics, Inverse.Desktop, ScopePath,
-    ];
-    internal static IReadOnlyList<string> TransitiveContentPaths => [];
+    private const string Options = "CodeAlta.Orchestration/Hosting/CodeAltaHostOptions.cs";
+    private const string Host = "CodeAlta.Orchestration/Hosting/CodeAltaHost.cs";
+    private const string Runtime = "CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs";
+    private const string Template = "CodeAlta.Orchestration/Runtime/AgentInstructionTemplateProvider.cs";
+    private const string Builder = "CodeAlta.Orchestration/Runtime/SystemPrompts/SystemPromptBuilder.cs";
+    private const string AmbientHome = "UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),";
+    private const string ScopedHome = "UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),";
+    private const string ScopePathException = "/// <exception cref=\"ArgumentException\">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>";
 
     [TestMethod]
     public void Host_ValidatesScopeBeforeBootstrapAndPropagatesSameInstance()
     {
-        var host = Read(Inverse.Host);
+        var host = Read(Host);
         Before(host, "options.DiscoveryScope?.ValidateHostRoots(options.GlobalRoot, options.CurrentProjectPath);", "Directory.CreateDirectory(globalRoot);");
         Before(host, "options.DiscoveryScope?.ValidateHostRoots(options.GlobalRoot, options.CurrentProjectPath);", "PluginRuntimeManager? pluginRuntime = null;");
         RequireOnce(host, "new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope)");
-        RequireOnce(Read(Inverse.Options), Inverse.ScopeOption);
+        RequireOnce(Read(Options), "public SessionDiscoveryScope? DiscoveryScope { get; init; }");
         RequireOnce(Read(ScopePath), "NormalizeAbsolutePath(globalRoot!, nameof(globalRoot));");
         RequireOnce(Read(ScopePath), "ValidateProjectPath(currentProjectPath!, nameof(currentProjectPath));");
     }
@@ -34,162 +31,92 @@ public sealed class SessionDiscoveryScopeSourceTests
     [TestMethod]
     public void Constructors_PreserveExistingSignaturesAndAmbientFallback()
     {
-        var runtime = Read(Inverse.Runtime);
-        // Inspect the current constructor/discovery seam, not a frozen inverse of unrelated runtime code.
+        var runtime = Read(Runtime);
         RequireOnce(runtime, "    public SessionRuntimeService(");
         RequireOnce(runtime, "SkillCatalog? skillCatalog = null)");
         RequireOnce(runtime, "_discoveryScope = instructionTemplateProvider.DiscoveryScope;");
-        var template = Read(Inverse.Template);
+        var template = Read(Template);
         RequireOnce(template, "internal SessionDiscoveryScope? DiscoveryScope { get; }");
         RequireOnce(template, "CodeAltaConfigStore? configStore = null)\n        : this(skillCatalog, catalogOptions, contentLocator, configStore, discoveryScope: null)");
         RequireOnce(template, "DiscoveryScope = discoveryScope;");
-        RequireOnce(template, Inverse.TemplateOverload);
-        Assert.AreEqual(3, Count(runtime, Inverse.ScopedHome));
+        RequireOnce(template, "ISystemPromptContentLocator? contentLocator,\n        CodeAltaConfigStore? configStore,\n        SessionDiscoveryScope? discoveryScope)");
+        Assert.AreEqual(3, Count(runtime, ScopedHome));
         Assert.AreEqual(2, Count(template, "UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"));
     }
 
     [TestMethod]
     public void Runtime_ValidatesBeforePersistenceAndDiscoveryAndReplacesThreeHomeReads()
     {
-        var source = Read(Inverse.Runtime);
-        Assert.AreEqual(6, Count(source, Inverse.ScopePathException));
-        RequireOnce(source, Inverse.RuntimeValidation);
+        var source = Read(Runtime);
+        Assert.AreEqual(6, Count(source, ScopePathException));
+        var start = source.IndexOf("private void ValidateDiscoveryPaths(", StringComparison.Ordinal);
+        var end = source.IndexOf("private SkillCatalogQuery BuildSkillCatalogQuery(", StringComparison.Ordinal);
+        Assert.IsTrue(start >= 0 && end > start);
+        var validationBody = source[start..end];
+        StringAssert.Contains(validationBody, "if (_discoveryScope is null)\n        {\n            return;");
+        foreach (var validation in new[]
+        {
+            "_discoveryScope.ValidateProjectPath(session.WorkingDirectory, nameof(session.WorkingDirectory));",
+            "_discoveryScope.ValidateProjectPath(options.WorkingDirectory, nameof(options.WorkingDirectory));",
+            "foreach (var root in options.ProjectRoots)\n            {\n                _discoveryScope.ValidateProjectPath(root, nameof(options.ProjectRoots));",
+            "ValidateDiscoveryProjectRoot(project?.ProjectPath);",
+            "_discoveryScope.ValidateProjectPath(projectRoot, nameof(projectRoot));",
+        }) RequireOnce(validationBody, validation);
         Before(source, "ValidateDiscoveryPaths(null, options, project);", "var previousProject = await _projectCatalog.GetByPathAsync");
         Assert.AreEqual(2, Count(source, "ArgumentException.ThrowIfNullOrWhiteSpace(options.WorkingDirectory);\n        ValidateDiscoveryPaths(session, options);"));
         StringAssert.Contains(source, "var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);\n        ValidateDiscoveryPaths(session, options, project);");
-        RequireOnce(source, "ValidateDiscoveryPaths(session, options);\n" + Inverse.SkillActivation);
+        RequireOnce(source, "ValidateDiscoveryPaths(session, options);\n        var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);\n        var query = BuildSkillCatalogQuery(project, options.ProjectRoots);");
         Before(source, "_discoveryScope.ValidateProjectPath(root, nameof(projectRoots));", "foreach (var projectRoot in projectRoots.Where");
         RequireOnce(source, "private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot)\n    {\n        ValidateDiscoveryProjectRoot(projectRoot);");
         RequireOnce(source, "private AgentPromptUsageInfo? ResolveAgentPromptUsage(SystemPromptBundle? promptBundle, string? projectRoot)\n    {\n        ValidateDiscoveryProjectRoot(projectRoot);");
-        Assert.AreEqual(3, Count(source, Inverse.ScopedHome));
-        Assert.AreEqual(0, Count(source, Inverse.AmbientHome));
-        // Path-validation guards above remain active as runtime ownership evolves.
+        Assert.AreEqual(3, Count(source, ScopedHome));
+        Assert.AreEqual(0, Count(source, AmbientHome));
     }
 
     [TestMethod]
     public void TemplateProvider_ValidatesBeforeSkillsAndPropagatesScopeAndBothHomeReads()
     {
-        var source = Read(Inverse.Template);
-        Assert.AreEqual(3, Count(source, Inverse.ScopePathException));
-        RequireOnce(source, Inverse.TemplateValidation);
+        var source = Read(Template);
+        Assert.AreEqual(3, Count(source, ScopePathException));
+        RequireOnce(source, "if (DiscoveryScope is null)\n        {\n            return;");
+        RequireOnce(source, "DiscoveryScope.ValidateProjectPath(session.WorkingDirectory, nameof(session.WorkingDirectory));");
+        RequireOnce(source, "DiscoveryScope.ValidateProjectPath(project.ProjectPath, nameof(project.ProjectPath));");
         Before(source, "ValidateDiscoveryPaths(session, project);", "var projectRoots = string.IsNullOrWhiteSpace(project?.ProjectPath)");
         Before(source, "ValidateDiscoveryPaths(session, project);", "AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project),");
         RequireOnce(source, "DiscoveryScope = DiscoveryScope,");
         Assert.AreEqual(2, Count(source, "UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"));
-        Assert.AreEqual(0, Count(source, Inverse.AmbientHome));
-        Inverse.Restore(Inverse.Template, source);
+        Assert.AreEqual(0, Count(source, AmbientHome));
     }
 
     [TestMethod]
     public void PromptBuilder_ValidatesEveryRootBeforeDiscoveryOrExistenceProbes()
     {
-        var source = Read(Inverse.Builder);
-        RequireOnce(source, Inverse.BuilderValidation);
+        var source = Read(Builder);
+        RequireOnce(source, "if (request.DiscoveryScope is not { } scope)\n        {\n            return;");
+        foreach (var path in new[] { "request.Session.WorkingDirectory", "request.WorkingDirectory", "request.Project.ProjectPath" })
+            RequireOnce(source, $"scope.ValidateProjectPath({path}, nameof({path}));");
+        RequireOnce(source, "foreach (var root in request.ProjectRoots)\n        {\n            scope.ValidateProjectPath(root, nameof(request.ProjectRoots));");
         Before(source, "ValidateDiscoveryPaths(request);", "var projectRoot = NormalizeOptionalRoot(");
         Before(source, "ValidateDiscoveryPaths(request);", "_contentLocator.GetRoots(");
-        RequireOnce(source, Inverse.WalkValidation);
-        Before(source, Inverse.WalkValidation, "!Directory.Exists(root)");
+        Before(source, "discoveryScope.ValidateProjectPath(workingDirectory, nameof(workingDirectory));", "!Directory.Exists(root)");
+        Before(source, "discoveryScope.ValidateProjectPath(root, nameof(projectRoots));", "!Directory.Exists(root)");
         Assert.AreEqual(2, Count(source, "UserProfileRoot = request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot,"));
         RequireOnce(source, "public SessionDiscoveryScope? DiscoveryScope { get; init; }");
-        Inverse.Restore(Inverse.Builder, source);
     }
 
     [TestMethod]
     public void InstructionWalk_UsesProductionPureAncestryAndPreservesSelectionOrder()
     {
-        var source = Read(Inverse.Builder);
-        RequireOnce(source, Inverse.NewWalk);
+        var source = Read(Builder);
+        RequireOnce(source, "foreach (var directory in SessionDiscoveryScope.GetInstructionAncestors(root, discoveryScope))");
         RequireOnce(source, "projectRoot is null ? [] : [projectRoot], request.DiscoveryScope);");
-        var original = Inverse.Restore(Inverse.Builder, source);
-        RequireOnce(original, Inverse.OldWalk);
         const string selection = "                    .Where(File.Exists)\n                    .Select(path => new FileInfo(path))\n                    .OrderByDescending(static file => file.Length)\n                    .ThenBy(static file => file.FullName, StringComparer.OrdinalIgnoreCase)\n                    .FirstOrDefault();";
         RequireOnce(source, selection);
-        RequireOnce(original, selection);
         var scope = Read(ScopePath);
         foreach (var forbidden in new[] { "Directory.", "File.", "Environment.", "GetFolderPath", "GetEnvironmentVariable" })
             Assert.IsFalse(scope.Contains(forbidden, StringComparison.Ordinal), forbidden);
         RequireOnce(scope, "Path.GetDirectoryName(current)");
         RequireOnce(scope, "stack.ToArray()");
-    }
-
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests; current discovery/path guards remain active. Replace/remove inverse chain before M4 completion.")]
-    public void Preservation_RestoresAllNineWholeOriginalsAcrossNewlineRepresentations()
-    {
-        Assert.AreEqual(9, Inverse.Originals.Count);
-        Assert.AreEqual(10, DirectContentPaths.Count);
-        Assert.AreEqual(10, DirectContentPaths.Distinct(StringComparer.Ordinal).Count());
-        Assert.AreEqual(0, TransitiveContentPaths.Count);
-        foreach (var (path, hash) in Inverse.Originals)
-        {
-            var canonical = Read(path);
-            foreach (var representation in Representations(canonical))
-            {
-                var restored = Inverse.Restore(path, representation);
-                Assert.AreEqual(hash, Inverse.Hash(restored), path);
-                Assert.IsTrue(restored.EndsWith('\n'), path);
-                Assert.IsFalse(restored.Contains('\r'), path);
-            }
-        }
-    }
-
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests; current discovery/path guards remain active. Replace/remove inverse chain before M4 completion.")]
-    public void Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges()
-    {
-        foreach (var (path, _) in Inverse.Originals)
-        {
-            var source = Read(path);
-            var edit = SourceTestText.Canonicalize(Inverse.Edits(path)[0].After);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, source.Replace(edit, "", StringComparison.Ordinal)), path);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, source + edit + "\n"), path);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, "// unrelated change\n" + source), path);
-            var original = Inverse.Restore(path, source);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, original), path);
-        }
-        Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore("unknown.cs", "// unknown\n"));
-    }
-
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests; current discovery/path guards remain active. Replace/remove inverse chain before M4 completion.")]
-    public void Preservation_NewestPreMapsPreserveInheritedChains()
-    {
-        RequireOnce(Read(Inverse.Profile), Inverse.RestoreStart + Inverse.ProfileMap);
-        RequireOnce(Read(Inverse.Mcp), Inverse.RestoreStart + Inverse.McpMap);
-        RequireOnce(Read(Inverse.Statistics), Inverse.RestoreStart + Inverse.StatisticsMap);
-        RequireOnce(Read(Inverse.Desktop), Inverse.StatisticsLink + Inverse.NewLinks);
-        foreach (var (path, _) in Inverse.Originals)
-        {
-            var source = Read(path);
-            var restored = Inverse.Restore(path, source);
-            Assert.AreEqual(path is Inverse.Host or Inverse.Options ? restored : source, Inverse.RestoreProfileInput(path, source), path);
-            Assert.AreEqual(path is Inverse.Profile ? restored : source, Inverse.RestoreMcpInput(path, source), path);
-            Assert.AreEqual(path is Inverse.Mcp or Inverse.Desktop ? restored : source, Inverse.RestoreStatisticsInput(path, source), path);
-        }
-        foreach (var path in new[] { Inverse.Host, Inverse.Options })
-            PluginAuthoringProfileSourceInverse.Restore(path, Read(path));
-        PluginMcpBackendSeparationSourceInverse.Restore(Inverse.Profile, Read(Inverse.Profile));
-        PluginGitHubBackendSeparationSourceInverse.Restore(Inverse.Profile, Read(Inverse.Profile));
-        foreach (var path in new[] { Inverse.Mcp, Inverse.Desktop })
-            PluginStatisticsBackendSeparationSourceInverse.Restore(path, Read(path));
-        const string untouched = "not a source document";
-        Assert.AreSame(untouched, Inverse.RestoreProfileInput("unmapped", untouched));
-        Assert.AreSame(untouched, Inverse.RestoreMcpInput("unmapped", untouched));
-        Assert.AreSame(untouched, Inverse.RestoreStatisticsInput("unmapped", untouched));
-    }
-
-    private static IEnumerable<string> Representations(string source)
-    {
-        yield return source;
-        yield return source.Replace("\n", "\r\n", StringComparison.Ordinal);
-        var mixed = new StringBuilder();
-        var crlf = false;
-        foreach (var character in source)
-        {
-            if (character == '\n' && (crlf = !crlf)) mixed.Append('\r');
-            mixed.Append(character);
-        }
-        yield return mixed.ToString();
     }
 
     private static int Count(string source, string fragment)
@@ -202,8 +129,5 @@ public sealed class SessionDiscoveryScopeSourceTests
         Assert.IsTrue(source.IndexOf(first, StringComparison.Ordinal) < source.IndexOf(second, StringComparison.Ordinal), first);
     }
     private static string Read(string path, [CallerFilePath] string caller = "")
-    {
-        Assert.IsTrue(DirectContentPaths.Contains(path, StringComparer.Ordinal), path);
-        return SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(caller)!, "..", path)));
-    }
+        => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(caller)!, "..", path)));
 }

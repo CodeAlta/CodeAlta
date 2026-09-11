@@ -4,6 +4,36 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: scoped source-test cleanup — 2026-09-11
+
+All eleven reconstruction-only methods listed in the historical checkpoints below are now
+removed, together with their private hashes, compressed data, restoration routines and obsolete
+inventories. The six source-test classes retain all **22 current-source guards**, now independent
+of historical source transformations. Current command/read-owner joins, scoped discovery,
+provider configuration, cancellation, bounded history, epoch-bound mutation and owned-only
+composition assertions remain active. No behavior test or production code changed.
+
+`CodeAlta.Desktop.Tests.csproj` no longer compiles the nine unused shared inverse-helper links;
+`SourceTestText` remains linked. Shared helper **files** remain unchanged because older main-test
+consumers still reference them: `CodeAltaHostLifetimeTests` uses the command-owner gateway;
+plugin profile/MCP/statistics helpers use discovery/owner gateways, which retain the Desktop and
+forwarding helpers. Historical text literals also remain in `PluginNeutralContractSourceInverse`.
+These are residual legacy dependencies, not executable calls to the removed Desktop history method.
+This closes the eleven-method deferral, not repository-wide reconstruction cleanup or M4.
+
+Parent independently reviewed the seven-file diff and references and passed the cached Release
+solution build (zero warnings/errors) plus **42 tests, zero failures/skips**: 13 main-source,
+14 Desktop current-source/display-RPC and 15 in-memory projection cases, using the same focused
+class filters as the preceding checkpoints. Child reported two intermediate assertion-anchor
+failures corrected without production edits; parent final runs were green. Logs:
+`%TEMP%/codealta-parent-source-cleanup-*-20260911.log`. No restore, app/native launch,
+real provider/discovery/default-root execution, broad suite or website acquisition ran.
+Remaining legacy consumers were not broadly qualified and may need later test rework.
+
+Next is a bounded TUI observation/effect review of the actual pump/coordinator/reducer/plugin
+routes. Rich history and original .NET plugin/effect inputs must not be replaced by truncated
+display DTOs or reconstructed events; a scoped migration recommendation precedes implementation.
+
 ## M4 checkpoint: scoped Desktop selected-session display — 2026-09-11
 
 Parent reviewed and independently verified the sole child's owned-only `SessionDisplayService`,
@@ -40,8 +70,8 @@ Two additional reconstruction-only deferrals supplement the nine below:
 `DesktopHistorySourceTests.Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains` and
 `DesktopWorkspaceSourceTests.Boundaries_PreserveTrustAndDocumentReadLimits`. Current history,
 workspace and owned-mode guards now inspect current source directly. No behavior test was skipped.
-**All eleven deferred methods must be replaced/removed before M4 completion.** This focused
-test-quality cleanup is the next sequential slice; no new inverse reconstruction machinery is allowed.
+**All eleven were subsequently removed in the scoped cleanup above.** The original requirement
+was to resolve them before M4 completion, without adding inverse reconstruction machinery.
 
 ## M4 checkpoint: committed live display foundation — 2026-09-11
 
@@ -62,7 +92,8 @@ Real-runtime fixtures use explicit isolated roots and fake providers; no default
 real authentication/provider network, native UI, package installation or full test suite ran.
 
 Following the user's explicit test-refactoring decision, these obsolete historical source
-reconstruction methods are temporarily ignored, not behavior/safety tests:
+reconstruction methods were temporarily ignored at this checkpoint, then removed in the cleanup
+above; they were not behavior/safety tests:
 
 - `OwnedSessionCommandSourceTests`: `Preservation_RestoresAllEightWholeOriginalsAcrossNewlineRepresentations`,
   `Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges`, `Preservation_NewestPreMapPreservesInheritedChains`.
@@ -72,8 +103,8 @@ reconstruction methods are temporarily ignored, not behavior/safety tests:
   `Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges`, `Preservation_NewestPreMapsPreserveInheritedChains`.
 - `DesktopOwnedSessionSourceTests`: `Boundaries_RestoreWholeOriginalsAndHistoricalReaders`.
 
-Rework/re-enable or remove these methods and their obsolete reconstruction machinery **before
-M4 completion**. Current token-separation, discovery/path, resolver and forwarding checks remain
+The before-M4 deferral is now resolved for these methods; shared machinery still referenced by
+other legacy tests remains. Current token-separation, discovery/path, resolver and forwarding checks remain
 active; new coverage checks immutable DTO closure, actual publication before loss, race-free
 observation, coalescing, cancellation, terminal closure and stable text identity.
 

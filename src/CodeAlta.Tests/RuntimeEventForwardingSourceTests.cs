@@ -1,8 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Text;
-using Inverse = CodeAlta.Tests.RuntimeEventForwardingSourceInverse;
-using Owner = CodeAlta.Tests.OwnedSessionCommandSourceInverse;
-using Desktop = CodeAlta.Tests.DesktopOwnedSessionSourceInverse;
 
 namespace CodeAlta.Tests;
 
@@ -13,25 +9,14 @@ public sealed class RuntimeEventForwardingSourceTests
     private const string Helper = "CodeAlta.Orchestration/Runtime/OwnedProviderEventForwarding.cs";
     private const string Pure = "CodeAlta.Orchestration.Tests/OwnedProviderEventForwardingTests.cs";
     private const string Real = "CodeAlta.Orchestration.Tests/SessionRuntimeForwardingLifetimeTests.cs";
-    private const string InverseSource = "CodeAlta.Tests/RuntimeEventForwardingSourceInverse.cs";
-    private const string Self = "CodeAlta.Tests/RuntimeEventForwardingSourceTests.cs";
     private const string Notes = "../doc/runtime-provider-event-forwarding.md";
-    private const string HistoricalFixture = "CodeAlta.Desktop.Tests/DesktopOwnedSessionSourceTests.cs";
-
-    // Nine scoped inputs plus the untouched historical assertion/reader-map source. The sibling
-    // Desktop fixture remains responsible for running its actual inherited readers separately.
-    internal static IReadOnlyList<string> DirectContentPaths =>
-    [
-        Inverse.Runtime, Inverse.DesktopInverse, Inverse.DesktopProject,
-        Helper, Pure, Real, InverseSource, Self, Notes, HistoricalFixture,
-    ];
-    internal static IReadOnlyList<string> TransitiveContentPaths => [];
+    private const string Runtime = "CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs";
 
     /// <summary>Checks genuine guard expressions and separate body/tail/attachment-use release points.</summary>
     [TestMethod]
     public void Runtime_OwnsBodiesTailsAndCapturedAttachmentUses()
     {
-        var runtime = Read(Inverse.Runtime);
+        var runtime = Read(Runtime);
         foreach (var expression in new[]
         {
             "@event => _ = PostAgentEventToActorAsync(actor, session.SessionId, projector, @event)",
@@ -138,119 +123,8 @@ public sealed class RuntimeEventForwardingSourceTests
         StringAssert.Contains(Read(Notes), "not a completed shutdown or compatibility qualification");
     }
 
-    /// <summary>Checks three whole originals, nine newline reconstructions, and every ordered tuple's missing/duplicate negatives.</summary>
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests and retained forwarding behavior tests; replace/remove this inverse chain before M4 completion.")]
-    public void Preservation_RestoresWholeOriginalsAndRejectsDrift()
-    {
-        Assert.AreEqual(3, Inverse.Originals.Count);
-        Assert.AreEqual(95, Inverse.Originals.Sum(item => Inverse.Edits(item.Path).Count));
-        Assert.AreEqual(96, Inverse.Originals.Sum(item => Inverse.Edits(item.Path).Sum(edit => edit.Count)));
-        var reconstructions = 0;
-        foreach (var (path, hash) in Inverse.Originals)
-        {
-            var current = Read(path);
-            foreach (var representation in Representations(current))
-            {
-                Assert.AreEqual(hash, Owner.Hash(Inverse.Restore(path, representation)), path);
-                reconstructions++;
-            }
-            // Tuples are ordered and some introduce the unchanged context for a later tuple.
-            // Exercise the exact same occurrence checker at its actual application stage, not
-            // a no-op Replace against raw current text that lacks an intermediate fragment.
-            var intermediate = current;
-            foreach (var edit in Inverse.Edits(path))
-            {
-                var after = SourceTestText.Canonicalize(edit.After);
-                var before = SourceTestText.Canonicalize(edit.Before);
-                Assert.IsTrue(SharedContextLines(before, after).Any(), path + ": missing unchanged context");
-                Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Apply(path, intermediate.Replace(after, "", StringComparison.Ordinal), edit), path);
-                Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Apply(path, intermediate + after + "\n", edit), path);
-                intermediate = Inverse.Apply(path, intermediate, edit);
-            }
-            Assert.AreEqual(hash, Owner.Hash(intermediate), path);
-            Assert.AreEqual(path switch
-            {
-                Inverse.Runtime => 131701,
-                Inverse.DesktopInverse => 36681,
-                Inverse.DesktopProject => 1632,
-                _ => throw new AssertFailedException("Unexpected original path."),
-            }, new UTF8Encoding(false, true).GetByteCount(intermediate), path);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, "// unrelated drift\n" + current), path);
-            Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(path, intermediate), path);
-        }
-        Assert.AreEqual(9, reconstructions);
-        Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore("unknown.cs", "// unknown\n"));
-    }
-
-    /// <summary>Checks disjoint newest gateways, old full-original anchors, unchanged historical checks, and zero-read inverse closure.</summary>
-    [TestMethod]
-    [Ignore("M4 display checkpoint: historical whole-runtime hash reconstruction is superseded by RuntimeDisplayProjectionTests and retained forwarding behavior tests; replace/remove this inverse chain before M4 completion.")]
-    public void Preservation_ClosesReaderMapsAndInheritedGateways()
-    {
-        Assert.AreEqual(10, DirectContentPaths.Distinct(StringComparer.Ordinal).Count());
-        Assert.AreEqual(0, TransitiveContentPaths.Count);
-        Assert.AreEqual(0, Inverse.DirectContentPaths.Count);
-        Assert.AreEqual(0, Inverse.TransitiveContentPaths.Count);
-        Assert.AreEqual(16, Desktop.Originals.Count);
-        Assert.AreEqual(42, Desktop.Originals.Sum(item => Desktop.Edits(item.Path).Count));
-        Assert.AreEqual(42, Desktop.Originals.Sum(item => Desktop.Edits(item.Path).Sum(edit => edit.Count)));
-        var runtime = Read(Inverse.Runtime);
-        Assert.AreEqual(Inverse.Restore(Inverse.Runtime, runtime), Desktop.RestoreInput(Inverse.Runtime, runtime));
-        Assert.AreEqual(Owner.Originals.Single(item => item.Path == Inverse.Runtime).Hash,
-            Owner.Hash(Owner.RestoreCurrentInput(Inverse.Runtime, runtime)));
-        SessionDiscoveryScopeSourceInverse.Restore(Inverse.Runtime, runtime);
-        var project = Read(Inverse.DesktopProject);
-        Assert.AreEqual(Desktop.Originals.Single(item => item.Path == Inverse.DesktopProject).Hash,
-            Owner.Hash(Desktop.Restore(Inverse.DesktopProject, project)));
-        Owner.RestoreCurrentInput(Inverse.DesktopProject, project);
-        PluginNeutralContractSourceInverse.Restore(Inverse.DesktopProject, project);
-        var desktopInverse = Read(Inverse.DesktopInverse);
-        Assert.AreSame(desktopInverse, Desktop.RestoreInput(Inverse.DesktopInverse, desktopInverse));
-        Inverse.Restore(Inverse.DesktopInverse, desktopInverse); // Deliberately direct; no recursive gateway.
-        const string untouched = "unmapped input";
-        Assert.AreSame(untouched, Desktop.RestoreInput("unmapped", untouched));
-
-        var historical = Read(HistoricalFixture);
-        foreach (var assertion in new[]
-        {
-            "Assert.AreEqual(16, Inverse.Originals.Count);",
-            "Assert.AreEqual(42, Inverse.Originals.Sum(item => Inverse.Edits(item.Path).Count));",
-            "Assert.AreEqual(42, Inverse.Originals.Sum(item => Inverse.Edits(item.Path).Sum(edit => edit.Count)));",
-            "Assert.AreEqual(48, reconstructions);",
-            "Assert.AreEqual(30, DirectContentPaths.Distinct(StringComparer.Ordinal).Count());",
-            "Assert.AreEqual(19, TransitiveContentPaths.Distinct(StringComparer.Ordinal).Count());",
-            "Assert.ThrowsExactly<AssertFailedException>(() => Inverse.Restore(\"unknown.cs\", \"// unknown\\n\"));",
-            "new DesktopHistorySourceTests().Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains();",
-        }) StringAssert.Contains(historical, assertion);
-        var inverse = Read(InverseSource);
-        foreach (var forbidden in new[] { "File.Read", "Directory.", "Assembly.Load", "Process.Start", "ReadAllText", "ReadAllBytes" })
-            Assert.IsFalse(inverse.Contains(forbidden, StringComparison.Ordinal), forbidden);
-        var self = Read(Self);
-        RequireOnce(self, "return SourceTestText." + "DecodeSource(File.ReadAllBytes(");
-    }
-
-    private static IEnumerable<string> SharedContextLines(string before, string after)
-        => before.Split('\n').Intersect(after.Split('\n'), StringComparer.Ordinal)
-            .Where(line => line.Trim().Length > 1 && line.Trim() is not "}," and not "};" and not "try" and not "finally");
-
-    private static IEnumerable<string> Representations(string source)
-    {
-        yield return source;
-        yield return source.Replace("\n", "\r\n", StringComparison.Ordinal);
-        var mixed = new StringBuilder();
-        var crlf = false;
-        foreach (var character in source)
-        {
-            if (character == '\n' && (crlf = !crlf)) mixed.Append('\r');
-            mixed.Append(character);
-        }
-        yield return mixed.ToString();
-    }
-
     private static string Read(string path, [CallerFilePath] string caller = "")
     {
-        CollectionAssert.Contains(DirectContentPaths.ToArray(), path);
         return SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(caller)!, "..", path)));
     }
 

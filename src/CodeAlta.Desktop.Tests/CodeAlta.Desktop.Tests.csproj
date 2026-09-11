@@ -10,14 +10,5 @@
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="../CodeAlta/CodeAlta.csproj" />
     <Compile Include="../CodeAlta.Tests/SourceTestText.cs" Link="SourceTestText.cs" />
-    <Compile Include="../CodeAlta.Tests/PluginNeutralContractSourceInverse.cs" Link="PluginNeutralContractSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/PluginAuthoringProfileSourceInverse.cs" Link="PluginAuthoringProfileSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/PluginGitHubBackendSeparationSourceInverse.cs" Link="PluginGitHubBackendSeparationSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/PluginMcpBackendSeparationSourceInverse.cs" Link="PluginMcpBackendSeparationSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/PluginStatisticsBackendSeparationSourceInverse.cs" Link="PluginStatisticsBackendSeparationSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/SessionDiscoveryScopeSourceInverse.cs" Link="SessionDiscoveryScopeSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/OwnedSessionCommandSourceInverse.cs" Link="OwnedSessionCommandSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/DesktopOwnedSessionSourceInverse.cs" Link="DesktopOwnedSessionSourceInverse.cs" />
-    <Compile Include="../CodeAlta.Tests/RuntimeEventForwardingSourceInverse.cs" Link="RuntimeEventForwardingSourceInverse.cs" />
   </ItemGroup>
 </Project>
