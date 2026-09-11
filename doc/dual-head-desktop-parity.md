@@ -1,8 +1,47 @@
 # Dual-head desktop parity — in development
 
-> **Status: runtime-owned live display foundation verified, 2026-09-11; frontend integration pending.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: runtime-owned live display foundation and scoped Desktop selected-session integration verified, 2026-09-11.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
+
+## M4 checkpoint: scoped Desktop selected-session display — 2026-09-11
+
+Parent reviewed and independently verified the sole child's owned-only `SessionDisplayService`,
+generated channel/JSON metadata, selected-session store and `LiveSessionPanel`. Default/catalog-only
+startup, roots, provider registration and command/permission policy are unchanged. No competing
+original event reader or DTO-to-plugin reconstruction was introduced. Malformed UTF-16 stable
+identities are omitted/counted without changing the original event instances delivered for effects.
+
+The channel exposes only the selected session, with separate host/projection epochs and decimal
+revision strings. Complete replacements/removals, coalesced gaps, absence after eviction, terminal
+closure, stale-selection fencing and iterator cancellation are explicit. Known `stale_epoch` requires
+UI reload, not reconnect with the old epoch, and survives cleanup errors. The UI is plain text and
+labels its retained window as partial; receipts/history remain separate from live state. Published
+NeoAstra client inspection confirms opening-only timeout and channel-lifetime cancellation.
+
+Independent parent verification passed:
+
+- Cached Release solution and focused test-project builds: zero warnings/errors, `--no-restore`,
+  frontend restore/build disabled in MSBuild. No dependency acquisition or application launch.
+- `SessionDisplayRpcTests`, `DesktopOwnedSessionSourceTests`, `DesktopHistorySourceTests`, and
+  `DesktopWorkspaceSourceTests`: **14 passed, three explicit historical reconstruction skips**.
+- `RuntimeDisplayProjectionTests`: **15 passed**, including malformed identities/original delivery.
+- `npm test`: **30 passed**; `npm run build`: TypeScript and Vite passed using cached dependencies.
+- Generated serialization budget rerun: **236,725 bytes**, **240,821 with 4 KiB framing allowance**,
+  below **262,144 bytes**. This is an item-payload bound, not a process/renderer heap limit.
+
+Logs: `%TEMP%/codealta-parent-desktop-display-*-20260911.log`. Managed fixtures use in-memory
+publishers/fake event data and checkout/generated-source reads, not hosts/default roots/providers.
+Website build was deliberately not rerun: previous Lunet builds acquired the configured theme,
+incompatible with this checkpoint's no-install restriction. Full suites, native/real-provider runs,
+complete recovery/discovery, TUI observation/effect migration and interaction parity remain unverified.
+
+Two additional reconstruction-only deferrals supplement the nine below:
+`DesktopHistorySourceTests.Boundaries_ReconstructWholeSourcesAndPreserveHistoricalChains` and
+`DesktopWorkspaceSourceTests.Boundaries_PreserveTrustAndDocumentReadLimits`. Current history,
+workspace and owned-mode guards now inspect current source directly. No behavior test was skipped.
+**All eleven deferred methods must be replaced/removed before M4 completion.** This focused
+test-quality cleanup is the next sequential slice; no new inverse reconstruction machinery is allowed.
 
 ## M4 checkpoint: committed live display foundation — 2026-09-11
 
@@ -41,8 +80,8 @@ observation, coalescing, cancellation, terminal closure and stable text identity
 This is deliberately partial live display storage, not full M4 recovery or an authoritative
 active-session query. Running sessions can be evicted; tool/interaction/plugin/usage data is not
 projected. Bounds cover retained payload/counts, not total process heap or caller-retained
-snapshots. Desktop channel/UI integration, TUI observation/effect migration, canonical history
-reconciliation and full interaction/run-state parity remain open.
+snapshots. The later scoped Desktop channel/UI integration is recorded above; TUI observation/effect
+migration, canonical history reconciliation and full interaction/run-state parity remain open.
 
 ## M3 follow-up: explicit source-plugin authoring profiles — 2026-09-08
 

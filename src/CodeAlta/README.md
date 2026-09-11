@@ -97,12 +97,22 @@ submissions can authenticate and use provider storage/network. Plugins and probe
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
 
 Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied,
-user input is cancelled, and this path does not expose tools, plugins or live events. **Refresh
+user input is cancelled, and this path does not expose tools or plugins. **Refresh
 submissions** explicitly retrieves receipts; **Abort submission** targets one pending send,
 not a later run. Submitted means dispatch completed, not that the conversation/run completed.
 An uncertain response retains the exact epoch/key/session/text for explicit retry, never
 automatic resend. Epoch mismatch disables mutations across selection changes; reload recovers
 receipts, not prompt text. The host retains at most256 receipts, paged64 at a time.
+
+The selected session also has a **live status/text window**, separate from persisted-history
+browsing and submission receipts. It shows retained lifecycle, queue count, configuration labels
+and up to eight text items; it is not a complete transcript, usage/tool view or interaction UI.
+No retained state means not yet observed or evicted—not idle or completed. Text and labels may
+be shortened, and replacement/eviction indicators make omissions explicit. **Reconnect live
+display** explicitly starts a new observation; it never resends a prompt. A stale host epoch
+explicitly requires reloading the UI, not reconnecting with the old identity. Selection changes,
+renderer detach and cancellation close only the observation, not a run or the host. Only explicit
+owned mode registers this channel; default/catalog-only startup behavior is unchanged.
 
 Actual cached-store reads are host-owned (eight active reads, excess rejected); cancelling an
 RPC wait does not stop them. Shutdown joins command/read work before runtime dependencies.

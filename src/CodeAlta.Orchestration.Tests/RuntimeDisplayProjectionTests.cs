@@ -307,6 +307,39 @@ public sealed class RuntimeDisplayProjectionTests
         Assert.IsFalse(projection.Contains("JsonSerializer", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public async Task MalformedStableUtf16Identities_AreOmittedWithoutChangingOriginalEffects()
+    {
+        foreach (var malformed in new[] { "\ud800", "\udc00", "x\ud800x", "x\udc00x", "\ud800\ud800", "\udc00\ud800" })
+        {
+            var publisher = new SessionRuntimeEventPublisher(8);
+            SessionRuntimeEvent[] invalid = [Text("bad session", malformed), Text("bad content", contentId: malformed),
+                new SessionAgentEvent("session", new AgentContentDeltaEvent(new ModelProviderId("fake"), "session", DateTimeOffset.UtcNow,
+                    new AgentRunId(malformed), AgentContentKind.Assistant, "content", null, "bad run"))];
+            foreach (var original in invalid) Assert.IsTrue(publisher.TryPublish(original));
+            var snapshot = publisher.Display.GetSnapshot();
+            Assert.AreEqual(1L, snapshot.OmittedSessionEvents);
+            Assert.AreEqual(2L, snapshot.Sessions.Single().UnsupportedEvents);
+            Assert.AreEqual(0, snapshot.Sessions.Single().Text.Length);
+            await using var reader = publisher.ReadAllAsync().GetAsyncEnumerator();
+            foreach (var original in invalid)
+            {
+                Assert.IsTrue(await reader.MoveNextAsync());
+                Assert.AreSame(original, reader.Current);
+            }
+            publisher.TryPublish(Text("valid pair", "session", "😀"));
+            Assert.AreEqual("😀", publisher.Display.GetSnapshot().Sessions.Single().Text.Single().ContentId);
+            var pairedIdentity = new string('x', RuntimeDisplayProjection.MaxIdentifierCharacters - 2) + "😀";
+            publisher.TryPublish(new SessionAgentEvent(pairedIdentity, new AgentContentDeltaEvent(new ModelProviderId("fake"),
+                pairedIdentity, DateTimeOffset.UtcNow, new AgentRunId(pairedIdentity), AgentContentKind.Assistant,
+                pairedIdentity, null, "valid paired identities at bound")));
+            var paired = publisher.Display.GetSnapshot().Sessions.Single(session => session.SessionId == pairedIdentity).Text.Single();
+            Assert.AreEqual(pairedIdentity, paired.RunId);
+            Assert.AreEqual(pairedIdentity, paired.ContentId);
+            publisher.Complete();
+        }
+    }
+
     private static string ReadRuntimeSource(string name, [System.Runtime.CompilerServices.CallerFilePath] string caller = "")
         => File.ReadAllText(Path.Combine(Path.GetDirectoryName(caller)!, "..", "CodeAlta.Orchestration", "Runtime", name));
 

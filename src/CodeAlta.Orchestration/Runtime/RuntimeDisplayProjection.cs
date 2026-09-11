@@ -227,7 +227,17 @@ public sealed class RuntimeDisplayProjection
         return session with { Text = items.Add(value) };
     }
 
-    private static bool ValidIdentity(string? value) => value is not null && value.Length <= MaxIdentifierCharacters && !string.IsNullOrWhiteSpace(value);
+    private static bool ValidIdentity(string? value)
+    {
+        if (value is null || value.Length > MaxIdentifierCharacters || string.IsNullOrWhiteSpace(value)) return false;
+        // JSON replacement of unpaired surrogates can alias distinct stable identities at a renderer boundary.
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (!char.IsSurrogate(value[i])) continue;
+            if (!char.IsHighSurrogate(value[i]) || ++i == value.Length || !char.IsLowSurrogate(value[i])) return false;
+        }
+        return true;
+    }
 
     private static string Prefix(string value, int limit)
     {

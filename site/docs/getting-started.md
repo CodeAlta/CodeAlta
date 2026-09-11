@@ -33,9 +33,17 @@ Receipts describe submission, not live-run completion; **Abort submission** is n
 Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
 agent parity remain unqualified; continue using `altatui` for normal workflows.
 
+Owned-host mode also shows a selected-session **live status/text window**, separate from
+persisted history and submission receipts. It retains at most eight text items with explicit
+truncation/eviction indicators; it is not a complete transcript or tool/usage/interaction view.
+Missing live state means not yet observed or evicted, not idle or completed. Reconnect restarts
+only the observation, never a prompt; a stale host identity requires reloading the UI.
+Changing selection or closing the observation does not stop the run. Catalog-only browsing
+does not enable this channel.
+
 The shared runtime retains admitted provider-event work through queue/parent
-bookkeeping and shutdown joins. This does not add live Desktop streaming or event
-replay. Noncooperative work can keep shutdown pending; failed runtime cleanup does
+bookkeeping and shutdown joins. This is separate from the partial live display window,
+not event replay. Noncooperative work can keep shutdown pending; failed runtime cleanup does
 not guarantee that every outer Host/provider dependency remains alive.
 
 > [!IMPORTANT]

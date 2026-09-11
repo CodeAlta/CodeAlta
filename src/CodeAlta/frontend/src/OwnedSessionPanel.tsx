@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionSendRequest } from "#neoastra";
 import { captureSubmission, createMutationCapability, refreshSubmissions, sendSubmission } from "./sessionOperations";
 import { historyMessage, loadHistory, type HistoryState } from "./history";
+import { LiveSessionPanel } from "./LiveSessionPanel";
+import type { createSessionDisplayStore } from "./sessionDisplay";
 
-export function OwnedSessionPanel({ sessionId, epoch, drafts, capability }: {
+export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, display }: {
   sessionId: string; epoch: string; drafts: Map<string, SessionSendRequest>; capability: ReturnType<typeof createMutationCapability>;
+  display: ReturnType<typeof createSessionDisplayStore>;
 }) {
   const [text, setText] = useState("");
   const [message, setMessage] = useState("Refresh submissions to recover accepted receipts. Never automatically resend an uncertain request.");
@@ -92,7 +95,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, capability }: {
   }
   return <section className="owned-session" aria-label="Owned text submission">
     <h3>Owned text-only submission</h3>
-    <p className="detail">Existing session only. Permissions are denied; user input is cancelled; no tools, plugins or live events. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
+    <p className="detail">Existing session only. Permissions are denied; user input is cancelled; no tools or plugins. A bounded live status/text window is available below. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
     <label>Text<textarea maxLength={32768} value={text} disabled={busy || !!pending} onChange={event => setText(event.target.value)} /></label>
     <div className="history-controls">
       <button type="button" disabled={invalidEpoch || busy || (!pending && !text.trim()) || (!!pending && pending.expectedEpoch !== epoch)} onClick={submit}>{pending ? "Retry exact request" : "Send text"}</button>
@@ -106,6 +109,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, capability }: {
       {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch} onClick={() => abort(row.operationId)}>Abort submission</button>}
     </div>)}
     {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
+    <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} />
     <h3>Persisted history — not live run state</h3>
     <p className="detail">Bounded journal pages; deltas and completed records remain separate. Actual cached-store reads are host-owned. Caller cancellation does not stop them. Copied paths/reparse points are not sandboxed.</p>
     <button type="button" onClick={() => readHistory()}>Restart history</button>

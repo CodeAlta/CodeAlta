@@ -139,10 +139,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     var builder = new NeoRpcBuilder(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 208 * 1024,
+                        MaximumChannelsPerSession = 2, MaximumUnacknowledgedChannelItems = 2,
                     });
                     builder.AddBootService(new BootService(epoch));
                     builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
                     builder.AddSessionOperationsService(operations);
+                    builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
                     var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions

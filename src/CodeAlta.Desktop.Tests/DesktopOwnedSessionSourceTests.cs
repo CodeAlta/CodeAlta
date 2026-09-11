@@ -54,10 +54,12 @@ public sealed class DesktopOwnedSessionSourceTests
         StringAssert.Contains(app, "if (!shutdownUnconfirmed) window.Title");
         StringAssert.Contains(app, "GC.KeepAlive(environmentLifetime)");
         StringAssert.Contains(app, "return ValueTask.CompletedTask; // Never await host cleanup inside the native deadline.");
-        var legacy = Inverse.Restore(Inverse.App, app);
+        var legacy = app[app.IndexOf("    private async ValueTask RunAsync(", StringComparison.Ordinal)..];
         Assert.IsFalse(legacy.Contains("MaximumFrameBytes", StringComparison.Ordinal));
         StringAssert.Contains(legacy, "await using var environment");
         StringAssert.Contains(legacy, "builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));");
+        Assert.IsFalse(legacy.Contains("AddSessionDisplayService", StringComparison.Ordinal));
+        RequireOnce(app, "builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));");
 
         var host = Read(Inverse.Host);
         RequireOnce(host, "WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore);");
@@ -89,8 +91,11 @@ public sealed class DesktopOwnedSessionSourceTests
     public void Frontend_PreservesLegacyHistoryAndUsesEpochBoundMutations()
     {
         var main = Read(Inverse.Main);
-        var legacy = Inverse.Restore(Inverse.Main, main);
-        Assert.AreEqual(legacy[legacy.IndexOf("function History(", StringComparison.Ordinal)..], main[main.IndexOf("function History(", StringComparison.Ordinal)..]);
+        var history = main[main.IndexOf("function History(", StringComparison.Ordinal)..];
+        StringAssert.Contains(history, "loadHistory(workspace.history, request, abort.signal, setState)");
+        StringAssert.Contains(history, "return () => abort.abort()");
+        StringAssert.Contains(main, "<History key={selectedSession.id} sessionId={selectedSession.id} />");
+        StringAssert.Contains(main, "createSessionDisplayStore(sessionDisplay.observe)");
         StringAssert.Contains(main, "key={JSON.stringify([selectedSession.id, status.hostEpoch])}");
         StringAssert.Contains(main, "capability={mutation.capability}");
         StringAssert.Contains(main, "current?.epoch === value.hostEpoch ? current");

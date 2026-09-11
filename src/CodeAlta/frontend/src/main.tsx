@@ -1,12 +1,13 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { boot, workspace, type BootStatus } from "#neoastra";
+import { boot, workspace, sessionDisplay, type BootStatus } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, type HistoryState } from "./history";
 import type { HistoryRequest } from "#neoastra";
 import type { SessionSendRequest } from "#neoastra";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability } from "./sessionOperations";
+import { createSessionDisplayStore } from "./sessionDisplay";
 import "./style.css";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [submissions] = useState(() => new Map<string, SessionSendRequest>());
+  const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   useEffect(() => {
     const abort = new AbortController();
@@ -41,7 +43,7 @@ function App() {
     <h1>CodeAlta</h1>
     <p className="badge">Desktop — in development</p>
     {status?.hostAvailable
-      ? <p>Explicit owned-host mode: text submission and receipt observation for existing sessions. No live events or completed-run claim. Configured providers may use authentication/storage/network; discovery roots are not a sandbox.</p>
+      ? <p>Explicit owned-host mode: text submission, receipts and selected-session live status/text for existing sessions. The live window is partial; a submission receipt is not run completion. Configured providers may use authentication/storage/network; discovery roots are not a sandbox.</p>
       : <p>Browse persisted workspace metadata from a trusted task-owned <strong>COPY</strong>. Read-only persisted history is available on selection. This is not live session state: sending, resuming and live events are not connected.</p>}
     <p>Use <code>altatui</code> for current agent functionality.</p>
     <p role="status">{error ?? (status ? `Desktop bridge ready · ${status.version}` : "Initializing desktop bridge…")}</p>
@@ -91,7 +93,7 @@ function App() {
             <dt>Persisted update time</dt><dd>{selectedSession.updatedAt}</dd>
           </dl>
           {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
-            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} drafts={submissions} capability={mutation.capability} />
+            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} drafts={submissions} capability={mutation.capability} display={display} />
             : <History key={selectedSession.id} sessionId={selectedSession.id} />}
         </section>}
       </>}

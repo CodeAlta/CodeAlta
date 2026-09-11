@@ -108,8 +108,57 @@ the subscriber set. Late publications are refused. Late observers get one closed
 closed state remains queryable for the runtime owner's lifetime. Next integration seam: a
 host/frontend adapter can observe `RuntimeService.Display`, authorize transport scope and apply
 replacements without adding a `StreamEventsAsync` reader. History paging, full status recovery,
-shared interactions, original-effects routing changes and Desktop/TUI integration remain later
-M4 work.
+shared interactions, original-effects routing changes and broader Desktop/TUI integration remain
+later M4 work; the scoped selected-session Desktop channel is described below.
+
+#### Selected-session Desktop channel (explicit owned mode only)
+
+`SessionDisplayService` is registered in the real `DesktopApplication.RunOwnedAsync` against
+that host's `RuntimeService.Display`. Default boot/catalog-only modes do not register it; no
+startup opt-in, root, provider, tool or permission policy changes. `display.observe` is a generated
+NeoAstra 0.1.0 channel using `DesktopJsonContext`. Before creating a runtime observation it validates
+the expected **host epoch** and bounded, well-formed selected-session identity. Unknown/unobserved
+or evicted identities yield an explicit absent session and partial coverage, without catalog/store
+scans. Runtime stable session/run/content identities also reject unpaired UTF-16 surrogates so JSON
+normalization cannot alias distinct row keys; rejected display identities are counted, while the
+original event/effects route still receives the original objects.
+
+Each item contains exactly the selected session, not the runtime's 128-session snapshot. It carries
+separate host and projection epochs, decimal-string global observation revision/previous revision,
+and decimal-string coverage counters/session revision. TypeScript orders revisions with `BigInt`,
+not unsafe JavaScript numbers. Items are full replacements: absence clears the session; missing
+text keys remove rows. Text identity is session/run/content/channel. Lifecycle, queue count,
+configuration and text are display-only; submitted receipts are never interpreted as run completion.
+Service failures use `invalid_request`, `stale_epoch`, `capacity` or `observation_failed`, with no
+exception messages. Closing the runtime yields final closed state and ends the channel; canceling
+or disposing its iterator releases only observation resources, including after a suspended yield.
+
+The selected DTO retains at most eight 4,096-unit text prefixes and 256-unit stable identities.
+Status/configuration/lifecycle labels are additionally limited to 256 UTF-16 units, with an explicit
+transport-truncation flag. Conservative six-byte-per-unit JSON escaping plus a 16 KiB fixed
+property/framing allowance stays below **256 KiB per item**; a regression serializes worst-case
+escaped content with the actual generated type metadata and reserves a further explicit 4 KiB
+framing check. This is a selected-item payload budget, not a total heap claim. `MaximumFrameBytes`
+remains an **inbound-only** limit and is not being used as an outbound payload cap.
+
+Buffering layers are separate: the runtime retains one payload-free wakeup per observer; the
+owned RPC session permits two channels (allowing teardown overlap) and two unacknowledged items
+per channel. The published default client has a 64-item channel buffer. The application store
+retains one selected replacement and serializes local iterator cleanup before opening another
+selected-session channel; it does not replace the library's channel machinery. At the conservative
+item budget, 64 buffered payloads alone could approach 16 MiB before parsed-object/string overhead,
+and host credit/transport/transient/React allocations are additional. Credits acknowledge transport
+buffer admission, **not DOM application**. No whole-process memory/performance measurement or
+native final-message delivery-on-window-close guarantee is claimed.
+
+`createSessionDisplayStore` centrally owns selection, opening cancellation and iterator return.
+Its immutable current snapshot reports loading/connected/closed/error; late selection/unmount
+callbacks, wrong epochs and out-of-order revisions cannot restore stale display state. The UI offers
+explicit reconnect without automatic commands, keeps persisted history separate, and renders plain
+React text (no HTML/Markdown execution). A known stale host epoch explicitly requires UI reload and
+disables reconnect with the old identity, even if iterator cleanup also fails. Opening timeout uses
+the standard generated API; its signal remains attached for the full channel lifetime. This slice has managed in-memory channel, generated
+contract/typechecking and frontend helper verification, not native/real-provider or complete M4 parity.
 
 ### Durable session notes
 
