@@ -16,6 +16,36 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class SessionRuntimeForwardingLifetimeTests
 {
     [TestMethod]
+    public Task Display_ActualRuntimePublishesWithoutAnEventReader_AndClosesObservation() => Fixture.Run(async f =>
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var display = f.Runtime.Display.ObserveAsync(cancellation.Token).GetAsyncEnumerator();
+        Assert.IsTrue(await display.MoveNextAsync());
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "queued", "send", null));
+        f.Session.AgentPromptId = "plan";
+        await f.Wait(f.Runtime.PersistSessionLocalStateAsync(f.Session));
+        await f.Wait(f.Runtime.AppendSessionEventAsync(f.Session, new AgentContentCompletedEvent(
+            f.Provider.Descriptor.ProviderId, f.Session.SessionId, DateTimeOffset.UtcNow, null,
+            AgentContentKind.Assistant, "display-item", null, "committed renderer text")));
+        var snapshot = f.Runtime.Display.GetSnapshot();
+        var session = snapshot.Sessions.Single();
+        Assert.AreEqual(f.Session.SessionId, session.SessionId);
+        Assert.AreEqual(1, session.QueuedPromptCount);
+        Assert.AreEqual("plan", session.Configuration!.Value.AgentPromptId);
+        Assert.AreEqual("committed renderer text", session.Text.Single().Text);
+        Assert.IsTrue(session.Text.Single().IsComplete);
+        Assert.IsNotNull(session.Lifecycle);
+        await f.Wait(f.Runtime.DisposeAsync().AsTask());
+        Assert.IsTrue(await display.MoveNextAsync());
+        Assert.IsTrue(display.Current.Snapshot.IsClosed);
+        Assert.IsTrue(display.Current.HasGap);
+        Assert.IsFalse(await display.MoveNextAsync());
+        Assert.IsFalse(snapshot.IsClosed);
+        Assert.AreEqual(0, f.Runtime.Display.SubscriberCount);
+    });
+
+    [TestMethod]
     public Task PendingAgentPrompt_QueuedTailReplacesAttachmentWithoutSelfJoin() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));

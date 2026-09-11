@@ -1,8 +1,48 @@
 # Dual-head desktop parity — in development
 
-> **Status: first persisted-workspace browsing vertical implemented and managed/frontend checks passed, 2026-09-08.** Earlier bounded M2/M3 evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` provides an explicitly in-development boot/workspace surface, not agent functionality. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: runtime-owned live display foundation verified, 2026-09-11; frontend integration pending.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
+
+## M4 checkpoint: committed live display foundation — 2026-09-11
+
+`SessionRuntimeService.Display` now commits immutable, bounded live status/text values before
+the existing lossy event-delivery attempt. Atomic observation admission captures the initial
+snapshot and registers one coalesced wakeup slot; subsequent messages replace the retained
+window with an epoch/revision and explicit gap/eviction/truncation indicators. The original
+event objects and TUI/plugin-effects route are unchanged; there is no second raw event reader.
+Parent review required candidate projection before state/revision/eviction mutation. See
+[runtime contracts and limits](runtime.md#committed-live-display-window-m4-foundation-not-complete-m4).
+
+Parent independently passed the full cached Release solution build (zero warnings/errors,
+no restore/frontend build), 25 Orchestration display/forwarding cases, 13 current main-source
+checks, two Desktop source checks and two existing architecture checks: **42 passes, nine
+explicit historical-source skips**. `lunet build` passed (111 files; configured theme acquisition
+occurred), and diff/whitespace review passed. Logs are `%TEMP%/codealta-parent-display-*.log`.
+Real-runtime fixtures use explicit isolated roots and fake providers; no default profile,
+real authentication/provider network, native UI, package installation or full test suite ran.
+
+Following the user's explicit test-refactoring decision, these obsolete historical source
+reconstruction methods are temporarily ignored, not behavior/safety tests:
+
+- `OwnedSessionCommandSourceTests`: `Preservation_RestoresAllEightWholeOriginalsAcrossNewlineRepresentations`,
+  `Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges`, `Preservation_NewestPreMapPreservesInheritedChains`.
+- `RuntimeEventForwardingSourceTests`: `Preservation_RestoresWholeOriginalsAndRejectsDrift`,
+  `Preservation_ClosesReaderMapsAndInheritedGateways`.
+- `SessionDiscoveryScopeSourceTests`: `Preservation_RestoresAllNineWholeOriginalsAcrossNewlineRepresentations`,
+  `Preservation_RejectsMissingDuplicateAndUnrelatedSourceChanges`, `Preservation_NewestPreMapsPreserveInheritedChains`.
+- `DesktopOwnedSessionSourceTests`: `Boundaries_RestoreWholeOriginalsAndHistoricalReaders`.
+
+Rework/re-enable or remove these methods and their obsolete reconstruction machinery **before
+M4 completion**. Current token-separation, discovery/path, resolver and forwarding checks remain
+active; new coverage checks immutable DTO closure, actual publication before loss, race-free
+observation, coalescing, cancellation, terminal closure and stable text identity.
+
+This is deliberately partial live display storage, not full M4 recovery or an authoritative
+active-session query. Running sessions can be evicted; tool/interaction/plugin/usage data is not
+projected. Bounds cover retained payload/counts, not total process heap or caller-retained
+snapshots. Desktop channel/UI integration, TUI observation/effect migration, canonical history
+reconciliation and full interaction/run-state parity remain open.
 
 ## M3 follow-up: explicit source-plugin authoring profiles — 2026-09-08
 

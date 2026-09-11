@@ -43,6 +43,74 @@ flowchart TD
 
 Same-session mutation is serialized by internal mailbox actors and session coordinators. Different sessions can run concurrently; a blocked provider call, tool execution, or journal append for one session must not serialize unrelated sessions. Runtime events use bounded streams so slow readers do not create unbounded memory pressure.
 
+### Committed live display window (M4 foundation, not complete M4)
+
+`SessionRuntimeService.Display` exposes runtime-owned immutable renderer values. The runtime's
+`SessionRuntimeEventPublisher` commits each publication **before** attempting delivery of the
+same original event instance to the existing bounded/lossy `StreamEventsAsync` route. All
+publication sites share this owner, including concurrent sessions. A short synchronous gate
+orders commits and delivery attempts; projection work contains no I/O, provider calls, observer
+callbacks or asynchronous waits. Observers cannot backpressure publication (ordinary bounded
+gate contention/allocation still exists). There is no new stream reader. The original runtime
+event/plugin-effects path is unchanged and remains separate from display storage; renderer
+DTOs must never be substituted for genuine plugin inputs. No exception or JSON round-trip
+compatibility is claimed.
+
+Candidate display values are calculated before revision/state eviction is committed. Malformed
+null text/lifecycle/catalog payloads are counted as unsupported (null/invalid session identities
+as omitted) while original event delivery remains unchanged; this is not generic fault rollback
+or a guarantee of recovery from allocation/process failure.
+
+`Display.ObserveAsync` admits on first enumeration: registration and initial snapshot capture
+are atomic. Each owner has a new `Epoch`; every publication and the final close increments one
+global `Revision`. Subsequent messages are **full replacements**, not events or append deltas.
+Each carries `PreviousRevision` and `HasGap` when intermediate revisions were coalesced. Replace
+the entire local window, removing absent sessions/items; never replay these messages as effects.
+One payload-free wakeup slot per observer coalesces arbitrarily slow consumption. There is no
+event replay buffer. The next read captures current committed state under the same gate, so a
+gap requires no upstream lossy-stream reconciliation for this retained window. It does not
+recover history or omitted content. `GetSnapshot` is an atomic standalone query, not a substitute
+for the observation handshake.
+
+Coverage is deliberately partial (`IsPartial` is always true): latest published lifecycle,
+queue **count**, configuration labels, host status and selected text channels (user, assistant,
+reasoning/summary, plan, notice). Null state means not observed, not idle/empty. Lifecycle,
+queue count and configuration survive text eviction **within a retained session**. Text keys
+are `(session ID, run ID, content ID, channel)`; finalized content replaces its prefix, and late
+deltas cannot unfinalize it. `StartedWithDelta` warns that there is no finalized baseline.
+The projection is not hydrated from journals, does not infer command admission, and is not an
+authoritative execution/permission/queue-item API. Catalog events copy configuration labels,
+not mutable descriptors. Tools, errors/exception graphs, activities, notes, asks, interactions,
+plugin data, attachments and arbitrary JSON details are not projected. `UnsupportedEvents`
+counts unsupported publications; omitted optional details/queue payloads/catalog fields are
+part of the declared partial coverage rather than individually counted.
+
+Fixed bounds (UTF-16 code units, not UTF-8 bytes): **128 session windows**, **8 text items per
+session**, **4,096 units per text prefix**, **256 per stable identity**, **512 per metadata
+label**, and **32 live observers**. New sessions/text evict the least recently published/updated
+window/item; eviction counters expose loss. Oversized/missing session or text identities are
+omitted and counted rather than truncated into colliding keys. Text/metadata truncation is
+explicit; prefix cutting avoids splitting a well-formed surrogate pair. Session eviction may
+remove even a running session and all its last-known status; reappearance starts a fresh window.
+No claim of complete active-session discovery should be made from this bounded display API.
+
+These are **retained payload/count bounds, not a total heap cap**: current text payload is at
+most 4,194,304 UTF-16 units (8 MiB of character storage), plus bounded identities, labels and
+collection overhead. Immutable arrays/strings are shared with snapshots. Consumers may retain
+unlimited old snapshots; iteration, concurrent snapshot reads, transient allocations, original
+event/provider graphs, the legacy event channel, journals and renderer serialization are not
+covered by that payload budget. There is no measured performance/whole-process memory claim.
+
+Cancellation releases subscriber admission even while an enumerator is suspended at `yield`;
+enumerator disposal also detaches. Neither cancels a run. Runtime disposal settles its existing
+owned forwarding work, commits final closed state, wakes/completes observations and releases
+the subscriber set. Late publications are refused. Late observers get one closed baseline;
+closed state remains queryable for the runtime owner's lifetime. Next integration seam: a
+host/frontend adapter can observe `RuntimeService.Display`, authorize transport scope and apply
+replacements without adding a `StreamEventsAsync` reader. History paging, full status recovery,
+shared interactions, original-effects routing changes and Desktop/TUI integration remain later
+M4 work.
+
 ### Durable session notes
 
 `SessionRuntimeService.GetNotesMarkdownAsync` and `UpdateNotesAsync` own tab-independent notes operations. `RuntimeAltaNotesService` is the actual live-tool adapter used by TUI composition; the old tab-authoritative notes service is removed. An explicit caller session ID wins, including when it is unknown (no fallback to another selected session). A host fallback captures only a session ID once, before awaiting stdin or storage. Resolution uses active runtime provider identity or persisted metadata and the configured global/project catalog association, without provider startup or prompt/skill discovery. These are trusted backend identities, not renderer authorization or arbitrary journal-path inputs.

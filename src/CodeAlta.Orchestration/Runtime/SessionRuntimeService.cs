@@ -33,7 +33,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     private readonly CatalogOptions _catalogOptions;
     private readonly CodeAltaConfigStore _configStore;
     private readonly SkillCatalog _skillCatalog;
-    private readonly BoundedRuntimeEventStream<SessionRuntimeEvent> _events = new();
+    private readonly SessionRuntimeEventPublisher _events = new();
     private readonly SessionActorRegistry _sessionActors = new(mailboxCapacity: 128);
     private readonly ConcurrentDictionary<string, RuntimeSessionEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly OwnedProviderEventForwarding _forwarding = new();
@@ -98,6 +98,9 @@ public sealed class SessionRuntimeService : IAsyncDisposable
 
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
     public SessionPermissionService Permissions { get; }
+
+    /// <summary>Gets committed bounded live display state, independent of the original lossy event/effects stream.</summary>
+    public RuntimeDisplayProjection Display => _events.Display;
 
     /// <summary>
     /// Gets the skill catalog used when building instructions and activating skills.
