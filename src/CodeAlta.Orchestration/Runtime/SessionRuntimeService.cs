@@ -34,6 +34,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     private readonly CodeAltaConfigStore _configStore;
     private readonly SkillCatalog _skillCatalog;
     private readonly SessionRuntimeEventPublisher _events = new();
+    private readonly Guid _runtimeInstanceId = Guid.NewGuid();
     private readonly SessionActorRegistry _sessionActors = new(mailboxCapacity: 128);
     private readonly ConcurrentDictionary<string, RuntimeSessionEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly OwnedProviderEventForwarding _forwarding = new();
@@ -1460,6 +1461,45 @@ public sealed class SessionRuntimeService : IAsyncDisposable
     private async Task<AgentRunId> SteerCapturedAsync(AgentSessionHandleId sessionHandleId, AgentSteerOptions steerOptions, CancellationToken cancellationToken)
     {
         return await _agentHub.SteerAsync(sessionHandleId, steerOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Captures immutable current-runtime facts for one session without discovery or acquisition.</summary>
+    /// <param name="sessionId">The nonblank durable session identifier.</param>
+    /// <param name="cancellationToken">Cancels admission or the caller's wait, not already admitted runtime-owned work.</param>
+    /// <returns>A point-in-time observation; a missing entry is explicitly absent, not idle or completed.</returns>
+    /// <remarks>
+    /// Uses the existing session actor when present; never creates an actor, coordinator or provider, and
+    /// never reads catalogs, journals or Display. Entry and transition facts are copied synchronously on
+    /// that actor; attachment retirement is read through its existing owner gate. Missing-actor absence
+    /// is observed at registry lookup. The result can become stale immediately. Runtime instance and
+    /// attachment generation identify ownership, not state revisions or effect watermarks. Consumers
+    /// must fence obsolete selection/request results themselves. Queue depth, provider quiescence,
+    /// history recovery and an atomic history/original-stream handshake are not provided.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The session identifier is null.</exception>
+    /// <exception cref="ArgumentException">The session identifier is empty or whitespace.</exception>
+    /// <exception cref="OperationCanceledException">Admission or the caller's wait was canceled.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime or session actor no longer admits queries.</exception>
+    public async Task<SessionRuntimeCurrentState> GetCurrentStateAsync(string sessionId, CancellationToken cancellationToken = default)
+        => await AdmitAsync(() => GetCurrentStateOwnedBodyAsync(sessionId), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+
+    private async Task<SessionRuntimeCurrentState> GetCurrentStateOwnedBodyAsync(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (!_sessionActors.TryGet(sessionId, out var actor))
+            return new(_runtimeInstanceId, sessionId, false, null);
+
+        return await actor.QueryAsync(_ =>
+        {
+            SessionRuntimeCurrentEntry? snapshot = null;
+            if (_entries.TryGetValue(sessionId, out var entry))
+                snapshot = new(entry.Attachment.Ordinal, entry.IsTerminated, entry.Attachment.IsRetiring,
+                    entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
+                    entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId);
+            return ValueTask.FromResult(new SessionRuntimeCurrentState(_runtimeInstanceId, sessionId,
+                _transitions.ContainsKey(sessionId), snapshot));
+        }, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -16,6 +16,153 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class SessionRuntimeForwardingLifetimeTests
 {
     [TestMethod]
+    public Task CurrentState_AbsentAndCanceledQueriesDoNotAcquire_AndClosureRejects() => Fixture.Run(async f =>
+    {
+        var absent = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsNull(absent.Entry);
+        Assert.IsFalse(absent.CoordinatorTransitionInProgress);
+        Assert.AreNotEqual(Guid.Empty, absent.RuntimeInstanceId);
+        Assert.AreEqual(f.Session.SessionId, absent.SessionId);
+        await f.Expect<ArgumentNullException>(f.Track(f.Runtime.GetCurrentStateAsync(null!)));
+        await f.Expect<ArgumentException>(f.Track(f.Runtime.GetCurrentStateAsync(" ")));
+        using var preCanceled = new CancellationTokenSource();
+        preCanceled.Cancel();
+        await f.ExpectCancellation(f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, preCanceled.Token)));
+        var next = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.AreEqual(absent, next);
+        Assert.AreEqual(0, f.Provider.AttachmentCount);
+        Assert.AreEqual(0, f.Provider.Creates);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+        await f.Wait(f.Runtime.DisposeAsync().AsTask());
+        await f.Expect<ObjectDisposedException>(f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+    });
+
+    [TestMethod]
+    public Task CurrentState_CancellationAfterAdmissionStopsWait_NotOwnedActorWork() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var before = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var held = new HeldEmptyTools();
+        Task? ensure = null;
+        try
+        {
+            // Matches reads Count on the real session actor. Hold that existing operation so the
+            // current-state query is admitted but cannot execute, without a runtime test hook.
+            ensure = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", held)));
+            await f.Ready(held.Entered.Task);
+            using var cancellation = new CancellationTokenSource();
+            var query = f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, cancellation.Token));
+            Assert.IsFalse(query.IsCompleted);
+            cancellation.Cancel();
+            await f.ExpectCancellation(query);
+            Assert.IsFalse(ensure.IsCompleted);
+        }
+        finally { held.Release.TrySetResult(); }
+        await f.Wait(ensure!);
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        // Real owner shutdown joins admitted work, including the query whose caller stopped waiting.
+        await f.Wait(f.Runtime.DisposeAsync().AsTask());
+    });
+
+    [TestMethod]
+    public Task CurrentState_CapturesConfigurationAndReplacementWithoutMutatingPriorSnapshot() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var before = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsNotNull(before.Entry);
+        Assert.AreEqual("fixture-model", before.Entry.ModelId);
+        Assert.AreEqual(f.Provider.Descriptor.ProviderId.Value, before.Entry.ProviderId);
+        Assert.AreEqual(f.Options.ProviderKey, before.Entry.ProviderKey);
+        Assert.AreEqual(f.Options.ReasoningEffort, before.Entry.ReasoningEffort);
+        Assert.AreEqual("default", before.Entry.AgentPromptId);
+        Assert.IsNull(before.Entry.PendingAgentPromptId);
+        await f.Wait(f.Runtime.SetActiveSessionAgentPromptIdAsync(f.Session.SessionId, "plan"));
+        var pending = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.AreEqual("default", pending.Entry!.AgentPromptId);
+        Assert.AreEqual("plan", pending.Entry.PendingAgentPromptId);
+        f.Provider.HoldAbort = true;
+        var replace = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("replacement-model")));
+        await f.Ready(f.Provider.AbortStarted.Task);
+        var during = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsTrue(during.CoordinatorTransitionInProgress);
+        Assert.IsTrue(during.Entry!.IsRetiring);
+        Assert.AreEqual(before.Entry.AttachmentGeneration, during.Entry.AttachmentGeneration);
+        f.Provider.ReleaseAbort.TrySetResult();
+        await f.Wait(replace);
+        var after = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.AreEqual(before.RuntimeInstanceId, after.RuntimeInstanceId);
+        Assert.AreNotEqual(before.Entry.AttachmentGeneration, after.Entry!.AttachmentGeneration);
+        Assert.IsFalse(after.CoordinatorTransitionInProgress);
+        Assert.IsFalse(after.Entry.IsRetiring);
+        Assert.AreEqual("replacement-model", after.Entry.ModelId);
+        Assert.AreEqual("plan", after.Entry.AgentPromptId);
+        Assert.IsNull(after.Entry.PendingAgentPromptId);
+        Assert.IsFalse(before.Entry.IsRetiring);
+        Assert.AreEqual("fixture-model", before.Entry.ModelId);
+        Assert.IsNull(before.Entry.PendingAgentPromptId);
+    });
+
+    [TestMethod]
+    public Task CurrentState_ReportsEntrylessPreparation_AndQueueDrainWithoutInventingRunState() => Fixture.Run(async f =>
+    {
+        f.Provider.HoldPreparation = true;
+        var ensure = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.Ready(f.Provider.PreparationStarted.Task);
+        var preparing = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsNull(preparing.Entry);
+        Assert.IsTrue(preparing.CoordinatorTransitionInProgress);
+        f.Provider.ReleasePreparation.TrySetResult();
+        await f.Wait(ensure);
+        await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "held", "send", null));
+        f.Provider.Latest.EmitIdle();
+        await f.Ready(f.Provider.SendStarted.Task);
+        var draining = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsTrue(draining.Entry!.QueueDrainInProgress);
+        Assert.IsFalse(draining.Entry.IsTerminated);
+        f.Provider.ReleaseSend.TrySetResult();
+        var settled = await f.Wait(DrainSettled());
+        Assert.IsFalse(settled.Entry!.QueueDrainInProgress);
+        Assert.AreEqual(draining.Entry.AttachmentGeneration, settled.Entry.AttachmentGeneration);
+        // Detach joins the actual held work and removes the entry, not a simulated drain state.
+        await f.Wait(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
+        var detached = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsNull(detached.Entry);
+        Assert.IsFalse(detached.CoordinatorTransitionInProgress);
+        Assert.IsTrue(draining.Entry.QueueDrainInProgress);
+
+        async Task<SessionRuntimeCurrentState> DrainSettled()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                var snapshot = await f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, timeout.Token));
+                if (snapshot.Entry is { QueueDrainInProgress: false }) return snapshot;
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+    });
+
+    [TestMethod]
+    public Task CurrentState_RecordsRunAndShutdown_WithoutTreatingDetachAsCompletion() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("recorded-run"));
+        var running = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.AreEqual("recorded-run", running.Entry!.ActiveRunId);
+        Assert.IsFalse(running.Entry.IsTerminated);
+        Assert.IsFalse(running.Entry.QueueDrainInProgress);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null);
+        var terminated = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsTrue(terminated.Entry!.IsTerminated);
+        Assert.IsNull(terminated.Entry.ActiveRunId);
+        Assert.AreEqual(running.Entry.AttachmentGeneration, terminated.Entry.AttachmentGeneration);
+        await f.Wait(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
+        Assert.IsNull((await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId))).Entry);
+        Assert.AreEqual("recorded-run", running.Entry.ActiveRunId);
+        Assert.IsFalse(running.Entry.IsTerminated);
+    });
+
+    [TestMethod]
     public Task Display_ActualRuntimePublishesWithoutAnEventReader_AndClosesObservation() => Fixture.Run(async f =>
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -238,6 +385,24 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         Assert.AreEqual(0, f.Provider.EarlyDisposals);
     });
 
+    private sealed class HeldEmptyTools : IReadOnlyList<AgentToolDefinition>
+    {
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Count
+        {
+            get
+            {
+                Entered.TrySetResult();
+                if (!Release.Task.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("Fixture actor hold expired.");
+                return 0;
+            }
+        }
+        public AgentToolDefinition this[int index] => throw new ArgumentOutOfRangeException(nameof(index));
+        public IEnumerator<AgentToolDefinition> GetEnumerator() => Enumerable.Empty<AgentToolDefinition>().GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class Fixture
     {
         private readonly object _gate = new();
@@ -258,12 +423,13 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal SessionViewJournalStore Journal { get; private set; } = null!;
         internal SessionRuntimeService Runtime { get { lock (_gate) return _host!.RuntimeService; } }
         internal SessionExecutionOptions Options => OptionsFor("fixture-model");
-        internal SessionExecutionOptions OptionsFor(string model) => new()
+        internal SessionExecutionOptions OptionsFor(string model, IReadOnlyList<AgentToolDefinition>? tools = null) => new()
         {
             ProviderId = Provider.Descriptor.ProviderId,
             ProviderKey = Provider.Descriptor.ProviderId.Value,
             WorkingDirectory = Path.Combine(_root, "project"),
             Model = model,
+            Tools = tools,
             ProjectRoots = [Path.Combine(_root, "project")],
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
             OnUserInputRequest = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true)),
@@ -332,6 +498,24 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             var error = await Assert.ThrowsExactlyAsync<T>(() => task);
             lock (_gate) _expected.Add(error);
             return error;
+        }
+
+        internal void Expected(Exception error) { lock (_gate) _expected.Add(error); }
+        internal async Task ExpectCancellation(Task task)
+            => Expected(await Assert.ThrowsAsync<OperationCanceledException>(() => task));
+
+        internal async Task EmitAndObserve(AgentSessionUpdateKind kind, AgentRunId? runId)
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var marker = Guid.NewGuid().ToString();
+            Provider.Latest.EmitState(kind, runId, marker);
+            await Wait(Observe());
+            async Task Observe()
+            {
+                await foreach (var value in Runtime.StreamEventsAsync(cancellation.Token))
+                    if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent update } && update.Message == marker) return;
+                Assert.Fail("The actual runtime did not forward the fixture state event.");
+            }
         }
 
         private async Task Setup()
@@ -538,6 +722,8 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
             private void Emit(AgentEvent value) { Action<AgentEvent>? handler; lock (_gate) handler = _handler; handler?.Invoke(value); }
             internal void EmitIdle() => Emit(new AgentSessionUpdateEvent(ProviderId, id, DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Idle, "fixture"));
+            internal void EmitState(AgentSessionUpdateKind kind, AgentRunId? runId, string message)
+                => Emit(new AgentSessionUpdateEvent(ProviderId, id, DateTimeOffset.UtcNow, runId, kind, message));
             internal void EmitNotification(string content) => Emit(new AgentContentCompletedEvent(ProviderId, id, DateTimeOffset.UtcNow, null, AgentContentKind.Assistant, Guid.NewGuid().ToString(), null, "<notify-parent>" + content + "</notify-parent>"));
             public async Task<AgentRunId> SendAsync(AgentSendOptions send, CancellationToken cancellationToken = default)
             {

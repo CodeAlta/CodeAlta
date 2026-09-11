@@ -4,15 +4,19 @@ import { captureSubmission, createMutationCapability, refreshSubmissions, sendSu
 import { historyMessage, loadHistory, type HistoryState } from "./history";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import type { createSessionDisplayStore } from "./sessionDisplay";
+import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 
-export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, display }: {
+export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, display, runtimeReader }: {
   sessionId: string; epoch: string; drafts: Map<string, SessionSendRequest>; capability: ReturnType<typeof createMutationCapability>;
   display: ReturnType<typeof createSessionDisplayStore>;
+  runtimeReader: ReturnType<typeof createRuntimeStateReader>;
 }) {
   const [text, setText] = useState("");
   const [message, setMessage] = useState("Refresh submissions to recover accepted receipts. Never automatically resend an uncertain request.");
   const [page, setPage] = useState<SessionReceiptPage>();
   const [history, setHistory] = useState<HistoryState>();
+  const [runtimeState, setRuntimeState] = useState<RuntimeState>();
+  const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [busy, setBusy] = useState(false);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
   const invalidEpoch = observedInvalidEpoch || !capability.canMutate();
@@ -25,10 +29,12 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, displa
     setText(drafts.get(sessionId)?.text ?? "");
     setPage(undefined);
     setHistory(undefined);
+    setRuntimeState(undefined);
+    runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState);
     setBusy(false);
     setMessage("Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
-    return () => { controller.abort(); scope.current = null; };
-  }, [sessionId, epoch, drafts]);
+    return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
+  }, [sessionId, epoch, drafts, runtimeReader]);
 
   const pending = drafts.get(sessionId);
   function observeEpoch(result: { status: string; epoch: string | null }) {
@@ -110,6 +116,31 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, displa
     </div>)}
     {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
     <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} />
+    <h3>Current runtime — manual point-in-time observation</h3>
+    <p className="detail">Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.</p>
+    <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>Refresh runtime state</button>
+    {runtimeState?.kind === "loading" && <p role="status">Reading current runtime facts…</p>}
+    {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {["stale_epoch", "stale_runtime"].includes(runtimeState.code) ? "Reload the Desktop UI before continuing; the old epoch cannot be retried." : "No idle or completion state is inferred."}</p>}
+    {runtimeState?.kind === "ready" && <>
+      <p className="detail">Runtime instance {runtimeState.snapshot.runtimeInstanceId} · coordinator transition recorded: {runtimeState.snapshot.coordinatorTransitionInProgress ? "yes" : "no"}</p>
+      {runtimeState.snapshot.entry ? <>
+        <dl>
+          <dt>Attachment generation (identity, not revision)</dt><dd>{runtimeState.snapshot.entry.attachmentGeneration}</dd>
+          <dt>Active run recorded</dt><dd>{runtimeState.snapshot.entry.activeRunId ?? "No run recorded — provider activity unknown"}</dd>
+          <dt>Shutdown observed on entry</dt><dd>{runtimeState.snapshot.entry.isTerminated ? "yes" : "no"}</dd>
+          <dt>Attachment retiring</dt><dd>{runtimeState.snapshot.entry.isRetiring ? "yes" : "no"}</dd>
+          <dt>Queue drain in progress</dt><dd>{runtimeState.snapshot.entry.queueDrainInProgress ? "yes" : "no"}</dd>
+        </dl>
+        <p className="detail">Captured configuration — not verified provider-effective settings.</p>
+        <dl>
+          <dt>Provider / configured key</dt><dd>{runtimeState.snapshot.entry.providerId} / {runtimeState.snapshot.entry.providerKey}</dd>
+          <dt>Captured model</dt><dd>{runtimeState.snapshot.entry.modelId ?? "Not recorded"}</dd>
+          <dt>Captured reasoning</dt><dd>{runtimeState.snapshot.entry.reasoningEffort ?? "Not recorded"}</dd>
+          <dt>Captured prompt</dt><dd>{runtimeState.snapshot.entry.agentPromptId ?? "Not recorded"}</dd>
+          <dt>Pending prompt (separate selection)</dt><dd>{runtimeState.snapshot.entry.pendingAgentPromptId ?? "None recorded"}</dd>
+        </dl>
+      </> : <p>No runtime entry observed. This does not imply idle, completion or absence of a durable session.</p>}
+    </>}
     <h3>Persisted history — not live run state</h3>
     <p className="detail">Bounded journal pages; deltas and completed records remain separate. Actual cached-store reads are host-owned. Caller cancellation does not stop them. Copied paths/reparse points are not sandboxed.</p>
     <button type="button" onClick={() => readHistory()}>Restart history</button>

@@ -38,5 +38,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(SessionReceiptPage))]
 [JsonSerializable(typeof(SessionDisplayRequest))]
 [JsonSerializable(typeof(SessionDisplayItem))]
+[JsonSerializable(typeof(SessionRuntimeStateRequest))]
+[JsonSerializable(typeof(SessionRuntimeStateResponse))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal sealed partial class DesktopJsonContext : JsonSerializerContext;

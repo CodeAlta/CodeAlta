@@ -43,6 +43,42 @@ flowchart TD
 
 Same-session mutation is serialized by internal mailbox actors and session coordinators. Different sessions can run concurrently; a blocked provider call, tool execution, or journal append for one session must not serialize unrelated sessions. Runtime events use bounded streams so slow readers do not create unbounded memory pressure.
 
+### Selected-session current-runtime observation
+
+`SessionRuntimeService.GetCurrentStateAsync(sessionId, token)` returns immutable
+`SessionRuntimeCurrentState` / `SessionRuntimeCurrentEntry` values from the actual runtime owner.
+Admission uses the existing retained-work owner, followed by `TryGet` and a synchronous copy on
+the existing session actor. A missing actor returns an absent entry at registry lookup: the query
+does not create an actor/coordinator/provider or read catalogs, journals, discovery paths or Display.
+Pre-cancellation prevents admission; later cancellation stops the caller's wait, not admitted work.
+Runtime/actor closure fails explicitly rather than manufacturing an inactive snapshot.
+
+The observation contains entry presence, coordinator transition, recorded active run, observed
+Shutdown termination, attachment retirement and queue-drain facts. **No run recorded is not proof
+of provider inactivity**, including while a send is awaiting its provider result/events. Missing
+entry, retirement, transition and query failure are not idle/completion signals. Queue depth is
+unknown: durable queued records/counts are intentionally not loaded or cached by this query.
+Captured provider/key/model/reasoning/prompt settings are not verified provider-effective values;
+pending prompt selection remains separate from the coordinator's captured prompt. No tools,
+instructions, delegates, credentials or mutable descriptor graphs are returned.
+
+`RuntimeInstanceId` identifies this runtime independently of Display. `AttachmentGeneration` is
+the existing attachment ordinal scoped by that instance; it identifies replacement, **not a state
+revision**. Results may immediately become stale. Consumers must fence old selection, host epoch
+and request-generation results, not order snapshots by attachment ordinal. There is no effect
+acknowledgement, replay, history recovery or atomic history/original-event-stream handshake.
+
+Owned Desktop exposes a unary `runtimeState.current` RPC and a manual **Refresh runtime state**
+readout, separate from Display/history/receipts. It does not poll, automatically refresh or gate
+commands. Host epoch and bounded, well-formed session identity are validated before querying.
+Malformed/oversized results produce `wire_limit`, with no partial/truncated authoritative state;
+closure and other failures use stable codes without exception messages. Attachment ordinals use
+decimal strings to preserve Int64 precision in JavaScript. Seven bounded identity/configuration
+strings (256 UTF-16 units each), fixed GUIDs/enums/ordinal/keys and a 4 KiB framing allowance fit
+the **32 KiB response budget**, verified with actual generated JSON serialization and worst-case
+escaping. Stale host/runtime identity requires UI reload, not retrying the old epoch. Selection
+detach cancels the waiter and discards late results; it does not stop a run or the runtime.
+
 ### Committed live display window (M4 foundation, not complete M4)
 
 `SessionRuntimeService.Display` exposes runtime-owned immutable renderer values. The runtime's

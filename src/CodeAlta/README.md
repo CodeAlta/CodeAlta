@@ -114,6 +114,19 @@ explicitly requires reloading the UI, not reconnecting with the old identity. Se
 renderer detach and cancellation close only the observation, not a run or the host. Only explicit
 owned mode registers this channel; default/catalog-only startup behavior is unchanged.
 
+**Refresh runtime state** is a separate manual, point-in-time observation of the actual runtime
+entry, coordinator transition, recorded run, Shutdown, retirement and queue-drain facts. It does
+not poll, automatically refresh or control command availability. No entry/no recorded run is not
+idle or completed, and queue depth is explicitly unknown. Configuration is runtime-captured, not
+verified provider-effective settings; pending prompt selection is shown separately. This query
+does not read catalogs/history or start/discover providers. Its runtime instance/attachment
+identity is not a Display revision, effect acknowledgement or history-recovery handshake.
+Host epoch and selection are checked, obsolete responses are discarded, and stale host/runtime
+identity requires reload rather than retrying the old epoch. Malformed/oversized output is refused
+without truncating authoritative fields (32 KiB transport budget, 256 UTF-16 units per identity/
+configuration string, decimal-string attachment generation). Canceling a wait does not cancel
+admitted runtime-owned work. This unary RPC is registered only in explicit owned mode.
+
 Actual cached-store reads are host-owned (eight active reads, excess rejected); cancelling an
 RPC wait does not stop them. Shutdown joins command/read work before runtime dependencies.
 Five seconds triggers a pending diagnostic, not termination. Unconfirmed host/native cleanup

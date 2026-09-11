@@ -78,7 +78,7 @@ public sealed class DesktopOwnedSessionSourceTests
         StringAssert.Contains(panel, "Reload required; mutations are disabled");
         StringAssert.Contains(panel, "observedInvalidEpoch || !capability.canMutate()");
         StringAssert.Contains(panel, "Refresh submissions");
-        StringAssert.Contains(panel, "return () => { controller.abort(); scope.current = null; };");
+        StringAssert.Contains(panel, "return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };");
         var helper = Read(Helper);
         StringAssert.Contains(helper, "Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text })");
         StringAssert.Contains(helper, "if (signal.aborted || !capability.canSubmit(request)) return;");

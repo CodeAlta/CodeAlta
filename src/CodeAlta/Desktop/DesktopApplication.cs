@@ -145,6 +145,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
+                    builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
                     var creatingView = environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions

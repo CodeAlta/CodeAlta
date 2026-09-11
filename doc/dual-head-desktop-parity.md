@@ -1,8 +1,49 @@
 # Dual-head desktop parity — in development
 
-> **Status: runtime-owned live display foundation and scoped Desktop selected-session integration verified, 2026-09-11.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: scoped Desktop live display and manual current-runtime readout verified, 2026-09-11.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
+
+## M4 checkpoint: manual selected-session current-runtime observation — 2026-09-11
+
+`SessionRuntimeService.GetCurrentStateAsync` uses existing admitted-work ownership, actor lookup
+and a synchronous actor query to copy immutable entry/transition facts. It creates no actor or
+coordinator and reads no catalog, journal, provider or Display state. Pre-cancellation prevents
+admission; later cancellation stops the caller's wait, not admitted work. Runtime/actor closure
+fails explicitly. Runtime instance and attachment generation identify ownership, not revisions.
+Missing entry/no recorded run is not idle, completed or proof of provider inactivity. Queue depth
+remains unknown; captured configuration is not verified provider-effective, and pending prompt
+selection remains distinct from the coordinator's captured prompt.
+
+Owned-only unary `runtimeState.current` validates host epoch and session identity before querying,
+refuses malformed/oversized output without truncation, maps failures to stable codes and serializes
+attachment generations as decimal strings. The Desktop readout refreshes only on explicit request.
+Its App-owned identity/reload latch survives panel remounts; selection cancellation and request
+generations suppress late results. Stale host/runtime identity requires reload, not old-epoch retry.
+No mutation gating, original-event/plugin/TUI routing or Display behavior changed.
+
+Parent independently reviewed the complete slice and passed:
+
+- Cached Release solution build: zero warnings/errors, no restore, frontend dependency restore/build
+  disabled in MSBuild; generated unary/JSON/TypeScript contracts checked.
+- **60 focused .NET tests, zero failures/skips**: 34 runtime publisher/projection/actual-state and
+  related lifetime cases, 13 Desktop RPC/current-source cases, 13 main current-source guards.
+- **27 frontend loader tests**, zero failures/skips; TypeScript/Vite build using cached dependencies.
+- Actual generated JSON: **11,185 bytes**, **15,281 with 4 KiB framing**, below **32,768 bytes**.
+  This bounds the response payload, not retained/transient runtime or renderer heap usage.
+
+The five new actual-runtime cases use explicit isolated home/global/project/builtin roots, fake
+providers, held preparation/send/abort/actor gates and tracked cleanup. They exercise absence,
+validation/closure, post-admission cancellation, captured/pending configuration and replacement,
+transition/drain, recorded run/Shutdown/detach, and immutable earlier snapshots. RPC test inputs
+are literal transport values, not substitutes for those runtime transition tests. Parent's focused
+selection is narrower than the child's reported 94-test total; only the 87 cases above are claimed
+as independently rerun here.
+
+No native/app or mounted-React qualification, real providers, network/install/restore, default-root
+execution, broad suite or website acquisition ran. Current-state observations acknowledge no
+effects and provide no replay or atomic Display/history/original-stream handshake. Actual shared
+effect/TUI migration, richer recovery and pending interaction parity remain open; **M4 is incomplete**.
 
 ## M4 checkpoint: exclusive original-event reader — 2026-09-11
 
