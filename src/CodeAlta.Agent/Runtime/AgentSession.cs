@@ -194,7 +194,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             };
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
-            var allTools = BuildAvailableTools();
+            var allTools = BuildAvailableTools(options.OnPermissionRequest ?? _options.OnPermissionRequest);
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
 
@@ -579,7 +579,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
     }
 
-    private IReadOnlyList<AgentToolDefinition> BuildAvailableTools()
+    private IReadOnlyList<AgentToolDefinition> BuildAvailableTools(AgentPermissionRequestHandler permissionRequestHandler)
     {
         var builtIns = AgentBuiltInToolFactory.CreateDefaultTools(
             new AgentBuiltInToolOptions
@@ -587,7 +587,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 ProviderId = ProviderId,
                 SessionId = SessionId,
                 WorkingDirectory = _summary.WorkingDirectory,
-                OnPermissionRequest = _options.OnPermissionRequest,
+                OnPermissionRequest = permissionRequestHandler,
                 OnUserInputRequest = _options.OnUserInputRequest,
                 Provider = Provider,
             });

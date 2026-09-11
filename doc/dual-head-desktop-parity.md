@@ -4,6 +4,30 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: explicit per-send permission callback prerequisite — 2026-09-11
+
+`AgentSendOptions.OnPermissionRequest` is now an optional callback override for each send's
+in-process `AgentSession` built-in tool definitions. Null keeps the existing session callback.
+The runtime does not mutate session options or retain a mutable latest callback; custom tools and
+user-input handling are unchanged. Other provider sessions must explicitly support the option.
+This is callback selection only: retained tool definitions retain their original callback, not an
+automatically canceled lease. Owned command preparation still denies permission requests, and
+there is no owned permission execution/attachment binding, RPC or Desktop approval UI yet.
+
+Parent audited the entire new fixture before executing: actual `AgentSession`, scripted turns,
+fresh explicit work/store roots, precomposed instructions, supplied model metadata and disabled
+compaction. Both override and fallback exclusively Deny/Cancel real built-in shell requests,
+returning before process construction. No subprocess or provider transport is created. Retained
+work owns setup/sends/disposal/CTS; unfinished work or failed disposal retains the root.
+
+Independent verification passed all **five actual-session cases** (precedence, null fallback,
+sequential sends, retained original tool callback, unchanged session/custom-tool/user-input
+options) and **19 existing pure permission/current-source cases**, zero failures/skips. Cached
+targeted and solution Release builds passed zero warnings/errors, no restore and frontend
+acquisition disabled. No broad suite, native/app/default-root/real-provider/network or website
+execution ran. The next prerequisite is a bounded, authoritative per-execution/attachment
+permission lifetime using this explicit association; **M4/full parity remain incomplete**.
+
 ## M4 checkpoint: manual selected-session current-runtime observation — 2026-09-11
 
 `SessionRuntimeService.GetCurrentStateAsync` uses existing admitted-work ownership, actor lookup
