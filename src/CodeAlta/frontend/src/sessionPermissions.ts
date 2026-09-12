@@ -8,49 +8,77 @@ export type PermissionReviewState =
   | { kind: "result"; code: "resolved" | "rejected" }
   | { kind: "error"; code: string; reloadRequired: boolean };
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
+type DecisionOrigin = Readonly<{
+  expectedHostEpoch: string; handle: SessionPermissionCommandHandle; decision: CommandDecision;
+}>;
+export type PermissionDecisionObservation = Readonly<{
+  origin: DecisionOrigin; state: "pending" | "resolved" | "rejected" | "error"; code: string | null;
+}>;
+type RetainedDecision = {
+  readonly origin: DecisionOrigin;
+  readonly controller: AbortController;
+  waiter: Promise<SessionPermissionResolution> | null;
+  state: PermissionDecisionObservation["state"];
+  code: string | null;
+  observed: boolean;
+};
 
-// App-owned identity and uncertain-response latch; selection-owned manual requests, no polling or event bus.
+// One App-owned original decision/waiter, not a replay or completion ledger. List reads remain selection-owned.
 export function createPermissionReviewer(
   list: (request: SessionPermissionsRequest, options: CallOptions) => Promise<SessionPermissionsPage>,
   resolve: (request: SessionPermissionResolveRequest, options: CallOptions) => Promise<SessionPermissionResolution>,
 ) {
   let selection = 0;
+  let hostEpoch: string | null = null;
   let runtime: string | null = null;
   let reloadCode: string | null = null;
-  let resolving = false;
+  let retained: RetainedDecision | null = null;
+  const latch = (code: string) => {
+    // Epoch invalidation is permanent, including when a former selection's reply arrives late.
+    if (code === "stale_epoch") reloadCode = code;
+    else reloadCode ??= code;
+  };
+  const replaceable = () => retained === null
+    || ((retained.state === "resolved" || retained.state === "rejected") && retained.observed);
   return {
     forSelection(request: SessionPermissionsRequest, signal: AbortSignal, publish: (value: PermissionReviewState) => void) {
+      // Caller-owned request objects and later selections cannot change captured authority.
+      const selectedRequest = Object.freeze({ expectedHostEpoch: request.expectedHostEpoch, sessionId: request.sessionId });
+      const validSelection = guid(selectedRequest.expectedHostEpoch) && identity(selectedRequest.sessionId);
       const selected = ++selection;
-      if (resolving) reloadCode ??= "uncertain";
+      if (validSelection) {
+        if (hostEpoch !== null && hostEpoch !== selectedRequest.expectedHostEpoch) latch("stale_epoch");
+        hostEpoch ??= selectedRequest.expectedHostEpoch;
+      }
       let generation = 0;
       let entries: readonly SessionPermissionCommand[] = [];
       const active = () => !signal.aborted && selected === selection;
       const error = (code: string) => {
         entries = [];
-        if (["stale_epoch", "stale_runtime", "uncertain"].includes(code)) reloadCode ??= code;
+        if (["stale_epoch", "stale_runtime", "uncertain"].includes(code)) latch(code);
         if (active()) publish({ kind: "error", code: reloadCode ?? code, reloadRequired: reloadCode !== null });
       };
       signal.addEventListener("abort", () => {
-        if (selected === selection && resolving) reloadCode ??= "uncertain";
         entries = [];
       }, { once: true });
       if (reloadCode) error(reloadCode);
       return {
         async refresh(): Promise<void> {
           if (!active()) return;
+          if (!validSelection) { error("invalid_request"); return; }
           if (reloadCode) { error(reloadCode); return; }
-          if (resolving) return;
+          if (!replaceable()) return;
           const current = ++generation;
           entries = [];
           publish({ kind: "loading" });
           try {
-            const page = await list(request, { signal, timeoutMilliseconds: 8_000 });
+            const page = await list(selectedRequest, { signal, timeoutMilliseconds: 8_000 });
             if (!active() || current !== generation) return;
             if (reloadCode) { error(reloadCode); return; }
-            if (page.status === "stale_epoch" || page.hostEpoch !== request.expectedHostEpoch) { error("stale_epoch"); return; }
+            if (page.status === "stale_epoch" || page.hostEpoch !== selectedRequest.expectedHostEpoch) { error("stale_epoch"); return; }
             if (page.status !== "ok") { error(page.status); return; }
-            if (page.sessionId !== request.sessionId || !Array.isArray(page.entries) || page.entries.length > 4
-              || typeof page.hasMore !== "boolean" || page.entries.some(entry => !validCommand(entry, request.sessionId))
+            if (page.sessionId !== selectedRequest.sessionId || !Array.isArray(page.entries) || page.entries.length > 4
+              || typeof page.hasMore !== "boolean" || page.entries.some(entry => !validCommand(entry, selectedRequest.sessionId))
               || new Set(page.entries.map(entry => entry.handle.attemptId)).size !== page.entries.length) {
               error("invalid_response"); return;
             }
@@ -62,23 +90,54 @@ export function createPermissionReviewer(
             publish({ kind: "ready", entries, hasMore: page.hasMore });
           } catch { if (active() && current === generation) error("read_failed"); }
         },
+        observeDecision(): PermissionDecisionObservation | null {
+          if (!active() || retained === null) return null;
+          // A local observation never queries pending entries, resubmits, or acknowledges a live waiter.
+          if (reloadCode) return Object.freeze({ origin: retained.origin, state: "error", code: reloadCode });
+          if ((retained.state === "resolved" || retained.state === "rejected") && !retained.observed) {
+            retained.observed = true;
+            ++generation;
+            entries = []; // Replacement requires a NEW explicit list/review after acknowledgment.
+          }
+          return Object.freeze({ origin: retained.origin, state: retained.state, code: retained.code });
+        },
         async decide(entry: SessionPermissionCommand, decision: CommandDecision): Promise<void> {
-          if (!active() || resolving || reloadCode || !entries.includes(entry) || !["allow_once", "deny", "cancel"].includes(decision)) return;
+          if (!active() || !validSelection || !replaceable() || reloadCode || !entries.includes(entry)
+            || !["allow_once", "deny", "cancel"].includes(decision)) return;
           // Retire the entire review window before dispatch. Old closures/refreshes cannot resubmit it.
           ++generation;
           entries = [];
-          resolving = true;
-          publish({ kind: "resolving" });
-          const handle = { ...entry.handle };
+          const original: RetainedDecision = {
+            origin: Object.freeze({ expectedHostEpoch: selectedRequest.expectedHostEpoch,
+              handle: Object.freeze({ ...entry.handle }), decision }),
+            controller: new AbortController(), waiter: null, state: "pending", code: null, observed: false,
+          };
+          retained = original; // Synchronous exclusion, before any callback or transport can reenter.
           try {
-            const response = await resolve({ expectedHostEpoch: request.expectedHostEpoch, handle, decision }, { signal, timeoutMilliseconds: 8_000 });
-            if (!active()) { reloadCode ??= "uncertain"; return; }
-            if (response.status === "stale_epoch" || response.hostEpoch !== request.expectedHostEpoch) { error("stale_epoch"); return; }
-            if (!sameHandle(response.handle, handle)) { error("uncertain"); return; }
-            if (response.status === "resolved" || response.status === "rejected") publish({ kind: "result", code: response.status });
-            else error(response.status === "disabled" ? "disabled" : "uncertain");
-          } catch { error("uncertain"); }
-          finally { resolving = false; }
+            publish({ kind: "resolving" });
+            if (reloadCode) {
+              original.state = "error"; original.code = reloadCode;
+            } else {
+              original.waiter = resolve(original.origin, { signal: original.controller.signal, timeoutMilliseconds: 8_000 });
+              const response = await original.waiter;
+              // Validate the ORIGINAL reply independently of presentation. Unknown/malformed data is not epoch evidence.
+              if (!response || !["resolved", "rejected", "stale_epoch", "disabled", "uncertain", "invalid_request"].includes(response.status)
+                || !guid(response.hostEpoch) || !sameHandle(response.handle, original.origin.handle)) {
+                latch("uncertain");
+              } else if (response.hostEpoch !== original.origin.expectedHostEpoch) {
+                latch("stale_epoch");
+              } else if (response.status === "resolved" || response.status === "rejected") {
+                original.state = response.status;
+              } else {
+                latch("uncertain");
+              }
+            }
+          } catch { latch("uncertain"); }
+          if (reloadCode) { original.state = "error"; original.code = reloadCode; }
+          // Neither live terminal publication nor mounting acknowledges a result for replacement.
+          if (!active()) return;
+          if (original.state === "resolved" || original.state === "rejected") publish({ kind: "result", code: original.state });
+          else error(original.code ?? "uncertain");
         },
       };
     },

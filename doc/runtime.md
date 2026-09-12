@@ -579,15 +579,27 @@ refresh after resolving entries reveals remaining requests. Invalid or oversized
 without shortening a command being approved. The 192 KiB response budget includes a 4 KiB framing
 allowance; it is not a process memory bound. Errors are stable codes, not provider exception text.
 
-The application-owned frontend controller uses manual reads, selection/request fencing and an
-epoch reload latch. Detaching presentation cancels its observation, not pending permissions or the
-run. Decision responses are exactly-attempt scoped; refresh/response races cannot restore actionable
-stale cards. A transport failure after resolution starts is **uncertain**, never proof of denial or
-nonexecution, and no decision is automatically replayed. Uncertainty conservatively latches review
-disabled across selections until renderer reload, followed by an explicit authoritative read.
-Reload can reattach to requests still owned by the running process,
-not restore requests after process restart. This does not add polling, push notifications, file-change
-review, session-wide approval, user-input/ask handling, or native/provider qualification.
+The App-owned frontend reviewer retains one immutable original epoch, complete handle and clicked
+decision with its original transport waiter. Detaching presentation cancels selection-owned list
+reads, not that decision wait, pending permissions or the run. Resolution keeps its existing
+8,000-ms transport deadline; this is not a host-termination guarantee. Exact replies are validated
+before obsolete presentation callbacks are suppressed. Epoch invalidation remains latched even
+when a late exact success arrives. Refresh/response races cannot restore actionable stale cards.
+
+**Observe retained decision** is synchronous and local-only: it reports the original session/handle
+and pending/result/error state without either RPC. Neither mounting nor live result publication
+acknowledges a terminal response; explicit terminal observation and fresh manual review are required
+before replacing the record. Pending observation grants no authority. Only an exact resolved/rejected
+response settles the decision: resolved means accepted, not executed, and rejected does not identify
+an earlier decision. The mailbox consumes attempts without replayable outcomes; pending-list absence
+cannot reconcile them. Transport failure, malformed/mismatched responses and genuine uncertainty
+keep review disabled across selections until renderer reload, as does epoch invalidation.
+
+Renderer reload loses the local record and permits only explicit reads of still-pending requests
+under the existing opt-in. It reconstructs no lost decision; host restart restores no old authority.
+This is not retry, pending-list reconciliation, a completion ledger or durable recovery. It adds no
+polling, push notifications, file-change review, session-wide approval, user-input/ask handling,
+or native/provider qualification.
 
 ## Provider initialization
 

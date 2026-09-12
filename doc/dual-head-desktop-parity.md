@@ -345,15 +345,32 @@ checks and stable failure codes. At most four commands are returned with `HasMor
 refreshing reveals the next window. The measured maximum-escaping response is **161,936 bytes**,
 **166,032 with framing allowance**, below **196,608 (192 KiB)**. This is not a heap bound.
 
-The selected-session UI provides manual Refresh / Allow once / Deny / Cancel. An App-owned
-controller retains no permission completion authority: immutable review windows, request/selection
-fencing and immediate retirement of actionable rows prevent stale responses and double clicks from
-replaying a review. Uncertain decisions or selection loss during resolution conservatively disable
-review across selections until renderer reload, then explicit refresh. There is no in-place
-uncertainty recovery, automatic retry, polling or notification stream. Approval is not proof of
-execution; closing presentation does not cancel a permission or revoke an accepted decision.
+The selected-session UI provides manual Refresh / Allow once / Deny / Cancel. The App-owned reviewer
+retains one original immutable epoch/full handle/clicked decision and its transport waiter across
+selection/remount. List reads remain selection-cancellable; the decision wait retains its 8,000-ms
+transport deadline independently. Immutable windows and immediate retirement of actionable rows
+prevent stale responses and double clicks from replaying a review. Exact original replies are
+validated before obsolete presentation fencing; genuine uncertainty and epoch invalidation stay latched.
 
-**Parent verification:** parent audited the complete new literal RPC/CLI/serialization fixtures,
+**Observe retained decision** reports original attribution and pending/result/error state locally,
+without either RPC. Pending observation, mounting and live result publication do not acknowledge a
+terminal response. Explicit terminal observation plus fresh manual review is required before another
+decision can replace the record. Resolved means accepted, not executed; rejected identifies no earlier
+decision. Pending-list absence cannot recover the consumed mailbox attempt's outcome. Renderer reload
+loses the record and permits only existing explicit pending review; host restart restores no old
+authority. This is not retry, list reconciliation, a completion ledger or durable recovery. Closing
+presentation does not cancel a permission or revoke an accepted decision.
+
+**Permission-observation prerequisite verification (2026-09-12):** parent audited the complete reviewer,
+panel and all 523 fixture lines before execution, including all twelve retained/adapted historical
+declarations and six additions. All **18 permission tests + 36 unchanged command-helper regressions**
+passed, with zero failures, cancellations or skips; cached TypeScript passed. Fixture cleanup retains
+original work/observers, releases gates and cancels selections before dependent joins, clears deadline
+timers and permanently fails/retains uncertain work after timeout. This frontend-only slice ran no
+managed build/runtime fixture, contract generation, Vite, mounted/native UI, provider/tool, full suite
+or website build. No installs/restores; M4–M6, deferred runtime interleavings and durable recovery remain open.
+
+**Earlier command-review vertical verification:** parent audited the complete new literal RPC/CLI/serialization fixtures,
 three actual in-memory mailbox tests, pure frontend tests and the existing isolated fake-provider
 send fixture before execution. Cached Release solution and targeted builds passed with zero
 warnings/errors, without restore or frontend dependency acquisition. All **52 focused .NET cases**

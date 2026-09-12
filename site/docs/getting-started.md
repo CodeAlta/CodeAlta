@@ -68,10 +68,14 @@ In owned-host mode only, `--review-owned-command-permissions` opts into manual r
 plain command requests. Refresh the selected session's pending commands and choose **Allow once**,
 **Deny**, or **Cancel** after reviewing the complete command and directory. Unsupported permissions
 remain denied; there is no session-wide approval. Commands can run with the host's privileges, and
-the explicit roots are not a sandbox. Switching sessions or reloading does not cancel pending
-reviews. A lost response may already have been accepted: review is disabled until renderer reload,
-then refresh pending commands rather than assuming denial or automatically retrying. This
-experimental workflow does not provide full permission/ask parity.
+the explicit roots are not a sandbox. Switching sessions does not cancel pending permissions or
+the original decision-response wait. Use **Observe retained decision** to check that response locally,
+labelled with its original session; it never resends the decision. Explicitly observe the terminal
+response, then refresh for a fresh review before deciding again. A pending response cannot be replaced.
+A genuinely lost response may already have been accepted: review stays disabled until renderer reload.
+Reload loses the local record; manually refresh pending commands rather than inferring an outcome
+from an empty list. Host restart restores no old permission authority. This experimental workflow
+does not provide full permission/ask parity or proof of command execution.
 
 For providers supporting run-bound review, cancelling the owning run invalidates its pending
 reviews, including requests that omit a run ID. It cannot revoke an already accepted decision.

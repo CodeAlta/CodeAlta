@@ -115,10 +115,15 @@ complete command, working directory and optional reason, with **Allow once / Den
 Refresh pending commands manually; this is not a notification stream. Unsupported permission
 payloads remain denied, user input remains cancelled, and there is no Allow for Session option.
 Approval can execute a command with the host's privileges: discovery roots are not a sandbox.
-Changing selection or reloading the renderer does not cancel a pending request; returning and
-refreshing reads the application-owned pending state. An uncertain response is not a denial or
-proof that nothing executed. An uncertain decision disables review across selections until the
-renderer is reloaded; then refresh pending commands. No response is automatically replayed.
+Changing selection does not cancel a pending permission or its original decision-response wait.
+Use **Observe retained decision** to check that response locally, labelled with its original session
+and complete handle; it does not contact the host or resend a decision. A pending observation does
+not unlock another decision. Explicitly observe a terminal response, then refresh for a fresh review
+before deciding again; merely displaying the result does not acknowledge it. Acceptance is not proof
+of execution, and rejection does not identify an earlier decision. Genuine uncertainty or epoch
+invalidation disables review across selections until renderer reload. Reload loses the local record;
+then manually refresh still-pending requests under the existing opt-in. An empty list cannot recover
+a lost decision, and host restart restores no old permission authority. No decision is replayed.
 Aborting the owning submission or closing the application invalidates still-pending requests,
 but cannot revoke a decision already accepted by the backend. Native/provider qualification and
 the broader permission, file-review and ask workflows remain incomplete.
