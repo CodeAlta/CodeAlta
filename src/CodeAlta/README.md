@@ -98,11 +98,16 @@ Use only trusted task-owned roots, never a production profile or an untrusted co
 
 Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied by
 default, user input is cancelled, and this path supplies no custom tools or plugins. **Refresh
-submissions** explicitly retrieves receipts; **Abort submission** targets one pending send,
+submissions** explicitly retrieves receipts; **Abort original Send operation** targets one pending send,
 not a later run. Submitted means dispatch completed, not that the conversation/run completed.
-An uncertain response retains the exact epoch/key/session/text for explicit retry, never
-automatic resend. Epoch mismatch disables mutations across selection changes; reload recovers
-receipts, not prompt text. The host retains at most256 receipts, paged64 at a time.
+Send and Abort retain up to 256 local intents combined, including their original live waiters,
+across selection changes and remounts. Uncertainty keeps the exact epoch/key/session/text or
+original Abort target for deliberate retry, never automatic resend. Receipt refresh cannot clear
+an intent while its original waiter is live; Abort-only recovery does not erase unrelated composer
+text. Late valid epoch mismatch disables mutations even after the old selection is cancelled.
+Reload permits manual receipt browsing, not reconstruction of lost text/keys. Abort control
+settlement is not rollback, decision retraction or run termination. The host's separate shared
+receipt capacity remains 256, paged 64 at a time.
 
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
 into manual review of supported plain command requests. The selected-session review shows the
@@ -123,7 +128,7 @@ its pending requests, even when individual requests omit a run ID. A request nam
 denied. Previously accepted decisions remain accepted; trusted TUI approval policy is unchanged.
 
 After **Refresh runtime state**, **Signal cancellation for observed run** targets only that exact
-runtime, attachment and run. This is distinct from **Abort submission**. Unsupported, stale,
+runtime, attachment and run. This is distinct from **Abort original Send operation**. Unsupported, stale,
 retiring, transitioning and draining targets fail closed without fallback. Refresh submissions
 for the result: **Cancellation signalled; run completion is not confirmed.** Failure can occur
 after signalling; neither failure nor success promises rollback of accepted decisions or effects.

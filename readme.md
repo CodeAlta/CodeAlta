@@ -20,6 +20,8 @@ The same experimental mode can compact an explicitly observed attachment only if
 
 The same experimental mode offers **Queue text — this host only** after manual runtime refresh, including while the observed attachment is busy. Reservation, host-only insertion and execution/cleanup are separate; queued text is not durable. Cancellation targets the original queued operation, not a later run. Uncertain requests retain their exact text/key/target for manual reconciliation or deliberate retry while the document remains open; reload does not reconstruct lost local intent. Existing terminal queue behavior is unchanged.
 
+Experimental Send/Abort also retains exact local intent and live-waiter exclusion across selection changes. Manual receipt refresh cannot release an in-flight request; Abort-only recovery preserves unrelated composer text. Late epoch changes disable mutations, and reload does not reconstruct lost text or retry keys. Abort control settlement is not rollback or run termination.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>

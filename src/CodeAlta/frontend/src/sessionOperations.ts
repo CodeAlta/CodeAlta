@@ -1,4 +1,4 @@
-import type { SessionAdmission, SessionReceiptPage, SessionReceiptRequest, SessionSendRequest } from "#neoastra";
+import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null };
@@ -15,36 +15,201 @@ export function createMutationCapability(epoch: string) {
   };
 }
 
-export function captureSubmission(epoch: string, sessionId: string, text: string, key: string): SessionSendRequest {
+type Capability = ReturnType<typeof createMutationCapability>;
+type AbortIntent = Readonly<{ request: Readonly<SessionAbortRequest>; sessionId: string }>;
+type PendingSend = { request: Readonly<SessionSendRequest>; inFlight: boolean; waiter?: Promise<SessionAdmission> };
+type PendingAbort = { intent: AbortIntent; inFlight: boolean; waiter?: Promise<SessionAdmission> };
+
+function wellFormed(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 0xd800 || code > 0xdfff) continue;
+    if (code > 0xdbff || ++index === value.length) return false;
+    const low = value.charCodeAt(index);
+    if (low < 0xdc00 || low > 0xdfff) return false;
+  }
+  return true;
+}
+function identity(value: unknown, maximum: number, trim = true): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maximum && !/^[\s\u0085]*$/u.test(value)
+    && (!trim || !/^[\s\u0085]|[\s\u0085]$/u.test(value)) && wellFormed(value);
+}
+function guid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
+    && value !== "00000000-0000-0000-0000-000000000000";
+}
+function validSend(request: SessionSendRequest): boolean {
+  return !!request && identity(request.expectedEpoch, 64) && identity(request.clientRequestId, 256)
+    && identity(request.sessionId, 256) && identity(request.text, 32768, false);
+}
+export function captureSubmission(epoch: string, sessionId: string, text: string, key: string): Readonly<SessionSendRequest> | null {
+  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text })) return null;
   return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text });
 }
 
-export function hasSubmissionReceipt(request: SessionSendRequest, page: SessionReceiptPage): boolean {
-  return page.status === "ok" && page.epoch === request.expectedEpoch
-    && page.rows.some(row => row.kind === "Send" && row.clientRequestId === request.clientRequestId && row.sessionId === request.sessionId);
+// Match the existing wire validation. Legacy outcome/code/run nullability is deliberately independent
+// of state; Queue phases apply only to Queue/CancelQueue rows in a legitimately mixed receipt page.
+function validRow(row: SessionReceiptView): boolean {
+  if (!row || !identity(row.clientRequestId, 256, false) || !identity(row.sessionId, 256, false) || !guid(row.operationId)
+    || (row.targetOperationId !== null && !guid(row.targetOperationId)) || !["pending", "terminal"].includes(row.state)
+    || (row.outcome !== null && !["Completed", "Cancelled", "Failed"].includes(row.outcome))
+    || (row.code !== null && !identity(row.code, 64, false)) || (row.runId !== null && !identity(row.runId, 256, false))) return false;
+  if (row.kind !== "Queue" && row.kind !== "CancelQueue")
+    return ["Send", "Abort", "Steer", "Compact", "AbortRun"].includes(row.kind) && row.queueInsertion === null;
+  if (row.state === "pending" && (row.outcome !== null || row.code !== null || row.runId !== null)) return false;
+  if (row.state === "terminal" && (row.outcome === null || !identity(row.code, 64, false))) return false;
+  if (row.kind === "CancelQueue") return row.queueInsertion === null && row.runId === null && guid(row.targetOperationId)
+    && row.targetOperationId !== row.operationId && (row.state === "pending" || row.outcome === "Failed"
+      || row.outcome === "Completed" && ["queue_cancellation_signalled", "already_terminal"].includes(row.code!));
+  const insertion = row.queueInsertion;
+  if (row.targetOperationId !== null || !insertion) return false;
+  if (insertion.state === "pending") return row.state === "pending" && insertion.accepted === null && insertion.code === null;
+  if (insertion.state !== "terminal" || typeof insertion.accepted !== "boolean" || !identity(insertion.code, 64, false)
+    || (insertion.accepted ? insertion.code !== "queue_accepted" : insertion.code === "queue_accepted")) return false;
+  if (row.state === "pending") return true;
+  return row.outcome === "Completed" ? insertion.accepted && row.code === "queue_dispatched" && row.runId !== null
+    : row.runId === null && (row.outcome === "Failed" || row.outcome === "Cancelled" && row.code === "queue_cancelled");
+}
+function validEnvelope(value: { status: string; epoch: string | null }): boolean {
+  return !!value && identity(value.status, 64) && (value.epoch === null || identity(value.epoch, 64));
+}
+function validPage(page: SessionReceiptPage): boolean {
+  if (!validEnvelope(page) || !Array.isArray(page.rows) || page.rows.length > 64) return false;
+  if (page.status !== "ok") return page.rows.length === 0 && page.next === null;
+  return identity(page.epoch, 64)
+    && (page.next === null || Number.isInteger(page.next) && page.next >= 64 && page.next <= 256 && page.next % 64 === 0 && page.rows.length === 64)
+    && Array.from(page.rows).every(validRow) && new Set(page.rows.map(row => row.operationId)).size === page.rows.length
+    && new Set(page.rows.map(row => row.clientRequestId)).size === page.rows.length;
+}
+function observeAdmission(admission: SessionAdmission, capability: Capability): boolean {
+  if (!validEnvelope(admission) || !(admission.receipt === null || validRow(admission.receipt))) return false;
+  capability.observe(admission); // Valid late identity evidence revokes authority even after selection cancellation.
+  return true;
+}
+function matchesSend(request: SessionSendRequest, row: SessionReceiptView): boolean {
+  return validRow(row) && row.kind === "Send" && row.targetOperationId === null
+    && row.clientRequestId === request.clientRequestId && row.sessionId === request.sessionId;
+}
+function matchesAbort(intent: AbortIntent, row: SessionReceiptView): boolean {
+  return validRow(row) && row.kind === "Abort" && row.clientRequestId === intent.request.clientRequestId
+    && row.sessionId === intent.sessionId && row.targetOperationId === intent.request.targetOperationId && row.operationId !== row.targetOperationId;
+}
+function definiteRefusal(admission: SessionAdmission, abort: boolean): boolean {
+  return admission.receipt === null && (["conflict", "busy", "capacity", "closed", "invalid_request"].includes(admission.status)
+    || abort && admission.status === "unknowntarget");
+}
+export function captureSubmissionAbort(epoch: string, sessionId: string, page: SessionReceiptPage, row: SessionReceiptView, key: string): AbortIntent | null {
+  if (!validPage(page) || page.status !== "ok" || page.epoch !== epoch || !page.rows.includes(row)
+    || row.kind !== "Send" || row.state !== "pending" || row.targetOperationId !== null || row.sessionId !== sessionId
+    || !identity(row.sessionId, 256) || !identity(key, 256)) return null;
+  return Object.freeze({ sessionId: row.sessionId,
+    request: Object.freeze({ expectedEpoch: epoch, clientRequestId: key, targetOperationId: row.operationId }) });
 }
 
-export async function sendSubmission(
-  invoke: (request: SessionSendRequest, options: WaitOptions) => Promise<SessionAdmission>,
-  request: SessionSendRequest, signal: AbortSignal, publish: (result: SubmissionResult) => void,
-  capability: ReturnType<typeof createMutationCapability>,
-): Promise<void> {
-  if (signal.aborted || !capability.canSubmit(request)) return;
-  try {
-    const result = await invoke(request, { signal, timeoutMilliseconds: 8_000 });
-    if (!signal.aborted) { capability.observe(result); publish(result); }
-  } catch {
-    if (!signal.aborted) publish({ status: "uncertain", epoch: request.expectedEpoch, receipt: null });
-  }
+// App-owned Send/Abort intent only, not runtime execution. The original transport waiter owns its
+// latch through settlement even after remount; cancelling a document waiter never proves non-admission.
+export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest, options: WaitOptions) => Promise<SessionAdmission>,
+  invokeAbort: (request: SessionAbortRequest, options: WaitOptions) => Promise<SessionAdmission>) {
+  const sends = new Map<string, PendingSend>();
+  const aborts = new Map<string, PendingAbort>();
+  const sessionKey = (sessionId: string) => sessionId.toLowerCase();
+  return {
+    pending(sessionId: string) {
+      const entry = sends.get(sessionKey(sessionId));
+      return entry ? Object.freeze({ request: entry.request, inFlight: entry.inFlight }) : undefined;
+    },
+    abortPending(operationId: string) {
+      const entry = aborts.get(operationId);
+      return entry ? Object.freeze({ intent: entry.intent, inFlight: entry.inFlight }) : undefined;
+    },
+    aborts(sessionId: string) {
+      return Object.freeze([...aborts.values()].filter(entry => sessionKey(entry.intent.sessionId) === sessionKey(sessionId))
+        .map(entry => Object.freeze({ intent: entry.intent, inFlight: entry.inFlight })));
+    },
+    reconcile(sessionId: string, page: SessionReceiptPage, capability: Capability): { sendRecovered: boolean; abortsRecovered: number } {
+      const recovered = { sendRecovered: false, abortsRecovered: 0 };
+      if (!validPage(page)) return recovered;
+      capability.observe(page);
+      if (page.status !== "ok") return recovered;
+      const key = sessionKey(sessionId); const entry = sends.get(key);
+      if (entry && !entry.inFlight && capability.canSubmit(entry.request) && page.epoch === entry.request.expectedEpoch
+        && page.rows.some(row => matchesSend(entry.request, row))) { sends.delete(key); recovered.sendRecovered = true; }
+      for (const [operation, value] of aborts) {
+        if (sessionKey(value.intent.sessionId) === key && !value.inFlight && capability.canSubmit(value.intent.request)
+          && page.epoch === value.intent.request.expectedEpoch && page.rows.some(row => matchesAbort(value.intent, row))) {
+          aborts.delete(operation); recovered.abortsRecovered++;
+        }
+      }
+      return recovered;
+    },
+    async submit(request: SessionSendRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
+      if (!validSend(request) || signal.aborted || !capability.canSubmit(request)) return;
+      const key = sessionKey(request.sessionId); let entry = sends.get(key);
+      if (entry && (entry.inFlight || entry.request !== request)) return;
+      if (!entry) {
+        if (sends.size + aborts.size >= 256) { publish({ status: "capacity", epoch: request.expectedEpoch, receipt: null }); return; }
+        entry = { request: Object.freeze({ expectedEpoch: request.expectedEpoch, clientRequestId: request.clientRequestId,
+          sessionId: request.sessionId, text: request.text }), inFlight: false };
+        sends.set(key, entry);
+      }
+      entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.
+      const captured = entry.request;
+      let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
+      try {
+        entry.waiter = invokeSend(captured, { signal, timeoutMilliseconds: 8_000 });
+        const admission = await entry.waiter;
+        if (observeAdmission(admission, capability) && !signal.aborted && capability.canSubmit(captured) && admission.epoch === captured.expectedEpoch) {
+          if ((["accepted", "replay"].includes(admission.status) && admission.receipt && matchesSend(captured, admission.receipt)) || definiteRefusal(admission, false)) {
+            sends.delete(key); result = admission;
+          }
+        } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.expectedEpoch, receipt: null };
+      } catch { /* Transport failure/cancellation is not non-admission. Preserve exact uncertainty. */ }
+      finally { entry.inFlight = false; entry.waiter = undefined; }
+      if (!signal.aborted) publish(result);
+    },
+    async abort(intent: AbortIntent, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
+      if (!intent?.request || !identity(intent.sessionId, 256) || !identity(intent.request.expectedEpoch, 64)
+        || !identity(intent.request.clientRequestId, 256) || !guid(intent.request.targetOperationId)
+        || signal.aborted || !capability.canSubmit(intent.request)) return;
+      const key = intent.request.targetOperationId; let entry = aborts.get(key);
+      if (entry && (entry.inFlight || entry.intent !== intent)) return;
+      if (!entry) {
+        if (sends.size + aborts.size >= 256) { publish({ status: "capacity", epoch: intent.request.expectedEpoch, receipt: null }); return; }
+        entry = { intent: Object.freeze({ sessionId: intent.sessionId, request: Object.freeze({ expectedEpoch: intent.request.expectedEpoch,
+          clientRequestId: intent.request.clientRequestId, targetOperationId: intent.request.targetOperationId }) }), inFlight: false };
+        aborts.set(key, entry);
+      }
+      entry.inFlight = true;
+      const captured = entry.intent;
+      let result: SubmissionResult = { status: "uncertain", epoch: captured.request.expectedEpoch, receipt: null };
+      try {
+        entry.waiter = invokeAbort(captured.request, { signal, timeoutMilliseconds: 8_000 });
+        const admission = await entry.waiter;
+        if (observeAdmission(admission, capability) && !signal.aborted && capability.canSubmit(captured.request) && admission.epoch === captured.request.expectedEpoch) {
+          if ((["accepted", "replay"].includes(admission.status) && admission.receipt && matchesAbort(captured, admission.receipt)) || definiteRefusal(admission, true)) {
+            aborts.delete(key); result = admission;
+          }
+        } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.request.expectedEpoch, receipt: null };
+      } catch { /* Keep the original operation/key/session; never retarget cancellation. */ }
+      finally { entry.inFlight = false; entry.waiter = undefined; }
+      if (!signal.aborted) publish(result);
+    },
+  };
 }
 
 export async function refreshSubmissions(
   invoke: (request: SessionReceiptRequest, options: WaitOptions) => Promise<SessionReceiptPage>,
   epoch: string, offset: number, signal: AbortSignal, publish: (result: SessionReceiptPage) => void,
+  capability: Capability,
 ): Promise<void> {
-  if (signal.aborted) return;
+  if (signal.aborted || !identity(epoch, 64) || !Number.isInteger(offset) || offset < 0 || offset > 256 || offset % 64 !== 0) return;
   try {
     const result = await invoke({ expectedEpoch: epoch, offset }, { signal, timeoutMilliseconds: 8_000 });
+    if (!validPage(result)) {
+      if (!signal.aborted) publish({ status: "invalid_response", epoch, rows: [], next: null });
+      return;
+    }
+    capability.observe(result); // Invalidate independently of obsolete presentation, including manual reads.
     if (!signal.aborted) publish(result);
   } catch {
     if (!signal.aborted) publish({ status: "read_failed", epoch, rows: [], next: null });

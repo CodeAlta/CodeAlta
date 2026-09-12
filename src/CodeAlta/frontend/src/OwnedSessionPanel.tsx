@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionReceiptView, type SessionSendRequest } from "#neoastra";
-import { captureSubmission, createMutationCapability, refreshSubmissions, sendSubmission, hasSubmissionReceipt } from "./sessionOperations";
+import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
 import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
@@ -12,8 +12,8 @@ import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 
-export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compaction, abortRuns, queue, capability, display, runtimeReader, permissionReviewer }: {
-  sessionId: string; epoch: string; drafts: Map<string, SessionSendRequest>; capability: ReturnType<typeof createMutationCapability>;
+export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, display, runtimeReader, permissionReviewer }: {
+  sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   display: ReturnType<typeof createSessionDisplayStore>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
@@ -34,7 +34,6 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
   const [history, setHistory] = useState<HistoryState>();
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
-  const [busy, setBusy] = useState(false);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
   const invalidEpoch = observedInvalidEpoch || !capability.canMutate();
   const scope = useRef<AbortController | null>(null);
@@ -43,7 +42,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
   useEffect(() => {
     const controller = new AbortController();
     scope.current = controller;
-    setText(drafts.get(sessionId)?.text ?? "");
+    setText(submissions.pending(sessionId)?.request.text ?? "");
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
     setQueueText(queue.pending(sessionId)?.request.text ?? "");
     setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
@@ -65,12 +64,14 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
       if (value.kind === "error" && ["stale_epoch", "stale_runtime"].includes(value.code)) observeEpoch({ status: value.code, epoch: null });
       setRuntimeState(value);
     });
-    setBusy(false);
-    setMessage("Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
+    setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
+      ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
+      : "Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
     return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
-  }, [sessionId, epoch, drafts, steering, compaction, abortRuns, queue, runtimeReader, capability]);
+  }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
 
-  const pending = drafts.get(sessionId);
+  const pending = submissions.pending(sessionId);
+  const pendingAborts = submissions.aborts(sessionId);
   const pendingSteer = steering.pending(sessionId);
   const pendingCompact = compaction.pending(sessionId);
   const pendingAbortRun = abortRuns.pending(sessionId);
@@ -86,44 +87,32 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
   }
   function submit() {
     const signal = scope.current?.signal;
-    if (!signal || signal.aborted || busy || invalidEpoch) return;
-    if (pending && pending.expectedEpoch !== epoch) { setMessage("Old host epoch: this request cannot be retried against the new host."); return; }
-    if (!pending && drafts.size >= 256) { setMessage("Uncertain draft limit reached. Review existing requests first."); return; }
-    const request = pending ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID());
-    if (!capability.canSubmit(request)) return;
-    drafts.set(sessionId, request); // Keep exact text/key/epoch until an admission result is known.
-    setBusy(true);
+    if (!signal || signal.aborted || !capability.canMutate()) return;
+    const retained = submissions.pending(sessionId);
+    if (retained?.inFlight) return;
+    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID());
+    if (!request || !capability.canSubmit(request)) return;
     setMessage("Submission admission pending…");
-    void sendSubmission(sessions.send, request, signal, result => {
+    void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
-      setBusy(false);
       setMessage(result.status === "accepted" || result.status === "replay"
         ? "Submission accepted. Refresh submissions for dispatch outcome; this is not run completion."
         : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
-      if (capability.canSubmit(request) && ["accepted", "replay", "conflict", "busy", "capacity", "closed", "invalid_request"].includes(result.status)) {
-        drafts.delete(sessionId);
-        if (result.status === "accepted" || result.status === "replay") setText("");
-      }
-    }, capability);
+      if (result.status === "accepted" || result.status === "replay") setText("");
+    });
   }
   function refresh(offset = 0) {
     const signal = scope.current?.signal;
     if (!signal) return;
     const revision = ++receiptRevision.current;
-    void refreshSubmissions(async (request, options) => {
-      const result = await sessions.receipts(request, options);
-      capability.observe(result); // Even a late obsolete selection must invalidate shared mutation authority.
-      return result;
-    }, epoch, offset, signal, result => {
+    void refreshSubmissions(sessions.receipts, epoch, offset, signal, result => {
       if (revision !== receiptRevision.current) return;
       observeEpoch(result);
       setPage(result);
-      const uncertain = drafts.get(sessionId);
-      if (uncertain && capability.canSubmit(uncertain) && hasSubmissionReceipt(uncertain, result)) {
-        drafts.delete(sessionId);
-        setText("");
-        setMessage("Accepted receipt recovered without exposing prompt text.");
-      }
+      const recovered = submissions.reconcile(sessionId, result, capability);
+      if (recovered.sendRecovered) setText("");
+      if (recovered.sendRecovered || recovered.abortsRecovered > 0)
+        setMessage("Send/Abort receipt reconciled without prompt text. Admission/control settlement is not rollback or run completion.");
       if (steering.reconcile(sessionId, result, capability)) {
         setSteerText("");
         setSteerMessage("Steering receipt recovered. Input submission is not run completion.");
@@ -137,7 +126,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
       if (recoveredQueue.queueRecovered || recoveredQueue.cancellationsRecovered > 0) {
         setQueueMessage("Queue/cancellation receipt reconciled. Review reservation, host-only insertion and execution/cleanup separately.");
       }
-    });
+    }, capability);
   }
   function steer() {
     const signal = scope.current?.signal;
@@ -215,17 +204,17 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
         : `Queued-operation cancellation: ${result.status}. Uncertainty retains the original operation, session and key. No automatic retry.`);
     });
   }
-  function abort(operationId: string) {
+  function abort(row?: SessionReceiptView, retainedOperationId?: string) {
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
-    // Explicit control only. It cannot target a later send or serve as a general Stop-agent action.
-    void sessions.abort({ expectedEpoch: epoch, clientRequestId: crypto.randomUUID(), targetOperationId: operationId },
-      { signal, timeoutMilliseconds: 8_000 }).then(result => {
-        if (!signal.aborted) {
-          observeEpoch(result);
-          setMessage(`Abort submission: ${result.status}. Refresh submissions for control outcome.`);
-        }
-      }).catch(() => { if (!signal.aborted) setMessage("Abort response uncertain. Refresh submissions; no automatic retry."); });
+    const retained = submissions.abortPending(retainedOperationId ?? row?.operationId ?? "");
+    const intent = retained?.intent ?? (page && row ? captureSubmissionAbort(epoch, sessionId, page, row, crypto.randomUUID()) : null);
+    if (!intent || retained?.inFlight || !capability.canSubmit(intent.request)) return;
+    setMessage("Abort admission pending for the original Send operation only.");
+    void submissions.abort(intent, signal, capability, result => {
+      observeEpoch(result);
+      setMessage(`Abort original Send: ${result.status}. Refresh receipts for control outcome, not rollback, decision retraction or run termination. Uncertainty retains the exact operation and key.`);
+    });
   }
   function readHistory(next = false) {
     const signal = scope.current?.signal;
@@ -239,9 +228,10 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
   return <section className="owned-session" aria-label="Owned text submission">
     <h3>Owned text-only submission</h3>
     <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A bounded live status/text window is available below. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
-    <label>Text<textarea maxLength={32768} value={text} disabled={busy || !!pending} onChange={event => setText(event.target.value)} /></label>
+    <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>
+    <label>Text<textarea maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending} onChange={event => setText(event.target.value)} /></label>
     <div className="history-controls">
-      <button type="button" disabled={invalidEpoch || busy || (!pending && !text.trim()) || (!!pending && pending.expectedEpoch !== epoch)} onClick={submit}>{pending ? "Retry exact request" : "Send text"}</button>
+      <button type="button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : "Send text"}</button>
       <button type="button" onClick={() => refresh()}>Refresh submissions</button>
     </div>
     <p role="status">{message}</p>
@@ -251,13 +241,20 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
         {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>Malformed queue receipt; not actionable.</p>}</>
         : row.kind === "CancelQueue" ? <p>CancelQueue · {queueCancellationStatus(row) ?? "Malformed cancellation receipt; not actionable."} · target {row.targetOperationId}</p>
-        : <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending"} {row.code ?? ""} · {row.operationId}</p>}
+        : <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "Abort" ? "Original Send control settled; not rollback, decision retraction or run termination" : row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending"} {row.code ?? ""} · {row.operationId}</p>}
       {row.kind === "Queue" && <button type="button" disabled={invalidEpoch || !!queue.cancelPending(row.operationId)
         || (!!pendingQueue?.inFlight && pendingQueue.request.clientRequestId === row.clientRequestId)
         || !page || captureQueueCancellation(epoch, sessionId, page, row, "availability") === null} onClick={() => cancelQueued(row)}>Cancel this queued operation</button>}
-      {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch} onClick={() => abort(row.operationId)}>Abort submission</button>}
+      {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch || !!submissions.abortPending(row.operationId)
+        || (!!pending?.inFlight && pending.request.clientRequestId === row.clientRequestId)
+        || !page || captureSubmissionAbort(epoch, sessionId, page, row, "availability") === null} onClick={() => abort(row)}>Abort original Send operation</button>}
     </div>)}
     {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
+    {pendingAborts.map(value => <div key={value.intent.request.targetOperationId}>
+      <p className="detail">Retained Abort: original session {value.intent.sessionId} · operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
+      <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)}
+        onClick={() => abort(undefined, value.intent.request.targetOperationId)}>Retry exact original Send Abort</button>
+    </div>)}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
     <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} />
     <h3>Current runtime — manual point-in-time observation</h3>

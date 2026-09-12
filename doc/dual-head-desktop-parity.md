@@ -4,6 +4,44 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: Send/Abort document-lifetime correction — 2026-09-12
+
+The same sole writer corrected five files; parent audited all source/fixture bodies and integrated.
+Send/Abort now use an App-owned helper with immutable intents, original transport waiters, synchronous
+exclusion and a combined 256-intent local bound. Exact manual retry/reconciliation survives selection
+and remount. Receipt refresh cannot remove live-waiter intent, and accepted/replay requires matching
+valid receipt identity. Abort retains its original Send operation/session/key, never a latest run.
+Legacy nullable receipt fields and mixed pages remain valid; malformed or uncertain results retain intent.
+Valid late epoch invalidation is independent of obsolete UI publication. Separate Send/Abort recovery
+results preserve unrelated composer text on Abort-only recovery. Reload does not reconstruct lost
+text/keys, and control settlement is not rollback, decision retraction or run termination.
+
+Parent read all 359 fixture lines, the complete helper and App/panel diff. Canonical ordinal comparisons
+preserved the C# source outside the one authorized method and the entire shared mutation capability.
+Other command helpers/tests, runtime/RPC, permissions and generated contract definitions are unchanged.
+The existing test/source guard that required signal-gated invalidation was intentionally replaced with
+positive ownership and ordering coverage; unrelated history/display/security guards remain intact.
+
+Initial execution passed 36 frontend tests, but TypeScript failed at two fixture sites: empty-array
+assertion narrowing to `never[]` and assignment to generated readonly `next`. The sole writer corrected
+only those two test bodies using a separate typed publication array and construction-time page cursor.
+Parent re-audited both, with no assertion removal or suppression. **Final verification passes:**
+36 frontend tests (`sessionOperations.test.ts`: 10; unchanged Queue/Steering/Compaction/AbortRun: 26),
+TypeScript `--noEmit`, and exact C# source-only
+`DesktopOwnedSessionSourceTests.Frontend_PreservesLegacyHistoryAndUsesEpochBoundMutations` (1 case).
+No final failures/skips or timeouts. Cached targeted and full Release solution builds pass zero
+warnings/errors with `--no-restore -p:NeoAstraRestoreFrontendDependencies=false -p:NeoAstraBuildFrontend=false`;
+the source test used `--no-build --no-restore`. Generated TS/manifest/schema hashes remain unchanged,
+and automatic contract checking passes. Cached Vite production build passes to retained fresh output
+`%TEMP%/codealta-parent-send-abort-vite-a28eac5b02514f7286a8adfa83cacf2f`.
+Logs: `%TEMP%/codealta-parent-send-abort-*-20260912.log`.
+
+These are in-memory transport fixtures and named-checkout source checks, not mounted UI or new
+managed runtime qualification. No provider/tool/native/default-profile, network/install/restore,
+full-suite or website execution. Website theme acquisition remains outside the no-network boundary.
+Deferred runtime interleavings and durable reauthorization are unchanged. M4–M6 remain open;
+this closes a document-lifetime prerequisite, not the admission/observation or interaction milestones.
+
 ## M4 checkpoint: volatile Desktop queue/cancel — 2026-09-12
 
 The same sole writer implemented the adapter-only 11-file vertical and a three-file correction;

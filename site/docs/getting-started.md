@@ -29,9 +29,13 @@ absolute roots (the instruction root includes the project). This broader consent
 configuration/discovery reads, journal/provider-state writes and configured-provider
 registration; submissions may authenticate or use provider storage/network. Do not use a
 production profile. Plugins/probes stay off, permissions are denied by default and user input is cancelled.
-Receipts describe submission, not live-run completion; **Abort submission** is not general
-Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
-agent parity remain unqualified; continue using `altatui` for normal workflows.
+Receipts describe submission, not live-run completion; **Abort original Send operation** is not
+general Stop-agent behavior. Send/Abort uncertainty and live-waiter exclusion survive selection
+changes, with up to 256 local intents combined. Use manual receipt refresh or exact retry after the
+original waiter settles; Abort-only recovery preserves unrelated composer text. Late epoch changes
+disable mutations even after leaving the old selection. Reload permits receipt browsing, not recovery
+of lost local text/keys. No automatic retry or rollback/run-termination guarantee is provided.
+Native lifecycle and full agent parity remain unqualified; continue using `altatui` for normal workflows.
 
 The experimental owned mode offers **Queue text — this host only** after manual runtime refresh,
 including when the observed attachment is busy. Reservation, insertion retained in this host and

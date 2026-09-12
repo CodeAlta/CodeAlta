@@ -71,6 +71,9 @@ public sealed class DesktopOwnedSessionSourceTests
         StringAssert.Contains(main, "key={JSON.stringify([selectedSession.id, status.hostEpoch])}");
         StringAssert.Contains(main, "capability={mutation.capability}");
         StringAssert.Contains(main, "current?.epoch === value.hostEpoch ? current");
+        RequireOnce(main, "const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));");
+        RequireOnce(main, "submissions={submissions}");
+        Assert.IsFalse(main.Contains("new Map<string, SessionSendRequest>", StringComparison.Ordinal));
         var panel = Read(Panel);
         StringAssert.Contains(panel, "sessionOperations as sessions");
         StringAssert.Contains(panel, "submission submitted");
@@ -79,10 +82,37 @@ public sealed class DesktopOwnedSessionSourceTests
         StringAssert.Contains(panel, "observedInvalidEpoch || !capability.canMutate()");
         StringAssert.Contains(panel, "Refresh submissions");
         StringAssert.Contains(panel, "return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };");
+        RequireOnce(panel, "void submissions.submit(request, signal, capability, result => {");
+        RequireOnce(panel, "void submissions.abort(intent, signal, capability, result => {");
+        StringAssert.Contains(panel, "const retained = submissions.pending(sessionId);");
+        StringAssert.Contains(panel, "const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID());");
+        StringAssert.Contains(panel, "const retained = submissions.abortPending(retainedOperationId ?? row?.operationId ?? \"\");");
+        StringAssert.Contains(panel, "captureSubmissionAbort(epoch, sessionId, page, row, crypto.randomUUID())");
+        StringAssert.Contains(panel, "void refreshSubmissions(sessions.receipts, epoch, offset, signal, result => {");
+        StringAssert.Contains(panel, "const recovered = submissions.reconcile(sessionId, result, capability);");
+        StringAssert.Contains(panel, "if (recovered.sendRecovered) setText(\"\");");
+        StringAssert.Contains(panel, "recovered.sendRecovered || recovered.abortsRecovered > 0");
+        StringAssert.Contains(panel, "Original Send control settled; not rollback, decision retraction or run termination");
+        Assert.IsFalse(panel.Contains("sessions.send(", StringComparison.Ordinal));
+        Assert.IsFalse(panel.Contains("sessions.abort(", StringComparison.Ordinal));
+        Assert.IsFalse(panel.Contains("setBusy(", StringComparison.Ordinal));
         var helper = Read(Helper);
         StringAssert.Contains(helper, "Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text })");
-        StringAssert.Contains(helper, "if (signal.aborted || !capability.canSubmit(request)) return;");
-        StringAssert.Contains(helper, "if (!signal.aborted) { capability.observe(result); publish(result); }");
+        StringAssert.Contains(helper, "if (!validSend(request) || signal.aborted || !capability.canSubmit(request)) return;");
+        StringAssert.Contains(helper, "if (entry && (entry.inFlight || entry.request !== request)) return;");
+        StringAssert.Contains(helper, "if (entry && (entry.inFlight || entry.intent !== intent)) return;");
+        StringAssert.Contains(helper, "sends.size + aborts.size >= 256");
+        StringAssert.Contains(helper, "entry && !entry.inFlight && capability.canSubmit(entry.request)");
+        StringAssert.Contains(helper, "!value.inFlight && capability.canSubmit(value.intent.request)");
+        StringAssert.Contains(helper, "row.targetOperationId === intent.request.targetOperationId");
+        Before(helper, "if (!validEnvelope(admission)", "capability.observe(admission);", "function observeAdmission(");
+        Before(helper, "capability.observe(result);", "if (!signal.aborted) publish(result);", "export async function refreshSubmissions(");
+        foreach (var (method, invoke) in new[] { ("    async submit(", "invokeSend("), ("    async abort(", "invokeAbort(") })
+        {
+            Before(helper, "entry.inFlight = true;", "entry.waiter = " + invoke, method);
+            Before(helper, "const admission = await entry.waiter;", "observeAdmission(admission, capability) && !signal.aborted", method);
+            Before(helper, "finally { entry.inFlight = false; entry.waiter = undefined; }", "if (!signal.aborted) publish(result);", method);
+        }
         foreach (var forbidden in new[] { "setInterval(", "localStorage", "dangerouslySetInnerHTML", "StreamEvents", "fetch(" })
             Assert.IsFalse((main + panel + helper).Contains(forbidden, StringComparison.Ordinal), forbidden);
     }

@@ -423,13 +423,22 @@ generated-JSON checks establish a separate 448-KiB response budget. This is not 
 limit supplied by NeoAstra. Text is limited to 32,768 UTF-16 units; identities are validated rather
 than silently trimmed or truncated.
 
-**Refresh submissions** is explicit. An uncertain send retains its exact epoch, retry key,
-session and text for deliberate retry; there is no polling or automatic resend. A host-epoch
-mismatch latches mutation invalidation across panel remounts and requires reload, not rekeying
-the old request. Labels describe submission
-pending/submitted/failed/cancelled, never a completed conversation. **Abort submission** targets
-one pending owned send, not an arbitrary later run or a general Stop-agent command. No runtime
-event reader or live projection is added by this vertical.
+**Refresh submissions** is explicit. App-owned `createOwnedSubmissions` retains up to 256 combined
+Send/Abort intents and their original transport waiters. Send captures immutable epoch/key/session/
+exact text; Abort captures the original pending Send operation and session metadata, not a runtime
+or later run. Synchronous exclusion survives selection/remount and prevents recaptured intent from
+replacing uncertainty. Matching receipts cannot release an intent while its original waiter is live.
+Accepted/replay responses and manual reconciliation require valid exact kind/key/session identity,
+plus original target for Abort; malformed/mismatched responses and transport uncertainty retain intent.
+Legacy nullable outcome/code/run fields remain valid, including on mixed receipt pages. Coherent
+definite refusals require absent receipts. Recovery reports Send separately from Abort so Abort-only
+refresh cannot clear unrelated composer text. There is no polling or automatic resend.
+
+Valid late host/runtime mismatch latches shared mutation invalidation even after selection cancellation;
+obsolete UI publication is suppressed independently. Reload allows manual host receipt browsing, not
+reconstruction/rekeying of lost local text or targets. **Abort original Send operation** is not a general
+Stop-agent command: control settlement does not prove rollback, decision retraction or run termination.
+No runtime event reader or live projection is added by this frontend correction.
 
 Generated owned-only `sessions.steer` accepts up to 32,768 UTF-16 text units and 256-unit
 identities, canonical runtime GUID and positive decimal attachment generation. It uses the
