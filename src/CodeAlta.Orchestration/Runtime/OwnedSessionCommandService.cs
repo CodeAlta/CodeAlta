@@ -5,8 +5,8 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Host-owned, bounded text-send/abort/steer admission. Owns its tasks, not its runtime dependencies.
-/// One send and independently one steer per session are reserved; no queue or event reader is created.
+/// Host-owned, bounded text-send/abort/steer/idle-compaction admission. Owns its tasks, not its runtime dependencies.
+/// One send and independently one steer and one compact per session are reserved; no queue or event reader is created.
 /// </summary>
 public sealed class OwnedSessionCommandService : IAsyncDisposable
 {
@@ -21,6 +21,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private readonly Dictionary<string, SendOperation> _active = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SteerOperation> _steers = [];
     private readonly HashSet<string> _steering = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<CompactOperation> _compacts = [];
+    private readonly HashSet<string> _compacting = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Exception> _failures = [];
     private readonly List<Exception> _cleanupFailures = [];
     private bool _closed;
@@ -172,6 +174,70 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             _steering.Remove(operation.Request.SessionId);
+            operation.Receipt.Complete(result);
+        }
+    }
+
+    /// <summary>Reserves an exact-attachment idle compaction attempt in an independent bounded slot.</summary>
+    /// <remarks>Caller cancellation is checked only before acceptance. Busy requires a new explicit request;
+    /// an exact retry always replays its original receipt. No permission execution or new attachment is created.</remarks>
+    /// <exception cref="ArgumentNullException">The request is null.</exception>
+    /// <exception cref="ArgumentException">An identity is blank or padded, or the runtime/attachment identity is invalid.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested before acceptance.</exception>
+    public OwnedSessionCommandAdmission AdmitCompact(OwnedCompactRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
+        if (request.SessionId != request.SessionId.Trim() || request.ExpectedRuntimeInstanceId == Guid.Empty || request.ExpectedAttachmentGeneration <= 0)
+            throw new ArgumentException("Compaction requires exact session, runtime and attachment identities.", nameof(request));
+        CompactOperation operation;
+        lock (_gate)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
+                return Replay(previous, previous.Compact == request);
+            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (_compacting.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
+            var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Compact, request.SessionId);
+            operation = new(request, receipt);
+            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, Compact: request));
+            _compacts.Add(operation);
+            _compacting.Add(request.SessionId);
+            operation.Work = RunCompactAsync(operation);
+        }
+        operation.Launch.TrySetResult();
+        return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
+    }
+
+    private async Task RunCompactAsync(CompactOperation operation)
+    {
+        await operation.Launch.Task.ConfigureAwait(false);
+        OwnedSessionCommandResult result;
+        try
+        {
+            var outcome = await _runtime.CompactOwnedCommandAsync(operation.Request, operation.Execution.Token).ConfigureAwait(false);
+            result = outcome is null ? new(OwnedSessionCommandOutcome.Failed, Code: "compact_busy")
+                : outcome.Success ? new(OwnedSessionCommandOutcome.Completed)
+                : new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsuccessful");
+        }
+        catch (OperationCanceledException) when (operation.Execution.IsCancellationRequested)
+        {
+            result = new(OwnedSessionCommandOutcome.Cancelled);
+        }
+        catch (NotSupportedException)
+        {
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsupported");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure(ex, cleanup: false);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_failed");
+        }
+        lock (_gate)
+        {
+            _compacting.Remove(operation.Request.SessionId);
             operation.Receipt.Complete(result);
         }
     }
@@ -382,7 +448,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         }
     }
 
-    /// <summary>Closes admission, signals owned sends and steering, and joins all owned work without disposing dependencies.</summary>
+    /// <summary>Closes admission, signals owned sends, steering and compaction, and joins all owned work without disposing dependencies.</summary>
     /// <remarks>Repeated calls share one task. Noncooperative preparation can keep disposal pending indefinitely.</remarks>
     /// <exception cref="Exception">One control or cleanup operation failed, after all work was joined.</exception>
     /// <exception cref="AggregateException">Multiple control or cleanup operations failed, after all work was joined.</exception>
@@ -390,6 +456,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     {
         SendOperation[] operations;
         SteerOperation[] steers;
+        CompactOperation[] compacts;
         TaskCompletionSource launch;
         Task disposal;
         lock (_gate)
@@ -398,10 +465,11 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             _closed = true;
             operations = [.. _operations.Values];
             steers = [.. _steers];
+            compacts = [.. _compacts];
             foreach (var operation in operations)
                 if (!operation.Released) EnsureControl(operation);
             launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _disposeTask = DisposeCoreAsync(operations, steers, launch.Task);
+            _disposeTask = DisposeCoreAsync(operations, steers, compacts, launch.Task);
             disposal = _disposeTask;
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
@@ -412,11 +480,16 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             try { steer.Cancellation = steer.Execution.CancelAsync(); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
+        foreach (var compact in compacts)
+        {
+            try { compact.Cancellation = compact.Execution.CancelAsync(); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        }
         launch.TrySetResult();
         return new(disposal);
     }
 
-    private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, Task launch)
+    private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, CompactOperation[] compacts, Task launch)
     {
         await launch.ConfigureAwait(false);
         if (_reviewPermissions)
@@ -451,14 +524,33 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             try { steer.Execution.Dispose(); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
+        foreach (var compact in compacts)
+        {
+            try { await compact.Work.ConfigureAwait(false); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            try { await compact.Cancellation.ConfigureAwait(false); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            try { compact.Execution.Dispose(); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        }
         Exception[] failures;
         lock (_gate) failures = [.. _cleanupFailures];
         if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Length > 1) throw new AggregateException(failures);
     }
 
-    private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null, OwnedTextSteerRequest? Steer = null);
+    private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null, OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null);
     private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options);
+
+    private sealed class CompactOperation(OwnedCompactRequest request, OwnedSessionCommandReceipt receipt)
+    {
+        internal OwnedCompactRequest Request { get; } = request;
+        internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
+        internal CancellationTokenSource Execution { get; } = new();
+        internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task Work { get; set; } = Task.CompletedTask;
+        internal Task Cancellation { get; set; } = Task.CompletedTask;
+    }
 
     private sealed class SteerOperation(OwnedTextSteerRequest request, OwnedSessionCommandReceipt receipt)
     {

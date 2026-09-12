@@ -199,6 +199,68 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task OwnedCompact_AbsentUnownedAndStaleTargetsDoNotMutateOrAcquire() => Fixture.Run(async f =>
+    {
+        var absent = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var request = new OwnedCompactRequest("compact", f.Session.SessionId, absent.RuntimeInstanceId, 1);
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.CompactOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(0, f.Provider.AttachmentCount);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var before = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        request = request with { ExpectedAttachmentGeneration = before.Entry!.AttachmentGeneration };
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.CompactOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        await f.Wait(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
+        await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+        var owned = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        foreach (var stale in new[] { request, request with { ExpectedRuntimeInstanceId = Guid.NewGuid() }, request with { SessionId = "missing" } })
+            await f.Expect<InvalidOperationException>(f.Track(f.Runtime.CompactOwnedCommandAsync(stale, CancellationToken.None)));
+        Assert.AreEqual(owned, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null);
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.CompactOwnedCommandAsync(request with { ExpectedAttachmentGeneration = owned.Entry!.AttachmentGeneration }, CancellationToken.None)));
+        Assert.AreEqual(2, f.Provider.AttachmentCount);
+        Assert.AreEqual(0, f.Provider.IdleCompactions);
+    });
+
+    [TestMethod]
+    public Task OwnedCompact_RecordedRunAndQueueDrainRefuseBeforeProvider() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("active"));
+        var before = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var request = new OwnedCompactRequest("compact", f.Session.SessionId, before.RuntimeInstanceId, before.Entry!.AttachmentGeneration);
+        Assert.IsNull(await f.Wait(f.Runtime.CompactOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "queued", "send", null));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Idle, null);
+        await f.Ready(f.Provider.SendStarted.Task);
+        Assert.IsTrue((await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId))).Entry!.QueueDrainInProgress);
+        Assert.IsNull(await f.Wait(f.Runtime.CompactOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(0, f.Provider.IdleCompactions);
+    });
+
+    [TestMethod]
+    public Task OwnedCompact_RetirementJoinsCapturedUseAndRejectsTransition() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+        var state = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var request = new OwnedCompactRequest("compact", f.Session.SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration);
+        f.Provider.HoldIdleCompact = true;
+        var compact = f.Track(f.Runtime.CompactOwnedCommandAsync(request, CancellationToken.None));
+        await f.Ready(f.Provider.IdleCompactStarted.Task);
+        var detach = f.Track(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
+        await f.Ready(f.Provider.IdleCompactCancelled.Task);
+        Assert.IsFalse(compact.IsCompleted);
+        Assert.IsFalse(detach.IsCompleted);
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.CompactOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        f.Provider.ReleaseIdleCompact.TrySetResult();
+        await f.ExpectCancellation(compact);
+        await f.Wait(detach);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+    });
+
+    [TestMethod]
     public Task CurrentState_RecordsRunAndShutdown_WithoutTreatingDetachAsCompletion() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
@@ -797,6 +859,12 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal TaskCompletionSource ReleaseSteer { get; } = NewGate();
         private int _steers;
         internal int Steers => Volatile.Read(ref _steers);
+        internal bool HoldIdleCompact { get; set; }
+        internal TaskCompletionSource IdleCompactStarted { get; } = NewGate();
+        internal TaskCompletionSource IdleCompactCancelled { get; } = NewGate();
+        internal TaskCompletionSource ReleaseIdleCompact { get; } = NewGate();
+        private int _idleCompactions;
+        internal int IdleCompactions => Volatile.Read(ref _idleCompactions);
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("forwarding-fixture"), "Forwarding fixture") { DefaultModelId = "fixture-model" };
         internal Session Latest { get { lock (_gate) return _sessions[^1]; } }
         internal int AttachmentCount { get { lock (_gate) return _sessions.Count; } }
@@ -813,6 +881,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             lock (_gate) { _cleaning = true; _holdPreparation = false; _holdAbort = false; }
             ReleasePreparation.TrySetResult(); ReleaseSend.TrySetResult(); ReleaseAbort.TrySetResult();
             ReleaseSteer.TrySetResult();
+            ReleaseIdleCompact.TrySetResult();
         }
 
         private sealed class Runtime(Provider owner) : IModelProviderSessionRuntime
@@ -842,7 +911,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
         }
 
-        internal sealed class Session(Provider owner, string id, AgentSessionCreateOptions options) : IAgentSession
+        internal sealed class Session(Provider owner, string id, AgentSessionCreateOptions options) : IAgentSession, IAgentIdleCompactionProvider
         {
             private readonly object _gate = new();
             private Action<AgentEvent>? _handler;
@@ -909,6 +978,20 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
             public Task CompactAsync(CancellationToken cancellationToken = default)
             { Interlocked.Increment(ref owner._compactions); EmitIdle(); return Task.CompletedTask; }
+            public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
+            {
+                Interlocked.Increment(ref _active);
+                try
+                {
+                    Interlocked.Increment(ref owner._idleCompactions);
+                    using var readiness = cancellationToken.Register(() => owner.IdleCompactCancelled.TrySetResult());
+                    owner.IdleCompactStarted.TrySetResult();
+                    if (owner.HoldIdleCompact) await owner.ReleaseIdleCompact.Task.ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return new(true, "inert compaction settled");
+                }
+                finally { Interlocked.Decrement(ref _active); }
+            }
             public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
             { Interlocked.Increment(ref owner._historyReads); return Task.FromResult<IReadOnlyList<AgentEvent>>([]); }
             public ValueTask DisposeAsync()

@@ -42,6 +42,15 @@ An uncertain request keeps its exact text, key and target across session selecti
 observations never retarget it, and no retry happens automatically. Reload is required if the
 host/runtime identity changes. Closing the panel does not cancel accepted steering.
 
+**Compact observed attachment if idle** is also available after manual runtime refresh. No
+recorded run or queue drain makes an attempt eligible, but the provider must still admit it
+without waiting. Stale or unsupported targets fail without replacement or fallback. This
+summarizes context current at admission, not the history previously displayed, and may use the
+configured model/network and save context changes. It adds no permission authority. Refresh
+submissions for the outcome; a busy receipt stays busy on replay. Trying again is a new explicit
+action. Uncertain compaction keeps its exact attachment/key for manual reconciliation or deliberate
+retry, never automatic retry or retargeting. Closing the panel does not cancel admitted work.
+
 In owned-host mode only, `--review-owned-command-permissions` opts into manual review of supported
 plain command requests. Refresh the selected session's pending commands and choose **Allow once**,
 **Deny**, or **Cancel** after reviewing the complete command and directory. Unsupported permissions

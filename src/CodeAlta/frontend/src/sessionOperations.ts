@@ -7,7 +7,7 @@ export function createMutationCapability(epoch: string) {
   let valid = true;
   return {
     canMutate: () => valid,
-    canSubmit: (request: SessionSendRequest) => valid && request.expectedEpoch === epoch,
+    canSubmit: (request: { expectedEpoch: string }) => valid && request.expectedEpoch === epoch,
     observe(result: { status: string; epoch: string | null }): boolean {
       if (result.status === "stale_epoch" || result.status === "stale_runtime" || (result.epoch !== null && result.epoch !== epoch)) valid = false;
       return valid;

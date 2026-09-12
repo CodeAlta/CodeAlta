@@ -14,7 +14,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
-public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider
+public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -516,33 +516,52 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
-            var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
-            var outcome = await CompactCoreAsync(
-                    trigger: AgentCompactionTrigger.Manual,
-                    runId: null,
-                    systemMessage: instructionBundle.SystemMessage,
-                    developerInstructions: instructionBundle.DeveloperInstructions,
-                    modelInfo: modelInfo,
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            if (outcome is null)
-            {
-                return new AgentCompactionOutcome(true, "Nothing to compact.");
-            }
-
-            return new AgentCompactionOutcome(
-                Success: true,
-                Message: outcome.Message,
-                MessagesRemoved: outcome.MessagesRemoved,
-                TokensRemoved: outcome.TokensRemoved,
-                PreCompactionTokens: outcome.PreCompactionTokens,
-                PostCompactionTokens: outcome.PostCompactionTokens);
+            return await CompactGateHeldAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _stateGate.Release();
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!await _stateGate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return null;
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_activeRunId is not null) return null;
+            return await CompactGateHeldAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { _stateGate.Release(); }
+    }
+
+    private async Task<AgentCompactionOutcome> CompactGateHeldAsync(CancellationToken cancellationToken)
+    {
+        var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+        var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
+        var outcome = await CompactCoreAsync(
+                trigger: AgentCompactionTrigger.Manual,
+                runId: null,
+                systemMessage: instructionBundle.SystemMessage,
+                developerInstructions: instructionBundle.DeveloperInstructions,
+                modelInfo: modelInfo,
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        if (outcome is null)
+        {
+            return new AgentCompactionOutcome(true, "Nothing to compact.");
+        }
+
+        return new AgentCompactionOutcome(
+            Success: true,
+            Message: outcome.Message,
+            MessagesRemoved: outcome.MessagesRemoved,
+            TokensRemoved: outcome.TokensRemoved,
+            PreCompactionTokens: outcome.PreCompactionTokens,
+            PostCompactionTokens: outcome.PostCompactionTokens);
     }
 
     /// <inheritdoc />

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionSendRequest } from "#neoastra";
 import { captureSubmission, createMutationCapability, refreshSubmissions, sendSubmission, hasSubmissionReceipt } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
+import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
 import { historyMessage, loadHistory, type HistoryState } from "./history";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import type { createSessionDisplayStore } from "./sessionDisplay";
@@ -9,16 +10,18 @@ import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 
-export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capability, display, runtimeReader, permissionReviewer }: {
+export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compaction, capability, display, runtimeReader, permissionReviewer }: {
   sessionId: string; epoch: string; drafts: Map<string, SessionSendRequest>; capability: ReturnType<typeof createMutationCapability>;
   display: ReturnType<typeof createSessionDisplayStore>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
   steering: ReturnType<typeof createSteeringSubmissions>;
+  compaction: ReturnType<typeof createCompactionSubmissions>;
 }) {
   const [text, setText] = useState("");
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
+  const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
   const [message, setMessage] = useState("Refresh submissions to recover accepted receipts. Never automatically resend an uncertain request.");
   const [page, setPage] = useState<SessionReceiptPage>();
   const [history, setHistory] = useState<HistoryState>();
@@ -39,6 +42,9 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capabili
       ? "A retained steering request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and target once the previous wait settles."
       : "Refresh runtime state explicitly before targeting a run.");
     setPage(undefined);
+    setCompactMessage(compaction.pending(sessionId)
+      ? "A retained compaction request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and attachment once the previous wait settles."
+      : "Refresh runtime state explicitly before attempting idle compaction.");
     setHistory(undefined);
     setRuntimeState(undefined);
     runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, value => {
@@ -48,12 +54,14 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capabili
     setBusy(false);
     setMessage("Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
     return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
-  }, [sessionId, epoch, drafts, steering, runtimeReader, capability]);
+  }, [sessionId, epoch, drafts, steering, compaction, runtimeReader, capability]);
 
   const pending = drafts.get(sessionId);
   const pendingSteer = steering.pending(sessionId);
+  const pendingCompact = compaction.pending(sessionId);
   const observedTarget = runtimeState?.kind === "ready" ? runtimeState.snapshot : undefined;
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
+  const canCaptureCompact = captureCompaction(epoch, sessionId, observedTarget, "availability") !== null;
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -97,6 +105,8 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capabili
         setSteerText("");
         setSteerMessage("Steering receipt recovered. Input submission is not run completion.");
       }
+      if (compaction.reconcile(sessionId, result, capability))
+        setCompactMessage("Compaction receipt recovered. Review its settled outcome; a busy outcome requires a new explicit action.");
     });
   }
   function steer() {
@@ -114,6 +124,21 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capabili
         setSteerText("");
         setSteerMessage("Steering accepted. Refresh submissions for input dispatch outcome, not run completion.");
       } else setSteerMessage(`Steering: ${result.status}. Refresh submissions; uncertain requests retain their original text and target and are never retried automatically.`);
+    });
+  }
+  function compact() {
+    const signal = scope.current?.signal;
+    if (!signal || signal.aborted || !capability.canMutate()) return;
+    const retained = compaction.pending(sessionId);
+    if (retained?.inFlight) return;
+    const request = retained?.request ?? captureCompaction(epoch, sessionId, observedTarget, crypto.randomUUID());
+    if (!request || !capability.canSubmit(request)) return;
+    setCompactMessage("Idle compaction admission pending…");
+    void compaction.submit(request, signal, capability, result => {
+      observeEpoch(result);
+      setCompactMessage(result.status === "accepted" || result.status === "replay"
+        ? "Compaction attempt accepted. Refresh submissions for its settled outcome; busy requires a new explicit action, not replay."
+        : `Compaction: ${result.status}. Refresh submissions; uncertain requests retain their exact attachment and key. No automatic retry.`);
     });
   }
   function abort(operationId: string) {
@@ -149,7 +174,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capabili
     {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}
     {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
     {page?.rows.filter(row => row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
-      <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "submission failed" : row.outcome === "Cancelled" ? "submission cancelled" : "submission pending"} {row.code ?? ""} · {row.operationId}</p>
+      <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending"} {row.code ?? ""} · {row.operationId}</p>
       {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch} onClick={() => abort(row.operationId)}>Abort submission</button>}
     </div>)}
     {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
@@ -189,6 +214,13 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, capabili
       {pendingSteer ? "Retry exact steering request" : "Steer observed run"}
     </button>
     <p role="status">{steerMessage}</p>
+    <h3>Compact the observed attachment if idle now</h3>
+    <p className="detail">Recorded idleness only permits an attempt: the provider must prove idle without waiting. Compacts context current at provider admission, not the history from your observation. Stale, retiring, non-owned or unsupported targets are rejected without fallback. No new permission authority is created. A busy receipt is permanent; a new explicit action uses a fresh key. Refreshes never retarget an uncertain request.</p>
+    {pendingCompact && <p className="detail">Retained target: runtime {pendingCompact.request.expectedRuntimeInstanceId} · attachment {pendingCompact.request.expectedAttachmentGeneration} · request {pendingCompact.request.clientRequestId}</p>}
+    <button type="button" disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact ? !capability.canSubmit(pendingCompact.request) : !canCaptureCompact)} onClick={compact}>
+      {pendingCompact ? "Retry exact compaction request" : "Compact observed attachment if idle"}
+    </button>
+    <p role="status">{compactMessage}</p>
     <h3>Persisted history — not live run state</h3>
     <p className="detail">Bounded journal pages; deltas and completed records remain separate. Actual cached-store reads are host-owned. Caller cancellation does not stop them. Copied paths/reparse points are not sandboxed.</p>
     <button type="button" onClick={() => readHistory()}>Restart history</button>

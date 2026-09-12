@@ -162,6 +162,68 @@ public sealed class DesktopOwnedSessionTests
     });
 
     [TestMethod]
+    public void CompactRpc_RejectsBeforeAdmissionAndBoundsGeneratedJson()
+    {
+        var service = new SessionOperationsService("current", _ => throw new AssertFailedException("Send called"),
+            _ => throw new AssertFailedException("Abort called"), null, _ => throw new AssertFailedException("Compact called"));
+        var request = new SessionCompactRequest("current", "key", "session", "abcdefab-1234-5678-9abc-abcdefabcdef", "1");
+        Assert.AreEqual("unconfigured", new SessionOperationsService().Compact(request, CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", service.Compact(request with { ExpectedEpoch = "old" }, CancellationToken.None).Status);
+        foreach (var invalid in new[] { request with { ExpectedRuntimeInstanceId = request.ExpectedRuntimeInstanceId.ToUpperInvariant() },
+            request with { ExpectedRuntimeInstanceId = Guid.Empty.ToString("D") }, request with { ExpectedAttachmentGeneration = "01" },
+            request with { ExpectedAttachmentGeneration = "0" }, request with { ExpectedAttachmentGeneration = "9223372036854775808" },
+            request with { SessionId = " session" }, request with { SessionId = "\ud800" }, request with { ClientRequestId = new string('x', 257) } })
+            Assert.AreEqual("invalid_request", service.Compact(invalid, CancellationToken.None).Status);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => service.Compact(request, cancelled.Token));
+        service.CloseAdmission();
+        Assert.AreEqual("closed", service.Compact(request, CancellationToken.None).Status);
+        var escaped = new string('\u0001', 256);
+        var maximum = request with { ExpectedEpoch = new string('\u0001', 64), ClientRequestId = escaped, SessionId = escaped,
+            ExpectedAttachmentGeneration = long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(maximum, DesktopJsonContext.Default.SessionCompactRequest).Length + 8192 <= 16 * 1024);
+        var row = new SessionReceiptView("key", "session", Guid.NewGuid().ToString("D"), null, "Compact", "terminal", "Completed", null, null);
+        Assert.AreEqual("ok", SessionOperationsService.ProjectPage("epoch", [row], null).Status);
+    }
+
+    [TestMethod]
+    public Task CompactRpc_ActualOwnedRouteRetainsReplayAndKind() => RealFixture.RunAsync(async f =>
+    {
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        service.Send(new("fixture-epoch", "send", f.SessionId, "text"), CancellationToken.None);
+        var send = f.Retain(f.Host.Commands.AdmitSend(new("send", f.SessionId, "text")));
+        await f.Ready(send);
+        f.Provider.Release.TrySetResult();
+        await f.Wait(send.Completion);
+        var marker = Guid.NewGuid().ToString("N");
+        f.Provider.EmitIdle!(marker);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await f.Keep(Committed());
+        async Task Committed()
+        {
+            await foreach (var value in f.Host.RuntimeService.StreamEventsAsync(deadline.Token))
+                if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent update }
+                    && update.Kind == AgentSessionUpdateKind.Idle && update.Message == marker) return;
+            Assert.Fail("Idle marker was not committed.");
+        }
+        var state = await f.Wait(f.Keep(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId)));
+        var request = new SessionCompactRequest("fixture-epoch", "compact", f.SessionId, state.RuntimeInstanceId.ToString("D"),
+            state.Entry!.AttachmentGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var admitted = service.Compact(request, CancellationToken.None);
+        var compact = f.Retain(f.Host.Commands.AdmitCompact(new("compact", f.SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration)));
+        Assert.AreEqual("accepted", admitted.Status);
+        Assert.AreEqual("replay", service.Compact(request, CancellationToken.None).Status);
+        Assert.AreEqual("conflict", service.Compact(request with { ExpectedAttachmentGeneration = "999" }, CancellationToken.None).Status);
+        Assert.AreEqual("conflict", service.Send(new("fixture-epoch", "compact", f.SessionId, "text"), CancellationToken.None).Status);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(compact.Completion)).Outcome);
+        Assert.AreEqual(1, f.Provider.Compactions);
+        var row = service.Receipts(new("fixture-epoch", 0)).Rows.Single(value => value.ClientRequestId == "compact");
+        Assert.AreEqual("Compact", row.Kind);
+        Assert.IsNull(row.RunId);
+    });
+
+    [TestMethod]
     public async Task Shutdown_RetainsLeaseUntilAllOwnedWorkIsConfirmed()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -368,6 +430,8 @@ public sealed class DesktopOwnedSessionTests
 
     private sealed class FakeProvider
     {
+        internal Action<string>? EmitIdle { get; set; }
+        internal int Compactions { get; set; }
         internal readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("owned-fixture"), "Owned fixture") { DefaultModelId = "fixture-model" };
@@ -387,14 +451,21 @@ public sealed class DesktopOwnedSessionTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class FakeSession(FakeProvider provider, string sessionId, string? cwd) : IAgentSession
+    private sealed class FakeSession(FakeProvider provider, string sessionId, string? cwd) : IAgentSession, IAgentIdleCompactionProvider
     {
         public ModelProviderId ProviderId => provider.Descriptor.ProviderId;
         public string SessionId => sessionId;
         public string? WorkspacePath => cwd;
         public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         { await Task.CompletedTask; yield break; }
-        public IDisposable Subscribe(Action<AgentEvent> handler) => new Subscription();
+        public IDisposable Subscribe(Action<AgentEvent> handler)
+        {
+            provider.EmitIdle = marker =>
+            {
+                handler(new AgentSessionUpdateEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Idle, marker));
+            };
+            return new Subscription(() => provider.EmitIdle = null);
+        }
         public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
         {
             provider.Started.TrySetResult();
@@ -410,8 +481,14 @@ public sealed class DesktopOwnedSessionTests
             return Task.FromResult(new AgentRunId("fixture-run"));
         }
         public Task CompactAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("No compaction.");
+        public Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            provider.Compactions++;
+            return Task.FromResult<AgentCompactionOutcome?>(new(true, "inert completed compaction"));
+        }
         public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        private sealed class Subscription : IDisposable { public void Dispose() { } }
+        private sealed class Subscription(Action dispose) : IDisposable { public void Dispose() => dispose(); }
     }
 }

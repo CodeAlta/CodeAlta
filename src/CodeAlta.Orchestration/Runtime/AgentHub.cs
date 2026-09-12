@@ -264,6 +264,22 @@ public sealed class AgentHub : IAsyncDisposable
         }
     }
 
+    /// <summary>Attempts settled idle compaction on this exact attachment without waiting for run admission.</summary>
+    /// <param name="sessionHandleId">The existing session attachment; never replaced or acquired from a catalog.</param>
+    /// <param name="cancellationToken">Cancels admission or actual compaction.</param>
+    /// <returns>Null only for busy refusal without starting compaction; otherwise the actual settled outcome.</returns>
+    /// <exception cref="InvalidOperationException">The handle is not active.</exception>
+    /// <exception cref="NotSupportedException">The session does not support idle compaction; unconditional compaction is never used.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or session is disposed.</exception>
+    /// <exception cref="Exception">The actual provider compaction failed.</exception>
+    public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentSessionHandleId sessionHandleId, CancellationToken cancellationToken = default)
+    {
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        try { return await entry.Coordinator.TryCompactWhenIdleAsync(cancellationToken).ConfigureAwait(false); }
+        finally { entry.ReleaseReference(); }
+    }
+
     /// <summary>
     /// Stops and disposes the active session attachment for a handle, if present.
     /// </summary>
@@ -621,6 +637,18 @@ public sealed class AgentHub : IAsyncDisposable
             {
                 _runGate.Release();
             }
+        }
+
+        public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken)
+        {
+            if (!await _runGate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return null;
+            try
+            {
+                if (_session is not IAgentIdleCompactionProvider provider)
+                    throw new NotSupportedException("The session does not support idle compaction.");
+                return await provider.TryCompactWhenIdleAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally { _runGate.Release(); }
         }
 
         public async ValueTask DisposeAsync()

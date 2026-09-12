@@ -1,8 +1,60 @@
 # Dual-head desktop parity — in development
 
-> **Status: scoped owned Desktop command review and exact-target text steering verified, 2026-09-12.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission/display evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: scoped owned Desktop command review, exact-target steering and idle compaction verified, 2026-09-12.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission/display evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
+
+## M4 checkpoint: owned exact-attachment idle compaction — 2026-09-12
+
+The same sole writer implemented one further command vertical; parent independently audited all
+changed production/fixture bodies, executed verification and owns documentation/integration.
+`IAgentIdleCompactionProvider` is optional and has no unconditional fallback. The hub run gate
+and in-process provider state gate attempt admission without waiting; the provider refuses an
+active run and excludes new runs through settled compaction. Null means busy/no work started,
+never background compaction. The extracted trusted compaction body preserves its original
+instruction/model resolution, compaction call, awaits and result construction.
+
+Owned requests capture epoch/session/runtime/attachment/key, not a run or history revision.
+Existing-entry-only mailbox capture validates owned defaults and rejects stale/transitioning/
+terminated targets, recorded runs and queue drains; retiring attachments refuse use. It does not
+discover/replace a coordinator, clear a pending prompt, emit a premature start event, or create
+permission execution. The provider check closes the capture-to-run race. Compaction operates on
+context current at provider admission and may use the configured model and persist context.
+
+One compaction slot per session shares bounded receipts with Send/Abort/Steer. Exact replay
+returns the same receipt; changed fields/kind conflict. Busy, unsupported, unsuccessful provider
+outcome and failure have distinct bounded codes, without arbitrary provider messages. Shutdown
+starts independent cancellation and joins retained provider work and cancellation traversals
+before releasing attachment/source lifetime. Default permissions and existing trusted operations
+remain unchanged. Manual UI targeting, App-owned immutable uncertainty, synchronous double-click
+exclusion and Compact-kind receipt reconciliation prevent automatic retry or retargeting. Busy
+requires a new explicit action, not replay. Success is settled compaction, not a completed run.
+
+**Parent verification:** all **83 focused .NET cases** passed: 70 owned-command/forwarding cases,
+11 Desktop-owned cases and two actual-Agent compaction cases. Twelve are new compaction cases.
+They cover actual checkpoint persistence, no start events on busy refusal, occupied hub/provider
+gates, a run starting after runtime capture, unsupported/no fallback, failed outcomes, identity
+rejection/no mutation, capacity/replay, caller cancellation and shutdown/retirement joins. The
+actual Agent fixture uses explicit task-owned roots, cached metadata, precomposed instructions
+and a gated text-only scripted executor; summary requests assert no tools. Those actual-Agent roots are
+retained for audit. All **59 frontend tests**, TypeScript/Vite, cached targeted and full Release
+solution builds passed, with zero build warnings/errors and no restore/acquisition. Generated
+TypeScript/manifest expose unary `sessions.compact` and string-valued attachment generation.
+Generated worst-escaping input plus framing fits 16 KiB within the existing 208 KiB frame budget.
+
+Pre-execution audit corrected Idle readiness to observe the exact tagged event, not a separately
+forwarded Notice whose commit could precede Idle. Complete fixture iterator tasks are joined
+before their timeout sources are released; there is no competing or new production reader.
+The first eight-case runtime execution had seven passes/one timeout: the shutdown fixture
+released compaction but left its fake abort gate held. A one-line `ReleaseAll` correction after
+the pending/cancellation assertions allowed full host disposal to join; all eight passed on
+rerun, then the regression selections passed. Timeout/failure retention and production shutdown
+were not weakened. Logs: `%TEMP%/codealta-parent-idle-compact-*-20260912.log`.
+
+No native/mounted-React, configured-provider/auth/subprocess-tool, default-profile, network,
+install/restore, full-suite or website qualification. Website theme acquisition remains outside
+the verification boundary. Conditional active-run abort, queue execution/recovery ownership,
+broader M4 interactions/recovery and all remaining M5/M6 work are **still open**.
 
 ## M4 checkpoint: owned exact-target text steering — 2026-09-12
 

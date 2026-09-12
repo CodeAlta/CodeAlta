@@ -1571,6 +1571,41 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         finally { handleUse?.Dispose(); }
     }
 
+    // Recorded idleness only permits a provider attempt. The provider gate proves idle against
+    // intervening sends; neither this route nor its mailbox query publishes a started event.
+    internal Task<AgentCompactionOutcome?> CompactOwnedCommandAsync(OwnedCompactRequest request, CancellationToken executionCancellationToken)
+        => AdmitAsync(() => CompactOwnedCommandBodyAsync(request, executionCancellationToken), CancellationToken.None);
+
+    private async Task<AgentCompactionOutcome?> CompactOwnedCommandBodyAsync(OwnedCompactRequest request, CancellationToken executionCancellationToken)
+    {
+        executionCancellationToken.ThrowIfCancellationRequested();
+        if (request.ExpectedRuntimeInstanceId != _runtimeInstanceId || !_sessionActors.TryGet(request.SessionId, out var actor))
+            throw new InvalidOperationException("The observed compaction target is unavailable.");
+        OwnedProviderEventForwarding.Use? handleUse = null;
+        try
+        {
+            var handle = await actor.QueryAsync(_ =>
+            {
+                if (_transitions.ContainsKey(request.SessionId) || !_entries.TryGetValue(request.SessionId, out var entry)
+                    || entry.IsTerminated || entry.Attachment.Ordinal != request.ExpectedAttachmentGeneration || !HasOwnedCommandDefaults(entry))
+                    throw new InvalidOperationException("The observed compaction target is stale or is not owned.");
+                if (entry.ActiveRunId is not null || entry.QueueDrainInProgress)
+                    return ValueTask.FromResult<AgentSessionHandleId?>(null);
+                handleUse = entry.Attachment.TryAcquireHandleUse()
+                    ?? throw new InvalidOperationException("The observed compaction attachment is retiring.");
+                return ValueTask.FromResult<AgentSessionHandleId?>(entry.SessionHandleId);
+            }, CancellationToken.None).ConfigureAwait(false);
+            if (handle is null) return null;
+            using var execution = new CancellationTokenSource();
+            await using var ownerCancellation = executionCancellationToken.Register(
+                static state => ((CancellationTokenSource)state!).Cancel(), execution);
+            await using var attachmentCancellation = handleUse!.Attachment.Cancellation.Token.Register(
+                static state => ((CancellationTokenSource)state!).Cancel(), execution);
+            return await _agentHub.TryCompactWhenIdleAsync(handle.Value, execution.Token).ConfigureAwait(false);
+        }
+        finally { handleUse?.Dispose(); }
+    }
+
     /// <summary>Captures immutable current-runtime facts for one session without discovery or acquisition.</summary>
     /// <param name="sessionId">The nonblank durable session identifier.</param>
     /// <param name="cancellationToken">Cancels admission or the caller's wait, not already admitted runtime-owned work.</param>

@@ -645,6 +645,98 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(0, f.Provider.EarlyDisposals);
     });
 
+    [TestMethod]
+    public Task OwnedCompact_ExactReplayCapacityCallerCancellationAndOutcomes() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportIdleCompaction = true;
+        f.Provider.HoldCompact = true;
+        var request = await f.PrepareCompact();
+        using var caller = new CancellationTokenSource();
+        var compact = f.Accept(f.AdmitCompact(request, caller.Token));
+        await f.ObserveReadiness(f.Provider.CompactStarted.Task, compact, "compaction");
+        caller.Cancel();
+        Assert.IsFalse(f.Provider.CompactToken.IsCancellationRequested);
+        Assert.AreSame(compact, f.AdmitCompact(request).Receipt);
+        foreach (var changed in new[] { request with { SessionId = "different" }, request with { ExpectedRuntimeInstanceId = Guid.NewGuid() },
+            request with { ExpectedAttachmentGeneration = request.ExpectedAttachmentGeneration + 1 } })
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitCompact(changed).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(new(request.ClientRequestId, request.SessionId, "text")).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitCompact(request with { ClientRequestId = "busy" }).Kind);
+        f.Provider.ReleaseCompact.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(compact.Completion)).Outcome);
+        f.Provider.CompactOutcome = new(false, "private provider message");
+        var unsuccessful = f.Accept(f.AdmitCompact(request with { ClientRequestId = "unsuccessful" }));
+        var result = await f.Observe(unsuccessful.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
+        Assert.AreEqual("compact_unsuccessful", result.Code);
+        f.Provider.FailCompact = true;
+        var failed = f.Accept(f.AdmitCompact(request with { ClientRequestId = "failure" }));
+        Assert.AreEqual("compact_failed", (await f.Observe(failed.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitCompact(request with { ClientRequestId = "capacity" }).Kind);
+        Assert.AreSame(compact, f.AdmitCompact(request).Receipt);
+    }, capacity: 4);
+
+    [TestMethod]
+    public Task OwnedCompact_ActualHubGateRefusesWhileSendIsHeld() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportIdleCompaction = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        // This fake has not reported its run yet: runtime null is eligibility, not provider idleness.
+        var state = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        var compact = f.Accept(f.AdmitCompact(new("compact", f.SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration)));
+        var result = await f.Observe(compact.Completion);
+        Assert.AreEqual("compact_busy", result.Code);
+        Assert.AreEqual(0, f.Provider.Compactions);
+        Assert.IsFalse(f.Provider.CompactEntered.Task.IsCompleted);
+        Assert.IsFalse(send.Completion.IsCompleted);
+    });
+
+    [TestMethod]
+    public Task OwnedCompact_ProviderBoundaryRefusesRunStartedAfterCapture() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportIdleCompaction = true;
+        f.Provider.HoldCompactAdmission = true;
+        var request = await f.PrepareCompact();
+        var compact = f.Accept(f.AdmitCompact(request));
+        await f.ObserveReadiness(f.Provider.CompactEntered.Task, compact, "provider idle check");
+        f.Provider.RecordRun("later-run", Guid.NewGuid().ToString("N"));
+        f.Provider.ReleaseCompactAdmission.TrySetResult();
+        Assert.AreEqual("compact_busy", (await f.Observe(compact.Completion)).Code);
+        Assert.AreEqual(0, f.Provider.Compactions);
+    });
+
+    [TestMethod]
+    public Task OwnedCompact_UnsupportedNeverFallsBack() => Fixture.RunAsync(async f =>
+    {
+        var request = await f.PrepareCompact(); // Default fake deliberately does not implement the capability.
+        var compact = f.Accept(f.AdmitCompact(request));
+        Assert.AreEqual("compact_unsupported", (await f.Observe(compact.Completion)).Code);
+        Assert.AreEqual(0, f.Provider.Compactions);
+    });
+
+    [TestMethod]
+    public Task OwnedCompact_ShutdownSignalsAndJoinsOriginalWork() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportIdleCompaction = true;
+        f.Provider.HoldCompact = true;
+        var request = await f.PrepareCompact();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => f.AdmitCompact(request, cancelled.Token));
+        var compact = f.Accept(f.AdmitCompact(request));
+        await f.ObserveReadiness(f.Provider.CompactStarted.Task, compact, "compaction");
+        var disposal = f.BeginDisposal();
+        await f.ObserveReadiness(f.Provider.CompactCancelled.Task, compact, "compact cancellation");
+        Assert.IsFalse(disposal.IsCompleted);
+        Assert.IsFalse(compact.Completion.IsCompleted);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Closed, f.AdmitCompact(request with { ClientRequestId = "closed" }).Kind);
+        f.Provider.ReleaseAll();
+        await f.Observe(disposal);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Cancelled, (await f.Observe(compact.Completion)).Outcome);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+    });
+
     // Constructed only inside a selected real-route test. All gates and tasks are instance-owned.
     private sealed class Fixture
     {
@@ -817,6 +909,31 @@ public sealed class OwnedSessionCommandServiceTests
         internal OwnedSessionCommandAdmission AdmitSteer(OwnedTextSteerRequest request, CancellationToken cancellationToken = default)
             => RetainAdmission(Host.Commands.AdmitSteer(request, cancellationToken));
 
+        internal OwnedSessionCommandAdmission AdmitCompact(OwnedCompactRequest request, CancellationToken cancellationToken = default)
+            => RetainAdmission(Host.Commands.AdmitCompact(request, cancellationToken));
+
+        internal async Task<OwnedCompactRequest> PrepareCompact()
+        {
+            var send = Send();
+            await ObserveReadiness(Provider.SendStarted.Task, send, "send");
+            Provider.ReleaseSend.TrySetResult();
+            await Observe(send.Completion);
+            var marker = Guid.NewGuid().ToString("N");
+            Provider.RecordIdle(marker);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await Track(Committed());
+            var state = await Observe(Host.RuntimeService.GetCurrentStateAsync(SessionId));
+            Assert.IsNull(state.Entry!.ActiveRunId);
+            return new("compact", SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration);
+            async Task Committed()
+            {
+                await foreach (var value in Host.RuntimeService.StreamEventsAsync(timeout.Token))
+                    if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent update }
+                        && update.Kind == AgentSessionUpdateKind.Idle && update.Message == marker) return;
+                Assert.Fail("Runtime closed before the exact fake idle event committed.");
+            }
+        }
+
         internal async Task<OwnedTextSteerRequest> SteerRequest()
         {
             var marker = Guid.NewGuid().ToString("N");
@@ -988,6 +1105,19 @@ public sealed class OwnedSessionCommandServiceTests
         internal bool RequestPerSendPermission { get; set; }
         internal string? CurrentRun { get; set; }
         internal bool WrongSteerResult { get; set; }
+        internal bool SupportIdleCompaction { get; set; }
+        internal bool HoldCompactAdmission { get; set; }
+        internal bool HoldCompact { get; set; }
+        internal bool FailCompact { get; set; }
+        internal AgentCompactionOutcome CompactOutcome { get; set; } = new(true, "inert completed compaction");
+        internal CancellationToken CompactToken { get; private set; }
+        private int _compactions;
+        internal int Compactions => Volatile.Read(ref _compactions);
+        internal TaskCompletionSource CompactEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseCompactAdmission { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource CompactStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource CompactCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseCompact { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal AgentSteerOptions? SteerOptions { get; private set; }
         internal CancellationToken SteerToken { get; private set; }
         internal int SteerDeliveries { get; private set; }
@@ -999,6 +1129,11 @@ public sealed class OwnedSessionCommandServiceTests
                 new AgentRunId(run), AgentSessionUpdateKind.Warning, "inert recorded run"));
             _handler!(new AgentContentCompletedEvent(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
                 new AgentRunId(run), AgentContentKind.Notice, marker, null, "inert steering readiness"));
+        }
+        internal void RecordIdle(string marker)
+        {
+            CurrentRun = null;
+            _handler!(new AgentSessionUpdateEvent(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Idle, marker));
         }
         internal TaskCompletionSource SteerStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource SteerCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1064,7 +1199,7 @@ public sealed class OwnedSessionCommandServiceTests
                 PreparationStarted.TrySetResult();
                 await ReleasePreparation.Task.ConfigureAwait(false);
                 if (FailPreparation) throw new InvalidOperationException("Controlled preparation failure.");
-                return new Session(this, sessionId);
+                return SupportIdleCompaction ? new CompactSession(this, sessionId) : new Session(this, sessionId);
             }
             finally { Interlocked.Decrement(ref _active); }
         }
@@ -1083,6 +1218,8 @@ public sealed class OwnedSessionCommandServiceTests
             ReleaseSecondSend.TrySetResult();
             ReleaseAbort.TrySetResult();
             ReleaseSteer.TrySetResult();
+            ReleaseCompactAdmission.TrySetResult();
+            ReleaseCompact.TrySetResult();
         }
 
         // A fresh runtime for every real registry factory call, including resume-fallback creation.
@@ -1100,7 +1237,7 @@ public sealed class OwnedSessionCommandServiceTests
             public ValueTask DisposeAsync() => owner.DisposeAsync();
         }
 
-        private sealed class Session(ControlledProvider owner, string sessionId) : IAgentSession
+        private class Session(ControlledProvider owner, string sessionId) : IAgentSession
         {
             public ModelProviderId ProviderId => owner.Descriptor.ProviderId;
             public string SessionId => sessionId;
@@ -1182,6 +1319,34 @@ public sealed class OwnedSessionCommandServiceTests
             {
                 if (Volatile.Read(ref owner._active) != 0) Interlocked.Increment(ref owner._earlyDisposals);
                 return ValueTask.CompletedTask;
+            }
+        }
+
+        private sealed class CompactSession : Session, IAgentIdleCompactionProvider
+        {
+            private readonly ControlledProvider _owner;
+            internal CompactSession(ControlledProvider owner, string sessionId) : base(owner, sessionId) => _owner = owner;
+
+            public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
+            {
+                var owner = _owner;
+                Interlocked.Increment(ref owner._active);
+                try
+                {
+                    owner.CompactToken = cancellationToken;
+                    using var readiness = cancellationToken.Register(() => owner.CompactCancelled.TrySetResult());
+                    owner.CompactEntered.TrySetResult();
+                    if (owner.HoldCompactAdmission) await owner.ReleaseCompactAdmission.Task.ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (owner.CurrentRun is not null) return null;
+                    Interlocked.Increment(ref owner._compactions);
+                    owner.CompactStarted.TrySetResult();
+                    if (owner.HoldCompact) await owner.ReleaseCompact.Task.ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (owner.FailCompact) throw new InvalidOperationException("Private fixture provider failure.");
+                    return owner.CompactOutcome;
+                }
+                finally { Interlocked.Decrement(ref owner._active); }
             }
         }
 

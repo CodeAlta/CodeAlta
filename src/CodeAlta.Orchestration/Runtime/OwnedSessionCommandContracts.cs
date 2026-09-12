@@ -23,6 +23,13 @@ public sealed record OwnedAbortRequest(string ClientRequestId, Guid TargetOperat
 public sealed record OwnedTextSteerRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId,
     long ExpectedAttachmentGeneration, string ExpectedRunId, string Text);
 
+/// <summary>Immutable request to compact an existing attachment if idle at provider admission; never retargeted.</summary>
+/// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>
+/// <param name="SessionId">Exact durable session identity without surrounding whitespace.</param>
+/// <param name="ExpectedRuntimeInstanceId">Observed runtime instance identity.</param>
+/// <param name="ExpectedAttachmentGeneration">Observed positive attachment generation; not a history revision.</param>
+public sealed record OwnedCompactRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId, long ExpectedAttachmentGeneration);
+
 /// <summary>The admitted command kind.</summary>
 public enum OwnedSessionCommandKind
 {
@@ -32,6 +39,8 @@ public enum OwnedSessionCommandKind
     Abort,
     /// <summary>Submit text to one exactly targeted active run.</summary>
     Steer,
+    /// <summary>Compact an exactly targeted attachment only if idle at actual admission.</summary>
+    Compact,
 }
 
 /// <summary>Admission decision; only accepted requests allocate new retry receipts.</summary>

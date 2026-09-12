@@ -265,7 +265,7 @@ Desktop startup, owned commands or event subscriptions.
 
 ### Host-owned text commands (in development)
 
-`CodeAltaHost.Commands` owns text-send, abort and exact-target steering admission against that host's existing
+`CodeAltaHost.Commands` owns text-send, abort, exact-target steering and idle-compaction admission against that host's existing
 runtime. Requests contain scalar identity/text values, not mutable descriptors, execution
 options, tools or callbacks. Send preparation resolves the durable session directly and captures
 its execution policy; this bounded route supplies no custom tools, defaults to denying permission
@@ -290,7 +290,27 @@ The existing run retains its permission callback; steering creates no new approv
 Caller cancellation cannot cancel admitted steering. Shutdown starts independent cancellation,
 then joins retained dispatch and cancellation work; explicit forwarding registrations are joined
 before releasing the execution source and captured attachment use. This does not add active-run
-abort, compaction or durable queue execution ownership.
+abort or durable queue execution ownership. The separate idle-compaction route is described below.
+
+`OwnedCompactRequest` captures session/runtime-instance/attachment/key, without a fabricated run
+or history revision. The mailbox rejects stale/non-owned/transitioning/terminated entries,
+recorded runs and queue drains, then retains use of the exact existing attachment; retirement
+refuses acquisition. It never discovers/replaces a coordinator, clears pending prompt selection
+or publishes a start event before provider admission. Null recorded run only permits an attempt.
+`AgentHub.TryCompactWhenIdleAsync` attempts its run gate without waiting and requires the optional
+`IAgentIdleCompactionProvider`; unsupported sessions have no fallback. `AgentSession` likewise
+attempts its state gate without waiting, refuses active runs and holds that gate through the
+existing compaction body. Trusted `CompactWithOutcomeAsync` retains its existing behavior.
+The new capability's null outcome means busy/no compaction started, not background execution.
+Compaction can summarize with the configured model and persist context current at admission;
+the in-process summary request has no tools. No new permission callback/window is created.
+
+Compaction has its own per-session slot within shared receipt capacity. Exact record replay
+returns the same receipt; different request fields or command kind conflict. Outcomes distinguish
+`compact_busy`, `compact_unsupported`, `compact_unsuccessful` and `compact_failed` without exposing
+arbitrary provider messages. Success means actual compaction settled successfully, including a
+valid no-op. Caller cancellation governs admission only. Dispatch, cancellation traversals and
+attachment/source lifetime are retained and joined through shutdown just as for owned steering.
 
 Caller cancellation governs admission only. Accepted preparation, send, cancellation and
 attachment-aware abort work are retained by the owner; a session slot remains occupied until
@@ -366,6 +386,15 @@ observed runtime identity disables mutations until reload. Completed steering me
 submitted, not completion of the run. Generated-contract and inert managed/frontend coverage is
 recorded in the [parity ledger](dual-head-desktop-parity.md); mounted/native/provider behavior is
 not established by those tests.
+
+Generated `sessions.compact` adds the same owned-only epoch/identity validation, canonical GUID
+and decimal attachment checks. Maximum-escaping input plus framing fits 16 KiB within the existing
+208 KiB bridge frame budget; this is not a heap bound. The UI captures only a manually observed
+attachment with no recorded run/drain and explains provider-time idleness. App-owned immutable
+retention, synchronous in-flight exclusion and **Compact-kind** receipt reconciliation survive
+selection/remount. Manual exact-key retry never retargets or changes a settled busy receipt;
+trying again requires a new explicit action. No automatic retry, polling or new production event
+reader is added. Native/provider qualification and broader command parity remain open.
 
 The explicit catalog-copy lease belongs to the Desktop application through the synchronous
 native loop. A cancellable close signals retained shutdown work without awaiting it inside the
