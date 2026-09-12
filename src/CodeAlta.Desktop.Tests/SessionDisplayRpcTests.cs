@@ -120,30 +120,84 @@ public sealed class SessionDisplayRpcTests
     public void MaximumEscapedSelectedPayload_FitsBudget_AndInt64RevisionsAreStrings()
     {
         var publisher = new SessionRuntimeEventPublisher(1);
-        var id = new string('"', RuntimeDisplayProjection.MaxIdentifierCharacters);
-        var label = new string('\0', RuntimeDisplayProjection.MaxMetadataCharacters);
-        publisher.TryPublish(new SessionLifecycleRuntimeEvent(id, DateTimeOffset.UtcNow,
-            new SessionLifecycleEvent { SessionId = id, RunId = label, Message = label, Kind = SessionLifecycleEventKind.RunCompleted }));
-        publisher.TryPublish(new SessionAgentConfigurationRuntimeEvent(id, DateTimeOffset.UtcNow, label, label, label, AgentReasoningEffort.High, label));
-        publisher.TryPublish(new SessionHostEvent(id, DateTimeOffset.UtcNow, AgentSessionUpdateKind.Warning, label));
-        publisher.TryPublish(new SessionQueueRuntimeEvent(id, DateTimeOffset.UtcNow, int.MaxValue, null, null, true));
-        for (var i = 0; i < RuntimeDisplayProjection.MaxTextItemsPerSession; i++)
-            publisher.TryPublish(new SessionAgentEvent(id, new AgentContentCompletedEvent(new ModelProviderId("fake"), id,
-                DateTimeOffset.UtcNow, new AgentRunId(id), AgentContentKind.ReasoningSummary, id[..^1] + i, null,
-                new string('\0', RuntimeDisplayProjection.MaxTextCharacters + 1))));
-        var snapshot = publisher.Display.GetSnapshot() with { Revision = 9007199254740993L, EvictedSessions = long.MaxValue, OmittedSessionEvents = long.MaxValue };
-        var item = SessionDisplayService.Project(HostEpoch, id, new(snapshot, false, 9007199254740991L, true));
-        Assert.AreEqual("9007199254740993", item.Revision);
-        Assert.AreEqual("9007199254740991", item.PreviousRevision);
-        Assert.IsTrue(item.Session!.TransportTruncated);
-        Assert.IsTrue(item.Session.Text.All(text => text.IsTruncated && text.IsComplete));
-        var json = JsonSerializer.SerializeToUtf8Bytes(item, DesktopJsonContext.Default.SessionDisplayItem);
-        Console.WriteLine($"Worst-case escaped selected item: {json.Length} bytes; with framing allowance: {json.Length + 4096}; budget: {SessionDisplayService.MaximumItemBytes}.");
-        Assert.IsTrue(json.Length + 4096 < SessionDisplayService.MaximumItemBytes, $"Escaped item plus framing allowance: {json.Length + 4096}");
-        using var parsed = JsonDocument.Parse(json);
-        Assert.AreEqual(JsonValueKind.String, parsed.RootElement.GetProperty("revision").ValueKind);
-        Assert.AreEqual(RuntimeDisplayProjection.MaxTextItemsPerSession, parsed.RootElement.GetProperty("session").GetProperty("text").GetArrayLength());
-        publisher.Complete();
+        try
+        {
+            var id = new string('"', RuntimeDisplayProjection.MaxIdentifierCharacters);
+            var label = new string('\0', RuntimeDisplayProjection.MaxMetadataCharacters);
+            publisher.TryPublish(new SessionLifecycleRuntimeEvent(id, DateTimeOffset.UtcNow,
+                new SessionLifecycleEvent { SessionId = id, RunId = label, Message = label,
+                    Kind = Enum.GetValues<SessionLifecycleEventKind>().MaxBy(value => value.ToString().Length) }));
+            publisher.TryPublish(new SessionAgentConfigurationRuntimeEvent(id, DateTimeOffset.UtcNow, label, label, label,
+                Enum.GetValues<AgentReasoningEffort>().Append((AgentReasoningEffort)int.MinValue).MaxBy(value => value.ToString().Length), label)); // Existing numeric enum fallback is longer.
+            publisher.TryPublish(new SessionHostEvent(id, DateTimeOffset.UtcNow,
+                Enum.GetValues<AgentSessionUpdateKind>().MaxBy(value => value.ToString().Length), label));
+            publisher.TryPublish(new SessionQueueRuntimeEvent(id, DateTimeOffset.UtcNow, int.MinValue, null, null, true)); // Longest typed Int32, conservatively.
+            for (var i = 0; i < RuntimeDisplayProjection.MaxTextItemsPerSession; i++)
+                publisher.TryPublish(new SessionAgentEvent(id, new AgentContentCompletedEvent(new ModelProviderId("fake"), id,
+                    DateTimeOffset.UtcNow, new AgentRunId(id), AgentContentKind.ReasoningSummary, id[..^1] + (char)(0x80 + i), null,
+                    new string('\0', RuntimeDisplayProjection.MaxTextCharacters + 1))));
+            for (var i = 0; i < RuntimeDisplayProjection.MaxToolActivitiesPerSession; i++)
+                publisher.TryPublish(new SessionAgentEvent(id, new AgentActivityEvent(new ModelProviderId(id), id,
+                    DateTimeOffset.UtcNow, new AgentRunId(id), AgentActivityKind.ToolCall, AgentActivityPhase.Progressed,
+                    id[..^1] + (char)(0x80 + i), null, new string('\0', RuntimeDisplayProjection.MaxToolNameCharacters), null)));
+            var snapshot = publisher.Display.GetSnapshot() with { Revision = long.MaxValue, EvictedSessions = long.MaxValue, OmittedSessionEvents = long.MaxValue };
+            snapshot = snapshot with { Sessions = [snapshot.Sessions.Single() with { Revision = long.MaxValue,
+                EvictedTextItems = long.MaxValue, UnsupportedEvents = long.MaxValue, EvictedToolActivities = long.MaxValue }] };
+            var item = SessionDisplayService.Project(HostEpoch, id, new(snapshot, false, long.MaxValue - 1, false));
+            Assert.AreEqual("9223372036854775807", item.Revision);
+            Assert.AreEqual("9223372036854775806", item.PreviousRevision);
+            Assert.IsTrue(item.Session!.TransportTruncated);
+            Assert.IsTrue(item.Session.Text.All(text => text.IsTruncated && text.IsComplete));
+            Assert.IsTrue(item.Session.Text.All(text => text.Text.Length == 4096 && text.ContentId.Length == 256 && text.RunId!.Length == 256));
+            Assert.AreEqual(2, item.Session.ToolActivities.Length);
+            Assert.IsTrue(item.Session.ToolActivities.All(activity => activity.ProviderId.Length == 256 && activity.RunId!.Length == 256 &&
+                activity.ActivityId.Length == 256 && activity.Name!.Length == 128 && activity.Phase == "Progressed"));
+            // Maximize even the boolean encodings (false is longer), without reducing any retained string/counter.
+            item = item with { Session = item.Session with { MetadataTruncated = false, TransportTruncated = false,
+                Text = item.Session.Text.Select(text => text with { IsComplete = false, IsTruncated = false, StartedWithDelta = false }).ToArray() } };
+            var json = JsonSerializer.SerializeToUtf8Bytes(item, DesktopJsonContext.Default.SessionDisplayItem);
+            Console.WriteLine($"Worst-case escaped selected item: {json.Length} bytes; with framing allowance: {json.Length + 4096}; budget: {SessionDisplayService.MaximumItemBytes}.");
+            Assert.IsTrue(json.Length + 4096 < SessionDisplayService.MaximumItemBytes, $"Escaped item plus framing allowance: {json.Length + 4096}");
+            using var parsed = JsonDocument.Parse(json);
+            Assert.AreEqual(JsonValueKind.String, parsed.RootElement.GetProperty("revision").ValueKind);
+            foreach (var field in new[] { "revision", "evictedSessions", "omittedSessionEvents" })
+                Assert.AreEqual("9223372036854775807", parsed.RootElement.GetProperty(field).GetString());
+            Assert.AreEqual("9223372036854775806", parsed.RootElement.GetProperty("previousRevision").GetString());
+            foreach (var field in new[] { "revision", "evictedTextItems", "unsupportedEvents", "evictedToolActivities" })
+                Assert.AreEqual("9223372036854775807", parsed.RootElement.GetProperty("session").GetProperty(field).GetString());
+            Assert.AreEqual(RuntimeDisplayProjection.MaxTextItemsPerSession, parsed.RootElement.GetProperty("session").GetProperty("text").GetArrayLength());
+            Assert.AreEqual(2, parsed.RootElement.GetProperty("session").GetProperty("toolActivities").GetArrayLength());
+            Assert.AreEqual(JsonValueKind.String, parsed.RootElement.GetProperty("session").GetProperty("evictedToolActivities").ValueKind);
+            Assert.AreEqual("9223372036854775807", parsed.RootElement.GetProperty("session").GetProperty("evictedToolActivities").GetString());
+        }
+        finally { publisher.Complete(); }
+    }
+
+    [TestMethod]
+    public void Project_MapsOnlySelectedReportedToolWindow_AndReplacesAbsence()
+    {
+        var display = new RuntimeDisplayProjection();
+        foreach (var session in new[] { "selected", "other" })
+        {
+            display.Commit(new SessionAgentEvent(session, new AgentActivityEvent(new ModelProviderId("Provider"), session,
+                DateTimeOffset.UnixEpoch, null, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "same", null, null, "PRIVATE")));
+            display.Commit(new SessionAgentEvent(session, new AgentActivityEvent(new ModelProviderId("provider"), session,
+                DateTimeOffset.UnixEpoch, new AgentRunId("run"), AgentActivityKind.ToolCall, AgentActivityPhase.Started, "same", null,
+                new string('x', 129), "PRIVATE")));
+        }
+        var snapshot = display.GetSnapshot();
+        var item = SessionDisplayService.Project(HostEpoch, "SELECTED", new(snapshot, true, null, false));
+        Assert.AreEqual("SELECTED", item.SessionId);
+        Assert.AreEqual("selected", item.Session!.SessionId);
+        Assert.AreEqual(2, item.Session.ToolActivities.Length);
+        Assert.AreEqual(new SessionDisplayToolActivity("Provider", null, "same", "Completed", null, false), item.Session.ToolActivities[0]);
+        Assert.AreEqual(new SessionDisplayToolActivity("provider", "run", "same", "Started", new string('x', 128), true), item.Session.ToolActivities[1]);
+        Assert.AreEqual("0", item.Session.EvictedToolActivities);
+        Assert.IsTrue(item.IsPartial);
+        var absent = SessionDisplayService.Project(HostEpoch, "SELECTED", new(snapshot with { Sessions = [], IsClosed = true }, false, 0, true));
+        Assert.IsNull(absent.Session);
+        Assert.IsTrue(absent.HasGap && absent.IsClosed && absent.IsPartial);
+        Assert.AreEqual(2, item.Session.ToolActivities.Length); // No mutation of the earlier replacement.
     }
 
     [TestMethod]

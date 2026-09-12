@@ -6,7 +6,7 @@ using CodeAlta.Agent;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Runtime-owned committed live status/text projection. A short single-writer gate makes commit and
+/// Runtime-owned committed partial live display projection. A short single-writer gate makes commit and
 /// snapshot/subscription atomic across sessions. No I/O, callbacks, asynchronous work or observer waits run under it.
 /// Limits bound retained payload/counts, not total process heap or consumer-retained snapshots.
 /// </summary>
@@ -16,6 +16,10 @@ public sealed class RuntimeDisplayProjection
     public const int MaxSessions = 128;
     /// <summary>Maximum retained text items per session.</summary>
     public const int MaxTextItemsPerSession = 8;
+    /// <summary>Maximum reported plain ToolCall identities per session, ordered by latest update.</summary>
+    public const int MaxToolActivitiesPerSession = 2;
+    /// <summary>Maximum UTF-16 code units in a retained well-formed tool name prefix.</summary>
+    public const int MaxToolNameCharacters = 128;
     /// <summary>Maximum UTF-16 code units per text item.</summary>
     public const int MaxTextCharacters = 4096;
     /// <summary>Maximum UTF-16 code units per identity; oversized text/session identities are omitted, never aliased by truncation.</summary>
@@ -188,11 +192,56 @@ public sealed class RuntimeDisplayProjection
                 return ProjectText(session, delta.RunId?.Value, delta.ContentId, delta.Kind, delta.Delta, complete: false);
             case SessionAgentEvent { Event: AgentContentCompletedEvent completed }:
                 return ProjectText(session, completed.RunId?.Value, completed.ContentId, completed.Kind, completed.Content, complete: true);
+            case SessionAgentEvent { Event: AgentActivityEvent activity }:
+                return ProjectToolActivity(session, activity);
             default:
                 session = session with { UnsupportedEvents = session.UnsupportedEvents + 1 };
                 break;
         }
         return session with { MetadataTruncated = truncated };
+    }
+
+    private static RuntimeDisplaySession ProjectToolActivity(RuntimeDisplaySession session, AgentActivityEvent activity)
+    {
+        // Only these scalar fields are inspected. In particular, never touch Details, Message or parent/provider graphs.
+        if (activity.Kind != AgentActivityKind.ToolCall ||
+            activity.Phase is not (AgentActivityPhase.Requested or AgentActivityPhase.Started or AgentActivityPhase.Progressed or
+                AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled) ||
+            !ValidToolIdentity(activity.ProviderId.Value) || !ValidToolIdentity(activity.ActivityId) ||
+            (activity.RunId is { } suppliedRun && !ValidToolIdentity(suppliedRun.Value)) ||
+            (activity.Name is { } name && !WellFormedToolString(name)))
+            return session with { UnsupportedEvents = session.UnsupportedEvents + 1 };
+
+        var runId = activity.RunId?.Value;
+        var items = session.ToolActivities;
+        var index = -1;
+        for (var i = 0; i < items.Length; i++)
+            if (items[i].ProviderId == activity.ProviderId.Value && items[i].RunId == runId && items[i].ActivityId == activity.ActivityId)
+            { index = i; break; }
+        var value = new RuntimeDisplayToolActivity(activity.ProviderId.Value, runId, activity.ActivityId, activity.Phase,
+            activity.Name is null ? null : Prefix(activity.Name, MaxToolNameCharacters), activity.Name?.Length > MaxToolNameCharacters);
+        if (index >= 0) items = items.RemoveAt(index); // Latest report wins, even Completed -> Started.
+        else if (items.Length == MaxToolActivitiesPerSession)
+        {
+            items = items.RemoveAt(0);
+            session = session with { EvictedToolActivities = session.EvictedToolActivities + 1 };
+        }
+        return session with { ToolActivities = items.Add(value) };
+    }
+
+    private static bool ValidToolIdentity(string? value)
+        => value is { Length: > 0 and <= MaxIdentifierCharacters } && !string.IsNullOrWhiteSpace(value) && WellFormedToolString(value);
+
+    private static bool WellFormedToolString(string value)
+    {
+        // Local policy only: malformed names reject the entire report, including malformed suffixes beyond the prefix.
+        // Existing text and status/configuration label handling is deliberately unchanged.
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (!char.IsSurrogate(value[i])) continue;
+            if (!char.IsHighSurrogate(value[i]) || ++i == value.Length || !char.IsLowSurrogate(value[i])) return false;
+        }
+        return true;
     }
 
     private static RuntimeDisplaySession ProjectText(RuntimeDisplaySession session, string? runId, string contentId,

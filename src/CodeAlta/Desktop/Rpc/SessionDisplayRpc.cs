@@ -77,13 +77,19 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
                 session.StatusKind?.ToString(), message,
                 session.Text.Select(text => new SessionDisplayText(text.RunId, text.ContentId, text.Kind.ToString(),
                     text.Text, text.IsComplete, text.IsTruncated, text.StartedWithDelta)).ToArray(),
-                session.MetadataTruncated, shortened, Decimal(session.EvictedTextItems), Decimal(session.UnsupportedEvents));
+                session.MetadataTruncated, shortened, Decimal(session.EvictedTextItems), Decimal(session.UnsupportedEvents),
+                session.ToolActivities.Select(activity => new SessionDisplayToolActivity(activity.ProviderId, activity.RunId,
+                    activity.ActivityId, activity.Phase.ToString(), activity.Name, activity.IsNameTruncated)).ToArray(),
+                Decimal(session.EvictedToolActivities));
             break;
         }
-        // Only one session crosses the bridge. Bounds inherited from the runtime: 8*(4096+2*256)
-        // text/key units, 8*256 label units, 2*256 session identifiers, plus fixed codes/counters/epochs.
-        // Six-byte worst-case JSON escaping plus 16 KiB property/envelope allowance is <256 KiB.
-        // The serialization-budget test uses the actual generated JsonTypeInfo, not an unescaped text estimate.
+        // One selected session: 8*(4096+2*256) text/key + 8*256 label + 2*256 session identity
+        // + 2*(3*256+128) tool identity/name = 41,216 UTF-16 units, at most 247,296 escaped bytes.
+        // JSON overhead (NOT framing): <=103 properties * (32 ASCII key bytes + 4 syntax bytes),
+        // <=57 non-payload scalars * 64 bytes (canonical epochs, fixed codes/enums, Int32/Int64, bool/null),
+        // plus 256 container/separator/nullable-string quote bytes = 7,612, rounded up to 8 KiB.
+        // With a SEPARATE 4 KiB bridge framing allowance: 247,296 + 8,192 + 4,096 = 259,584 < 262,144.
+        // Actual generated JsonTypeInfo serialization remains covered by the worst-escaping budget assertion.
         return new("ok", epoch, selectedSessionId, snapshot.Epoch.ToString("D"), Decimal(snapshot.Revision),
             replacement.PreviousRevision is { } previous ? Decimal(previous) : null, replacement.IsInitial,
             replacement.HasGap, snapshot.IsClosed, snapshot.IsPartial, Decimal(snapshot.EvictedSessions),
@@ -111,9 +117,12 @@ internal sealed record SessionDisplayItem(string Status, string HostEpoch, strin
     string EvictedSessions, string OmittedSessionEvents, SessionDisplayView? Session);
 internal sealed record SessionDisplayView(string SessionId, string Revision, SessionDisplayLifecycle? Lifecycle,
     int? QueuedPromptCount, SessionDisplayConfiguration? Configuration, string? StatusKind, string? StatusMessage,
-    SessionDisplayText[] Text, bool MetadataTruncated, bool TransportTruncated, string EvictedTextItems, string UnsupportedEvents);
+    SessionDisplayText[] Text, bool MetadataTruncated, bool TransportTruncated, string EvictedTextItems, string UnsupportedEvents,
+    SessionDisplayToolActivity[] ToolActivities, string EvictedToolActivities);
 internal sealed record SessionDisplayLifecycle(string Kind, string? RunId, string? Message);
 internal sealed record SessionDisplayConfiguration(string? ProviderId, string? ProviderKey, string? ModelId,
     string? ReasoningEffort, string? AgentPromptId);
 internal sealed record SessionDisplayText(string? RunId, string ContentId, string Kind, string Text,
     bool IsComplete, bool IsTruncated, bool StartedWithDelta);
+internal sealed record SessionDisplayToolActivity(string ProviderId, string? RunId, string ActivityId, string Phase,
+    string? Name, bool IsNameTruncated);

@@ -1,4 +1,4 @@
-import type { SessionDisplayItem, SessionDisplayRequest, SessionDisplayText } from "#neoastra";
+import type { SessionDisplayItem, SessionDisplayRequest, SessionDisplayText, SessionDisplayToolActivity } from "#neoastra";
 
 type OpenDisplay = (request: SessionDisplayRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<AsyncIterable<SessionDisplayItem>>;
 export type DisplayState = Readonly<{
@@ -67,6 +67,9 @@ export function createSessionDisplayStore(open: OpenDisplay) {
           if (revision !== null && next <= revision) continue; // Never apply duplicate or out-of-order callbacks.
           const previous = decimalRevision(item.previousRevision);
           if (revision !== null && (item.isInitial || previous === null || previous >= next)) { fail("invalid_update"); return; }
+          if (item.session !== null && !validToolActivities(item.session.toolActivities, item.session.evictedToolActivities)) {
+            fail("invalid_update"); return;
+          }
           const gap = item.hasGap || (revision !== null && (next > revision + 1n || previous !== revision));
           revision = next;
           projectionEpoch = item.projectionEpoch;
@@ -97,15 +100,59 @@ function decimalRevision(value: string | null): bigint | null {
   return value !== null && /^(0|[1-9][0-9]{0,18})$/.test(value) ? BigInt(value) : null;
 }
 
+function wellFormedToolString(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index);
+    if (unit < 0xd800 || unit > 0xdfff) continue;
+    if (unit > 0xdbff || ++index === value.length) return false;
+    const low = value.charCodeAt(index);
+    if (low < 0xdc00 || low > 0xdfff) return false;
+  }
+  return true;
+}
+
+function validToolIdentity(value: unknown): value is string {
+  // Match .NET IsNullOrWhiteSpace, not JS trim (which disagrees on U+0085 and U+FEFF).
+  return typeof value === "string" && value.length > 0 && value.length <= 256 &&
+    !/^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/.test(value) && wellFormedToolString(value);
+}
+
+function validToolActivities(rows: unknown, evicted: unknown): boolean {
+  if (!Array.isArray(rows) || rows.length > 2 || typeof evicted !== "string") return false;
+  // Require a canonical nonnegative Int64 STRING, including an exact end (JS $ also matches before a final newline).
+  const decimal = /^(0|[1-9][0-9]{0,18})$/.exec(evicted);
+  if (!decimal || decimal[0] !== evicted || BigInt(evicted) > 9223372036854775807n) return false;
+  const identities = new Set<string>();
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row) ||
+      !validToolIdentity(row.providerId) || (row.runId !== null && !validToolIdentity(row.runId)) || !validToolIdentity(row.activityId) ||
+      !["Requested", "Started", "Progressed", "Completed", "Failed", "Canceled"].includes(row.phase) ||
+      typeof row.isNameTruncated !== "boolean" ||
+      (row.name === null ? row.isNameTruncated : typeof row.name !== "string" || row.name.length > 128 || !wellFormedToolString(row.name))) return false;
+    const identity = JSON.stringify([row.providerId, row.runId, row.activityId]);
+    if (identities.has(identity)) return false;
+    identities.add(identity);
+  }
+  return true;
+}
+
 function immutableReplacement(item: SessionDisplayItem): SessionDisplayItem {
   return Object.freeze({ ...item, session: item.session === null ? null : Object.freeze({
     ...item.session,
     lifecycle: item.session.lifecycle && Object.freeze({ ...item.session.lifecycle }),
     configuration: item.session.configuration && Object.freeze({ ...item.session.configuration }),
     text: Object.freeze(item.session.text.map(row => Object.freeze({ ...row }))),
+    toolActivities: Object.freeze(item.session.toolActivities.map(row => Object.freeze({
+      providerId: row.providerId, runId: row.runId, activityId: row.activityId, phase: row.phase,
+      name: row.name, isNameTruncated: row.isNameTruncated,
+    }))),
   }) });
 }
 
 export function displayRowKey(sessionId: string, row: SessionDisplayText): string {
   return JSON.stringify([sessionId, row.runId, row.contentId, row.kind]);
+}
+
+export function displayToolActivityKey(sessionId: string, row: SessionDisplayToolActivity): string {
+  return JSON.stringify([sessionId, row.providerId, row.runId, row.activityId]);
 }

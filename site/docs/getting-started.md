@@ -89,7 +89,12 @@ request. There is no automatic retry or retargeting. Closing the panel cancels o
 
 Owned-host mode also shows a selected-session **live status/text window**, separate from
 persisted history and submission receipts. It retains at most eight text items with explicit
-truncation/eviction indicators; it is not a complete transcript or tool/usage/interaction view.
+truncation/eviction indicators, plus two most recently updated **reported plain tool activities**.
+These show a bounded name and reported phase, not arguments/results. Started may precede permission
+resolution and proves neither approval nor process launch; later phases do not establish run
+completion. Missing/evicted activity is unknown. This is not a complete transcript or tool-results/
+usage/interaction view. Reload recovers only the host's retained partial display, not history,
+permission decisions or effects; host restart restores no prior authority.
 Missing live state means not yet observed or evicted, not idle or completed. Reconnect restarts
 only the observation, never a prompt; a stale host identity requires reloading the UI.
 Changing selection or closing the observation does not stop the run. Catalog-only browsing

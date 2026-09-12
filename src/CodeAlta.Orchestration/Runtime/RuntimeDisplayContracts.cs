@@ -14,6 +14,16 @@ namespace CodeAlta.Orchestration.Runtime;
 public readonly record struct RuntimeDisplayText(string? RunId, string ContentId, AgentContentKind Kind,
     string Text, bool IsComplete, bool IsTruncated, bool StartedWithDelta);
 
+/// <summary>Latest reported plain ToolCall values only; not permission, process-start, run-completion or effect acknowledgment.</summary>
+/// <param name="ProviderId">Exact provider.Value identity, at most 256 well-formed UTF-16 code units.</param>
+/// <param name="RunId">Exact supplied run identity, at most 256 well-formed UTF-16 code units; null remains unknown.</param>
+/// <param name="ActivityId">Exact activity identity, at most 256 well-formed UTF-16 code units.</param>
+/// <param name="Phase">Latest supported published phase, which may regress; no lifecycle reconstruction.</param>
+/// <param name="Name">Optional well-formed name prefix, at most 128 UTF-16 code units. A malformed name omits the entire report.</param>
+/// <param name="IsNameTruncated">Whether a valid name exceeded the retained prefix bound.</param>
+public readonly record struct RuntimeDisplayToolActivity(string ProviderId, string? RunId, string ActivityId,
+    AgentActivityPhase Phase, string? Name, bool IsNameTruncated);
+
 /// <summary>Latest published lifecycle values; not a recoverable execution/interaction authority.</summary>
 /// <param name="Kind">Published lifecycle kind.</param>
 /// <param name="RunId">Bounded display run identifier, possibly truncated.</param>
@@ -44,7 +54,14 @@ public readonly record struct RuntimeDisplayConfiguration(string? ProviderId, st
 public readonly record struct RuntimeDisplaySession(string SessionId, long Revision, RuntimeDisplayLifecycle? Lifecycle,
     int? QueuedPromptCount, RuntimeDisplayConfiguration? Configuration, AgentSessionUpdateKind? StatusKind,
     string? StatusMessage, ImmutableArray<RuntimeDisplayText> Text, bool MetadataTruncated,
-    long EvictedTextItems, long UnsupportedEvents);
+    long EvictedTextItems, long UnsupportedEvents)
+{
+    /// <summary>At most two reported plain ToolCalls, least-to-most recently updated. Missing/evicted means unknown, not idle or complete.</summary>
+    public ImmutableArray<RuntimeDisplayToolActivity> ToolActivities { get; init; } = [];
+
+    /// <summary>Tool identities evicted during this retained session window; not a history/effect count.</summary>
+    public long EvictedToolActivities { get; init; }
+}
 
 /// <summary>A complete replacement of the retained live display window, never a complete journal or M4 snapshot.</summary>
 /// <param name="Epoch">Projection-owner identity; revisions from another epoch are unrelated.</param>
@@ -56,7 +73,7 @@ public readonly record struct RuntimeDisplaySession(string SessionId, long Revis
 public readonly record struct RuntimeDisplaySnapshot(Guid Epoch, long Revision, bool IsClosed,
     ImmutableArray<RuntimeDisplaySession> Sessions, long EvictedSessions, long OmittedSessionEvents)
 {
-    /// <summary>Always true: live status/text only; history, tools, interactions, plugins and arbitrary details are not projected.</summary>
+    /// <summary>Always true: bounded live status/text/reported ToolCalls only; history, tool payloads/effects, interactions, plugins and arbitrary details are not projected.</summary>
     public bool IsPartial => true;
 }
 

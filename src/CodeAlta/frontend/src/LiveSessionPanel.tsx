@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { createSessionDisplayStore, displayRowKey } from "./sessionDisplay";
+import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from "./sessionDisplay";
 
 export function LiveSessionPanel({ store, hostEpoch, sessionId }: {
   store: ReturnType<typeof createSessionDisplayStore>; hostEpoch: string; sessionId: string;
@@ -14,8 +14,9 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId }: {
   const snapshot = state?.snapshot;
   const session = snapshot?.session;
   return <section className="live-display" aria-label="Selected session live display">
-    <h3>Live status and text — partial window</h3>
-    <p className="detail">Only this selected session is observed. This is not persisted history, a complete transcript, or a tool/usage/interaction view. Closing or reconnecting this observation does not stop a run.</p>
+    <h3>Live status, text and reported tools — partial window</h3>
+    <p className="detail">Only this selected session is observed. This is not persisted history, a complete transcript, or a tool-results/usage/interaction view. Closing or reconnecting this observation does not stop a run.</p>
+    <p className="detail">A same-host reload obtains a new baseline of retained partial values only, not history, results, decisions or effects. Restart restores no authority.</p>
     <p role="status">Observation: {state?.kind ?? "loading"}{state?.code ? ` · ${state.code}` : ""}</p>
     {state?.code === "stale_epoch" && <p role="alert">The host has changed. Reload the Desktop UI before continuing; reconnecting with this old host identity will not work.</p>}
     <button type="button" disabled={state?.code === "stale_epoch"} onClick={() => store.select(hostEpoch, sessionId)}>Reconnect live display</button>
@@ -37,6 +38,14 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId }: {
         {session.lifecycle?.message && <p>{session.lifecycle.message}</p>}
         {(session.metadataTruncated || session.transportTruncated) && <p className="detail">Some status/configuration labels were shortened.</p>}
         <p className="detail">Retained-window omissions: {session.evictedTextItems} text items evicted; {session.unsupportedEvents} unsupported publications. Other payload details are not projected.</p>
+        <h4>REPORTED tool activity</h4>
+        <p className="detail">At most two plain ToolCalls, least-to-most recently updated. These are reports, not command execution, permissions, receipts or run completion. Started precedes invocation and may precede permission resolution; it proves neither approval nor process start. Completed, Failed and Canceled are not exactly-once external effect acknowledgments. Reported phases may regress.</p>
+        <p className="detail">{session.evictedToolActivities} tool identities evicted in this retained window. Missing or evicted activity is unknown, not idle or complete.</p>
+        {session.toolActivities.length === 0 && <p>No reported tool activity retained.</p>}
+        <ol className="history-records">{session.toolActivities.map(activity => <li key={displayToolActivityKey(session.sessionId, activity)}>
+          <strong>{activity.name ?? "Unnamed tool"}</strong>{activity.isNameTruncated && <span className="detail"> · name prefix truncated</span>}
+          <p>Reported {activity.phase} · provider {activity.providerId} · run {activity.runId ?? "not supplied"} · activity {activity.activityId}</p>
+        </li>)}</ol>
         {session.text.length === 0 && <p>No text retained in this window.</p>}
         <ol className="history-records">{session.text.map(row => <li key={displayRowKey(session.sessionId, row)}>
           <strong>{row.kind}</strong><span className="detail"> · {row.isComplete ? "finalized content" : "streaming content"} · {row.contentId}</span>

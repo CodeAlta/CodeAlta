@@ -614,6 +614,41 @@ workspace and owned-mode guards now inspect current source directly. No behavior
 **All eleven were subsequently removed in the scoped cleanup above.** The original requirement
 was to resolve them before M4 completion, without adding inverse reconstruction machinery.
 
+## M4 checkpoint: reported plain ToolCall display — 2026-09-12
+
+The existing selected-session Display channel now includes at most two recently updated reported
+plain ToolCalls, keyed by exact provider/nullable-run/activity identity within the existing session
+container. Immutable rows carry only those bounded identities, a supported reported phase and an
+optional 128-unit name prefix/truncation flag. Third identities evict oldest with an explicit decimal
+counter. Invalid identities/phases or malformed names omit the report without changing valid rows.
+No tool details/message/arguments/results/paths/exception graphs are traversed or copied into Display.
+Latest phase may regress; Started is not permission approval/process launch, and no phase establishes
+run completion or exactly-once effects. Reconnect/reload recovers retained partial display only.
+
+Parent audited all eight source/fixture files, including all 223 new managed fixture lines and
+352 frontend fixture lines, before execution. Historical RPC async bodies and the source-guard/helper
+suffix were independently compared unchanged; the old projection fixture remains untouched.
+**16 focused .NET tests passed**: six new in-memory activity cases, the expanded generated budget
+case, one new synchronous RPC projection case, four unchanged synchronous text/status regressions,
+and four current-source/immutable-contract guards. **13 frontend Display tests passed** (nine retained
+historical declarations and four additions), plus TypeScript. No failures, cancellations or skips.
+Cached Desktop and both targeted test-project Release builds passed with zero warnings/errors and
+no restore/frontend acquisition. Generated TypeScript/schema now include the activity DTO and string
+counter; the manifest retains the same selected-session channel and automatic contract checks pass.
+
+The combined generated worst-escaping payload is **247,886 bytes**, **251,982 with separate 4-KiB
+framing**, below **262,144**. Revised conservative accounting is 247,296 escaped string bytes +8,192
+JSON overhead +4,096 framing =259,584. The old 16-KiB overhead inequality was not reused. Existing
+text/session/subscriber limits and original-instance event delivery remain unchanged. Payload bounds
+are not heap/CPU bounds: malformed-name validation scans the whole supplied name. Managed async
+coverage uses one completed/prebuffered original reader with retained bounded joins; frontend cleanup
+uses explicit readiness gates and retained original opens/next/returns, with permanent timeout failure.
+
+No actual host/runtime/provider/tool, mounted/native UI, solution-wide build, Vite, full suite or
+website execution was added. Historical async projection/RPC suites were not rerun wholesale.
+Permission policy, TUI/effects, native/file/ask authority, deferred queue interleavings and durable
+recovery remain outside this vertical. **M4–M6 remain open.**
+
 ## M4 checkpoint: committed live display foundation — 2026-09-11
 
 `SessionRuntimeService.Display` now commits immutable, bounded live status/text values before
@@ -650,8 +685,8 @@ active; new coverage checks immutable DTO closure, actual publication before los
 observation, coalescing, cancellation, terminal closure and stable text identity.
 
 This is deliberately partial live display storage, not full M4 recovery or an authoritative
-active-session query. Running sessions can be evicted; tool/interaction/plugin/usage data is not
-projected. Bounds cover retained payload/counts, not total process heap or caller-retained
+active-session query. Running sessions can be evicted; at this checkpoint tool/interaction/plugin/usage
+data was not projected (the later bounded ToolCall report extension is recorded above). Bounds cover retained payload/counts, not total process heap or caller-retained
 snapshots. The later scoped Desktop channel/UI integration is recorded above; TUI observation/effect
 migration, canonical history reconciliation and full interaction/run-state parity remain open.
 

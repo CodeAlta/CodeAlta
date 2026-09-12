@@ -145,13 +145,19 @@ refresh or polling is added. This remains experimental, not full session-command
 
 The selected session also has a **live status/text window**, separate from persisted-history
 browsing and submission receipts. It shows retained lifecycle, queue count, configuration labels
-and up to eight text items; it is not a complete transcript, usage/tool view or interaction UI.
+and up to eight text items, plus two most recently updated **reported plain ToolCall activities**.
+Tool names may be shortened; arguments/results are not shown. Reported phases can regress, and
+missing/evicted activity is unknown—not idle or complete. Started may precede permission resolution
+and proves neither approval nor process launch; other phases are not run-completion or exactly-once
+effect acknowledgments. This is not a complete transcript, tool-results/usage view or interaction UI.
 No retained state means not yet observed or evicted—not idle or completed. Text and labels may
 be shortened, and replacement/eviction indicators make omissions explicit. **Reconnect live
 display** explicitly starts a new observation; it never resends a prompt. A stale host epoch
 explicitly requires reloading the UI, not reconnecting with the old identity. Selection changes,
 renderer detach and cancellation close only the observation, not a run or the host. Only explicit
 owned mode registers this channel; default/catalog-only startup behavior is unchanged.
+Same-host reload obtains a new baseline of retained partial values only, not omitted history,
+tool results, permission decisions or effects. Host restart restores no prior authority.
 
 **Refresh runtime state** is a separate manual, point-in-time observation of the actual runtime
 entry, coordinator transition, recorded run, Shutdown, retirement and queue-drain facts. It does

@@ -132,20 +132,36 @@ for the observation handshake.
 
 Coverage is deliberately partial (`IsPartial` is always true): latest published lifecycle,
 queue **count**, configuration labels, host status and selected text channels (user, assistant,
-reasoning/summary, plan, notice). Null state means not observed, not idle/empty. Lifecycle,
+reasoning/summary, plan, notice), plus two recently updated reported plain ToolCalls. Null state means not observed, not idle/empty. Lifecycle,
 queue count and configuration survive text eviction **within a retained session**. Text keys
 are `(session ID, run ID, content ID, channel)`; finalized content replaces its prefix, and late
 deltas cannot unfinalize it. `StartedWithDelta` warns that there is no finalized baseline.
 The projection is not hydrated from journals, does not infer command admission, and is not an
 authoritative execution/permission/queue-item API. Catalog events copy configuration labels,
-not mutable descriptors. Tools, errors/exception graphs, activities, notes, asks, interactions,
+not mutable descriptors. Tool arguments/results, errors/exception graphs, other activity kinds, notes, asks, interactions,
 plugin data, attachments and arbitrary JSON details are not projected. `UnsupportedEvents`
 counts unsupported publications; omitted optional details/queue payloads/catalog fields are
 part of the declared partial coverage rather than individually counted.
 
+Reported ToolCall rows use exact `(provider.Value, nullable run ID, activity ID)` keys within the
+existing session container. Requested/Started/Progressed/Completed/Failed/Canceled are the only
+supported phases. Matching updates move to newest; a third identity evicts the oldest and increments
+`EvictedToolActivities`. Latest published phase wins even if it regresses; this is not lifecycle
+reconstruction. Identities are untruncated, well-formed and at most 256 units; an absent run stays null,
+while a supplied empty/default run is invalid. A name is optional and retained as a surrogate-safe
+128-unit prefix with its own truncation flag. An unpaired surrogate anywhere in the name rejects
+the report, including beyond the prefix. Invalid reports increment unsupported accounting without
+replacing valid rows or changing original event delivery. Name validation scans the whole supplied
+string; retained payload limits are not a bound on validation time. No message, structured details,
+arguments, results, paths or exceptions are traversed/copied into these rows.
+
+Started is reported before invocation and may precede permission resolution; it proves neither
+approval nor process launch. Other phases prove neither run completion nor exactly-once effects.
+Missing/evicted activities remain unknown. Display values confer no command or permission authority.
+
 Fixed bounds (UTF-16 code units, not UTF-8 bytes): **128 session windows**, **8 text items per
 session**, **4,096 units per text prefix**, **256 per stable identity**, **512 per metadata
-label**, and **32 live observers**. New sessions/text evict the least recently published/updated
+label**, **2 ToolCall rows per session** with **128-unit name prefixes**, and **32 live observers**. New sessions/text evict the least recently published/updated
 window/item; eviction counters expose loss. Oversized/missing session or text identities are
 omitted and counted rather than truncated into colliding keys. Text/metadata truncation is
 explicit; prefix cutting avoids splitting a well-formed surrogate pair. Session eviction may
@@ -154,7 +170,7 @@ No claim of complete active-session discovery should be made from this bounded d
 
 These are **retained payload/count bounds, not a total heap cap**: current text payload is at
 most 4,194,304 UTF-16 units (8 MiB of character storage), plus bounded identities, labels and
-collection overhead. Immutable arrays/strings are shared with snapshots. Consumers may retain
+collection overhead. Tool identity/name payload adds at most 1,792 units per session. Immutable arrays/strings are shared with snapshots. Consumers may retain
 unlimited old snapshots; iteration, concurrent snapshot reads, transient allocations, original
 event/provider graphs, the legacy event channel, journals and renderer serialization are not
 covered by that payload budget. There is no measured performance/whole-process memory claim.
@@ -185,18 +201,21 @@ Each item contains exactly the selected session, not the runtime's 128-session s
 separate host and projection epochs, decimal-string global observation revision/previous revision,
 and decimal-string coverage counters/session revision. TypeScript orders revisions with `BigInt`,
 not unsafe JavaScript numbers. Items are full replacements: absence clears the session; missing
-text keys remove rows. Text identity is session/run/content/channel. Lifecycle, queue count,
-configuration and text are display-only; submitted receipts are never interpreted as run completion.
+text/tool keys remove rows. Text identity is session/run/content/channel; tool identity is
+session/provider/nullable-run/activity. Lifecycle, queue count, configuration, text and reported
+tools are display-only; submitted receipts are never interpreted as run completion.
 Service failures use `invalid_request`, `stale_epoch`, `capacity` or `observation_failed`, with no
 exception messages. Closing the runtime yields final closed state and ends the channel; canceling
 or disposing its iterator releases only observation resources, including after a suspended yield.
 
 The selected DTO retains at most eight 4,096-unit text prefixes and 256-unit stable identities.
 Status/configuration/lifecycle labels are additionally limited to 256 UTF-16 units, with an explicit
-transport-truncation flag. Conservative six-byte-per-unit JSON escaping plus a 16 KiB fixed
-property/framing allowance stays below **256 KiB per item**; a regression serializes worst-case
-escaped content with the actual generated type metadata and reserves a further explicit 4 KiB
-framing check. This is a selected-item payload budget, not a total heap claim. `MaximumFrameBytes`
+transport-truncation flag. Including both tool rows, the conservative bound is 41,216 string units
+at six escaped bytes each, plus 8 KiB JSON overhead and a separate 4 KiB framing allowance:
+**259,584 bytes < 256 KiB per item**. The generated-serialization regression measures **247,886 bytes**,
+**251,982 including framing**, with old and new fields maximized together. This replaces the earlier
+16-KiB overhead estimate, which no longer fits the expanded conservative payload. This is a
+selected-item payload budget, not a total heap claim. `MaximumFrameBytes`
 remains an **inbound-only** limit and is not being used as an outbound payload cap.
 
 Buffering layers are separate: the runtime retains one payload-free wakeup per observer; the

@@ -1,27 +1,132 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setImmediate as tick } from "node:timers/promises";
-import { createSessionDisplayStore, displayRowKey } from "./sessionDisplay";
-import type { SessionDisplayItem, SessionDisplayText, SessionDisplayView } from "#neoastra";
+import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from "./sessionDisplay";
+import type { SessionDisplayItem, SessionDisplayText, SessionDisplayToolActivity, SessionDisplayView } from "#neoastra";
 
 const row: SessionDisplayText = { runId: "run", contentId: "content", kind: "Assistant", text: "before", isComplete: false, isTruncated: false, startedWithDelta: true };
+function tool(overrides: Partial<SessionDisplayToolActivity> = {}): SessionDisplayToolActivity {
+  return { providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: null, isNameTruncated: false, ...overrides };
+}
 function item(revision = "0", overrides: Partial<SessionDisplayItem> = {}): SessionDisplayItem {
   const session: SessionDisplayView = { sessionId: "selected", revision, lifecycle: null, queuedPromptCount: null, configuration: null,
-    statusKind: null, statusMessage: null, text: [row], metadataTruncated: false, transportTruncated: false, evictedTextItems: "0", unsupportedEvents: "0" };
+    statusKind: null, statusMessage: null, text: [row], metadataTruncated: false, transportTruncated: false, evictedTextItems: "0", unsupportedEvents: "0",
+    toolActivities: [], evictedToolActivities: "0" };
   return { status: "ok", hostEpoch: "host", sessionId: "selected", projectionEpoch: "projection", revision,
     previousRevision: null, isInitial: true, hasGap: false, isClosed: false, isPartial: true,
     evictedSessions: "0", omittedSessionEvents: "0", session, ...overrides };
 }
 async function* sequence(items: SessionDisplayItem[]) { yield* items; }
 
-test("lossless revision ordering, full replacements, removals and closed state", async () => {
+type Store = ReturnType<typeof createSessionDisplayStore>;
+type Open = Parameters<typeof createSessionDisplayStore>[0];
+type Fixture = {
+  observe(open: Open): Store;
+  gate<T>(cleanupValue: T): { promise: Promise<T>; resolve(value: T): void };
+};
+
+// Every case retains setup/body, original open/next/return, their wrappers/observers, and each
+// selected work chain before assertions. No scheduling tick is a readiness/termination proof.
+async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
+  const originals: { promise: Promise<unknown>; observer: Promise<void> }[] = [];
+  const stores: Store[] = [];
+  const iterators: AsyncIterator<SessionDisplayItem>[] = [];
+  const signals: AbortSignal[] = [];
+  const releases: (() => void)[] = [];
+  const unsubscribes: (() => void)[] = [];
+  let stopping = false;
+  let expired = false;
+  let body: Promise<void> | undefined;
+  let bodyWait: Promise<void> | undefined;
+  let joined: Promise<void> | undefined;
+  let joinWait: Promise<void> | undefined;
+  function retain<T>(promise: Promise<T>): Promise<T> {
+    originals.push({ promise, observer: promise.then(() => {}, () => {}) });
+    return promise;
+  }
+  function stop() {
+    stopping = true;
+    for (const release of releases) release();
+    for (const store of stores) store.detach(); // All independent cancellations precede any dependent join.
+  }
+  const fixture: Fixture = {
+    observe(open: Open): Store {
+      if (stopping) throw new Error("Fixture already stopping");
+      const store = createSessionDisplayStore((request, options) => {
+        signals.push(options.signal);
+        const opening = retain(open(request, options));
+        return retain(opening.then(stream => ({ [Symbol.asyncIterator]() {
+          const iterator = stream[Symbol.asyncIterator]();
+          iterators.push(iterator);
+          const returned = iterator.return?.bind(iterator);
+          return { next: () => retain(iterator.next()), return: returned ? () => retain(returned()) : undefined };
+        } })));
+      });
+      stores.push(store);
+      return { ...store,
+        select(epoch: string, session: string) {
+          if (stopping) throw new Error("Fixture already stopping");
+          store.select(epoch, session);
+          retain(store.settled());
+        },
+        subscribe(listener: () => void) {
+          const unsubscribe = store.subscribe(listener);
+          unsubscribes.push(unsubscribe);
+          return unsubscribe;
+        },
+      };
+    },
+    gate<T>(cleanupValue: T) {
+      if (stopping) throw new Error("Fixture already stopping");
+      let resolve!: (value: T) => void;
+      const promise = retain(new Promise<T>(done => { resolve = done; }));
+      releases.push(() => resolve(cleanupValue));
+      return { promise, resolve };
+    },
+  };
+  let finishDeadline!: () => void;
+  let timer!: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<void>((resolve, reject) => {
+    finishDeadline = resolve;
+    timer = setTimeout(() => {
+      expired = true; // Permanent failure; late completion never permits unsubscribe/release of uncertain resources.
+      stop();
+      reject(new Error("Display fixture deadline; uncertain work retained, not proven terminated", {
+        cause: { originals, stores, iterators, signals, releases, unsubscribes, body, bodyWait, joined, joinWait, fixture },
+      }));
+    }, 5_000);
+  });
+  const deadlineObserver = deadline.then(() => {}, () => {});
+  try {
+    const setup = retain(Promise.resolve());
+    body = retain(setup.then(() => retain(action(fixture))));
+    bodyWait = Promise.race([body, deadline]);
+    await bodyWait;
+  } finally {
+    stop();
+    try {
+      if (!expired) {
+        // Include originals added while earlier originals settle (e.g. late open -> iterator return).
+        joined = (async () => { for (let index = 0; index < originals.length; index++) await originals[index].observer; })();
+        joinWait = Promise.race([joined, deadline]);
+        await joinWait;
+        if (!expired) for (const unsubscribe of unsubscribes) unsubscribe();
+      }
+    } finally {
+      clearTimeout(timer);
+      finishDeadline();
+      await deadlineObserver;
+    }
+  }
+}
+
+test("lossless revision ordering, full replacements, removals and closed state", () => runDisplayFixture(async fixture => {
   const baseline = item("9007199254740992");
   const replaced = item("9007199254740993", { isInitial: false, previousRevision: baseline.revision,
     session: { ...baseline.session!, text: [{ ...row, text: "final", isComplete: true, startedWithDelta: false }] } });
   const removed = item("9007199254740996", { isInitial: false, previousRevision: replaced.revision, session: null, hasGap: true, isClosed: true, evictedSessions: "1" });
-  const store = createSessionDisplayStore(async () => sequence([baseline, replaced, baseline, removed]));
+  const store = fixture.observe(async () => sequence([baseline, replaced, baseline, removed]));
   const snapshots: SessionDisplayItem[] = [];
-  const unsubscribe = store.subscribe(() => { const snapshot = store.getSnapshot().snapshot; if (snapshot) snapshots.push(snapshot); });
+  store.subscribe(() => { const snapshot = store.getSnapshot().snapshot; if (snapshot) snapshots.push(snapshot); });
   store.select("host", "selected");
   await store.settled();
   assert.equal(snapshots.length, 3); // Out-of-order baseline never applies, even above Number.MAX_SAFE_INTEGER.
@@ -34,22 +139,20 @@ test("lossless revision ordering, full replacements, removals and closed state",
   assert.equal(Object.isFrozen(snapshots[0]), true);
   assert.equal(Object.isFrozen(snapshots[0].session!.text), true);
   assert.equal(Object.isFrozen(snapshots[0].session!.text[0]), true);
-  unsubscribe(); store.detach();
-});
+}));
 
-test("empty text replacement removes rows while retaining latest status", async () => {
+test("empty text replacement removes rows while retaining latest status", () => runDisplayFixture(async fixture => {
   const first = item();
   const empty = item("1", { isInitial: false, previousRevision: "0", isClosed: true,
     session: { ...first.session!, queuedPromptCount: 3, text: [], evictedTextItems: "8", unsupportedEvents: "2", metadataTruncated: true } });
-  const store = createSessionDisplayStore(async () => sequence([first, empty]));
+  const store = fixture.observe(async () => sequence([first, empty]));
   store.select("host", "selected"); await store.settled();
   assert.deepEqual(store.getSnapshot().snapshot!.session!.text, []);
   assert.equal(store.getSnapshot().snapshot!.session!.queuedPromptCount, 3);
   assert.equal(store.getSnapshot().snapshot!.session!.metadataTruncated, true);
-  store.detach();
-});
+}));
 
-test("wrong host/projection/selection and malformed revision fail closed", async () => {
+test("wrong host/projection/selection and malformed revision fail closed", () => runDisplayFixture(async fixture => {
   for (const [values, code] of [
     [[item("0", { hostEpoch: "old" })], "stale_epoch"],
     [[item(), item("1", { isInitial: false, previousRevision: "0", projectionEpoch: "other" })], "stale_projection"],
@@ -58,17 +161,16 @@ test("wrong host/projection/selection and malformed revision fail closed", async
     [[item("-1")], "invalid_update"],
     [[item("0", { isInitial: false })], "invalid_update"],
   ] as const) {
-    const store = createSessionDisplayStore(async () => sequence([...values]));
+    const store = fixture.observe(async () => sequence([...values]));
     store.select("host", "selected"); await store.settled();
     assert.equal(store.getSnapshot().code, code);
     assert.equal(store.getSnapshot().snapshot, null);
-    store.detach();
   }
-});
+}));
 
-test("capacity/errors require explicit retry, do not leak messages or automatically mutate", async () => {
+test("capacity/errors require explicit retry, do not leak messages or automatically mutate", () => runDisplayFixture(async fixture => {
   let opens = 0;
-  const store = createSessionDisplayStore(async () => {
+  const store = fixture.observe(async () => {
     opens++;
     if (opens === 1) return sequence([item("0", { status: "capacity" })]);
     if (opens === 2) throw new Error("SECRET raw transport detail");
@@ -81,86 +183,170 @@ test("capacity/errors require explicit retry, do not leak messages or automatica
   assert.equal(JSON.stringify(store.getSnapshot()).includes("SECRET"), false);
   store.select("host", "selected"); await store.settled();
   assert.equal(opens, 3); assert.equal(store.getSnapshot().kind, "closed");
-  store.detach();
-});
+}));
 
-test("known stale host requires reload even if channel cleanup fails", async () => {
-  const store = createSessionDisplayStore(async () => (async function* () {
+test("known stale host requires reload even if channel cleanup fails", () => runDisplayFixture(async fixture => {
+  const store = fixture.observe(async () => (async function* () {
     try { yield item("0", { status: "stale_epoch" }); }
     finally { throw new Error("cleanup failed"); }
   })());
   store.select("host", "selected"); await store.settled();
   assert.equal(store.getSnapshot().code, "stale_epoch");
   assert.equal(store.getSnapshot().snapshot, null);
-  store.detach();
-});
+}));
 
-test("selection and unmount suppress late callbacks and join iterator return before reopening", { timeout: 5000 }, async () => {
-  let resolve!: (item: IteratorResult<SessionDisplayItem>) => void;
-  const next = new Promise<IteratorResult<SessionDisplayItem>>(done => { resolve = done; });
+test("selection and unmount suppress late callbacks and join iterator return before reopening", () => runDisplayFixture(async fixture => {
+  const next = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+  const reading = fixture.gate<void>(undefined);
   const calls: string[] = [];
   const signals: AbortSignal[] = [];
   let active = 0;
   let maxActive = 0;
   let returned = 0;
-  const store = createSessionDisplayStore(async (request, options) => {
+  const store = fixture.observe(async (request, options) => {
     calls.push(request.sessionId); signals.push(options.signal);
     active++; maxActive = Math.max(maxActive, active);
     return { [Symbol.asyncIterator]() { return {
-      next: () => next, // Deliberately delivers a callback after cancellation.
+      next: () => { reading.resolve(undefined); return next.promise; }, // Deliberately delivers after cancellation.
       return: async () => { returned++; active--; return { done: true, value: undefined }; },
     }; } };
   });
-  try {
-    store.select("host", "old"); await tick();
-    store.select("host", "new");
-    assert.equal(signals[0].aborted, true);
-    assert.equal(store.getSnapshot().snapshot, null);
-    assert.deepEqual(calls, ["old"]);
-    resolve({ done: false, value: item("0", { sessionId: "old" }) });
-    await store.settled(); // Second selection rejects the deliberately wrong identity, then closes.
-    assert.deepEqual(calls, ["old", "new"]);
-    assert.equal(maxActive, 1);
-    assert.equal(returned, 2);
-    assert.equal(store.getSnapshot().code, "invalid_update");
-    store.detach();
-    assert.equal(store.getSnapshot().kind, "idle");
-    assert.equal(signals[1].aborted, true);
-  } finally { resolve({ done: true, value: undefined }); store.detach(); await store.settled(); }
-});
+  store.select("host", "old"); await reading.promise;
+  store.select("host", "new");
+  assert.equal(signals[0].aborted, true);
+  assert.equal(store.getSnapshot().snapshot, null);
+  assert.deepEqual(calls, ["old"]);
+  next.resolve({ done: false, value: item("0", { sessionId: "old" }) });
+  await store.settled(); // Second selection rejects the deliberately wrong identity, then closes.
+  assert.deepEqual(calls, ["old", "new"]);
+  assert.equal(maxActive, 1);
+  assert.equal(returned, 2);
+  assert.equal(store.getSnapshot().code, "invalid_update");
+  store.detach();
+  assert.equal(store.getSnapshot().kind, "idle");
+  assert.equal(signals[1].aborted, true);
+}));
 
-test("unmount during opening disposes the late channel without publishing", { timeout: 5000 }, async () => {
-  let finish!: (value: AsyncIterable<SessionDisplayItem>) => void;
-  const opening = new Promise<AsyncIterable<SessionDisplayItem>>(resolve => { finish = resolve; });
+test("unmount during opening disposes the late channel without publishing", () => runDisplayFixture(async fixture => {
   let returned = 0;
   let read = 0;
-  const store = createSessionDisplayStore(async () => opening);
-  store.select("host", "selected"); await tick();
-  store.detach();
-  finish({ [Symbol.asyncIterator]() { return {
+  const late: AsyncIterable<SessionDisplayItem> = { [Symbol.asyncIterator]() { return {
     next: async () => { read++; return { done: false, value: item() }; },
     return: async () => { returned++; return { done: true, value: undefined }; },
-  }; } });
+  }; } };
+  const opening = fixture.gate<AsyncIterable<SessionDisplayItem>>(late);
+  const entered = fixture.gate<void>(undefined);
+  const store = fixture.observe(() => { entered.resolve(undefined); return opening.promise; });
+  store.select("host", "selected"); await entered.promise;
+  store.detach();
+  opening.resolve(late);
   await store.settled();
   assert.equal(store.getSnapshot().kind, "idle");
   assert.equal(read, 0); assert.equal(returned, 1);
-});
+}));
 
-test("normal terminal return and missing terminal are distinguished", async () => {
+test("normal terminal return and missing terminal are distinguished", () => runDisplayFixture(async fixture => {
   let cleaned = 0;
-  const store = createSessionDisplayStore(async () => (async function* () {
+  const store = fixture.observe(async () => (async function* () {
     try { yield item("0", { isClosed: true }); } finally { cleaned++; }
   })());
   store.select("host", "selected"); await store.settled();
-  assert.equal(cleaned, 1); assert.equal(store.getSnapshot().kind, "closed"); store.detach();
-  const disconnected = createSessionDisplayStore(async () => sequence([item()]));
+  assert.equal(cleaned, 1); assert.equal(store.getSnapshot().kind, "closed");
+  store.detach();
+  const disconnected = fixture.observe(async () => sequence([item()]));
   disconnected.select("host", "selected"); await disconnected.settled();
-  assert.equal(disconnected.getSnapshot().code, "ended_without_close"); disconnected.detach();
-});
+  assert.equal(disconnected.getSnapshot().code, "ended_without_close");
+}));
 
 test("row identity includes session, run, content and channel without delimiter collisions", () => {
   const keys = [displayRowKey("selected", row), displayRowKey("other", row),
     displayRowKey("selected", { ...row, runId: "other" }), displayRowKey("selected", { ...row, contentId: "other" }),
     displayRowKey("selected", { ...row, kind: "Reasoning" }), displayRowKey("selected", { ...row, runId: null })];
+  assert.equal(new Set(keys).size, keys.length);
+});
+
+test("reported tools are frozen full replacements, including regressed phase, eviction, gap and closure", () => runDisplayFixture(async fixture => {
+  const first = item();
+  const baseline = item("0", { session: { ...first.session!, toolActivities: [tool({ phase: "Completed", runId: null }), tool({ providerId: "Provider" })] } });
+  const replacement = item("3", { isInitial: false, previousRevision: "0", session: { ...first.session!,
+    toolActivities: [tool({ runId: null, name: "x".repeat(127), isNameTruncated: true })], evictedToolActivities: "9223372036854775807" } });
+  const empty = item("4", { isInitial: false, previousRevision: "3", session: first.session });
+  const closed = item("5", { isInitial: false, previousRevision: "4", isClosed: true, session: null });
+  const store = fixture.observe(async () => sequence([baseline, replacement, empty, closed]));
+  const snapshots: SessionDisplayItem[] = [];
+  store.subscribe(() => { const value = store.getSnapshot().snapshot; if (value) snapshots.push(value); });
+  store.select("host", "selected"); await store.settled();
+  assert.equal(snapshots.length, 4);
+  assert.equal(snapshots[0].session!.toolActivities.length, 2);
+  assert.equal(snapshots[0].session!.toolActivities[0].phase, "Completed");
+  assert.equal(snapshots[0].session!.evictedToolActivities, "0");
+  assert.equal(snapshots[1].session!.toolActivities.length, 1);
+  assert.equal(snapshots[1].session!.toolActivities[0].phase, "Started");
+  assert.equal(snapshots[1].session!.toolActivities[0].runId, null);
+  assert.equal(snapshots[1].session!.evictedToolActivities, "9223372036854775807");
+  assert.equal(snapshots[1].hasGap, true);
+  assert.deepEqual(snapshots[2].session!.toolActivities, []);
+  assert.equal(snapshots[3].session, null);
+  assert.equal(store.getSnapshot().kind, "closed");
+  assert.equal(Object.isFrozen(snapshots[0].session!.toolActivities), true);
+  assert.equal(Object.isFrozen(snapshots[0].session!.toolActivities[0]), true);
+  assert.notEqual(snapshots[0].session!.toolActivities[0], baseline.session!.toolActivities[0]);
+  assert.throws(() => Object.assign(snapshots[0].session!.toolActivities[0], { phase: "Failed" }), TypeError);
+}));
+
+test("reported tool validation accepts only the six phases and exact bounded well-formed values", () => runDisplayFixture(async fixture => {
+  const bound = "x".repeat(254) + "😀";
+  for (const phase of ["Requested", "Started", "Progressed", "Completed", "Failed", "Canceled"]) {
+    const base = item();
+    const value = item("0", { isClosed: true, session: { ...base.session!, toolActivities: [
+      tool({ providerId: bound, runId: bound, activityId: bound, name: "x".repeat(126) + "😀", phase }),
+      tool({ providerId: "\ufeff", runId: " run ", activityId: " tool ", name: "", phase }),
+    ] } });
+    const store = fixture.observe(async () => sequence([value]));
+    store.select("host", "selected"); await store.settled();
+    assert.equal(store.getSnapshot().kind, "closed");
+    assert.deepEqual(store.getSnapshot().snapshot!.session!.toolActivities, value.session!.toolActivities);
+  }
+}));
+
+test("malformed reported tool data fails invalid_update without publishing a fallback window", () => runDisplayFixture(async fixture => {
+  const invalid: Record<string, unknown>[] = [
+    { toolActivities: undefined }, { toolActivities: null }, { toolActivities: {} }, { toolActivities: [null] },
+    { toolActivities: [tool(), tool()] }, { toolActivities: [tool(), tool({ activityId: "b" }), tool({ activityId: "c" })] },
+  ];
+  for (const field of ["providerId", "runId", "activityId"]) {
+    for (const value of [undefined, "", " \t", "\u0085", "x".repeat(257), "\ud800", "\udc00", "x\ud800x", 1])
+      invalid.push({ toolActivities: [{ ...tool(), [field]: value }] });
+    if (field !== "runId") invalid.push({ toolActivities: [{ ...tool(), [field]: null }] });
+  }
+  for (const phase of ["Selected", "Deselected", "started", "Unknown", "0", 0, null, undefined])
+    invalid.push({ toolActivities: [{ ...tool(), phase }] });
+  for (const name of [undefined, 1, "x".repeat(129), "\ud800", "x\udc00x"])
+    invalid.push({ toolActivities: [{ ...tool(), name }] });
+  for (const isNameTruncated of [undefined, null, 0, "false"])
+    invalid.push({ toolActivities: [{ ...tool(), isNameTruncated }] });
+  invalid.push({ toolActivities: [tool({ name: null, isNameTruncated: true })] });
+  for (const evictedToolActivities of [undefined, null, 0, "", "00", "01", "+1", "-1", " 1", "1 ", "1\n", "1.0", "1e0", "9223372036854775808", "18446744073709551615"])
+    invalid.push({ evictedToolActivities });
+  for (const patch of invalid) {
+    const first = item();
+    const malformed = item("1", { isInitial: false, previousRevision: "0", isClosed: true,
+      session: { ...first.session!, ...patch } as unknown as SessionDisplayView });
+    const store = fixture.observe(async () => sequence([first, malformed]));
+    const snapshots: SessionDisplayItem[] = [];
+    store.subscribe(() => { const value = store.getSnapshot().snapshot; if (value) snapshots.push(value); });
+    store.select("host", "selected"); await store.settled();
+    assert.equal(store.getSnapshot().code, "invalid_update", JSON.stringify(patch));
+    assert.equal(store.getSnapshot().snapshot, null);
+    assert.equal(snapshots.length, 1);
+  }
+}));
+
+test("reported tool keys include the full session provider nullable-run activity tuple without collisions", () => {
+  const rows = [tool(), tool({ providerId: "Provider" }), tool({ runId: "Run" }), tool({ activityId: "Tool" }),
+    tool({ runId: null }), tool({ runId: "null" }), tool({ providerId: "a|b", runId: "c" }), tool({ providerId: "a", runId: "b|c" }),
+    tool({ providerId: 'a","b', activityId: 'c\\d' })];
+  const keys = rows.map(value => displayToolActivityKey("selected", value));
+  keys.push(displayToolActivityKey("other", rows[0]));
   assert.equal(new Set(keys).size, keys.length);
 });
