@@ -2,7 +2,12 @@ namespace CodeAlta.Agent;
 
 /// <summary>Optional exact-run cancellation, without an unconditional abort fallback.</summary>
 /// <remarks>Supporting providers must honor a supplied <see cref="AgentSendOptions.RunLifecycle"/>.
-/// Run/source identity is validated atomically at mutation admission, not inferred from events.</remarks>
+/// Run/source identity is validated atomically at mutation admission, not inferred from events.
+/// Supporting sessions must allow concurrent exact and trusted <see cref="IAgentSession.AbortAsync"/>
+/// calls, including during retirement, and independent control reads during cancellation callbacks.
+/// The provider owns synchronization and source lifetimes; the host does not serialize these
+/// cancellation calls with its run or control gate. Callbacks must not await their own send, abort,
+/// or session disposal.</remarks>
 public interface IAgentTargetedAbortProvider
 {
     /// <summary>Signals only the expected active run and joins its original cancellation traversal.</summary>

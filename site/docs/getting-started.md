@@ -62,7 +62,13 @@ experimental workflow does not provide full permission/ask parity.
 
 For providers supporting run-bound review, cancelling the owning run invalidates its pending
 reviews, including requests that omit a run ID. It cannot revoke an already accepted decision.
-This does not add a Desktop action to abort an observed run.
+After **Refresh runtime state**, use **Signal cancellation for observed run** to target exactly
+that runtime, attachment and run. This is separate from **Abort submission**. Stale, unsupported,
+retiring, transitioning or draining targets fail without fallback. Refresh submissions for the
+outcome: **Cancellation signalled; run completion is not confirmed.** Failure can occur after
+signalling, and accepted decisions are not rolled back. An uncertain request retains its original
+target and key across selection changes; reconcile manually or deliberately retry that exact
+request. There is no automatic retry or retargeting. Closing the panel cancels only its wait.
 
 Owned-host mode also shows a selected-session **live status/text window**, separate from
 persisted history and submission receipts. It retains at most eight text items with explicit

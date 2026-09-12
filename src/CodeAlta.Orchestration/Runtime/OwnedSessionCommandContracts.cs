@@ -30,6 +30,34 @@ public sealed record OwnedTextSteerRequest(string ClientRequestId, string Sessio
 /// <param name="ExpectedAttachmentGeneration">Observed positive attachment generation; not a history revision.</param>
 public sealed record OwnedCompactRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId, long ExpectedAttachmentGeneration);
 
+/// <summary>Immutable exact-run cancellation target; distinct from aborting an owned send receipt.</summary>
+/// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>
+/// <param name="SessionId">Exact durable session identity without surrounding whitespace.</param>
+/// <param name="ExpectedRuntimeInstanceId">Observed runtime instance identity.</param>
+/// <param name="ExpectedAttachmentGeneration">Observed positive attachment generation.</param>
+/// <param name="ExpectedRunId">Original provider run identity, never retargeted.</param>
+public sealed record OwnedAbortRunRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId,
+    long ExpectedAttachmentGeneration, string ExpectedRunId)
+{
+    internal void Validate()
+    {
+        if (!ValidIdentity(ClientRequestId) || !ValidIdentity(SessionId) || !ValidIdentity(ExpectedRunId)
+            || ExpectedRuntimeInstanceId == Guid.Empty || ExpectedAttachmentGeneration <= 0)
+            throw new ArgumentException("Exact cancellation requires bounded, well-formed session, runtime, attachment, run and retry identities.");
+    }
+
+    private static bool ValidIdentity(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 256 || value != value.Trim()) return false;
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (!char.IsSurrogate(value[index])) continue;
+            if (!char.IsHighSurrogate(value[index]) || ++index == value.Length || !char.IsLowSurrogate(value[index])) return false;
+        }
+        return true;
+    }
+}
+
 /// <summary>The admitted command kind.</summary>
 public enum OwnedSessionCommandKind
 {
@@ -41,6 +69,8 @@ public enum OwnedSessionCommandKind
     Steer,
     /// <summary>Compact an exactly targeted attachment only if idle at actual admission.</summary>
     Compact,
+    /// <summary>Signal cancellation of an exactly targeted provider run, not an owned send receipt.</summary>
+    AbortRun,
 }
 
 /// <summary>Admission decision; only accepted requests allocate new retry receipts.</summary>

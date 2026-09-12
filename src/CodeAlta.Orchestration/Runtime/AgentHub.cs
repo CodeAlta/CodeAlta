@@ -244,6 +244,26 @@ public sealed class AgentHub : IAsyncDisposable
         }
     }
 
+    /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
+    /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
+    /// <param name="expectedRunId">Immutable original provider run identity.</param>
+    /// <param name="cancellationToken">Cancels admission, not cancellation work already admitted by the provider.</param>
+    /// <returns>Exact provider cancellation outcome, not confirmation that the run stopped.</returns>
+    /// <exception cref="ArgumentException">The run identity is blank.</exception>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="NotSupportedException">The session lacks exact cancellation; no fallback is invoked.</exception>
+    /// <exception cref="OperationCanceledException">Admission was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or provider is disposed.</exception>
+    /// <exception cref="Exception">Provider cancellation failed, possibly after signalling.</exception>
+    public async Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentSessionHandleId sessionHandleId,
+        AgentRunId expectedRunId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedRunId.Value);
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        try { return await entry.Coordinator.AbortRunAsync(expectedRunId, cancellationToken).ConfigureAwait(false); }
+        finally { entry.ReleaseReference(); }
+    }
+
     /// <summary>
     /// Triggers a manual compaction in the active session attachment.
     /// </summary>
@@ -609,6 +629,14 @@ public sealed class AgentHub : IAsyncDisposable
 
         public async Task AbortAsync(CancellationToken cancellationToken)
         {
+            // This capability explicitly promises concurrent cancellation/control-read safety.
+            // In particular retirement must not hold the control gate while joining a traversal
+            // whose callback needs that gate. Legacy providers retain their serialization contract.
+            if (_session is IAgentTargetedAbortProvider)
+            {
+                await _session.AbortAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
             await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -619,6 +647,11 @@ public sealed class AgentHub : IAsyncDisposable
                 _controlGate.Release();
             }
         }
+
+        public Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken)
+            => _session is IAgentTargetedAbortProvider provider
+                ? provider.AbortRunAsync(expectedRunId, cancellationToken)
+                : throw new NotSupportedException("The session does not support exact-run cancellation.");
 
         public async Task<AgentCompactionOutcome?> CompactAsync(CancellationToken cancellationToken)
         {

@@ -265,7 +265,7 @@ Desktop startup, owned commands or event subscriptions.
 
 ### Host-owned text commands (in development)
 
-`CodeAltaHost.Commands` owns text-send, abort, exact-target steering and idle-compaction admission against that host's existing
+`CodeAltaHost.Commands` owns text-send, abort, exact-target steering, idle-compaction and exact-run cancellation admission against that host's existing
 runtime. Requests contain scalar identity/text values, not mutable descriptors, execution
 options, tools or callbacks. Send preparation resolves the durable session directly and captures
 its execution policy; this bounded route supplies no custom tools, defaults to denying permission
@@ -608,10 +608,10 @@ Mutation and shell tools flow through host permission handling. Tool schemas are
 
 `AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions default to denial; the backend opt-in described above supplies runtime execution/attachment binding. This API alone enables no Desktop approval route.
 
-#### Provider exact-run cancellation foundation
+#### Exact-run cancellation and provider lifetime
 
-`IAgentTargetedAbortProvider.AbortRunAsync` is an optional **provider-only** capability. It is not
-yet exposed as an AgentHub/owned command or Desktop RPC/action. The in-process `AgentSession`
+`IAgentTargetedAbortProvider.AbortRunAsync` is an optional capability exposed through exact
+`AgentHub.AbortRunAsync`, owned command admission and Desktop `sessions.abortRun`. The in-process `AgentSession`
 atomically matches the expected run to its original source record. Cancellation remains possible
 during successful postprocessing, but exact admission closes when `Closing` begins. Stale targets
 return `TargetNotActive` without cancellation; unsupported providers have no unconditional fallback.
@@ -628,6 +628,35 @@ turn completion still clears steering/conversation bookkeeping before post-turn 
 it no longer releases source lifetime. Hooks/cancellation callbacks must not await their own
 send, abort or disposal. Noncooperative dependencies can prevent shutdown; timeouts are not proof
 of settlement. Existing trusted targeting, AutoApprove and user-input policy remain unchanged.
+
+Only capability providers bypass the hub run/control gates for exact and trusted cancellation.
+They must support concurrent cancellation and independent control reads from callbacks; otherwise
+retirement can hold the control gate while joining a traversal whose callback needs that gate.
+Legacy providers retain trusted control serialization; exact cancellation throws without fallback.
+The original hub entry reference remains retained until the provider task settles, including failure.
+
+`OwnedAbortRunRequest` captures immutable session/runtime/positive attachment/run/retry identity.
+The runtime captures only an existing matching actor/owned attachment, refusing transition,
+termination, retirement and queue drain. It acquires handle use atomically, leaves the mailbox,
+then forwards the original expected run unchanged. Recorded `ActiveRunId` is not authority.
+There is no discovery, acquisition, replacement, recapture or attachment-wide permission invalidation.
+Provider-bound execution cancellation supplies the permission authority. Original provider work and
+forwarding registration disposal settle before destination source and handle-use release.
+
+AbortRun reserves one independent per-session slot and shares bounded receipt capacity/key identity
+with Send/Abort/Steer/Compact. Exact replay returns the original receipt even after closure; changed
+fields or kind conflict. Post-admission caller cancellation abandons only the wait. Shutdown initiates
+independent cancellation before joining workers. Terminal codes are `cancellation_signalled`,
+`abort_run_not_active`, `abort_run_target_unavailable`, `abort_run_unsupported` and `abort_run_failed`.
+Failure can occur after signalling; no raw provider exception text or run-stopped claim is returned.
+
+Unary `sessions.abortRun` adds the host epoch and validates canonical runtime GUID, positive decimal
+attachment string and bounded well-formed identities before admission. The App retains a frozen
+observed target/key and synchronous in-flight latch across selection/remount. Only matching epoch,
+session, key and AbortRun-kind receipts reconcile it, never while its original waiter remains live.
+Legacy Abort rows cannot reconcile it. Late epoch mismatch disables shared mutations without stale
+panel publication. **Signal cancellation for observed run** remains separate from **Abort submission**;
+manual refresh/retry never retargets an uncertain request or automatically retries cancellation.
 
 The `alta` live tool is injected for CodeAlta-managed sessions on any configured provider when the in-process runtime is available. See [`alta` live tool](live-tool.md).
 

@@ -223,6 +223,47 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public async Task AbortRun_ExistingOnlyCaptureRefusesAbsentUnownedStaleTerminatedAndDrain()
+    {
+        await Fixture.Run(async f =>
+        {
+            var absent = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+            var request = new OwnedAbortRunRequest("abort-run", f.Session.SessionId, absent.RuntimeInstanceId, 1, "original-run");
+            Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+            Assert.AreEqual(0, f.Provider.AttachmentCount);
+            await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+            var unowned = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+            request = request with { ExpectedAttachmentGeneration = unowned.Entry!.AttachmentGeneration };
+            Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+            Assert.AreEqual(unowned, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+            Assert.AreEqual(1, f.Provider.AttachmentCount);
+        });
+
+        // Retirement releases the fake provider's send gate. Use fresh ownership/gates for drain.
+        await Fixture.Run(async f =>
+        {
+            await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+            var owned = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+            var request = new OwnedAbortRunRequest("abort-run", f.Session.SessionId, owned.RuntimeInstanceId,
+                owned.Entry!.AttachmentGeneration, "original-run");
+            var otherAttachment = request.ExpectedAttachmentGeneration == 1 ? 2 : 1;
+            foreach (var stale in new[] { request with { ExpectedAttachmentGeneration = otherAttachment },
+                request with { SessionId = "missing" }, request with { ExpectedRuntimeInstanceId = Guid.NewGuid() } })
+                Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(stale, CancellationToken.None)));
+            // No recorded run is required for capture; unsupported provider, not event timing, rejects.
+            await f.Expect<NotSupportedException>(f.Track(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+            await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "inert queued input", "send", null));
+            await f.EmitAndObserve(AgentSessionUpdateKind.Idle, null);
+            await f.Ready(f.Provider.SendStarted.Task);
+            Assert.IsTrue((await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId))).Entry!.QueueDrainInProgress);
+            Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+            await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null);
+            Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+            Assert.AreEqual(1, f.Provider.AttachmentCount);
+        });
+    }
+
+    [TestMethod]
     public Task OwnedCompact_RecordedRunAndQueueDrainRefuseBeforeProvider() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
@@ -701,10 +742,31 @@ public sealed class SessionRuntimeForwardingLifetimeTests
 
         internal async Task EmitAndObserve(AgentSessionUpdateKind kind, AgentRunId? runId, List<SessionRuntimeEvent>? observed = null)
         {
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var cancellation = new CancellationTokenSource();
             var marker = Guid.NewGuid().ToString();
-            Provider.Latest.EmitState(kind, runId, marker);
-            await Wait(Observe());
+            Task observation = Task.CompletedTask;
+            try
+            {
+                Provider.Latest.EmitState(kind, runId, marker);
+                observation = Track(Observe());
+                await Wait(observation);
+            }
+            catch (Exception ex)
+            {
+                // Preserve the bounded observer's failure even if cancellation/iterator cleanup
+                // subsequently faults. A timeout is never permission to release the source.
+                lock (_gate) _failures.Add(ex);
+                throw;
+            }
+            finally
+            {
+                Task traversal;
+                try { traversal = Track(cancellation.CancelAsync()); }
+                catch (Exception ex) { traversal = Track(Task.FromException(ex)); }
+                // Initiate cancellation before dependent joins. Neither join has a timeout:
+                // the outer fixture retains this work/source/root if actual cleanup stays pending.
+                await Track(Task.WhenAll(observation, traversal));
+            }
             async Task Observe()
             {
                 await foreach (var value in Runtime.StreamEventsAsync(cancellation.Token))

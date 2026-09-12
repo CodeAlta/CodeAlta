@@ -15,6 +15,7 @@ internal sealed class SessionOperationsService
     private readonly Func<OwnedAbortRequest, CancellationToken, OwnedSessionCommandAdmission>? _abort;
     private readonly Func<OwnedTextSteerRequest, CancellationToken, OwnedSessionCommandAdmission>? _steer;
     private readonly Func<OwnedCompactRequest, CancellationToken, OwnedSessionCommandAdmission>? _compact;
+    private readonly Func<OwnedAbortRunRequest, CancellationToken, OwnedSessionCommandAdmission>? _abortRun;
     private readonly Dictionary<Guid, OwnedSessionCommandReceipt> _receipts = [];
     private bool _closed;
 
@@ -27,6 +28,7 @@ internal sealed class SessionOperationsService
         _abort = commands.AdmitAbort;
         _steer = commands.AdmitSteer;
         _compact = commands.AdmitCompact;
+        _abortRun = commands.AdmitAbortRun;
     }
     // Mandatory rejection-route seam: tests use throwing literal callbacks, never fabricate receipts.
     internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
@@ -40,12 +42,18 @@ internal sealed class SessionOperationsService
     internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
         Func<OwnedAbortRequest, OwnedSessionCommandAdmission> abort, Func<OwnedTextSteerRequest, OwnedSessionCommandAdmission>? steer,
         Func<OwnedCompactRequest, OwnedSessionCommandAdmission> compact)
+        : this(epoch, send, abort, steer, compact, _ => throw new InvalidOperationException("No exact cancellation callback configured.")) { }
+
+    internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
+        Func<OwnedAbortRequest, OwnedSessionCommandAdmission> abort, Func<OwnedTextSteerRequest, OwnedSessionCommandAdmission>? steer,
+        Func<OwnedCompactRequest, OwnedSessionCommandAdmission> compact, Func<OwnedAbortRunRequest, OwnedSessionCommandAdmission> abortRun)
     {
         _epoch = epoch;
         _send = (request, _) => send(request);
         _abort = (request, _) => abort(request);
         _steer = steer is null ? null : (request, _) => steer(request);
         _compact = (request, _) => compact(request);
+        _abortRun = (request, _) => abortRun(request);
     }
 
     [NeoRpcMethod("send")]
@@ -127,6 +135,27 @@ internal sealed class SessionOperationsService
         }
     }
 
+    [NeoRpcMethod("abortRun")]
+    public SessionAdmission AbortRun(SessionAbortRunRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, null);
+            if (!Identity(request.ClientRequestId, 256) || !Identity(request.SessionId, 256) || !Identity(request.ExpectedRunId, 256)
+                || !CanonicalGuid(request.ExpectedRuntimeInstanceId, out var runtime) || runtime == Guid.Empty
+                || !long.TryParse(request.ExpectedAttachmentGeneration, NumberStyles.None, CultureInfo.InvariantCulture, out var attachment)
+                || attachment <= 0 || attachment.ToString(CultureInfo.InvariantCulture) != request.ExpectedAttachmentGeneration)
+                return new("invalid_request", _epoch, null);
+            cancellationToken.ThrowIfCancellationRequested();
+            try { return Retain(_abortRun!(new(request.ClientRequestId, request.SessionId, runtime, attachment, request.ExpectedRunId), cancellationToken)); }
+            catch (ArgumentException) { return new("invalid_request", _epoch, null); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception) { return new("admission_failed", _epoch, null); }
+        }
+    }
+
     [NeoRpcMethod("receipts")]
     public SessionReceiptPage Receipts(SessionReceiptRequest request)
     {
@@ -180,7 +209,7 @@ internal sealed class SessionOperationsService
     private static bool ValidRow(SessionReceiptView row) => Identity(row.ClientRequestId, 256, trim: false)
         && Identity(row.SessionId, 256, trim: false) && CanonicalGuid(row.OperationId, out _)
         && (row.TargetOperationId is null || CanonicalGuid(row.TargetOperationId, out _))
-        && row.Kind is "Send" or "Abort" or "Steer" or "Compact" && row.State is "pending" or "terminal"
+        && row.Kind is "Send" or "Abort" or "Steer" or "Compact" or "AbortRun" && row.State is "pending" or "terminal"
         && (row.Outcome is null or "Completed" or "Cancelled" or "Failed")
         && (row.Code is null || Identity(row.Code, 64, trim: false))
         && (row.RunId is null || Identity(row.RunId, 256, trim: false));
@@ -211,6 +240,8 @@ internal sealed record SessionSteerRequest(string ExpectedEpoch, string ClientRe
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId, string Text);
 internal sealed record SessionCompactRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration);
+internal sealed record SessionAbortRunRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
+    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId);
 internal sealed record SessionReceiptRequest(string ExpectedEpoch, int Offset);
 internal sealed record SessionAdmission(string Status, string? Epoch, SessionReceiptView? Receipt);
 internal sealed record SessionReceiptPage(string Status, string? Epoch, SessionReceiptView[] Rows, int? Next);

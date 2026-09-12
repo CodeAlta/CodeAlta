@@ -12,6 +12,7 @@ import { createRuntimeStateReader } from "./runtimeState";
 import { createPermissionReviewer } from "./sessionPermissions";
 import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
+import { createAbortRunSubmissions } from "./sessionAbortRun";
 import "./style.css";
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
   const [submissions] = useState(() => new Map<string, SessionSendRequest>());
   const [steering] = useState(() => createSteeringSubmissions(sessionOperations.steer));
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
+  const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
@@ -101,7 +103,7 @@ function App() {
             <dt>Persisted update time</dt><dd>{selectedSession.updatedAt}</dd>
           </dl>
           {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
-            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} drafts={submissions} steering={steering} compaction={compaction} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
+            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} drafts={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
             : <History key={selectedSession.id} sessionId={selectedSession.id} />}
         </section>}
       </>}

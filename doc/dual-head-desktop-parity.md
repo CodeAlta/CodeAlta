@@ -1,15 +1,62 @@
 # Dual-head desktop parity — in development
 
-> **Status: scoped owned Desktop command review, exact-target steering and idle compaction verified, 2026-09-12.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission/display evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: scoped owned Desktop command review, exact-target steering, idle compaction and observed-run cancellation verified, 2026-09-12.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission/display evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
+
+## M4 checkpoint: exact observed-run cancellation — 2026-09-12
+
+The same sole writer implemented the optional hub route, existing-only owned runtime capture,
+independent AbortRun slot/shared bounded receipts and unary Desktop `sessions.abortRun`. Parent
+audited source and complete fixtures before execution, owns documentation and integration, and
+returned corrections to that writer without adding another implementation writer.
+
+- Exact session/runtime/attachment/run identity is retained through original provider work, never
+  rediscovered, replaced, recaptured or retargeted. Unsupported, stale, transitioning, retiring,
+  terminated and draining targets fail closed. Event-derived run state is not cancellation authority.
+- Only exact-capability providers bypass hub run/control gates for exact and trusted cancellation.
+  Their concurrent cancellation and independent callback control reads avoid a retirement/control-gate
+  cycle. Legacy trusted serialization remains. Original references, registration disposal and
+  cancellation traversals settle before source/use release; independent shutdown cancellation starts
+  before dependent joins. No new event reader, Display change, queue work or approval authority.
+- Provider-bound run cancellation supplies permission authority, including matching/null-run requests
+  with token None. Stale A cannot cancel B; accepted decisions and unrelated trusted requests survive.
+- Exact replay returns the original receipt even after closure. Changed fields/kinds conflict.
+  Bounded terminal codes distinguish signalled, not active, target unavailable, unsupported and failed.
+  Failure can follow signalling. Success is **cancellation signalled, not run completion**.
+- App-owned frozen targets and synchronous latches survive remount and selection changes. Reconcile
+  only matching epoch/session/key AbortRun receipts after the original waiter joins; legacy Abort is
+  distinct. Late epoch mismatch disables mutations without stale panel publication. Manual only:
+  no automatic refresh, retry or retargeting. Generated contracts preserve all six identity strings.
+
+Pre-execution audit corrected two fixture permission-handle type/member errors, joined the original
+fixture event iterator and explicit cancellation traversal before source disposal, and bounded the
+owner-shutdown failure code with an additional held-admission regression. Initial focused runs passed
+all 13 new .NET/five frontend cases, but the broader run exposed one queue-drain fixture race (84 pass,
+one fail): earlier detach had released its shared fake send gate. The same writer isolated the two
+phases into fresh fixture lifetimes without weakening refusal assertions. Parent re-audited and
+reran the new Orchestration filter and full audited regression selection successfully. The failed
+root remains at `%TEMP%/CodeAlta-forwarding-2719f9bd355d42208c207127483abcad`.
+
+Final verification: **128 focused .NET cases pass** (85 owned-command/forwarding/run-binding/hub,
+30 actual-Agent lifetime/idle-compaction/permission mailbox, 13 Desktop-owned), zero failures/skips.
+This includes **13 new .NET cases**, also passed in focused filters. All **64 frontend cases** pass,
+including five new pure exact-cancellation cases. Cached targeted and full Release solution builds
+pass zero warnings/errors with `--no-restore`, `NeoAstraRestoreFrontendDependencies=false` and
+`NeoAstraBuildFrontend=false`; cached TypeScript/Vite passes separately. Normal cached generation
+and contract validation expose unary `sessions.abortRun`. Logs: `%TEMP%/codealta-parent-exact-abort-*-20260912.log`.
+
+No native/mounted UI, real-provider/tool/auth, default-profile, network/install/restore, full-suite
+or website qualification. Website theme acquisition remains outside the no-network boundary.
+Noncooperative/self-awaiting callbacks remain unsupported; timeout is not termination proof.
+Queue ownership and remaining M4–M6 requirements are not completed by this command vertical.
 
 ## M4 checkpoint: provider run lifetime and owned run binding — 2026-09-12
 
 The optional provider-only `IAgentTargetedAbortProvider` and per-send `AgentRunLifecycle` now
 establish original-source cancellation and authoritative owned permission/run binding in the
-in-process AgentSession. This is a prerequisite, **not** an AgentHub/owned AbortRun command,
-Desktop RPC/action, queue implementation or completed M4 milestone.
+in-process AgentSession. This historical prerequisite did not itself add an AgentHub/owned AbortRun
+command or Desktop RPC/action (integrated separately above), queue implementation or completed M4 milestone.
 
 - Exact admission matches the actual run under provider ownership; caller cancellation only
   cancels admission. Success means the original cancellation traversal settled, not run completion

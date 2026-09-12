@@ -1607,6 +1607,41 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         finally { handleUse?.Dispose(); }
     }
 
+    internal Task<AgentTargetedAbortOutcome?> AbortRunOwnedCommandAsync(OwnedAbortRunRequest request, CancellationToken executionCancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Validate();
+        return AdmitAsync(() => AbortRunOwnedCommandBodyAsync(request, executionCancellationToken), CancellationToken.None);
+    }
+
+    private async Task<AgentTargetedAbortOutcome?> AbortRunOwnedCommandBodyAsync(OwnedAbortRunRequest request, CancellationToken executionCancellationToken)
+    {
+        executionCancellationToken.ThrowIfCancellationRequested();
+        if (request.ExpectedRuntimeInstanceId != _runtimeInstanceId || !_sessionActors.TryGet(request.SessionId, out var actor)) return null;
+        OwnedProviderEventForwarding.Use? handleUse = null;
+        try
+        {
+            var handle = await actor.QueryAsync(_ =>
+            {
+                if (_transitions.ContainsKey(request.SessionId) || !_entries.TryGetValue(request.SessionId, out var entry)
+                    || entry.IsTerminated || entry.QueueDrainInProgress || entry.Attachment.Ordinal != request.ExpectedAttachmentGeneration
+                    || !HasOwnedCommandDefaults(entry)) return ValueTask.FromResult<AgentSessionHandleId?>(null);
+                handleUse = entry.Attachment.TryAcquireHandleUse();
+                return ValueTask.FromResult(handleUse is null ? (AgentSessionHandleId?)null : entry.SessionHandleId);
+            }, CancellationToken.None).ConfigureAwait(false);
+            if (handle is null) return null;
+            // Event-derived ActiveRunId is not admission authority. Only the captured provider can
+            // atomically validate the unchanged expected run; no permission invalidation occurs here.
+            using var execution = new CancellationTokenSource();
+            await using var ownerCancellation = executionCancellationToken.Register(
+                static state => ((CancellationTokenSource)state!).Cancel(), execution);
+            await using var attachmentCancellation = handleUse!.Attachment.Cancellation.Token.Register(
+                static state => ((CancellationTokenSource)state!).Cancel(), execution);
+            return await _agentHub.AbortRunAsync(handle.Value, new AgentRunId(request.ExpectedRunId), execution.Token).ConfigureAwait(false);
+        }
+        finally { handleUse?.Dispose(); }
+    }
+
     /// <summary>Captures immutable current-runtime facts for one session without discovery or acquisition.</summary>
     /// <param name="sessionId">The nonblank durable session identifier.</param>
     /// <param name="cancellationToken">Cancels admission or the caller's wait, not already admitted runtime-owned work.</param>

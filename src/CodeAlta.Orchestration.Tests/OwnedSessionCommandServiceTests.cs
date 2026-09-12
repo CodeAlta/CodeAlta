@@ -784,6 +784,203 @@ public sealed class OwnedSessionCommandServiceTests
         await f.Observe(later.Completion);
     }, reviewPermissions: true);
 
+    [TestMethod]
+    public Task AbortRun_ReplayConflictsIndependentSlotAndSharedCapacity() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        f.Provider.HoldExactAbort = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "exact send");
+        var steerRequest = await f.SteerRequest();
+        var steer = f.Accept(f.AdmitSteer(steerRequest));
+        await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "independent steer");
+        var request = await f.AbortRunRequest();
+        using var caller = new CancellationTokenSource();
+        var abort = f.Accept(f.AdmitAbortRun(request, caller.Token));
+        await f.ObserveReadiness(f.Provider.ExactAbortStarted.Task, abort, "exact cancellation");
+        var cancellation = f.Track(caller.CancelAsync());
+        await f.Observe(cancellation);
+        Assert.IsFalse(abort.Completion.IsCompleted);
+        Assert.IsFalse(f.Provider.ExactCallerCancelled.Task.IsCompleted, "Accepted caller cancellation must not cancel the owned execution.");
+        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        foreach (var changed in new[] { request with { SessionId = "other" }, request with { ExpectedRuntimeInstanceId = Guid.NewGuid() },
+            request with { ExpectedAttachmentGeneration = request.ExpectedAttachmentGeneration + 1 }, request with { ExpectedRunId = "other" } })
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitAbortRun(changed).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitAbort(new(request.ClientRequestId, send.OperationId)).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(new(request.ClientRequestId, f.SessionId, "other kind")).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSteer(steerRequest with { ClientRequestId = request.ClientRequestId }).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitCompact(new(request.ClientRequestId, f.SessionId,
+            request.ExpectedRuntimeInstanceId, request.ExpectedAttachmentGeneration)).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitAbortRun(request with { ClientRequestId = "busy" }).Kind);
+        f.Provider.ReleaseExactAbort.TrySetResult();
+        Assert.AreEqual("cancellation_signalled", (await f.Observe(abort.Completion)).Code);
+        var stale = f.Accept(f.AdmitAbortRun(request with { ClientRequestId = "stale", ExpectedRunId = "not-active" }));
+        Assert.AreEqual("abort_run_not_active", (await f.Observe(stale.Completion)).Code);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitAbortRun(request with { ClientRequestId = "full" }).Kind);
+        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        Assert.AreEqual(1, f.Provider.ExactTraversals);
+        Assert.AreEqual(1, f.Provider.ExactAdmissions);
+        f.Provider.ReleaseAll();
+        await f.Observe(send.Completion);
+        await f.Observe(steer.Completion);
+        await f.Observe(f.BeginDisposal());
+        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Closed, f.AdmitAbortRun(request with { ClientRequestId = "closed" }).Kind);
+    }, capacity: 4);
+
+    [TestMethod]
+    public Task AbortRun_ValidationPreCancellationAndUnsupportedDoNotInvalidate() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportRunLifecycle = true; // Legacy session deliberately lacks the exact capability.
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "legacy send");
+        var request = await f.AbortRunRequest();
+        foreach (var invalid in new[] { request with { ClientRequestId = "\ud800" }, request with { SessionId = " x" },
+            request with { ExpectedRunId = "\udfff" }, request with { ExpectedRunId = new string('r', 257) },
+            request with { ExpectedRuntimeInstanceId = Guid.Empty }, request with { ExpectedAttachmentGeneration = 0 } })
+            Assert.Throws<ArgumentException>(() => f.AdmitAbortRun(invalid));
+        using var caller = new CancellationTokenSource();
+        await f.Observe(f.Track(caller.CancelAsync()));
+        Assert.Throws<OperationCanceledException>(() => f.AdmitAbortRun(request, caller.Token));
+        var pending = f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!);
+        var page = await f.Observe(f.Host.RuntimeService.Permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+        var handle = page.Entries.Single().Handle;
+        var abort = f.Accept(f.AdmitAbortRun(request));
+        Assert.AreEqual("abort_run_unsupported", (await f.Observe(abort.Completion)).Code);
+        Assert.AreEqual(0, f.Provider.Aborts);
+        Assert.IsFalse(f.Provider.BoundRunToken.IsCancellationRequested);
+        Assert.IsTrue(await f.Observe(f.Host.RuntimeService.Permissions.ResolveOwnedCommandAsync(handle,
+            AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(pending)).Kind);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    public Task AbortRun_StaleALeavesBReviewsAndMatchingBCancelsOnlyBoundAuthority() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        var a = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, a, "run A");
+        var requestA = await f.AbortRunRequest();
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(a.Completion);
+        var b = f.Send("send-b");
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, b, "run B");
+        var permissions = f.Host.RuntimeService.Permissions;
+        var handler = f.Provider.SecondSendOptions!.OnPermissionRequest!;
+        var command = f.Provider.CommandRequest();
+        var matching = f.Track(handler(command with { RunId = new("owned-run-2"), InteractionId = "matching" }, CancellationToken.None));
+        var nullRun = f.Track(handler(command with { InteractionId = "null-run" }, CancellationToken.None));
+        var accepted = f.Track(handler(command with { InteractionId = "already-accepted" }, CancellationToken.None));
+        var trusted = await f.Observe(permissions.RegisterAsync(f.SessionId, command with { InteractionId = "trusted-abort-run" }, false, CancellationToken.None));
+        _ = f.Track(trusted.Completion);
+        var stale = f.Accept(f.AdmitAbortRun(requestA));
+        Assert.AreEqual("abort_run_not_active", (await f.Observe(stale.Completion)).Code);
+        Assert.IsFalse(matching.IsCompleted);
+        Assert.IsFalse(nullRun.IsCompleted);
+        var page = await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+        Assert.HasCount(3, page.Entries);
+        var acceptedHandle = page.Entries.Single(entry => entry.Handle.Attempt.InteractionId == "already-accepted").Handle;
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(acceptedHandle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(accepted)).Kind);
+        var abort = f.Accept(f.AdmitAbortRun(requestA with { ClientRequestId = "cancel-b", ExpectedRunId = "owned-run-2" }));
+        Assert.AreEqual("cancellation_signalled", (await f.Observe(abort.Completion)).Code);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(matching)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(nullRun)).Kind);
+        foreach (var entry in page.Entries)
+            Assert.IsFalse(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(accepted)).Kind);
+        Assert.IsFalse(trusted.Completion.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.CancelAsync(trusted.Snapshot.Handle).AsTask()));
+        await f.Observe(trusted.Completion);
+        Assert.AreEqual(1, f.Provider.ExactTraversals);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task AbortRun_CapturedTraversalSurvivesRetirementOrOwnerShutdown(bool shutdown) => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        f.Provider.HoldExactAbort = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.AbortRunRequest();
+        var abort = f.Accept(f.AdmitAbortRun(request));
+        await f.ObserveReadiness(f.Provider.ExactAbortStarted.Task, abort, "traversal");
+        var closing = f.Track(shutdown ? f.Host.Commands.DisposeAsync().AsTask()
+            : f.Host.RuntimeService.DetachRuntimeSessionAsync(f.SessionId));
+        await f.Observe(f.Provider.ExactCallerCancelled.Task);
+        Assert.IsFalse(abort.Completion.IsCompleted);
+        Assert.IsFalse(closing.IsCompleted);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        if (shutdown) Assert.AreSame(closing, f.Host.Commands.DisposeAsync().AsTask());
+        else
+        {
+            var refused = f.Track(f.Host.RuntimeService.AbortRunOwnedCommandAsync(request, CancellationToken.None));
+            Assert.IsNull(await f.Observe(refused));
+        }
+        f.Provider.ReleaseAll();
+        Assert.AreEqual("cancellation_signalled", (await f.Observe(abort.Completion)).Code);
+        await f.Observe(closing);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        Assert.AreEqual(1, f.Provider.Resumes);
+    });
+
+    [TestMethod]
+    public Task AbortRun_FailureAfterSignallingIsBoundedAndReplayDoesNotRepeat() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        f.Provider.FailExactAbort = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.AbortRunRequest();
+        var abort = f.Accept(f.AdmitAbortRun(request));
+        var result = await f.Observe(abort.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
+        Assert.AreEqual("abort_run_failed", result.Code);
+        Assert.IsTrue(f.Provider.BoundRunToken.IsCancellationRequested);
+        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        Assert.AreEqual(1, f.Provider.ExactTraversals);
+    });
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task AbortRun_RetirementOrShutdownAfterCaptureBeforeProviderAdmissionNeverRecaptures(bool shutdown) => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        f.Provider.HoldExactAdmission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.AbortRunRequest();
+        var abort = f.Accept(f.AdmitAbortRun(request));
+        await f.ObserveReadiness(f.Provider.ExactEntered.Task, abort, "captured provider entry");
+        var closing = f.Track(shutdown ? f.Host.Commands.DisposeAsync().AsTask()
+            : f.Host.RuntimeService.DetachRuntimeSessionAsync(f.SessionId));
+        await f.Observe(f.Provider.ExactCallerCancelled.Task);
+        Assert.IsFalse(closing.IsCompleted);
+        Assert.IsFalse(abort.Completion.IsCompleted);
+        Assert.AreEqual(0, f.Provider.ExactAdmissions);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        if (shutdown)
+        {
+            Assert.AreSame(closing, f.Host.Commands.DisposeAsync().AsTask());
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Closed, f.AdmitAbortRun(request with { ClientRequestId = "closed-before-admission" }).Kind);
+        }
+        else
+            Assert.IsNull(await f.Observe(f.Track(f.Host.RuntimeService.AbortRunOwnedCommandAsync(request, CancellationToken.None))));
+        f.Provider.ReleaseAll();
+        var result = await f.Observe(abort.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
+        Assert.AreEqual("abort_run_failed", result.Code);
+        await f.Observe(closing);
+        Assert.AreSame(abort, f.AdmitAbortRun(request).Receipt);
+        Assert.AreEqual(0, f.Provider.ExactAdmissions);
+        Assert.AreEqual(1, f.Provider.Resumes);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+    });
+
     // Constructed only inside a selected real-route test. All gates and tasks are instance-owned.
     private sealed class Fixture
     {
@@ -958,6 +1155,15 @@ public sealed class OwnedSessionCommandServiceTests
 
         internal OwnedSessionCommandAdmission AdmitCompact(OwnedCompactRequest request, CancellationToken cancellationToken = default)
             => RetainAdmission(Host.Commands.AdmitCompact(request, cancellationToken));
+
+        internal OwnedSessionCommandAdmission AdmitAbortRun(OwnedAbortRunRequest request, CancellationToken cancellationToken = default)
+            => RetainAdmission(Host.Commands.AdmitAbortRun(request, cancellationToken));
+
+        internal async Task<OwnedAbortRunRequest> AbortRunRequest()
+        {
+            var state = await Observe(Host.RuntimeService.GetCurrentStateAsync(SessionId));
+            return new("abort-run", SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "owned-run-1");
+        }
 
         internal async Task<OwnedCompactRequest> PrepareCompact()
         {
@@ -1188,6 +1394,17 @@ public sealed class OwnedSessionCommandServiceTests
         internal TaskCompletionSource ReleaseSteer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task<AgentPermissionDecision>? SendPermission { get; private set; }
         internal bool SupportRunLifecycle { get; set; }
+        internal bool SupportExactAbort { get; set; }
+        internal bool HoldExactAbort { get; set; }
+        internal bool HoldExactAdmission { get; set; }
+        internal bool FailExactAbort { get; set; }
+        internal int ExactTraversals;
+        internal int ExactAdmissions;
+        internal TaskCompletionSource ExactEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseExactAdmission { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ExactAbortStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ExactCallerCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseExactAbort { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int RunBindings { get; private set; }
         internal int RunClosures { get; private set; }
         internal CancellationToken BoundRunToken { get; private set; }
@@ -1253,7 +1470,8 @@ public sealed class OwnedSessionCommandServiceTests
                 PreparationStarted.TrySetResult();
                 await ReleasePreparation.Task.ConfigureAwait(false);
                 if (FailPreparation) throw new InvalidOperationException("Controlled preparation failure.");
-                return SupportIdleCompaction ? new CompactSession(this, sessionId) : new Session(this, sessionId);
+                return SupportExactAbort ? new ExactSession(this, sessionId)
+                    : SupportIdleCompaction ? new CompactSession(this, sessionId) : new Session(this, sessionId);
             }
             finally { Interlocked.Decrement(ref _active); }
         }
@@ -1274,6 +1492,8 @@ public sealed class OwnedSessionCommandServiceTests
             ReleaseSteer.TrySetResult();
             ReleaseCompactAdmission.TrySetResult();
             ReleaseCompact.TrySetResult();
+            ReleaseExactAbort.TrySetResult();
+            ReleaseExactAdmission.TrySetResult();
         }
 
         // A fresh runtime for every real registry factory call, including resume-fallback creation.
@@ -1306,7 +1526,7 @@ public sealed class OwnedSessionCommandServiceTests
                 owner._handler = handler;
                 return new Subscription(() => owner._handler = null);
             }
-            public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
+            public virtual async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
             {
                 Interlocked.Increment(ref owner._active);
                 CancellationTokenSource? runSource = null;
@@ -1364,7 +1584,7 @@ public sealed class OwnedSessionCommandServiceTests
                     finally { runSource?.Dispose(); Interlocked.Decrement(ref owner._active); }
                 }
             }
-            public async Task AbortAsync(CancellationToken cancellationToken = default)
+            public virtual async Task AbortAsync(CancellationToken cancellationToken = default)
             {
                 Interlocked.Increment(ref owner._active);
                 try
@@ -1400,6 +1620,122 @@ public sealed class OwnedSessionCommandServiceTests
             {
                 if (Volatile.Read(ref owner._active) != 0) Interlocked.Increment(ref owner._earlyDisposals);
                 return ValueTask.CompletedTask;
+            }
+        }
+
+        // Each send owns its original source/worker. No mutable latest-CTS cleanup or real tools.
+        private sealed class ExactSession : Session, IAgentTargetedAbortProvider
+        {
+            private readonly object _gate = new();
+            private readonly ControlledProvider _owner;
+            private ExactRun? _run;
+            internal ExactSession(ControlledProvider owner, string sessionId) : base(owner, sessionId) => _owner = owner;
+            public override async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
+            {
+                var owner = _owner;
+                Interlocked.Increment(ref owner._active);
+                var number = Interlocked.Increment(ref owner._sends);
+                var run = new ExactRun(owner, new("owned-run-" + number));
+                lock (_gate) _run = run;
+                owner.BoundRunToken = run.Source.Token;
+                if (number == 1) owner.FirstSendOptions = options; else owner.SecondSendOptions = options;
+                var forwarding = cancellationToken.Register(() =>
+                {
+                    owner.SendCancelled.TrySetResult();
+                    run.Signal();
+                });
+                try
+                {
+                    if (options.RunLifecycle is { } lifecycle)
+                    {
+                        await lifecycle.StartedAsync(run.Id, run.Source.Token);
+                        owner.RunBindings++;
+                    }
+                    (number == 1 ? owner.SendStarted : owner.SecondSendStarted).TrySetResult();
+                    await (number == 1 ? owner.ReleaseSend.Task : owner.ReleaseSecondSend.Task);
+                    return run.Id;
+                }
+                finally
+                {
+                    lock (_gate) run.Closing = true;
+                    var closing = options.RunLifecycle?.ClosingAsync(run.Id) ?? Task.CompletedTask;
+                    var registrationDisposal = forwarding.DisposeAsync().AsTask();
+                    try { await Task.WhenAll(closing, registrationDisposal); }
+                    finally
+                    {
+                        owner.RunClosures++;
+                        lock (_gate) { run.SignalGate.TrySetResult(false); _run = null; }
+                        try { await run.Work; }
+                        finally
+                        {
+                            await run.Registration.DisposeAsync();
+                            run.Source.Dispose();
+                            Interlocked.Decrement(ref owner._active);
+                        }
+                    }
+                }
+            }
+            public async Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken = default)
+            {
+                var owner = _owner;
+                Interlocked.Increment(ref owner._active);
+                try
+                {
+                    await using var registration = cancellationToken.Register(() => owner.ExactCallerCancelled.TrySetResult());
+                    owner.ExactEntered.TrySetResult();
+                    if (owner.HoldExactAdmission) await owner.ReleaseExactAdmission.Task;
+                    ExactRun run;
+                    lock (_gate)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (_run is not { Closing: false } current || current.Id != expectedRunId)
+                            return AgentTargetedAbortOutcome.TargetNotActive;
+                        run = current;
+                        owner.ExactAdmissions++;
+                        run.Signal();
+                    }
+                    await run.Work;
+                    if (owner.FailExactAbort) throw new InvalidOperationException("Private failure after signalling.");
+                    return AgentTargetedAbortOutcome.CancellationSignalled;
+                }
+                finally { Interlocked.Decrement(ref owner._active); }
+            }
+            public override async Task AbortAsync(CancellationToken cancellationToken = default)
+            {
+                var owner = _owner;
+                ExactRun? run;
+                lock (_gate) { run = _run; run?.Signal(); }
+                owner.AbortStarted.TrySetResult();
+                if (run is not null) await run.Work;
+            }
+            private sealed class ExactRun
+            {
+                internal ExactRun(ControlledProvider owner, AgentRunId id)
+                {
+                    Id = id;
+                    if (owner.HoldExactAbort)
+                        Registration = Source.Token.Register(() =>
+                        {
+                            owner.ExactAbortStarted.TrySetResult();
+                            owner.ReleaseExactAbort.Task.GetAwaiter().GetResult();
+                        });
+                    Work = CancelAsync(owner);
+                }
+                internal AgentRunId Id { get; }
+                internal CancellationTokenSource Source { get; } = new();
+                internal TaskCompletionSource<bool> SignalGate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                internal Task Work { get; }
+                internal CancellationTokenRegistration Registration { get; }
+                internal bool Closing { get; set; }
+                internal void Signal() => SignalGate.TrySetResult(true);
+                private async Task CancelAsync(ControlledProvider owner)
+                {
+                    if (!await SignalGate.Task) return;
+                    Interlocked.Increment(ref owner.ExactTraversals);
+                    var traversal = Source.CancelAsync();
+                    if (!owner.HoldExactAbort) owner.ExactAbortStarted.TrySetResult();
+                    await traversal;
+                }
             }
         }
 

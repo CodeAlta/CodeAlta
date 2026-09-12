@@ -224,6 +224,62 @@ public sealed class DesktopOwnedSessionTests
     });
 
     [TestMethod]
+    public void AbortRunRpc_RejectsBeforeAdmissionAndBoundsGeneratedJson()
+    {
+        var calls = 0;
+        var service = new SessionOperationsService("current", _ => throw new AssertFailedException("Send called"),
+            _ => throw new AssertFailedException("Abort called"), null, _ => throw new AssertFailedException("Compact called"),
+            _ => { calls++; throw new AssertFailedException("AbortRun called"); });
+        var request = new SessionAbortRunRequest("current", "key", "session", "abcdefab-1234-5678-9abc-abcdefabcdef", "1", "run");
+        Assert.AreEqual("unconfigured", new SessionOperationsService().AbortRun(request, CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", service.AbortRun(request with { ExpectedEpoch = "old" }, CancellationToken.None).Status);
+        foreach (var invalid in new[] { request with { ExpectedRuntimeInstanceId = request.ExpectedRuntimeInstanceId.ToUpperInvariant() },
+            request with { ExpectedRuntimeInstanceId = Guid.Empty.ToString("D") }, request with { ExpectedAttachmentGeneration = "01" },
+            request with { ExpectedAttachmentGeneration = "0" }, request with { ExpectedAttachmentGeneration = "9223372036854775808" },
+            request with { ExpectedRunId = " run" }, request with { ExpectedRunId = "\ud800" }, request with { ExpectedRunId = new string('r', 257) },
+            request with { SessionId = "\udfff" }, request with { ClientRequestId = new string('x', 257) } })
+            Assert.AreEqual("invalid_request", service.AbortRun(invalid, CancellationToken.None).Status);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => service.AbortRun(request, cancelled.Token));
+        service.CloseAdmission();
+        Assert.AreEqual("closed", service.AbortRun(request, CancellationToken.None).Status);
+        Assert.AreEqual(0, calls);
+        var escaped = new string('\u0001', 256);
+        var maximum = request with { ExpectedEpoch = new string('\u0001', 64), ClientRequestId = escaped, SessionId = escaped,
+            ExpectedRunId = escaped, ExpectedAttachmentGeneration = long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(maximum, DesktopJsonContext.Default.SessionAbortRunRequest);
+        Assert.IsTrue(bytes.Length + 8192 <= 16 * 1024);
+        Assert.AreEqual(maximum, JsonSerializer.Deserialize(bytes, DesktopJsonContext.Default.SessionAbortRunRequest));
+        var row = new SessionReceiptView("key", "session", Guid.NewGuid().ToString("D"), null, "AbortRun", "terminal", "Completed", "cancellation_signalled", "run");
+        Assert.AreEqual("ok", SessionOperationsService.ProjectPage("epoch", [row], null).Status);
+    }
+
+    [TestMethod]
+    public Task AbortRunRpc_ActualOwnedUnsupportedReceiptRetainsReplayAndKind() => RealFixture.RunAsync(async f =>
+    {
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        var sendAdmission = service.Send(new("fixture-epoch", "send", f.SessionId, "text"), CancellationToken.None);
+        var send = f.Retain(f.Host.Commands.AdmitSend(new("send", f.SessionId, "text")));
+        Assert.AreEqual("accepted", sendAdmission.Status);
+        await f.Ready(send);
+        var state = await f.Wait(f.Keep(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId)));
+        var request = new SessionAbortRunRequest("fixture-epoch", "abort-run", f.SessionId, state.RuntimeInstanceId.ToString("D"),
+            state.Entry!.AttachmentGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture), "fixture-run");
+        var admitted = service.AbortRun(request, CancellationToken.None);
+        var abort = f.Retain(f.Host.Commands.AdmitAbortRun(new("abort-run", f.SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration, "fixture-run")));
+        Assert.AreEqual("accepted", admitted.Status);
+        Assert.AreEqual("replay", service.AbortRun(request, CancellationToken.None).Status);
+        Assert.AreEqual("conflict", service.AbortRun(request with { ExpectedRunId = "other" }, CancellationToken.None).Status);
+        Assert.AreEqual("conflict", service.Abort(new("fixture-epoch", "abort-run", send.OperationId.ToString("D")), CancellationToken.None).Status);
+        Assert.AreEqual("abort_run_unsupported", (await f.Wait(abort.Completion)).Code);
+        Assert.IsFalse(send.Completion.IsCompleted);
+        var row = service.Receipts(new("fixture-epoch", 0)).Rows.Single(value => value.ClientRequestId == "abort-run");
+        Assert.AreEqual("AbortRun", row.Kind);
+        Assert.IsNull(row.TargetOperationId);
+    });
+
+    [TestMethod]
     public async Task Shutdown_RetainsLeaseUntilAllOwnedWorkIsConfirmed()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -120,8 +120,18 @@ the broader permission, file-review and ask workflows remain incomplete.
 
 With a provider supporting run-bound review, cancellation of the actual owning run also invalidates
 its pending requests, even when individual requests omit a run ID. A request naming another run is
-denied. Previously accepted decisions remain accepted. This provider-level foundation adds no
-Desktop exact-run abort action and does not change trusted TUI approval policy.
+denied. Previously accepted decisions remain accepted; trusted TUI approval policy is unchanged.
+
+After **Refresh runtime state**, **Signal cancellation for observed run** targets only that exact
+runtime, attachment and run. This is distinct from **Abort submission**. Unsupported, stale,
+retiring, transitioning and draining targets fail closed without fallback. Refresh submissions
+for the result: **Cancellation signalled; run completion is not confirmed.** Failure can occur
+after signalling; neither failure nor success promises rollback of accepted decisions or effects.
+An uncertain request retains its original target/key across selection changes and remounts.
+Reconcile manually or deliberately **Retry exact cancellation request** after the previous wait
+settles. New observations never retarget it, and replay never repeats cancellation. Closing the
+panel cancels only its wait; host shutdown retains and joins original work. No automatic retry,
+refresh or polling is added. This remains experimental, not full session-command/native parity.
 
 The selected session also has a **live status/text window**, separate from persisted-history
 browsing and submission receipts. It shows retained lifecycle, queue count, configuration labels
