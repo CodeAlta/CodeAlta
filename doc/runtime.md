@@ -334,6 +334,45 @@ Desktop integration below has separate fake-provider qualification; these earlie
 not qualify that integration. TUI activation, real providers, event projection, noncooperative
 shutdown and frontend/native parity remain unqualified.
 
+### Volatile owned deferred text execution
+
+`OwnedSessionCommandService.AdmitQueue` reserves one outstanding text item per session, sharing
+the owner's bounded receipt capacity and ordinal retry-key namespace. `OwnedTextQueueRequest`
+captures exact text, session, runtime instance and attachment generation, not an expected run:
+it authorizes future execution on that existing owned attachment only. Reservation is distinct
+from retained `QueueInsertion` (`queue_accepted`: retained **in this host only**) and eventual
+`Completion`. Exact replay returns the original receipt/results, even after closure; changed
+immutable fields or command kind conflict. Caller cancellation after admission abandons only a waiter.
+
+No queue journal row is inserted. Waiting items retain cancellation/task ownership, not a long-lived
+handle-use lease. A temporary use protects attachment-token registration outside the mailbox;
+publication and claim revalidate exact identity, owned defaults, retirement, transition, termination
+and pending prompt replacement. Claim shares existing drain arbitration and atomically acquires
+its slot/use. Eligible legacy journal records take precedence; a failed/null journal read cannot
+authorize an independent owned drainer. Enqueue attempts one immediate drain, then uses existing
+event/completion opportunities, not polling. Durable records, including owned-looking provenance,
+never construct live owned authority or gain owned permission review.
+
+Claimed work sends through the captured handle without resolving/replacing it. Opted-in review
+binds actual run lifecycle authority at execution time; default denial and user-input behavior
+remain unchanged. `queue_dispatched` describes returned dispatch and cleanup, not conversation
+completion. Bounded failures include `queue_target_unavailable`, `queue_binding_unavailable`,
+`queue_failed`, `queue_cleanup_failed` and `queue_cancel_failed`. A hook-ignoring provider is denied
+owned review; binding failure is reported after dispatch returns, not as preflight rejection or
+rollback. Unsolicited provider cancellation exceptions are failures, not `queue_cancelled`.
+
+`AdmitCancelQueue` targets the original queue operation ID, never a current/later run. Cancellation
+uses only that operation's source; `queue_cancellation_signalled` or `already_terminal` does not
+prove rollback. Waiting items settle on retirement/owner/runtime closure without acquisition.
+Claimed sends retain original work, permission closure, callback traversal and registration joins
+before source/use release. Independent cancellation starts before dependent joins; noncooperative
+providers/callbacks can keep shutdown pending indefinitely. Timeouts are not termination proof.
+
+This is a host-lifetime prerequisite with no Desktop queue RPC/UI or durable/restart recovery.
+The [parity ledger](dual-head-desktop-parity.md) records focused verification and two explicitly
+uncovered paths: injected failed/null journal reads and retirement forced between setup capture
+and registration/publication. Source inspection is not dynamic proof of those interleavings.
+
 ### Explicit Desktop submissions and owned reads
 
 The in-development Desktop owned mode borrows `Commands` and `WorkspaceReads` from one
@@ -573,6 +612,9 @@ A normal prompt follows this path:
 7. The runtime marks the session idle, updates usage/state, and drains at most one queued prompt for that session.
 
 Busy-session sends are queued when requested by UI or live-tool options. Queue items keep caller attribution and are durable enough for runtime recovery paths that read session state. Steering requests are sent only when a run is active and the provider/runtime supports `SteerAsync`; otherwise CodeAlta falls back to normal send or re-queues according to the caller path.
+
+Those legacy UI/live-tool paths are distinct from volatile owned deferred text execution above;
+their recovered records do not establish owned execution or permission authority.
 
 ## Agent session runtime
 

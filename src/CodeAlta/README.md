@@ -181,6 +181,10 @@ selection changes with its exact key and attachment for manual reconciliation or
 Replaying a busy receipt does not try again: a new explicit action uses a fresh key. Closing the
 panel cancels only the wait; shutdown retains and joins accepted compaction and cancellation work.
 
+Desktop prompt queueing is not yet exposed by RPC or UI. The shared runtime's volatile deferred-text
+prerequisite retains work only within the current host; it is not durable Desktop queue recovery.
+Existing terminal/live-tool queues remain separate and do not grant owned permission-review authority.
+
 Actual cached-store reads are host-owned (eight active reads, excess rejected); cancelling an
 RPC wait does not stop them. Shutdown joins command/read work before runtime dependencies.
 Five seconds triggers a pending diagnostic, not termination. Unconfirmed host/native cleanup

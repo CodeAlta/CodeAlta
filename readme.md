@@ -18,6 +18,8 @@ Owned mode also supports text steering of an explicitly refreshed runtime/run ta
 
 The same experimental mode can compact an explicitly observed attachment only if the supported provider admits it while idle, without waiting or replacing the target. Compaction uses context current at admission; inspect its receipt for success or busy/unsupported/failure outcomes.
 
+Desktop prompt queueing is not yet exposed. The shared runtime has a host-lifetime-only deferred-text prerequisite; it does not provide durable Desktop queue recovery or change existing terminal queue behavior.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>

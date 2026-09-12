@@ -33,6 +33,9 @@ Receipts describe submission, not live-run completion; **Abort submission** is n
 Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
 agent parity remain unqualified; continue using `altatui` for normal workflows.
 
+Desktop prompt queueing and restart recovery of pending Desktop prompts are not yet available.
+Existing terminal prompt queues are unchanged; continue using `altatui` for those workflows.
+
 In owned-host mode, **Refresh runtime state** before using **Steer observed run**. Steering sends
 text only to that recorded runtime, attachment and run; no recorded run means unavailable, and
 stale or unsupported targets fail rather than becoming a send/queue or targeting later work.

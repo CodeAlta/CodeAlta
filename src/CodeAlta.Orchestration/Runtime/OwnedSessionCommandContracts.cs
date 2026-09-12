@@ -58,6 +58,51 @@ public sealed record OwnedAbortRunRequest(string ClientRequestId, string Session
     }
 }
 
+/// <summary>Immutable volatile text intent for an existing owned attachment, never a recovered journal record.</summary>
+/// <param name="ClientRequestId">Ordinal owner-lifetime retry key, at most 256 UTF-16 units.</param>
+/// <param name="SessionId">Exact unpadded session identity, at most 256 UTF-16 units.</param>
+/// <param name="ExpectedRuntimeInstanceId">Observed nonempty runtime identity.</param>
+/// <param name="ExpectedAttachmentGeneration">Observed positive attachment generation.</param>
+/// <param name="Text">Exact well-formed nonblank text, at most 32768 UTF-16 units.</param>
+public sealed record OwnedTextQueueRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId,
+    long ExpectedAttachmentGeneration, string Text)
+{
+    internal void Validate()
+    {
+        ValidateIdentity(ClientRequestId);
+        ValidateIdentity(SessionId);
+        if (ExpectedRuntimeInstanceId == Guid.Empty || ExpectedAttachmentGeneration <= 0
+            || string.IsNullOrWhiteSpace(Text) || Text.Length > 32768 || !IsWellFormed(Text))
+            throw new ArgumentException("Queueing requires exact runtime/attachment identities and bounded, well-formed text.");
+    }
+
+    internal static void ValidateIdentity(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 256 || value != value.Trim() || !IsWellFormed(value))
+            throw new ArgumentException("Queue identities must be bounded, nonblank, unpadded and well-formed.");
+    }
+
+    private static bool IsWellFormed(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (!char.IsSurrogate(value[index])) continue;
+            if (!char.IsHighSurrogate(value[index]) || ++index == value.Length || !char.IsLowSurrogate(value[index])) return false;
+        }
+        return true;
+    }
+}
+
+/// <summary>Cancels only an original owned queue operation, whether waiting or claimed.</summary>
+/// <param name="ClientRequestId">Bounded ordinal owner-lifetime retry key.</param>
+/// <param name="TargetOperationId">Original queue receipt identity; never the latest run.</param>
+public sealed record OwnedCancelQueueRequest(string ClientRequestId, Guid TargetOperationId);
+
+/// <summary>Actual volatile insertion, distinct from synchronous owner reservation and eventual dispatch.</summary>
+/// <param name="Accepted">Whether this host retained the item; never a durability promise.</param>
+/// <param name="Code">Bounded insertion code, including queue_accepted on success.</param>
+public sealed record OwnedQueueInsertionResult(bool Accepted, string Code);
+
 /// <summary>The admitted command kind.</summary>
 public enum OwnedSessionCommandKind
 {
@@ -71,6 +116,10 @@ public enum OwnedSessionCommandKind
     Compact,
     /// <summary>Signal cancellation of an exactly targeted provider run, not an owned send receipt.</summary>
     AbortRun,
+    /// <summary>Volatile deferred text execution on one existing owned attachment.</summary>
+    Queue,
+    /// <summary>Cancel one owned queue operation, never another run.</summary>
+    CancelQueue,
 }
 
 /// <summary>Admission decision; only accepted requests allocate new retry receipts.</summary>
@@ -82,13 +131,13 @@ public enum OwnedSessionCommandAdmissionKind
     Replay,
     /// <summary>The retry key belongs to a different payload or command kind.</summary>
     Conflict,
-    /// <summary>The session already has an owned send or control operation.</summary>
+    /// <summary>The session already has an outstanding operation in the requested command slot.</summary>
     Busy,
     /// <summary>The owner-lifetime receipt bound is exhausted.</summary>
     Capacity,
     /// <summary>Disposal has closed new admission.</summary>
     Closed,
-    /// <summary>The abort target is not an owned send.</summary>
+    /// <summary>The target is not an owned operation of the required kind.</summary>
     UnknownTarget,
 }
 
@@ -121,6 +170,7 @@ public sealed record OwnedSessionCommandAdmission(OwnedSessionCommandAdmissionKi
 public sealed class OwnedSessionCommandReceipt
 {
     private readonly TaskCompletionSource<OwnedSessionCommandResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<OwnedQueueInsertionResult>? _queueInsertion;
 
     internal OwnedSessionCommandReceipt(string clientRequestId, OwnedSessionCommandKind kind, string sessionId, Guid? targetOperationId = null)
     {
@@ -129,6 +179,8 @@ public sealed class OwnedSessionCommandReceipt
         Kind = kind;
         SessionId = sessionId;
         TargetOperationId = targetOperationId;
+        if (kind == OwnedSessionCommandKind.Queue)
+            _queueInsertion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     /// <summary>Gets the stable operation identity.</summary>
@@ -139,10 +191,15 @@ public sealed class OwnedSessionCommandReceipt
     public OwnedSessionCommandKind Kind { get; }
     /// <summary>Gets the durable target session identity.</summary>
     public string SessionId { get; }
-    /// <summary>Gets the targeted send identity for an abort.</summary>
+    /// <summary>Gets the original send identity for Abort or queue identity for CancelQueue.</summary>
     public Guid? TargetOperationId { get; }
     /// <summary>Gets the retained, non-faulting terminal result task.</summary>
     public Task<OwnedSessionCommandResult> Completion => _completion.Task;
 
+    /// <summary>Gets actual volatile insertion for Queue only; null for other kinds. Acceptance is not
+    /// persistence, execution or run completion. Cancelling a waiter cannot cancel the retained item.</summary>
+    public Task<OwnedQueueInsertionResult>? QueueInsertion => _queueInsertion?.Task;
+
     internal void Complete(OwnedSessionCommandResult result) => _completion.TrySetResult(result);
+    internal void CompleteQueueInsertion(OwnedQueueInsertionResult result) => _queueInsertion?.TrySetResult(result);
 }

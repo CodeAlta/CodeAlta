@@ -5,8 +5,9 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Host-owned, bounded send/abort/steer/idle-compaction/exact-cancellation admission. Owns tasks, not runtime dependencies.
-/// One send and independently one steer, compact and abort-run per session are reserved; no queue or event reader is created.
+/// Host-owned, bounded send/abort/steer/idle-compaction/exact-cancellation/volatile-queue admission. Owns tasks, not runtime dependencies.
+/// One send and independently one steer, compact, abort-run and volatile queue operation per session are reserved.
+/// No durable queue or event reader is created.
 /// </summary>
 public sealed class OwnedSessionCommandService : IAsyncDisposable
 {
@@ -25,6 +26,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private readonly HashSet<string> _compacting = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<AbortRunOperation> _abortRuns = [];
     private readonly HashSet<string> _abortingRuns = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, QueueOperation> _queues = [];
+    private readonly HashSet<string> _queueing = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Exception> _failures = [];
     private readonly List<Exception> _cleanupFailures = [];
     private bool _closed;
@@ -241,6 +244,152 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         {
             _compacting.Remove(operation.Request.SessionId);
             operation.Receipt.Complete(result);
+        }
+    }
+
+    /// <summary>Reserves one volatile deferred text operation. Actual insertion and eventual dispatch
+    /// have separate retained results; acceptance here only reserves ownership and replay protection.</summary>
+    /// <exception cref="ArgumentNullException">The request is null.</exception>
+    /// <exception cref="ArgumentException">An identity or text is invalid or exceeds its bound.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled before reservation.</exception>
+    public OwnedSessionCommandAdmission AdmitQueue(OwnedTextQueueRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Validate();
+        QueueOperation operation;
+        lock (_gate)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.Queue == request);
+            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
+            var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
+            operation = new(request, receipt);
+            _receipts.Add(request.ClientRequestId, new(receipt, Queue: request));
+            _queues.Add(receipt.OperationId, operation);
+            _queueing.Add(request.SessionId);
+            operation.Work = RunQueueAsync(operation);
+        }
+        operation.Launch.TrySetResult();
+        return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
+    }
+
+    /// <summary>Reserves cancellation of an original queue operation. Caller cancellation after
+    /// reservation abandons only its waiter. No runtime-wide or latest-run abort is invoked.</summary>
+    /// <exception cref="ArgumentNullException">The request is null.</exception>
+    /// <exception cref="ArgumentException">The key is invalid or the operation identity is empty.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled before reservation.</exception>
+    public OwnedSessionCommandAdmission AdmitCancelQueue(OwnedCancelQueueRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        OwnedTextQueueRequest.ValidateIdentity(request.ClientRequestId);
+        if (request.TargetOperationId == Guid.Empty) throw new ArgumentException("Queue cancellation requires an operation identity.", nameof(request));
+        QueueOperation operation;
+        OwnedSessionCommandReceipt receipt;
+        lock (_gate)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.CancelQueue == request);
+            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (!_queues.TryGetValue(request.TargetOperationId, out var target)) return new(OwnedSessionCommandAdmissionKind.UnknownTarget);
+            operation = target;
+            receipt = new(request.ClientRequestId, OwnedSessionCommandKind.CancelQueue, operation.Request.SessionId, request.TargetOperationId);
+            _receipts.Add(request.ClientRequestId, new(receipt, CancelQueue: request));
+            if (operation.Released) receipt.Complete(new(OwnedSessionCommandOutcome.Completed, Code: "already_terminal"));
+            else
+            {
+                operation.CancelReceipts.Add(receipt);
+                EnsureQueueCancellation(operation);
+                if (operation.CancelResult is { } result) receipt.Complete(result);
+            }
+        }
+        StartQueueCancellation(operation);
+        return new(OwnedSessionCommandAdmissionKind.Accepted, receipt);
+    }
+
+    private async Task RunQueueAsync(QueueOperation operation)
+    {
+        await operation.Launch.Task.ConfigureAwait(false);
+        OwnedSessionCommandResult result;
+        try
+        {
+            result = await _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, _reviewPermissions,
+                operation.Execution.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            RecordFailure(ex, cleanup: false);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_failed");
+        }
+        // Also covers runtime admission refusal before its original body starts.
+        operation.Receipt.CompleteQueueInsertion(new(false, result.Code ?? "queue_failed"));
+        operation.RuntimeResult = result;
+        operation.RuntimeSettled.TrySetResult();
+        Task? cancellation;
+        lock (_gate)
+        {
+            cancellation = operation.Cancellation;
+            if (cancellation is null) { ReleaseQueue(operation, result); return; }
+        }
+        await cancellation.ConfigureAwait(false);
+        lock (_gate) ReleaseQueue(operation, result);
+    }
+
+    private void ReleaseQueue(QueueOperation operation, OwnedSessionCommandResult result)
+    {
+        operation.Released = true;
+        _queueing.Remove(operation.Request.SessionId);
+        operation.Receipt.Complete(operation.CancellationFailed
+            ? new(OwnedSessionCommandOutcome.Failed, Code: "queue_cancel_failed") : result);
+    }
+
+    // Called only under the owner gate; the original control cannot start until its launch opens.
+    private void EnsureQueueCancellation(QueueOperation operation)
+    {
+        if (!operation.Released && operation.Cancellation is null)
+            operation.Cancellation = CancelQueueAsync(operation);
+    }
+
+    private void StartQueueCancellation(QueueOperation operation)
+    {
+        lock (_gate)
+        {
+            if (operation.Cancellation is null || operation.CancellationInitiated) return;
+            operation.CancellationInitiated = true;
+        }
+        try { operation.SourceCancellation = operation.Execution.CancelAsync(); }
+        catch (Exception ex)
+        {
+            operation.CancellationFailed = true;
+            RecordFailure(ex, cleanup: true);
+        }
+        finally { operation.CancelLaunch.TrySetResult(); }
+    }
+
+    private async Task CancelQueueAsync(QueueOperation operation)
+    {
+        await operation.CancelLaunch.Task.ConfigureAwait(false);
+        try
+        {
+            // Runtime owns the exact execution cancellation, registrations and send. Its callback
+            // only signals that owner; joining this source alone would falsely report settled control.
+            await operation.SourceCancellation.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            operation.CancellationFailed = true;
+            RecordFailure(ex, cleanup: true);
+        }
+        await operation.RuntimeSettled.Task.ConfigureAwait(false);
+        if (operation.RuntimeResult?.Code is "queue_cleanup_failed" or "queue_cancel_failed") operation.CancellationFailed = true;
+        var result = new OwnedSessionCommandResult(operation.CancellationFailed ? OwnedSessionCommandOutcome.Failed : OwnedSessionCommandOutcome.Completed,
+            Code: operation.CancellationFailed ? "queue_cancel_failed" : "queue_cancellation_signalled");
+        lock (_gate)
+        {
+            operation.CancelResult = result;
+            foreach (var receipt in operation.CancelReceipts) receipt.Complete(result);
         }
     }
 
@@ -526,6 +675,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         SteerOperation[] steers;
         CompactOperation[] compacts;
         AbortRunOperation[] abortRuns;
+        QueueOperation[] queues;
         TaskCompletionSource launch;
         Task disposal;
         lock (_gate)
@@ -536,14 +686,17 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             steers = [.. _steers];
             compacts = [.. _compacts];
             abortRuns = [.. _abortRuns];
+            queues = [.. _queues.Values];
+            foreach (var queue in queues) EnsureQueueCancellation(queue);
             foreach (var operation in operations)
                 if (!operation.Released) EnsureControl(operation);
             launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, launch.Task);
+            _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, queues, launch.Task);
             disposal = _disposeTask;
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
         foreach (var operation in operations) StartControl(operation);
+        foreach (var queue in queues) StartQueueCancellation(queue);
         foreach (var steer in steers)
         {
             // Start every independent cancellation before any dependent join. No callbacks under _gate.
@@ -565,7 +718,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     }
 
     private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, CompactOperation[] compacts,
-        AbortRunOperation[] abortRuns, Task launch)
+        AbortRunOperation[] abortRuns, QueueOperation[] queues, Task launch)
     {
         await launch.ConfigureAwait(false);
         if (_reviewPermissions)
@@ -618,6 +771,18 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             try { abortRun.Execution.Dispose(); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
+        foreach (var queue in queues)
+        {
+            try { await queue.Work.ConfigureAwait(false); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            if (queue.Cancellation is { } cancellation)
+            {
+                try { await cancellation.ConfigureAwait(false); }
+                catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            }
+            try { queue.Execution.Dispose(); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        }
         Exception[] failures;
         lock (_gate) failures = [.. _cleanupFailures];
         if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
@@ -625,8 +790,28 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     }
 
     private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null,
-        OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null);
+        OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null,
+        OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null);
     private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options);
+
+    private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)
+    {
+        internal OwnedTextQueueRequest Request { get; } = request;
+        internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
+        internal CancellationTokenSource Execution { get; } = new();
+        internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource CancelLaunch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource RuntimeSettled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task Work { get; set; } = Task.CompletedTask;
+        internal Task? Cancellation { get; set; }
+        internal Task SourceCancellation { get; set; } = Task.CompletedTask;
+        internal bool CancellationInitiated { get; set; }
+        internal List<OwnedSessionCommandReceipt> CancelReceipts { get; } = [];
+        internal OwnedSessionCommandResult? CancelResult { get; set; }
+        internal OwnedSessionCommandResult? RuntimeResult { get; set; }
+        internal bool Released { get; set; }
+        internal bool CancellationFailed { get; set; }
+    }
 
     private sealed class AbortRunOperation(OwnedAbortRunRequest request, OwnedSessionCommandReceipt receipt)
     {

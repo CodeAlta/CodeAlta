@@ -4,6 +4,57 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: volatile owned deferred execution — 2026-09-12
+
+The same sole writer implemented only the shared-runtime queue prerequisite. Parent independently
+audited complete source/fixture bodies, returned corrections to that writer, ran verification and
+owns documentation/integration. This does **not** complete Desktop queue parity or M4–M6.
+
+- One outstanding owned text item per session shares bounded receipt capacity and retry keys.
+  Immutable session/runtime/attachment/text identity authorizes future execution on that exact
+  attachment. Reservation, retained `QueueInsertion` and eventual `Completion` are distinct.
+  `queue_accepted` means retained in this host, not persisted or executed. Exact replay preserves
+  original identity/results after completion/closure; conflicting fields/kinds are rejected.
+- Waiting items do not retain a long-lived attachment use. Setup temporarily protects registration;
+  mailbox publication/claim revalidate identity, owned defaults and unavailable/retiring/transitioning
+  targets. Shared drain arbitration gives eligible legacy records precedence; failed/null journal
+  reads cannot start an independent drainer. One immediate attempt plus existing completion/event
+  opportunities replaces polling. No volatile journal row or recovered-record approval authority.
+- Captured-handle execution binds actual run permission authority only at dispatch. Default denial,
+  TUI policy, AutoApprove, user input and raw-event/Display ownership remain unchanged. Hook-ignoring
+  providers receive no owned review; binding failure after dispatch is not preflight rejection or rollback.
+- Cancellation targets the original queue operation, never a current/later run. Waiting work settles
+  on lifetime closure without acquisition; claimed work retains original sends, callback traversals,
+  permission closure and registration joins before source/use release. Cancellation success does not
+  prove rollback; noncooperative providers/callbacks may keep shutdown pending indefinitely.
+
+Parent source audit corrected unconditional OCE classification: unsolicited provider cancellation
+exceptions now produce bounded `Failed / queue_failed`, while actual operation cancellation and
+explicit pre-dispatch retirement refusal remain `queue_cancelled`. The new inert regression covers
+original cleanup, no raw failure detail, exact replay and no redispatch. The first cached test build
+then failed with three fixture compile errors: summary `ViewState` lacks journal queue data. The
+same writer changed only two fixture reads to `Journal.ReadLatestStateAsync` with retained tasks and
+non-null assertions; parent re-audited complete bodies. No assertion or production policy was weakened.
+
+Final verification: **137 focused .NET cases pass**, zero failures/skips: **22 new queue cases**
+(18 exact-FQN methods), 85 previously audited owned-command/forwarding/run-binding/hub cases, and
+30 previously audited actual-Agent lifetime/idle-compaction/permission cases. Regression fixture
+files were unchanged from the integrated baseline. Cached targeted and full Release solution builds
+pass zero warnings/errors using `--no-restore`, `NeoAstraRestoreFrontendDependencies=false` and
+`NeoAstraBuildFrontend=false`. Tests used `--no-build --no-restore`; generated RPC contracts remain
+current with no new queue RPC. Logs: `%TEMP%/codealta-parent-owned-queue-*-20260912.log`.
+
+**Explicit deferred coverage:** injected failed/null journal reads in actual drain arbitration, and
+retirement forced exactly between setup-use capture and registration/publication. Parent inspected
+the concrete store/cache path, null refusal, setup-use protection and publication revalidation, but
+found no existing safe deterministic injection/observation seam. These are source-supported paths,
+not passing dynamic evidence; revisit before broader queue parity. No timing race tests or production
+test hooks were added. Fixture roots are retained, and timeouts never establish termination.
+
+No Desktop queue RPC/UI, durable/restart recovery, frontend/native/mounted UI, real-provider/tool/auth,
+default-profile, network/install/restore, full-suite or website qualification. Website build remains
+omitted because configured theme acquisition crosses the no-network boundary.
+
 ## M4 checkpoint: exact observed-run cancellation — 2026-09-12
 
 The same sole writer implemented the optional hub route, existing-only owned runtime capture,
