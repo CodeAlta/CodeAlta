@@ -96,13 +96,27 @@ Registration can read declared credential environment variables and shipped defa
 submissions can authenticate and use provider storage/network. Plugins and probes remain off.
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
 
-Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied,
-user input is cancelled, and this path does not expose tools or plugins. **Refresh
+Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied by
+default, user input is cancelled, and this path supplies no custom tools or plugins. **Refresh
 submissions** explicitly retrieves receipts; **Abort submission** targets one pending send,
 not a later run. Submitted means dispatch completed, not that the conversation/run completed.
 An uncertain response retains the exact epoch/key/session/text for explicit retry, never
 automatic resend. Epoch mismatch disables mutations across selection changes; reload recovers
 receipts, not prompt text. The host retains at most256 receipts, paged64 at a time.
+
+Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
+into manual review of supported plain command requests. The selected-session review shows the
+complete command, working directory and optional reason, with **Allow once / Deny / Cancel**.
+Refresh pending commands manually; this is not a notification stream. Unsupported permission
+payloads remain denied, user input remains cancelled, and there is no Allow for Session option.
+Approval can execute a command with the host's privileges: discovery roots are not a sandbox.
+Changing selection or reloading the renderer does not cancel a pending request; returning and
+refreshing reads the application-owned pending state. An uncertain response is not a denial or
+proof that nothing executed. An uncertain decision disables review across selections until the
+renderer is reloaded; then refresh pending commands. No response is automatically replayed.
+Aborting the owning submission or closing the application invalidates still-pending requests,
+but cannot revoke a decision already accepted by the backend. Native/provider qualification and
+the broader permission, file-review and ask workflows remain incomplete.
 
 The selected session also has a **live status/text window**, separate from persisted-history
 browsing and submission receipts. It shows retained lifecycle, queue count, configuration labels

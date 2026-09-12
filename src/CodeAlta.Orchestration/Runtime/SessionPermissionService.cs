@@ -321,6 +321,56 @@ public sealed class SessionPermissionService : IAsyncDisposable
             Array.Empty<SessionPermissionSnapshot>());
 
     /// <summary>
+    /// Lists at most four complete owned plain-command attempts for an exact session under mailbox authority.
+    /// Legacy trusted registrations are never included. Cancellation or closure invalidates observations, not accepted decisions.
+    /// Returns an empty window after disposal. This does not create runtime state or wait for user decisions.
+    /// </summary>
+    /// <exception cref="ArgumentException">The session is not a bounded, canonical UTF-16 identity.</exception>
+    /// <exception cref="OperationCanceledException">The caller token is canceled at the mailbox query.</exception>
+    public ValueTask<SessionOwnedPermissionPage> ListOwnedCommandsAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (!ValidOwnedText(sessionId, OwnedIdentityLimit, required: true, identity: true))
+            throw new ArgumentException("A bounded canonical session identity is required.", nameof(sessionId));
+        cancellationToken.ThrowIfCancellationRequested();
+        return ExecuteAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entries = _ownedDeliveries.Where(pending => pending.Snapshot.Handle.SessionId == sessionId
+                && _pending.ContainsKey(pending.Snapshot.Handle) && !IsCanceled(pending)).Take(5)
+                .Select(pending => new SessionOwnedPermissionSnapshot(
+                    new(pending.OwnedExecution!.OperationId, pending.OwnedExecution.RuntimeId,
+                        pending.OwnedExecution.AttachmentOrdinal, pending.Snapshot.Handle), pending.Snapshot)).ToArray();
+            return new SessionOwnedPermissionPage(Array.AsReadOnly(entries.Take(4).ToArray()), entries.Length > 4);
+        }, new SessionOwnedPermissionPage(Array.Empty<SessionOwnedPermissionSnapshot>(), false));
+    }
+
+    /// <summary>
+    /// Resolves only the exact still-live owned execution/attachment/attempt in the permission mailbox.
+    /// Wrong identities, replay, closure and unsupported decisions return false, including legacy TUI handles.
+    /// Caller cancellation observed before the mailbox decision throws without resolving; cancellation after acceptance
+    /// cannot revoke the decision. An uncertain transport response must not be treated as an uncommitted decision.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">The handle or its attempt is null.</exception>
+    /// <exception cref="OperationCanceledException">Caller cancellation is observed before resolution.</exception>
+    public ValueTask<bool> ResolveOwnedCommandAsync(SessionOwnedPermissionHandle handle,
+        AgentPermissionDecisionKind decision, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentNullException.ThrowIfNull(handle.Attempt);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel))
+            return ValueTask.FromResult(false);
+        return ExecuteAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_pending.TryGetValue(handle.Attempt, out var pending) || pending.OwnedExecution is not { } execution
+                || execution.OperationId != handle.OperationId || execution.RuntimeId != handle.RuntimeInstanceId
+                || execution.AttachmentOrdinal != handle.AttachmentGeneration || !CanUse(execution) || IsCanceled(pending)) return false;
+            return Complete(handle.Attempt, decision);
+        }, false);
+    }
+
+    /// <summary>
     /// Checks the entire scoped handle and caller cancellation in the mailbox; canceled, stale or wrong identities
     /// return false even before cancellation cleanup. This observation does not reserve a later resolution.
     /// </summary>

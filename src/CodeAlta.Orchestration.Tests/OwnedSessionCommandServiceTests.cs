@@ -386,6 +386,46 @@ public sealed class OwnedSessionCommandServiceTests
     }, reviewPermissions: true);
 
     [TestMethod]
+    public Task OwnedPermission_PublicOwnedReviewUsesActualReceiptRuntimeAndAttachment() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Track(f.Provider.SendPermission!);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var page = await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+        var current = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId, CancellationToken.None));
+        Assert.HasCount(1, page.Entries);
+        Assert.IsFalse(page.HasMore);
+        Assert.IsNotNull(current.Entry);
+        var entry = page.Entries.Single();
+        Assert.AreEqual(send.OperationId, entry.Handle.OperationId);
+        Assert.AreEqual(current.RuntimeInstanceId, entry.Handle.RuntimeInstanceId);
+        Assert.AreNotEqual(Guid.Empty, entry.Handle.RuntimeInstanceId);
+        Assert.AreEqual(current.Entry.AttachmentGeneration, entry.Handle.AttachmentGeneration);
+        Assert.IsTrue(entry.Handle.AttachmentGeneration > 0);
+        Assert.AreEqual(f.SessionId, entry.Handle.Attempt.SessionId);
+        Assert.IsNull(entry.Handle.Attempt.RunId); // Do not invent a run from the separate current-runtime observation.
+        Assert.AreEqual("owned-permission", entry.Handle.Attempt.InteractionId);
+        Assert.AreNotEqual(Guid.Empty, entry.Handle.Attempt.AttemptId);
+        Assert.AreEqual(entry.Handle.Attempt, entry.Request.Handle);
+        Assert.AreEqual(f.Provider.Descriptor.ProviderId, entry.Request.ProviderId);
+        Assert.AreEqual("commandExecution", entry.Request.Kind);
+        Assert.AreEqual("inert fixture command", entry.Request.Command);
+        Assert.AreEqual(f.ProjectRoot, entry.Request.WorkingDirectory);
+        Assert.AreEqual("fixture", entry.Request.Reason);
+        Assert.IsNull(entry.Request.GrantRoot);
+        Assert.IsFalse(pending.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        // AllowOnce is inert decision data here: the unchanged fake cannot execute a tool or model turn.
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(pending)).Kind);
+        Assert.IsFalse(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.HasCount(0, (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+    }, reviewPermissions: true);
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public Task OwnedPermission_SendReturnCancelsPendingAndOldDelegateCannotJoinReusedCoordinator(bool failSend) => Fixture.RunAsync(async f =>

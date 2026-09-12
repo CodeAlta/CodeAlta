@@ -5,11 +5,14 @@ import { historyMessage, loadHistory, type HistoryState } from "./history";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import type { createSessionDisplayStore } from "./sessionDisplay";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
+import type { createPermissionReviewer } from "./sessionPermissions";
+import { CommandPermissionPanel } from "./CommandPermissionPanel";
 
-export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, display, runtimeReader }: {
+export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, display, runtimeReader, permissionReviewer }: {
   sessionId: string; epoch: string; drafts: Map<string, SessionSendRequest>; capability: ReturnType<typeof createMutationCapability>;
   display: ReturnType<typeof createSessionDisplayStore>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
+  permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
 }) {
   const [text, setText] = useState("");
   const [message, setMessage] = useState("Refresh submissions to recover accepted receipts. Never automatically resend an uncertain request.");
@@ -101,7 +104,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, displa
   }
   return <section className="owned-session" aria-label="Owned text submission">
     <h3>Owned text-only submission</h3>
-    <p className="detail">Existing session only. Permissions are denied; user input is cancelled; no tools or plugins. A bounded live status/text window is available below. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
+    <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A bounded live status/text window is available below. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
     <label>Text<textarea maxLength={32768} value={text} disabled={busy || !!pending} onChange={event => setText(event.target.value)} /></label>
     <div className="history-controls">
       <button type="button" disabled={invalidEpoch || busy || (!pending && !text.trim()) || (!!pending && pending.expectedEpoch !== epoch)} onClick={submit}>{pending ? "Retry exact request" : "Send text"}</button>
@@ -115,6 +118,7 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, capability, displa
       {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch} onClick={() => abort(row.operationId)}>Abort submission</button>}
     </div>)}
     {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
+    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
     <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} />
     <h3>Current runtime — manual point-in-time observation</h3>
     <p className="detail">Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.</p>

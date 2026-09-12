@@ -28,10 +28,19 @@ receipt refresh/retry. It additionally requires `--allow-owned-host`, `--project
 absolute roots (the instruction root includes the project). This broader consent permits
 configuration/discovery reads, journal/provider-state writes and configured-provider
 registration; submissions may authenticate or use provider storage/network. Do not use a
-production profile. Plugins/probes stay off, permissions are denied and user input is cancelled.
+production profile. Plugins/probes stay off, permissions are denied by default and user input is cancelled.
 Receipts describe submission, not live-run completion; **Abort submission** is not general
 Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
 agent parity remain unqualified; continue using `altatui` for normal workflows.
+
+In owned-host mode only, `--review-owned-command-permissions` opts into manual review of supported
+plain command requests. Refresh the selected session's pending commands and choose **Allow once**,
+**Deny**, or **Cancel** after reviewing the complete command and directory. Unsupported permissions
+remain denied; there is no session-wide approval. Commands can run with the host's privileges, and
+the explicit roots are not a sandbox. Switching sessions or reloading does not cancel pending
+reviews. A lost response may already have been accepted: review is disabled until renderer reload,
+then refresh pending commands rather than assuming denial or automatically retrying. This
+experimental workflow does not provide full permission/ask parity.
 
 Owned-host mode also shows a selected-session **live status/text window**, separate from
 persisted history and submission receipts. It retains at most eight text items with explicit

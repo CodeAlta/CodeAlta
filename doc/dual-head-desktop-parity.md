@@ -4,10 +4,54 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: opted-in Desktop command review — 2026-09-12
+
+The explicit `--review-owned-command-permissions` flag now connects the existing owned-send
+permission lifetime to Desktop. Complete owned-host/root consent remains mandatory and the
+default remains denial. Preparation, unsupported permission payloads and user-input behavior are
+unchanged; TUI AutoApprove and the trusted TUI registration/resolve surface remain independent.
+
+`SessionPermissionService.ListOwnedCommandsAsync` and `ResolveOwnedCommandAsync` are separate
+owned-only mailbox operations. They filter out trusted TUI attempts and atomically validate the
+operation/runtime/attachment plus exact session/run/interaction/attempt handle. Generated unary
+`sessionPermissions.list` / `resolve` RPCs add host-epoch validation, complete nontruncating payload
+checks and stable failure codes. At most four commands are returned with `HasMore`; resolving and
+refreshing reveals the next window. The measured maximum-escaping response is **161,936 bytes**,
+**166,032 with framing allowance**, below **196,608 (192 KiB)**. This is not a heap bound.
+
+The selected-session UI provides manual Refresh / Allow once / Deny / Cancel. An App-owned
+controller retains no permission completion authority: immutable review windows, request/selection
+fencing and immediate retirement of actionable rows prevent stale responses and double clicks from
+replaying a review. Uncertain decisions or selection loss during resolution conservatively disable
+review across selections until renderer reload, then explicit refresh. There is no in-place
+uncertainty recovery, automatic retry, polling or notification stream. Approval is not proof of
+execution; closing presentation does not cancel a permission or revoke an accepted decision.
+
+**Parent verification:** parent audited the complete new literal RPC/CLI/serialization fixtures,
+three actual in-memory mailbox tests, pure frontend tests and the existing isolated fake-provider
+send fixture before execution. Cached Release solution and targeted builds passed with zero
+warnings/errors, without restore or frontend dependency acquisition. All **52 focused .NET cases**
+passed: 8 new Desktop RPC cases, 19 mailbox cases, 24 existing Desktop startup/current-source cases
+and the actual owned-send public-review regression. The latter checks receipt/runtime/attachment
+identity, complete command data and nullable run identity, AllowOnce callback observation, replay
+rejection, send completion and an empty pending window using retained inert fixture work.
+All **47 frontend tests** and **TypeScript/Vite build** passed. The initial TypeScript build found
+four readonly generated DTO mutations in tests; fixture construction was corrected, with a narrow
+test-local mutable cast only for intentional adversarial transport mutation. Production compiler
+warning policy and generated readonly contracts remain unchanged. Parent reviewed the final diff,
+generated RPC contract and conservative reload wording; `git diff --check` passed.
+
+No default-profile, native UI, real-provider/auth/subprocess-tool, network, dependency acquisition,
+or full-suite qualification is claimed. The website build remains deferred because its configured
+theme acquisition conflicts with this continuation's no-install/no-network boundary. **M4/full
+desktop parity remain incomplete**, including notifications, file-change review, asks, broader
+observation/effect recovery and real native usability.
+
 ## M4 checkpoint: backend owned permission execution/attachment lifetime — 2026-09-11
 
-`CodeAltaHostOptions.ReviewOwnedCommandPermissions` is explicit and defaults **OFF**. No RPC or
-Desktop consumer enables it. The existing `SessionPermissionService` mailbox owns each actual
+`CodeAltaHostOptions.ReviewOwnedCommandPermissions` is explicit and defaults **OFF**. At this backend
+checkpoint no RPC or Desktop consumer enabled it; the 2026-09-12 continuation above adds that opt-in.
+The existing `SessionPermissionService` mailbox owns each actual
 receipt operation's canonical session/token association, binds it once to the runtime and acquired
 attachment, and supplies the callback through the real `AgentHub.RunAsync` send route. Preparation
 and persistent session callbacks deny; user input remains canceled. Retained delegates cannot join

@@ -423,6 +423,122 @@ public sealed class SessionPermissionServiceTests
         }
     }
 
+    [TestMethod]
+    public async Task OwnedReview_WindowIsBoundedSelectedAndExcludesTrustedRegistrations()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        try
+        {
+            var trusted = await service.RegisterAsync("session", Request(), false, CancellationToken.None);
+            deliveries.Add(trusted.Completion);
+            for (var i = 0; i < 2; i++)
+            {
+                var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+                Assert.IsNotNull(execution);
+                Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+                for (var j = 0; j < 4; j++)
+                    deliveries.Add(service.HandleOwnedCommandAsync(execution, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None));
+            }
+            Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("other", default)).Entries.Count);
+            var page = await service.ListOwnedCommandsAsync("session", default);
+            Assert.AreEqual(4, page.Entries.Count);
+            Assert.IsTrue(page.HasMore);
+            Assert.IsFalse(page.Entries.Any(entry => entry.Handle.Attempt == trusted.Snapshot.Handle));
+            foreach (var entry in page.Entries)
+            {
+                Assert.AreEqual(entry.Request.Handle, entry.Handle.Attempt);
+                Assert.IsTrue(await service.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, default));
+            }
+            var next = await service.ListOwnedCommandsAsync("session", default);
+            Assert.AreEqual(4, next.Entries.Count);
+            Assert.IsFalse(next.HasMore);
+            Assert.IsFalse(next.Entries.Any(entry => page.Entries.Contains(entry)));
+            Assert.IsTrue(await service.IsPendingAsync(trusted.Snapshot.Handle));
+            Assert.IsFalse(await service.ResolveOwnedCommandAsync(next.Entries[0].Handle with { Attempt = trusted.Snapshot.Handle }, AgentPermissionDecisionKind.AllowOnce, default));
+            // The existing trusted TUI policy remains independent of the renderer route.
+            Assert.IsTrue(await service.ResolveAsync(trusted.Snapshot.Handle, AgentPermissionDecisionKind.AllowForSession));
+        }
+        finally { await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, []); }
+    }
+
+    [TestMethod]
+    public async Task OwnedReview_ExactBindingDecisionAndReplayAreMailboxAuthoritative()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        try
+        {
+            var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+            Assert.IsNotNull(execution);
+            Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+            foreach (var runId in new AgentRunId?[] { null, new("run") })
+            foreach (var decision in new[] { AgentPermissionDecisionKind.AllowOnce, AgentPermissionDecisionKind.Deny, AgentPermissionDecisionKind.Cancel })
+            {
+                var delivery = service.HandleOwnedCommandAsync(execution, Request() with { RunId = runId, WorkingDirectory = "Q:\\fixture" }, default);
+                deliveries.Add(delivery);
+                var handle = (await service.ListOwnedCommandsAsync("session", default)).Entries.Single().Handle;
+                foreach (var wrong in new[] { handle with { OperationId = Guid.NewGuid() }, handle with { RuntimeInstanceId = Guid.NewGuid() },
+                    handle with { AttachmentGeneration = handle.AttachmentGeneration + 1 }, handle with { Attempt = handle.Attempt with { SessionId = "other" } },
+                    handle with { Attempt = handle.Attempt with { RunId = "wrong-run" } }, handle with { Attempt = handle.Attempt with { InteractionId = "other" } },
+                    handle with { Attempt = handle.Attempt with { AttemptId = Guid.NewGuid() } } })
+                    Assert.IsFalse(await service.ResolveOwnedCommandAsync(wrong, AgentPermissionDecisionKind.AllowOnce, default));
+                Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.AllowForSession, default));
+                Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, (AgentPermissionDecisionKind)999, default));
+                Assert.IsTrue(await service.ResolveOwnedCommandAsync(handle, decision, default));
+                Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, decision, default));
+                Assert.AreEqual(decision, (await delivery.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            }
+            var closing = service.HandleOwnedCommandAsync(execution, Request() with { WorkingDirectory = "Q:\\fixture" }, default);
+            deliveries.Add(closing);
+            var stale = (await service.ListOwnedCommandsAsync("session", default)).Entries.Single().Handle;
+            await service.InvalidateOwnedOperationAsync(execution.OperationId);
+            Assert.IsFalse(await service.ResolveOwnedCommandAsync(stale, AgentPermissionDecisionKind.AllowOnce, default));
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await closing.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
+        }
+        finally { await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, []); }
+    }
+
+    [TestMethod]
+    public async Task OwnedReview_CancellationAndExecutionClosureInvalidateReturnedWindows()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        var cancellation = new CancellationTokenSource();
+        try
+        {
+            foreach (var identity in new[] { "", " padded ", "bad\ud800", "bad\n", new string('x', 129) })
+                Assert.Throws<ArgumentException>(() => service.ListOwnedCommandsAsync(identity, default));
+            var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", cancellation.Token);
+            Assert.IsNotNull(execution);
+            Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+            var delivery = service.HandleOwnedCommandAsync(execution, Request() with { WorkingDirectory = "Q:\\fixture" }, default);
+            deliveries.Add(delivery);
+            var handle = (await service.ListOwnedCommandsAsync("session", default)).Entries.Single().Handle;
+            Assert.Throws<OperationCanceledException>(() => service.ListOwnedCommandsAsync("session", new CancellationToken(true)));
+            Assert.Throws<OperationCanceledException>(() => service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.AllowOnce, new CancellationToken(true)));
+            Assert.IsTrue(await service.IsPendingAsync(handle.Attempt)); // Canceling an RPC is not a permission Cancel.
+            cancellation.Cancel();
+            Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.AllowOnce, default));
+            Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
+            await service.CloseOwnedExecutionAsync(execution);
+            Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await delivery.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            Assert.IsFalse(await service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.Cancel, default));
+        }
+        finally { await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, [cancellation]); }
+        Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
+    }
+
     private static async Task CloseOwnedFixtureAsync(SessionPermissionService service, OwnedProviderEventForwarding forwarding,
         OwnedProviderEventForwarding.Attachment attachment, List<Task<AgentPermissionDecision>> deliveries, IReadOnlyList<CancellationTokenSource> sources)
     {

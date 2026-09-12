@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { boot, workspace, sessionDisplay, sessionRuntimeState, type BootStatus } from "#neoastra";
+import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, type BootStatus } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, type HistoryState } from "./history";
 import type { HistoryRequest } from "#neoastra";
@@ -9,6 +9,7 @@ import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
+import { createPermissionReviewer } from "./sessionPermissions";
 import "./style.css";
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
   const [submissions] = useState(() => new Map<string, SessionSendRequest>());
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
+  const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   useEffect(() => {
     const abort = new AbortController();
@@ -95,7 +97,7 @@ function App() {
             <dt>Persisted update time</dt><dd>{selectedSession.updatedAt}</dd>
           </dl>
           {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
-            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} drafts={submissions} capability={mutation.capability} display={display} runtimeReader={runtimeReader} />
+            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} drafts={submissions} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
             : <History key={selectedSession.id} sessionId={selectedSession.id} />}
         </section>}
       </>}

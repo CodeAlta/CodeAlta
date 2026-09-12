@@ -268,7 +268,7 @@ Desktop startup, owned commands or event subscriptions.
 runtime. Requests contain scalar identity/text values, not mutable descriptors, execution
 options, tools or callbacks. Preparation resolves the durable session directly and captures
 its execution policy; this bounded route supplies no custom tools, defaults to denying permission
-requests and cancels user-input requests. The explicit backend-only permission opt-in below
+requests and cancels user-input requests. The explicit owned-command permission opt-in below
 does not change preparation/session callbacks, existing TUI policy or direct runtime callers.
 
 Admission reserves one owned send per session before lookup. Client request IDs are ordinal;
@@ -369,13 +369,13 @@ The TUI coordinator is a presentation adapter. It checks pending state again ins
 
 Pending summaries remain available without an open tab and outside the bounded/lossy runtime timeline. They copy only immutable identity and scalar command/file preview data; mutable provider collections and raw JSON payloads are not retained as authoritative state. These are trusted in-process application contracts, not renderer grants, full payload replay or durable restart recovery. This bounded permission slice does not implement shared pending user-input/`alta ask` workflows, renderer reattachment, general host admission/shutdown changes, or whole-runtime close/reload stress qualification. In particular, the terminal loop must still service queued presentation work while it is being joined; full application exit ordering is a separate lifecycle qualification.
 
-#### Opt-in owned command permission lifetime (backend only)
+#### Opt-in owned command permission lifetime
 
 `CodeAltaHostOptions.ReviewOwnedCommandPermissions` defaults to **false**. When explicitly enabled,
 an owned text send can register a plain command request for manual resolution in the same
-`SessionPermissionService` mailbox. No frontend enables the option or supplies a presenter in
-this slice. Hosts enabling it must resolve through the trusted permission owner or cancel the
-operation. Preparation and persistent session callbacks always deny; user input remains canceled.
+`SessionPermissionService` mailbox. Experimental owned Desktop startup enables it only with
+`--review-owned-command-permissions`; ordinary and catalog-only launches do not enable review.
+Preparation and persistent session callbacks always deny; user input remains canceled.
 Only providers honoring `AgentSendOptions.OnPermissionRequest` can participate. Ignoring the
 per-send hook leaves the provider's permission path denial-only.
 
@@ -433,6 +433,31 @@ mailbox callers waiting for admission, provider memory or total process heap. Pa
 backend fixtures exercise these lifetimes with fake providers and inert decisions; see the
 [parity ledger](dual-head-desktop-parity.md) for verification evidence. They do not qualify
 native/frontend or real-provider behavior.
+
+#### Owned Desktop command review
+
+The generated `sessionPermissions.list` and `sessionPermissions.resolve` RPCs use dedicated
+`ListOwnedCommandsAsync` / `ResolveOwnedCommandAsync` operations, never the trusted TUI list/resolve
+surface. The mailbox filters owned plain-command requests and validates the receipt operation,
+runtime instance, attachment generation and complete session/provider-run/interaction/attempt
+association atomically against the still-live record. A null provider run stays null. Ordinary
+trusted TUI registrations cannot be listed or resolved through this route.
+
+The adapter requires the current host epoch and canonical nonempty GUID/decimal identities.
+Selected-session lists return at most four complete commands with an explicit more-entries flag;
+refresh after resolving entries reveals remaining requests. Invalid or oversized data fails closed
+without shortening a command being approved. The 192 KiB response budget includes a 4 KiB framing
+allowance; it is not a process memory bound. Errors are stable codes, not provider exception text.
+
+The application-owned frontend controller uses manual reads, selection/request fencing and an
+epoch reload latch. Detaching presentation cancels its observation, not pending permissions or the
+run. Decision responses are exactly-attempt scoped; refresh/response races cannot restore actionable
+stale cards. A transport failure after resolution starts is **uncertain**, never proof of denial or
+nonexecution, and no decision is automatically replayed. Uncertainty conservatively latches review
+disabled across selections until renderer reload, followed by an explicit authoritative read.
+Reload can reattach to requests still owned by the running process,
+not restore requests after process restart. This does not add polling, push notifications, file-change
+review, session-wide approval, user-input/ask handling, or native/provider qualification.
 
 ## Provider initialization
 
