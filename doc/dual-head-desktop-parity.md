@@ -4,6 +4,53 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: volatile Desktop queue/cancel — 2026-09-12
+
+The same sole writer implemented the adapter-only 11-file vertical and a three-file correction;
+parent independently audited complete source/fixtures, generated contracts, verified and integrated.
+This does **not** complete M4–M6 or durable queue parity. Runtime/owner, permission policy and Display
+architecture are unchanged from the prerequisite below.
+
+- Unary `sessions.queue` / `sessions.cancelQueue` route only to existing owner admission. Epoch-first
+  validation, canonical GUIDs and positive Int64 attachment strings preserve exact targets; text is
+  neither trimmed nor reconstructed. Shared 256-receipt retention, ordinal retry keys and manual
+  64-row pages remain. Nullable insertion projection preserves nine-argument receipt construction.
+- Queue reservation, insertion and execution/cleanup are distinct. Completion is sampled before
+  insertion; settled/refused insertion with pending execution is valid. Generated serialization
+  tests include escaped maxima and framing allowances within 208-KiB inbound /448-KiB response limits.
+- App-owned immutable queue/cancel intents and synchronous latches survive selection/remount with a
+  combined 256-intent bound. Manual exact retry/reconciliation only; late epoch mismatch invalidates
+  shared mutation. Busy/draining capture permits an attempt, not authority. No browser persistence,
+  retargeting, automatic polling/recovery or new event reader. After reload, manual receipt browsing
+  cannot recreate lost local text/keys. Cancellation targets the original operation, not a later run.
+- Parent found cancellation-only reconciliation could erase an unrelated new queue draft. The sole
+  writer added a regression first, then distinguished `queueRecovered` from `cancellationsRecovered`;
+  the panel consumes that production result directly. Parent re-audited all changed bodies.
+
+**Actual verification:** 13 focused Desktop cases (8 new queue RPC methods plus 5 existing pure RPC
+regressions) and 31 frontend tests (9 queue tests plus 22 from the four literal-only adapted fixtures)
+passed, zero failures/skips. New C# filter: `FullyQualifiedName~CodeAlta.Desktop.Tests.SessionQueueRpcTests`.
+Regression filter is the exact OR of these `CodeAlta.Desktop.Tests.DesktopOwnedSessionTests` methods:
+`StaleEpoch_RejectsBeforeOwnerAdmission`, `ReceiptPages_BoundWorstCaseGeneratedJson`,
+`SteerRpc_RejectsBeforeAdmissionAndBoundsGeneratedJson`,
+`CompactRpc_RejectsBeforeAdmissionAndBoundsGeneratedJson`,
+`AbortRunRpc_RejectsBeforeAdmissionAndBoundsGeneratedJson`. All five complete bodies were re-read.
+Frontend selection: `sessionQueue.test.ts` and `{sessionOperations,sessionSteering,sessionCompaction,sessionAbortRun}.test.ts`.
+
+Cached targeted and full Release solution builds passed zero warnings/errors with `--no-restore
+-p:NeoAstraRestoreFrontendDependencies=false -p:NeoAstraBuildFrontend=false`; tests used `--no-build
+--no-restore`. Parent-generated TS/manifest/schema and automatic contract check passed; TypeScript
+`--noEmit` and cached Vite production build passed. Vite output is retained at
+`%TEMP%/codealta-parent-desktop-queue-vite-7e0243ed83484417bde014a1b0629673`.
+Logs: `%TEMP%/codealta-parent-desktop-queue-*-20260912.log`. New fixture roots remain retained; no
+verification failure or timeout occurred. The prior 137 runtime passes are separate prerequisite
+evidence, not this Desktop result.
+
+No native/mounted UI, real-provider/tool/auth, default-profile, network/install/restore, full-suite
+or website qualification. Website build remains omitted because configured theme acquisition crosses
+the no-network boundary. The two deferred runtime interleavings below remain dynamically uncovered;
+durable/restart recovery needs a separately approved trust/reauthorization contract.
+
 ## M4 checkpoint: volatile owned deferred execution — 2026-09-12
 
 The same sole writer implemented only the shared-runtime queue prerequisite. Parent independently
@@ -51,7 +98,7 @@ found no existing safe deterministic injection/observation seam. These are sourc
 not passing dynamic evidence; revisit before broader queue parity. No timing race tests or production
 test hooks were added. Fixture roots are retained, and timeouts never establish termination.
 
-No Desktop queue RPC/UI, durable/restart recovery, frontend/native/mounted UI, real-provider/tool/auth,
+That prerequisite step did not qualify Desktop queue RPC/UI, durable/restart recovery, frontend/native/mounted UI, real-provider/tool/auth,
 default-profile, network/install/restore, full-suite or website qualification. Website build remains
 omitted because configured theme acquisition crosses the no-network boundary.
 

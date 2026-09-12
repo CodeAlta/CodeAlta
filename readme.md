@@ -18,7 +18,7 @@ Owned mode also supports text steering of an explicitly refreshed runtime/run ta
 
 The same experimental mode can compact an explicitly observed attachment only if the supported provider admits it while idle, without waiting or replacing the target. Compaction uses context current at admission; inspect its receipt for success or busy/unsupported/failure outcomes.
 
-Desktop prompt queueing is not yet exposed. The shared runtime has a host-lifetime-only deferred-text prerequisite; it does not provide durable Desktop queue recovery or change existing terminal queue behavior.
+The same experimental mode offers **Queue text — this host only** after manual runtime refresh, including while the observed attachment is busy. Reservation, host-only insertion and execution/cleanup are separate; queued text is not durable. Cancellation targets the original queued operation, not a later run. Uncertain requests retain their exact text/key/target for manual reconciliation or deliberate retry while the document remains open; reload does not reconstruct lost local intent. Existing terminal queue behavior is unchanged.
 
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">

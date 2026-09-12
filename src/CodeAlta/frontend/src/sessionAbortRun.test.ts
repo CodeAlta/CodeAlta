@@ -12,7 +12,7 @@ const observation: SessionRuntimeStateResponse = {
 function request() { return captureAbortRun("epoch", "session", observation, "key")!; }
 function page(kind = "AbortRun", key = "key"): SessionReceiptPage {
   return { status: "ok", epoch: "epoch", next: null, rows: [{ clientRequestId: key, sessionId: "session", operationId: "operation",
-    targetOperationId: null, kind, state: "pending", outcome: null, code: null, runId: null }] };
+    targetOperationId: null, kind, state: "pending", outcome: null, code: null, runId: null, queueInsertion: null }] };
 }
 function finiteJoin<T>(task: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;

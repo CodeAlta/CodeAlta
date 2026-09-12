@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionSendRequest } from "#neoastra";
+import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionReceiptView, type SessionSendRequest } from "#neoastra";
 import { captureSubmission, createMutationCapability, refreshSubmissions, sendSubmission, hasSubmissionReceipt } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
 import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
+import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
 import { historyMessage, loadHistory, type HistoryState } from "./history";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import type { createSessionDisplayStore } from "./sessionDisplay";
@@ -11,7 +12,7 @@ import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 
-export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compaction, abortRuns, capability, display, runtimeReader, permissionReviewer }: {
+export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compaction, abortRuns, queue, capability, display, runtimeReader, permissionReviewer }: {
   sessionId: string; epoch: string; drafts: Map<string, SessionSendRequest>; capability: ReturnType<typeof createMutationCapability>;
   display: ReturnType<typeof createSessionDisplayStore>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
@@ -19,12 +20,15 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
   steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
+  queue: ReturnType<typeof createQueueSubmissions>;
 }) {
   const [text, setText] = useState("");
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
   const [abortRunMessage, setAbortRunMessage] = useState("Refresh runtime state explicitly before targeting cancellation.");
+  const [queueText, setQueueText] = useState("");
+  const [queueMessage, setQueueMessage] = useState("Refresh runtime state explicitly before queueing text in this host.");
   const [message, setMessage] = useState("Refresh submissions to recover accepted receipts. Never automatically resend an uncertain request.");
   const [page, setPage] = useState<SessionReceiptPage>();
   const [history, setHistory] = useState<HistoryState>();
@@ -41,6 +45,10 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
     scope.current = controller;
     setText(drafts.get(sessionId)?.text ?? "");
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
+    setQueueText(queue.pending(sessionId)?.request.text ?? "");
+    setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
+      ? "Retained queue/cancellation intent exists. Manually refresh receipts or explicitly retry the exact request after its original waiter settles."
+      : "Refresh runtime state explicitly before queueing text in this host.");
     setSteerMessage(steering.pending(sessionId)
       ? "A retained steering request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and target once the previous wait settles."
       : "Refresh runtime state explicitly before targeting a run.");
@@ -60,16 +68,19 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
     setBusy(false);
     setMessage("Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
     return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
-  }, [sessionId, epoch, drafts, steering, compaction, abortRuns, runtimeReader, capability]);
+  }, [sessionId, epoch, drafts, steering, compaction, abortRuns, queue, runtimeReader, capability]);
 
   const pending = drafts.get(sessionId);
   const pendingSteer = steering.pending(sessionId);
   const pendingCompact = compaction.pending(sessionId);
   const pendingAbortRun = abortRuns.pending(sessionId);
+  const pendingQueue = queue.pending(sessionId);
+  const pendingQueueCancellations = queue.cancellations(sessionId);
   const observedTarget = runtimeState?.kind === "ready" ? runtimeState.snapshot : undefined;
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
   const canCaptureCompact = captureCompaction(epoch, sessionId, observedTarget, "availability") !== null;
   const canCaptureAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability") !== null;
+  const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -99,7 +110,11 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
     const signal = scope.current?.signal;
     if (!signal) return;
     const revision = ++receiptRevision.current;
-    void refreshSubmissions(sessions.receipts, epoch, offset, signal, result => {
+    void refreshSubmissions(async (request, options) => {
+      const result = await sessions.receipts(request, options);
+      capability.observe(result); // Even a late obsolete selection must invalidate shared mutation authority.
+      return result;
+    }, epoch, offset, signal, result => {
       if (revision !== receiptRevision.current) return;
       observeEpoch(result);
       setPage(result);
@@ -117,6 +132,11 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
         setCompactMessage("Compaction receipt recovered. Review its settled outcome; a busy outcome requires a new explicit action.");
       if (abortRuns.reconcile(sessionId, result, capability))
         setAbortRunMessage("Exact cancellation receipt recovered. Review its outcome; cancellation signalling is not run completion.");
+      const recoveredQueue = queue.reconcile(sessionId, result, capability);
+      if (recoveredQueue.queueRecovered) setQueueText("");
+      if (recoveredQueue.queueRecovered || recoveredQueue.cancellationsRecovered > 0) {
+        setQueueMessage("Queue/cancellation receipt reconciled. Review reservation, host-only insertion and execution/cleanup separately.");
+      }
     });
   }
   function steer() {
@@ -166,6 +186,35 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
         : `Exact cancellation: ${result.status}. Uncertain requests retain their original run and key. No automatic retry.`);
     });
   }
+  function queueTextInHost() {
+    const signal = scope.current?.signal;
+    if (!signal || signal.aborted || !capability.canMutate()) return;
+    const retained = queue.pending(sessionId);
+    const request = retained?.request ?? captureQueue(epoch, sessionId, observedTarget, queueText, crypto.randomUUID());
+    if (!request || retained?.inFlight || !capability.canSubmit(request)) return;
+    setQueueMessage("Owner reservation pending; host-only insertion and execution are not yet confirmed.");
+    void queue.submit(request, signal, capability, result => {
+      observeEpoch(result);
+      if (result.status === "accepted" || result.status === "replay") {
+        setQueueText("");
+        setQueueMessage("Owner reservation accepted. Refresh submissions manually for host-only insertion and execution/cleanup; neither durability nor run completion is implied.");
+      } else setQueueMessage(`Queue: ${result.status}. Uncertain requests retain exact text, key and attachment. No automatic retry.`);
+    });
+  }
+  function cancelQueued(row?: SessionReceiptView, retainedOperationId?: string) {
+    const signal = scope.current?.signal;
+    if (!signal || signal.aborted || !capability.canMutate()) return;
+    const retained = queue.cancelPending(retainedOperationId ?? row?.operationId ?? "");
+    const intent = retained?.intent ?? (page && row ? captureQueueCancellation(epoch, sessionId, page, row, crypto.randomUUID()) : null);
+    if (!intent || retained?.inFlight || !capability.canSubmit(intent.request)) return;
+    setQueueMessage("Cancellation owner reservation pending for the original queued operation only.");
+    void queue.cancel(intent, signal, capability, result => {
+      observeEpoch(result);
+      setQueueMessage(result.status === "accepted" || result.status === "replay"
+        ? "Cancellation reservation accepted. Refresh receipts manually. Signalling is not rollback, cleanup completion or run completion; previously accepted decisions remain accepted."
+        : `Queued-operation cancellation: ${result.status}. Uncertainty retains the original operation, session and key. No automatic retry.`);
+    });
+  }
   function abort(operationId: string) {
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -198,8 +247,14 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
     <p role="status">{message}</p>
     {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}
     {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
-    {page?.rows.filter(row => row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
-      <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending"} {row.code ?? ""} · {row.operationId}</p>
+    {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
+      {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
+        {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>Malformed queue receipt; not actionable.</p>}</>
+        : row.kind === "CancelQueue" ? <p>CancelQueue · {queueCancellationStatus(row) ?? "Malformed cancellation receipt; not actionable."} · target {row.targetOperationId}</p>
+        : <p>{row.kind} · {row.outcome === "Completed" ? (row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending"} {row.code ?? ""} · {row.operationId}</p>}
+      {row.kind === "Queue" && <button type="button" disabled={invalidEpoch || !!queue.cancelPending(row.operationId)
+        || (!!pendingQueue?.inFlight && pendingQueue.request.clientRequestId === row.clientRequestId)
+        || !page || captureQueueCancellation(epoch, sessionId, page, row, "availability") === null} onClick={() => cancelQueued(row)}>Cancel this queued operation</button>}
       {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch} onClick={() => abort(row.operationId)}>Abort submission</button>}
     </div>)}
     {page?.next != null && <button type="button" onClick={() => refresh(page.next!)}>Next receipt page</button>}
@@ -230,6 +285,20 @@ export function OwnedSessionPanel({ sessionId, epoch, drafts, steering, compacti
         </dl>
       </> : <p>No runtime entry observed. This does not imply idle, completion or absence of a durable session.</p>}
     </>}
+    <h3>Queue text — this host only</h3>
+    <p className="detail">Volatile, bounded, exact-attachment text. Busy/draining observations permit an attempt; the backend checks the exact attachment and owned-default policy. No retargeting or durable/restart recovery. Owner reservation, insertion retained IN THIS HOST ONLY, and execution/cleanup are separate phases. queue_accepted is not executed; queue_dispatched is not run completed. After document reload, browse receipts manually: lost local text and retry keys are not reconstructed.</p>
+    {pendingQueue && <p className="detail">Retained target: runtime {pendingQueue.request.expectedRuntimeInstanceId} · attachment {pendingQueue.request.expectedAttachmentGeneration} · request {pendingQueue.request.clientRequestId}</p>}
+    <label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue}
+      onChange={event => setQueueText(event.target.value)} /></label>
+    <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={queueTextInHost}>
+      {pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}
+    </button>
+    {pendingQueueCancellations.map(value => <div key={value.intent.request.targetOperationId}>
+      <p className="detail">Retained cancellation: original session {value.intent.sessionId} · operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
+      <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)}
+        onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>Retry exact queued-operation cancellation</button>
+    </div>)}
+    <p role="status">{queueMessage}</p>
     <h3>Steer the explicitly observed run</h3>
     <p className="detail">Exact-target text only; the host rejects stale, retiring or non-owned targets. No run ID recorded means steering is unavailable. Steering does not create permission authority or reopen a closed review window. Refreshes never change a retained request's target.</p>
     {pendingSteer && <p className="detail">Retained target: runtime {pendingSteer.request.expectedRuntimeInstanceId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · run {pendingSteer.request.expectedRunId} · request {pendingSteer.request.clientRequestId}</p>}

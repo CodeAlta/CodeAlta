@@ -89,7 +89,7 @@ test("epoch mismatch never resends", async () => {
 
 test("receipt recovery exposes no prompt text", async () => {
   const published: unknown[] = [];
-  const recovered: SessionReceiptPage = { ...page, rows: [{ clientRequestId: "key", sessionId: "session", operationId: "operation", targetOperationId: null, kind: "Send", state: "terminal", outcome: "Completed", code: null, runId: "run" }] };
+  const recovered: SessionReceiptPage = { ...page, rows: [{ clientRequestId: "key", sessionId: "session", operationId: "operation", targetOperationId: null, kind: "Send", state: "terminal", outcome: "Completed", code: null, runId: "run", queueInsertion: null }] };
   await refreshSubmissions(async () => recovered, "epoch", 0, signal, value => published.push(value));
   assert.deepEqual(published, [recovered]);
   assert.equal(JSON.stringify(published).includes("text"), false);

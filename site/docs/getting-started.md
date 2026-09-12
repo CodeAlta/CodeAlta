@@ -33,8 +33,14 @@ Receipts describe submission, not live-run completion; **Abort submission** is n
 Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
 agent parity remain unqualified; continue using `altatui` for normal workflows.
 
-Desktop prompt queueing and restart recovery of pending Desktop prompts are not yet available.
-Existing terminal prompt queues are unchanged; continue using `altatui` for those workflows.
+The experimental owned mode offers **Queue text — this host only** after manual runtime refresh,
+including when the observed attachment is busy. Reservation, insertion retained in this host and
+execution/cleanup are separate: acceptance is not durable storage or proof of execution. Use
+**Cancel this queued operation** for the original operation, not a later run; signalling cancellation
+does not prove rollback or completion. Uncertain requests retain exact text, keys and targets across
+selection changes for manual receipt refresh or deliberate retry. Reload loses local retry intent;
+receipts can still be browsed manually, but text and keys are not reconstructed. Restart recovery is
+not provided. Existing terminal prompt queues are unchanged.
 
 In owned-host mode, **Refresh runtime state** before using **Steer observed run**. Steering sends
 text only to that recorded runtime, attachment and run; no recorded run means unavailable, and

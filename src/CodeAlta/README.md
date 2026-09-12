@@ -181,9 +181,16 @@ selection changes with its exact key and attachment for manual reconciliation or
 Replaying a busy receipt does not try again: a new explicit action uses a fresh key. Closing the
 panel cancels only the wait; shutdown retains and joins accepted compaction and cancellation work.
 
-Desktop prompt queueing is not yet exposed by RPC or UI. The shared runtime's volatile deferred-text
-prerequisite retains work only within the current host; it is not durable Desktop queue recovery.
-Existing terminal/live-tool queues remain separate and do not grant owned permission-review authority.
+**Queue text — this host only** uses an explicitly refreshed runtime/attachment observation, including
+busy/draining attachments. `sessions.queue` reserves exact text for that attachment only; the receipt
+separately reports reservation, host-only insertion and execution/cleanup. `queue_accepted` is not
+durable or executed, and `queue_dispatched` is not proof of run completion. **Cancel this queued
+operation** uses `sessions.cancelQueue` with the original operation ID, never a later/current run.
+Cancellation signalling is not rollback or target cleanup completion. Uncertain queue/cancel intents
+retain exact keys and targets in App memory across selection/remount, with manual refresh/retry only
+and a combined 256-intent bound. Cancellation-only recovery preserves unrelated queue draft text.
+After document reload, receipts can be browsed manually, but lost local text/keys are not reconstructed.
+No durable/restart recovery is provided. Existing terminal/live-tool queues and permission policy remain separate.
 
 Actual cached-store reads are host-owned (eight active reads, excess rejected); cancelling an
 RPC wait does not stop them. Shutdown joins command/read work before runtime dependencies.

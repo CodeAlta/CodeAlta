@@ -368,7 +368,24 @@ Claimed sends retain original work, permission closure, callback traversal and r
 before source/use release. Independent cancellation starts before dependent joins; noncooperative
 providers/callbacks can keep shutdown pending indefinitely. Timeouts are not termination proof.
 
-This is a host-lifetime prerequisite with no Desktop queue RPC/UI or durable/restart recovery.
+Desktop exposes this host-lifetime contract through unary `sessions.queue` and `sessions.cancelQueue`,
+routed only to those owner admissions. Queue requests contain epoch, client key, session, runtime,
+canonical positive Int64 attachment **string**, and exact text (at most 32768 UTF-16 units). Cancellation
+contains epoch, client key and original operation ID. Admission checks epoch first. The shared receipt
+index retains at most 256 owner references and returns manual 64-row pages; no text is reconstructed.
+Nullable `QueueInsertion` is null on other command kinds, initially pending on Queue, then settles
+independently of execution. Projection samples completion before insertion, allowing settled/refused
+insertion with still-pending execution, never terminal execution with pending insertion. Generated JSON
+fixtures include framing allowances within 208-KiB inbound and 448-KiB response budgets.
+
+The manual UI captures explicitly refreshed exact identity; busy/draining is permitted, but unavailable,
+transitioning, retiring, terminated and pending-prompt observations are not. App-owned immutable intents
+and synchronous in-flight latches survive selection/remount (256 combined queue/cancel intents).
+Manual reconciliation requires matching epoch/kind/key/session and original cancellation target;
+late epoch mismatch disables shared mutation without rebasing. Only actual queue-intent recovery clears
+queue text; cancellation-only recovery preserves an unrelated draft. Document reload loses local intent;
+manual receipt browsing does not recreate its text/key or authorize automatic retry. No durable/restart
+recovery, new raw-event reader or renderer permission authority is introduced.
 The [parity ledger](dual-head-desktop-parity.md) records focused verification and two explicitly
 uncovered paths: injected failed/null journal reads and retirement forced between setup capture
 and registration/publication. Source inspection is not dynamic proof of those interleavings.
