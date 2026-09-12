@@ -69,8 +69,9 @@ and request-generation results, not order snapshots by attachment ordinal. There
 acknowledgement, replay, history recovery or atomic history/original-event-stream handshake.
 
 Owned Desktop exposes a unary `runtimeState.current` RPC and a manual **Refresh runtime state**
-readout, separate from Display/history/receipts. It does not poll, automatically refresh or gate
-commands. Host epoch and bounded, well-formed session identity are validated before querying.
+readout, separate from Display/history/receipts. It does not poll or automatically refresh.
+Exact-target steering captures this observation, but the host revalidates all target authority.
+Host epoch and bounded, well-formed session identity are validated before querying.
 Malformed/oversized results produce `wire_limit`, with no partial/truncated authoritative state;
 closure and other failures use stable codes without exception messages. Attachment ordinals use
 decimal strings to preserve Int64 precision in JavaScript. Seven bounded identity/configuration
@@ -264,9 +265,9 @@ Desktop startup, owned commands or event subscriptions.
 
 ### Host-owned text commands (in development)
 
-`CodeAltaHost.Commands` owns text-send and abort admission against that host's existing
+`CodeAltaHost.Commands` owns text-send, abort and exact-target steering admission against that host's existing
 runtime. Requests contain scalar identity/text values, not mutable descriptors, execution
-options, tools or callbacks. Preparation resolves the durable session directly and captures
+options, tools or callbacks. Send preparation resolves the durable session directly and captures
 its execution policy; this bounded route supplies no custom tools, defaults to denying permission
 requests and cancels user-input requests. The explicit owned-command permission opt-in below
 does not change preparation/session callbacks, existing TUI policy or direct runtime callers.
@@ -276,6 +277,20 @@ send identity uses a case-insensitive session ID and exact text. Matching retrie
 same receipt. `OwnedCommandReceiptCapacity` defaults to 256; receipts are retained for the
 owner's lifetime rather than evicted, and new requests, including abort receipts, are rejected
 when full. Disposal can still initiate control without allocating another receipt.
+
+`OwnedTextSteerRequest` captures exact session/runtime-instance/positive-attachment/non-null-run
+identity, retry key and unnormalized text. Steering reserves an independent per-session slot
+and shares receipt capacity with Send/Abort; exact record replay returns the same receipt and
+changed payload or command kind conflicts. It does not prepare or discover a runtime. The
+existing session mailbox validates the target, owned-denying defaults and transition/termination
+state before acquiring the existing attachment's use; retirement rejects acquisition. Dispatch
+forwards the original `AgentSteerOptions.ExpectedRunId`, never retargets, and rejects a different
+returned run. Provider-boundary expected-run enforcement remains essential to later-run exclusion.
+The existing run retains its permission callback; steering creates no new approval window.
+Caller cancellation cannot cancel admitted steering. Shutdown starts independent cancellation,
+then joins retained dispatch and cancellation work; explicit forwarding registrations are joined
+before releasing the execution source and captured attachment use. This does not add active-run
+abort, compaction or durable queue execution ownership.
 
 Caller cancellation governs admission only. Accepted preparation, send, cancellation and
 attachment-aware abort work are retained by the owner; a session slot remains occupied until
@@ -339,6 +354,18 @@ the old request. Labels describe submission
 pending/submitted/failed/cancelled, never a completed conversation. **Abort submission** targets
 one pending owned send, not an arbitrary later run or a general Stop-agent command. No runtime
 event reader or live projection is added by this vertical.
+
+Generated owned-only `sessions.steer` accepts up to 32,768 UTF-16 text units and 256-unit
+identities, canonical runtime GUID and positive decimal attachment generation. It uses the
+same epoch gate, bounded owner receipts and sanitized outcomes. **Steer observed run** captures
+only the manually refreshed current-runtime response, not Display/history or a send receipt.
+App-owned immutable retention and synchronous per-session in-flight exclusion survive panel
+remounts; uncertainty can be reconciled by manual receipt refresh or an explicit exact-key retry,
+never automatic retry/rekeying/retargeting. Receipt matching includes command kind. Stale host or
+observed runtime identity disables mutations until reload. Completed steering means input
+submitted, not completion of the run. Generated-contract and inert managed/frontend coverage is
+recorded in the [parity ledger](dual-head-desktop-parity.md); mounted/native/provider behavior is
+not established by those tests.
 
 The explicit catalog-copy lease belongs to the Desktop application through the synchronous
 native loop. A cancellable close signals retained shutdown work without awaiting it inside the

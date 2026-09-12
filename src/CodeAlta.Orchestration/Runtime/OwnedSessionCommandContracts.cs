@@ -13,6 +13,16 @@ public sealed record OwnedTextSendRequest(string ClientRequestId, string Session
 /// <param name="TargetOperationId">The accepted send receipt's operation identity.</param>
 public sealed record OwnedAbortRequest(string ClientRequestId, Guid TargetOperationId);
 
+/// <summary>Immutable text steering for one observed runtime attachment and run; never retargeted.</summary>
+/// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>
+/// <param name="SessionId">Durable session identity without surrounding whitespace.</param>
+/// <param name="ExpectedRuntimeInstanceId">Observed runtime instance identity.</param>
+/// <param name="ExpectedAttachmentGeneration">Observed positive attachment generation.</param>
+/// <param name="ExpectedRunId">Real, nonblank provider run identity from the observation.</param>
+/// <param name="Text">Exact text; whitespace is not normalized.</param>
+public sealed record OwnedTextSteerRequest(string ClientRequestId, string SessionId, Guid ExpectedRuntimeInstanceId,
+    long ExpectedAttachmentGeneration, string ExpectedRunId, string Text);
+
 /// <summary>The admitted command kind.</summary>
 public enum OwnedSessionCommandKind
 {
@@ -20,6 +30,8 @@ public enum OwnedSessionCommandKind
     Send,
     /// <summary>Abort one owned submission.</summary>
     Abort,
+    /// <summary>Submit text to one exactly targeted active run.</summary>
+    Steer,
 }
 
 /// <summary>Admission decision; only accepted requests allocate new retry receipts.</summary>

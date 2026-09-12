@@ -33,6 +33,15 @@ Receipts describe submission, not live-run completion; **Abort submission** is n
 Stop-agent behavior. Uncertain sends are never retried automatically. Native lifecycle and full
 agent parity remain unqualified; continue using `altatui` for normal workflows.
 
+In owned-host mode, **Refresh runtime state** before using **Steer observed run**. Steering sends
+text only to that recorded runtime, attachment and run; no recorded run means unavailable, and
+stale or unsupported targets fail rather than becoming a send/queue or targeting later work.
+It preserves the run's existing permission policy. Success means input submitted, not run completed.
+An uncertain request keeps its exact text, key and target across session selection changes. Use
+**Refresh submissions** to reconcile it or deliberately **Retry exact steering request**; new
+observations never retarget it, and no retry happens automatically. Reload is required if the
+host/runtime identity changes. Closing the panel does not cancel accepted steering.
+
 In owned-host mode only, `--review-owned-command-permissions` opts into manual review of supported
 plain command requests. Refresh the selected session's pending commands and choose **Allow once**,
 **Deny**, or **Cancel** after reviewing the complete command and directory. Unsupported permissions

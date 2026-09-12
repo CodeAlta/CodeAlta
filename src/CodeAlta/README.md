@@ -130,7 +130,7 @@ owned mode registers this channel; default/catalog-only startup behavior is unch
 
 **Refresh runtime state** is a separate manual, point-in-time observation of the actual runtime
 entry, coordinator transition, recorded run, Shutdown, retirement and queue-drain facts. It does
-not poll, automatically refresh or control command availability. No entry/no recorded run is not
+not poll or automatically refresh; steering uses its captured target, subject to host revalidation. No entry/no recorded run is not
 idle or completed, and queue depth is explicitly unknown. Configuration is runtime-captured, not
 verified provider-effective settings; pending prompt selection is shown separately. This query
 does not read catalogs/history or start/discover providers. Its runtime instance/attachment
@@ -140,6 +140,19 @@ identity requires reload rather than retrying the old epoch. Malformed/oversized
 without truncating authoritative fields (32 KiB transport budget, 256 UTF-16 units per identity/
 configuration string, decimal-string attachment generation). Canceling a wait does not cancel
 admitted runtime-owned work. This unary RPC is registered only in explicit owned mode.
+
+After **Refresh runtime state**, **Steer observed run** submits text to that exact runtime,
+attachment and recorded non-null run. It never creates or replaces a runtime, falls back to a
+send/queue, or silently targets a later run. The host rechecks ownership and target identity;
+stale, retiring, transitioning, terminated or unsupported targets fail rather than retarget.
+Steering preserves the existing run's permission authority and cannot reopen a closed review
+window. Text is limited to 32,768 UTF-16 units. Success means input submitted, not run completed.
+An uncertain steering request retains its immutable target, key and text across selection changes.
+Use **Refresh submissions** to reconcile it or **Retry exact steering request** deliberately;
+there is no automatic retry. A fresh runtime observation does not change that retained target.
+Only one steering dispatch per session is in flight, independently of an owned send; steering
+shares the host's 256-receipt limit. Closing presentation cancels only the waiter, while host
+shutdown retains and joins accepted steering and cancellation work.
 
 Actual cached-store reads are host-owned (eight active reads, excess rejected); cancelling an
 RPC wait does not stop them. Shutdown joins command/read work before runtime dependencies.

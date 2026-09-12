@@ -559,6 +559,92 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(AgentPermissionDecisionKind.AllowForSession, (await f.Observe(tui.Completion)).Kind);
     }, reviewPermissions: true);
 
+    [TestMethod]
+    public Task OwnedSteer_AlongsideSendPreservesExactReplayAndIndependentSlot() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.SteerRequest();
+        using var caller = new CancellationTokenSource();
+        var steer = f.Accept(f.AdmitSteer(request, caller.Token));
+        await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "steer");
+        caller.Cancel();
+        Assert.IsFalse(f.Provider.SteerToken.IsCancellationRequested);
+        Assert.IsFalse(send.Completion.IsCompleted);
+        Assert.AreSame(steer, f.AdmitSteer(request).Receipt);
+        foreach (var changed in new[] { request with { Text = "changed" }, request with { SessionId = "different-session" },
+            request with { ExpectedRunId = "later" }, request with { ExpectedRuntimeInstanceId = Guid.NewGuid() },
+            request with { ExpectedAttachmentGeneration = request.ExpectedAttachmentGeneration + 1 } })
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSteer(changed).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(new(request.ClientRequestId, f.SessionId, request.Text)).Kind);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSteer(request with { ClientRequestId = "other" }).Kind);
+        f.Provider.ReleaseSteer.TrySetResult();
+        var result = await f.Observe(steer.Completion);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome);
+        Assert.AreEqual(request.ExpectedRunId, result.RunId!.Value.Value);
+        Assert.AreEqual(request.ExpectedRunId, f.Provider.SteerOptions!.ExpectedRunId!.Value.Value);
+        Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+    });
+
+    [TestMethod]
+    public Task OwnedSteer_ProviderBoundaryRejectsLaterRun_AndWrongReturnedRunFails() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.SteerRequest();
+        var steer = f.Accept(f.AdmitSteer(request));
+        await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "captured attachment");
+        // The fake's mutation-boundary check mirrors AgentSession's state-gate check, after capture.
+        f.Provider.CurrentRun = "later-run";
+        f.Provider.ReleaseSteer.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, (await f.Observe(steer.Completion)).Outcome);
+        Assert.AreEqual(0, f.Provider.SteerDeliveries);
+        f.Provider.CurrentRun = request.ExpectedRunId;
+        f.Provider.WrongSteerResult = true;
+        var wrong = f.Accept(f.AdmitSteer(request with { ClientRequestId = "wrong-return" }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, (await f.Observe(wrong.Completion)).Outcome);
+    });
+
+    [TestMethod]
+    public Task OwnedSteer_CapacityAndPreCancellationDoNotDispatch() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.SteerRequest();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => f.AdmitSteer(request, cancelled.Token));
+        var steer = f.Accept(f.AdmitSteer(request));
+        await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "steer");
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Capacity, f.AdmitSteer(request with { ClientRequestId = "over" }).Kind);
+        Assert.AreSame(steer, f.AdmitSteer(request).Receipt);
+    }, capacity: 2);
+
+    [TestMethod]
+    public Task OwnedSteer_ShutdownSignalsBeforeJoiningAndRetainsNoncooperativeWork() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.SteerRequest();
+        var steer = f.Accept(f.AdmitSteer(request));
+        await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "steer");
+        var disposal = f.BeginDisposal();
+        var sendCancelled = f.ObserveReadiness(f.Provider.SendCancelled.Task, send, "send cancellation");
+        var steerCancelled = f.ObserveReadiness(f.Provider.SteerCancelled.Task, steer, "steer cancellation");
+        await sendCancelled;
+        await steerCancelled;
+        Assert.IsTrue(f.Provider.SendToken.IsCancellationRequested);
+        Assert.IsTrue(f.Provider.SteerToken.IsCancellationRequested);
+        Assert.IsFalse(disposal.IsCompleted);
+        Assert.IsFalse(steer.Completion.IsCompleted);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Closed, f.AdmitSteer(request with { ClientRequestId = "closed" }).Kind);
+        f.Provider.ReleaseAll();
+        await f.Observe(disposal);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Cancelled, (await f.Observe(steer.Completion)).Outcome);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+    });
+
     // Constructed only inside a selected real-route test. All gates and tasks are instance-owned.
     private sealed class Fixture
     {
@@ -728,6 +814,30 @@ public sealed class OwnedSessionCommandServiceTests
         internal OwnedSessionCommandAdmission AdmitAbort(OwnedAbortRequest request)
             => RetainAdmission(Host.Commands.AdmitAbort(request));
 
+        internal OwnedSessionCommandAdmission AdmitSteer(OwnedTextSteerRequest request, CancellationToken cancellationToken = default)
+            => RetainAdmission(Host.Commands.AdmitSteer(request, cancellationToken));
+
+        internal async Task<OwnedTextSteerRequest> SteerRequest()
+        {
+            var marker = Guid.NewGuid().ToString("N");
+            Provider.RecordRun("owned-run-1", marker);
+            // Display is only a commit-readiness signal, never target authority. Join the complete
+            // observation (including iterator disposal) before releasing its timeout source.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await Track(Committed());
+            var state = await Observe(Host.RuntimeService.GetCurrentStateAsync(SessionId));
+            return new("steer", SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "owned-run-1", "exact steer text");
+            async Task Committed()
+            {
+                await foreach (var replacement in Host.RuntimeService.Display.ObserveAsync(timeout.Token))
+                {
+                    if (replacement.Snapshot.Sessions.Any(session => session.SessionId == SessionId
+                        && session.Text.Any(text => text.ContentId == marker && text.Text == "inert steering readiness"))) return;
+                }
+                Assert.Fail("Display closed before the fake run event committed.");
+            }
+        }
+
         private OwnedSessionCommandAdmission RetainAdmission(OwnedSessionCommandAdmission admission)
         {
             // Retain even an unexpectedly accepted receipt before any rejection/replay assertion.
@@ -876,6 +986,24 @@ public sealed class OwnedSessionCommandServiceTests
         internal bool RequestInteractions { get; set; }
         internal bool RequestPreparationPermission { get; set; }
         internal bool RequestPerSendPermission { get; set; }
+        internal string? CurrentRun { get; set; }
+        internal bool WrongSteerResult { get; set; }
+        internal AgentSteerOptions? SteerOptions { get; private set; }
+        internal CancellationToken SteerToken { get; private set; }
+        internal int SteerDeliveries { get; private set; }
+        private Action<AgentEvent>? _handler;
+        internal void RecordRun(string run, string marker)
+        {
+            CurrentRun = run;
+            _handler!(new AgentSessionUpdateEvent(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
+                new AgentRunId(run), AgentSessionUpdateKind.Warning, "inert recorded run"));
+            _handler!(new AgentContentCompletedEvent(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
+                new AgentRunId(run), AgentContentKind.Notice, marker, null, "inert steering readiness"));
+        }
+        internal TaskCompletionSource SteerStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource SteerCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource SendCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseSteer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task<AgentPermissionDecision>? SendPermission { get; private set; }
         internal AgentPermissionDecisionKind? PreparationDecision { get; private set; }
         internal AgentSendOptions? FirstSendOptions { get; private set; }
@@ -954,6 +1082,7 @@ public sealed class OwnedSessionCommandServiceTests
             ReleaseSend.TrySetResult();
             ReleaseSecondSend.TrySetResult();
             ReleaseAbort.TrySetResult();
+            ReleaseSteer.TrySetResult();
         }
 
         // A fresh runtime for every real registry factory call, including resume-fallback creation.
@@ -981,7 +1110,11 @@ public sealed class OwnedSessionCommandServiceTests
                 await Task.CompletedTask.ConfigureAwait(false);
                 yield break;
             }
-            public IDisposable Subscribe(Action<AgentEvent> handler) => new Subscription();
+            public IDisposable Subscribe(Action<AgentEvent> handler)
+            {
+                owner._handler = handler;
+                return new Subscription(() => owner._handler = null);
+            }
             public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
             {
                 Interlocked.Increment(ref owner._active);
@@ -990,6 +1123,7 @@ public sealed class OwnedSessionCommandServiceTests
                     var send = Interlocked.Increment(ref owner._sends);
                     owner.Input = options.Input;
                     owner.SendToken = cancellationToken;
+                    using var cancellationReadiness = cancellationToken.Register(() => owner.SendCancelled.TrySetResult());
                     if (send == 1) owner.FirstSendOptions = options;
                     else owner.SecondSendOptions = options;
                     if (owner.RequestInteractions)
@@ -1024,7 +1158,24 @@ public sealed class OwnedSessionCommandServiceTests
                 }
                 finally { Interlocked.Decrement(ref owner._active); }
             }
-            public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected steer.");
+            public async Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
+            {
+                Interlocked.Increment(ref owner._active);
+                try
+                {
+                    owner.SteerOptions = options;
+                    owner.SteerToken = cancellationToken;
+                    using var cancellationReadiness = cancellationToken.Register(() => owner.SteerCancelled.TrySetResult());
+                    owner.SteerStarted.TrySetResult();
+                    await owner.ReleaseSteer.Task.ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (options.ExpectedRunId?.Value != owner.CurrentRun || owner.CurrentRun is null)
+                        throw new InvalidOperationException("Exact run no longer active.");
+                    owner.SteerDeliveries++;
+                    return new AgentRunId(owner.WrongSteerResult ? "wrong-returned-run" : owner.CurrentRun);
+                }
+                finally { Interlocked.Decrement(ref owner._active); }
+            }
             public Task CompactAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected compaction.");
             public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
             public ValueTask DisposeAsync()
@@ -1034,9 +1185,9 @@ public sealed class OwnedSessionCommandServiceTests
             }
         }
 
-        private sealed class Subscription : IDisposable
+        private sealed class Subscription(Action dispose) : IDisposable
         {
-            public void Dispose() { }
+            public void Dispose() => dispose();
         }
     }
 }

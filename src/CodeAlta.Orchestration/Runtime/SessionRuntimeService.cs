@@ -1527,6 +1527,50 @@ public sealed class SessionRuntimeService : IAsyncDisposable
         return await _agentHub.SteerAsync(sessionHandleId, steerOptions, cancellationToken).ConfigureAwait(false);
     }
 
+    // Only the command owner supplies execution cancellation; transport cancellation never reaches
+    // accepted work. This path cannot acquire a coordinator or substitute a newly observed target.
+    internal Task<AgentRunId> SteerOwnedCommandAsync(OwnedTextSteerRequest request, CancellationToken executionCancellationToken)
+        => AdmitAsync(() => SteerOwnedCommandBodyAsync(request, executionCancellationToken), CancellationToken.None);
+
+    private async Task<AgentRunId> SteerOwnedCommandBodyAsync(OwnedTextSteerRequest request, CancellationToken executionCancellationToken)
+    {
+        executionCancellationToken.ThrowIfCancellationRequested();
+        if (request.ExpectedRuntimeInstanceId != _runtimeInstanceId || !_sessionActors.TryGet(request.SessionId, out var actor))
+            throw new InvalidOperationException("The observed steering target is unavailable.");
+        OwnedProviderEventForwarding.Use? handleUse = null;
+        try
+        {
+            var handle = await actor.QueryAsync(_ =>
+            {
+                if (_transitions.ContainsKey(request.SessionId) || !_entries.TryGetValue(request.SessionId, out var entry)
+                    || entry.IsTerminated || entry.Attachment.Ordinal != request.ExpectedAttachmentGeneration
+                    || entry.ActiveRunId is not { } activeRun || !string.Equals(activeRun.Value, request.ExpectedRunId, StringComparison.Ordinal)
+                    || !HasOwnedCommandDefaults(entry))
+                    throw new InvalidOperationException("The observed steering target is stale or is not owned.");
+                handleUse = entry.Attachment.TryAcquireHandleUse()
+                    ?? throw new InvalidOperationException("The observed steering attachment is retiring.");
+                return ValueTask.FromResult(entry.SessionHandleId);
+            }, CancellationToken.None).ConfigureAwait(false);
+            // Explicit forwarding registrations let this call join in-progress cancellation
+            // traversals before releasing its execution source or the captured handle use.
+            using var execution = new CancellationTokenSource();
+            await using var ownerCancellation = executionCancellationToken.Register(
+                static state => ((CancellationTokenSource)state!).Cancel(), execution);
+            await using var attachmentCancellation = handleUse!.Attachment.Cancellation.Token.Register(
+                static state => ((CancellationTokenSource)state!).Cancel(), execution);
+            var expectedRun = new AgentRunId(request.ExpectedRunId);
+            var returnedRun = await SteerCapturedAsync(handle, new AgentSteerOptions
+            {
+                Input = AgentInput.Text(request.Text),
+                ExpectedRunId = expectedRun,
+            }, execution.Token).ConfigureAwait(false);
+            if (returnedRun != expectedRun)
+                throw new InvalidOperationException("The provider returned a different steering target.");
+            return returnedRun;
+        }
+        finally { handleUse?.Dispose(); }
+    }
+
     /// <summary>Captures immutable current-runtime facts for one session without discovery or acquisition.</summary>
     /// <param name="sessionId">The nonblank durable session identifier.</param>
     /// <param name="cancellationToken">Cancels admission or the caller's wait, not already admitted runtime-owned work.</param>

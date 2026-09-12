@@ -143,6 +143,62 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task OwnedSteer_RejectsAbsentAndUnownedWithoutAcquisitionOrRunMutation() => Fixture.Run(async f =>
+    {
+        var absent = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var request = new OwnedTextSteerRequest("steer", f.Session.SessionId, absent.RuntimeInstanceId, 1, "recorded", "text");
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.SteerOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(0, f.Provider.AttachmentCount);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("recorded"));
+        var before = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        request = request with { ExpectedAttachmentGeneration = before.Entry!.AttachmentGeneration };
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.SteerOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId)));
+        Assert.AreEqual(0, f.Provider.Steers);
+    });
+
+    [TestMethod]
+    public Task OwnedSteer_RejectsEveryStaleTargetAndNullRunWithoutRetargeting() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+        var state = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var request = new OwnedTextSteerRequest("steer", f.Session.SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "recorded", "text");
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.SteerOwnedCommandAsync(request, CancellationToken.None)));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("recorded"));
+        foreach (var stale in new[] { request with { SessionId = "missing" }, request with { ExpectedRunId = "old" },
+            request with { ExpectedRuntimeInstanceId = Guid.NewGuid() }, request with { ExpectedAttachmentGeneration = request.ExpectedAttachmentGeneration + 1 } })
+            await f.Expect<InvalidOperationException>(f.Track(f.Runtime.SteerOwnedCommandAsync(stale, CancellationToken.None)));
+        Assert.AreEqual("recorded", (await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId))).Entry!.ActiveRunId);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null);
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.SteerOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(1, f.Provider.AttachmentCount);
+        Assert.AreEqual(0, f.Provider.Steers);
+    });
+
+    [TestMethod]
+    public Task OwnedSteer_RetirementJoinsCapturedUseBeforeDisposal() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("recorded"));
+        var state = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        var request = new OwnedTextSteerRequest("steer", f.Session.SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "recorded", "text");
+        var steer = f.Track(f.Runtime.SteerOwnedCommandAsync(request, CancellationToken.None));
+        await f.Ready(f.Provider.SteerStarted.Task);
+        var detach = f.Track(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
+        // Cancellation is an independent observation; the fake deliberately stays in its original call.
+        await f.Ready(f.Provider.SteerCancelled.Task);
+        Assert.IsFalse(steer.IsCompleted);
+        Assert.IsFalse(detach.IsCompleted);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+        await f.Expect<InvalidOperationException>(f.Track(f.Runtime.SteerOwnedCommandAsync(request with { ClientRequestId = "retiring" }, CancellationToken.None)));
+        f.Provider.ReleaseSteer.TrySetResult();
+        await f.ExpectCancellation(steer);
+        await f.Wait(detach);
+        Assert.AreEqual(0, f.Provider.EarlyDisposals);
+    });
+
+    [TestMethod]
     public Task CurrentState_RecordsRunAndShutdown_WithoutTreatingDetachAsCompletion() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
@@ -500,7 +556,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal SessionRuntimeService Runtime { get { lock (_gate) return _host!.RuntimeService; } }
         internal OwnedSessionCommandService Commands { get { lock (_gate) return _host!.Commands; } }
         internal SessionExecutionOptions Options => OptionsFor("fixture-model");
-        internal SessionExecutionOptions OptionsFor(string model, IReadOnlyList<AgentToolDefinition>? tools = null) => new()
+        internal SessionExecutionOptions OptionsFor(string model, IReadOnlyList<AgentToolDefinition>? tools = null, bool ownedDefaults = false) => new()
         {
             ProviderId = Provider.Descriptor.ProviderId,
             ProviderKey = Provider.Descriptor.ProviderId.Value,
@@ -508,8 +564,8 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             Model = model,
             Tools = tools,
             ProjectRoots = [Path.Combine(_root, "project")],
-            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
-            OnUserInputRequest = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true)),
+            OnPermissionRequest = ownedDefaults ? Runtime.Permissions.OwnedDefaultPermissionHandler : static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+            OnUserInputRequest = ownedDefaults ? Runtime.Permissions.OwnedDefaultUserInputHandler : static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true)),
         };
 
         internal static async Task Run(Func<Fixture, Task> body, bool reviewPermissions = false)
@@ -736,6 +792,11 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal TaskCompletionSource ReleaseSend { get; } = NewGate();
         internal TaskCompletionSource AbortStarted { get; } = NewGate();
         internal TaskCompletionSource ReleaseAbort { get; } = NewGate();
+        internal TaskCompletionSource SteerStarted { get; } = NewGate();
+        internal TaskCompletionSource SteerCancelled { get; } = NewGate();
+        internal TaskCompletionSource ReleaseSteer { get; } = NewGate();
+        private int _steers;
+        internal int Steers => Volatile.Read(ref _steers);
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("forwarding-fixture"), "Forwarding fixture") { DefaultModelId = "fixture-model" };
         internal Session Latest { get { lock (_gate) return _sessions[^1]; } }
         internal int AttachmentCount { get { lock (_gate) return _sessions.Count; } }
@@ -751,6 +812,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         {
             lock (_gate) { _cleaning = true; _holdPreparation = false; _holdAbort = false; }
             ReleasePreparation.TrySetResult(); ReleaseSend.TrySetResult(); ReleaseAbort.TrySetResult();
+            ReleaseSteer.TrySetResult();
         }
 
         private sealed class Runtime(Provider owner) : IModelProviderSessionRuntime
@@ -831,7 +893,20 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                 if (owner.HoldAbort) await owner.ReleaseAbort.Task.ConfigureAwait(false);
                 owner.ReleaseSend.TrySetResult();
             }
-            public Task<AgentRunId> SteerAsync(AgentSteerOptions steer, CancellationToken cancellationToken = default) => Task.FromResult(new AgentRunId("steered"));
+            public async Task<AgentRunId> SteerAsync(AgentSteerOptions steer, CancellationToken cancellationToken = default)
+            {
+                Interlocked.Increment(ref _active);
+                try
+                {
+                    Interlocked.Increment(ref owner._steers);
+                    using var registration = cancellationToken.Register(() => owner.SteerCancelled.TrySetResult());
+                    owner.SteerStarted.TrySetResult();
+                    await owner.ReleaseSteer.Task.ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return steer.ExpectedRunId ?? new AgentRunId("steered");
+                }
+                finally { Interlocked.Decrement(ref _active); }
+            }
             public Task CompactAsync(CancellationToken cancellationToken = default)
             { Interlocked.Increment(ref owner._compactions); EmitIdle(); return Task.CompletedTask; }
             public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)

@@ -5,8 +5,8 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Host-owned, bounded text-send/abort admission. Owns its tasks, not its runtime dependencies.
-/// One send per session is reserved before lookup; no queue or event reader is created.
+/// Host-owned, bounded text-send/abort/steer admission. Owns its tasks, not its runtime dependencies.
+/// One send and independently one steer per session are reserved; no queue or event reader is created.
 /// </summary>
 public sealed class OwnedSessionCommandService : IAsyncDisposable
 {
@@ -19,6 +19,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private readonly Dictionary<string, ReceiptEntry> _receipts = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, SendOperation> _operations = [];
     private readonly Dictionary<string, SendOperation> _active = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<SteerOperation> _steers = [];
+    private readonly HashSet<string> _steering = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Exception> _failures = [];
     private readonly List<Exception> _cleanupFailures = [];
     private bool _closed;
@@ -113,6 +115,65 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         }
         StartControl(operation);
         return new(OwnedSessionCommandAdmissionKind.Accepted, receipt);
+    }
+
+    /// <summary>Reserves exact-target text steering independently of an in-flight owned send.</summary>
+    /// <exception cref="ArgumentNullException">The request is null.</exception>
+    /// <exception cref="ArgumentException">An identity or text is blank, an identity is padded, or the runtime/attachment identity is invalid.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested before acceptance.</exception>
+    public OwnedSessionCommandAdmission AdmitSteer(OwnedTextSteerRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ExpectedRunId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Text);
+        if (request.SessionId != request.SessionId.Trim() || request.ExpectedRunId != request.ExpectedRunId.Trim()
+            || request.ExpectedRuntimeInstanceId == Guid.Empty || request.ExpectedAttachmentGeneration <= 0)
+            throw new ArgumentException("Steering requires exact session, runtime, attachment and run identities.", nameof(request));
+        SteerOperation operation;
+        lock (_gate)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
+                return Replay(previous, previous.Steer == request);
+            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
+            if (_steering.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
+            var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Steer, request.SessionId);
+            operation = new(request, receipt);
+            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, Steer: request));
+            _steers.Add(operation);
+            _steering.Add(request.SessionId);
+            operation.Work = RunSteerAsync(operation);
+        }
+        operation.Launch.TrySetResult();
+        return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
+    }
+
+    private async Task RunSteerAsync(SteerOperation operation)
+    {
+        await operation.Launch.Task.ConfigureAwait(false);
+        OwnedSessionCommandResult result;
+        try
+        {
+            var runId = await _runtime.SteerOwnedCommandAsync(operation.Request, operation.Execution.Token).ConfigureAwait(false);
+            result = new(OwnedSessionCommandOutcome.Completed, runId);
+        }
+        catch (OperationCanceledException) when (operation.Execution.IsCancellationRequested)
+        {
+            result = new(OwnedSessionCommandOutcome.Cancelled);
+        }
+        catch (Exception ex)
+        {
+            RecordFailure(ex, cleanup: false);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "steer_failed");
+        }
+        lock (_gate)
+        {
+            _steering.Remove(operation.Request.SessionId);
+            operation.Receipt.Complete(result);
+        }
     }
 
     private static OwnedSessionCommandAdmission Replay(ReceiptEntry entry, bool same)
@@ -321,13 +382,14 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         }
     }
 
-    /// <summary>Closes admission, signals every active send, and joins all owned work without disposing dependencies.</summary>
+    /// <summary>Closes admission, signals owned sends and steering, and joins all owned work without disposing dependencies.</summary>
     /// <remarks>Repeated calls share one task. Noncooperative preparation can keep disposal pending indefinitely.</remarks>
     /// <exception cref="Exception">One control or cleanup operation failed, after all work was joined.</exception>
     /// <exception cref="AggregateException">Multiple control or cleanup operations failed, after all work was joined.</exception>
     public ValueTask DisposeAsync()
     {
         SendOperation[] operations;
+        SteerOperation[] steers;
         TaskCompletionSource launch;
         Task disposal;
         lock (_gate)
@@ -335,19 +397,26 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             if (_disposeTask is not null) return new(_disposeTask);
             _closed = true;
             operations = [.. _operations.Values];
+            steers = [.. _steers];
             foreach (var operation in operations)
                 if (!operation.Released) EnsureControl(operation);
             launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _disposeTask = DisposeCoreAsync(operations, launch.Task);
+            _disposeTask = DisposeCoreAsync(operations, steers, launch.Task);
             disposal = _disposeTask;
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
         foreach (var operation in operations) StartControl(operation);
+        foreach (var steer in steers)
+        {
+            // Start every independent cancellation before any dependent join. No callbacks under _gate.
+            try { steer.Cancellation = steer.Execution.CancelAsync(); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        }
         launch.TrySetResult();
         return new(disposal);
     }
 
-    private async Task DisposeCoreAsync(SendOperation[] operations, Task launch)
+    private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, Task launch)
     {
         await launch.ConfigureAwait(false);
         if (_reviewPermissions)
@@ -373,14 +442,33 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             try { operation.Execution.Dispose(); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
+        foreach (var steer in steers)
+        {
+            try { await steer.Work.ConfigureAwait(false); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            try { await steer.Cancellation.ConfigureAwait(false); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            try { steer.Execution.Dispose(); }
+            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        }
         Exception[] failures;
         lock (_gate) failures = [.. _cleanupFailures];
         if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Length > 1) throw new AggregateException(failures);
     }
 
-    private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null);
+    private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null, OwnedTextSteerRequest? Steer = null);
     private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options);
+
+    private sealed class SteerOperation(OwnedTextSteerRequest request, OwnedSessionCommandReceipt receipt)
+    {
+        internal OwnedTextSteerRequest Request { get; } = request;
+        internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
+        internal CancellationTokenSource Execution { get; } = new();
+        internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task Work { get; set; } = Task.CompletedTask;
+        internal Task Cancellation { get; set; } = Task.CompletedTask;
+    }
 
     private sealed class SendOperation(OwnedTextSendRequest request, OwnedSessionCommandReceipt receipt)
     {

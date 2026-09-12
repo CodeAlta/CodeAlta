@@ -1,8 +1,54 @@
 # Dual-head desktop parity — in development
 
-> **Status: scoped Desktop live display and manual current-runtime readout verified, 2026-09-11.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
+> **Status: scoped owned Desktop command review and exact-target text steering verified, 2026-09-12.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission/display evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
+
+## M4 checkpoint: owned exact-target text steering — 2026-09-12
+
+The same sole implementation writer added `OwnedTextSteerRequest`, bounded owned admission,
+existing-entry-only runtime dispatch, generated `sessions.steer`, and App-owned steering
+retention/UI. Parent independently audited source and fixtures and owns verification/integration.
+M4 command parity, M5 and M6 remain incomplete; this checkpoint does not close any whole milestone.
+
+Steering captures epoch/session/runtime-instance/attachment/non-null run/text/key exactly once.
+The mailbox rejects absent/stale/non-owned/transitioning/terminated targets before acquiring
+attachment use; retirement refuses acquisition. Dispatch forwards the original `ExpectedRunId`
+to the provider boundary and rejects a different returned run. No coordinator creation/replacement,
+fallback send/queue, stale run clearing, trusted TUI permission authority or new permission window
+is introduced. There is one independent steering slot per session, sharing the bounded owner
+receipt limit with Send/Abort. Caller cancellation does not cancel admitted execution; dispatch,
+cancellation tasks and forwarding registrations are joined before releasing their dependencies.
+
+Manual current-runtime observation supplies UI target data. Immutable uncertain requests survive
+selection/remount, synchronous latches exclude double clicks, and receipt matching checks command
+kind. Manual refresh can reconcile a retained request; deliberate retry uses only its exact key,
+text and original target. No automatic retry, polling, new event reader or silent retargeting.
+Completed steering means input submitted, not run completed. Default denial, explicit command
+review opt-in, TUI policy/AutoApprove and existing user-input behavior remain unchanged.
+
+**Independent verification:** cached Orchestration/Desktop test-project and Release solution
+builds passed with zero warnings/errors, no restore or frontend acquisition. All **71 focused
+.NET cases** passed (62 owned-command/forwarding lifetime cases and 9 Desktop-owned cases),
+including seven new runtime steering regressions and two new RPC cases. The race fixture gates
+steering after capture, changes the fake active run, and verifies no delivery to the later run.
+Tests also cover replay/conflict, independent slot/capacity, caller cancellation, shutdown and
+retirement joins, absent/unowned/stale targets, canonical input validation and generated JSON
+payload fit within the 208 KiB request budget including framing. All **53 frontend tests** and
+**TypeScript/Vite build** passed. Generated TypeScript and manifest include the typed unary steer
+method with string-valued attachment generation; no manual generated-file edits.
+
+The first runtime run had three passes/four fixture-readiness failures: a provider Warning was
+incorrectly expected in Display StatusMessage. The writer corrected only the fixture to emit a
+unique supported inert content marker, await its fully joined observation, then query authority
+once. All seven new cases passed on rerun; no production Display changes or polling were added.
+Failed fixture roots remain retained. Logs: `%TEMP%/codealta-parent-owned-steer-*-20260912.log`.
+
+No native/mounted-React, configured-provider/auth/subprocess-tool, default-profile, network,
+install/restore, full-suite or website qualification. The configured website theme can acquire
+remote content, so its build remains outside this verification boundary. Genuine conditional
+active-run abort, owned compaction, queue drain/recovery ownership and broader interactions/UI
+remain subsequent work, not features supplied by this slice.
 
 ## M4 checkpoint: opted-in Desktop command review — 2026-09-12
 

@@ -12,6 +12,8 @@ Shared-runtime [provider-event forwarding ownership](doc/runtime-provider-event-
 
 Experimental owned Desktop mode also offers explicitly opted-in plain-command review with **Allow once / Deny / Cancel**. Permissions remain denied by default; pending requests are refreshed manually, and approval can execute commands with the host's privileges. See the [owned-mode safety and usage notes](src/CodeAlta/README.md#explicit-owned-text-submission); this is not full permission or ask parity.
 
+Owned mode also supports text steering of an explicitly refreshed runtime/run target. Uncertain requests retain their exact key and target for manual receipt reconciliation or deliberate retry; they are never automatically retried or redirected to a later run. This remains experimental, not complete session-command parity.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>

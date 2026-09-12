@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureSubmission, createMutationCapability, sendSubmission, refreshSubmissions } from "./sessionOperations";
+import { captureSubmission, createMutationCapability, sendSubmission, refreshSubmissions, hasSubmissionReceipt } from "./sessionOperations";
 import type { SessionAdmission, SessionReceiptPage } from "#neoastra";
 
 const signal = { aborted: false } as AbortSignal;
@@ -93,6 +93,10 @@ test("receipt recovery exposes no prompt text", async () => {
   await refreshSubmissions(async () => recovered, "epoch", 0, signal, value => published.push(value));
   assert.deepEqual(published, [recovered]);
   assert.equal(JSON.stringify(published).includes("text"), false);
+  const request = captureSubmission("epoch", "session", "text", "key");
+  assert.equal(hasSubmissionReceipt(request, recovered), true);
+  for (const kind of ["Steer", "Abort"])
+    assert.equal(hasSubmissionReceipt(request, { ...recovered, rows: [{ ...recovered.rows[0], kind }] }), false);
 });
 
 test("refresh is explicit and never submits", async () => {

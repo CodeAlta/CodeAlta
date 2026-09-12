@@ -110,6 +110,58 @@ public sealed class DesktopOwnedSessionTests
     }
 
     [TestMethod]
+    public void SteerRpc_RejectsBeforeAdmissionAndBoundsGeneratedJson()
+    {
+        var service = new SessionOperationsService("current", _ => throw new AssertFailedException("Send called"),
+            _ => throw new AssertFailedException("Abort called"), _ => throw new AssertFailedException("Steer called"));
+        var request = new SessionSteerRequest("current", "key", "session", "abcdefab-1234-5678-9abc-abcdefabcdef", "1", "run", "text");
+        Assert.AreEqual("unconfigured", new SessionOperationsService().Steer(request, CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", service.Steer(request with { ExpectedEpoch = "old" }, CancellationToken.None).Status);
+        foreach (var invalid in new[] { request with { ExpectedRuntimeInstanceId = request.ExpectedRuntimeInstanceId.ToUpperInvariant() },
+            request with { ExpectedRuntimeInstanceId = Guid.Empty.ToString("D") }, request with { ExpectedAttachmentGeneration = "01" },
+            request with { ExpectedAttachmentGeneration = "0" }, request with { ExpectedAttachmentGeneration = "9223372036854775808" },
+            request with { ExpectedRunId = "" }, request with { ExpectedRunId = " run" }, request with { Text = "\ud800" },
+            request with { Text = new string('x', 32769) }, request with { ClientRequestId = new string('x', 257) } })
+            Assert.AreEqual("invalid_request", service.Steer(invalid, CancellationToken.None).Status);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => service.Steer(request, cancelled.Token));
+        service.CloseAdmission();
+        Assert.AreEqual("closed", service.Steer(request, CancellationToken.None).Status);
+        var escaped = new string('\u0001', 256);
+        var maximum = request with { ExpectedEpoch = new string('\u0001', 64), ClientRequestId = escaped, SessionId = escaped,
+            ExpectedRunId = escaped, ExpectedAttachmentGeneration = long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture), Text = new string('\u0001', 32768) };
+        Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(maximum, DesktopJsonContext.Default.SessionSteerRequest).Length + 8192 <= 208 * 1024);
+        var row = new SessionReceiptView("key", "session", Guid.NewGuid().ToString("D"), null, "Steer", "terminal", "Completed", null, "run");
+        Assert.AreEqual("ok", SessionOperationsService.ProjectPage("epoch", [row], null).Status);
+    }
+
+    [TestMethod]
+    public Task SteerRpc_ActualOwnedRouteRetainsReplayAndKind() => RealFixture.RunAsync(async f =>
+    {
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        service.Send(new("fixture-epoch", "send", f.SessionId, "text"), CancellationToken.None);
+        var send = f.Retain(f.Host.Commands.AdmitSend(new("send", f.SessionId, "text")));
+        await f.Ready(send);
+        f.Provider.Release.TrySetResult();
+        await f.Wait(send.Completion);
+        var state = await f.Wait(f.Keep(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId)));
+        var request = new SessionSteerRequest("fixture-epoch", "steer", f.SessionId, state.RuntimeInstanceId.ToString("D"),
+            state.Entry!.AttachmentGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture), state.Entry.ActiveRunId!, "exact text");
+        var admitted = service.Steer(request, CancellationToken.None);
+        var steer = f.Retain(f.Host.Commands.AdmitSteer(new("steer", f.SessionId, state.RuntimeInstanceId,
+            state.Entry.AttachmentGeneration, request.ExpectedRunId, request.Text)));
+        Assert.AreEqual("accepted", admitted.Status);
+        Assert.AreEqual("replay", service.Steer(request, CancellationToken.None).Status);
+        Assert.AreEqual("conflict", service.Steer(request with { Text = "changed" }, CancellationToken.None).Status);
+        Assert.AreEqual("conflict", service.Send(new("fixture-epoch", "steer", f.SessionId, "exact text"), CancellationToken.None).Status);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(steer.Completion)).Outcome);
+        var row = service.Receipts(new("fixture-epoch", 0)).Rows.Single(value => value.ClientRequestId == "steer");
+        Assert.AreEqual("Steer", row.Kind);
+        Assert.AreEqual(request.ExpectedRunId, row.RunId);
+    });
+
+    [TestMethod]
     public async Task Shutdown_RetainsLeaseUntilAllOwnedWorkIsConfirmed()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -351,7 +403,12 @@ public sealed class DesktopOwnedSessionTests
             return new("fixture-run");
         }
         public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default) => throw new InvalidOperationException("No steering.");
+        public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (options.ExpectedRunId?.Value != "fixture-run") throw new InvalidOperationException("Wrong fixture run.");
+            return Task.FromResult(new AgentRunId("fixture-run"));
+        }
         public Task CompactAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("No compaction.");
         public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

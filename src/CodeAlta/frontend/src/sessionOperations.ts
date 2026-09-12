@@ -9,7 +9,7 @@ export function createMutationCapability(epoch: string) {
     canMutate: () => valid,
     canSubmit: (request: SessionSendRequest) => valid && request.expectedEpoch === epoch,
     observe(result: { status: string; epoch: string | null }): boolean {
-      if (result.status === "stale_epoch" || (result.epoch !== null && result.epoch !== epoch)) valid = false;
+      if (result.status === "stale_epoch" || result.status === "stale_runtime" || (result.epoch !== null && result.epoch !== epoch)) valid = false;
       return valid;
     },
   };
@@ -17,6 +17,11 @@ export function createMutationCapability(epoch: string) {
 
 export function captureSubmission(epoch: string, sessionId: string, text: string, key: string): SessionSendRequest {
   return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text });
+}
+
+export function hasSubmissionReceipt(request: SessionSendRequest, page: SessionReceiptPage): boolean {
+  return page.status === "ok" && page.epoch === request.expectedEpoch
+    && page.rows.some(row => row.kind === "Send" && row.clientRequestId === request.clientRequestId && row.sessionId === request.sessionId);
 }
 
 export async function sendSubmission(
