@@ -60,6 +60,10 @@ reviews. A lost response may already have been accepted: review is disabled unti
 then refresh pending commands rather than assuming denial or automatically retrying. This
 experimental workflow does not provide full permission/ask parity.
 
+For providers supporting run-bound review, cancelling the owning run invalidates its pending
+reviews, including requests that omit a run ID. It cannot revoke an already accepted decision.
+This does not add a Desktop action to abort an observed run.
+
 Owned-host mode also shows a selected-session **live status/text window**, separate from
 persisted history and submission receipts. It retains at most eight text items with explicit
 truncation/eviction indicators; it is not a complete transcript or tool/usage/interaction view.

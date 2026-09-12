@@ -1272,6 +1272,7 @@ public sealed class SessionRuntimeService : IAsyncDisposable
                         Input = sendOptions.Input,
                         AskId = sendOptions.AskId,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
+                        RunLifecycle = Permissions.CreateOwnedRunLifecycle(permissionExecution),
                     };
                 }
                 runId = await RunCapturedAsync(sessionHandleId, sendOptions, execution.Token).ConfigureAwait(false);

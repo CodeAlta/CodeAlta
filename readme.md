@@ -12,6 +12,8 @@ Shared-runtime [provider-event forwarding ownership](doc/runtime-provider-event-
 
 Experimental owned Desktop mode also offers explicitly opted-in plain-command review with **Allow once / Deny / Cancel**. Permissions remain denied by default; pending requests are refreshed manually, and approval can execute commands with the host's privileges. See the [owned-mode safety and usage notes](src/CodeAlta/README.md#explicit-owned-text-submission); this is not full permission or ask parity.
 
+For providers supporting run-bound review, cancellation of that run invalidates its pending reviews, including requests without a run ID. Already accepted decisions cannot be revoked; this does not add a Desktop exact-run abort action.
+
 Owned mode also supports text steering of an explicitly refreshed runtime/run target. Uncertain requests retain their exact key and target for manual receipt reconciliation or deliberate retry; they are never automatically retried or redirected to a later run. This remains experimental, not complete session-command parity.
 
 The same experimental mode can compact an explicitly observed attachment only if the supported provider admits it while idle, without waiting or replacing the target. Compaction uses context current at admission; inspect its receipt for success or busy/unsupported/failure outcomes.

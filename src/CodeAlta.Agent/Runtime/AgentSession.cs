@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -14,7 +15,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
-public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider
+public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -51,8 +52,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private AgentSessionState _state;
     private AgentRunId? _activeRunId;
     private int? _activeRunConversationStartIndex;
-    private CancellationTokenSource? _activeRunCancellation;
-    private bool _disposed;
+    private ActiveRun? _activeRun;
+    private readonly object _lifetimeGate = new();
+    private int _operationUses;
+    private TaskCompletionSource? _operationsSettled;
+    private Task? _disposeTask;
+    private volatile bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentSession"/> class.
@@ -136,6 +141,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// <inheritdoc />
     public IDisposable Subscribe(Action<AgentEvent> handler)
     {
+        using var operation = EnterOperation();
         ArgumentNullException.ThrowIfNull(handler);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -148,30 +154,46 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var runId = new AgentRunId(Guid.CreateVersion7().ToString());
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var operation = EnterOperation();
+        var run = new ActiveRun(new AgentRunId(Guid.CreateVersion7().ToString()));
+        var admitted = false;
+        CancellationTokenRegistration callerRegistration = default;
+        Exception? failure = null;
         try
         {
-            if (_activeRunId is not null)
+            await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                throw new InvalidOperationException($"Local raw-API session '{SessionId}' already has an active run.");
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_activeRun is not null)
+                    throw new InvalidOperationException($"Local raw-API session '{SessionId}' already has an active run.");
+                _activeRunId = run.Id;
+                _activeRun = run;
+                _activeRunConversationStartIndex = _conversation.Count;
+                _pendingSteerInputs.Clear();
+                admitted = true;
             }
-
-            _activeRunId = runId;
-            _activeRunConversationStartIndex = _conversation.Count;
-            _activeRunCancellation = linkedCts;
-            _pendingSteerInputs.Clear();
+            finally { _stateGate.Release(); }
+            // The forwarding callback only signals the one retained worker. It never synchronously
+            // traverses provider callbacks, and its own disposal is joined before source release.
+            callerRegistration = cancellationToken.UnsafeRegister(static state => ((ActiveRun)state!).SignalCancellation(), run);
+            return await ExecuteRunAsync(options, run.Id, run.Cancellation).ConfigureAwait(false);
         }
+        catch (Exception ex) { failure = ex; throw; }
         finally
         {
-            _stateGate.Release();
+            await FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure).ConfigureAwait(false);
         }
+    }
 
+    private async Task<AgentRunId> ExecuteRunAsync(AgentSendOptions options, AgentRunId runId, CancellationTokenSource linkedCts)
+    {
         try
         {
+            if (options.RunLifecycle is { } lifecycle)
+                await lifecycle.StartedAsync(runId, linkedCts.Token).ConfigureAwait(false);
+            linkedCts.Token.ThrowIfCancellationRequested();
             var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.WorkingDirectory);
             var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
             var requestDeveloperInstructions = CombineDeveloperInstructions(
@@ -256,7 +278,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     }
 
                     await AppendTurnDiffUpdatedAsync(fileChangeTracker, runId, linkedCts.Token).ConfigureAwait(false);
-                    await CompleteActiveRunAsync(runId, CancellationToken.None).ConfigureAwait(false);
+                    await CompleteActiveTurnAsync(runId, CancellationToken.None).ConfigureAwait(false);
                     await RefreshEstimatedUsageAsync(
                             runId,
                             instructionBundle.SystemMessage,
@@ -459,16 +481,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             await AppendRunErrorAsync(runId, ex).ConfigureAwait(false);
             throw;
         }
-        finally
-        {
-            await CompleteActiveRunAsync(runId, CancellationToken.None).ConfigureAwait(false);
-        }
     }
 
     /// <inheritdoc />
     public async Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        using var operation = EnterOperation();
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -497,11 +516,47 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     /// <inheritdoc />
-    public Task AbortAsync(CancellationToken cancellationToken = default)
+    public async Task AbortAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        _activeRunCancellation?.Cancel();
-        return Task.CompletedTask;
+        using var operation = EnterOperation();
+        ActiveRun? run;
+        await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            run = _activeRun;
+            if (run is { CancellationSealed: false }) run.CancellationReserved = true;
+        }
+        finally { _stateGate.Release(); }
+        // Preserve untargeted trusted policy (including its historically ignored caller token).
+        if (run is null) return;
+        if (run.CancellationReserved) run.SignalCancellation();
+        await run.CancellationWork.ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedRunId.Value);
+        using var operation = EnterOperation();
+        ActiveRun run;
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            // Exact cancellation remains available during postprocessing, but closes before Closing.
+            // The source lifetime remains owned after that point for trusted/disposal cancellation.
+            if (_activeRun is not { Closing: false } current || current.Id != expectedRunId)
+                return AgentTargetedAbortOutcome.TargetNotActive;
+            run = current;
+            // Work already exists behind an unreleased signal. Teardown sees this reservation and
+            // must join that original task even if the controlling caller has not launched it yet.
+            run.CancellationReserved = true;
+        }
+        finally { _stateGate.Release(); }
+        run.SignalCancellation();
+        await run.CancellationWork.ConfigureAwait(false);
+        return AgentTargetedAbortOutcome.CancellationSignalled;
     }
 
     /// <inheritdoc />
@@ -511,6 +566,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// <inheritdoc />
     public async Task<AgentCompactionOutcome?> CompactWithOutcomeAsync(CancellationToken cancellationToken = default)
     {
+        using var operation = EnterOperation();
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -527,12 +583,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// <inheritdoc />
     public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
     {
+        using var operation = EnterOperation();
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!await _stateGate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return null;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_activeRunId is not null) return null;
+            if (_activeRun is not null) return null;
             return await CompactGateHeldAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _stateGate.Release(); }
@@ -567,21 +624,45 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// <inheritdoc />
     public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
     {
+        using var operation = EnterOperation();
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult<IReadOnlyList<AgentEvent>>([.. _history]);
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed)
+        TaskCompletionSource launch;
+        Task disposal;
+        lock (_lifetimeGate)
         {
-            return;
+            if (_disposeTask is not null) return new(_disposeTask);
+            _disposed = true;
+            launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            disposal = _disposeTask = DisposeCoreAsync(launch.Task, _operationsSettled?.Task ?? Task.CompletedTask);
         }
+        launch.TrySetResult();
+        return new(disposal);
+    }
 
-        _disposed = true;
-        _activeRunCancellation?.Cancel();
+    private async Task DisposeCoreAsync(Task launch, Task operationsSettled)
+    {
+        await launch.ConfigureAwait(false);
+        ActiveRun? run;
+        await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            run = _activeRun;
+            if (run is { CancellationSealed: false }) run.CancellationReserved = true;
+        }
+        finally { _stateGate.Release(); }
+        run?.SignalCancellation();
+        List<Exception> failures = [];
+        // Start cancellation before joining operation scopes, which include actual hooks and all
+        // registration/traversal disposal. No new operation can enter after _disposed was published.
+        try { await Task.WhenAll(operationsSettled, run?.CancellationWork ?? Task.CompletedTask).ConfigureAwait(false); }
+        catch (Exception ex) { failures.Add(ex); }
         try
         {
             if (_turnExecutor is IAgentProviderSessionCleanup providerSessionCleanup)
@@ -589,14 +670,114 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 await providerSessionCleanup.DisposeProviderSessionAsync(SessionId).ConfigureAwait(false);
             }
         }
+        catch (Exception ex) { failures.Add(ex); }
         finally
         {
-            _activeRunCancellation?.Dispose();
             _pendingSteerInputs.Clear();
             _stateGate.Dispose();
             _eventChannel.Writer.TryComplete();
         }
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException(failures);
     }
+
+    // These are session-local scopes, not detached wait wrappers. Release occurs only after the
+    // original operation has joined its work; disposal cannot free the gate/provider underneath it.
+    private OperationUse EnterOperation()
+    {
+        lock (_lifetimeGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_operationUses++ == 0) _operationsSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            return new OperationUse(this);
+        }
+    }
+
+    private sealed class OperationUse(AgentSession owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (owner._lifetimeGate)
+                if (--owner._operationUses == 0) owner._operationsSettled!.TrySetResult();
+        }
+    }
+
+    private sealed class ActiveRun
+    {
+        private readonly TaskCompletionSource<bool> _cancel = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal ActiveRun(AgentRunId id) { Id = id; CancellationWork = CancelAsync(); }
+        internal AgentRunId Id { get; }
+        internal CancellationTokenSource Cancellation { get; } = new();
+        internal Task CancellationWork { get; }
+        internal Task? Traversal { get; private set; }
+        // State gate owns admission flags. Only the one worker can ever cancel this source.
+        internal bool CancellationReserved { get; set; }
+        internal bool CancellationSealed { get; set; }
+        internal bool Closing { get; set; }
+        internal void SignalCancellation() => _cancel.TrySetResult(true);
+        internal void CompleteWithoutCancellation() => _cancel.TrySetResult(false);
+        private async Task CancelAsync()
+        {
+            if (!await _cancel.Task.ConfigureAwait(false)) return;
+            Traversal = Cancellation.CancelAsync();
+            await Traversal.ConfigureAwait(false);
+        }
+    }
+
+    private async Task FinishRunAsync(ActiveRun run, bool admitted, AgentRunLifecycle? lifecycle,
+        CancellationTokenRegistration callerRegistration, Exception? bodyFailure)
+    {
+        if (admitted)
+        {
+            await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try { run.Closing = true; }
+            finally { _stateGate.Release(); }
+        }
+        // Launch Closing before dependent cancellation joins: permission delivery may itself be a
+        // cancellation dependency. Capture synchronous hook failures in the returned original task.
+        var closing = admitted && lifecycle is not null ? CloseLifecycleAsync(lifecycle, run.Id) : Task.CompletedTask;
+        var registrationDisposal = callerRegistration.DisposeAsync().AsTask();
+        var closureJoins = Task.WhenAll(closing, registrationDisposal);
+        Exception? cleanupFailure = null;
+        try { await closureJoins.ConfigureAwait(false); }
+        catch (Exception ex) { cleanupFailure = closureJoins.Exception ?? ex; }
+        // Keep trusted/disposal cancellation available while Closing is pending. Only after the hook
+        // and caller forwarding registration settle can a non-cancelled run seal its worker as a no-op.
+        await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            run.CancellationSealed = true;
+            if (!run.CancellationReserved) run.CompleteWithoutCancellation();
+        }
+        finally { _stateGate.Release(); }
+        try { await run.CancellationWork.ConfigureAwait(false); }
+        catch (Exception ex) { cleanupFailure = cleanupFailure is null ? ex : new AggregateException(cleanupFailure, ex); }
+        finally
+        {
+            // Sole CTS disposer, after every original traversal and the Closing hook have settled.
+            run.Cancellation.Dispose();
+            if (admitted)
+            {
+                await CompleteActiveTurnAsync(run.Id, CancellationToken.None).ConfigureAwait(false);
+                await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    // Logical turn completion may already have cleared _activeRunId. Release only
+                    // this exact source lifetime, after all original work and source disposal.
+                    if (ReferenceEquals(_activeRun, run)) _activeRun = null;
+                }
+                finally { _stateGate.Release(); }
+            }
+        }
+        if (cleanupFailure is not null)
+        {
+            if (bodyFailure is not null) throw new AggregateException(bodyFailure, cleanupFailure);
+            ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
+        }
+    }
+
+    private static async Task CloseLifecycleAsync(AgentRunLifecycle lifecycle, AgentRunId runId)
+        => await lifecycle.ClosingAsync(runId).ConfigureAwait(false);
 
     private IReadOnlyList<AgentToolDefinition> BuildAvailableTools(AgentPermissionRequestHandler permissionRequestHandler)
     {
@@ -833,7 +1014,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return true;
     }
 
-    private async Task CompleteActiveRunAsync(AgentRunId runId, CancellationToken cancellationToken)
+    // Clear steering/replay/media bookkeeping before post-turn usage refresh and compaction, but
+    // retain source lifetime authority until FinishRunAsync has joined and disposed the original work.
+    private async Task CompleteActiveTurnAsync(AgentRunId runId, CancellationToken cancellationToken)
     {
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -845,7 +1028,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
             _activeRunId = null;
             _activeRunConversationStartIndex = null;
-            _activeRunCancellation = null;
             _pendingSteerInputs.Clear();
         }
         finally

@@ -357,6 +357,7 @@ public sealed class OwnedSessionCommandServiceTests
         await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, f.Provider.PreparationDecision);
         Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        Assert.IsNull(f.Provider.FirstSendOptions.RunLifecycle);
         var denied = f.Permission(f.Provider.Options!.OnPermissionRequest);
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(denied)).Kind);
         f.Provider.ReleaseSend.TrySetResult();
@@ -736,6 +737,52 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(OwnedSessionCommandOutcome.Cancelled, (await f.Observe(compact.Completion)).Outcome);
         Assert.AreEqual(0, f.Provider.EarlyDisposals);
     });
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task OwnedRunLifecycle_ActualSendWiringCancelsMatchingAndNullRunWithoutTouchingTrustedOrLater(bool includeRun) => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportRunLifecycle = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "bound send");
+        var options = f.Provider.FirstSendOptions!;
+        Assert.IsNotNull(options.RunLifecycle);
+        Assert.AreEqual(1, f.Provider.RunBindings);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var request = f.Provider.CommandRequest() with { RunId = includeRun ? new AgentRunId("owned-run-1") : null };
+        var pending = f.Track(options.OnPermissionRequest!(request, CancellationToken.None));
+        var page = await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+        var handle = page.Entries.Single().Handle;
+        var mismatch = f.Track(options.OnPermissionRequest!(request with { RunId = new("different-run") }, CancellationToken.None));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(mismatch)).Kind);
+        var trusted = await f.Observe(permissions.RegisterAsync(f.SessionId, request with { InteractionId = "trusted" }, false, CancellationToken.None));
+        _ = f.Track(trusted.Completion);
+        var cancellation = f.Track(f.Provider.CancelBoundRun());
+        Assert.IsTrue(f.Provider.BoundRunToken.IsCancellationRequested);
+        Assert.IsFalse(await f.Observe(permissions.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.HasCount(0, (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+        await f.Observe(cancellation);
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(pending)).Kind);
+        Assert.IsFalse(trusted.Completion.IsCompleted);
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(send.Completion);
+        Assert.AreEqual(1, f.Provider.RunClosures);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(options.OnPermissionRequest!))).Kind);
+        var later = f.Send("later");
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, later, "later binding");
+        var current = f.Permission(f.Provider.SecondSendOptions!.OnPermissionRequest!);
+        var currentPage = await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(currentPage.Entries.Single().Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(current)).Kind);
+        // Already accepted decision is not revoked by subsequent run cancellation.
+        await f.Observe(f.Track(f.Provider.CancelBoundRun()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(current)).Kind);
+        Assert.IsTrue(await f.Observe(permissions.CancelAsync(trusted.Snapshot.Handle).AsTask()));
+        await f.Observe(trusted.Completion);
+        f.Provider.ReleaseAll();
+        await f.Observe(later.Completion);
+    }, reviewPermissions: true);
 
     // Constructed only inside a selected real-route test. All gates and tasks are instance-owned.
     private sealed class Fixture
@@ -1140,6 +1187,13 @@ public sealed class OwnedSessionCommandServiceTests
         internal TaskCompletionSource SendCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleaseSteer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task<AgentPermissionDecision>? SendPermission { get; private set; }
+        internal bool SupportRunLifecycle { get; set; }
+        internal int RunBindings { get; private set; }
+        internal int RunClosures { get; private set; }
+        internal CancellationToken BoundRunToken { get; private set; }
+        private CancellationTokenSource? _boundRunSource;
+        private Task _boundRunCancellation = Task.CompletedTask;
+        internal Task CancelBoundRun() => _boundRunCancellation = _boundRunSource!.CancelAsync();
         internal AgentPermissionDecisionKind? PreparationDecision { get; private set; }
         internal AgentSendOptions? FirstSendOptions { get; private set; }
         internal AgentSendOptions? SecondSendOptions { get; private set; }
@@ -1255,6 +1309,8 @@ public sealed class OwnedSessionCommandServiceTests
             public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
             {
                 Interlocked.Increment(ref owner._active);
+                CancellationTokenSource? runSource = null;
+                AgentRunId? boundRun = null;
                 try
                 {
                     var send = Interlocked.Increment(ref owner._sends);
@@ -1263,6 +1319,16 @@ public sealed class OwnedSessionCommandServiceTests
                     using var cancellationReadiness = cancellationToken.Register(() => owner.SendCancelled.TrySetResult());
                     if (send == 1) owner.FirstSendOptions = options;
                     else owner.SecondSendOptions = options;
+                    if (owner.SupportRunLifecycle)
+                    {
+                        runSource = new CancellationTokenSource();
+                        owner._boundRunSource = runSource;
+                        owner._boundRunCancellation = Task.CompletedTask;
+                        owner.BoundRunToken = runSource.Token;
+                        boundRun = new AgentRunId("owned-run-" + send);
+                        await options.RunLifecycle!.StartedAsync(boundRun.Value, runSource.Token).ConfigureAwait(false);
+                        owner.RunBindings++;
+                    }
                     if (owner.RequestInteractions)
                     {
                         var permission = owner.Options!.OnPermissionRequest(new AgentGenericPermissionRequest(ProviderId, SessionId, DateTimeOffset.UtcNow, null, "permission", "fixture", default), cancellationToken);
@@ -1281,7 +1347,22 @@ public sealed class OwnedSessionCommandServiceTests
                     if (owner.FailSend) throw new InvalidOperationException("Controlled provider fault.");
                     return new AgentRunId("owned-run-" + send);
                 }
-                finally { Interlocked.Decrement(ref owner._active); }
+                finally
+                {
+                    try
+                    {
+                        if (boundRun is { } run)
+                        {
+                            try
+                            {
+                                await options.RunLifecycle!.ClosingAsync(run).ConfigureAwait(false);
+                                owner.RunClosures++;
+                            }
+                            finally { await owner._boundRunCancellation.ConfigureAwait(false); }
+                        }
+                    }
+                    finally { runSource?.Dispose(); Interlocked.Decrement(ref owner._active); }
+                }
             }
             public async Task AbortAsync(CancellationToken cancellationToken = default)
             {

@@ -28,4 +28,10 @@ public sealed class AgentSendOptions
     /// retain their selected callback after the send returns.
     /// </remarks>
     public AgentPermissionRequestHandler? OnPermissionRequest { get; init; }
+
+    /// <summary>Gets or initializes the optional authoritative lifecycle observer for this send.</summary>
+    /// <remarks>The in-process session awaits this observer outside state gates before permission-capable
+    /// work and during closing before source release. Other providers must explicitly support it; an ignored
+    /// option supplies no run binding or cancellation guarantee. It never grants permission automatically.</remarks>
+    public AgentRunLifecycle? RunLifecycle { get; init; }
 }

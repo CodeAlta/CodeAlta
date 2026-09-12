@@ -4,6 +4,51 @@
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
+## M4 checkpoint: provider run lifetime and owned run binding — 2026-09-12
+
+The optional provider-only `IAgentTargetedAbortProvider` and per-send `AgentRunLifecycle` now
+establish original-source cancellation and authoritative owned permission/run binding in the
+in-process AgentSession. This is a prerequisite, **not** an AgentHub/owned AbortRun command,
+Desktop RPC/action, queue implementation or completed M4 milestone.
+
+- Exact admission matches the actual run under provider ownership; caller cancellation only
+  cancels admission. Success means the original cancellation traversal settled, not run completion
+  or rollback. Callback failure is retained even after signalling. Exact admission closes at
+  Closing; trusted/disposal cancellation remains available while Closing is pending.
+- One source/worker per run coordinates exact, trusted, caller-forwarded and disposal cancellation.
+  Teardown joins hooks, forwarding registration disposal and the original worker before releasing
+  the source. New sends and idle compaction cannot overtake successful postprocessing/Closing.
+  Logical turn bookkeeping still completes before post-turn usage/compaction, independently of
+  retained source authority. Concurrent disposal callers join one cleanup task.
+- Started binds the actual run/token before permission-capable work; Closing joins exactly that
+  execution even after startup failure. Bound-token cancellation rejects later mailbox approvals,
+  including null-run requests with request token None; non-null mismatches deny. Unrelated/later
+  executions, trusted registrations, AutoApprove and user input are preserved. Previously accepted
+  decisions are not revoked. Unsupported providers retain baseline behavior, not inferred binding.
+
+Parent independently audited source and complete new fixture bodies before execution. Initial
+fixture compilation found six retained-task CS4014 errors and one missing namespace import;
+the same writer corrected them without serializing cancellation initiation. The first actual-Agent
+run passed eight of nine cases and exposed an early normal-success source clear that allowed a
+send to overtake held Closing. Parent traced the call; the same writer separated logical turn
+completion from source release and strengthened idle-compaction refusal. The original failing
+assertion remains, and its failed root is retained (`CodeAlta-run-lifetime-18f54e14211e4720a6ecdf4001a2d185`
+under the temp directory).
+
+Final independent verification: **104 focused .NET cases pass**, zero failures/skips: 11 actual-Agent
+run-lifetime/idle-compaction cases, 74 owned-command/forwarding/run-binding cases, and 19 permission
+mailbox/policy cases. This includes all **13 new cases**, also rerun separately. Cached targeted
+and full Release solution builds pass zero warnings/errors, with `--no-restore` and frontend
+restore/build disabled in the solution build. Generated RPC contract remains current; no RPC or
+frontend source changed. Logs: `%TEMP%/codealta-parent-run-binding-*-20260912.log`.
+
+No frontend tests/build, native/mounted UI, real-provider/tool/auth, default-root, network,
+install/restore, full-suite or website qualification is claimed in this slice. Website build is
+omitted because its configured theme acquisition crosses the no-network boundary. Public/internal
+docs are updated. Noncooperative hooks/callbacks can still prevent shutdown; callbacks must not
+await their own send/control/disposal, and a timeout never authorizes abandoning retained work.
+M4–M6 remain open.
+
 ## M4 checkpoint: owned exact-attachment idle compaction — 2026-09-12
 
 The same sole writer implemented one further command vertical; parent independently audited all

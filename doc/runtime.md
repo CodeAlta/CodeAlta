@@ -453,7 +453,16 @@ to the runtime identity and actual attachment while holding its handle use, then
 capturing that record through `AgentHub.RunAsync`. There is no current-run lookup, nullable-run
 inference, token-equality association or mutable latest callback. A retained delegate cannot
 rebind its record or join a later send on a reused coordinator. Receipt replay does not recreate
-the record. A provider run ID, including null, is only part of the fresh attempt handle.
+the record. A request's provider run ID, including null, remains part of the fresh attempt handle.
+For supporting providers, the optional per-send `AgentRunLifecycle` also binds the execution once
+to the actual activated run ID and provider-owned execution token. `StartedAsync` is awaited
+outside provider gates before permission-capable work; this identity is never inferred from an
+event or the first request. A supplied non-null request run ID must match the binding. Null-run
+requests still belong to that exact execution. Bound-token cancellation rejects new approvals
+at mailbox admission/list/resolution checks and cancels pending deliveries even when the request
+token is `None`. `ClosingAsync` closes and joins the captured execution before provider source
+release, including activation-hook failure. Providers ignoring the hook retain baseline unbound
+behavior, not an inferred exact-run capability. Trusted TUI registrations are unaffected.
 
 Admission requires an exact session and bound provider identity and an `AgentCommandPermissionRequest`
 with complete nonblank command and working directory. `ApprovalId`, `Actions`, `Network`,
@@ -598,6 +607,27 @@ CodeAlta-runtime providers can receive host-injected tools. Current built-ins ar
 Mutation and shell tools flow through host permission handling. Tool schemas are bridged to provider-specific declarations, including strict-schema normalization where required. A user-input/request tool is intentionally not registered as a local raw-API built-in until host UI pause/resume semantics are implemented.
 
 `AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions default to denial; the backend opt-in described above supplies runtime execution/attachment binding. This API alone enables no Desktop approval route.
+
+#### Provider exact-run cancellation foundation
+
+`IAgentTargetedAbortProvider.AbortRunAsync` is an optional **provider-only** capability. It is not
+yet exposed as an AgentHub/owned command or Desktop RPC/action. The in-process `AgentSession`
+atomically matches the expected run to its original source record. Cancellation remains possible
+during successful postprocessing, but exact admission closes when `Closing` begins. Stale targets
+return `TargetNotActive` without cancellation; unsupported providers have no unconditional fallback.
+The caller token can cancel admission, not abandon an admitted traversal. `CancellationSignalled`
+means the original cancellation traversal settled, not that the run stopped or effects rolled back.
+Callback failures are reported even if cancellation was already signalled.
+
+Each run owns one cancellation worker shared by exact abort, trusted untargeted abort, caller-token
+forwarding and disposal. No callbacks execute under provider gates. Teardown joins lifecycle hooks,
+the caller forwarding registration and the original worker before disposing the source once.
+Concurrent session disposal joins the same cleanup and retains operations through provider/gate
+release. A later send or idle compaction cannot overtake postprocessing or held Closing. Logical
+turn completion still clears steering/conversation bookkeeping before post-turn usage/compaction;
+it no longer releases source lifetime. Hooks/cancellation callbacks must not await their own
+send, abort or disposal. Noncooperative dependencies can prevent shutdown; timeouts are not proof
+of settlement. Existing trusted targeting, AutoApprove and user-input policy remain unchanged.
 
 The `alta` live tool is injected for CodeAlta-managed sessions on any configured provider when the in-process runtime is available. See [`alta` live tool](live-tool.md).
 

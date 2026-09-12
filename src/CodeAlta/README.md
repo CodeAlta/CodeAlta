@@ -118,6 +118,11 @@ Aborting the owning submission or closing the application invalidates still-pend
 but cannot revoke a decision already accepted by the backend. Native/provider qualification and
 the broader permission, file-review and ask workflows remain incomplete.
 
+With a provider supporting run-bound review, cancellation of the actual owning run also invalidates
+its pending requests, even when individual requests omit a run ID. A request naming another run is
+denied. Previously accepted decisions remain accepted. This provider-level foundation adds no
+Desktop exact-run abort action and does not change trusted TUI approval policy.
+
 The selected session also has a **live status/text window**, separate from persisted-history
 browsing and submission receipts. It shows retained lifecycle, queue count, configuration labels
 and up to eight text items; it is not a complete transcript, usage/tool view or interaction UI.
