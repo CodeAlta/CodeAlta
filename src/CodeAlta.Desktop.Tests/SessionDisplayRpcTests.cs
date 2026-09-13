@@ -226,9 +226,12 @@ public sealed class SessionDisplayRpcTests
         StringAssert.Contains(generated, "Promise<AsyncIterable<SessionDisplayItem>>");
         StringAssert.Contains(generated, "readonly \"revision\": string | null");
         StringAssert.Contains(Read("frontend/src/main.tsx"), "createSessionDisplayStore(sessionDisplay.observe)");
-        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "<LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} />");
+        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "<LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} capability={capability} />");
         StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "Reload the Desktop UI before continuing");
-        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "disabled={state?.code === \"stale_epoch\"}");
+        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "disabled={!canMutate || state?.code === \"stale_epoch\" || state?.cleanupBlocked}");
+        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "store.select(hostEpoch, sessionId, capability.observe)");
+        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "owned.selection.detach()");
+        StringAssert.Contains(Read("frontend/src/LiveSessionPanel.tsx"), "useSyncExternalStore(capability.subscribe, capability.canMutate)");
     }
 
     private static SessionAgentEvent Text(string session, string text) => new(session,

@@ -7,97 +7,171 @@ export type DisplayState = Readonly<{
   sessionId: string | null;
   snapshot: SessionDisplayItem | null;
   code: string | null;
+  cleanupBlocked: boolean;
 }>;
 
 // Instance-owned, selected-session-only renderer state. NeoAstra owns the actual channel/credits/buffering.
 export function createSessionDisplayStore(open: OpenDisplay) {
-  let state: DisplayState = Object.freeze({ kind: "idle", hostEpoch: null, sessionId: null, snapshot: null, code: null });
+  let state: DisplayState = Object.freeze({ kind: "idle", hostEpoch: null, sessionId: null, snapshot: null, code: null, cleanupBlocked: false });
   const listeners = new Set<() => void>();
-  let generation = 0;
-  let active: AbortController | null = null;
+  type Selection = { hostEpoch: string; sessionId: string; controller: AbortController;
+    observeIdentity?: (result: { status: string; epoch: string | null }) => void };
+  type Owner = { selection: Selection; opening?: Promise<AsyncIterable<SessionDisplayItem>>; stream?: AsyncIterable<SessionDisplayItem>;
+    iterator?: AsyncIterator<SessionDisplayItem>; next?: Promise<IteratorResult<SessionDisplayItem>>;
+    returning?: Promise<IteratorResult<SessionDisplayItem>>; failure?: unknown };
+  let selected: Selection | null = null;
+  let desired: Selection | null = null;
+  let active: Owner | null = null;
+  let blocked: { owner: Owner; error: unknown } | null = null;
+  let reload = false;
+  let notificationFailure: unknown;
+  let running = false;
   let work = Promise.resolve();
-  function publish(value: DisplayState) {
-    state = Object.freeze(value);
-    for (const listener of listeners) listener();
+  function publish(value: Omit<DisplayState, "cleanupBlocked">) {
+    state = Object.freeze({ ...value, cleanupBlocked: blocked !== null });
+    for (const listener of [...listeners]) {
+      try { listener(); } catch (error) { notificationFailure ??= error; }
+    }
   }
-  function detach() {
-    generation++;
-    active?.abort();
-    active = null;
-    publish({ kind: "idle", hostEpoch: null, sessionId: null, snapshot: null, code: null });
+  function showBlocked() {
+    publish({ kind: "error", hostEpoch: selected?.hostEpoch ?? null, sessionId: selected?.sessionId ?? null,
+      snapshot: null, code: reload ? "stale_epoch" : "cleanup_failed" });
   }
-  function select(hostEpoch: string, sessionId: string) {
-    const current = ++generation;
-    active?.abort();
-    const controller = new AbortController();
-    active = controller;
-    const isCurrent = () => generation === current && !controller.signal.aborted;
-    publish({ kind: "loading", hostEpoch, sessionId, snapshot: null, code: null });
+  function detach(selection = selected) {
+    if (selection !== selected) return;
+    selected?.controller.abort();
+    active?.selection.controller.abort();
+    selected = desired = null;
+    if (blocked) showBlocked();
+    else publish({ kind: "idle", hostEpoch: null, sessionId: null, snapshot: null, code: null });
+  }
+  async function observe(owner: Owner) {
+    const { hostEpoch, sessionId, controller, observeIdentity } = owner.selection;
+    const isCurrent = () => selected === owner.selection && !controller.signal.aborted;
     const fail = (code: string) => {
       if (isCurrent() && state.code !== "stale_epoch") publish({ kind: "error", hostEpoch, sessionId, snapshot: null, code });
     };
-    // Join local iterator cleanup before opening the next selected-session channel. Aborting uses
-    // the normal generated API; it never issues a session abort or disposes the application host.
-    work = work.then(async () => {
-      if (!isCurrent()) return;
-      let iterator: AsyncIterator<SessionDisplayItem> | undefined;
-      let revision: bigint | null = null;
-      let projectionEpoch: string | null = null;
-      try {
-        const stream = await open({ expectedHostEpoch: hostEpoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8_000 });
-        iterator = stream[Symbol.asyncIterator]();
-        while (isCurrent()) {
-          const result = await iterator.next();
-          if (!isCurrent()) return;
-          if (result.done) { fail("ended_without_close"); return; }
-          const item = result.value;
-          if (item.status !== "ok") {
-            fail(["invalid_request", "stale_epoch", "capacity", "observation_failed"].includes(item.status) ? item.status : "observation_failed");
-            return;
-          }
-          if (item.hostEpoch !== hostEpoch) { fail("stale_epoch"); return; }
-          if (item.sessionId !== sessionId || (item.session && item.session.sessionId.toLowerCase() !== sessionId.toLowerCase())) {
-            fail("invalid_update"); return;
-          }
-          const next = decimalRevision(item.revision);
-          if (next === null || !item.projectionEpoch || (revision === null && (!item.isInitial || item.previousRevision !== null))) {
-            fail("invalid_update"); return;
-          }
-          if (projectionEpoch !== null && projectionEpoch !== item.projectionEpoch) { fail("stale_projection"); return; }
-          if (revision !== null && next <= revision) continue; // Never apply duplicate or out-of-order callbacks.
-          const previous = decimalRevision(item.previousRevision);
-          if (revision !== null && (item.isInitial || previous === null || previous >= next)) { fail("invalid_update"); return; }
-          if (item.session !== null && !validToolActivities(item.session.toolActivities, item.session.evictedToolActivities)) {
-            fail("invalid_update"); return;
-          }
-          const gap = item.hasGap || (revision !== null && (next > revision + 1n || previous !== revision));
-          revision = next;
-          projectionEpoch = item.projectionEpoch;
-          // Replace, never append/replay. A null session removes all old state; missing rows disappear.
-          const snapshot = immutableReplacement({ ...item, hasGap: gap });
-          publish({ kind: item.isClosed ? "closed" : "connected", hostEpoch, sessionId, snapshot, code: null });
-          if (item.isClosed) return;
+    let revision: bigint | null = null;
+    let projectionEpoch: string | null = null;
+    try {
+      owner.opening = open({ expectedHostEpoch: hostEpoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8_000 });
+      owner.stream = await owner.opening;
+      owner.iterator = owner.stream[Symbol.asyncIterator](); // Even a late acquisition must be returned.
+      while (isCurrent()) {
+        owner.next = owner.iterator.next();
+        const result = await owner.next;
+        if (result.done) { fail("ended_without_close"); return; }
+        const item = result.value;
+        // Identity is authority evidence even after detach; malformed or unrelated envelopes are not.
+        if (!correlatedIdentity(item, sessionId)) { fail("invalid_update"); return; }
+        if (item.status === "stale_epoch" || item.hostEpoch !== hostEpoch) {
+          reload = true; desired = null;
+          try { observeIdentity?.({ status: "stale_epoch", epoch: item.hostEpoch }); }
+          catch (error) { notificationFailure ??= error; }
+          if (selected) publish({ kind: "error", hostEpoch: selected.hostEpoch, sessionId: selected.sessionId, snapshot: null, code: "stale_epoch" });
+          return;
         }
-      } catch {
-        fail("transport_failed"); // Never display exception messages or arbitrary transport error text.
-      } finally {
-        try { await iterator?.return?.(); }
-        catch { fail("transport_failed"); }
+        if (!isCurrent()) return;
+        if (item.status !== "ok") {
+          fail(item.status);
+          return;
+        }
+        const next = decimalRevision(item.revision);
+        if (next === null || (revision === null && (!item.isInitial || item.previousRevision !== null))) {
+          fail("invalid_update"); return;
+        }
+        if (projectionEpoch !== null && projectionEpoch !== item.projectionEpoch) { fail("stale_projection"); return; }
+        if (revision !== null && next <= revision) continue; // Never apply duplicate or out-of-order callbacks.
+        const previous = decimalRevision(item.previousRevision);
+        if (revision !== null && (item.isInitial || previous === null || previous >= next)) { fail("invalid_update"); return; }
+        if (item.session !== null && !validToolActivities(item.session.toolActivities, item.session.evictedToolActivities)) {
+          fail("invalid_update"); return;
+        }
+        const gap = item.hasGap || (revision !== null && (next > revision + 1n || previous !== revision));
+        revision = next;
+        projectionEpoch = item.projectionEpoch;
+        // Replace, never append/replay. A null session removes all old state; missing rows disappear.
+        const snapshot = immutableReplacement({ ...item, hasGap: gap });
+        publish({ kind: item.isClosed ? "closed" : "connected", hostEpoch, sessionId, snapshot, code: null });
+        if (item.isClosed) return;
       }
+    } catch (error) {
+      owner.failure = error;
+      fail("transport_failed"); // Never display exception messages or arbitrary transport error text.
+    } finally {
+      try {
+        if (owner.stream) {
+          if (!owner.iterator?.return) throw new Error("Iterator cleanup unavailable");
+          owner.returning = owner.iterator.return();
+          if (!(await owner.returning).done) throw new Error("Iterator cleanup incomplete");
+        }
+      } catch (error) {
+        blocked = { owner, error }; desired = null;
+        showBlocked(); // Cleanup failure is not fenced by the obsolete presentation generation.
+      }
+    }
+  }
+  function start() {
+    if (running || blocked || reload) return;
+    running = true;
+    work = Promise.resolve().then(async () => {
+      try {
+        while (desired && !blocked && !reload) {
+          const selection = desired; desired = null;
+          active = { selection };
+          await observe(active);
+          if (!blocked) active = null;
+        }
+      } finally { running = false; }
     });
+  }
+  function select(hostEpoch: string, sessionId: string, observeIdentity?: Selection["observeIdentity"]) {
+    selected?.controller.abort(); active?.selection.controller.abort();
+    const selection: Selection = { hostEpoch, sessionId, controller: new AbortController(), observeIdentity };
+    selected = selection;
+    if (blocked) showBlocked();
+    else if (reload) publish({ kind: "error", hostEpoch, sessionId, snapshot: null, code: "stale_epoch" });
+    else {
+      desired = selection; // Exactly one replaceable desired selection, not a chain of waiters.
+      publish({ kind: "loading", hostEpoch, sessionId, snapshot: null, code: null });
+      start();
+    }
+    return { detach: () => detach(selection) };
   }
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     select,
     detach,
-    // Useful to join cleanup in tests/outer renderer lifetime; no command or host work is joined here.
+    retainedCleanupFailure: () => blocked,
+    notificationFailure: () => notificationFailure,
+    // Observer settlement is NOT successful cleanup: inspect retainedCleanupFailure as well.
+    // Neither this promise nor generated cancellation/timeout proves backend termination.
     settled: () => work,
   };
 }
 
 function decimalRevision(value: string | null): bigint | null {
-  return value !== null && /^(0|[1-9][0-9]{0,18})$/.test(value) ? BigInt(value) : null;
+  if (typeof value !== "string") return null;
+  const match = /^(0|[1-9][0-9]{0,18})$/.exec(value);
+  return match && match[0] === value && BigInt(value) <= 9223372036854775807n ? BigInt(value) : null;
+}
+
+function identity(value: unknown): value is string {
+  return validToolIdentity(value) && !/^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]|[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]$/.test(value);
+}
+
+function correlatedIdentity(item: SessionDisplayItem, sessionId: string): boolean {
+  if (!item || !["ok", "invalid_request", "stale_epoch", "capacity", "observation_failed"].includes(item.status) ||
+    !identity(item.hostEpoch) || !identity(item.sessionId) || item.sessionId !== sessionId) return false;
+  // Error envelopes legitimately omit projection/revisions/session, but malformed supplied values
+  // (including obsolete ones) are never host-replacement proof. Legacy opaque epoch strings remain valid.
+  if ((item.projectionEpoch !== null && !identity(item.projectionEpoch)) ||
+    (item.revision !== null && decimalRevision(item.revision) === null) ||
+    (item.previousRevision !== null && decimalRevision(item.previousRevision) === null) ||
+    (item.session !== null && (!identity(item.session?.sessionId) ||
+      item.session.sessionId.toLowerCase() !== sessionId.toLowerCase() || decimalRevision(item.session.revision) === null))) return false;
+  return item.status !== "ok" || (identity(item.projectionEpoch) && decimalRevision(item.revision) !== null);
 }
 
 function wellFormedToolString(value: string): boolean {

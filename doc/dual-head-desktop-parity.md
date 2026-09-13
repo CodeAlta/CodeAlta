@@ -2522,3 +2522,48 @@ schema-document retention, arbitrary constructor failure rollback, queue failure
 and deferred queue interleavings remain open. No old-binary forwarding, durable restart authority, broad
 effect/recovery stress, mounted/native UI, configured-provider/auth/network, full suite/solution or website
 qualification is claimed. Website theme acquisition remains outside this session's no-acquisition boundary.
+
+### M4 bounded frontend observation ownership checkpoint
+
+Parent accepted and independently audited a ten-path correction after provider-input integration
+`d8cd1f44`. Display now retains one original observation plus one latest desired selection; scoped
+detach cannot cancel a successor, and opening a successor requires successful terminal iterator
+return. Failed/unavailable/incomplete cleanup retains and blocks the old owner, without treating
+cancellation or renderer reload as proof of host cleanup. Current-state reads retain one original
+frontend invocation plus one latest explicitly pending refresh; displaced requests settle explicitly.
+Neither the waiter bound nor its drain completion establishes a bound on outstanding backend work.
+
+Both readers validate correlated identity before obsolete-presentation fencing and revoke the captured
+shared mutation capability on valid late replacement evidence. Capability subscribers are isolated and
+observe committed monotonic denial. Existing action guards/intent/uncertainty protocols remain unchanged.
+Display revisions are exact canonical nonnegative Int64 strings. History, raw-event readers, runtime
+effects, main composition, input/ask/notes protocols and generated contracts were not changed.
+
+Parent found an omitted current-state worker join in the initial handoff. A two-file correction now
+retains the drain before scheduled invocation and before loading notifications, exposes `settled()`,
+and joins explicit successors independently of refresh outcomes. Tests cover notification reentrancy
+and actual synchronous invoke failure without converting it into an asynchronous failure fixture.
+Fixture cleanup records original task/stage/outcome identities, includes late acquisitions, releases
+gates and starts cancellation before joining, and preserves primary plus cancellation-shaped cleanup
+failures. Intentional failed Display return asserts the exact retained blocked owner and does not
+unsubscribe/release dependents; its diagnostic output is expected, not a failing test or proof of
+successful cleanup. Deadlines remain permanent failures.
+
+Independent parent verification passed **45 selected frontend tests**: 23 Display, 14 current-state,
+one new capability-latch regression, and seven unchanged input regressions. TypeScript checking passed
+before and after the cached targeted Desktop test build. That Release build passed with zero warnings
+or errors and reported the generated contract current. **Eleven managed tests** passed: the two updated
+current-source wiring guards and nine previously admitted input RPC/source regressions, including all
+eighteen frozen input originals. No source hashes were rebased or inverse machinery added. The preexisting
+runtime-state wiring assertion drift was corrected only at its frontend call site; backend/registration
+and generated-contract guards remain intact.
+
+These are helper/state-machine and source-wiring checks, **not mounted React/native qualification**.
+Separate missing/unavailable/incomplete iterator-return and late-epoch-after-supersession cases are not
+all independently exercised by this selection; rejection, detach, held cleanup and scoped supersession
+are covered. No full suite/solution, Vite bundle, website/theme acquisition, dependencies, configured
+provider/auth/network or default-profile execution was admitted. Shared history/live reconciliation
+and original-effect ownership remain open: TUI still combines history/plugin projection and effects,
+and asynchronous history rebuild has no shared live watermark. Partial Display and separate current
+state/history reads must not be presented as recovery. Prior input disposal/client/queue limitations,
+durable outcomes and M4–M6 remain open.

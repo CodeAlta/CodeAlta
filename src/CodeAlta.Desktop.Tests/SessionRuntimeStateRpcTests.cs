@@ -113,7 +113,8 @@ public sealed class SessionRuntimeStateRpcTests
         Assert.IsTrue(app.IndexOf(registration, StringComparison.Ordinal) < app.IndexOf("private async ValueTask RunAsync", StringComparison.Ordinal));
         StringAssert.Contains(Read("Desktop/Rpc/SessionRuntimeStateRpc.cs"), "runtime.GetCurrentStateAsync");
         StringAssert.Contains(Read("frontend/src/main.tsx"), "useState(() => createRuntimeStateReader(sessionRuntimeState.current))");
-        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState)");
+        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe)");
+        StringAssert.Contains(Read("frontend/src/OwnedSessionPanel.tsx"), "useSyncExternalStore(capability.subscribe, capability.canMutate)");
         using var manifest = JsonDocument.Parse(Read("obj/neoastra/neoastra.manifest.json"));
         var command = manifest.RootElement.GetProperty("services").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "runtimeState")
             .GetProperty("commands").EnumerateArray().Single();

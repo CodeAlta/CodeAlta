@@ -4,6 +4,25 @@ import { captureSubmission, captureSubmissionAbort, createMutationCapability, cr
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
+
+test("capability commits denial before notifying, isolates subscriber faults and never re-enables", () => {
+  const capability = createMutationCapability("epoch");
+  const fault = new Error("subscriber failure");
+  const seen: boolean[] = [];
+  const removeFault = capability.subscribe(() => { seen.push(capability.canMutate()); throw fault; });
+  const removeGood = capability.subscribe(() => seen.push(capability.canSubmit({ expectedEpoch: "epoch" })));
+  const removed = capability.subscribe(() => assert.fail("Unsubscribed listener called"));
+  removed();
+  assert.equal(capability.observe({ status: "ok", epoch: "epoch" }), true);
+  assert.deepEqual(seen, []);
+  assert.equal(capability.observe({ status: "stale_epoch", epoch: "other" }), false);
+  assert.deepEqual(seen, [false, false]);
+  assert.equal(capability.notificationFailure(), fault);
+  assert.equal(capability.observe({ status: "ok", epoch: "epoch" }), false);
+  assert.equal(capability.observe({ status: "stale_runtime", epoch: null }), false);
+  assert.deepEqual(seen, [false, false]);
+  removeFault(); removeGood();
+});
 const control = "abcdefab-1234-5678-9abc-abcdefabcdee";
 function row(): SessionReceiptView {
   return { clientRequestId: "key", sessionId: "session", operationId: operation, targetOperationId: null, kind: "Send",

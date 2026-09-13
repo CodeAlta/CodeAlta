@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from "./sessionDisplay";
+import { createMutationCapability } from "./sessionOperations";
 import type { SessionDisplayItem, SessionDisplayText, SessionDisplayToolActivity, SessionDisplayView } from "#neoastra";
 
 const row: SessionDisplayText = { runId: "run", contentId: "content", kind: "Assistant", text: "before", isComplete: false, isTruncated: false, startedWithDelta: true };
@@ -20,14 +21,16 @@ async function* sequence(items: SessionDisplayItem[]) { yield* items; }
 type Store = ReturnType<typeof createSessionDisplayStore>;
 type Open = Parameters<typeof createSessionDisplayStore>[0];
 type Fixture = {
-  observe(open: Open): Store;
+  observe(open: Open, expected?: Partial<Record<"open" | "next" | "return", unknown>>): Store;
   gate<T>(cleanupValue: T): { promise: Promise<T>; resolve(value: T): void };
 };
 
 // Every case retains setup/body, original open/next/return, their wrappers/observers, and each
-// selected work chain before assertions. No scheduling tick is a readiness/termination proof.
+// selected drain promise before assertions. No scheduling tick is a readiness/termination proof.
 async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
-  const originals: { promise: Promise<unknown>; observer: Promise<void> }[] = [];
+  const originals: { stage: string; promise: Promise<unknown>; original?: Promise<unknown>; observer: Promise<void>;
+    outcome: "pending" | "success" | "failure"; error?: unknown; expected?: { error: unknown; seen: boolean } }[] = [];
+  const expectations: { stage: string; error: unknown; seen: boolean }[] = [];
   const stores: Store[] = [];
   const iterators: AsyncIterator<SessionDisplayItem>[] = [];
   const signals: AbortSignal[] = [];
@@ -35,38 +38,54 @@ async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
   const unsubscribes: (() => void)[] = [];
   let stopping = false;
   let expired = false;
+  let deadlineFailure: Error | undefined;
   let body: Promise<void> | undefined;
   let bodyWait: Promise<void> | undefined;
   let joined: Promise<void> | undefined;
   let joinWait: Promise<void> | undefined;
-  function retain<T>(promise: Promise<T>): Promise<T> {
-    originals.push({ promise, observer: promise.then(() => {}, () => {}) });
+  const stopFailures: unknown[] = [];
+  function launch<T>(stage: string, start: () => Promise<T>, expected?: { error: unknown; seen: boolean }): Promise<T> {
+    let resolve!: (value: T | PromiseLike<T>) => void, reject!: (error: unknown) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    const record: (typeof originals)[number] = { stage, promise, observer: Promise.resolve(), outcome: "pending", expected };
+    record.observer = promise.then(() => { record.outcome = "success"; }, error => {
+      record.outcome = "failure"; record.error = error;
+      if (expected && error === expected.error) expected.seen = true;
+    });
+    originals.push(record); // Publish ownership and observation before invoking user code.
+    try { record.original = start(); resolve(record.original as Promise<T>); } catch (error) { reject(error); }
     return promise;
   }
+  function retain<T>(promise: Promise<T>): Promise<T> { return launch("work", () => promise); }
   function stop() {
     stopping = true;
-    for (const release of releases) release();
-    for (const store of stores) store.detach(); // All independent cancellations precede any dependent join.
+    for (const release of releases) { try { release(); } catch (error) { stopFailures.push(error); } }
+    for (const store of stores) { try { store.detach(); } catch (error) { stopFailures.push(error); } }
   }
   const fixture: Fixture = {
-    observe(open: Open): Store {
+    observe(open: Open, expected = {}): Store {
       if (stopping) throw new Error("Fixture already stopping");
+      const stages = Object.entries(expected).map(([stage, error]) => ({ stage, error, seen: false }));
+      expectations.push(...stages);
       const store = createSessionDisplayStore((request, options) => {
         signals.push(options.signal);
-        const opening = retain(open(request, options));
-        return retain(opening.then(stream => ({ [Symbol.asyncIterator]() {
+        const expectation = (stage: "open" | "next" | "return") => stages.find(value => value.stage === stage);
+        const opening = launch("open", () => open(request, options), expectation("open"));
+        return launch("open-wrapper", () => opening.then(stream => ({ [Symbol.asyncIterator]() {
           const iterator = stream[Symbol.asyncIterator]();
           iterators.push(iterator);
           const returned = iterator.return?.bind(iterator);
-          return { next: () => retain(iterator.next()), return: returned ? () => retain(returned()) : undefined };
-        } })));
+          return { next: () => launch("next", () => iterator.next(), expectation("next")),
+            return: returned ? () => launch("return", () => returned(), expectation("return")) : undefined };
+        } })), expectation("open"));
       });
       stores.push(store);
       return { ...store,
-        select(epoch: string, session: string) {
+        select(...args: Parameters<Store["select"]>) {
           if (stopping) throw new Error("Fixture already stopping");
-          store.select(epoch, session);
+          const selection = store.select(...args);
           retain(store.settled());
+          return selection;
         },
         subscribe(listener: () => void) {
           const unsubscribe = store.subscribe(listener);
@@ -89,18 +108,22 @@ async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
     finishDeadline = resolve;
     timer = setTimeout(() => {
       expired = true; // Permanent failure; late completion never permits unsubscribe/release of uncertain resources.
-      stop();
-      reject(new Error("Display fixture deadline; uncertain work retained, not proven terminated", {
+      deadlineFailure = new Error("Display fixture deadline; uncertain work retained, not proven terminated", {
         cause: { originals, stores, iterators, signals, releases, unsubscribes, body, bodyWait, joined, joinWait, fixture },
-      }));
+      });
+      stop();
+      reject(deadlineFailure);
     }, 5_000);
   });
   const deadlineObserver = deadline.then(() => {}, () => {});
+  let primary: unknown;
+  let failed = false;
   try {
-    const setup = retain(Promise.resolve());
-    body = retain(setup.then(() => retain(action(fixture))));
+    const setup = launch("setup", () => Promise.resolve());
+    body = launch("body", () => setup.then(() => action(fixture)));
     bodyWait = Promise.race([body, deadline]);
     await bodyWait;
+  } catch (error) { primary = error; failed = true;
   } finally {
     stop();
     try {
@@ -108,8 +131,30 @@ async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
         // Include originals added while earlier originals settle (e.g. late open -> iterator return).
         joined = (async () => { for (let index = 0; index < originals.length; index++) await originals[index].observer; })();
         joinWait = Promise.race([joined, deadline]);
-        await joinWait;
-        if (!expired) for (const unsubscribe of unsubscribes) unsubscribe();
+        try { await joinWait; if (expired) throw deadlineFailure; } catch (error) {
+          throw new AggregateError(failed ? [primary, error] : [error], "Display cleanup uncertain", {
+            cause: { originals, stores, iterators, signals, releases, unsubscribes, body, bodyWait, joined, joinWait, fixture, expectations },
+          });
+        }
+        const failures = originals.filter(record => record.outcome === "failure" &&
+          (!record.expected || record.error !== record.expected.error)).map(record => record.error);
+        failures.push(...stopFailures);
+        if (failed) failures.unshift(primary);
+        const cleanupFailures = originals.filter(record => record.stage === "return" && record.outcome === "failure");
+        const cause = { originals, stores, iterators, signals, releases, unsubscribes, body, bodyWait, joined, joinWait, fixture, expectations };
+        for (const expected of expectations) if (!expected.seen) failures.push(new Error(`Expected ${expected.stage} failure was not observed`, { cause: expected }));
+        if (failures.length) failures.push(...cleanupFailures.map(record => record.error));
+        if (failures.length) throw new AggregateError([...new Set(failures)], "Display body or original cleanup failed", { cause });
+        if (cleanupFailures.length) {
+          for (const record of cleanupFailures) assert.equal(stores.some(store => {
+            const blocked = store.retainedCleanupFailure();
+            return blocked?.error === record.error && blocked?.owner.returning === record.promise && store.getSnapshot().cleanupBlocked;
+          }), true, "Every failed return must retain its exact blocked owner");
+          console.log(new Error("Expected return failure: blocked owner and dependents retained, not released", { cause }));
+        } else {
+          if (stores.some(store => store.retainedCleanupFailure() !== null)) throw new Error("Unexpected unproven cleanup; owners retained", { cause });
+          if (!expired) for (const unsubscribe of unsubscribes) unsubscribe();
+        }
       }
     } finally {
       clearTimeout(timer);
@@ -117,6 +162,10 @@ async function runDisplayFixture(action: (fixture: Fixture) => Promise<void>) {
       await deadlineObserver;
     }
   }
+  if (expired) throw new AggregateError([...new Set(failed ? [primary, deadlineFailure] : [deadlineFailure])], "Display deadline permanently failed", {
+    cause: { originals, stores, iterators, signals, releases, unsubscribes, body, bodyWait, joined, joinWait, fixture, expectations },
+  });
+  if (failed) throw primary;
 }
 
 test("lossless revision ordering, full replacements, removals and closed state", () => runDisplayFixture(async fixture => {
@@ -170,12 +219,13 @@ test("wrong host/projection/selection and malformed revision fail closed", () =>
 
 test("capacity/errors require explicit retry, do not leak messages or automatically mutate", () => runDisplayFixture(async fixture => {
   let opens = 0;
+  const failure = new Error("SECRET raw transport detail");
   const store = fixture.observe(async () => {
     opens++;
     if (opens === 1) return sequence([item("0", { status: "capacity" })]);
-    if (opens === 2) throw new Error("SECRET raw transport detail");
+    if (opens === 2) throw failure;
     return sequence([item("0", { isClosed: true, session: null })]);
-  });
+  }, { open: failure });
   store.select("host", "selected"); await store.settled();
   assert.equal(opens, 1); assert.equal(store.getSnapshot().code, "capacity");
   store.select("host", "selected"); await store.settled();
@@ -186,13 +236,16 @@ test("capacity/errors require explicit retry, do not leak messages or automatica
 }));
 
 test("known stale host requires reload even if channel cleanup fails", () => runDisplayFixture(async fixture => {
+  const failure = new Error("cleanup failed");
   const store = fixture.observe(async () => (async function* () {
     try { yield item("0", { status: "stale_epoch" }); }
-    finally { throw new Error("cleanup failed"); }
-  })());
+    finally { throw failure; }
+  })(), { return: failure });
   store.select("host", "selected"); await store.settled();
   assert.equal(store.getSnapshot().code, "stale_epoch");
   assert.equal(store.getSnapshot().snapshot, null);
+  assert.equal(store.getSnapshot().cleanupBlocked, true);
+  assert.equal(store.retainedCleanupFailure()?.error, failure);
 }));
 
 test("selection and unmount suppress late callbacks and join iterator return before reopening", () => runDisplayFixture(async fixture => {
@@ -245,6 +298,28 @@ test("unmount during opening disposes the late channel without publishing", () =
   assert.equal(read, 0); assert.equal(returned, 1);
 }));
 
+test("superseding a held open retains the late iterator until its own return succeeds", () => runDisplayFixture(async fixture => {
+  const entered = fixture.gate<void>(undefined), returning = fixture.gate<void>(undefined);
+  const finishReturn = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+  let reads = 0, returns = 0; const opens: string[] = [];
+  const late: AsyncIterable<SessionDisplayItem> = { [Symbol.asyncIterator]: () => ({
+    next: async () => { reads++; return { done: false, value: item() }; },
+    return: () => { returns++; returning.resolve(undefined); return finishReturn.promise; },
+  }) };
+  const opening = fixture.gate(late);
+  const store = fixture.observe(request => {
+    opens.push(request.sessionId); entered.resolve(undefined);
+    return opens.length === 1 ? opening.promise : Promise.resolve(sequence([item("0", { sessionId: request.sessionId, session: null, isClosed: true })]));
+  });
+  const first = store.select("host", "first"); await entered.promise;
+  store.select("host", "skipped"); store.select("host", "last"); first.detach();
+  opening.resolve(late); await returning.promise;
+  assert.deepEqual(opens, ["first"]); assert.equal(reads, 0); assert.equal(returns, 1);
+  finishReturn.resolve({ done: true, value: undefined }); await store.settled();
+  assert.deepEqual(opens, ["first", "last"]); assert.equal(store.getSnapshot().kind, "closed");
+  assert.equal(reads, 0); assert.equal(returns, 1);
+}));
+
 test("normal terminal return and missing terminal are distinguished", () => runDisplayFixture(async fixture => {
   let cleaned = 0;
   const store = fixture.observe(async () => (async function* () {
@@ -264,6 +339,178 @@ test("row identity includes session, run, content and channel without delimiter 
     displayRowKey("selected", { ...row, kind: "Reasoning" }), displayRowKey("selected", { ...row, runId: null })];
   assert.equal(new Set(keys).size, keys.length);
 });
+
+test("one latest selection waits for real return; stale detach cannot cancel its successor", () => runDisplayFixture(async fixture => {
+  const reading = fixture.gate<void>(undefined), returning = fixture.gate<void>(undefined);
+  const newReading = fixture.gate<void>(undefined);
+  const newNext = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+  let newSignal: AbortSignal | undefined;
+  const next = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+  const releaseReturn = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+  const calls: string[] = [];
+  const store = fixture.observe(async (request, options) => {
+    calls.push(request.sessionId);
+    if (calls.length > 1) {
+      newSignal = options.signal;
+      return { [Symbol.asyncIterator]: () => ({ next: () => { newReading.resolve(undefined); return newNext.promise; },
+        return: async () => ({ done: true, value: undefined }),
+      }) };
+    }
+    return { [Symbol.asyncIterator]: () => ({
+      next: () => { reading.resolve(undefined); return next.promise; },
+      return: () => { returning.resolve(undefined); return releaseReturn.promise; },
+    }) };
+  });
+  const old = store.select("host", "first"); await reading.promise;
+  store.select("host", "second");
+  next.resolve({ done: true, value: undefined }); await returning.promise;
+  for (let index = 0; index < 32; index++) store.select("host", `skipped-${index}`);
+  store.select("host", "latest"); old.detach();
+  assert.deepEqual(calls, ["first"]);
+  releaseReturn.resolve({ done: true, value: undefined }); await newReading.promise;
+  old.detach(); assert.equal(newSignal?.aborted, false);
+  newNext.resolve({ done: false, value: item("0", { sessionId: "latest", session: null, isClosed: true }) }); await store.settled();
+  assert.deepEqual(calls, ["first", "latest"]);
+  assert.equal(store.getSnapshot().sessionId, "latest");
+  assert.equal(store.getSnapshot().kind, "closed");
+}));
+
+test("late correlated epoch evidence revokes authority before obsolete presentation fencing", () => runDisplayFixture(async fixture => {
+  for (const patch of [
+    { hostEpoch: "other" },
+    { status: "stale_epoch" },
+    { hostEpoch: "other", sessionId: "wrong" },
+    { hostEpoch: "\ud800" },
+    { hostEpoch: "other", projectionEpoch: "" },
+    { hostEpoch: "other", revision: "9223372036854775808" },
+    { status: "stale_epoch", projectionEpoch: "\ud800" },
+    {},
+  ]) {
+    const entered = fixture.gate<void>(undefined);
+    const next = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+    const capability = createMutationCapability("host");
+    const subscriberFailure = new Error("notification failed");
+    let returned = 0, notifications = 0;
+    capability.subscribe(() => { throw subscriberFailure; });
+    capability.subscribe(() => { notifications++; });
+    const store = fixture.observe(async () => ({ [Symbol.asyncIterator]: () => ({
+      next: () => { entered.resolve(undefined); return next.promise; },
+      return: async () => { returned++; return { done: true, value: undefined }; },
+    }) }));
+    const selected = store.select("host", "selected", capability.observe); await entered.promise;
+    selected.detach();
+    next.resolve({ done: false, value: item("0", { ...patch, session: null }) });
+    await store.settled();
+    const validRevocation = Object.keys(patch).length === 1 && (patch.hostEpoch === "other" || patch.status === "stale_epoch");
+    assert.equal(capability.canMutate(), !validRevocation);
+    assert.equal(notifications, validRevocation ? 1 : 0);
+    assert.equal(capability.notificationFailure(), validRevocation ? subscriberFailure : undefined);
+    assert.equal(returned, 1);
+    assert.equal(store.getSnapshot().snapshot, null);
+  }
+}));
+
+test("return rejection including AbortError blocks reopen and retains the failed owner", () => runDisplayFixture(async fixture => {
+  for (const error of [new Error("private return failure"), Object.assign(new Error("cancel-shaped cleanup"), { name: "AbortError" })]) {
+    let opens = 0;
+    const store = fixture.observe(async () => {
+      opens++;
+      return { [Symbol.asyncIterator]: () => ({
+        next: async () => ({ done: false, value: item("0", { isClosed: true }) }),
+        return: async () => { throw error; },
+      }) };
+    }, { return: error });
+    store.select("host", "selected"); await store.settled();
+    store.select("host", "other"); await store.settled();
+    assert.equal(opens, 1);
+    assert.equal(store.getSnapshot().cleanupBlocked, true);
+    assert.equal(store.getSnapshot().code, "cleanup_failed");
+    assert.equal(store.retainedCleanupFailure()?.error, error);
+    assert.equal(JSON.stringify(store.getSnapshot()).includes(error.message), false);
+  }
+}));
+
+test("expected next failure still requires successful return before explicit retry", () => runDisplayFixture(async fixture => {
+  const error = new Error("private next failure"); let opens = 0, returns = 0;
+  const store = fixture.observe(async () => {
+    if (++opens > 1) return sequence([item("0", { isClosed: true })]);
+    return { [Symbol.asyncIterator]: () => ({ next: async () => { throw error; },
+      return: async () => { returns++; return { done: true, value: undefined }; } }) };
+  }, { next: error });
+  store.select("host", "selected"); await store.settled();
+  assert.equal(returns, 1); assert.equal(store.getSnapshot().code, "transport_failed");
+  store.select("host", "selected"); await store.settled();
+  assert.equal(opens, 2); assert.equal(store.getSnapshot().kind, "closed");
+}));
+
+test("superseded cancellation-shaped next and return failures retain both originals and block latest", () => runDisplayFixture(async fixture => {
+  const nextFailure = Object.assign(new Error("next canceled"), { name: "AbortError" });
+  const returnFailure = Object.assign(new Error("return canceled"), { name: "AbortError" });
+  const reading = fixture.gate<void>(undefined), releaseNext = fixture.gate<void>(undefined);
+  const returning = fixture.gate<void>(undefined), releaseReturn = fixture.gate<void>(undefined);
+  let opens = 0;
+  const store = fixture.observe(async () => { opens++; return { [Symbol.asyncIterator]: () => ({
+    next: async () => { reading.resolve(undefined); await releaseNext.promise; throw nextFailure; },
+    return: async () => { returning.resolve(undefined); await releaseReturn.promise; throw returnFailure; },
+  }) }; }, { next: nextFailure, return: returnFailure });
+  store.select("host", "old"); await reading.promise;
+  store.select("host", "new"); releaseNext.resolve(undefined); await returning.promise;
+  store.select("host", "latest"); assert.equal(opens, 1);
+  releaseReturn.resolve(undefined); await store.settled();
+  assert.equal(store.retainedCleanupFailure()?.owner.failure, nextFailure);
+  assert.equal(store.retainedCleanupFailure()?.error, returnFailure);
+  assert.equal(store.getSnapshot().code, "cleanup_failed"); assert.equal(store.getSnapshot().sessionId, "latest");
+  store.select("host", "retry"); await store.settled(); assert.equal(opens, 1);
+}));
+
+test("fixture failure reporting preserves primary and cancellation-shaped cleanup failures", () => runDisplayFixture(async () => {
+  const primary = new Error("primary assertion failure");
+  const cleanup = Object.assign(new Error("cleanup cancellation"), { name: "AbortError" });
+  await assert.rejects(runDisplayFixture(async fixture => {
+    const reading = fixture.gate<void>(undefined), release = fixture.gate<IteratorResult<SessionDisplayItem>>({ done: true, value: undefined });
+    const store = fixture.observe(async () => ({ [Symbol.asyncIterator]: () => ({
+      next: () => { reading.resolve(undefined); return release.promise; }, return: async () => { throw cleanup; },
+    }) }), { return: cleanup });
+    store.select("host", "selected"); await reading.promise; throw primary;
+  }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.ok(error.errors.includes(primary)); assert.ok(error.errors.includes(cleanup));
+    assert.ok(error.cause); console.log(error); return true;
+  });
+}));
+
+test("revisions are exact canonical nonnegative Int64 strings", () => runDisplayFixture(async fixture => {
+  for (const revision of ["0", "9007199254740993", "9223372036854775807", "9223372036854775808", "9999999999999999999", "1\n", "1\r\n", "01", "-1", "+1", " 1", "1 "]) {
+    const store = fixture.observe(async () => sequence([item(revision, { isClosed: true })]));
+    store.select("host", "selected"); await store.settled();
+    assert.equal(store.getSnapshot().kind, ["0", "9007199254740993", "9223372036854775807"].includes(revision) ? "closed" : "error");
+  }
+}));
+
+test("previous and embedded session revisions reject noncanonical or overflowing Int64 values", () => runDisplayFixture(async fixture => {
+  for (const revision of ["9223372036854775808", "1\n", "01", "-1"]) {
+    for (const malformed of [
+      item("9223372036854775807", { isInitial: false, previousRevision: revision }),
+      item("1", { isInitial: false, previousRevision: "0", session: { ...item().session!, revision } }),
+    ]) {
+      const store = fixture.observe(async () => sequence([item(), malformed]));
+      store.select("host", "selected"); await store.settled();
+      assert.equal(store.getSnapshot().code, "invalid_update"); assert.equal(store.getSnapshot().snapshot, null);
+    }
+  }
+}));
+
+test("nullable error identity envelope and legacy opaque/case-insensitive embedded identities stay valid", () => runDisplayFixture(async fixture => {
+  const capability = createMutationCapability("host");
+  const error = fixture.observe(async () => sequence([item("0", { status: "stale_epoch", revision: null,
+    previousRevision: null, projectionEpoch: null, session: null })]));
+  error.select("host", "selected", capability.observe); await error.settled(); assert.equal(capability.canMutate(), false);
+  for (const sessionId of ["selected", "legacy/session", "\ufeff", "a\0b"]) {
+    const first = item("9223372036854775807", { sessionId, projectionEpoch: "legacy-projection", isClosed: true });
+    const store = fixture.observe(async () => sequence([{ ...first, session: { ...first.session!, sessionId: sessionId.toUpperCase() } }]));
+    store.select("host", sessionId); await store.settled(); assert.equal(store.getSnapshot().kind, "closed");
+  }
+}));
 
 test("reported tools are frozen full replacements, including regressed phase, eviction, gap and closure", () => runDisplayFixture(async fixture => {
   const first = item();

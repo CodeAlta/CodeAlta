@@ -209,6 +209,11 @@ owned mode registers this channel; default/catalog-only startup behavior is unch
 Same-host reload obtains a new baseline of retained partial values only, not omitted history,
 tool results, permission decisions or effects. Host restart restores no prior authority.
 
+Rapid selection/reconnect requests retain only the latest desired observation. Reopening waits for
+the previous iterator's successful cleanup. If cleanup fails, **Reconnect live display** is blocked
+and the failed owner is retained; renderer reload does not prove that old backend work terminated.
+Valid late host/runtime identity changes disable shared mutation controls even after selection changes.
+
 **Refresh runtime state** is a separate manual, point-in-time observation of the actual runtime
 entry, coordinator transition, recorded run, Shutdown, retirement and queue-drain facts. It does
 not poll or automatically refresh; steering uses its captured target, subject to host revalidation. No entry/no recorded run is not
@@ -216,8 +221,10 @@ idle or completed, and queue depth is explicitly unknown. Configuration is runti
 verified provider-effective settings; pending prompt selection is shown separately. This query
 does not read catalogs/history or start/discover providers. Its runtime instance/attachment
 identity is not a Display revision, effect acknowledgement or history-recovery handshake.
-Host epoch and selection are checked, obsolete responses are discarded, and stale host/runtime
-identity requires reload rather than retrying the old epoch. Malformed/oversized output is refused
+Host epoch and selection are checked; obsolete presentation is discarded, but valid late identity
+changes still require reload rather than retrying the old epoch. Repeated explicit refreshes retain
+one frontend waiter and the latest pending refresh, not an unlimited set of overlapping requests.
+This is not a bound on actual backend work. Malformed/oversized output is refused
 without truncating authoritative fields (32 KiB transport budget, 256 UTF-16 units per identity/
 configuration string, decimal-string attachment generation). Canceling a wait does not cancel
 admitted runtime-owned work. This unary RPC is registered only in explicit owned mode.

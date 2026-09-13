@@ -55,6 +55,12 @@ An uncertain request keeps its exact text, key and target across session selecti
 observations never retarget it, and no retry happens automatically. Reload is required if the
 host/runtime identity changes. Closing the panel does not cancel accepted steering.
 
+Repeated runtime refreshes keep one frontend request and the latest explicitly pending refresh.
+Live-display reconnect waits for successful cleanup of the previous observation; cleanup failure
+blocks reconnect in that view. Valid late host/runtime changes disable mutation controls even after
+switching sessions. Reloading the renderer does not prove old backend work stopped, and these
+observations do not recover missing history, effects or lost outcomes.
+
 **Compact observed attachment if idle** is also available after manual runtime refresh. No
 recorded run or queue drain makes an attempt eligible, but the provider must still admit it
 without waiting. Stale or unsupported targets fail without replacement or fallback. This

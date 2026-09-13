@@ -78,7 +78,13 @@ decimal strings to preserve Int64 precision in JavaScript. Seven bounded identit
 strings (256 UTF-16 units each), fixed GUIDs/enums/ordinal/keys and a 4 KiB framing allowance fit
 the **32 KiB response budget**, verified with actual generated JSON serialization and worst-case
 escaping. Stale host/runtime identity requires UI reload, not retrying the old epoch. Selection
-detach cancels the waiter and discards late results; it does not stop a run or the runtime.
+detach cancels the frontend waiter and suppresses obsolete presentation; valid correlated late
+host/runtime identity evidence still revokes the captured shared mutation capability. It does not
+stop a run or the runtime. The App-owned reader retains one original frontend invocation and one
+latest explicitly pending refresh; displaced pending refreshes settle as superseded. It never
+creates retries or refreshes. Its retained drain joins original frontend processing and explicit
+pending work, separately from individual refresh outcomes. Neither generated timeout/cancellation
+nor frontend drain completion proves backend termination or reduces the backend read-ownership bound.
 
 ### Committed live display window (M4 foundation, not complete M4)
 
@@ -228,14 +234,23 @@ and host credit/transport/transient/React allocations are additional. Credits ac
 buffer admission, **not DOM application**. No whole-process memory/performance measurement or
 native final-message delivery-on-window-close guarantee is claimed.
 
-`createSessionDisplayStore` centrally owns selection, opening cancellation and iterator return.
-Its immutable current snapshot reports loading/connected/closed/error; late selection/unmount
-callbacks, wrong epochs and out-of-order revisions cannot restore stale display state. The UI offers
+`createSessionDisplayStore` centrally owns one original observation and one replaceable latest
+desired selection. Scoped detach cannot cancel a newer selection. A successor waits for successful
+terminal iterator return; failed, unavailable or incomplete cleanup retains the owner and blocks
+reopening in that store (`cleanupBlocked` / sanitized `cleanup_failed`). Cancellation alone never
+authorizes release. Its immutable current snapshot reports loading/connected/closed/error; late
+selection/unmount callbacks, wrong epochs and out-of-order revisions cannot restore stale display
+state. Valid correlated late host identity evidence revokes the captured shared mutation capability
+before presentation fencing. Capability invalidation is monotonic and observable; subscriber faults
+cannot prevent denial or other notifications. Revision strings are exact nonnegative Int64 values.
+The UI offers
 explicit reconnect without automatic commands, keeps persisted history separate, and renders plain
 React text (no HTML/Markdown execution). A known stale host epoch explicitly requires UI reload and
 disables reconnect with the old identity, even if iterator cleanup also fails. Opening timeout uses
 the standard generated API; its signal remains attached for the full channel lifetime. This slice has managed in-memory channel, generated
 contract/typechecking and frontend helper verification, not native/real-provider or complete M4 parity.
+A renderer reload does not prove that an old channel or host work finished cleanup. These local
+ownership guarantees do not establish a history/live watermark, effect replay or durable outcomes.
 
 ### Durable session notes
 

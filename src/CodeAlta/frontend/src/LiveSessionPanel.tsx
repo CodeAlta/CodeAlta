@@ -1,14 +1,19 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from "./sessionDisplay";
+import type { createMutationCapability } from "./sessionOperations";
 
-export function LiveSessionPanel({ store, hostEpoch, sessionId }: {
+export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
   store: ReturnType<typeof createSessionDisplayStore>; hostEpoch: string; sessionId: string;
+  capability: ReturnType<typeof createMutationCapability>;
 }) {
   const observed = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
+  const scope = useRef<{ hostEpoch: string; sessionId: string; selection: ReturnType<typeof store.select> } | null>(null);
   useEffect(() => {
-    store.select(hostEpoch, sessionId);
-    return () => store.detach();
-  }, [store, hostEpoch, sessionId]);
+    const owned = { hostEpoch, sessionId, selection: store.select(hostEpoch, sessionId, capability.observe) };
+    scope.current = owned;
+    return () => { owned.selection.detach(); if (scope.current === owned) scope.current = null; };
+  }, [store, hostEpoch, sessionId, capability]);
   // Never flash the previous selection during the render preceding effect cleanup/admission.
   const state = observed.hostEpoch === hostEpoch && observed.sessionId === sessionId ? observed : null;
   const snapshot = state?.snapshot;
@@ -19,7 +24,12 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId }: {
     <p className="detail">A same-host reload obtains a new baseline of retained partial values only, not history, results, decisions or effects. Restart restores no authority.</p>
     <p role="status">Observation: {state?.kind ?? "loading"}{state?.code ? ` · ${state.code}` : ""}</p>
     {state?.code === "stale_epoch" && <p role="alert">The host has changed. Reload the Desktop UI before continuing; reconnecting with this old host identity will not work.</p>}
-    <button type="button" disabled={state?.code === "stale_epoch"} onClick={() => store.select(hostEpoch, sessionId)}>Reconnect live display</button>
+    {state?.cleanupBlocked && <p role="alert">Previous observation cleanup failed. Its owner is retained; no successor can open here. Reconnect cannot prove cleanup or recover effects.</p>}
+    <button type="button" disabled={!canMutate || state?.code === "stale_epoch" || state?.cleanupBlocked} onClick={() => {
+      const owned = scope.current;
+      if (!owned || owned.hostEpoch !== hostEpoch || owned.sessionId !== sessionId || !capability.canMutate() || store.getSnapshot().cleanupBlocked) return;
+      owned.selection = store.select(hostEpoch, sessionId, capability.observe);
+    }}>Reconnect live display</button>
     {snapshot && <>
       <p className="detail">Projection {snapshot.projectionEpoch} · revision {snapshot.revision}</p>
       {snapshot.hasGap && <p role="status">Intermediate updates were coalesced. This replacement is the latest retained window, not recovered history.</p>}

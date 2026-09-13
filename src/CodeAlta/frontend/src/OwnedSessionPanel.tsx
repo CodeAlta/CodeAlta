@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -35,7 +35,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
-  const invalidEpoch = observedInvalidEpoch || !capability.canMutate();
+  const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
+  const invalidEpoch = observedInvalidEpoch || !canMutate;
   const scope = useRef<AbortController | null>(null);
   const receiptRevision = useRef(0);
   const historyRevision = useRef(0);
@@ -60,10 +61,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
     setRuntimeState(undefined);
-    runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, value => {
-      if (value.kind === "error" && ["stale_epoch", "stale_runtime"].includes(value.code)) observeEpoch({ status: value.code, epoch: null });
-      setRuntimeState(value);
-    });
+    runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
     setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
       ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
       : "Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
@@ -256,7 +254,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
         onClick={() => abort(undefined, value.intent.request.targetOperationId)}>Retry exact original Send Abort</button>
     </div>)}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
-    <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} />
+    <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} capability={capability} />
     <h3>Current runtime — manual point-in-time observation</h3>
     <p className="detail">Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.</p>
     <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>Refresh runtime state</button>

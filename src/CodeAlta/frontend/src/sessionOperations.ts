@@ -5,11 +5,21 @@ export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: 
 
 export function createMutationCapability(epoch: string) {
   let valid = true;
+  const listeners = new Set<() => void>();
+  let notificationFailure: unknown;
   return {
     canMutate: () => valid,
     canSubmit: (request: { expectedEpoch: string }) => valid && request.expectedEpoch === epoch,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    // Retain the first observer fault for diagnostics, never as public status or authority.
+    notificationFailure: () => notificationFailure,
     observe(result: { status: string; epoch: string | null }): boolean {
-      if (result.status === "stale_epoch" || result.status === "stale_runtime" || (result.epoch !== null && result.epoch !== epoch)) valid = false;
+      if (valid && (result.status === "stale_epoch" || result.status === "stale_runtime" || (result.epoch !== null && result.epoch !== epoch))) {
+        valid = false; // Commit before any reentrant subscriber or event handler can inspect authority.
+        for (const listener of [...listeners]) {
+          try { listener(); } catch (error) { notificationFailure ??= error; }
+        }
+      }
       return valid;
     },
   };
