@@ -2633,3 +2633,18 @@ to that contract. Any required shutdown/deactivation policy change needs explici
 against the standing close-order constraint. The candidate first correction is at the existing
 activation/adapter/manager boundary; plugin history replay, other callback classes and shared
 history/live recovery must not be silently included or claimed fixed.
+
+The sole child's independent audit completed on retry and agrees with these gaps. Parent also
+confirmed that TUI disposes frontend resources before owned services (`ShellFrontendHost.cs:97–124`)
+and that `PluginAltaServiceBridge.InvokeAsync` retains/calls its dispatcher with plugin identity
+(`PluginAltaServiceBridge.cs:23–82`). A production lease therefore needs dependency-release barriers,
+not merely a retained activation object. Rejecting callback-originated self-dependent shutdown also
+requires an exact close-capable command audit and propagated attempt identity; that coverage is open.
+
+The proposed policy is **64 outstanding event attempts per activation, no queued waiters**, explicit
+Capacity/Closing rejection, bounded rejection reporting, and bounded retained retiring generations.
+It is **not approved or implemented**: it adds a delivery-loss boundary. Retaining live dependencies
+after a shutdown timeout likewise changes production semantics even without changing its duration.
+Both decisions must be resolved before the proposed activation/adapter/manager prerequisite can be
+wired; lossless observation would require a different producer/backpressure or durable-delivery
+contract. No new runtime/plugin tests were executed for this read-only audit.
