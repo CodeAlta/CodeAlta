@@ -2611,3 +2611,25 @@ The renamed legacy live-handler regression was not executed because it starts an
 unretained deferred plugin-projection task. The cached-history regression suppresses that task and
 joins its actual rebuild. These checks do not qualify mounted/native UI, real providers/plugins,
 the full suite, shared plugin lifetime/effects or history/live consistency. M4–M6 remain open.
+
+### M4 plugin-effect migration: parent lifecycle audit
+
+The cache prerequisite is integrated as `861a2f97`. It does not authorize moving arbitrary
+plugin callbacks into runtime forwarding. Independent parent source review found these remaining
+contract gaps; no plugin production behavior was changed or executed by this audit:
+
+| Current boundary | Evidence and consequence |
+| --- | --- |
+| Agent-event dispatch | `PluginContributionAdapters.cs:626–654` enters callbacks directly, without an activation lease. Ordinary callback exceptions become diagnostics; cancellation escapes to callers. Context invalidation occurs only on success. Another `Task.Run` would not provide finite admission or a lifetime lease. |
+| Activation teardown | `PluginRuntimeLifecycle.cs:81–119` cancels tracked work, then clears the context/instance in `finally`, including failure/timeout paths. Event callbacks are not part of that tracked-work join. An active-plugin snapshot therefore does not retain a usable activation through callback completion. |
+| Manager teardown | `PluginRuntimeManager.cs:306–320` clears active handles before awaiting deactivation. Retention and repeated/reentrant deactivation need an explicit contract, not an assumption that removal means termination. |
+| Existing task tracker | `PluginTaskTracking.cs:51–77,83–111` launches before registration and has no finite admission/closed gate; cancellation of an idle waiter does not terminate its originals. It cannot simply be reused as the missing event owner. |
+| Context and service borrowing | `PluginHostBridge.cs:305–323,535–553` uses event RunId/provider identity, TUI project-path resolution and managed-provider classification. `SessionPluginEventObserver` instead supplies headless context. Host cleanup orders runtime/hub/providers before plugins (`CodeAltaHost.cs:60–67`); an event-specific plugin lease alone does not prove all borrowed service lifetimes. |
+
+The next contract must specify finite overload handling, reentrant callback-initiated deactivation,
+retained original outcomes, and dependency release only after actual callback termination. Silent
+coalescing/dropping, unbounded pending waiters and timeout-authorized disposal are not equivalent
+to that contract. Any required shutdown/deactivation policy change needs explicit scope approval
+against the standing close-order constraint. The candidate first correction is at the existing
+activation/adapter/manager boundary; plugin history replay, other callback classes and shared
+history/live recovery must not be silently included or claimed fixed.
