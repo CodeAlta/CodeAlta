@@ -87,6 +87,12 @@ can read retained same-host state but does not recreate lost intent, and restart
 This restricted workflow provides no general LiveTool dispatch, attached files or provider-input
 activation. Continue using `altatui` for complete agent workflows.
 
+In owned-host mode, **Current durable notes — read only** offers **Refresh notes** for the selected
+session without starting a provider. Refresh is manual; the view shows complete literal text up to
+16,384 UTF-16 units, not live progress or rich Markdown. Oversized notes are refused without truncation,
+and read failure is distinct from empty notes. Switching sessions does not stop an already-started
+read; refresh again explicitly after it settles. Editing and automatic refresh are not provided.
+
 For providers supporting run-bound review, cancelling the owning run invalidates its pending
 reviews, including requests that omit a run ID. It cannot revoke an already accepted decision.
 After **Refresh runtime state**, use **Signal cancellation for observed run** to target exactly

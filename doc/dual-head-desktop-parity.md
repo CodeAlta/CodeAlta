@@ -2429,3 +2429,40 @@ missing generated symbols were not separate defects. The two historical hazardou
 UI, real providers/tools/auth and website are not newly qualified; website theme acquisition stays
 outside the no-network/install boundary. Old-binary compatibility, deferred queue interleavings,
 durable trust recovery and remaining M4–M6 work are explicitly open.
+
+### Owned Desktop current-notes read — 2026-09-13
+
+Implemented a 19-path source/test vertical: notes-specific contained store reader sharing the original
+parser/lock, runtime known-session resolution, existing eight-read workspace admission/drain, owned-only
+unary RPC, App-owned manual refresh coordinator and literal-text panel. No notes mutation, rich Markdown,
+provider-input activation, tool expansion, permissions, attachments/native operations or event/queue
+arbitration change. Empty/no-event/Clear collapse and journal order remain unchanged. Lexical containment
+does not cover prior cache metadata/existence probes, reparse points or external races. See
+[notes runtime boundaries](runtime.md#owned-desktop-current-notes-read).
+
+Parent independently audited all production changes and complete fixture bodies/helpers/cleanup.
+Two source-only fixture corrections retain primary failures during frontend cleanup and require actual
+epoch-marker/click-handler presence in the source guard. All three cached targeted Release builds passed
+zero warnings/errors, with no restore/frontend acquisition. Generated TS/schema/manifest have only the
+new unary notes service and string/nullable-string envelope; cached TypeScript passed.
+
+**24 focused managed cases passed:** five workspace ownership, seven notes RPC, two new source checks,
+the updated composition and unchanged history-reader checks, four preserved ask source checks, and four
+separately admitted real-reader/runtime tests. The 18 new methods are included, not additive. All **six
+frontend notes cases** passed. No failures, skips or timeouts occurred. Ten frozen originals restore
+against `7c3a1279` with LF/CRLF inputs; ask historical hashes remain intact. Generated full escaping
+measured **99,935 payload bytes +4,096 framing =104,031 <131,072**. Neither response bounds nor these
+fixtures qualify heap use, scan cost, latency or mounted rendering.
+
+Real-reader tests use tiny task-owned journals and no-session runtime/Hub construction with forbidden
+provider/discovery factories, not actual Host or configured-provider startup. Explicit-root cache SQLite
+connections disable pooling and dispose through retained operations. Roots remain retained even on
+success under `%TEMP%/CodeAlta-owned-notes-`: `8325b4c576284c02b1f1402f51f3f910`,
+`46f4682092db43579178910fb602feef`, `162d11354ad44c81925f1638043bf1b0`, and
+`b5718f41bbde4ce18f2dea0d24a67a01`. A deadline would permanently fail and retain ownership evidence,
+not prove termination. Historical hazardous `SessionNotesServiceTests` remains unchanged/unexecuted.
+
+No full solution/suite, Vite/native/mounted UI, real provider/auth, default profile or website build is
+newly qualified. Website theme acquisition remains outside the no-install/network boundary. Old-binary
+ask forwarding, deferred queue interleavings, durable trust recovery and M4–M6 remain open. This supplies
+the current-notes read adapter, not notes editing or complete milestone parity.

@@ -194,6 +194,32 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return notes is null ? string.Empty : notes.Markdown;
     }
 
+    /// <summary>Reads known-session notes with lexical containment of the notes-content open.</summary>
+    /// <param name="sessionId">A backend-resolved active or recoverable session, not a renderer path or descriptor.</param>
+    /// <param name="cancellationToken">Cancels lookup/read or the caller wait; runtime retains admitted work.</param>
+    /// <returns>Exact latest Markdown, or empty for no notes, an empty Set or Clear.</returns>
+    /// <remarks>No provider activation, writes or events. Scan costs, prior cache probes and reparse/external races
+    /// are not bounded or isolated by the content-open containment check.</remarks>
+    /// <exception cref="ArgumentException">The identifier is blank.</exception>
+    /// <exception cref="SessionNotesSessionNotFoundException">No known session matches the configured scope.</exception>
+    /// <exception cref="InvalidOperationException">The resolved journal no longer exists.</exception>
+    /// <exception cref="AgentSessionHistoryException">The notes-content path is outside the sessions root.</exception>
+    /// <exception cref="IOException">The journal cannot be read or its notes are invalid.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access is denied.</exception>
+    /// <exception cref="System.Text.Json.JsonException">A canonical journal record is malformed.</exception>
+    /// <exception cref="ObjectDisposedException">Runtime admission has closed.</exception>
+    /// <exception cref="OperationCanceledException">The operation or caller wait is canceled.</exception>
+    public async Task<string> GetOwnedNotesMarkdownAsync(string sessionId, CancellationToken cancellationToken = default)
+        => await AdmitAsync(() => GetOwnedNotesMarkdownBodyAsync(sessionId, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+
+    private async Task<string> GetOwnedNotesMarkdownBodyAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = await ResolveNotesSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var notes = await _sessionViewCatalog.JournalStore.CreateSessionStore()
+            .ReadLatestNotesContainedAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        return notes is null ? string.Empty : notes.Markdown;
+    }
+
     /// <summary>Appends session notes and delivers feedback in the existing per-journal write order.</summary>
     /// <param name="sessionId">A known backend session identifier; never a renderer grant or arbitrary path.</param>
     /// <param name="markdown">Exact replacement Markdown.</param>

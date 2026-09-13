@@ -459,7 +459,32 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         var path = await GetExistingSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        return await _journalFile.WithPathLockAsync(path, async () =>
+        return await ReadLatestNotesAtPathAsync(path, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the latest notes with lexical containment of the notes-content open.</summary>
+    /// <param name="sessionId">An existing session identifier, never a path grant.</param>
+    /// <param name="cancellationToken">Cancels lookup, gate admission or reading.</param>
+    /// <returns>The last canonical notes event in journal order, or null. Existing trailing-record tolerance applies.</returns>
+    /// <remarks>Shares the legacy parser and journal lock. The complete scan is not bounded by a renderer limit.
+    /// Containment does not cover prior cache metadata/existence probes, reparse points or external races.</remarks>
+    /// <exception cref="ArgumentException">The identifier is blank.</exception>
+    /// <exception cref="InvalidOperationException">No session exists.</exception>
+    /// <exception cref="AgentSessionHistoryException">The resolved notes path is outside the sessions root.</exception>
+    /// <exception cref="IOException">The journal cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">Journal access is denied.</exception>
+    /// <exception cref="InvalidDataException">A notes event has no Markdown.</exception>
+    /// <exception cref="JsonException">A canonical record is malformed.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<AgentNotesEvent?> ReadLatestNotesContainedAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = await GetExistingSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return await AgentJournalHistoryReader.OpenContainedAsync(_layout.SessionsRootPath, path, ReadLatestNotesAtPathAsync, cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task<AgentNotesEvent?> ReadLatestNotesAtPathAsync(string path, CancellationToken cancellationToken)
+        => _journalFile.WithPathLockAsync(path, async () =>
         {
             AgentNotesEvent? latest = null;
             await foreach (var entry in ReadJournalEventsAsync(path, cancellationToken).ConfigureAwait(false))
@@ -476,8 +501,7 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
             }
 
             return latest;
-        }, cancellationToken).ConfigureAwait(false);
-    }
+        }, cancellationToken);
 
     /// <summary>Appends notes to an existing journal and delivers acknowledged feedback in journal-write order.</summary>
     /// <param name="notes">The canonical notes event.</param>

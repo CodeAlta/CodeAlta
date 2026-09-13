@@ -150,6 +150,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
+                    builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, epoch));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));

@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, sessionAsks, type BootStatus } from "#neoastra";
+import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, sessionAsks, sessionNotes, type BootStatus } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, type HistoryState } from "./history";
 import type { HistoryRequest } from "#neoastra";
@@ -15,6 +15,8 @@ import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
 import { AskPanel } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
+import { NotesPanel } from "./NotesPanel";
+import { createNotesReader } from "./sessionNotes";
 import "./style.css";
 
 function App() {
@@ -33,6 +35,7 @@ function App() {
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
+  const [notesReader] = useState(() => createNotesReader(sessionNotes.current));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   useEffect(() => {
@@ -114,6 +117,9 @@ function App() {
           {status?.ownedAsksEnabled && status.hostEpoch && mutation?.epoch === status.hostEpoch && <AskPanel
             key={JSON.stringify([selectedSession.id, status.hostEpoch, "asks"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
             actions={askActions} capability={mutation.capability} />}
+          {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch && <NotesPanel
+            key={JSON.stringify([selectedSession.id, status.hostEpoch, "notes"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
+            reader={notesReader} capability={mutation.capability} />}
         </section>}
       </>}
     </section>

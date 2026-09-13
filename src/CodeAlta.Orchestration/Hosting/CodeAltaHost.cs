@@ -55,7 +55,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         PluginRuntime = pluginRuntime;
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks);
-        WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore);
+        WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         _disposeTask = CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,

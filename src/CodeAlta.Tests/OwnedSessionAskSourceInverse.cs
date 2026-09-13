@@ -23,6 +23,7 @@ internal static class OwnedSessionAskSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        source = OwnedSessionNotesSourceInverse.RestoreInput(path, source);
         source = SourceTestText.Canonicalize(source);
         foreach (var (before, after, count) in Edits(path))
         {

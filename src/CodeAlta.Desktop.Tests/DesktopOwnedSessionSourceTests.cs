@@ -34,13 +34,15 @@ public sealed class DesktopOwnedSessionSourceTests
         RequireOnce(app, "builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));");
 
         var host = Read("CodeAlta.Orchestration/Hosting/CodeAltaHost.cs");
-        RequireOnce(host, "WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore);");
+        RequireOnce(host, "WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);");
         Before(host, "var reads = Start(disposeReads);", "var commands = Start(disposeCommands);");
         Before(host, "var commands = Start(disposeCommands);", "await commands.ConfigureAwait(false)");
         Before(host, "await reads.ConfigureAwait(false)", "var runtime = disposeRuntime();");
         var reads = Read(Reads);
         RequireOnce(reads, "var store = journals.CreateSessionStore();");
         StringAssert.Contains(reads, "internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals)");
+        StringAssert.Contains(reads, "internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals, SessionRuntimeService runtime)");
+        StringAssert.Contains(reads, "_notes = runtime.GetOwnedNotesMarkdownAsync;");
         StringAssert.Contains(reads, "if (_active.Count == 8)");
         Before(reads, "operation.Work = work;", "operation.Launch.TrySetResult();");
         StringAssert.Contains(reads, "await foreach (var session in _sessions(CancellationToken.None).ConfigureAwait(false)) sessions.Add(session);");

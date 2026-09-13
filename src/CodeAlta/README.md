@@ -145,6 +145,20 @@ The host retains at most 256 asks and 256 action records without evicting uncert
 attachments, file review, target override, polling or automatic retry is provided. Qualification
 uses isolated inert providers, not native UI or configured-provider workflows.
 
+The selected owned-host session also has **Current durable notes — read only**. Use **Refresh notes**
+explicitly; selecting a session does not automatically read it. It displays the latest stored notes
+in journal order as literal text, not live progress or rendered Markdown. Complete notes up to
+16,384 UTF-16 units are shown without truncation; larger or invalid text produces an error. Empty
+notes, cleared notes and no notes event share the same empty result; a failed read is distinct.
+There is no editing, automatic retry or browser persistence. This feature does not require ask opt-in.
+
+Selection/remount changes detach presentation but retain the original read. While it is pending,
+another local refresh is refused; after failure, retry is a new explicit read, not a recovered write
+outcome. Host identity change requires reload before further operations. Notes shares the host's
+eight actual workspace/history reads, and a cancelled/timed-out wait does not release a still-running
+backend read. The display limit does not bound journal scanning or latency. Reload can perform a
+fresh durable read without restoring run/queue/interaction authority.
+
 With a provider supporting run-bound review, cancellation of the actual owning run also invalidates
 its pending requests, even when individual requests omit a run ID. A request naming another run is
 denied. Previously accepted decisions remain accepted; trusted TUI approval policy is unchanged.

@@ -13,6 +13,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> _projects;
     private readonly Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> _sessions;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _history;
+    private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
     private bool _closed;
     private Task? _disposal;
@@ -29,7 +30,14 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _history = store.ReadHistoryPageAsync;
     }
 
-    // Literal callback seam, internal to qualified tests; production uses only the constructor above.
+    internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals, SessionRuntimeService runtime)
+        : this(projects, journals)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        _notes = runtime.GetOwnedNotesMarkdownAsync;
+    }
+
+    // Literal callback seam, internal to qualified tests; production uses only the constructors above.
     internal OwnedSessionWorkspace(
         Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
         Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> sessions,
@@ -41,6 +49,32 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _projects = projects;
         _sessions = sessions;
         _history = history;
+    }
+
+    internal OwnedSessionWorkspace(
+        Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
+        Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> sessions,
+        Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> history,
+        Func<string, CancellationToken, Task<string>> notes)
+        : this(projects, sessions, history)
+    {
+        ArgumentNullException.ThrowIfNull(notes);
+        _notes = notes;
+    }
+
+    /// <summary>Reads complete notes through the same eight-actual-read admission and drain.</summary>
+    /// <param name="sessionId">An explicit backend session identity.</param>
+    /// <param name="cancellationToken">Cancels only this wait, never the retained actual read.</param>
+    /// <returns>Exact latest Markdown, including empty notes.</returns>
+    /// <exception cref="ArgumentException">The identifier is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Read admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Eight actual reads are admitted (synchronous admission refusal).</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="Exception">An admitted downstream read fails asynchronously.</exception>
+    public Task<string> ReadNotesMarkdownAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => _notes(sessionId, CancellationToken.None), cancellationToken);
     }
 
     /// <summary>Reads a complete direct-store workspace snapshot, independent of a cancelled caller wait.</summary>

@@ -247,6 +247,39 @@ Cancellation applies to lookup, reading, gate admission and opening the existing
 
 TUI owns only projections: acknowledged changes update a matching open tab and the selected sidebar. Sidebar construction receives an initial Markdown snapshot without storage I/O; selection/history replay later supplies recovered notes. Closing a view does not gate shared notes operations. Existing timeline delivery/loss and history-load races remain unchanged; this slice does not add loop-stop/reload reconciliation, renderer reconnect/grants, shared host lifetime transactions, or new durability for drafts, asks or reminders.
 
+### Owned Desktop current-notes read
+
+Owned-host composition exposes unary `sessionNotes.current` through `OwnedSessionWorkspace` and
+`SessionRuntimeService.GetOwnedNotesMarkdownAsync`, independently of owned asks. The catalog-copy
+branch does not register it. Requests contain only a canonical host epoch and bounded session ID;
+backend active/recoverable session and project association resolution remains authoritative. No
+provider or prompt/skill discovery is started. The notes-specific `ReadLatestNotesContainedAsync`
+validates lexical containment and passes that exact path to the shared legacy parser and journal
+lock. It does not re-resolve the path after validation. Existing TUI/read/write semantics are unchanged.
+Containment guards the notes-content open, not prior cache metadata/existence probes, reparse points
+or external filesystem races; this is not a sandbox.
+
+Notes shares the existing **eight actual workspace reads** with snapshot/history operations. The
+owner retains work and fault observers before launch. Caller cancellation or a bridge timeout ends
+only its wait, not the actual read or occupied slot. Host shutdown closes read admission and starts
+command disposal independently, joins reads, then disposes runtime dependencies. No shutdown timeout
+is added. Synchronous capacity refusal is distinguished from downstream read failure; error responses
+contain sanitized status and validated identity, never exception details or Markdown.
+
+Only `ok` carries complete well-formed text, capped at **16,384 UTF-16 units** without truncation.
+Empty Set, Clear and no notes event all remain `""`; no timestamp, revision or update kind is invented.
+Journal order and incomplete-final-record tolerance are preserved. Generated worst-escaping response
+measures **99,935 UTF-8 bytes /104,031 with framing**, below 128 KiB. This is a wire bound, not a bound
+on journal scanning, allocation or latency.
+
+The App-owned reader offers **Refresh notes** only. Selection/remount changes detach presentation
+without cancelling the original bridge promise; synchronous exclusion prevents overlapping local
+reads. Valid late host-epoch evidence revokes the shared mutation capability before obsolete-result
+suppression. Failures are not empty notes and are not a mutation uncertainty ledger. Reload may make
+a fresh durable read, not recover execution authority. Text renders literally in a `<pre>`; notes
+editing, rich Markdown, automatic refresh/retry, browser persistence and native qualification are
+separate work.
+
 ### Captured execution options
 
 `SessionExecutionPolicy` captures a portable, immutable `SessionExecutionRequest` and assembles `SessionExecutionOptions` with host-supplied Agent tool and interaction contracts. Assembly performs no filesystem access, provider startup, model discovery or prompt discovery. Descriptors and root lists are copied into scalar/read-only values rather than retained as mutable authority. Provider/model/reasoning choices are preserved even before the model catalog synchronizes; an existing tab's provider override wins over the stored provider, and agent prompt preferences retain null-fallback and whitespace normalization behavior.
