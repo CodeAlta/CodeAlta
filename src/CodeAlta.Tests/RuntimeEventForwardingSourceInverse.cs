@@ -22,6 +22,7 @@ internal static class RuntimeEventForwardingSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        source = OwnedSessionAskSourceInverse.RestoreRuntimeInput(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         foreach (var edit in Edits(path)) source = Apply(path, source, edit);
         Assert.AreEqual(Originals.Single(item => item.Path == path).Hash, OwnedSessionCommandSourceInverse.Hash(source), path);

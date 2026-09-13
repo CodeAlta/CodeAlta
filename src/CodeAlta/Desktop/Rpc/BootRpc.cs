@@ -16,7 +16,7 @@ internal sealed class BootService
     [NeoRpcMethod("status")]
     public BootStatus Status(BootRequest request) => _epoch is null
         ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
-        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview };
+        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true };
 }
 
 internal sealed record BootRequest;
@@ -24,6 +24,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 {
     public string? HostEpoch { get; init; }
     public bool CommandReviewEnabled { get; init; }
+    public bool OwnedAsksEnabled { get; init; }
 }
 
 [JsonSerializable(typeof(BootRequest))]
@@ -54,4 +55,9 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(SessionPermissionResolveRequest))]
 [JsonSerializable(typeof(SessionPermissionResolution))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(SessionAsksRequest))]
+[JsonSerializable(typeof(SessionAsksPage))]
+[JsonSerializable(typeof(SessionAskActionRequest))]
+[JsonSerializable(typeof(SessionAskObservationRequest))]
+[JsonSerializable(typeof(SessionAskResult))]
 internal sealed partial class DesktopJsonContext : JsonSerializerContext;

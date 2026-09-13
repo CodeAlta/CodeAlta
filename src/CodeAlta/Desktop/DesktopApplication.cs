@@ -82,6 +82,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         var allowClose = false;
         var shutdownUnconfirmed = false;
         SessionOperationsService? operations = null;
+        SessionAsksService? asks = null;
         NeoWindow? window = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null;
         var bodyFailed = false;
@@ -99,6 +100,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                 {
                     request.Cancel();
                     operations?.CloseAdmission();
+                    asks?.CloseAdmission();
                     closeRequested.TrySetResult();
                     if (!shutdownUnconfirmed) window.Title = "CodeAlta — shutdown pending; lease retained";
                 }
@@ -112,6 +114,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                 DiscoveryScope = new SessionDiscoveryScope(roots.Home, roots.Instructions), BuiltInSkillRoot = roots.Builtin,
                 OwnedCommandReceiptCapacity = 256, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
+                EnableOwnedAsks = true,
                 StartPlugins = false, OwnsLogging = false, IsHeadless = true,
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
@@ -125,6 +128,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             {
                 var epoch = Guid.NewGuid().ToString("D");
                 operations = new SessionOperationsService(host.Commands, epoch);
+                asks = new SessionAsksService(host.Commands.Asks, epoch);
                 var assets = Path.Combine(AppContext.BaseDirectory, "assets");
                 var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
                 var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
@@ -145,6 +149,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions));
                     builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
                     builder.AddSessionOperationsService(operations);
+                    builder.AddSessionAsksService(asks);
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));
@@ -177,6 +182,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             closeRequested.TrySetResult();
         }
         operations?.CloseAdmission();
+        asks?.CloseAdmission();
         if (_closeFlow is not null)
         {
             try

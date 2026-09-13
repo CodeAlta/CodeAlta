@@ -2389,3 +2389,43 @@ Unbounded retained work/failures/actors, upstream callback-drain limitations and
 lossy competing-reader runtime stream remain explicit. This is not revisioned
 projection, M4/live parity, native qualification or completed M3–M7. Website theme
 acquisition and prior M2/file-search deferrals remain open; M8 remains undefined.
+
+### Restricted owned Desktop ask round trip — 2026-09-12
+
+Implemented the caller-session-only `alta ask --stdin` producer, private shared ask owner,
+finite list/answer/cancel/observe RPCs and App-owned pending-ask presentation. It is enabled only
+by explicit owned Desktop composition; ordinary hosts default to no owned asks. There is no
+general LiveTool dispatcher, cross-session target, file/native effect, provider-input activation
+or restart authority. Answer makes a new normal owned submission with original AskId; cancellation
+only removes an unclaimed original head. Committed asks can outlive their producers. Actual
+successful run-capture return, not an early receipt, is positive admission evidence. See
+[runtime contracts](runtime.md#restricted-owned-desktop-asks) for lifetime and wire bounds.
+
+The shared implementation moved to Orchestration, retaining `CodeAlta.LiveTool` public names and
+20 LiveTool forwarders. Frozen-source restoration and dependent rebuilds pass; this is **not
+old-binary forwarding qualification**. Original historical assertions/inverses remain intact.
+
+Parent independently audited the complete production/fixture routes and the final five-path
+wire/nullability correction before cached qualification. Targeted Release builds of the three
+test projects and Desktop generation succeeded without restore/frontend acquisition. Generated
+handles use canonical decimal strings, not raw `long` or frontend numeric conversion. **20
+managed in-memory/source cases** passed (including the earlier three Agent cases, not additive),
+**13 frontend ask cases** and cached TypeScript `--noEmit` passed. The earlier 12 frontend passes
+are superseded. Framed generated payload maxima are **74,720 bytes page /59,662 bytes action**,
+within 192/208 KiB respectively; no heap/latency/rendering guarantee follows.
+
+The separately admitted exact inert-provider test
+`OwnedSessionAskRuntimeTests.RealOwnedRoute_PropagatesAskIdRejectsPlainReplayAndClosesRetainedProducer`
+also succeeded after parent transitive setup/cleanup audit. It uses actual Host/Commands/Runtime,
+isolated retained roots, bounded discovery, fixture-local Git settings and shipped prompts, without
+plugin startup. Original work, late setup and cleanup remain owned; gates release and independent
+cancellation starts before dependent joins. Roots are retained even on success. Deadlines remain
+permanent failure/uncertainty, never shutdown proof. This result does not qualify native UI,
+configured providers or default profiles.
+
+Intermediate CS8604/NEORPC005 build failures were corrected and rebuilt successfully; cascading
+missing generated symbols were not separate defects. The two historical hazardous asynchronous
+`AltaAskResponseTests` cases remain unchanged and unexecuted. Full solution/suite, mounted/native
+UI, real providers/tools/auth and website are not newly qualified; website theme acquisition stays
+outside the no-network/install boundary. Old-binary compatibility, deferred queue interleavings,
+durable trust recovery and remaining M4–M6 work are explicitly open.

@@ -77,6 +77,16 @@ Reload loses the local record; manually refresh pending commands rather than inf
 from an empty list. Host restart restores no old permission authority. This experimental workflow
 does not provide full permission/ask parity or proof of command execution.
 
+Owned Desktop submissions can also produce caller-session `alta ask --stdin` questions. Under
+**Pending asks**, **Refresh asks**, then **Answer original ask** to start a new text submission or
+**Cancel original ask** to remove an unclaimed question without stopping a run. Requests and answers
+each allow up to 8,192 UTF-16 text units in aggregate. **Observe original action** reads retained
+backend evidence without resending. A timeout means uncertainty, not definite failure, and blocks
+competing actions. Original actions survive panel remounts and session selection changes; reload
+can read retained same-host state but does not recreate lost intent, and restart restores no authority.
+This restricted workflow provides no general LiveTool dispatch, attached files or provider-input
+activation. Continue using `altatui` for complete agent workflows.
+
 For providers supporting run-bound review, cancelling the owning run invalidates its pending
 reviews, including requests that omit a run ID. It cannot revoke an already accepted decision.
 After **Refresh runtime state**, use **Signal cancellation for observed run** to target exactly

@@ -620,6 +620,53 @@ This is not retry, pending-list reconciliation, a completion ledger or durable r
 polling, push notifications, file-change review, session-wide approval, user-input/ask handling,
 or native/provider qualification.
 
+## Restricted owned Desktop asks
+
+`CodeAltaHostOptions.EnableOwnedAsks` defaults false; the existing explicitly owned Desktop
+composition enables it. `Commands.Asks` owns a private instance of the shared `AltaAskService`.
+The shared queue/contracts now live in Orchestration while retaining their public `CodeAlta.LiveTool`
+namespaces; LiveTool forwards 20 public types and retains its internal JSON context. TUI composition
+continues to use the same queue implementation independently. Dependent source builds are not
+old-binary forwarding qualification.
+
+Optional per-send `AgentSendOptions.AdditionalTools` preserves the old route when null/empty and
+rejects collisions against actual normalized/truncated/suffixed registered aliases. The owned
+producer exposes only `alta` with exactly `ask --stdin`: no registry, dispatcher, target override,
+files or provider user-input activation. It captures the original operation, durable session,
+runtime instance, attachment, provider and actual nullable `StartedAsync` run. Ignored lifecycle
+cannot enqueue, closed callbacks cannot rebind, and one producer commits at most one ask.
+
+Finite `sessionAsks` list/answer/cancel/observe RPCs project only bounded immutable values.
+The owner recovers the exact retained queue-issued handle; deserialized fields never create
+authority. Domain generations remain `long`; Desktop wire generations are canonical ASCII decimal
+strings: attachment 1..9007199254740991, response 0..256. Reject noncanonical spelling, missing/null
+fields, wrong JSON types and overflow without numeric coercion in the frontend.
+
+An answer validates/formats the original request through `RespondAsync`, then makes a new ordinary
+owned text submission with the original `AskId`. The early accepted receipt is not admission proof;
+actual successful `RunCapturedAsync` return is retained before later publication/cleanup. Definite
+non-admission rotates the response generation; uncertainty retains the claimed head and blocks
+replay/cancel. Cancel removes only the original unclaimed pending ask, never the producer run or an
+admitted answer. A committed ask survives producer closure. Producer close joins producer work,
+not response work that may await Commands; shutdown closes ask admission before controls/cancellation
+and joins retained response work before releasing dependencies. No Commands call occurs under the
+ask owner gate, and no production shutdown timeout is added.
+
+Bounds: 256 retained asks and 256 actions, 12 questions with at most 20 choices each, aggregate
+request/answer text 8,192 UTF-16 units each, and formatted answer 32,768 units. The producer uses a
+fixed 128-KiB serialization buffer, a 65,536-unit stdin limit and pre-normalization depth/count checks;
+oversize data is rejected, not truncated. RPC payload plus 4,096 framing bytes must fit 192 KiB for
+a page and 208 KiB for an action. Measured framed fixture maxima are 74,720 and 59,662 bytes,
+respectively; these are transport measurements, not heap/latency/rendering guarantees.
+
+App-owned frozen actions and observations survive selection/remount. Synchronous exclusion precedes
+launch; exact-ID reuse retains the original. An eight-second deadline permanently latches local
+uncertainty. Explicit observation is separate backend evidence, not redispatch or acknowledgment.
+Epoch evidence is processed before obsolete-read presentation fences and revokes shared mutation
+capability. Same-host reload reads retained facts only; missing action/head is not non-commit proof,
+and restart restores no authority. Attachments, general LiveTool parity and provider input remain
+separate work. See the parity ledger for focused qualification and exclusions.
+
 ## Provider initialization
 
 `IModelProviderRegistry` lists configured `ModelProviderDescriptor` values and creates provider runtimes. `IModelProviderInitializationService` starts provider probes eagerly after provider descriptors/configuration are available. Each provider probe owns its success/failure state and model list cache:

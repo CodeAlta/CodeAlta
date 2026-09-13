@@ -38,6 +38,9 @@ public sealed class CodeAltaHostOptions
     /// </remarks>
     public bool ReviewOwnedCommandPermissions { get; init; }
 
+    /// <summary>Gets whether owned sends expose the restricted, operation-bound ask producer. Default is false.</summary>
+    public bool EnableOwnedAsks { get; init; }
+
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>
     public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }

@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, type BootStatus } from "#neoastra";
+import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, sessionAsks, type BootStatus } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, type HistoryState } from "./history";
 import type { HistoryRequest } from "#neoastra";
@@ -13,6 +13,8 @@ import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
 import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
+import { AskPanel } from "./AskPanel";
+import { askWireRequest, createAskActions } from "./sessionAsks";
 import "./style.css";
 
 function App() {
@@ -26,6 +28,9 @@ function App() {
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
   const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
   const [queue] = useState(() => createQueueSubmissions(sessionOperations.queue, sessionOperations.cancelQueue));
+  const [askActions] = useState(() => createAskActions(
+    request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
+    request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
@@ -106,6 +111,9 @@ function App() {
           {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
             ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
             : <History key={selectedSession.id} sessionId={selectedSession.id} />}
+          {status?.ownedAsksEnabled && status.hostEpoch && mutation?.epoch === status.hostEpoch && <AskPanel
+            key={JSON.stringify([selectedSession.id, status.hostEpoch, "asks"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
+            actions={askActions} capability={mutation.capability} />}
         </section>}
       </>}
     </section>

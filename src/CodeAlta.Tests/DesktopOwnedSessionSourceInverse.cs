@@ -25,7 +25,10 @@ internal static class DesktopOwnedSessionSourceInverse
     internal static IReadOnlyList<string> DirectContentPaths => [];
     internal static IReadOnlyList<string> TransitiveContentPaths => [];
 
-    internal static string RestoreInput(string path, string source) => path is
+    internal static string RestoreInput(string path, string source)
+        => RestoreInputCore(path, OwnedSessionAskSourceInverse.RestoreDesktopInput(path, source));
+
+    private static string RestoreInputCore(string path, string source) => path is
         Project or Cli or App or Boot or Workspace or Main or Styles or Architecture or HistoryTests or
         WorkspaceTests or Host or OwnerInverse or OwnerTests or Lifetime or DesktopProject or OrchestrationAssemblyInfo
         ? Restore(path, source)

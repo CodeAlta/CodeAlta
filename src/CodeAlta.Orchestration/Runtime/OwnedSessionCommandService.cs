@@ -34,7 +34,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private Task? _disposeTask;
 
     internal OwnedSessionCommandService(
-        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions)
+        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions, bool enableAsks = false)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(projects);
@@ -45,13 +45,22 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         _catalog = catalog;
         _capacity = capacity;
         _reviewPermissions = reviewPermissions;
+        Asks = new OwnedSessionAskService(enableAsks, (request, context) => AdmitSendCore(request, context, CancellationToken.None));
     }
+
+    /// <summary>Gets the command-owned restricted ask service, disabled unless explicitly configured.</summary>
+    public OwnedSessionAskService Asks { get; }
+
+    internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
 
     /// <summary>Reserves an immutable text submission without doing catalog or provider work inline.</summary>
     /// <exception cref="ArgumentNullException">The request is null.</exception>
     /// <exception cref="ArgumentException">A request string is blank or the session identity has leading or trailing whitespace.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before acceptance.</exception>
     public OwnedSessionCommandAdmission AdmitSend(OwnedTextSendRequest request, CancellationToken cancellationToken = default)
+        => AdmitSendCore(request, null, cancellationToken);
+
+    private OwnedSessionCommandAdmission AdmitSendCore(OwnedTextSendRequest request, OwnedAskSubmission? askSubmission, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
@@ -65,7 +74,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
             {
-                var same = previous.Send is not null &&
+                var same = previous.Send is not null && SameAskContext(previous.Ask, askSubmission) &&
                     string.Equals(previous.Send.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal);
                 return Replay(previous, same);
@@ -75,8 +84,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
 
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Send, request.SessionId);
-            operation = new SendOperation(request, receipt);
-            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, request));
+            operation = new SendOperation(request, receipt) { AskSubmission = askSubmission };
+            _receipts.Add(request.ClientRequestId, new ReceiptEntry(receipt, request, Ask: askSubmission));
             _operations.Add(receipt.OperationId, operation);
             _active.Add(request.SessionId, operation);
             // The first await is an unreleased asynchronous launch gate, not fallible setup.
@@ -527,9 +536,10 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                     }
                     else
                     {
-                        var sendOptions = new AgentSendOptions { Input = AgentInput.Text(operation.Request.Text) };
+                        if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
+                        var sendOptions = new AgentSendOptions { Input = AgentInput.Text(operation.Request.Text), AskId = operation.AskSubmission?.AskId };
                         operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
-                            operation.PermissionExecution, operation.Execution.Token);
+                            operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission);
                         var runId = await operation.Send.ConfigureAwait(false);
                         result = new(OwnedSessionCommandOutcome.Completed, runId);
                     }
@@ -547,6 +557,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             result = new(OwnedSessionCommandOutcome.Failed, Code: "send_failed");
         }
         // Also covers runtime admission failure before its body acquires a handle use.
+        operation.AskExecution?.Close();
         if (operation.PermissionExecution is { } permission)
         {
             try { await _runtime.Permissions.CloseOwnedExecutionAsync(permission).ConfigureAwait(false); }
@@ -695,6 +706,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             disposal = _disposeTask;
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
+        Asks.CloseAdmission();
         foreach (var operation in operations) StartControl(operation);
         foreach (var queue in queues) StartQueueCancellation(queue);
         foreach (var steer in steers)
@@ -783,6 +795,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             try { queue.Execution.Dispose(); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
+        try { await Asks.DrainAsync().ConfigureAwait(false); }
+        catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         Exception[] failures;
         lock (_gate) failures = [.. _cleanupFailures];
         if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
@@ -791,7 +805,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
 
     private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null,
         OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null,
-        OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null);
+        OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null, OwnedAskSubmission? Ask = null);
     private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options);
 
     private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)
@@ -857,6 +871,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         internal Task<Prepared?>? Preparation { get; set; }
         internal Task<AgentRunId>? Send { get; set; }
         internal SessionPermissionService.OwnedPermissionExecution? PermissionExecution { get; set; }
+        internal OwnedSessionAskExecution? AskExecution { get; set; }
+        internal OwnedAskSubmission? AskSubmission { get; init; }
         internal Task? Control { get; set; }
         internal Task Cancellation { get; set; } = Task.CompletedTask;
         internal bool CancelRequested { get; set; }

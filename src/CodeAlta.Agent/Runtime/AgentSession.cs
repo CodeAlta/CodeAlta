@@ -216,7 +216,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             };
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
-            var allTools = BuildAvailableTools(options.OnPermissionRequest ?? _options.OnPermissionRequest);
+            var allTools = AppendSendTools(BuildAvailableTools(options.OnPermissionRequest ?? _options.OnPermissionRequest), options.AdditionalTools);
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
 
@@ -794,6 +794,25 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]
             : builtIns;
+    }
+
+    // Registration uses normalized/truncated names and suffixes duplicate session tools. Preserve that
+    // legacy behavior, but never let an additional per-send tool silently acquire another alias.
+    internal static IReadOnlyList<AgentToolDefinition> AppendSendTools(
+        IReadOnlyList<AgentToolDefinition> original, IReadOnlyList<AgentToolDefinition>? additional)
+    {
+        if (additional is not { Count: > 0 }) return original;
+        var used = new HashSet<string>(AgentToolBridge.CreateDefinitionMap(original).Keys, StringComparer.Ordinal);
+        var combined = new List<AgentToolDefinition>(original.Count + additional.Count);
+        combined.AddRange(original);
+        foreach (var tool in additional)
+        {
+            ArgumentNullException.ThrowIfNull(tool);
+            var alias = AgentToolBridge.GetRegisteredToolName(tool.Spec.Name);
+            if (!used.Add(alias)) throw new ArgumentException("Additional send tool collides with a registered tool alias.", nameof(additional));
+            combined.Add(tool);
+        }
+        return combined.AsReadOnly();
     }
 
     private static string CombineDeveloperInstructions(string? developerInstructions, string runtimeContext)

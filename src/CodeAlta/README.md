@@ -128,6 +128,23 @@ Aborting the owning submission or closing the application invalidates still-pend
 but cannot revoke a decision already accepted by the backend. Native/provider qualification and
 the broader permission, file-review and ask workflows remain incomplete.
 
+Owned submissions also enable restricted caller-session **`alta ask --stdin`** questions; ordinary
+host composition still defaults to no owned asks. This does not expose the general LiveTool command
+dispatcher or activate provider user-input requests. In **Pending asks**, use **Refresh asks** to
+read the original retained head, then **Answer original ask** or **Cancel original ask**. An answer
+starts a new normal text submission to the original session with the original AskId. Cancel removes
+only an unclaimed pending ask; it does not stop the producer run or an admitted answer. A committed
+ask can outlive its producer. Requests and answers each have an aggregate 8,192 UTF-16-unit text limit.
+
+Original actions survive selection changes and panel remounts. An eight-second timeout permanently
+marks the original transport result uncertain and prevents competing actions; it is not proof of
+failure to submit. **Observe original action** reads separate backend evidence without resending or
+rewriting that uncertain result. Reload can read same-host retained heads/dispositions but cannot
+reconstruct lost action intent; absence is not acknowledgment. Host restart restores no authority.
+The host retains at most 256 asks and 256 action records without evicting uncertain evidence. No
+attachments, file review, target override, polling or automatic retry is provided. Qualification
+uses isolated inert providers, not native UI or configured-provider workflows.
+
 With a provider supporting run-bound review, cancellation of the actual owning run also invalidates
 its pending requests, even when individual requests omit a run ID. A request naming another run is
 denied. Previously accepted decisions remain accepted; trusted TUI approval policy is unchanged.

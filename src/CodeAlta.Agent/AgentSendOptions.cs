@@ -34,4 +34,10 @@ public sealed class AgentSendOptions
     /// work and during closing before source release. Other providers must explicitly support it; an ignored
     /// option supplies no run binding or cancellation guarantee. It never grants permission automatically.</remarks>
     public AgentRunLifecycle? RunLifecycle { get; init; }
+
+    /// <summary>Gets additional tools used only by this send, empty by default.</summary>
+    /// <remarks>The in-process session rejects collisions with actual registered tool aliases.
+    /// Session tools are not replaced. Other session implementations must explicitly support this
+    /// option. Tool handlers must enforce their own lifetime; this option confers no authority.</remarks>
+    public IReadOnlyList<AgentToolDefinition>? AdditionalTools { get; init; }
 }

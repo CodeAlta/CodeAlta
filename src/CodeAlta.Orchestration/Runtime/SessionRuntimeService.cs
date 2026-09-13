@@ -1206,7 +1206,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private async Task<AgentRunId> SendOwnedBodyAsync(
         SessionViewDescriptor session, SessionExecutionOptions options, AgentSendOptions sendOptions,
         CancellationToken cancellationToken, CancellationToken coordinationCancellationToken,
-        SessionPermissionService.OwnedPermissionExecution? permissionExecution = null, bool ownedCommand = false)
+        SessionPermissionService.OwnedPermissionExecution? permissionExecution = null, bool ownedCommand = false,
+        OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -1271,16 +1272,24 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     {
                         Input = sendOptions.Input,
                         AskId = sendOptions.AskId,
+                        AdditionalTools = sendOptions.AdditionalTools,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
-                        RunLifecycle = Permissions.CreateOwnedRunLifecycle(permissionExecution),
+                        RunLifecycle = OwnedSessionAskExecution.Combine(sendOptions.RunLifecycle, Permissions.CreateOwnedRunLifecycle(permissionExecution)),
                     };
                 }
+                if (askExecution is not null)
+                {
+                    askExecution.Bind(_runtimeInstanceId, candidate.Attachment.Ordinal, candidate.ProviderId);
+                    sendOptions = askExecution.Compose(sendOptions);
+                }
                 runId = await RunCapturedAsync(sessionHandleId, sendOptions, execution.Token).ConfigureAwait(false);
+                askSubmission?.RecordRunReturned(runId);
             }
             finally
             {
                 // Closes only this interaction window, not a claim that the provider is quiescent.
                 // Owner-controlled deliveries finish before the linked source and handle use release.
+                askExecution?.Close();
                 if (permissionExecution is not null) await Permissions.CloseOwnedExecutionAsync(permissionExecution).ConfigureAwait(false);
             }
             await PublishRunSubmittedIfStillInFlightAsync(session, runId, runStartedAt, coordinationCancellationToken, candidate).ConfigureAwait(false);
@@ -1310,6 +1319,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             try
             {
+                askExecution?.Close();
                 if (permissionExecution is not null) await Permissions.CloseOwnedExecutionAsync(permissionExecution).ConfigureAwait(false);
             }
             finally { handleUse?.Dispose(); }
@@ -1317,8 +1327,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     internal Task<AgentRunId> SendOwnedCommandAsync(SessionViewDescriptor session, SessionExecutionOptions options,
-        AgentSendOptions sendOptions, SessionPermissionService.OwnedPermissionExecution? permissionExecution, CancellationToken cancellationToken)
-        => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution, ownedCommand: true), CancellationToken.None);
+        AgentSendOptions sendOptions, SessionPermissionService.OwnedPermissionExecution? permissionExecution, CancellationToken cancellationToken,
+        OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
+        => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution,
+            ownedCommand: true, askExecution: askExecution, askSubmission: askSubmission), CancellationToken.None);
 
     // Fixed default-policy check only; per-operation association remains in the permission mailbox.
     private bool HasOwnedCommandDefaults(RuntimeSessionEntry candidate)
