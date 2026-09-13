@@ -2719,3 +2719,38 @@ dependency acquisition, full suite/solution or website/theme acquisition was exe
 This completes a bounded prerequisite only. Runtime plugin observation has not moved, history
 replay is unchanged, and there is no history/live watermark. Pre-handle activation acquisitions,
 noncooperative background work and complete host termination remain unqualified. M4–M6 stay open.
+
+### M4 captured-envelope observer prerequisite: verified — 2026-09-13
+
+The same sole writer added only `RuntimePluginAgentEventObserver.cs` in Orchestration and its
+main-test-project fixture. No existing source, project or historical inverse changed. The helper
+retains the supplied published-event reference and scalar context, derives provider/nullable run
+identity from the event, and uses the existing bounded adapter and actual activation services.
+An explicit awaited policy handles escaping failures; policy failure retains original and reporting
+exceptions as separate ordered entries, including cancellation-shaped/shared-identity exceptions.
+This is not runtime wiring or a default frontend/headless policy. The policy tail has no extra
+activation lease; callers retain the returned original and its dependencies.
+
+Parent independently read all 143 production lines and 575 fixture lines, including all eight
+methods, partial acquisition, retained originals/outcomes, callback-failure attribution, independent
+non-disposing controls and stable disposal inventory. The cached main test-project Release build
+passed with zero warnings/errors, using `--no-restore` and disabled frontend acquisition/build targets.
+All **eight exact new method selections passed**, zero failures/skips, with `--no-build --no-restore`.
+Coverage includes scalar/path defaults, empty snapshot/required arguments, actual services/scope and
+references, ordinary continuation/success-only invalidation, OCE with gated policy tail, four ordered
+failure shapes, synchronous-prefix ownership, and explicit Closing rejection.
+
+Fixtures use unstarted managers and directly constructed inert activations; no Host, real activator,
+catalog, provider or filesystem root is constructed. Main assembly logging remains enabled under its
+existing initializer/cleanup, so callback failures can log. No deadline/control-fault injection or
+capacity saturation was added; no real projector, append, channel-drop, notes, fatal-reporting or
+standalone-host policy execution is established. Prior roots and protected artifacts remain retained.
+The inherited HostOptions/Deferred failures and all historical anchors are unchanged; they were not
+rerun or claimed repaired in this step. No full suite, native, dependency restore or website execution.
+
+All-four-origin cutover remains separately gated. Parent source review additionally established that
+notes feedback runs inside the journal path gate: capture publication evidence there, but invoke
+plugins only after release, preserving any committed-feedback failure. Recovered context must retain
+global-root precedence/first matching project identity without prompt discovery. The TUI task monitor
+reports faulted, not canceled tasks; its fatal path defaults to `Environment.FailFast` and has not been
+executed here. Existing headless API, history observation and readers remain unchanged. M4–M6 stay open.

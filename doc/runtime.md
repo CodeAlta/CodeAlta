@@ -985,6 +985,17 @@ context tail. Ordinary exceptions still produce diagnostics and allow later appl
 cancellation still propagates, and context invalidation remains success-only. History observation
 is unchanged; this does not move plugin callbacks into runtime forwarding or establish a replay watermark.
 
+`RuntimePluginAgentEventObserver` is a prepared, **not yet runtime-wired** helper. Its immutable
+envelope retains the supplied event reference and captured session/project/path strings. Options use
+the event provider and exact nullable run ID, with no selected model or forced headless conversion.
+The helper borrows the manager's observation-time active snapshot and each activation's existing
+services. A mandatory, awaited failure policy receives escaping exceptions, including cancellation;
+successful policy completion handles the exception. If the policy also fails, an ordered aggregate
+retains both exact exception references, even when they are the same object or cancellation-shaped.
+The returned operation includes this policy tail, but the tail is not an additional activation lease:
+the caller must retain its dependencies until actual completion. The existing headless observer,
+TUI error/fatal policy, live/history routes and publication behavior remain unchanged.
+
 Activation and manager quiescence retain original event/task/cancellation work before dependent
 release. The manager admits one startup per lifetime and joins returned late activations before
 shutdown. Host/outer rollback and frontend cleanup require successful quiescence before releasing
