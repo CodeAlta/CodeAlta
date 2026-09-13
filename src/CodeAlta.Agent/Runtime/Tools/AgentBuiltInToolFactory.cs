@@ -212,10 +212,14 @@ public static class AgentBuiltInToolFactory
                     ApplyPatchToolDescription,
                     ApplyPatchSchema),
                 (invocation, cancellationToken) => ApplyPatchAsync(options, invocation, cancellationToken)),
-            // Intentionally not registered yet: the local raw-API host does not currently expose
-            // the structured UI feedback loop needed to pause for request_user_input safely.
-            // Keep the implementation around so the tool can be enabled once the host supports it.
         ];
+
+        if (options.EnableUserInputTool && options.OnUserInputRequest is not null)
+        {
+            tools = [.. tools, new AgentToolDefinition(
+                new AgentToolSpec("request_user_input", "Request structured user input.", RequestUserInputSchema),
+                (invocation, cancellationToken) => RequestUserInputAsync(options, invocation, cancellationToken))];
+        }
 
         return tools
             .Where(tool => ShouldIncludeBuiltInTool(options, tool.Spec.Name))

@@ -115,6 +115,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                 OwnedCommandReceiptCapacity = 256, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,
+                EnableOwnedUserInput = options.EnableOwnedUserInput,
                 StartPlugins = false, OwnsLogging = false, IsHeadless = true,
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
@@ -146,11 +147,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 208 * 1024,
                         MaximumChannelsPerSession = 2, MaximumUnacknowledgedChannelItems = 2,
                     });
-                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions));
+                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, epoch));
+                    builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));

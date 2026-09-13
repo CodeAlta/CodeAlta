@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, sessionAsks, sessionNotes, type BootStatus } from "#neoastra";
+import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, sessionAsks, sessionNotes, sessionUserInput, type BootStatus } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, type HistoryState } from "./history";
 import type { HistoryRequest } from "#neoastra";
@@ -17,6 +17,8 @@ import { AskPanel } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
 import { NotesPanel } from "./NotesPanel";
 import { createNotesReader } from "./sessionNotes";
+import { createUserInputReviewer } from "./sessionUserInput";
+import { UserInputPanel } from "./UserInputPanel";
 import "./style.css";
 
 function App() {
@@ -36,6 +38,10 @@ function App() {
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [notesReader] = useState(() => createNotesReader(sessionNotes.current));
+  const [inputReviewer] = useState(() => createUserInputReviewer(
+    request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
+    request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
+    request => sessionUserInput.cancel(request, { timeoutMilliseconds: 8000 })));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   useEffect(() => {
@@ -120,6 +126,9 @@ function App() {
           {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch && <NotesPanel
             key={JSON.stringify([selectedSession.id, status.hostEpoch, "notes"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
             reader={notesReader} capability={mutation.capability} />}
+          {status?.ownedUserInputEnabled && status.hostEpoch && mutation?.epoch === status.hostEpoch && <UserInputPanel
+            key={JSON.stringify([selectedSession.id, status.hostEpoch, "input"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
+            reviewer={inputReviewer} capability={mutation.capability} />}
         </section>}
       </>}
     </section>

@@ -2466,3 +2466,59 @@ No full solution/suite, Vite/native/mounted UI, real provider/auth, default prof
 newly qualified. Website theme acquisition remains outside the no-install/network boundary. Old-binary
 ask forwarding, deferred queue interleavings, durable trust recovery and M4–M6 remain open. This supplies
 the current-notes read adapter, not notes editing or complete milestone parity.
+
+### M4 owned nonsecret provider-input checkpoint (2026-09-12)
+
+The owned Desktop branch adds independent default-false `--enable-owned-user-input`, with explicit
+Host forwarding and per-send activation/callbacks for ordinary sends, restricted-ask responses and
+claimed queue items. `request_user_input` requires both the flag and a selected callback; profile
+overrides can disable it but cannot activate it alone. Session-default denial/cancellation, command
+review authority, trusted TUI AutoApprove/immediate input, nullable request RunId, and raw-event/Display
+boundaries remain unchanged. This is a limited input adapter, not M4–M6 completion.
+
+The existing permission mailbox owns immutable nonsecret forms and exact operation/runtime/attachment/
+session/request-run/interaction/attempt handles. Actual successful Started binding supplies run lifetime,
+not a manufactured request RunId. Input and permission deliveries share capacity. Whole unsupported or
+oversized forms cancel; duplicate/missing/extra answers are refused, freeform answers remain literal,
+and accepted means owner decision only. Answers may enter provider tool-result/history storage.
+Unary list/resolve/cancel contracts use canonical string generations and bounded sanitized responses.
+
+Frontend originals are App-owned across remounts. Action admission and acknowledgment invalidate old
+pages and outstanding reads; epoch evidence is processed before obsolete-presentation fences. A terminal
+result requires explicit local observation/acknowledgment followed by a fresh list. Uncertainty is never
+replayed, renderer reload recovers only host-pending forms, and list absence/restart does not recover a
+lost decision. No browser ledger, polling or native credential-entry workflow is added.
+
+Parent audited sole-writer corrections and independently passed **27 managed methods**: five Agent,
+ten root-free mailbox, three runtime/lifecycle/cleanup, and nine Desktop RPC/source methods. The lifecycle
+method covers 24 combinations. **Seven frontend tests** pass, including 12 retained-page and 32 racing-list
+scenarios; TypeScript checking and all three cached targeted Release builds pass with zero warnings/errors.
+All eighteen newest source originals and inherited notes/ask routes reconstruct without hash rebasing.
+Measured generated full-nested escaping plus 4,096-byte framing is **224,920 / 262,144 bytes** for a page
+and **62,245 / 98,304 bytes** for resolve; not parser-allocation/heap/latency guarantees.
+
+Corrections included actual factory registration/Host forwarding, C#/TypeScript errors, literal historical
+assertions and exact removed-comment restoration, retained-page authority, and fixture defects. Empty
+`SkillCatalog([])` selects defaults: runtime fixtures instead supply a nonempty no-root provider. A borrowed
+metadata catalog uses the explicit locator; the ask seed uses the isolated global directory so real recovery
+and the actual restricted-ask answer transaction execute. Cleanup accounting requires successful original
+stop completion and preserves cancellation-shaped cleanup failures instead of filtering them out.
+
+Actual Agent qualification uses a fixture-owned rejecting HTTP client, scripted executor, cached models,
+precomposed instructions and explicit store paths; the session does not dispose the borrowed client.
+Both actual-Agent methods and all three inert-provider runtime routes pass. The five selected SQLite
+managed/native output assets match cached packages; runtime admission includes isolated SQLite/journal
+work, not configured providers or a native shutdown guarantee. Retain all roots, including successes:
+
+- `%TEMP%/CodeAlta-owned-input-agent-10ed9d2e0cee4b31bd72031adf98a779`
+- `%TEMP%/CodeAlta-owned-input-agent-4d6d2e43c31340628784a2d1019b52be`
+- `%TEMP%/CodeAlta-owned-input-runtime-595224301c6a45f29a3f62c28e8fd6df`
+- `%TEMP%/CodeAlta-owned-input-runtime-707209d4106e4d8ca09c17e25d234869`
+- `%TEMP%/CodeAlta-owned-input-runtime-cfada128e14a43f598c19e258e3211ca`
+
+**Remaining gaps:** the external cancellation-traversal test does not suspend/prove the service's real
+registration `DisposeAsync`; no timing seam was added. Production fallback-client ownership, existing
+schema-document retention, arbitrary constructor failure rollback, queue failure-path dependency retention
+and deferred queue interleavings remain open. No old-binary forwarding, durable restart authority, broad
+effect/recovery stress, mounted/native UI, configured-provider/auth/network, full suite/solution or website
+qualification is claimed. Website theme acquisition remains outside this session's no-acquisition boundary.

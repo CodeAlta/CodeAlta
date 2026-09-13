@@ -29,6 +29,17 @@ public sealed class AgentSendOptions
     /// </remarks>
     public AgentPermissionRequestHandler? OnPermissionRequest { get; init; }
 
+    /// <summary>Gets the optional user-input callback selected when constructing this send's built-in tools.</summary>
+    /// <remarks>Null falls back to the session callback. Retained tools retain this selection; custom
+    /// tools are unchanged. Other providers must explicitly support this option and the run lifecycle.
+    /// Selection alone confers no authority, cancellation or recovery guarantee.</remarks>
+    public AgentUserInputRequestHandler? OnUserInputRequest { get; init; }
+
+    /// <summary>Gets explicit activation of the user-input built-in for this send; defaults to false.</summary>
+    /// <remarks>Requires a selected callback and respects provider profile opt-out. Neither callback presence
+    /// nor a profile override activates the tool. Other providers must explicitly support this option.</remarks>
+    public bool EnableUserInputTool { get; init; }
+
     /// <summary>Gets or initializes the optional authoritative lifecycle observer for this send.</summary>
     /// <remarks>The in-process session awaits this observer outside state gates before permission-capable
     /// work and during closing before source release. Other providers must explicitly support it; an ignored

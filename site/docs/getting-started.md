@@ -93,6 +93,17 @@ session without starting a provider. Refresh is manual; the view shows complete 
 and read failure is distinct from empty notes. Switching sessions does not stop an already-started
 read; refresh again explicitly after it settles. Editing and automatic refresh are not provided.
 
+For supported **nonsecret provider input**, separately add `--enable-owned-user-input` to the complete
+owned-mode command. It is off by default and does not approve commands or files. **Never enter secrets**:
+answers may be stored in provider tool results and history. Use **Refresh input**, explicitly answer
+each prompt, then **Submit literal answers**, or **Cancel this attempt only**. Unsupported or secret
+forms are cancelled rather than answered automatically.
+
+Original decisions survive selection changes and panel remounts. Observe a terminal result locally,
+acknowledge it, then refresh for a new page; uncertainty cannot be replayed. Renderer reload can list
+still-pending host requests, but absence does not reveal a lost decision. Closing the application or
+cancelling the original operation/run invalidates pending requests. Host restart restores no old authority.
+
 For providers supporting run-bound review, cancelling the owning run invalidates its pending
 reviews, including requests that omit a run ID. It cannot revoke an already accepted decision.
 After **Refresh runtime state**, use **Signal cancellation for observed run** to target exactly

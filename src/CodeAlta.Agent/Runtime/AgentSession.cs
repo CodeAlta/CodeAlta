@@ -59,6 +59,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private Task? _disposeTask;
     private volatile bool _disposed;
 
+    /// <summary>Gets the optional borrowed client for this session's built-in tools.</summary>
+    /// <remarks>Null preserves factory fallback acquisition. The supplying owner must retain the client
+    /// through all original tool invocations and session cleanup; this session never disposes it.</remarks>
+    internal HttpClient? BuiltInToolHttpClient { get; init; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentSession"/> class.
     /// </summary>
@@ -216,7 +221,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             };
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
-            var allTools = AppendSendTools(BuildAvailableTools(options.OnPermissionRequest ?? _options.OnPermissionRequest), options.AdditionalTools);
+            var allTools = AppendSendTools(BuildAvailableTools(options.OnPermissionRequest ?? _options.OnPermissionRequest,
+                options.OnUserInputRequest ?? _options.OnUserInputRequest, options.EnableUserInputTool), options.AdditionalTools);
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
 
@@ -779,7 +785,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private static async Task CloseLifecycleAsync(AgentRunLifecycle lifecycle, AgentRunId runId)
         => await lifecycle.ClosingAsync(runId).ConfigureAwait(false);
 
-    private IReadOnlyList<AgentToolDefinition> BuildAvailableTools(AgentPermissionRequestHandler permissionRequestHandler)
+    private IReadOnlyList<AgentToolDefinition> BuildAvailableTools(AgentPermissionRequestHandler permissionRequestHandler,
+        AgentUserInputRequestHandler? userInputRequestHandler, bool enableUserInputTool)
     {
         var builtIns = AgentBuiltInToolFactory.CreateDefaultTools(
             new AgentBuiltInToolOptions
@@ -788,8 +795,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 SessionId = SessionId,
                 WorkingDirectory = _summary.WorkingDirectory,
                 OnPermissionRequest = permissionRequestHandler,
-                OnUserInputRequest = _options.OnUserInputRequest,
+                OnUserInputRequest = userInputRequestHandler,
+                EnableUserInputTool = enableUserInputTool,
                 Provider = Provider,
+                HttpClient = BuiltInToolHttpClient,
             });
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]

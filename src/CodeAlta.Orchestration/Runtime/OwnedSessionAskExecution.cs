@@ -62,6 +62,8 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     internal AgentSendOptions Compose(AgentSendOptions options) => new()
     {
         Input = options.Input, AskId = options.AskId, OnPermissionRequest = options.OnPermissionRequest,
+        OnUserInputRequest = options.OnUserInputRequest,
+        EnableUserInputTool = options.EnableUserInputTool,
         AdditionalTools = System.Array.AsReadOnly<AgentToolDefinition>([.. (options.AdditionalTools ?? []), Tool]),
         RunLifecycle = new Lifecycle(this, options.RunLifecycle),
     };

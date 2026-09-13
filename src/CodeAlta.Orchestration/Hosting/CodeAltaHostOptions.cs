@@ -41,6 +41,11 @@ public sealed class CodeAltaHostOptions
     /// <summary>Gets whether owned sends expose the restricted, operation-bound ask producer. Default is false.</summary>
     public bool EnableOwnedAsks { get; init; }
 
+    /// <summary>Gets explicit opt-in to bounded nonsecret owned provider input. Default false, independent of asks and command review.</summary>
+    /// <remarks>Requires per-send callbacks and actual Started binding. Session defaults still cancel.
+    /// Answers may enter provider tool results and persisted history; this is not credential entry or command permission.</remarks>
+    public bool EnableOwnedUserInput { get; init; }
+
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>
     public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }

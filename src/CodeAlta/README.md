@@ -97,7 +97,7 @@ submissions can authenticate and use provider storage/network. Plugins and probe
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
 
 Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied by
-default, user input is cancelled, and this path supplies no custom tools or plugins. **Refresh
+default, user input is cancelled unless separately opted in below, and this path supplies no custom tools or plugins. **Refresh
 submissions** explicitly retrieves receipts; **Abort original Send operation** targets one pending send,
 not a later run. Submitted means dispatch completed, not that the conversation/run completed.
 Send and Abort retain up to 256 local intents combined, including their original live waiters,
@@ -113,7 +113,7 @@ Add **`--review-owned-command-permissions`** to the complete owned-mode command 
 into manual review of supported plain command requests. The selected-session review shows the
 complete command, working directory and optional reason, with **Allow once / Deny / Cancel**.
 Refresh pending commands manually; this is not a notification stream. Unsupported permission
-payloads remain denied, user input remains cancelled, and there is no Allow for Session option.
+payloads remain denied, this review flag alone leaves user input cancelled, and there is no Allow for Session option.
 Approval can execute a command with the host's privileges: discovery roots are not a sandbox.
 Changing selection does not cancel a pending permission or its original decision-response wait.
 Use **Observe retained decision** to check that response locally, labelled with its original session
@@ -144,6 +144,25 @@ reconstruct lost action intent; absence is not acknowledgment. Host restart rest
 The host retains at most 256 asks and 256 action records without evicting uncertain evidence. No
 attachments, file review, target override, polling or automatic retry is provided. Qualification
 uses isolated inert providers, not native UI or configured-provider workflows.
+
+Add **`--enable-owned-user-input`** to the complete owned-mode command for **Nonsecret provider input**.
+It is off by default, requires owned mode, and is independent of command review and restricted asks.
+Commands remain denied unless independently reviewed. **Never enter passwords, tokens or other secrets**:
+literal answers may persist in provider tool results and history. Unsupported/secret/oversized forms are
+cancelled as a whole; this provides no file review or credential-entry workflow.
+
+Use **Refresh input** to list up to four pending forms. Select an offered option or explicitly enter
+freeform text for every prompt, then **Submit literal answers**, or **Cancel this attempt only**.
+No answer is silently filled in. Answers are limited to 2,048 UTF-16 units each and 8,192 in aggregate.
+An accepted response is an owner decision, not proof of provider continuation or persistence success.
+
+Selection changes and panel remounts retain the original action and prevent competing actions. Use
+**Observe original locally (no RPC)**, then **Acknowledge observed terminal original**; a fresh explicit
+list is required before acting again. Genuine uncertainty cannot be acknowledged away or replayed.
+Renderer reload can re-list still-pending host attempts but loses local action records; an absent attempt
+does not reveal a lost outcome. Closing the application or cancelling the original operation/run
+invalidates pending attempts; host restart restores no old input authority. Native UI and configured-provider
+qualification remain incomplete.
 
 The selected owned-host session also has **Current durable notes — read only**. Use **Refresh notes**
 explicitly; selecting a session does not automatically read it. It displays the latest stored notes

@@ -16,10 +16,11 @@ internal static class OwnedSessionNotesSourceInverse
     internal static IReadOnlyList<string> Paths => [Store, Runtime, Reads, Host, App, Boot, Main, AskInverse, Project, Wiring];
 
     internal static string RestoreInput(string path, string source)
-        => path is Store or Runtime or Reads or Host or App or Boot or Main or AskInverse or Project or Wiring ? Restore(path, source) : source;
+        => path is Store or Runtime or Reads or Host or App or Boot or Main or AskInverse or Project or Wiring ? Restore(path, source) : OwnedSessionUserInputSourceInverse.RestoreInput(path, source);
 
     internal static string Restore(string path, string source)
     {
+        source = OwnedSessionUserInputSourceInverse.RestoreInput(path, source);
         source = SourceTestText.Canonicalize(source);
         foreach (var (before, after, count) in Edits(path))
         {

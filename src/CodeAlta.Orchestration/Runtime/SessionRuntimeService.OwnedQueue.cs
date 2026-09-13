@@ -8,10 +8,14 @@ public sealed partial class SessionRuntimeService
     // Durable queue records never construct an OwnedQueuedExecution or carry its authority.
     internal Task<OwnedSessionCommandResult> QueueOwnedCommandAsync(OwnedTextQueueRequest request,
         OwnedSessionCommandReceipt receipt, bool reviewPermissions, CancellationToken cancellationToken)
-        => AdmitAsync(() => QueueOwnedBodyAsync(request, receipt, reviewPermissions, cancellationToken), CancellationToken.None);
+        => QueueOwnedCommandAsync(request, receipt, reviewPermissions, cancellationToken, false);
+
+    internal Task<OwnedSessionCommandResult> QueueOwnedCommandAsync(OwnedTextQueueRequest request,
+        OwnedSessionCommandReceipt receipt, bool reviewPermissions, CancellationToken cancellationToken, bool enableUserInput)
+        => AdmitAsync(() => QueueOwnedBodyAsync(request, receipt, reviewPermissions, cancellationToken, enableUserInput), CancellationToken.None);
 
     private async Task<OwnedSessionCommandResult> QueueOwnedBodyAsync(OwnedTextQueueRequest request,
-        OwnedSessionCommandReceipt receipt, bool reviewPermissions, CancellationToken cancellationToken)
+        OwnedSessionCommandReceipt receipt, bool reviewPermissions, CancellationToken cancellationToken, bool enableUserInput)
     {
         var item = new OwnedQueuedExecution(request, cancellationToken);
         var cancellation = item.CancelExecutionAsync();
@@ -99,14 +103,15 @@ public sealed partial class SessionRuntimeService
                     item.Execution.Token.ThrowIfCancellationRequested();
                     QueueRunLifecycle? lifecycle = null;
                     var send = new AgentSendOptions { Input = AgentInput.Text(request.Text) };
-                    if (reviewPermissions)
+                    if (reviewPermissions || enableUserInput)
                     {
-                        permission = await Permissions.CreateOwnedExecutionAsync(receipt.OperationId, request.SessionId, item.Execution.Token).ConfigureAwait(false);
+                        permission = await Permissions.CreateOwnedExecutionAsync(receipt.OperationId, request.SessionId, item.Execution.Token, reviewPermissions, enableUserInput).ConfigureAwait(false);
                         if (permission is null || !await Permissions.BindOwnedExecutionAsync(permission, _runtimeInstanceId,
                             captured.Attachment, captured.ProviderId).ConfigureAwait(false))
                             throw new QueueBindingException();
                         lifecycle = new(Permissions.CreateOwnedRunLifecycle(permission), Permissions.CreateOwnedCommandHandler(permission));
-                        send = new() { Input = send.Input, OnPermissionRequest = lifecycle.HandleAsync, RunLifecycle = lifecycle };
+                        send = new() { Input = send.Input, OnPermissionRequest = lifecycle.HandleAsync, RunLifecycle = lifecycle,
+                            OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permission), EnableUserInputTool = permission.EnableUserInput };
                     }
                     var startedAt = DateTimeOffset.UtcNow;
                     var runId = await RunCapturedAsync(work.SessionHandleId, send, item.Execution.Token).ConfigureAwait(false);

@@ -58,7 +58,7 @@ public sealed class SessionPermissionRegistration
 /// never user waits. Completed attempts are removed, not retained as tombstones. Provider runtime choice enforcement
 /// remains authoritative. Disposing presentation alone must not cancel this service or its requests.
 /// </summary>
-public sealed class SessionPermissionService : IAsyncDisposable
+public sealed partial class SessionPermissionService : IAsyncDisposable
 {
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
@@ -101,17 +101,25 @@ public sealed class SessionPermissionService : IAsyncDisposable
         internal string? ProviderId { get; set; }
         internal bool Bound { get; set; }
         internal bool Closed { get; set; }
+        internal bool ReviewCommands { get; init; }
+        internal bool EnableUserInput { get; init; }
+        internal HashSet<PendingUserInput> InputDeliveries { get; } = [];
         internal HashSet<PendingPermission> Deliveries { get; } = [];
         internal Task? Closure { get; set; }
     }
 
     internal ValueTask<OwnedPermissionExecution?> CreateOwnedExecutionAsync(Guid operationId, string sessionId, CancellationToken token)
+        => CreateOwnedExecutionAsync(operationId, sessionId, token, true, false);
+
+    internal ValueTask<OwnedPermissionExecution?> CreateOwnedExecutionAsync(Guid operationId, string sessionId,
+        CancellationToken token, bool reviewCommands, bool enableUserInput)
         => ExecuteAsync<OwnedPermissionExecution?>(() =>
         {
             if (_stopped || _ownedAdmissionClosed || token.IsCancellationRequested || operationId == Guid.Empty
                 || !ValidOwnedText(sessionId, OwnedIdentityLimit, required: true, identity: true)
                 || _ownedExecutions.Count >= OwnedExecutionLimit || _ownedExecutions.ContainsKey(operationId)) return null;
-            var execution = new OwnedPermissionExecution(this, operationId, sessionId, token);
+            var execution = new OwnedPermissionExecution(this, operationId, sessionId, token)
+            { ReviewCommands = reviewCommands, EnableUserInput = enableUserInput };
             _ownedExecutions.Add(operationId, execution);
             return execution;
         }, null);
@@ -138,7 +146,7 @@ public sealed class SessionPermissionService : IAsyncDisposable
     internal ValueTask<bool> BindOwnedRunAsync(OwnedPermissionExecution execution, AgentRunId runId, CancellationToken runToken)
         => ExecuteAsync(() =>
         {
-            if (!CanUse(execution) || execution.RunBound || execution.Deliveries.Count != 0
+            if (!CanUse(execution) || execution.RunBound || execution.Deliveries.Count != 0 || execution.InputDeliveries.Count != 0
                 || !ValidOwnedText(runId.Value, OwnedIdentityLimit, required: true, identity: true)
                 || !runToken.CanBeCanceled || runToken.IsCancellationRequested) return false;
             execution.RunId = runId;
@@ -168,8 +176,8 @@ public sealed class SessionPermissionService : IAsyncDisposable
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
-            if (!CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
-                || _ownedDeliveries.Count >= OwnedPendingLimit || execution.Deliveries.Count >= OwnedPendingPerExecutionLimit) return null;
+            if (!execution.ReviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
+                || !HasOwnedDeliveryCapacity(execution)) return null;
             var command = (AgentCommandPermissionRequest)request;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
             var snapshot = new SessionPermissionSnapshot(handle, request.ProviderId, request.Timestamp, request.Kind,
@@ -240,7 +248,7 @@ public sealed class SessionPermissionService : IAsyncDisposable
         {
             _ownedAdmissionClosed = true;
             foreach (var execution in _ownedExecutions.Values.ToArray()) _ = CloseOwned(execution);
-            return Task.WhenAll(_ownedDeliveries.Select(pending => pending.Delivery!));
+            return JoinOwnedDeliveries();
         });
 
     private async Task JoinOwnedClosureAsync(Func<Task> close)
@@ -260,11 +268,14 @@ public sealed class SessionPermissionService : IAsyncDisposable
         _ownedExecutions.Remove(execution.OperationId);
         var deliveries = execution.Deliveries.ToArray();
         foreach (var pending in deliveries) Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.Cancel);
+        var inputs = execution.InputDeliveries.ToArray();
+        foreach (var pending in inputs) CompleteInput(pending.Snapshot.Handle, null);
         execution.Attachment = null;
         execution.ExecutionToken = default;
         execution.AttachmentToken = default;
         execution.RunToken = default;
-        return execution.Closure = Task.WhenAll(deliveries.Select(pending => pending.Delivery!));
+        return execution.Closure = Task.WhenAll(deliveries.Select(pending => (Task)pending.Delivery!)
+            .Concat(inputs.Select(pending => (Task)pending.Delivery!)));
     }
 
     private bool Owns(OwnedPermissionExecution execution)
@@ -483,7 +494,7 @@ public sealed class SessionPermissionService : IAsyncDisposable
                 _stopped = true;
                 _ownedAdmissionClosed = true;
                 foreach (var execution in _ownedExecutions.Values.ToArray()) _ = CloseOwned(execution);
-                var owned = Task.WhenAll(_ownedDeliveries.Select(pending => pending.Delivery!));
+                var owned = JoinOwnedDeliveries();
                 foreach (var entry in _pending.Values)
                 {
                     entry.Completion.SetResult(new(AgentPermissionDecisionKind.Cancel));
@@ -502,6 +513,8 @@ public sealed class SessionPermissionService : IAsyncDisposable
                     {
                         foreach (var pending in _ownedDeliveries) pending.OwnedExecution!.Deliveries.Remove(pending);
                         _ownedDeliveries.Clear();
+                        foreach (var pending in _inputDeliveries) pending.Execution.InputDeliveries.Remove(pending);
+                        _inputDeliveries.Clear();
                         return ValueTask.FromResult(true);
                     }).ConfigureAwait(false);
                 }

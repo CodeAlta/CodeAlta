@@ -43,6 +43,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private readonly HashSet<string> _newSessionIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
+    /// <summary>Gets the optional borrowed catalog used for agent-prompt metadata lookup.</summary>
+    /// <remarks>Null preserves fresh default-catalog construction at each existing lookup site.
+    /// The supplying owner retains the catalog and its locator through runtime cleanup.</remarks>
+    internal AgentPromptCatalog? PromptCatalog { get; init; }
+
     private Task<T> AdmitAsync<T>(Func<Task<T>> body, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1300,6 +1305,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         AskId = sendOptions.AskId,
                         AdditionalTools = sendOptions.AdditionalTools,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
+                        OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permissionExecution),
+                        EnableUserInputTool = permissionExecution.EnableUserInput,
                         RunLifecycle = OwnedSessionAskExecution.Combine(sendOptions.RunLifecycle, Permissions.CreateOwnedRunLifecycle(permissionExecution)),
                     };
                 }
@@ -3141,7 +3148,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
             UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-        return new AgentPromptCatalog().ListEffectivePrompts(query)
+        return (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(query)
             .Any(prompt => string.Equals(prompt.PromptName, normalized, StringComparison.OrdinalIgnoreCase))
             ? normalized
             : AgentPromptCatalog.DefaultPromptName;
@@ -3163,7 +3170,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
             UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-        var descriptor = new AgentPromptCatalog().ResolvePrompt(query, promptName);
+        var descriptor = (PromptCatalog ?? new AgentPromptCatalog()).ResolvePrompt(query, promptName);
         if (descriptor is null)
         {
             return new AgentPromptUsageInfo(promptName, null, null);

@@ -32,6 +32,11 @@ public sealed class AgentBuiltInToolOptions
     /// </summary>
     public AgentUserInputRequestHandler? OnUserInputRequest { get; init; }
 
+    /// <summary>Gets explicit activation of the user-input built-in; defaults to false.</summary>
+    /// <remarks>A selected callback is also required. Provider profiles may opt out but cannot activate
+    /// this tool without this flag. This grants no command/file permission or lifecycle authority.</remarks>
+    public bool EnableUserInputTool { get; init; }
+
     /// <summary>
     /// Gets or initializes the shared HTTP client for web retrieval.
     /// </summary>

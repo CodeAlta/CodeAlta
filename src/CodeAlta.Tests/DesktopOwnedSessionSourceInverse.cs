@@ -36,6 +36,7 @@ internal static class DesktopOwnedSessionSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        if (path == Cli) source = OwnedSessionUserInputSourceInverse.Restore(path, source);
         if (path == DesktopProject) source = RuntimeEventForwardingSourceInverse.Restore(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         foreach (var (before, after, count) in Edits(path))

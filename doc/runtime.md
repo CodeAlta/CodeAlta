@@ -700,6 +700,45 @@ capability. Same-host reload reads retained facts only; missing action/head is n
 and restart restores no authority. Attachments, general LiveTool parity and provider input remain
 separate work. See the parity ledger for focused qualification and exclusions.
 
+### Opt-in owned nonsecret provider input
+
+`CodeAltaHostOptions.EnableOwnedUserInput` defaults to false. Desktop requires the separate
+`--enable-owned-user-input` flag in explicitly admitted owned mode; duplicate flags and browse-only
+use are rejected. This capability is independent of command review and owned asks. Input-only sends
+retain denying permission callbacks and never alter persistent session defaults or trusted TUI policy.
+
+The existing `SessionPermissionService` mailbox owns input attempts. A successful original Started
+hook binds the actual run token; a nullable provider request RunId remains nullable, and a supplied
+RunId must match. Handles include original operation/runtime, decimal-safe attachment generation,
+canonical session, nullable request RunId, interaction and fresh attempt ID. Exact live-owner membership,
+not Display/history/latest-selection state, authorizes unary `sessionUserInput.list`, `.resolve`, `.cancel`.
+Cancellation targets only the exact attempt. Operation/run cancellation, attachment retirement and
+owner shutdown invalidate requests and join retained deliveries without changing host close ordering.
+
+Only bounded nonsecret choice/freeform forms are supported. Reject malformed/ambiguous/secret or
+oversized callback forms in full, without truncation or implicit empty answers. Limits are 64 executions,
+128 combined permission/input pending-or-delivering requests (four per execution), four whole forms per
+page, eight prompts and eight options per prompt, 8,192 aggregate form UTF-16 units, and 2,048 units per
+answer/8,192 aggregate answer units. Resolve uses answer pairs to detect duplicates and requires exactly
+one answer per prompt, with ordinal IDs/options and literal freeform values. Answers may enter provider
+tool-result/history storage; this is not credential entry. An accepted decision is not provider success.
+
+App-owned immutable original actions survive selection/remount and exclude competing actions before
+transport launch. A shared page-authority token invalidates old pages and outstanding reads at action
+admission and terminal acknowledgment. Local observation precedes acknowledgment; another action needs
+a fresh explicit list. Late epoch evidence revokes shared mutation capability before presentation fences.
+Uncertainty is never replayed. Renderer reload can re-list pending host forms; completed removal cannot
+recover lost outcomes, and restart restores no authority. No durable decision ledger is added.
+
+Generated full-nested escaping fixtures measure 224,920 bytes/page and 62,245 bytes/resolve including
+4,096 bytes framing, below the 256/96-KiB limits. These are not parser-allocation, heap or latency bounds.
+Focused qualification includes scripted actual Agent sends with a borrowed rejecting HTTP client and
+three isolated inert-provider runtime routes, not default client ownership or configured providers.
+Strict suspension inside real registration disposal, broader queue failure retention, native UI and
+durable recovery remain open; see the parity ledger. Internal init-only borrowed client/prompt-catalog
+dependencies preserve default construction paths and require their supplying owner to retain them
+through all invocations/cleanup; the Agent never disposes the borrowed HTTP client.
+
 ## Provider initialization
 
 `IModelProviderRegistry` lists configured `ModelProviderDescriptor` values and creates provider runtimes. `IModelProviderInitializationService` starts provider probes eagerly after provider descriptors/configuration are available. Each provider probe owns its success/failure state and model list cache:
@@ -783,7 +822,7 @@ CodeAlta-runtime providers can receive host-injected tools. Current built-ins ar
 - `rename_file_or_dir`
 - `apply_patch`
 
-Mutation and shell tools flow through host permission handling. Tool schemas are bridged to provider-specific declarations, including strict-schema normalization where required. A user-input/request tool is intentionally not registered as a local raw-API built-in until host UI pause/resume semantics are implemented.
+Mutation and shell tools flow through host permission handling. Tool schemas are bridged to provider-specific declarations, including strict-schema normalization where required. `request_user_input` is registered only when the send explicitly sets default-false `EnableUserInputTool` and has a selected user-input callback. A profile may disable it but cannot independently activate it. `OnUserInputRequest` selects a per-send callback or falls back to the session callback when null; a callback alone never enables the tool. Retained definitions keep their original callback selection. Owned input adds the separate run/attachment authority described above; other provider implementations must explicitly support these options.
 
 `AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions default to denial; the backend opt-in described above supplies runtime execution/attachment binding. This API alone enables no Desktop approval route.
 

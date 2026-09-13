@@ -17,6 +17,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private readonly CatalogOptions _catalog;
     private readonly int _capacity;
     private readonly bool _reviewPermissions;
+    private readonly bool _enableUserInput;
     private readonly Dictionary<string, ReceiptEntry> _receipts = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, SendOperation> _operations = [];
     private readonly Dictionary<string, SendOperation> _active = new(StringComparer.OrdinalIgnoreCase);
@@ -34,7 +35,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private Task? _disposeTask;
 
     internal OwnedSessionCommandService(
-        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions, bool enableAsks = false)
+        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions, bool enableAsks = false, bool enableUserInput = false)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(projects);
@@ -45,6 +46,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         _catalog = catalog;
         _capacity = capacity;
         _reviewPermissions = reviewPermissions;
+        _enableUserInput = enableUserInput;
         Asks = new OwnedSessionAskService(enableAsks, (request, context) => AdmitSendCore(request, context, CancellationToken.None));
     }
 
@@ -325,7 +327,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         try
         {
             result = await _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, _reviewPermissions,
-                operation.Execution.Token).ConfigureAwait(false);
+                operation.Execution.Token, _enableUserInput).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -527,10 +529,10 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                 }
                 else
                 {
-                    if (_reviewPermissions)
+                    if (_reviewPermissions || _enableUserInput)
                         operation.PermissionExecution = await _runtime.Permissions.CreateOwnedExecutionAsync(
-                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token).ConfigureAwait(false);
-                    if (_reviewPermissions && operation.PermissionExecution is null)
+                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, _reviewPermissions, _enableUserInput).ConfigureAwait(false);
+                    if ((_reviewPermissions || _enableUserInput) && operation.PermissionExecution is null)
                     {
                         result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_unavailable");
                     }
@@ -619,7 +621,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         {
             // StartControl already initiated source cancellation independently. Close this exact
             // operation before preparation/provider/cancellation joins, including provider None tokens.
-            if (_reviewPermissions) await _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId).ConfigureAwait(false);
+            if (_reviewPermissions || _enableUserInput) await _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -733,7 +735,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         AbortRunOperation[] abortRuns, QueueOperation[] queues, Task launch)
     {
         await launch.ConfigureAwait(false);
-        if (_reviewPermissions)
+        if (_reviewPermissions || _enableUserInput)
         {
             try { await _runtime.Permissions.CloseOwnedAdmissionAsync().ConfigureAwait(false); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
