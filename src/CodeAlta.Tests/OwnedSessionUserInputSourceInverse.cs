@@ -18,6 +18,7 @@ internal static class OwnedSessionUserInputSourceInverse
     internal static string RestoreInput(string path, string source) => path != Cli && Paths.Contains(path) ? Restore(path, source) : source;
     internal static string Restore(string path, string source)
     {
+        source = RuntimeFileSearchInvalidationSourceInverse.RestoreInput(path, source);
         source = SourceTestText.Canonicalize(source);
         foreach (var (before, after, count) in Edits(path))
         {

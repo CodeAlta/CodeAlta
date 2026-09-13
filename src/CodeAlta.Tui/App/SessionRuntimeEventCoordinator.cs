@@ -19,7 +19,6 @@ internal sealed class SessionRuntimeEventCoordinator
     private readonly Func<string, bool> _isSelectedSession;
     private readonly IShellStatusPort _statusPort;
     private readonly Func<OpenSessionState, CancellationToken, Task> _drainQueuedPromptAsync;
-    private readonly IProjectFileSearchService _projectFileSearchService;
     private readonly Action<SessionViewDescriptor> _upsertRuntimeSession;
     private readonly IPluginAgentEventObserver _pluginAgentEventObserver;
     private readonly FrontendEventPublisher? _frontendEvents;
@@ -52,7 +51,8 @@ internal sealed class SessionRuntimeEventCoordinator
         _isSelectedSession = isSelectedSession;
         _statusPort = statusPort;
         _drainQueuedPromptAsync = drainQueuedPromptAsync;
-        _projectFileSearchService = projectFileSearchService;
+        // Retain the validated constructor parameter for frontend composition compatibility only.
+        // Runtime owns live cache invalidation; this coordinator must not repeat it during history replay.
         _upsertRuntimeSession = upsertRuntimeSession ?? (static _ => { });
         _pluginAgentEventObserver = pluginAgentEventObserver ?? new PluginAgentEventObserver(null);
         _frontendEvents = frontendEvents;
@@ -142,7 +142,7 @@ internal sealed class SessionRuntimeEventCoordinator
 
         if (runtimeEvent is SessionAgentEvent agentRuntimeEvent)
         {
-            InvalidateProjectFileSearchIfNeeded(session, agentRuntimeEvent.Event);
+
             ObservePluginAgentEvent(session, agentRuntimeEvent.Event);
         }
 
@@ -182,7 +182,7 @@ internal sealed class SessionRuntimeEventCoordinator
         }
 
         PublishRuntimeTimelineChanged(session, tab);
-        InvalidateProjectFileSearchIfNeeded(session, @event);
+
         ObservePluginAgentEvent(session, @event);
         ApplyReduction(tab, reduction);
     }
@@ -220,7 +220,7 @@ internal sealed class SessionRuntimeEventCoordinator
         }
 
         PublishRuntimeTimelineChanged(session, tab);
-        InvalidateProjectFileSearchIfNeeded(session, @event);
+
         ObservePluginAgentEvent(session, @event);
         ApplyReduction(tab, reduction);
         await Task.CompletedTask;
@@ -609,39 +609,6 @@ internal sealed class SessionRuntimeEventCoordinator
             session.AgentPromptId = configurationEvent.AgentPromptId.Trim();
         }
     }
-
-    private void InvalidateProjectFileSearchIfNeeded(SessionViewDescriptor session, AgentEvent @event)
-    {
-        ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(@event);
-
-        if (!ShouldInvalidateProjectFileSearch(@event) ||
-            string.IsNullOrWhiteSpace(session.WorkingDirectory))
-        {
-            return;
-        }
-
-        _ = InvalidateProjectFileSearchAsync(session.WorkingDirectory);
-    }
-
-    private async Task InvalidateProjectFileSearchAsync(string projectRoot)
-    {
-        try
-        {
-            await _projectFileSearchService.InvalidateAsync(projectRoot, ProjectFileInvalidationReason.FileSystemWrite);
-        }
-        catch
-        {
-        }
-    }
-
-    private static bool ShouldInvalidateProjectFileSearch(AgentEvent @event)
-        => @event switch
-        {
-            AgentActivityEvent { Kind: AgentActivityKind.FileChange } => true,
-            AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.DiffUpdated } => true,
-            _ => false,
-        };
 
     private void ApplyReduction(OpenSessionState? tab, SessionRuntimeReductionResult reduction)
     {

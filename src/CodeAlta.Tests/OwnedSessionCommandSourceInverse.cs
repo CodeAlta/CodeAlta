@@ -19,7 +19,7 @@ internal static class OwnedSessionCommandSourceInverse
         => path is Host or Options or Runtime or Desktop or Profile ? RestoreCurrentInput(path, source) : source;
 
     internal static string RestoreLifetimeInput(string path, string source)
-        => path is Lifetime ? RestoreCurrentInput(path, source) : source;
+        => path is Lifetime ? RestoreCurrentInput(path, source) : RuntimeFileSearchInvalidationSourceInverse.RestoreLifetimeInput(path, source);
 
     internal static string RestoreCurrentInput(string path, string source)
         => Restore(path, DesktopOwnedSessionSourceInverse.RestoreInput(path, source));

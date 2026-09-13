@@ -148,9 +148,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionViewDescriptor session,
         AgentEvent @event,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => AppendSessionEventOwnedBodyAsync(session, @event, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(@event);
+        var effectWorkingDirectory = session.WorkingDirectory;
+        await AdmitAsync(() => AppendSessionEventOwnedBodyAsync(session, @event, effectWorkingDirectory, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
-    private async Task AppendSessionEventOwnedBodyAsync(SessionViewDescriptor session, AgentEvent @event, CancellationToken cancellationToken)
+    private async Task AppendSessionEventOwnedBodyAsync(SessionViewDescriptor session, AgentEvent @event, string effectWorkingDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(@event);
@@ -171,6 +176,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             .ConfigureAwait(false);
         await _agentSessionCatalog.InvalidateAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
         _events.TryPublish(new SessionAgentEvent(session.SessionId, @event));
+        await InvalidateFileSearchCacheAsync(@event, effectWorkingDirectory).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2354,17 +2360,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         try
         {
-            var parentNotifications = await actor.QueryAsync(_ =>
+            var projection = await actor.QueryAsync(_ =>
                 {
                     var sanitized = projector.Project(@event);
                     RefuseUnavailableOwnedQueue(sessionId);
                     var notifications = projector.Entry!.TakeParentNotifications(sanitized);
-                    return ValueTask.FromResult(notifications);
+                    return ValueTask.FromResult((Event: sanitized, WorkingDirectory: projector.Entry.WorkingDirectory, Notifications: notifications));
                 })
                 .ConfigureAwait(false);
 
             projectionUse.Dispose();
-            foreach (var notification in parentNotifications)
+            await InvalidateFileSearchCacheAsync(projection.Event, projection.WorkingDirectory).ConfigureAwait(false);
+            foreach (var notification in projection.Notifications)
             {
                 await DeliverParentNotificationAsync(notification).ConfigureAwait(false);
             }

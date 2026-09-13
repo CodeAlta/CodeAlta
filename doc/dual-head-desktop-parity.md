@@ -2567,3 +2567,47 @@ and original-effect ownership remain open: TUI still combines history/plugin pro
 and asynchronous history rebuild has no shared live watermark. Partial Display and separate current
 state/history reads must not be presented as recovery. Prior input disposal/client/queue limitations,
 durable outcomes and M4–M6 remain open.
+
+### M4 runtime-owned file-search cache checkpoint
+
+The cache-only effect now runs in existing runtime-owned provider forwarding and CodeAlta-authored
+append operations. Host supplies one concrete cache to runtime and search. Exact projected event
+references and the source directory are captured independently of UI lookup; append captures its
+effect directory before asynchronous admission. Invalidation is outside actor/publisher locks and
+precedes forwarding's later notification/queue tails, without changing projection-use release or
+host-close order. All file-change phases and diff updates mark the cache dirty, including when the
+original stream is full. No worker, event reader, callback interface or plugin invocation was added.
+
+All three TUI invalidation calls are removed, intentionally removing cache effects from history
+rebuild as well as live rendering. Plugin observation still runs during history replay; its context,
+failure handling and lifetime are not migrated. The unused, validated search-service constructor
+parameter remains for composition compatibility. Cache invalidation remains best effort and is not
+a filesystem scan, write-success acknowledgment, durable effect ledger or history/live watermark.
+
+Parent verification so far: nine exact inert-runtime methods, seven new source methods, the
+frontend fire-and-forget guard, and the actual cached-history rebuild regression passed. The
+Orchestration, main and Desktop test projects build with cached assets and zero warnings/errors;
+the Desktop generated RPC contract remains current. Five
+selected SQLite managed/native artifacts matched their cached package inputs before runtime
+admission. Runtime/history fixture roots remain even on success. The main build initially found
+a missing required permission handler in the new history fixture; its explicit deny handler and
+inverse literal were corrected. One positive source-representation case incorrectly supplied a BOM;
+it now tests BOM-free LF/CRLF/mixed input and separately verifies the unchanged decoder rejects BOMs.
+Twelve complete original source anchors and all eighteen input anchors passed restoration checks.
+
+Selected Reminder and Models historical preservation methods also passed. The selected Plugin UI
+frozen-boundary method failed earlier on the HostOptions restoration route, before reaching the
+new architecture/reminder mappings. Independent source review identifies an inherited gap: older
+restoration expects receipt-capacity and plugin-environment declarations to be adjacent, but the
+permission-review block remains between them. The cache delta is a no-op for that Options route;
+neither its production source nor historical assertions were changed to hide the failure. This
+does not establish that every subsequent legacy assertion passes.
+The existing gateway regression separately exercises the exact outer PluginUI MCP→profile chain
+on the original decoded architecture/reminder inputs. Parent audit, cached main rebuild and its
+exact-method rerun passed against the unchanged canonical UTF-8 SHA-256 values, retaining inner
+full-parent-blob checks and second-restoration rejection. This qualifies those two fallback inputs
+only; the inherited full-method failure remains recorded and unrepaired.
+The renamed legacy live-handler regression was not executed because it starts an existing
+unretained deferred plugin-projection task. The cached-history regression suppresses that task and
+joins its actual rebuild. These checks do not qualify mounted/native UI, real providers/plugins,
+the full suite, shared plugin lifetime/effects or history/live consistency. M4–M6 remain open.

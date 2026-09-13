@@ -240,6 +240,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
             agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
+            var projectFileSnapshotCache = new ProjectFileSnapshotCache();
             runtimeService = new SessionRuntimeService(
                 agentHub,
                 agentSessionCatalog,
@@ -247,9 +248,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 sessionViewCatalog,
                 instructionTemplateProvider,
                 catalogOptions,
-                skillCatalog);
+                skillCatalog)
+            {
+                FileSearchCache = projectFileSnapshotCache,
+            };
             var projectFileSearchService = new ProjectFileSearchService(
-                new ProjectFileSnapshotCache(),
+                projectFileSnapshotCache,
                 new InMemoryProjectFileUsageStore());
 
             return new CodeAltaHost(

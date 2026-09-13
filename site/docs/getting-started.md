@@ -61,6 +61,10 @@ blocks reconnect in that view. Valid late host/runtime changes disable mutation 
 switching sessions. Reloading the renderer does not prove old backend work stopped, and these
 observations do not recover missing history, effects or lost outcomes.
 
+Live file-change notifications invalidate the shared file-search cache even when the terminal
+frontend is not open. Replaying history does not repeat this invalidation. It is best effort,
+not confirmation that a file write succeeded.
+
 **Compact observed attachment if idle** is also available after manual runtime refresh. No
 recorded run or queue drain makes an attempt eligible, but the provider must still admit it
 without waiting. Stale or unsupported targets fail without replacement or fallback. This

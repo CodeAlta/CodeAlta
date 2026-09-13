@@ -5,6 +5,7 @@ using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
 using CodeAlta.Tui.Models;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Tui.Presentation.Prompting;
 using CodeAlta.Tui.Presentation.Timeline;
@@ -473,7 +474,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
     }
 
     [TestMethod]
-    public void HandleAgentEvent_InvalidatesProjectFileSearchWhenFileChangesArrive()
+    public void HandleAgentEvent_DoesNotInvalidateRuntimeOwnedCacheWhenFileChangesArrive()
     {
         var session = CreateSession();
         var tab = CreateOpenSessionState(session);
@@ -495,9 +496,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
                 "write_file",
                 "Updated Program.cs"));
 
-        Assert.AreEqual(1, searchService.Invalidations.Count);
-        Assert.AreEqual(session.WorkingDirectory, searchService.Invalidations[0].ProjectRoot);
-        Assert.AreEqual(ProjectFileInvalidationReason.FileSystemWrite, searchService.Invalidations[0].Reason);
+        Assert.AreEqual(0, searchService.Invalidations.Count);
     }
 
     [TestMethod]
@@ -785,6 +784,131 @@ public sealed class SessionRuntimeEventCoordinatorTests
         var renderedWhileLockHeld = await dynamicContent.WaitForRenderAsync().ConfigureAwait(false);
 
         Assert.IsFalse(renderedWhileLockHeld, "Dynamic plugin projection refreshes must not render while the projection lock is held because UI dispatch can re-enter session reset.");
+    }
+
+    [TestMethod]
+    public Task HistoryRebuild_DoesNotInvalidateCache_PreservesHistoryLoadingPluginObservation()
+        => new HistoryCacheFixture().Run();
+
+    // Cached LoadEarlierAsync exercises the real rebuild without providers, journal access, plugin
+    // instances, or background projection. The fake observer returns already-completed tasks.
+    private sealed class HistoryCacheFixture
+    {
+        private readonly string _root = Path.Combine(Path.GetTempPath(), "CodeAlta-cache-history-" + Guid.NewGuid().ToString("N"));
+        private readonly List<Task> _originals = [];
+        private readonly List<Task<Exception?>> _outcomes = [];
+        private Task? _original;
+        private Task<Exception?>? _outcome;
+        private CodeAlta.Agent.ModelProviderRegistry? _registry;
+        private CodeAlta.Orchestration.Runtime.AgentHub? _hub;
+        private SessionRuntimeService? _runtime;
+
+        internal async Task Run()
+        {
+            var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _original = Core(launch.Task); _outcome = Observe(_original); launch.SetResult();
+            try { await _original.WaitAsync(TimeSpan.FromSeconds(30)); await _outcome; }
+            catch (Exception ex) { ex.Data["RetainedFixture"] = this; ex.Data["RetainedRoot"] = _root; throw; }
+            finally { Console.WriteLine("Retained cache history fixture root: " + _root); }
+        }
+
+        private async Task Core(Task launch)
+        {
+            await launch;
+            Exception? primary = null, cleanup = null;
+            try { await Keep(Exercise); }
+            catch (Exception ex) { primary = ex; }
+            // No held gates, external callbacks or cancellation dependencies: the original rebuild
+            // must actually return before releasing its borrowed runtime. A deadline never releases it.
+            try
+            {
+                if (_runtime is not null) await Keep(() => _runtime.DisposeAsync().AsTask());
+                if (_hub is not null) await Keep(() => _hub.DisposeAsync().AsTask());
+                if (_registry is not null) await Keep(() => _registry.DisposeAsync().AsTask());
+            }
+            catch (Exception ex) { cleanup = ex; }
+            await Task.WhenAll(_outcomes);
+            if (primary is not null || cleanup is not null)
+            {
+                var failure = new AggregateException(new[] { primary, cleanup }.OfType<Exception>());
+                failure.Data["Primary"] = primary; failure.Data["Cleanup"] = cleanup;
+                throw failure;
+            }
+        }
+
+        private Task Keep(Func<Task> operation)
+        {
+            var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var original = Invoke(); _originals.Add(original); _outcomes.Add(Observe(original)); launch.SetResult();
+            return original;
+            async Task Invoke() { await launch.Task.ConfigureAwait(false); await operation().ConfigureAwait(false); }
+        }
+        private static async Task<Exception?> Observe(Task original)
+        { try { await original.ConfigureAwait(false); return null; } catch (Exception ex) { return ex; } }
+
+        private async Task Exercise()
+        {
+            for (var parent = new DirectoryInfo(Path.GetDirectoryName(_root)!); parent is not null; parent = parent.Parent)
+                if (parent.Exists && (parent.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Reparse fixture ancestry.");
+            if (Directory.Exists(_root) || File.Exists(_root)) throw new IOException("Fixture root exists.");
+            Directory.CreateDirectory(_root);
+            var options = new CatalogOptions { GlobalRoot = Path.Combine(_root, "global") };
+            var views = new SessionViewCatalog(options);
+            var forbidden = new NoHistoryDiscovery();
+            var skills = new CodeAlta.Catalog.Skills.SkillCatalog([forbidden]);
+            _registry = new(); // Empty registry; no provider registration, probing or execution.
+            _hub = new(_registry, options.GlobalRoot);
+            _runtime = new(_hub, new CodeAlta.Agent.AgentSessionCatalog(views.JournalStore.CreateSessionStore()),
+                new ProjectCatalog(options), views,
+                new AgentInstructionTemplateProvider(skills, options, forbidden, null, new(Path.Combine(_root, "home"), _root)), options, skills);
+            var session = CreateSession();
+            session.WorkingDirectory = _root; session.ProviderId = "cache-history-inert"; session.ProviderKey = "cache-history-inert";
+            session.Kind = SessionViewKind.GlobalSession; session.ProjectRef = null;
+            var tab = CreateOpenSessionState(session);
+            AgentEvent[] events =
+            [
+                new AgentActivityEvent(new("cache-history-inert"), session.SessionId, DateTimeOffset.UnixEpoch, null,
+                    AgentActivityKind.FileChange, AgentActivityPhase.Completed, "file", null, "fixture", "fixture"),
+                new AgentSessionUpdateEvent(new("cache-history-inert"), session.SessionId, DateTimeOffset.UnixEpoch, null, AgentSessionUpdateKind.DiffUpdated, null),
+            ];
+            tab.HistoryEvents = events.ToList();
+            tab.Timeline.CreateTruncatedHistoryItem(1, static () => { });
+            var search = new FakeProjectFileSearchService();
+            var observer = new RecordingPluginAgentEventObserver();
+            var coordinator = CreateCoordinator(session, tab, search, observer);
+            var observations = new List<(AgentEvent? Event, bool Loading, bool ProjectionSuppressed)>();
+            var projectedLoadedHistory = false;
+            var history = new SessionHistoryCoordinator(_runtime, _ => tab, _ => session, _ => tab,
+                _ => true, (_, _) => new SessionExecutionOptions { ProviderId = new("cache-history-inert"), WorkingDirectory = _root, OnPermissionRequest = _runtime.Permissions.OwnedDefaultPermissionHandler },
+                (_, _, _, _) => { }, _ => { }, t => t.RenderedHistoryEvents.Clear(),
+                async (s, t, e) =>
+                {
+                    await coordinator.HandleAgentEventAsync(s, t, e);
+                    observations.Add((observer.ObservedEvent, t.HistoryLoading, observer.ProjectedEvents is null));
+                }, _ => Task.CompletedTask,
+                projectLoadedHistory: (_, _, loaded) => projectedLoadedHistory = loaded.SequenceEqual(events));
+            await Keep(() => history.LoadEarlierAsync(session.SessionId));
+            Assert.IsTrue(tab.HistoryLoaded);
+            Assert.IsFalse(tab.HistoryLoading);
+            Assert.IsTrue(projectedLoadedHistory);
+            Assert.AreEqual(events.Length, observations.Count);
+            for (var i = 0; i < events.Length; i++)
+            {
+                Assert.AreSame(events[i], observations[i].Event);
+                Assert.IsTrue(observations[i].Loading);
+                Assert.IsTrue(observations[i].ProjectionSuppressed);
+            }
+            Assert.AreEqual(0, search.Invalidations.Count);
+        }
+
+        private sealed class NoHistoryDiscovery : CodeAlta.Catalog.Skills.ISkillRootProvider, ISystemPromptContentLocator
+        {
+            public ValueTask<IReadOnlyList<CodeAlta.Catalog.Skills.SkillRootRegistration>> GetRootsAsync(CodeAlta.Catalog.Skills.SkillDiscoveryContext context, CancellationToken cancellationToken = default)
+                => throw new AssertFailedException("No history skill discovery.");
+            public SystemPromptContentRoots GetRoots(SystemPromptDiscoveryContext context) => throw new AssertFailedException("No history prompt discovery.");
+            public string ResolveBuiltInPromptPath(string relativePromptPath) => throw new AssertFailedException("No history prompts.");
+            public string ResolveBuiltInDocPath(string fileName) => throw new AssertFailedException("No history docs.");
+        }
     }
 
     private static SessionRuntimeEventCoordinator CreateCoordinator(

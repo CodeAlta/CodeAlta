@@ -69,7 +69,8 @@ public sealed class ModelsDevCatalogLifetimeSourceTests
         {
             var source = ReadSource(baseline);
             // Actual checkout bytes were checked by ReadSource; compare reconstructed originals below.
-            var restored = CodeAltaStartupAdmissionSourceTests.RestoreCatalogRoute(baseline.Path, source.Text);
+            var historicalSource = RuntimeFileSearchInvalidationSourceInverse.RestoreArchitectureInput(baseline.Path, source.Text);
+            var restored = CodeAltaStartupAdmissionSourceTests.RestoreCatalogRoute(baseline.Path, historicalSource);
             AssertBaseline(restored, baseline);
         }
     }

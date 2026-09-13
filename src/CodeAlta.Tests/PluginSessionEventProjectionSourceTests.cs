@@ -125,7 +125,7 @@ public sealed class PluginSessionEventProjectionSourceTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "CodeAlta.slnx"))) directory = directory.Parent;
         Assert.IsNotNull(directory);
-        return SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(directory.FullName, PluginStatisticsBackendSeparationSourceInverse.CurrentPath(path))));
+        return RuntimeFileSearchInvalidationSourceInverse.RestoreInput(path, SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(directory.FullName, PluginStatisticsBackendSeparationSourceInverse.CurrentPath(path)))));
     }
 
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));

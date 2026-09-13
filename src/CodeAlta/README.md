@@ -214,6 +214,11 @@ the previous iterator's successful cleanup. If cleanup fails, **Reconnect live d
 and the failed owner is retained; renderer reload does not prove that old backend work terminated.
 Valid late host/runtime identity changes disable shared mutation controls even after selection changes.
 
+Live file-change/diff notifications invalidate the host's shared file-search cache even without a
+terminal reader or when its event stream drops a notification. History replay and Display reconnect
+do not repeat that cache effect. This best-effort dirty mark does not scan files or confirm a write;
+plugin-effect ownership and shared history/live recovery remain separate, unfinished work.
+
 **Refresh runtime state** is a separate manual, point-in-time observation of the actual runtime
 entry, coordinator transition, recorded run, Shutdown, retirement and queue-drain facts. It does
 not poll or automatically refresh; steering uses its captured target, subject to host revalidation. No entry/no recorded run is not

@@ -1136,7 +1136,7 @@ public sealed class AltaReminderLifetimeSourceTests
             Path.GetDirectoryName(sourceFile) ?? throw new AssertFailedException("Missing fixture source directory."), ".."));
         var bytes = File.ReadAllBytes(Path.Combine(root, baseline.Path));
         // Validate actual UTF-8/BOM/final newline; LF, CRLF and mixed pairs are equivalent content.
-        return SourceTestText.DecodeSource(bytes);
+        return RuntimeFileSearchInvalidationSourceInverse.RestoreArchitectureInput(baseline.Path, SourceTestText.DecodeSource(bytes));
     }
 
     private static byte[] Encode(string normalized, Baseline baseline)

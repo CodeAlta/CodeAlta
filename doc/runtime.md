@@ -252,6 +252,23 @@ contract/typechecking and frontend helper verification, not native/real-provider
 A renderer reload does not prove that an old channel or host work finished cleanup. These local
 ownership guarantees do not establish a history/live watermark, effect replay or durable outcomes.
 
+### Runtime-owned file-search cache invalidation
+
+The host supplies the same concrete `ProjectFileSnapshotCache` to the runtime and project-file
+search service. Live projected `FileChange` events (all phases) and `DiffUpdated` events mark it
+dirty independently of TUI attachment and original-stream delivery, including stream overflow.
+Provider forwarding carries the exact publication event and captured attachment directory out of
+the actor; cache invalidation runs outside actor/publisher locks in the existing owned operation,
+before parent-notification and queue tails. CodeAlta-authored appends capture the effect directory
+before asynchronous admission and invalidate after the existing append/catalog/publication path.
+
+This is a best-effort, noncancelable in-memory dirty mark, not a file scan, proof of a successful
+write, or durable effect acknowledgment. Blank directories and standalone runtimes without a
+borrowed cache do nothing. There is no additional worker, reader, retry or shutdown owner.
+History rebuild and Display observation no longer repeat cache invalidation through TUI handlers.
+Plugin observation—including its existing history replay, context and failure policy—is unchanged;
+shared plugin lifetime/effect ownership and history/live reconciliation remain unresolved.
+
 ### Durable session notes
 
 `SessionRuntimeService.GetNotesMarkdownAsync` and `UpdateNotesAsync` own tab-independent notes operations. `RuntimeAltaNotesService` is the actual live-tool adapter used by TUI composition; the old tab-authoritative notes service is removed. An explicit caller session ID wins, including when it is unknown (no fallback to another selected session). A host fallback captures only a session ID once, before awaiting stdin or storage. Resolution uses active runtime provider identity or persisted metadata and the configured global/project catalog association, without provider startup or prompt/skill discovery. These are trusted backend identities, not renderer authorization or arbitrary journal-path inputs.
