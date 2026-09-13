@@ -632,22 +632,32 @@ public sealed class PluginContributionAdapterService
         ArgumentNullException.ThrowIfNull(activePlugins);
         ArgumentNullException.ThrowIfNull(template);
         var diagnostics = new List<PluginRuntimeDiagnostic>();
-        foreach (var active in GetApplicableActivePlugins(activePlugins, options))
+        // Eligibility is not liveness: stale supplied candidates must receive explicit Closing admission.
+        foreach (var active in activePlugins.Where(plugin => plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath)))
         {
-            var context = CreateAgentEventContext(active, template, options, cancellationToken);
-            try
+            var admission = await active.ObserveOwnedAgentEventAsync(async () =>
             {
-                if (active.Instance is not null)
+                var context = CreateAgentEventContext(active, template, options, cancellationToken);
+                try
                 {
-                    await active.Instance.OnAgentEventAsync(context, cancellationToken).ConfigureAwait(false);
-                }
+                    if (active.Instance is not null)
+                    {
+                        await active.Instance.OnAgentEventAsync(context, cancellationToken).ConfigureAwait(false);
+                    }
 
-                context.Invalidate();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+                    context.Invalidate();
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogCallbackFailure(active, "Agent-event callback failed.", ex);
+                    diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(active, PluginRuntimeDiagnosticSource.Callback, "Agent-event callback failed.", ex)));
+                }
+            }).ConfigureAwait(false);
+            if (admission != PluginAgentEventAdmission.Admitted)
             {
-                LogCallbackFailure(active, "Agent-event callback failed.", ex);
-                diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(active, PluginRuntimeDiagnosticSource.Callback, "Agent-event callback failed.", ex)));
+                // Return the outcome, but do not grow the manager's diagnostic store for rejected events.
+                diagnostics.Add(PluginRuntimeDiagnostic.Warning(PluginRuntimeDiagnosticSource.Callback,
+                    $"Agent-event admission: {admission}.", active.SourcePackage?.PackageId, active.SourcePackage?.PackageDirectory));
             }
         }
 

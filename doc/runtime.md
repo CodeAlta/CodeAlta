@@ -978,6 +978,23 @@ The runtime reads journals to restore recoverable sessions, session history, usa
 
 Derived plugin events are not canonical transcript entries. They are replayed from stored normalized events and can be recalculated after restart.
 
+Agent-event callbacks now use activation-owned admission: at most 64 outstanding attempts, no
+queued waiters, and explicit `Capacity` or `Closing` rejection. Rejection means that callback was
+not delivered, not that it succeeded. The slot covers the original callback and adapter diagnostics/
+context tail. Ordinary exceptions still produce diagnostics and allow later applicable plugins;
+cancellation still propagates, and context invalidation remains success-only. History observation
+is unchanged; this does not move plugin callbacks into runtime forwarding or establish a replay watermark.
+
+Activation and manager quiescence retain original event/task/cancellation work before dependent
+release. The manager admits one startup per lifetime and joins returned late activations before
+shutdown. Host/outer rollback and frontend cleanup require successful quiescence before releasing
+borrowed dependencies; the frontend barrier runs before reminder disposal. A failed or pending drain
+prevents release. Deactivation timeout/cancellation bounds only the caller's wait, never the original
+operation's lifetime. Borrowed managers are quiesced globally without transferring disposal ownership.
+Flowed callback/startup self-joins are rejected before close mutation; suppressed-context/detached
+cycles are not universally detected. Initialization and activation failures before an active handle
+is returned remain outside this guarantee, as do unregistered background work and complete host termination.
+
 ## Error and cancellation behavior
 
 Providers and sessions should surface recoverable failures as structured events or command outcomes when possible. Unrecoverable actor failures stop the affected session actor and complete pending replies. Runtime event streams are bounded; callers must not depend on unbounded buffering for UI or plugin responsiveness.

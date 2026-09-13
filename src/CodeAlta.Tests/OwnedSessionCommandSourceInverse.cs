@@ -16,7 +16,7 @@ internal static class OwnedSessionCommandSourceInverse
     internal const string Profile = "CodeAlta.Tests/PluginAuthoringProfileSourceInverse.cs";
 
     internal static string RestoreDiscoveryInput(string path, string source)
-        => path is Host or Options or Runtime or Desktop or Profile ? RestoreCurrentInput(path, source) : source;
+        => path is Host or Options or Runtime or Desktop or Profile ? RestoreCurrentInput(path, source) : PluginAgentEventOwnershipSourceInverse.RestoreDiscoveryInput(path, source);
 
     internal static string RestoreLifetimeInput(string path, string source)
         => path is Lifetime ? RestoreCurrentInput(path, source) : RuntimeFileSearchInvalidationSourceInverse.RestoreLifetimeInput(path, source);
@@ -26,6 +26,7 @@ internal static class OwnedSessionCommandSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        source = PluginAgentEventOwnershipSourceInverse.RestoreOwnerInput(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         foreach (var (before, after, count) in Edits(path))
         {

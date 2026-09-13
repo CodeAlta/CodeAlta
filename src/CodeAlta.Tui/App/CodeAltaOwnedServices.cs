@@ -59,11 +59,11 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         RuntimeService = host.RuntimeService;
         ProjectFileSearchService = host.ProjectFileSearchService;
         CurrentProject = host.CurrentProject;
-        _disposeTask = CreateOwnedServicesDisposal(
+        _disposeTask = PluginEventDependencyBarrier.Wrap(PluginRuntime, CreateOwnedServicesDisposal(
             _host.DisposeAsync,
             _modelsDevCatalogService.DisposeAsync,
             LogManager.Shutdown,
-            ownsLogging);
+            ownsLogging));
     }
 
     public CatalogOptions CatalogOptions { get; }
@@ -187,6 +187,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         }
         catch (Exception creationFailure)
         {
+            await PluginEventDependencyBarrier.BeforeRollbackAsync(
+                sharedHost?.PluginRuntime ?? prestartedPluginRuntime, creationFailure,
+                new object?[] { sharedHost, modelsDevCatalogService, prestartedPluginRuntime }).ConfigureAwait(false);
             await RollbackOwnedServicesCreationAsync(
                 creationFailure,
                 () => sharedHost?.DisposeAsync() ?? ValueTask.CompletedTask,
@@ -211,7 +214,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     /// <exception cref="Exception">A single cleanup stage failed; the original exception is propagated.</exception>
     /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
     /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
-    public ValueTask DisposeAsync() => new(_disposeTask.Value);
+    public ValueTask DisposeAsync() => PluginEventDependencyBarrier.EnterDispose(PluginRuntime, _disposeTask);
 
     /// <summary>
     /// Creates a lazy, single-execution outer cleanup operation from mandatory, caller-supplied operations.

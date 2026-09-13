@@ -458,7 +458,8 @@ public sealed class DeferredCodeAltaAppSourceTests
     // No upward discovery, profile access, localization or logging initialization is performed.
     // Named source reads and existing assembly-level logging are not zero I/O.
     private static string ReadSource(string relativePath)
-        => SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(SourceRoot(), relativePath)));
+        => PluginAgentEventOwnershipSourceInverse.RestoreDeferredInput(relativePath,
+            SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(SourceRoot(), relativePath))));
 
     private static string SourceRoot([CallerFilePath] string sourceFile = "")
         => Path.GetFullPath(Path.Combine(

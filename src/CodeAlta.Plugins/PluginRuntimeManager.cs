@@ -63,7 +63,7 @@ public sealed record PluginRuntimeManagerStartResult
 /// <summary>
 /// Reusable runtime manager that discovers, builds, loads, activates, adapts, and unloads plugins.
 /// </summary>
-public sealed class PluginRuntimeManager : IAsyncDisposable
+public sealed partial class PluginRuntimeManager : IAsyncDisposable
 {
     private readonly PluginContributionRegistry _registry = new();
     private readonly PluginRuntimeDiagnosticStore _diagnostics = new();
@@ -107,6 +107,7 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
     /// <returns>The startup result.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> or its startup feedback is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the authoring profile is invalid, before startup acquires resources.</exception>
+    /// <exception cref="InvalidOperationException">Startup was already admitted, or manager-wide event admission is closed.</exception>
     public async ValueTask<PluginRuntimeManagerStartResult> StartAsync(
         PluginRuntimeManagerOptions options,
         CancellationToken cancellationToken = default)
@@ -116,6 +117,13 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
         PluginAuthoringPolicy.Validate(options.AuthoringProfile);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        PluginRuntimeManagerStartResult? result = null;
+        await RunOwnedStartAsync(async () => result = await StartOwnedCoreAsync(options, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        return result!;
+    }
+
+    private async Task<PluginRuntimeManagerStartResult> StartOwnedCoreAsync(PluginRuntimeManagerOptions options, CancellationToken cancellationToken)
+    {
         var diagnostics = new List<PluginRuntimeDiagnostic>();
         var activePlugins = new List<ActivePluginInstance>();
         var buildResults = new List<PluginBuildResult>();
@@ -168,11 +176,12 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
                     new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory },
                     cancellationToken)
                 .ConfigureAwait(false);
-            diagnostics.AddRange(activation.Diagnostics);
             if (activation.ActivePlugin is not null)
             {
+                OwnActivation(activation.ActivePlugin);
                 activePlugins.Add(activation.ActivePlugin);
             }
+            diagnostics.AddRange(activation.Diagnostics);
         }
 
         var roots = BuildRoots(options).Where(static root => Directory.Exists(root.RootPath)).ToArray();
@@ -196,10 +205,6 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
         async ValueTask<PluginRuntimeManagerStartResult> CompleteStartupAsync(IPluginStartupProgress? liveStatus, CancellationToken token)
         {
             await BuildAndActivateSourcePluginsAsync(liveStatus, token).ConfigureAwait(false);
-            lock (_lock)
-            {
-                _activePlugins.AddRange(activePlugins);
-            }
 
             liveStatus?.MarkActivating();
             var startup = await Adapter.RunStartupAsync(activePlugins, options.RawArguments, CreateAdapterOptions(options), token).ConfigureAwait(false);
@@ -293,43 +298,31 @@ public sealed class PluginRuntimeManager : IAsyncDisposable
                             new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration },
                             token)
                         .ConfigureAwait(false);
-                    diagnostics.AddRange(activation.Diagnostics);
                     if (activation.ActivePlugin is not null)
                     {
+                        OwnActivation(activation.ActivePlugin);
                         activePlugins.Add(activation.ActivePlugin);
                     }
+                    diagnostics.AddRange(activation.Diagnostics);
                 }
             }
         }
     }
 
     /// <summary>Deactivates all active plugins and releases runtime-owned handles.</summary>
+    /// <remarks>Permanently closes event/start admission. Cancellation bounds the caller's wait only.</remarks>
+    /// <exception cref="InvalidOperationException">The caller would await its own startup/event attempt.</exception>
     public async ValueTask DeactivateAllAsync(CancellationToken cancellationToken = default)
     {
-        ActivePluginInstance[] active;
-        lock (_lock)
-        {
-            active = _activePlugins.ToArray();
-            _activePlugins.Clear();
-        }
-
-        foreach (var plugin in active.Reverse())
-        {
-            var diagnostics = await plugin.DeactivateAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
-            _diagnostics.AddRange(diagnostics);
-        }
+        await DeactivateManagerOriginalAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        await DeactivateAllAsync().ConfigureAwait(false);
+        ThrowIfAgentEventSelfJoin();
+        lock (_lock) _disposed = true;
+        return new(DeactivateManagerOriginalAsync());
     }
 
     private static PluginAdapterOperationOptions CreateAdapterOptions(PluginRuntimeManagerOptions options)

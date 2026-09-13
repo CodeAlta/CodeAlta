@@ -14,5 +14,6 @@
     <Compile Include="../CodeAlta.Tests/OwnedSessionNotesSourceInverse.cs" Link="OwnedSessionNotesSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/OwnedSessionUserInputSourceInverse.cs" Link="OwnedSessionUserInputSourceInverse.cs" />
     <Compile Include="../CodeAlta.Tests/RuntimeFileSearchInvalidationSourceInverse.cs" Link="RuntimeFileSearchInvalidationSourceInverse.cs" />
+    <Compile Include="../CodeAlta.Tests/PluginAgentEventOwnershipSourceInverse.cs" Link="PluginAgentEventOwnershipSourceInverse.cs" />
   </ItemGroup>
 </Project>

@@ -33,5 +33,6 @@
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
     <InternalsVisibleTo Include="CodeAlta.Plugins.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 </Project>

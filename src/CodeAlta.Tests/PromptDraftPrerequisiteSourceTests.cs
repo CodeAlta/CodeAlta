@@ -1134,8 +1134,8 @@ public sealed class PromptDraftPrerequisiteSourceTests
         """;
 
     private static string ReadSource(string relativePath)
-        => File.ReadAllText(Path.Combine(SourceRoot(), relativePath))
-            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        => PluginAgentEventOwnershipSourceInverse.RestorePromptInput(relativePath,
+            SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(SourceRoot(), relativePath))));
 
     private static string SourceRoot([CallerFilePath] string sourceFile = "")
         => Path.GetFullPath(Path.Combine(

@@ -1137,8 +1137,8 @@ public sealed class FileEditorWorkspaceCleanupSourceTests
     // publication/admission, controller incomplete startup joins and other lower owners/M2-M7 stay open.
     // Named source reads and existing writerless assembly logging are nonzero I/O, not isolation.
     private static string ReadSource(string relativePath)
-        => File.ReadAllText(Path.Combine(SourceRoot(), relativePath))
-            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        => PluginAgentEventOwnershipSourceInverse.RestoreShellInput(relativePath,
+            SourceTestText.DecodeSource(File.ReadAllBytes(Path.Combine(SourceRoot(), relativePath))));
 
     private static string SourceRoot([CallerFilePath] string sourceFile = "")
         => Path.GetFullPath(Path.Combine(

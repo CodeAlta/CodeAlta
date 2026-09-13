@@ -27,6 +27,7 @@ internal static class PluginGitHubBackendSeparationSourceInverse
 
     internal static string Restore(string path, string source)
     {
+        source = PluginAgentEventOwnershipSourceInverse.RestoreGitHubInput(path, source);
         source = SourceTestText.DecodeSource(new UTF8Encoding(false, true).GetBytes(source));
         source = PluginMcpBackendSeparationSourceInverse.RestoreGitHubInput(path, source);
         foreach (var (before, after) in Edits(path))

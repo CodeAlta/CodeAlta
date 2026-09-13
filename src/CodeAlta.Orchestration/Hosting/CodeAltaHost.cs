@@ -57,14 +57,14 @@ public sealed class CodeAltaHost : IAsyncDisposable
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput);
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
-        _disposeTask = CreateHostDisposal(
+        _disposeTask = PluginEventDependencyBarrier.Wrap(PluginRuntime, CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,
             ModelProviderRegistry.DisposeAsync,
             PluginRuntime.DisposeAsync,
             LogManager.Shutdown,
             ownsPluginRuntime,
-            ownsLogging);
+            ownsLogging));
     }
 
     /// <summary>
@@ -278,6 +278,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         }
         catch (Exception creationFailure)
         {
+            await PluginEventDependencyBarrier.BeforeRollbackAsync(
+                pluginRuntime ?? options.PrestartedPluginRuntime, creationFailure,
+                new object?[] { pluginRuntime, runtimeService, agentHub, modelProviderRegistry, options }).ConfigureAwait(false);
             await RollbackHostCreationAsync(
                 creationFailure,
                 () => runtimeService?.DisposeAsync() ?? ValueTask.CompletedTask,
@@ -409,7 +412,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="Exception">A single cleanup stage failed; the original exception is propagated.</exception>
     /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
     /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
-    public ValueTask DisposeAsync() => new(_disposeTask.Value);
+    public ValueTask DisposeAsync() => PluginEventDependencyBarrier.EnterDispose(PluginRuntime, _disposeTask);
 
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {

@@ -2643,8 +2643,79 @@ requires an exact close-capable command audit and propagated attempt identity; t
 
 The proposed policy is **64 outstanding event attempts per activation, no queued waiters**, explicit
 Capacity/Closing rejection, bounded rejection reporting, and bounded retained retiring generations.
-It is **not approved or implemented**: it adds a delivery-loss boundary. Retaining live dependencies
-after a shutdown timeout likewise changes production semantics even without changing its duration.
-Both decisions must be resolved before the proposed activation/adapter/manager prerequisite can be
-wired; lossless observation would require a different producer/backpressure or durable-delivery
+The user subsequently directed continued implementation and “Proceed” in response to these decisions;
+the parent accepted this policy and narrowly scoped dependency-retention barriers for implementation.
+Neither is yet implemented or qualified at this checkpoint. The policy adds a delivery-loss boundary;
+retaining dependencies after a shutdown timeout changes production semantics even without changing
+its duration. Lossless observation would require a different producer/backpressure or durable-delivery
 contract. No new runtime/plugin tests were executed for this read-only audit.
+
+Implementation is now authorized to the same sole writer, regression-first and source-only until
+parent fixture admission. The boundary includes already-admitted startup and late activations, direct
+normal/rollback cleanup routes, and the TUI barrier before reminder disposal. Manager-wide quiescence
+also closes event admission for a borrowed prestarted manager; this is not per-borrower isolation or
+transfer of disposal ownership. Existing downstream cleanup order remains after a successful barrier.
+Historical source reconstruction and old assertions must remain intact before integration.
+
+The initial source-only handoff now covers thirteen authorized files. Parent independently confirmed
+pre-scheduling and callback-entry lifetime checks, retained activation upstream cancellation, and
+manager joins of early/late/final wrapper outcomes. The handoff is not verification: further parent
+findings concern lost manager unload-diagnostic publication, the main test assembly's logging
+initializer, and fixture cleanup inventory races after an observation deadline. Corrections remain
+with the same writer; no plugin-slice tests or builds have been admitted.
+
+Parent authorized ten additional, blob-anchored gateway/link files for this same prerequisite after
+tracing the recursive readers. Disjoint newest-delta restoration is proposed in the cache,
+OwnedCommand, Profile, GitHub and Mcp inverses, four direct cleanup/draft readers, and the Desktop
+test-project link. The new inverse must restore all eighteen complete inputs to `fb18b27e` before
+older transformations, without hash rebasing or modifying the Reminder/Models/PluginUI readers and
+their actual-byte checks. Final closure audit and execution remain pending; inherited HostOptions
+and Deferred-disposal assertion failures are not authorized repairs. **M4–M6 remain incomplete.**
+
+The manager diagnostic publication correction is now source-reviewed: publication follows successful
+activation deactivation inside the retained manager operation, with a new exact-block source guard.
+It has not executed. The returned-activation boundary remains important: initialization and activation
+hooks run before the active handle exists. Existing handled activation failure can report diagnostics
+while startup succeeds, without establishing a drain for pre-handle background work or acquired
+lifetime/task-service/load-context resources; OCE bypasses the existing filtered cleanup catch.
+Joining manager startup is not qualification of that older failure path.
+
+### M4 bounded plugin ownership prerequisite: verified — 2026-09-13
+
+The approved 23-file implementation now gives each activation 64 occupied agent-event attempts
+and zero queued waiters. Capacity/Closing are explicit delivery rejection, not callback success.
+An attempt retains its original callback and adapter tail before launch; ordinary-exception
+diagnostics, cancellation propagation, exact event/context references and success-only context
+invalidation remain. Instance-owned flowed identities reject self-dependent close before mutation
+or access to memoized close tasks. Suppressed-context and detached cycles are not universally detected.
+
+One retained startup and quiescence operation covers returned early/late activations and their
+control wrappers. Independent cancellation starts before dependent joins. Task admission closes
+before release, with registration before launch and original cancellation/cleanup observers retained.
+Host/outer rollback and frontend shutdown now require successful quiescence before old dependencies
+are released; the frontend barrier precedes reminders. Post-barrier ordering and borrowed-manager
+disposal ownership are preserved. A pending or failed drain retains dependencies, and a caller's
+timeout/cancellation is never termination evidence. Borrowed quiescence remains manager-wide.
+
+Parent independently inspected the complete source/fixtures and ten reader gateways and matched
+all eighteen complete baseline anchors to `fb18b27e`. **28 selected methods passed**, with no skips:
+12 root-free ownership/meta-fixture methods, four inert shutdown/contributed-command methods,
+five new source/inverse methods and seven unchanged cache source regressions. Strict checkout-byte
+decoding, representation variants, unexpected edits, repeated restoration, cache twelve-input and
+older eighteen-input reconstruction, independent Lifecycle routes and the original decoded
+Architecture/Reminder outer PluginUI compositions passed without hash rebasing. All three cached
+Release test-project builds (Plugins, main, Desktop) passed without warnings/errors; the generated
+Desktop RPC contract is current. The first main build found an ambiguous `Command` constructor;
+the sole writer qualified it and the rebuild passed.
+
+The two known inherited failures were separately rerun and remain: PluginUI's HostOptions adjacency
+tuple and Deferred's obsolete `RuntimeService.DisposeAsync` constructor assertion. These are not
+passing preservation claims. Main tests retain the existing assembly logging initializer/cleanup;
+new logger categories touch its global cache, and unexpected dispatcher/callback failure can log.
+No no-emission or zero-I/O guarantee is claimed. The fixtures create no filesystem roots; all prior
+roots remain. No real plugin activation, Host/TUI construction, provider/native/default-profile,
+dependency acquisition, full suite/solution or website/theme acquisition was executed.
+
+This completes a bounded prerequisite only. Runtime plugin observation has not moved, history
+replay is unchanged, and there is no history/live watermark. Pre-handle activation acquisitions,
+noncooperative background work and complete host termination remain unqualified. M4–M6 stay open.

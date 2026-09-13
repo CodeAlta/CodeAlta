@@ -171,6 +171,8 @@ Run `altatui --help` (or `altatui -h`) or `altatui --version` with no additional
 
 All other invocations, including `--plugins-status`, plugin commands, and help combined with other arguments, acquire the shared `~/.alta/alta.lock` before mutable startup. The lock remains held through application, plugin, and logging cleanup. If admission fails, the command reports an error without starting plugins. Access-denied or other unexpected owner-inspection errors are not treated as evidence that the owner has exited; startup conservatively refuses to reclaim that lock. Close the existing instance before retrying; do not delete an active instance's lock file.
 
+Plugin agent-event observation has a limit of 64 outstanding callbacks per activation, with no waiting queue. Events rejected because a plugin is full or closing are not delivered to it. Shutdown waits for admitted work before releasing its dependencies; a timeout or failed drain does not make those dependencies safe to release. A noncooperative plugin can therefore prevent shutdown from completing. This does not provide event replay or complete Desktop plugin parity.
+
 ## Terminal font requirement
 
 > [!IMPORTANT]

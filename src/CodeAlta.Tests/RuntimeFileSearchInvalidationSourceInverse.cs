@@ -19,10 +19,11 @@ internal static class RuntimeFileSearchInvalidationSourceInverse
     internal static string RestoreInput(string path, string source) => Paths.Contains(path) ? Restore(path, source) : source;
     // Architecture is restored at the validated direct-read boundary. Reminder's own changed source
     // is restored only in dependent historical routes; do not pre-restore Host/Runtime here twice.
-    internal static string RestoreArchitectureInput(string path, string source) => path == Architecture ? Restore(path, source) : source;
-    internal static string RestoreLifetimeInput(string path, string source) => path is Architecture or Reminder ? Restore(path, source) : source;
+    internal static string RestoreArchitectureInput(string path, string source) => path == Architecture ? Restore(path, source) : PluginAgentEventOwnershipSourceInverse.RestoreArchitectureInput(path, source);
+    internal static string RestoreLifetimeInput(string path, string source) => path is Architecture or Reminder ? Restore(path, source) : PluginAgentEventOwnershipSourceInverse.RestoreLifetimeInput(path, source);
     internal static string Restore(string path, string source)
     {
+        source = PluginAgentEventOwnershipSourceInverse.RestoreCacheInput(path, source);
         source = SourceTestText.Canonicalize(source);
         foreach (var (before, after, count) in Edits(path))
         {

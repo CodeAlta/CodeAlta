@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using CodeAlta.LiveTool;
+using CodeAlta.Plugins;
 using XenoAtom.Terminal;
 using XenoAtom.Terminal.UI;
 
@@ -22,11 +23,18 @@ internal sealed class ShellFrontendHost : IAsyncDisposable
 {
     private readonly IShellFrontendHostLifecycle _lifecycle;
     private AltaReminderService? _reminders;
+    private readonly PluginRuntimeManager? _pluginRuntime;
+    private readonly Lazy<Task> _disposeTask;
 
     public ShellFrontendHost(IShellFrontendHostLifecycle lifecycle)
     {
         ArgumentNullException.ThrowIfNull(lifecycle);
         _lifecycle = lifecycle;
+        _pluginRuntime = (lifecycle.OwnedServices as CodeAltaOwnedServices)?.PluginRuntime;
+        _disposeTask = PluginEventDependencyBarrier.Wrap(_pluginRuntime,
+            new Lazy<Task>(() => DisposeRemindersThenFrontendAsync(
+                () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
+                DisposeFrontendAndOwnedServicesAsync)));
     }
 
     internal void OwnReminders(AltaReminderService reminders)
@@ -53,10 +61,7 @@ internal sealed class ShellFrontendHost : IAsyncDisposable
     public TerminalLoopResult Tick(CancellationToken cancellationToken)
         => _lifecycle.Tick(cancellationToken);
 
-    public async ValueTask DisposeAsync()
-        => await DisposeRemindersThenFrontendAsync(
-            () => _reminders?.DisposeAsync() ?? ValueTask.CompletedTask,
-            DisposeFrontendAndOwnedServicesAsync);
+    public ValueTask DisposeAsync() => PluginEventDependencyBarrier.EnterDispose(_pluginRuntime, _disposeTask);
 
     internal static Task DisposeRemindersThenFrontendAsync(
         Func<ValueTask> disposeReminders,

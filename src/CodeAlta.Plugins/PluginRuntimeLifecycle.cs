@@ -6,9 +6,9 @@ namespace CodeAlta.Plugins;
 /// <summary>
 /// Describes one active plugin instance.
 /// </summary>
-public sealed class ActivePluginInstance : IAsyncDisposable
+public sealed partial class ActivePluginInstance : IAsyncDisposable
 {
-    private readonly CancellationTokenSource _lifetime;
+    private readonly PluginActivationLifetime _lifetime;
     private readonly PluginContributionRegistry _contributionRegistry;
     private readonly PluginRuntimeTaskService _taskService;
     private PluginBase? _instance;
@@ -23,7 +23,7 @@ public sealed class ActivePluginInstance : IAsyncDisposable
         IReadOnlyList<PluginContributionRegistration> contributions,
         PluginContributionRegistry contributionRegistry,
         PluginRuntimeTaskService taskService,
-        CancellationTokenSource lifetime)
+        PluginActivationLifetime lifetime)
     {
         _instance = instance;
         Descriptor = descriptor;
@@ -63,63 +63,15 @@ public sealed class ActivePluginInstance : IAsyncDisposable
     /// <summary>
     /// Deactivates the plugin instance and removes its contributions.
     /// </summary>
-    /// <param name="timeout">The bounded deactivation timeout.</param>
-    /// <param name="cancellationToken">A token to cancel deactivation.</param>
+    /// <param name="timeout">Bounds only this caller's wait, never the retained original or dependency lifetime.</param>
+    /// <param name="cancellationToken">Cancels only this caller's wait.</param>
     /// <returns>Runtime diagnostics raised during deactivation.</returns>
-    public async ValueTask<IReadOnlyList<PluginRuntimeDiagnostic>> DeactivateAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
-    {
-        if (State is PluginRuntimeState.Deactivated or PluginRuntimeState.Unloaded)
-        {
-            return [];
-        }
-
-        var diagnostics = await DeactivateManagedAsync(timeout, cancellationToken).ConfigureAwait(false);
-        VerifyUnload(diagnostics);
-        return diagnostics;
-    }
-
-    private async ValueTask<List<PluginRuntimeDiagnostic>> DeactivateManagedAsync(TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        State = PluginRuntimeState.Deactivating;
-        var diagnostics = new List<PluginRuntimeDiagnostic>();
-        _contributionRegistry.RemoveByPlugin(Descriptor.RuntimeKey);
-        Contributions = [];
-        _lifetime.Cancel();
-        _taskService.CancelAll();
-
-        using var timeoutSource = new CancellationTokenSource(timeout);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutSource.Token, cancellationToken);
-        try
-        {
-            await _taskService.WhenIdleAsync(linked.Token).ConfigureAwait(false);
-            await DeactivatePluginInstanceAsync(_instance, linked.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
-        {
-            diagnostics.Add(PluginRuntimeDiagnostic.Warning(
-                PluginRuntimeDiagnosticSource.Unload,
-                "Plugin deactivation timed out.",
-                SourcePackage?.PackageId,
-                SourcePackage?.PackageDirectory));
-        }
-        catch (Exception ex)
-        {
-            diagnostics.Add(PluginRuntimeDiagnostic.Error(
-                PluginRuntimeDiagnosticSource.Unload,
-                $"Plugin deactivation failed: {ex.Message}",
-                SourcePackage?.PackageId,
-                SourcePackage?.PackageDirectory,
-                ex));
-        }
-        finally
-        {
-            RuntimeContext.Invalidate();
-            State = PluginRuntimeState.Deactivated;
-            _instance = null;
-        }
-
-        return diagnostics;
-    }
+    /// <exception cref="InvalidOperationException">The caller would join its own outstanding event attempt.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The timeout is invalid.</exception>
+    /// <exception cref="OperationCanceledException">The caller's wait was cancelled.</exception>
+    /// <exception cref="Exception">The retained prerequisite or deactivation failed; dependencies are retained.</exception>
+    public ValueTask<IReadOnlyList<PluginRuntimeDiagnostic>> DeactivateAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+        => WaitDeactivationAsync(timeout, cancellationToken);
 
     private void VerifyUnload(List<PluginRuntimeDiagnostic> diagnostics)
     {
@@ -156,11 +108,7 @@ public sealed class ActivePluginInstance : IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        await DeactivateAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-        _lifetime.Dispose();
-    }
+    public ValueTask DisposeAsync() => new(DeactivateOriginalAsync());
 }
 
 /// <summary>
@@ -250,7 +198,7 @@ public sealed class PluginRuntimeActivator
             }
 
             var logger = LogManager.GetLogger($"CodeAlta.Plugin.{discoveredType.Descriptor.RuntimeKey}");
-            var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var lifetime = new PluginActivationLifetime(cancellationToken);
             var taskService = new PluginRuntimeTaskService(lifetime.Token);
             var services = new PluginRuntimeServices(
                 logger,

@@ -11,6 +11,8 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
     private readonly object _gate = new();
     private readonly CancellationToken _lifetimeCancellationToken;
     private readonly List<TrackedPluginTask> _runningTasks = [];
+    private bool _closed;
+    private PluginOwnedOperation? _close;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginRuntimeTaskService"/> class.
@@ -54,29 +56,17 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
         ArgumentNullException.ThrowIfNull(work);
 
         options ??= new PluginTaskOptions();
-        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellationToken);
-        var task = StartTask(work, cancellationTokenSource.Token, options.LongRunning);
-        var handle = new PluginTaskHandle(
-            name,
-            options.Description,
-            options.LongRunning,
-            DateTimeOffset.UtcNow,
-            task,
-            () => RequestCancellation(cancellationTokenSource));
-        var tracked = new TrackedPluginTask(handle, cancellationTokenSource);
-
+        TrackedPluginTask tracked;
         lock (_gate)
         {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            RemoveCompletedTasks();
+            tracked = new TrackedPluginTask(this, name, work, options);
             _runningTasks.Add(tracked);
         }
 
-        _ = task.ContinueWith(
-            _ => Complete(tracked),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-
-        return handle;
+        tracked.Launch();
+        return tracked.Handle;
     }
 
     /// <inheritdoc />
@@ -84,7 +74,7 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
     {
         while (true)
         {
-            Task[] runningTasks;
+            PluginOwnedOperation[] runningTasks;
             lock (_gate)
             {
                 RemoveCompletedTasks();
@@ -93,21 +83,11 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
                     return;
                 }
 
-                runningTasks = [.. _runningTasks.Select(static task => task.Handle.Completion)];
+                runningTasks = [.. _runningTasks.Select(static task => task.Cleanup)];
             }
 
-            try
-            {
-                await Task.WhenAll(runningTasks).WaitAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch
-            {
-                // Completion failures are surfaced through PluginTaskHandle.Completion. Idle waits only gate unload.
-            }
+            // Work faults remain on the handle. Cancellation-cleanup faults prohibit lifetime release.
+            await PluginOwnedOperation.JoinAsync(runningTasks).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -125,8 +105,24 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
 
         foreach (var task in runningTasks)
         {
-            RequestCancellation(task.CancellationTokenSource);
+            task.RequestCancellation();
         }
+    }
+
+    internal Task CloseForReleaseAsync()
+    {
+        PluginOwnedOperation close;
+        lock (_gate)
+        {
+            _closed = true;
+            close = _close ??= new PluginOwnedOperation(async () =>
+            {
+                CancelAll();
+                await WhenIdleAsync().ConfigureAwait(false);
+            });
+        }
+        close.Launch();
+        return close.Work;
     }
 
     private static Task StartTask(Func<CancellationToken, ValueTask> work, CancellationToken cancellationToken, bool longRunning)
@@ -146,46 +142,80 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
         await state.Work(state.CancellationToken).ConfigureAwait(false);
     }
 
-    private static void RequestCancellation(CancellationTokenSource cancellationTokenSource)
-    {
-        try
-        {
-            cancellationTokenSource.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // The task has already completed and the tracker has released its cancellation source.
-        }
-    }
-
-    private void Complete(TrackedPluginTask task)
-    {
-        lock (_gate)
-        {
-            _runningTasks.Remove(task);
-        }
-
-        task.CancellationTokenSource.Dispose();
-    }
-
     private void RemoveCompletedTasks()
     {
+        // Metadata only: both original cleanup and its observer are terminal before retirement.
         for (var index = _runningTasks.Count - 1; index >= 0; index--)
         {
-            if (!_runningTasks[index].Handle.IsCompleted)
-            {
-                continue;
-            }
-
-            var task = _runningTasks[index];
-            _runningTasks.RemoveAt(index);
-            task.CancellationTokenSource.Dispose();
+            var outcome = _runningTasks[index].Cleanup.Outcome;
+            if (outcome.IsCompletedSuccessfully && outcome.Result is null) _runningTasks.RemoveAt(index);
         }
     }
 
     private readonly record struct WorkState(Func<CancellationToken, ValueTask> Work, CancellationToken CancellationToken);
 
-    private sealed record TrackedPluginTask(PluginTaskHandle Handle, CancellationTokenSource CancellationTokenSource);
+    private sealed class TrackedPluginTask
+    {
+        private readonly object _gate = new();
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly PluginRuntimeTaskService _owner;
+        private readonly PluginOwnedOperation _work;
+        private PluginOwnedOperation? _cancel;
+        private bool _completed;
+
+        internal TrackedPluginTask(PluginRuntimeTaskService owner, string name, Func<CancellationToken, ValueTask> work, PluginTaskOptions options)
+        {
+            _owner = owner;
+            _work = new PluginOwnedOperation(async () =>
+            {
+                // Do not use a linked CTS whose synchronous propagation can run plugin control callbacks.
+                using var registration = owner._lifetimeCancellationToken.UnsafeRegister(static state => ((TrackedPluginTask)state!).RequestCancellation(), this);
+                owner._lifetimeCancellationToken.ThrowIfCancellationRequested();
+                await StartTask(async token =>
+                {
+                    // Async control propagation is not the entry gate: recheck lifetime at actual callback entry.
+                    owner._lifetimeCancellationToken.ThrowIfCancellationRequested();
+                    token.ThrowIfCancellationRequested();
+                    await work(token).ConfigureAwait(false);
+                }, _cancellation.Token, options.LongRunning).ConfigureAwait(false);
+            });
+            Handle = new PluginTaskHandle(name, options.Description, options.LongRunning, DateTimeOffset.UtcNow, _work.Work, RequestCancellation);
+            Cleanup = new PluginOwnedOperation(CleanupAsync);
+        }
+
+        internal PluginTaskHandle Handle { get; }
+        internal PluginOwnedOperation Cleanup { get; }
+        internal void Launch() { Cleanup.Launch(); _work.Launch(); }
+
+        internal void RequestCancellation()
+        {
+            PluginOwnedOperation cancel;
+            lock (_gate)
+            {
+                if (_completed) return;
+                cancel = _cancel ??= new PluginOwnedOperation(_cancellation.CancelAsync);
+            }
+            cancel.Launch();
+        }
+
+        private async Task CleanupAsync()
+        {
+            await _work.Outcome.ConfigureAwait(false);
+            PluginOwnedOperation? cancel;
+            lock (_gate) { _completed = true; cancel = _cancel; }
+            try
+            {
+                if (cancel is not null) await PluginOwnedOperation.JoinAsync([cancel]).ConfigureAwait(false);
+                _cancellation.Dispose();
+            }
+            catch
+            {
+                // Retain the failed control and CTS and refuse further work. Idle cannot authorize release.
+                lock (_owner._gate) _owner._closed = true;
+                throw;
+            }
+        }
+    }
 }
 
 internal sealed class PluginRuntimeServices : IPluginServices
