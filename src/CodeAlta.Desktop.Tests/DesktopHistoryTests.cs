@@ -133,12 +133,27 @@ public sealed class DesktopHistoryTests
         Assert.AreEqual("ok", response.Status);
         Assert.AreEqual(100, response.Entries.Length);
         Assert.IsTrue(response.Entries.All(value => value.TextTruncated));
+        Assert.IsTrue(response.Entries.All(value => value.Text!.Length > 512));
         Assert.AreEqual("9007199254740992", response.Next!.Offset);
         Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.HistoryResponse).Length < 768 * 1024);
         var surrogate = WorkspaceService.ProjectHistory(new([new(0,
             new AgentContentCompletedEvent(new("p"), "runtime", DateTimeOffset.UnixEpoch, null,
-                AgentContentKind.Assistant, "content", null, new string('a', 511) + "😀z"))], null, false));
-        Assert.AreEqual(511, surrogate.Entries.Single().Text!.Length);
+                AgentContentKind.Assistant, "content", null, new string('a', 32_767) + "😀z"))], null, false));
+        Assert.AreEqual(32_767, surrogate.Entries.Single().Text!.Length);
         Assert.IsTrue(surrogate.Entries.Single().TextTruncated);
+    }
+
+    [TestMethod]
+    public void Projection_PreservesUsefulMarkdownWithinTheBoundedResponse()
+    {
+        var markdown = "# Result\n\n" + string.Join('\n', Enumerable.Range(0, 400).Select(index => $"- item {index}"));
+        var response = WorkspaceService.ProjectHistory(new([new(0,
+            new AgentContentCompletedEvent(new("p"), "runtime", DateTimeOffset.UnixEpoch, null,
+                AgentContentKind.Assistant, "content", null, markdown))], null, false));
+
+        Assert.AreEqual("ok", response.Status);
+        Assert.AreEqual(markdown, response.Entries.Single().Text);
+        Assert.IsFalse(response.Entries.Single().TextTruncated);
+        Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.HistoryResponse).Length < 768 * 1024);
     }
 }

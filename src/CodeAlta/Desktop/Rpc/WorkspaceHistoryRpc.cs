@@ -121,7 +121,10 @@ internal sealed partial class WorkspaceService
             }
             var shortened = false;
             name = Preview(name, 256, ref shortened);
-            text = Preview(text, 512, ref shortened);
+            var rowsRemaining = page.Entries.Count - rows.Count;
+            var rowBudget = remaining / rowsRemaining;
+            var textBudget = Math.Max(0, rowBudget - 1024 - identityCost - 6 * (name?.Length ?? 0));
+            text = Preview(text, Math.Min(32 * 1024, textBudget / 6), ref shortened);
             var cost = 1024 + identityCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0));
             if (cost > remaining) return Failure("wire_limit");
             remaining -= cost;
@@ -144,6 +147,7 @@ internal sealed partial class WorkspaceService
         ValidateUnicode(value);
         if (value.Length <= limit) return value;
         shortened = true;
+        if (limit == 0) return string.Empty;
         return value[..(char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit)];
     }
 

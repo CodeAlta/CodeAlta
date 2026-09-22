@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from "react";
+import { StrictMode, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -22,11 +22,14 @@ import { NotesPanel } from "./NotesPanel";
 import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
+import { MarkdownContent } from "./MarkdownContent";
+import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 type View = "workspace" | "configuration";
 type Theme = "dark" | "light";
+const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
   const [status, setStatus] = useState<BootStatus>();
@@ -56,10 +59,22 @@ function App() {
     request => sessionUserInput.cancel(request, { timeoutMilliseconds: 8000 })));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
+  const workspaceShell = useRef<HTMLDivElement>(null);
+  const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    persistPaneLayout(value => localStorage.setItem(paneLayoutStorageKey, value), paneLayout);
+  }, [paneLayout]);
+
+  useEffect(() => {
+    const constrain = () => setPaneLayout(current => constrainPaneLayout(current, workspaceShell.current?.clientWidth ?? window.innerWidth));
+    window.addEventListener("resize", constrain);
+    return () => window.removeEventListener("resize", constrain);
+  }, []);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -103,6 +118,14 @@ function App() {
     setView("workspace");
   }
 
+  function changePane(pane: PaneName, delta: number) {
+    setPaneLayout(current => resizePane(current, pane, delta, workspaceShell.current?.clientWidth ?? window.innerWidth));
+  }
+
+  function resetPane(pane: PaneName) {
+    setPaneLayout(current => constrainPaneLayout({ ...current, [pane]: defaultPaneLayout[pane] }, workspaceShell.current?.clientWidth ?? window.innerWidth));
+  }
+
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small></div>
@@ -118,7 +141,10 @@ function App() {
 
     {view === "configuration"
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} />
-      : <div className="workspace-shell">
+      : <div className="workspace-shell" ref={workspaceShell} style={{
+          "--project-pane-width": `${paneLayout.projects}px`,
+          "--session-pane-width": `${paneLayout.sessions}px`,
+        } as CSSProperties}>
         <aside className="project-rail" aria-label="Projects">
           <div className="panel-title"><span>Projects</span><span className="count">{snapshot?.projects.length ?? 0}</span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
@@ -137,9 +163,11 @@ function App() {
           </div>
         </aside>
 
+        <PaneSplitter label="Resize projects" value={paneLayout.projects} onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
+
         <aside className="session-rail" aria-label="Sessions">
           <div className="session-rail-header">
-            <div><span className="eyebrow">Workspace</span><h2>{selectedProject?.name ?? "Global"}</h2></div>
+            <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Global"}</h2></div>
             <button type="button" className="icon-button" title="Refresh by relaunching the current desktop host" disabled>＋</button>
           </div>
           <label className="search"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
@@ -152,6 +180,8 @@ function App() {
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{search ? "No matching sessions." : "No sessions in this project."}</div>}
           </div>
         </aside>
+
+        <PaneSplitter label="Resize sessions" value={paneLayout.sessions} onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />
 
         <main className="content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
@@ -292,7 +322,7 @@ function History({ sessionId }: { sessionId: string }) {
       {page?.entries.map(entry => <article key={entry.offset} className={`message message-${entry.kind?.toLowerCase() === "user" ? "user" : "assistant"}`}>
         <div className="avatar">{entry.kind?.toLowerCase() === "user" ? "You" : "A"}</div><div className="message-body">
           <div className="message-heading"><strong>{entry.kind ?? entry.eventType}</strong><time>{formatTimestamp(entry.timestamp)}</time></div>
-          {entry.name && <p><strong>{entry.name}</strong></p>}{entry.text !== null && <pre>{entry.text}</pre>}
+          {entry.name && <p><strong>{entry.name}</strong></p>}{entry.text !== null && <MarkdownContent source={entry.text} />}
           {(entry.textTruncated || entry.bodyOmitted) && <p className="muted-text">Some persisted content is not included in this preview.</p>}
           <details className="event-meta"><summary>Event metadata</summary><code>{entry.eventType} · byte {entry.offset} · {entry.providerId}</code></details>
         </div>
@@ -305,6 +335,41 @@ function History({ sessionId }: { sessionId: string }) {
 function formatTimestamp(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function PaneSplitter({ label, value, onResize, onReset }: {
+  label: string;
+  value: number;
+  onResize: (delta: number) => void;
+  onReset: () => void;
+}) {
+  const lastX = useRef<number | undefined>(undefined);
+  function pointerDown(event: PointerEvent<HTMLDivElement>) {
+    lastX.current = event.clientX;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function pointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (lastX.current === undefined || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const delta = event.clientX - lastX.current;
+    lastX.current = event.clientX;
+    onResize(delta);
+  }
+  function pointerEnd(event: PointerEvent<HTMLDivElement>) {
+    lastX.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  function keyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      onResize(event.key === "ArrowLeft" ? -16 : 16);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      onReset();
+    }
+  }
+  return <div className="pane-splitter" role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value}
+    tabIndex={0} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
+    onDoubleClick={onReset} onKeyDown={keyDown}><span /></div>;
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);

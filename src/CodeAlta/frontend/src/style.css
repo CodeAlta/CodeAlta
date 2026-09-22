@@ -56,8 +56,13 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 .connection-live .connection-dot, .connection-readonly .connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
 .connection-error .connection-dot { background: var(--red); }
 
-.workspace-shell { display: grid; grid-template-columns: 240px 310px minmax(480px, 1fr); height: calc(100vh - 58px); }
-.project-rail, .session-rail { min-width: 0; background: var(--panel); border-right: 1px solid var(--line); }
+.workspace-shell { display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px var(--session-pane-width, 310px) 8px minmax(480px, 1fr); height: calc(100vh - 58px); }
+.project-rail, .session-rail { min-width: 0; background: var(--panel); }
+.pane-splitter { position: relative; z-index: 2; width: 8px; cursor: col-resize; touch-action: none; background: var(--line); }
+.pane-splitter::before { content: ""; position: absolute; inset: 0 -3px; }
+.pane-splitter span { position: absolute; top: 50%; left: 2px; width: 4px; height: 38px; border-radius: 3px; background: transparent; transform: translateY(-50%); }
+.pane-splitter:hover span, .pane-splitter:focus-visible span { background: var(--accent); }
+.pane-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .project-rail { display: flex; flex-direction: column; padding: 18px 12px 12px; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; padding: 0 9px 12px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .count { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--panel-3); color: var(--muted); }
@@ -124,6 +129,24 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .message strong { font-size: 12px; }
 .message p { margin: 7px 0 0; color: color-mix(in srgb, var(--text) 91%, var(--muted)); line-height: 1.65; white-space: pre-wrap; }
 .message pre { margin: 8px 0 0; max-width: 100%; overflow-x: auto; color: var(--text); font: inherit; line-height: 1.65; white-space: pre-wrap; }
+.markdown-content { min-width: 0; overflow-wrap: anywhere; color: color-mix(in srgb, var(--text) 91%, var(--muted)); line-height: 1.65; }
+.markdown-content > :first-child { margin-top: 7px; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 { margin: 18px 0 8px; color: var(--text); line-height: 1.25; }
+.markdown-content h1 { font-size: 20px; }
+.markdown-content h2 { font-size: 17px; }
+.markdown-content h3, .markdown-content h4 { font-size: 14px; }
+.markdown-content ul, .markdown-content ol { margin: 8px 0; padding-left: 24px; }
+.markdown-content li + li { margin-top: 3px; }
+.markdown-content blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--accent); color: var(--muted); }
+.markdown-content code { padding: 1px 4px; border-radius: 4px; background: var(--panel-3); font-size: .92em; }
+.markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; font-size: 12px; white-space: pre; }
+.markdown-content pre code { padding: 0; background: transparent; font-size: inherit; }
+.markdown-content table { width: 100%; margin: 10px 0; border-collapse: collapse; font-size: 12px; }
+.markdown-content th, .markdown-content td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; }
+.markdown-content th { background: var(--panel-2); }
+.markdown-content a { color: var(--accent); }
+.markdown-content hr { border: 0; border-top: 1px solid var(--line); }
 .message-heading { display: flex; justify-content: space-between; gap: 10px; }
 .message-heading time { color: var(--muted); font-size: 11px; }
 .event-meta { margin-top: 9px; color: var(--muted); font-size: 11px; }
@@ -183,7 +206,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
   body { overflow: auto; }
   .topbar { grid-template-columns: 1fr auto; }
   .topnav { order: 3; grid-column: 1 / -1; justify-self: center; transform: translateY(-45px); }
-  .workspace-shell { grid-template-columns: 74px 260px minmax(400px, 1fr); }
+  .workspace-shell { grid-template-columns: 74px 8px var(--session-pane-width, 260px) 8px minmax(400px, 1fr); }
   .project-rail { padding-inline: 8px; }
   .project-rail .panel-title, .project-rail .nav-list button > span:last-child, .rail-footer { display: none; }
   .nav-list button { justify-content: center; padding: 8px; }
@@ -195,6 +218,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
   .topnav { position: fixed; z-index: 6; right: 10px; bottom: 10px; order: initial; grid-column: auto; transform: none; box-shadow: var(--shadow); }
   .connection { display: none; }
   .workspace-shell { display: block; height: auto; }
+  .pane-splitter { display: none; }
   .project-rail { display: none; }
   .session-rail { height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
   .session-list { display: flex; gap: 7px; overflow-x: auto; }

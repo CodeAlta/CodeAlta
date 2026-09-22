@@ -15,6 +15,8 @@
     "@codemirror/view": "6.43.11",
     "@neoastra/client": "file:../obj/neoastra/client",
     "@radix-ui/react-dialog": "1.1.23",
+    "dompurify": "3.4.14",
+    "marked": "16.4.2",
     "mermaid": "11.17.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"

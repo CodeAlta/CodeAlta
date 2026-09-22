@@ -2816,3 +2816,27 @@ The desktop project also no longer overrides `BaseOutputPath` or `BaseIntermedia
 New builds use standard SDK locations such as `bin/Debug/net10.0` and `obj/Debug/net10.0`; generated
 NeoAstra contracts remain under `obj/neoastra`. Existing stale `bin/desktop` or `obj/desktop` build
 artifacts are not runtime inputs and may be removed by the developer.
+
+### Persisted Markdown and resizable navigation — 2026-09-22
+
+Persisted timeline rows now retain up to 32 KiB of text per event while staying inside the existing
+bounded response budget. The desktop renders that text as GFM (including headings, lists, tables and
+fenced code), escapes raw Markdown HTML and sanitizes the generated result before inserting it into the
+document. This is the first transcript presentation slice, not Shiki highlighting, virtualization,
+stream/history reconciliation or mounted malicious-content qualification.
+
+Project and session navigation now have constrained pointer- and keyboard-operable separators with
+reset behavior. Committed widths are restored from the desktop WebView profile, which remains beneath
+the platform-local `CodeAlta/desktop` root; malformed, unavailable or full browser storage falls back
+without preventing startup. No `.alta` schema or file is added or changed by this UI state. A later
+slice still needs the selected shared panel library/backend UI-state owner, logical tabs and native
+drop handling.
+
+Behavioral frontend coverage passes all **139 tests**, including Markdown output/HTML inertness and
+pane constraints/storage failures. The frontend production TypeScript/Vite build and the focused
+Desktop project pass (**139 passed, 21 intentionally skipped source-shape checks**). The actual Debug
+desktop build with frontend assets succeeds with zero warnings/errors, and a no-argument Windows
+WebView process remained running for an eight-second startup smoke before explicit test termination.
+The obsolete frontend entrypoint source-text test was removed rather than updated to encode another
+implementation-shape contract. No mounted interaction, real-provider submission, broad solution test,
+website build or M7 qualification is claimed.
