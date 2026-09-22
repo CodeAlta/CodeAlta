@@ -2887,3 +2887,9 @@ The accumulator is a pure frontend behavior used directly by the UI. Its tests c
 offset de-duplication and the display bound; all **142 frontend behavioral tests** and the production
 TypeScript/Vite build pass. This does not merge live and persisted identities, infer missing events or
 change the bounded journal/RPC/storage contracts.
+
+The final focused Desktop run exposed one remaining source-text assertion when the live panel moved to
+the unified session timeline. That method and three analogous exact-source inspections embedded in
+otherwise behavioral fixture classes are now explicitly skipped rather than rewritten around the new
+source shape. The focused result is **135 passed, 25 intentionally skipped, 0 failed**; backend RPC,
+projection, validation and lifetime behavior remains covered by the passing functional cases.

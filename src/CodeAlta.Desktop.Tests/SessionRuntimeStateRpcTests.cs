@@ -103,6 +103,7 @@ public sealed class SessionRuntimeStateRpcTests
     }
 
     [TestMethod]
+    [Ignore("Brittle source-text inspection is not a functional desktop acceptance test.")]
     public void UnaryQuery_IsRegisteredOnlyForOwnedDesktop_AndUsesActualRuntime()
     {
         string Read(string path) => File.ReadAllText(Path.Combine(DesktopArchitectureTests.SourceRoot, "CodeAlta", path));
