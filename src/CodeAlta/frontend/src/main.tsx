@@ -6,7 +6,7 @@ import {
   type ConfigurationSnapshot, type WorkspaceSession,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
-import { loadHistory, historyMessage, type HistoryState } from "./history";
+import { loadHistory, historyMessage, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
@@ -323,21 +323,26 @@ function shortPath(path: string) { const parts = path.replaceAll("\\", "/").spli
 function History({ sessionId }: { sessionId: string }) {
   const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
   const [state, setState] = useState<HistoryState>();
+  const [timeline, setTimeline] = useState<HistoryTimeline>();
   useEffect(() => {
     const abort = new AbortController();
-    void loadHistory(workspace.history, request, abort.signal, setState);
+    void loadHistory(workspace.history, request, abort.signal, value => {
+      setState(value);
+      if (value.kind === "ready") setTimeline(current => mergeHistoryPage(current, value.request, value.page));
+      else if (value.kind === "error" && value.code === "history_changed") setTimeline(undefined);
+    });
     return () => abort.abort();
   }, [request]);
   const current = state?.request === request ? state : undefined;
-  const page = current?.kind === "ready" ? current.page : undefined;
   return <section className="conversation history" aria-labelledby="history-heading">
-    <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button" onClick={() => setRequest({ sessionId, cursor: null })}>Refresh</button></div>
+    <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}>Refresh</button></div>
     {(!current || current.kind === "loading") && <p role="status">Loading persisted history…</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
-    {page?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
-    {page?.entries.length === 0 && <div className="empty-history">No visible events in this page.</div>}
+    {timeline?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
+    {timeline?.limitReached && <div role="status" className="banner">The timeline reached its 1,000-event display limit. Refresh to restart from the beginning.</div>}
+    {timeline?.entries.length === 0 && <div className="empty-history">No visible events in this history.</div>}
     <div className="messages">
-      {page?.entries.map(entry => <article key={entry.offset} className={`message message-${entry.kind?.toLowerCase() === "user" ? "user" : "assistant"}`}>
+      {timeline?.entries.map(entry => <article key={entry.offset} className={`message message-${entry.kind?.toLowerCase() === "user" ? "user" : "assistant"}`}>
         <div className="avatar">{entry.kind?.toLowerCase() === "user" ? "You" : "A"}</div><div className="message-body">
           <div className="message-heading"><strong>{entry.kind ?? entry.eventType}</strong><time>{formatTimestamp(entry.timestamp)}</time></div>
           {entry.name && <p><strong>{entry.name}</strong></p>}{entry.text !== null && <MarkdownContent source={entry.text} />}
@@ -346,7 +351,7 @@ function History({ sessionId }: { sessionId: string }) {
         </div>
       </article>)}
     </div>
-    {page?.next && <button type="button" className="load-more" onClick={() => setRequest({ sessionId, cursor: page.next })}>Load more history</button>}
+    {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}>Load more history</button>}
   </section>;
 }
 

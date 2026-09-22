@@ -5,6 +5,40 @@ export type HistoryState =
   | { kind: "ready"; request: HistoryRequest; page: HistoryResponse }
   | { kind: "error"; request: HistoryRequest; code: string };
 
+export type HistoryTimeline = Readonly<{
+  sessionId: string;
+  entries: HistoryResponse["entries"];
+  next: HistoryResponse["next"];
+  tailOmitted: boolean;
+  limitReached: boolean;
+}>;
+
+const maximumTimelineEntries = 1000;
+
+export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: HistoryResponse): HistoryTimeline {
+  const retained = request.cursor !== null && previous?.sessionId === request.sessionId ? previous : undefined;
+  const accumulated = retained?.entries ?? [];
+  const offsets = new Set(accumulated.map(entry => entry.offset));
+  const entries = [...accumulated];
+  for (const entry of page.entries) {
+    if (!offsets.has(entry.offset)) {
+      offsets.add(entry.offset);
+      entries.push(entry);
+    }
+  }
+  const limitReached = retained?.limitReached === true
+    || entries.length > maximumTimelineEntries
+    || (entries.length === maximumTimelineEntries && page.next !== null);
+  if (entries.length > maximumTimelineEntries) entries.length = maximumTimelineEntries;
+  return {
+    sessionId: request.sessionId,
+    entries,
+    next: limitReached ? null : page.next,
+    tailOmitted: retained?.tailOmitted === true || page.tailOmitted,
+    limitReached,
+  };
+}
+
 export async function loadHistory(
   invoke: (request: HistoryRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<HistoryResponse>,
   request: HistoryRequest,

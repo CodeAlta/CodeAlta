@@ -2873,3 +2873,17 @@ Two new functional tests exercise scope boundaries, multi-term matching, normali
 results through the same filtering helper used by React. All **141 frontend behavioral tests** and the
 production TypeScript/Vite build pass. Permissions, account/auth and model management, prompt/skill/
 plugin mutation, dirty-state persistence and backend-validated saves remain open M6 work.
+
+### Accumulated persisted timeline paging — 2026-09-22
+
+Loading another persisted-history page now appends distinct journal offsets to the visible timeline
+instead of replacing the conversation with only the latest page. Empty pages retain continuation,
+explicit refresh starts over, a changed journal clears the stale accumulated view, and failures on later
+pages do not silently erase already displayed rows. The renderer stops at 1,000 events with an explicit
+notice rather than allowing unbounded browser memory growth; virtualization remains required for fuller
+history navigation.
+
+The accumulator is a pure frontend behavior used directly by the UI. Its tests cover append, restart,
+offset de-duplication and the display bound; all **142 frontend behavioral tests** and the production
+TypeScript/Vite build pass. This does not merge live and persisted identities, infer missing events or
+change the bounded journal/RPC/storage contracts.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryResponse } from "#neoastra";
-import { loadHistory, historyMessage, type HistoryState } from "./history";
+import { loadHistory, historyMessage, mergeHistoryPage, type HistoryState } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
@@ -50,18 +50,34 @@ test("reselection does not revive an old request", async () => {
   assert.equal(states.length, 3);
 });
 
-test("paging replaces rather than accumulates rows", async () => {
+test("timeline paging accumulates distinct rows and an explicit restart replaces them", () => {
   const entry: HistoryResponse["entries"][number] = {
     offset: "0", eventType: "contentDelta", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: "content",
     activityId: null, parentActivityId: null, name: null, text: "delta", textTruncated: false, bodyOmitted: false,
   };
-  let current: HistoryState | undefined;
-  await loadHistory(async () => ({ ...page, entries: [entry] }), request, signal, state => { current = state; });
+  const cursor = { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" };
+  const first = mergeHistoryPage(undefined, request, { ...page, entries: [entry], next: cursor });
   const next = { ...request, cursor: { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" } };
   const replacement = { ...page, entries: [{ ...entry, offset: "10", eventType: "contentCompleted", text: "final" }] };
-  await loadHistory(async () => replacement, next, signal, state => { current = state; });
-  assert.deepEqual(current, { kind: "ready", request: next, page: replacement });
+  const accumulated = mergeHistoryPage(first, next, replacement);
+  assert.deepEqual(accumulated.entries.map(value => value.text), ["delta", "final"]);
+  assert.equal(mergeHistoryPage(accumulated, request, { ...page, entries: [{ ...entry, text: "fresh" }] }).entries[0].text, "fresh");
+});
+
+test("timeline paging de-duplicates offsets and remains bounded", () => {
+  const entries = Array.from({ length: 1000 }, (_, index) => ({
+    offset: `${index}`, eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
+    timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
+    activityId: null, parentActivityId: null, name: null, text: `${index}`, textTruncated: false, bodyOmitted: false,
+  }));
+  const cursor = { version: 1, sessionId: "s", length: "2000", lastWriteUtcTicks: "7", offset: "1000" };
+  const first = mergeHistoryPage(undefined, request, { ...page, entries, next: cursor });
+  assert.equal(first.entries.length, 1000);
+  assert.equal(first.limitReached, true);
+  assert.equal(first.next, null);
+  const duplicate = mergeHistoryPage(first, { ...request, cursor }, { ...page, entries: [entries[999]] });
+  assert.equal(duplicate.entries.length, 1000);
 });
 
 test("history change resets the cursor", async () => {
