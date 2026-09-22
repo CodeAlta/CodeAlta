@@ -197,7 +197,7 @@ The preserved dependency/license review is point-in-time evidence, not a release
   removes only that build-only source item after collection and excludes publish symbols; generated
   JSON manifest/schema and manifest-backed assets remain packaged. Package inspection checks both
   absence of sources/maps/terminal/host/fixture assemblies and presence of runtime contract metadata.
-- Desktop output/intermediate paths are now `bin/desktop` / `obj/desktop`, with explicit exclusion
+- Desktop output/intermediate paths used `bin/desktop` / `obj/desktop` for the initial M1 isolation, with explicit exclusion
   of all `bin`/`obj` source globs. Initial M1b verification used the old default `bin/Release` and
   `obj/Release` paths before this isolation correction; those ordinary SDK builds may have updated
   overlapping pre-rename output files. No ignored directories were manually removed or restored.
@@ -214,7 +214,7 @@ Build/test/script output was redirected to files and only bounded summaries insp
 
 | Check | Actual result | Evidence relative to that root |
 | --- | --- | --- |
-| SDK item/output evaluation | `bin/desktop`, `obj/desktop`; 4 compile items, no old output resources/items. Excluding `frontend/node_modules/**` and `frontend/dist/**` reduced default `None` items from 10,719 to 13, and evaluation output from 11,314,627 to 14,827 bytes. | `evaluation.json`, `evaluation-after.json` (inspect counts, not full dumps) |
+| SDK item/output evaluation | Initial M1 evidence used `bin/desktop`, `obj/desktop`; current builds have returned to normal SDK `bin/<Configuration>/<TFM>` and `obj/<Configuration>/<TFM>` paths. Excluding `frontend/node_modules/**` and `frontend/dist/**` reduced default `None` items from 10,719 to 13, and evaluation output from 11,314,627 to 14,827 bytes. | `evaluation.json`, `evaluation-after.json` (inspect counts, not full dumps) |
 | Glob regression | New structural regression failed before the fix, passed afterward. | `glob-regression-before.log`, `desktop-tests-final.log` |
 | Release solution build | Passed, 0 warnings/errors. | `solution-build.log` |
 | Release solution tests | 1,821 passed, 2 skipped: explicit desktop-native opt-in and existing Catalog incremental-search skip. Desktop has 22 managed passes. **Unfiltered and not profile-isolated; see the safety correction below.** | `solution-tests.log` |

@@ -2801,3 +2801,17 @@ allows the intentional neutral plugin inventory assemblies. The focused M4 lifet
 passes 288 behavioral tests with four older source-shape checks skipped. A solution Release build
 passes with no warnings. The unfiltered solution test command exceeded the five-minute local limit,
 so this checkpoint does not claim a complete repository test pass.
+
+### Normal local startup and SDK output — 2026-09-22
+
+The desktop no longer requires an operator-created `--data-root` for ordinary startup. `alta` with
+no arguments stores WebView data beneath the platform-local application-data directory
+(`CodeAlta/desktop`) and leaves the workspace catalog unconfigured. This default does not open or
+modify legacy `~/.alta` state, start providers/plugins, expose owned-session mutation or acquire the
+terminal runtime lock, so it can coexist with an older CodeAlta installation. Explicit isolated-copy
+and owned-host flags remain available for their existing specialized paths.
+
+The desktop project also no longer overrides `BaseOutputPath` or `BaseIntermediateOutputPath`.
+New builds use standard SDK locations such as `bin/Debug/net10.0` and `obj/Debug/net10.0`; generated
+NeoAstra contracts remain under `obj/neoastra`. Existing stale `bin/desktop` or `obj/desktop` build
+artifacts are not runtime inputs and may be removed by the developer.

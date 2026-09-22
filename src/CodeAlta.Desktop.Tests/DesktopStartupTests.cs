@@ -22,10 +22,31 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
-    public void MissingMalformedAndProductionRoots_AreRejectedBeforeNativeStartup()
+    public void NoArguments_UsesStableLocalDesktopDataWithoutALegacyCatalog()
+    {
+        var calls = 0;
+
+        var exit = DesktopCommandLine.Run([], TextWriter.Null, TextWriter.Null, actual =>
+        {
+            calls++;
+            var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(localData))
+                localData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
+            Assert.AreEqual(Path.Combine(localData, "CodeAlta", "desktop"), actual.DataRoot);
+            Assert.IsNull(actual.CatalogRoot);
+            StringAssert.EndsWith(actual.DataRoot, Path.Combine("CodeAlta", "desktop"));
+            return 7;
+        });
+
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual(7, exit);
+    }
+
+    [TestMethod]
+    public void MalformedAndUnsafeExplicitRoots_AreRejectedBeforeNativeStartup()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-test-" + Guid.NewGuid().ToString("N"));
-        string[][] cases = [[], ["--unknown"], ["--smoke"], ["--data-root", "relative"],
+        string[][] cases = [["--unknown"], ["--smoke"], ["--data-root", "relative"],
             ["--data-root", Path.GetTempPath()], ["--data-root", Path.Combine(root, ".alta", "child")],
             ["--data-root", Path.Combine(root, ".ALTA", "child")], ["--help", "--data-root", root]];
         foreach (var args in cases)

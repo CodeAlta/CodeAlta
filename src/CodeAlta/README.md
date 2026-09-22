@@ -5,9 +5,10 @@ generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm 
 only to build. The installed application has no UI server or external asset origin.
 
 **This is an in-development workspace browser with a separately opted-in text-submission mode,
-not full agent parity.** Use `CodeAlta.Tui` (`altatui`) for normal agent workflows. Without
-catalog opt-in, only the boot surface is available and no provider, plugin, configuration or
-default profile is initialized. Catalog browsing alone does not compose a runtime host.
+not full agent parity.** Use `CodeAlta.Tui` (`altatui`) for normal agent workflows. Running
+`alta` with no options keeps its WebView data in the platform-local application-data directory.
+It does not open legacy `~/.alta` state, start providers/plugins or acquire the terminal runtime
+lock, so the desktop can run alongside an older CodeAlta installation.
 
 ## Try the web workspace now
 
@@ -34,23 +35,25 @@ repeat builds that already have generated contracts and `node_modules`):
 
 ```powershell
 cd src
-dotnet build CodeAlta/CodeAlta.csproj -c Release -p:NeoAstraRestoreFrontendDependencies=false -p:NeoAstraBuildFrontend=false
-./CodeAlta/bin/desktop/Release/net10.0/alta.exe --data-root "$env:TEMP/codealta-desktop-$([guid]::NewGuid())"
+dotnet build CodeAlta/CodeAlta.csproj
+./CodeAlta/bin/Debug/net10.0/alta.exe
 ```
 
-Use the catalog/owned-host flags documented below to browse or operate real existing sessions.
+The ordinary .NET output layout is used: Debug builds are under `bin/Debug/net10.0` and Release
+builds are under `bin/Release/net10.0`. Use the explicit catalog/owned-host flags documented below
+only for isolated copies or experimental session operations.
 
 ```powershell
 dotnet build -c Release
-./CodeAlta/bin/desktop/Release/net10.0/alta.exe --help
-./CodeAlta/bin/desktop/Release/net10.0/alta.exe --version
-$dataRoot = Join-Path $env:TEMP ("codealta-desktop-" + [guid]::NewGuid())
-./CodeAlta/bin/desktop/Release/net10.0/alta.exe --data-root $dataRoot
+./CodeAlta/bin/Release/net10.0/alta.exe --help
+./CodeAlta/bin/Release/net10.0/alta.exe --version
+./CodeAlta/bin/Release/net10.0/alta.exe
 ```
 
-Native startup requires an explicitly injected **new absolute task-owned directory**, outside
-`.alta`. Help/version and rejected arguments do not initialize native services or create storage.
-This restriction is not the future cross-head ownership guard. Do not use a production profile.
+No-argument startup derives a stable WebView data directory from the platform's local application-data
+location and leaves the workspace catalog unconfigured. It does not read, migrate or modify legacy
+`~/.alta` state. Help/version and rejected arguments do not initialize native services or create
+storage. Explicit catalog and owned-host options retain their stricter root validation.
 
 ## Browse a task-owned catalog copy
 
@@ -310,8 +313,8 @@ keeps the lease; external termination is not confirmed cleanup. Managed fake-pro
 helper tests pass, but configured-provider behavior, React mounting and this mode's native
 lifecycle remain unqualified. See [runtime contracts](../../doc/runtime.md#explicit-desktop-submissions-and-owned-reads).
 
-Build outputs use `bin/desktop` and `obj/desktop` to avoid reusing the pre-rename TUI residue.
-Generated frontend contracts/client remain build-only inputs under `obj/neoastra`.
+Build outputs use the standard SDK `bin/<Configuration>/<TFM>` and `obj/<Configuration>/<TFM>`
+layout. Generated frontend contracts/client remain build-only inputs under `obj/neoastra`.
 
 The desktop RID intent is Windows, macOS and glibc Linux x64/ARM64 (six RIDs, **no musl**).
 Only Windows x64 has executed native evidence so far. Ordinary `Exe` output and the Common

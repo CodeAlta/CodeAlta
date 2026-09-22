@@ -45,8 +45,8 @@ public sealed class DesktopArchitectureTests
         CollectionAssert.AreEqual(new[] { "../CodeAlta.Catalog/CodeAlta.Catalog.csproj", "../CodeAlta.Agent/CodeAlta.Agent.csproj", "../CodeAlta.Hosting/CodeAlta.Hosting.csproj", "../CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" },
             desktop.Descendants("ProjectReference").Select(value => value.Attribute("Include")!.Value).ToArray());
         var outputs = XDocument.Load(Path.Combine(SourceRoot, "CodeAlta", "Directory.Build.props"));
-        Assert.AreEqual("bin/desktop/", outputs.Descendants("BaseOutputPath").Single().Value);
-        Assert.AreEqual("obj/desktop/", outputs.Descendants("BaseIntermediateOutputPath").Single().Value);
+        Assert.IsEmpty(outputs.Descendants("BaseOutputPath"));
+        Assert.IsEmpty(outputs.Descendants("BaseIntermediateOutputPath"));
     }
 
     [TestMethod]

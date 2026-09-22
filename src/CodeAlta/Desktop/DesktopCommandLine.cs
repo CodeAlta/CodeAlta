@@ -19,7 +19,7 @@ internal static class DesktopCommandLine
     {
         if (args is ["--help"] or ["-h"])
         {
-            output.WriteLine("alta --data-root <new absolute directory> [--catalog-root <existing absolute trusted task-owned COPY> --allow-catalog-cache]\nCodeAlta desktop is in development; use altatui for agent functionality.\nOptional persisted workspace browsing can write cache/cache.sqlite3 and SQLite sidecars in the supplied COPY. No production/default profile, providers or plugins are opened.\nPaths do not prove task ownership or isolate reparse points: supply only a trusted task-owned copy. Browser and catalog roots must be separate and not beneath .alta.\n--help / --version must be used alone and do not initialize native services or storage.");
+            output.WriteLine("alta\nalta --data-root <new absolute directory> [--catalog-root <existing absolute trusted task-owned COPY> --allow-catalog-cache]\nCodeAlta desktop is in development; use altatui for full agent functionality.\nWith no options, the desktop keeps its data under the platform-local application-data directory. It does not open ~/.alta or any other legacy profile, start providers or plugins, or acquire the terminal runtime lock.\nThe explicit-root form remains available for isolated browsing. It can write cache/cache.sqlite3 and SQLite sidecars in the supplied COPY. Browser and catalog roots must be separate and outside .alta.\n--help / --version must be used alone and do not initialize native services or storage.");
             output.WriteLine("Separate owned mode additionally requires --allow-owned-host --project-root <existing absolute directory> --discovery-home <existing absolute directory> --instruction-root <existing absolute project ancestor> --builtin-skill-root <existing absolute directory>. This consents to lock/project-catalog/journal/cache/provider-state writes, configured-provider registration (including declared credential environment names and shipped defaults), and provider authentication/storage/network on submission. Plugins and probes stay disabled; permissions denied and user input cancelled. No default-profile/HOME substitution; discovery roots do not sandbox providers, copied-cache external journal paths or reparse points. Only task-owned roots are admitted; this is not production/shared-profile qualification.");
             output.WriteLine("Owned mode only: --review-owned-command-permissions explicitly enables manual review of supported plain command requests (Allow once / Deny / Cancel). Default remains deny. Approval can execute commands with the host's privileges; roots are not a sandbox. Unsupported permissions remain denied; user input remains cancelled. Refresh pending commands manually; closing a review or losing an RPC response does not revoke an accepted decision.");
             output.WriteLine("Owned mode only: --enable-owned-user-input independently enables manual nonsecret provider forms. Not credential entry or command approval; answers may persist in provider tool results/history. Default remains cancelled. Refresh manually; lost decisions cannot be recovered or replayed safely.");
@@ -40,7 +40,7 @@ internal static class DesktopCommandLine
                 return 2;
             }
 
-            // Admission grants only isolated browser storage and opt-in cache writes in a trusted copy.
+            // Admission grants only desktop-owned browser storage and opt-in cache writes in a trusted copy.
             return startNative(options!);
         }
         catch (Exception exception)
@@ -58,7 +58,13 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(directoryExists);
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
-        error = "Supply a new absolute --data-root; optional --catalog-root requires an existing absolute trusted task-owned COPY and --allow-catalog-cache. No default profiles, .alta paths or overlapping roots are allowed. Use --help.";
+        error = "Unknown or invalid options. Run alta with no arguments for desktop-owned storage, or use --help for isolated-root options.";
+        if (args.Length == 0)
+        {
+            options = CreateDefaultOptions();
+            error = null;
+            return true;
+        }
         string? data = null;
         string? catalog = null;
         var allowCache = false;
@@ -114,6 +120,19 @@ internal static class DesktopCommandLine
         }
         error = null;
         return true;
+    }
+
+    internal static DesktopLaunchOptions CreateDefaultOptions()
+    {
+        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localData))
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrWhiteSpace(userProfile))
+                throw new InvalidOperationException("Unable to determine a local application-data directory for CodeAlta.");
+            localData = Path.Combine(userProfile, ".local", "share");
+        }
+        return new DesktopLaunchOptions(Path.Combine(localData, "CodeAlta", "desktop"), CatalogRoot: null);
     }
 
     private static bool ContainsAlta(string path) => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
