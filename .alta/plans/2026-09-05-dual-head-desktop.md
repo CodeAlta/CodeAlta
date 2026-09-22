@@ -1017,7 +1017,8 @@ The order is deliberate: prove packaging, preserve behavior under extraction, es
 ### M6 — Complete settings and plugin parity
 
 - [ ] Implement the single settings dialog/sidebar/search/scope navigation with General/Appearance/Permissions, dirty-state handling and backend-validated save/refresh results.
-  - [x] Functional-first configuration page provides immediate dark/light appearance and clearly labelled read-only environment cards. Persisted dirty/save semantics and settings search/scope navigation remain open.
+  - [x] Functional-first configuration page provides immediate dark/light appearance and clearly labelled read-only environment cards. Persisted dirty/save semantics and permission settings remain open.
+  - [x] Configuration now has one responsive sidebar, text search and All/General/Agent/Extensions scopes backed by deterministic section filtering. Permissions, persistence, dirty/save and backend mutation remain open.
 - [ ] Implement Providers & Accounts and Models: form/advanced TOML, enabled state, tests, refresh/cancel, browser/device auth/logout, account/model lists, capability/status diagnostics. Keep all provider logic in .NET.
   - [x] Read-only generated `configuration.snapshot` RPC projects bounded provider identity/type/enabled/default model/reasoning data from .NET without starting providers. Accounts, auth, refresh and mutation remain open.
 - [ ] Add shared searchable/sortable model/provider/plugin table presentation where list size warrants it, with backend query semantics and accessible row navigation per §6.5.

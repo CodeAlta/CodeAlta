@@ -2861,3 +2861,15 @@ The production TypeScript/Vite build and all **139 behavioral frontend tests** p
 presentation change. No source-shape test was added. Mounted keyboard/pointer accessibility, an ordinary
 profile opt-in transition to owned mode, durable drafts, selectors/attachments, stream/history merging
 and M7 qualification remain open.
+
+### M6 settings navigation slice — 2026-09-22
+
+The existing configuration cards now sit behind one responsive settings navigator with text search and
+All, General, Agent and Extensions scopes. Filtering is local presentation only: it neither starts
+providers/plugins nor changes backend configuration. The appearance toggle remains the only editable
+card; provider/model and plugin inventory continue to use the existing bounded read-only snapshot.
+
+Two new functional tests exercise scope boundaries, multi-term matching, normalization and empty
+results through the same filtering helper used by React. All **141 frontend behavioral tests** and the
+production TypeScript/Vite build pass. Permissions, account/auth and model management, prompt/skill/
+plugin mutation, dirty-state persistence and backend-validated saves remain open M6 work.

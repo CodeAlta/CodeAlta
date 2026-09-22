@@ -25,6 +25,7 @@ import { UserInputPanel } from "./UserInputPanel";
 import { MarkdownContent } from "./MarkdownContent";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
+import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -274,28 +275,40 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
   setTheme: (theme: Theme) => void;
 }) {
   const inventory = configurationState.snapshot;
+  const [scope, setScope] = useState<ConfigurationScope>("all");
+  const [query, setQuery] = useState("");
+  const visible = new Set(visibleConfigurationSections(scope, query));
   return <main className="configuration-page">
     <header className="page-heading"><span className="eyebrow">Desktop</span><h1>Configuration</h1><p>Inspect the active desktop environment and personalize this window.</p></header>
-    <div className="settings-grid">
-      <section className="settings-card"><div className="settings-icon">◐</div><div><h2>Appearance</h2><p>Applied immediately to this window.</p><div className="segmented">
+    <div className="settings-layout">
+      <aside className="settings-navigation" aria-label="Configuration sections">
+        <label className="settings-search"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search settings" /></label>
+        <nav>{([ ["all", "All settings"], ["general", "General"], ["agent", "Agent"], ["extensions", "Extensions"] ] as const).map(([value, label]) =>
+          <button type="button" key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</nav>
+        <p>Configuration is read-only unless a card explicitly offers an editable control.</p>
+      </aside>
+      <div className="settings-grid">
+      {visible.has("appearance") && <section className="settings-card"><div className="settings-icon">◐</div><div><h2>Appearance</h2><p>Applied immediately to this window.</p><div className="segmented">
         <button type="button" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
         <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
-      </div></div></section>
-      <section className="settings-card"><div className="settings-icon">◆</div><div><h2>Providers &amp; models</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
+      </div></div></section>}
+      {visible.has("providers") && <section className="settings-card"><div className="settings-icon">◆</div><div><h2>Providers &amp; models</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}
         {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
         {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}
         {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
         {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
-      </div></section>
-      <section className="settings-card"><div className="settings-icon">Aa</div><div><h2>Agent prompts</h2><p>Prompt selection is captured by the session runtime. Desktop editing is not exposed by the current bridge.</p><StatusPill label="Read-only in this version" /></div></section>
-      <section className="settings-card"><div className="settings-icon">⌘</div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>
-      <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins</h2><p>Live plugin events now originate in the shared runtime, so desktop and terminal heads observe the same publications.</p>
+      </div></section>}
+      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon">Aa</div><div><h2>Agent prompts</h2><p>Prompt selection is captured by the session runtime. Desktop editing is not exposed by the current bridge.</p><StatusPill label="Read-only in this version" /></div></section>}
+      {visible.has("skills") && <section className="settings-card"><div className="settings-icon">⌘</div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
+      {visible.has("plugins") && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins</h2><p>Live plugin events now originate in the shared runtime, so desktop and terminal heads observe the same publications.</p>
         {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}
         {inventory && inventory.plugins.length === 0 && <StatusPill label={inventory.pluginRuntimeAvailable ? "No active plugins" : "Requires packaged host"} />}
         {inventory?.pluginsTruncated && <p className="muted-text">Showing the first 32 active plugins.</p>}
-      </div></section>
-      <section className="settings-card"><div className="settings-icon">i</div><div><h2>About</h2><p>{status?.productName ?? "CodeAlta Desktop"} · {status?.version ?? "initializing"}</p><p className="muted-text">Use <code>altatui</code> for provider/account/plugin mutation until those commands are exposed by the desktop bridge.</p></div></section>
+      </div></section>}
+      {visible.has("about") && <section className="settings-card"><div className="settings-icon">i</div><div><h2>About</h2><p>{status?.productName ?? "CodeAlta Desktop"} · {status?.version ?? "initializing"}</p><p className="muted-text">Use <code>altatui</code> for provider/account/plugin mutation until those commands are exposed by the desktop bridge.</p></div></section>}
+      {visible.size === 0 && <div className="empty-settings"><h2>No matching settings</h2><p>Try a different search or configuration section.</p></div>}
+      </div>
     </div>
   </main>;
 }
