@@ -22,7 +22,7 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
-    public void NoArguments_UsesStableLocalDesktopDataAndTheCurrentCatalog()
+    public void NoArguments_UsesStableLocalDesktopDataAndAnInteractiveOwnedHost()
     {
         var calls = 0;
 
@@ -36,12 +36,29 @@ public sealed class DesktopStartupTests
             Assert.AreEqual(
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta"),
                 actual.CatalogRoot);
+            Assert.IsNotNull(actual.Owned);
+            Assert.AreEqual(Path.GetFullPath(Environment.CurrentDirectory), actual.Owned.Project);
+            Assert.IsNull(actual.Owned.Home);
+            Assert.IsNull(actual.Owned.Instructions);
+            Assert.IsNull(actual.Owned.Builtin);
             StringAssert.EndsWith(actual.DataRoot, Path.Combine("CodeAlta", "desktop"));
             return 7;
         });
 
         Assert.AreEqual(1, calls);
         Assert.AreEqual(7, exit);
+    }
+
+    [TestMethod]
+    public void ExplicitCatalogOptions_RemainReadOnly()
+    {
+        var root = OperatingSystem.IsWindows() ? @"Q:\catalog" : "/catalog";
+        var args = new[] { "--data-root", root + "/browser", "--catalog-root", root + "/copy", "--allow-catalog-cache" };
+        bool DirectoryExists(string path) => path.EndsWith("copy", StringComparison.Ordinal);
+
+        Assert.IsTrue(DesktopCommandLine.TryParse(args, DirectoryExists, _ => false, out var options, out _));
+        Assert.IsNotNull(options);
+        Assert.IsNull(options.Owned);
     }
 
     [TestMethod]

@@ -8,7 +8,7 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     internal bool ReviewOwnedCommandPermissions { get; init; }
     internal bool EnableOwnedUserInput { get; init; }
 }
-internal sealed record OwnedDesktopRoots(string Project, string Home, string Instructions, string Builtin);
+internal sealed record OwnedDesktopRoots(string Project, string? Home, string? Instructions, string? Builtin);
 
 internal static class DesktopCommandLine
 {
@@ -19,8 +19,8 @@ internal static class DesktopCommandLine
     {
         if (args is ["--help"] or ["-h"])
         {
-            output.WriteLine("alta\nalta --data-root <new absolute directory> [--catalog-root <existing absolute trusted task-owned COPY> --allow-catalog-cache]\nCodeAlta desktop is in development; use altatui for full agent functionality.\nWith no options, the desktop opens the current ~/.alta catalog and keeps WebView data under the platform-local application-data directory. Catalog browsing can update the standard cache/cache.sqlite3 projection and its SQLite sidecars, but it does not start providers or plugins or acquire the terminal runtime lock.\nThe explicit-root form remains available for isolated browsing. Browser and catalog roots must be separate and outside .alta.\n--help / --version must be used alone and do not initialize native services or storage.");
-            output.WriteLine("Separate owned mode additionally requires --allow-owned-host --project-root <existing absolute directory> --discovery-home <existing absolute directory> --instruction-root <existing absolute project ancestor> --builtin-skill-root <existing absolute directory>. This consents to lock/project-catalog/journal/cache/provider-state writes, configured-provider registration (including declared credential environment names and shipped defaults), and provider authentication/storage/network on submission. Plugins and probes stay disabled; permissions denied and user input cancelled. No default-profile/HOME substitution; discovery roots do not sandbox providers, copied-cache external journal paths or reparse points. Only task-owned roots are admitted; this is not production/shared-profile qualification.");
+            output.WriteLine("alta\nalta --data-root <new absolute directory> [--catalog-root <existing absolute trusted task-owned COPY> --allow-catalog-cache]\nCodeAlta desktop is in development; use altatui for the complete terminal experience.\nWith no options, the desktop starts the normal interactive host for the current directory and ~/.alta catalog, matching the TUI default. It acquires the runtime lock and may update project catalog, journal, cache, provider state, and configured provider authentication/storage when a prompt is submitted. Plugins stay disabled in this desktop host. WebView data remains under the platform-local application-data directory.\nThe explicit-root form remains available for isolated catalog-only browsing. Browser and catalog roots must be separate and outside .alta.\n--help / --version must be used alone and do not initialize native services or storage.");
+            output.WriteLine("Explicit scoped owned mode requires --allow-owned-host --project-root <existing absolute directory> --discovery-home <existing absolute directory> --instruction-root <existing absolute project ancestor> --builtin-skill-root <existing absolute directory>. This consents to lock/project-catalog/journal/cache/provider-state writes, configured-provider registration (including declared credential environment names and shipped defaults), and provider authentication/storage/network on submission. Plugins and probes stay disabled; permissions denied and user input cancelled. No default-profile/HOME substitution; discovery roots do not sandbox providers, copied-cache external journal paths or reparse points. Only task-owned roots are admitted; this is not production/shared-profile qualification.");
             output.WriteLine("Owned mode only: --review-owned-command-permissions explicitly enables manual review of supported plain command requests (Allow once / Deny / Cancel). Default remains deny. Approval can execute commands with the host's privileges; roots are not a sandbox. Unsupported permissions remain denied; user input remains cancelled. Refresh pending commands manually; closing a review or losing an RPC response does not revoke an accepted decision.");
             output.WriteLine("Owned mode only: --enable-owned-user-input independently enables manual nonsecret provider forms. Not credential entry or command approval; answers may persist in provider tool results/history. Default remains cancelled. Refresh manually; lost decisions cannot be recovered or replayed safely.");
             return 0;
@@ -58,7 +58,7 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(directoryExists);
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
-        error = "Unknown or invalid options. Run alta with no arguments for the current catalog, or use --help for isolated-root options.";
+        error = "Unknown or invalid options. Run alta with no arguments for the interactive current-project host, or use --help for isolated-root options.";
         if (args.Length == 0)
         {
             options = CreateDefaultOptions();
@@ -132,7 +132,12 @@ internal static class DesktopCommandLine
             localData = Path.Combine(userProfile, ".local", "share");
         return new DesktopLaunchOptions(
             Path.Combine(localData, "CodeAlta", "desktop"),
-            Path.Combine(userProfile, ".alta"));
+            Path.Combine(userProfile, ".alta"))
+        {
+            // Match the TUI's normal startup: current project, standard profile, and the
+            // built-in discovery defaults rather than the restricted explicit-root scope.
+            Owned = new(Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
+        };
     }
 
     private static bool ContainsAlta(string path) => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)

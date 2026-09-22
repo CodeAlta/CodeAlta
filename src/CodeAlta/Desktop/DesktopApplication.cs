@@ -111,7 +111,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             _hostCreation = CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, CurrentProjectPath = roots.Project,
-                DiscoveryScope = new SessionDiscoveryScope(roots.Home, roots.Instructions), BuiltInSkillRoot = roots.Builtin,
+                DiscoveryScope = roots.Home is null || roots.Instructions is null
+                    ? null
+                    : new SessionDiscoveryScope(roots.Home, roots.Instructions),
+                BuiltInSkillRoot = roots.Builtin,
                 OwnedCommandReceiptCapacity = 256, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,

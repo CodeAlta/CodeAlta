@@ -30,6 +30,7 @@ import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { persistDraft, restoreDraft } from "./promptDraft";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
+import { AppIcon } from "./AppIcon";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -214,8 +215,8 @@ function App() {
             reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
             fallbackMarkdown={historyNotes} onClose={() => setNotesVisible(false)} />}
           <div className="rail-footer">
-            {!notesVisible && <button type="button" className="quiet-button" onClick={() => setNotesVisible(true)}>▤ Show Alta notes</button>}
-            <button type="button" className="quiet-button" onClick={() => setView("configuration")}>⚙ Settings &amp; extensions</button>
+            {!notesVisible && <button type="button" className="quiet-button icon-label-button" onClick={() => setNotesVisible(true)}><AppIcon name="notes" size={14} />Show Alta notes</button>}
+            <button type="button" className="quiet-button icon-label-button" onClick={() => setView("configuration")}><AppIcon name="settings" size={14} />Settings &amp; extensions</button>
           </div>
         </aside>
 
@@ -226,7 +227,7 @@ function App() {
             <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
             <button type="button" className="icon-button" title="Refresh by relaunching the current desktop host" disabled>＋</button>
           </div>
-          <label className="search"><span>⌕</span><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
+          <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
             {visibleSessions.map(session => <button type="button" key={session.id} aria-pressed={sessionId === session.id} onClick={() => setSessionId(session.id)}>
@@ -319,7 +320,7 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
           followTimeline.current = true;
           setTimelineFollowing(true);
           if (timeline.current) timeline.current.scrollTop = bottomScrollTop(timeline.current);
-        }}>Jump to latest ↓</button>}
+        }}><AppIcon name="arrowDown" size={14} />Jump to latest</button>}
         {ownedSession && status?.hostEpoch
           ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} />
           : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} />}
@@ -343,14 +344,14 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
     <div className="demo-banner"><strong>Interactive browser demo</strong><span>Messages are local and disappear on refresh. Run the packaged desktop for real sessions.</span></div>
     <div className="messages">
       {messages.map((message, index) => <article key={index} className={`message message-${message.role}`}>
-        <div className="avatar">{message.role === "user" ? "You" : "A"}</div><div><strong>{message.role === "user" ? "You" : "CodeAlta"}</strong><p>{message.text}</p></div>
+        <div className="avatar"><AppIcon name={message.role === "user" ? "user" : "assistant"} size={17} /></div><div><strong>{message.role === "user" ? "You" : "CodeAlta"}</strong><p>{message.text}</p></div>
       </article>)}
     </div>
     <div className="composer">
       <textarea aria-label="Message" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => {
         if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
       }} placeholder="Ask CodeAlta to work on this project…" />
-      <div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button type="button" onClick={submit} disabled={!text.trim()}>Send <span>↑</span></button></div>
+      <div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button type="button" onClick={submit} disabled={!text.trim()}>Send <AppIcon name="send" size={14} /></button></div>
     </div>
   </section>;
 }
@@ -371,7 +372,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
     <header className="page-heading"><span className="eyebrow">Desktop</span><h1>Configuration</h1><p>Inspect the active desktop environment and personalize this window.</p></header>
     <div className="settings-layout">
       <aside className="settings-navigation" aria-label="Configuration sections">
-        <label className="settings-search"><span>⌕</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search settings" /></label>
+        <label className="settings-search"><AppIcon name="search" size={14} /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search settings" /></label>
         <nav>{([ ["all", "All settings"], ["general", "General"], ["agent", "Agent"], ["extensions", "Extensions"] ] as const).map(([value, label]) =>
           <button type="button" key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</nav>
         <p>Configuration is read-only unless a card explicitly offers an editable control.</p>
@@ -381,15 +382,15 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         <button type="button" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
         <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
       </div></div></section>}
-      {visible.has("providers") && <section className="settings-card"><div className="settings-icon">◆</div><div><h2>Providers &amp; models</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
+      {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers &amp; models</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}
         {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
         {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}
         {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
         {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
       </div></section>}
-      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon">Aa</div><div><h2>Agent prompts</h2><p>The composer shows the prompt captured by an owned session. Persisted Prompt information entries include the applied system/developer text, prompt source, change summary, and token estimate.</p><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
-      {visible.has("skills") && <section className="settings-card"><div className="settings-icon">⌘</div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
+      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon"><AppIcon name="prompt" size={19} /></div><div><h2>Agent prompts</h2><p>The composer shows the prompt captured by an owned session. Persisted Prompt information entries include the applied system/developer text, prompt source, change summary, and token estimate.</p><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
+      {visible.has("skills") && <section className="settings-card"><div className="settings-icon"><AppIcon name="tool" size={19} /></div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
       {visible.has("plugins") && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
         <div className="inventory-row"><span><strong>MCP servers</strong><small>Model Context Protocol runtime state</small></span><StatusPill label={mcp ? mcp.state : inventory?.pluginRuntimeAvailable ? "Not configured" : "Runtime not started"} /></div>
         {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}
@@ -411,8 +412,8 @@ function OpenProjectDialog({ projects, onOpen, onClose }: { projects: ReadonlyAr
   const matches = projects.filter(project => !normalized || `${project.name} ${project.path}`.toLowerCase().includes(normalized));
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="open-project-title">
-      <header><div><span className="eyebrow">Workspace</span><h2 id="open-project-title">Open project</h2></div><button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></header>
-      <label className="settings-search"><span>⌕</span><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Project name or catalog path" /></label>
+      <header><div><span className="eyebrow">Workspace</span><h2 id="open-project-title">Open project</h2></div><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" size={16} /></button></header>
+      <label className="settings-search"><AppIcon name="search" size={14} /><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Project name or catalog path" /></label>
       <div className="dialog-list">{matches.map(project => <button type="button" key={project.id} onClick={() => onOpen(project.id)}>
         <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.path}</small></span>
       </button>)}</div>
@@ -432,7 +433,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
   ];
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="app-dialog shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
-      <header><div><span className="eyebrow">Keyboard first</span><h2 id="shortcut-title">Shortcuts</h2></div><button autoFocus type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></header>
+      <header><div><span className="eyebrow">Keyboard first</span><h2 id="shortcut-title">Shortcuts</h2></div><button autoFocus type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" size={16} /></button></header>
       <dl>{shortcuts.map(([keys, label]) => <div key={keys}><dt>{keys}</dt><dd>{label}</dd></div>)}</dl>
     </section>
   </div>;
@@ -466,16 +467,16 @@ function History({ sessionId, onNotesChange }: { sessionId: string; onNotesChang
   }, [current, timeline, sessionId]);
   const items = buildTimelineItems(timeline?.entries ?? []);
   return <section className="conversation history" aria-labelledby="history-heading">
-    <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}>Refresh</button></div>
+    <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}><AppIcon name="refresh" size={14} />Refresh</button></div>
     {(!current || current.kind === "loading") && <p role="status">Loading the latest persisted history…</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
     {timeline?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
     {timeline?.limitReached && <div role="status" className="banner">The timeline reached its 1,000-event display limit. Refresh to restart from the beginning.</div>}
+    {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}><AppIcon name="history" size={14} />Load older history</button>}
     {items.length === 0 && <div className="empty-history">No visible events in this history.</div>}
     <div className="messages">
       {items.map(item => <TimelineMessage key={item.key} item={item} />)}
     </div>
-    {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}>Load older history</button>}
   </section>;
 }
 
@@ -489,14 +490,14 @@ function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfigurat
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
       <label><span>Model</span><select aria-label="Model" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
-      <label><span>Provider</span><select aria-label="Provider" value={provider ?? "none"} disabled><option value={provider ?? "none"}>{provider ?? "Not recorded"}</option></select></label>
-      <button type="button" className="prompt-state" onClick={onOpenConfiguration}><span>Providers</span><strong>{configuration?.providers.length ?? 0} available</strong></button>
+      <label><span>Reasoning</span><select aria-label="Reasoning" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
+      <button type="button" className="prompt-state" onClick={onOpenConfiguration} aria-label="Open provider configuration" title={provider ?? "Provider not recorded"}><AppIcon name="settings" size={13} /><strong>{configuration?.providers.length ?? 0} providers</strong></button>
       <span className="prompt-state"><span>Context / MCP</span><strong>Requires runtime</strong></span>
     </div>
     <textarea id="catalog-prompt" aria-label="Message" maxLength={32768} value={text} onChange={event => setText(event.target.value)}
-      onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage("Cannot send from catalog-only mode. Relaunch with owned-host consent; your draft is saved."); } }}
+      onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage("This explicit catalog-only launch is read-only; your draft remains saved."); } }}
       placeholder="Draft a prompt for this session…" />
-    <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage("Cannot send from catalog-only mode. Relaunch with owned-host consent; your draft is saved.")}>Send <span>↑</span></button></div>
+    <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage("This explicit catalog-only launch is read-only; your draft remains saved.")}>Send <AppIcon name="send" size={14} /></button></div>
   </section>;
 }
 

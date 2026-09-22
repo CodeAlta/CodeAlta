@@ -3,8 +3,9 @@
 The production entrypoint is now [`src/CodeAlta`](../src/CodeAlta/README.md): package `CodeAlta`,
 assembly/command `alta`, ordinary `Exe`, published centrally pinned NeoAstra **0.1.0**. It is an
 **in-development desktop surface**, not a parity-complete agent frontend. The TUI remains `CodeAlta.Tui` / `altatui`.
-Desktop declares six non-musl RIDs; TUI retains eight. Default-profile startup remains disabled;
-the separately consented owned-host integration below is still undergoing qualification.
+Desktop declares six non-musl RIDs; TUI retains eight. Normal no-argument startup now composes the
+owned host for the current directory and `~/.alta`, matching the TUI default; native WebView behavior
+and the owned-host integration below are still undergoing qualification.
 
 The later workspace browser adds explicit catalog-copy/cache-write opt-in; see its
 [operator constraints](../src/CodeAlta/README.md#browse-a-task-owned-catalog-copy). This has
@@ -115,8 +116,9 @@ termination or native UI; they do not establish termination of the original fail
 
 ### Desktop owned-session integration: managed qualification
 
-The new explicit owned-host mode composes one existing host and borrows its command and direct
-cached-read services. It requires separate owned-host consent and explicit project, discovery,
+The owned-host mode composes one existing host and borrows its command and direct cached-read
+services. No-argument startup now selects this route with the TUI's normal current-directory/profile
+defaults. The separate scoped form requires explicit project, discovery,
 instruction-boundary and builtin-skill roots, in addition to the existing browser/catalog-copy
 arguments. Configured registration may read credential environment variables and shipped
 defaults; later submissions may authenticate or access provider storage/network. This source

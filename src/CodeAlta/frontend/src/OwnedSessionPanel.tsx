@@ -9,6 +9,7 @@ import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { persistDraft, restoreDraft } from "./promptDraft";
+import { AppIcon } from "./AppIcon";
 
 export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -225,13 +226,13 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       <label><span>Model</span><select aria-label="Model" value={runtimeConfiguration?.modelId ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
         <option value={runtimeConfiguration?.modelId ?? "default"}>{runtimeConfiguration?.modelId ?? "Provider default"}</option>
       </select></label>
-      <label><span>Provider</span><select aria-label="Provider" value={runtimeConfiguration?.providerKey ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
-        <option value={runtimeConfiguration?.providerKey ?? "default"}>{runtimeConfiguration?.providerKey ?? "Session provider"}</option>
+      <label><span>Reasoning</span><select aria-label="Reasoning" value={runtimeConfiguration?.reasoningEffort ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
+        <option value={runtimeConfiguration?.reasoningEffort ?? "default"}>{runtimeConfiguration?.reasoningEffort ?? "Provider default"}</option>
       </select></label>
-      <button type="button" className="prompt-state" onClick={() => void runtimeScope.current?.refresh()} title="Refresh context and runtime configuration">
-        <span>Context</span><strong>{runtimeState?.kind === "loading" ? "Reading…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Ready" : "Refresh"}</strong>
+      <button type="button" className="prompt-state" onClick={() => void runtimeScope.current?.refresh()} aria-label="Refresh context and runtime configuration" title={`Refresh context · ${runtimeConfiguration?.providerKey ?? "session provider"}`}>
+        <AppIcon name="refresh" size={13} /><strong>{runtimeState?.kind === "loading" ? "Reading…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Ready" : "Refresh"}</strong>
       </button>
-      <span className="prompt-state" title="MCP availability reported by the configured plugin runtime"><span>MCP</span><strong>{mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Not configured" : "Runtime unavailable")}</strong></span>
+      <span className="prompt-state" title="MCP availability reported by the configured plugin runtime"><span>MCP</span><strong>{mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")}</strong></span>
     </div>
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
@@ -240,7 +241,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       }} />
     <div className="history-controls">
       <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
-      <button type="button" className="primary-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : "Send"}</button>
+       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>
     <p role="status">{message}</p>
     {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}

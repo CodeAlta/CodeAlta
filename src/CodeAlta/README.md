@@ -4,11 +4,12 @@
 generated RPC, React/strict TypeScript and packaged local Vite assets. Node/npm is needed
 only to build. The installed application has no UI server or external asset origin.
 
-**This is an in-development workspace browser with a separately opted-in text-submission mode,
-not full agent parity.** Use `CodeAlta.Tui` (`altatui`) for normal agent workflows. Running
-`alta` with no options browses the current `~/.alta` catalog while keeping its WebView data in the
-platform-local application-data directory. It does not start providers/plugins or acquire the
-terminal runtime lock, so older terminal versions can continue to open the same catalog.
+**This is an in-development interactive workspace, not full agent parity.** Use `CodeAlta.Tui`
+(`altatui`) for the complete agent workflow. Running `alta` with no options now matches the TUI's
+normal startup: it owns the current project and `~/.alta` runtime, so an existing session can send
+a prompt immediately. It can start configured providers and acquires the shared runtime lock; plugins,
+command permission review and provider input remain disabled by default. WebView-only data stays in
+the platform-local application-data directory, and existing `.alta` storage is not migrated.
 
 ## Try the web workspace now
 
@@ -40,8 +41,8 @@ dotnet build CodeAlta/CodeAlta.csproj
 ```
 
 The ordinary .NET output layout is used: Debug builds are under `bin/Debug/net10.0` and Release
-builds are under `bin/Release/net10.0`. Use the explicit catalog/owned-host flags documented below
-only for isolated copies or experimental session operations.
+builds are under `bin/Release/net10.0`. Use the explicit catalog/scoped-owned flags documented below
+only for isolated copies or qualification.
 
 ```powershell
 dotnet build -c Release
@@ -51,11 +52,11 @@ dotnet build -c Release
 ```
 
 No-argument startup derives a stable WebView data directory from the platform's local application-data
-location and reads projects and sessions from the current `~/.alta` catalog. Catalog browsing may
-create or update the standard `~/.alta/cache/cache.sqlite3` projection and SQLite sidecars, but it adds
-no desktop-specific state there and performs no catalog migration. Help/version and rejected arguments
-do not initialize native services or create storage. Explicit catalog and owned-host options retain
-their stricter root validation.
+location, composes the owned host for the current directory, and uses the current `~/.alta` catalog.
+The host may update the standard project catalog, journal, cache, provider state and SQLite sidecars;
+submissions may authenticate or use configured provider storage/network. It adds no desktop-specific
+state to `.alta` and performs no storage migration. Help/version and rejected arguments do not initialize
+native services or create storage. Explicit catalog and scoped-owned options retain stricter validation.
 
 ## Browse a task-owned catalog copy
 
@@ -92,12 +93,13 @@ native lifecycle qualification remains open.
 
 ### Persisted event history
 
-Selecting a session loads a bounded page of its persisted canonical events. Next-page
-navigation replaces the current page rather than growing an unbounded transcript in the
-browser. Content deltas, completed content and activity phases remain distinct records;
-this is not a reconstructed conversation or a live stream. Permissions and other stored
-requests are historical records, not actionable approvals. Previews can be shortened or
-omitted explicitly; arbitrary provider payloads are not sent to the frontend.
+Selecting a session accumulates bounded pages of its persisted canonical events up to a 1,000-event
+display limit. The chronological timeline folds duplicate stream completions and tool lifecycle/output
+rows for presentation; this does not change persisted records. Tool cards identify the tool and primary
+command/input. Prompt, usage, model and secondary event data use compact summaries and disclosures, and
+internal raw persistence records duplicated by typed events are hidden rather than shown as empty cards.
+Permissions and other stored requests are historical records, not actionable approvals. Previews can be
+shortened explicitly; arbitrary provider payloads are not sent to the frontend.
 
 The shared reader limits page input to 256 KiB, individual records to 128 KiB and work to
 100 physical records, plus bounded framing probes. Blank and metadata-only records count,
@@ -114,9 +116,10 @@ race. Selecting another session, changing page or closing the view cancels the w
 suppresses late results. These checks do not establish native shutdown safety, reparse
 isolation, bounded catalog discovery, live recovery or full timeline parity.
 
-## Explicit owned text submission
+## Explicit scoped owned text submission
 
-An additional experimental mode borrows command and cached-read services from one shared host:
+The default launch already borrows command and cached-read services from one shared host. The following
+experimental form provides the same ownership route with isolated explicit roots:
 
 ```text
 alta --data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-trusted-copy> --allow-catalog-cache --allow-owned-host --project-root <existing-absolute-project-directory> --discovery-home <existing-absolute-discovery-directory> --instruction-root <existing-absolute-project-ancestor> --builtin-skill-root <existing-absolute-directory>
@@ -241,8 +244,7 @@ No retained state means not yet observed or evicted—not idle or completed. Tex
 be shortened, and replacement/eviction indicators make omissions explicit. **Reconnect live
 display** explicitly starts a new observation; it never resends a prompt. A stale host epoch
 explicitly requires reloading the UI, not reconnecting with the old identity. Selection changes,
-renderer detach and cancellation close only the observation, not a run or the host. Only explicit
-owned mode registers this channel; default/catalog-only startup behavior is unchanged.
+renderer detach and cancellation close only the observation, not a run or the host. Owned mode registers this channel, including the normal no-argument startup; the explicit catalog-only route does not.
 Same-host reload obtains a new baseline of retained partial values only, not omitted history,
 tool results, permission decisions or effects. Host restart restores no prior authority.
 

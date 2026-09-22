@@ -11,36 +11,43 @@ The CodeAlta terminal workspace is packaged as the .NET global tool `CodeAlta.Tu
 > [!NOTE]
 > This development branch documents the terminal package rename. The commands below apply once `CodeAlta.Tui` is released; older releases used `CodeAlta` / `alta`. The replacement desktop head is still in development. Existing `~/.alta` state is not renamed or migrated by the terminal rename.
 
-The development desktop includes a workspace snapshot browser. Run `alta` with no options to browse
-the current `~/.alta` catalog while keeping desktop-owned WebView data under the platform-local
-application-data directory. Catalog browsing can create or update the standard `cache/cache.sqlite3`
-projection and SQLite sidecars, but it adds no desktop-specific state to `.alta`, enables no agent
-execution, providers or plugins, and does not acquire the terminal runtime lock. Older terminal versions
-can continue to open the same catalog. To browse an isolated catalog copy, use
+The development desktop includes an interactive workspace. Run `alta` with no options to start the
+normal owned agent host for the current directory and `~/.alta`, matching the TUI default. You can
+select an existing session and send a prompt immediately; the running agent appears in the live view
+while persisted events appear in its timeline. The desktop acquires the same runtime lock and may
+update project catalog, journal, cache and provider state. A submission may authenticate or use the
+configured provider's storage/network. Plugins remain disabled in this desktop host, and command
+permissions and provider input remain denied unless separately enabled through the explicit scoped
+options. Desktop-owned WebView data stays under the platform-local `CodeAlta/desktop` directory, so
+existing terminal versions continue to use the same compatible `.alta` data without a migration.
+
+To use an intentionally read-only isolated catalog copy, launch
 `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`
 with trusted non-overlapping roots outside `.alta`. The browser shows
 persisted project/session metadata and bounded event history, not live runs. Project, session and
 timeline lists have dedicated scrollbars. Selecting a session accumulates up to 1,000 persisted
-events, starts at the latest content and preserves the viewport while older pages load. The timeline
+events in chronological order and preserves the viewport while pages load. The timeline
 distinguishes messages, reasoning, tools/file changes, plans, prompt information, usage, interactions
-and errors; hover or focus a text message to copy its Markdown. Shortened previews or omitted raw
-provider payloads are marked. The bounded reader supports UTF-8
+and errors. Tool cards identify the tool and primary command/input; prompt, usage, model and secondary
+event details use compact summaries with disclosure. Hover or focus a message to use its icon-only
+copy action. Internal raw persistence records are not shown as empty provider cards. The bounded reader supports UTF-8
 LF/CRLF journals, with a 128 KiB record limit; unsupported or oversized records are not
 silently skipped. If the journal changes, restart history rather than refreshing the catalog.
 
-Catalog mode includes an editable session-scoped prompt draft and a bottom-left Alta notes Markdown
-pane, but Send is refused because no runtime is owned. The project picker opens projects already in the
-catalog; it does not add an arbitrary folder. Use the Shortcuts dialog (`F1`) to discover navigation,
-search, prompt, notes and configuration shortcuts. Provider/model/agent-prompt values shown in the
-composer are current-session status, not editable selections in this development version.
+The explicit catalog-only mode includes an editable session-scoped prompt draft and a bottom-left Alta
+notes Markdown pane, but it remains intentionally read-only. The project picker opens projects already
+in that catalog; it does not add an arbitrary folder. Use the Shortcuts dialog (`F1`) to discover
+navigation, search, prompt, notes and configuration shortcuts. Agent-prompt/model/reasoning values in
+the compact composer strip are current-session status, not editable selections in this development version.
 
-A separate experimental owned-host mode adds existing-session text submission and explicit
-receipt refresh/retry. It additionally requires `--allow-owned-host`, `--project-root`,
+The default interactive desktop provides existing-session text submission and explicit receipt
+refresh/retry. A separate scoped owned-host form remains available for isolated test roots. It requires
+`--allow-owned-host`, `--project-root`,
 `--discovery-home`, `--instruction-root` and `--builtin-skill-root`, all with explicit existing
 absolute roots (the instruction root includes the project). This broader consent permits
 configuration/discovery reads, journal/provider-state writes and configured-provider
-registration; submissions may authenticate or use provider storage/network. Do not use a
-production profile. Plugins/probes stay off, permissions are denied by default and user input is cancelled.
+registration; submissions may authenticate or use provider storage/network. Plugins/probes stay off,
+permissions are denied by default and user input is cancelled.
 Receipts describe submission, not live-run completion; **Abort original Send operation** is not
 general Stop-agent behavior. Send/Abort uncertainty and live-waiter exclusion survive selection
 changes, with up to 256 local intents combined. Use manual receipt refresh or exact retry after the
@@ -48,7 +55,7 @@ original waiter settles; Abort-only recovery preserves unrelated composer text. 
 disable mutations even after leaving the old selection. Reload permits receipt browsing, not recovery
 of lost local text/keys. No automatic retry or rollback/run-termination guarantee is provided.
 The owned composer supports Enter to send, Shift+Enter for a newline and a bounded local draft. It also
-shows observed provider/model/agent-prompt/context state plus configured MCP runtime state. Native
+shows observed model/reasoning/agent-prompt/context state plus configured MCP runtime state. Native
 lifecycle and full agent parity remain unqualified; continue using `altatui` for normal workflows.
 
 The experimental owned mode offers **Queue text — this host only** after manual runtime refresh,

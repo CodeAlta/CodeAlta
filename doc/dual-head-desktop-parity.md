@@ -2804,13 +2804,10 @@ so this checkpoint does not claim a complete repository test pass.
 
 ### Normal local startup and SDK output — 2026-09-22
 
-The desktop no longer requires an operator-created `--data-root` for ordinary startup. `alta` with
-no arguments reads the current `~/.alta` catalog while storing WebView data beneath the platform-local
-application-data directory (`CodeAlta/desktop`). Catalog reads can create or update the existing
-`cache/cache.sqlite3` projection and SQLite sidecars, but the desktop adds no desktop-specific files to
-`.alta`, starts no providers/plugins, exposes no owned-session mutation and does not acquire the terminal
-runtime lock. Older terminal versions can therefore continue to open the same catalog. Explicit
-isolated-copy and owned-host flags remain available for their existing specialized paths.
+The desktop no longer requires an operator-created `--data-root` for ordinary startup. This historical
+checkpoint initially made no-argument startup catalog-only; the later interactive-default checkpoint
+below supersedes that ownership policy. Platform-local WebView storage remains `CodeAlta/desktop`, and
+explicit isolated-copy/catalog-only and scoped owned-host flags remain available.
 
 The desktop project also no longer overrides `BaseOutputPath` or `BaseIntermediateOutputPath`.
 New builds use standard SDK locations such as `bin/Debug/net10.0` and `obj/Debug/net10.0`; generated
@@ -2910,7 +2907,7 @@ Text events render safe Markdown; their Copy Markdown action remains visually hi
 or keyboard focus and is still reachable by keyboard. Live finalized/streaming text has the same action.
 
 The primary owned composer now restores and persists bounded per-session drafts, refreshes runtime state,
-shows observed agent-prompt/model/provider/context values and reports configured MCP runtime state. Enter
+shows observed agent-prompt/model/reasoning/context values and reports configured MCP runtime state. Enter
 sends and Shift+Enter inserts a newline through the existing retained Send flow. Catalog mode permits
 editing a saved local draft but refuses Send with a truthful owned-host requirement. Provider, model and
 agent-prompt selectors are deliberately disabled status controls: desktop mutation/listing contracts for
@@ -2931,3 +2928,26 @@ passes with zero warnings/errors and a current generated contract. The available
 native window but fails WebView2 controller creation (`NeoAstraException`), so mounted visual/keyboard,
 screen-reader and native-WebView interaction remain unverified. Model/provider/prompt mutation, full MCP
 management, CodeMirror/attachments, native menus and broader M5/M6 parity remain open; M7 is not started.
+
+### Interactive default and compact semantic timeline — 2026-09-22
+
+No-argument Desktop startup now follows the normal TUI ownership default: it composes an owned host for
+the current directory and standard `~/.alta` profile, acquires the shared runtime lock, and lets the
+selected existing session submit a prompt without an undocumented consent flag. WebView-only state
+continues under platform-local `CodeAlta/desktop`; `.alta` formats are unchanged. The explicit data-root /
+catalog-copy route remains read-only, and the complete explicit-root owned form remains available for
+isolated qualification. Default command permission review and nonsecret provider-input review remain off.
+
+The persisted timeline now follows TUI presentation semantics more closely. Raw persistence/provider
+records duplicated by typed events are omitted instead of producing unavailable-payload cards. Completed
+tool activities fold earlier lifecycle/output duplicates, identify the tool, and expose the first command,
+query, path or prompt as a compact primary line. Usage, model changes and system prompts use concise
+headlines with collapsed Markdown/JSON details; event metadata is secondary inside that same disclosure.
+Older-history loading is above the chronological messages. Cards, avatars and the agent-prompt/model/
+reasoning status strip are denser. Copy, message/category, refresh, send, search, notes, settings, close
+and navigation actions use tree-shaken Lucide icons with accessible labels/tooltips where applicable.
+
+Pure frontend behavior covers tool extraction/lifecycle folding, compact prompt/usage/model summaries,
+raw-record suppression, details and clipboard outcomes. Native mounted verification remains unavailable
+because WebView2 controller creation fails in this environment. This advances M5/M6 usability only; M7
+remains deferred.

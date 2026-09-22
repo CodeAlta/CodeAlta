@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MarkdownContent } from "./MarkdownContent";
 import { notesMessage, type createNotesReader, type NotesState } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
+import { AppIcon } from "./AppIcon";
 
 export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, onClose }: {
   epoch?: string;
@@ -26,8 +27,8 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
   const markdown = state?.kind === "ready" ? state.markdown : fallbackMarkdown;
   return <section className="notes-pane" aria-label="Alta notes" tabIndex={-1}>
     <header><span><strong>Alta notes</strong><small>Markdown · session scoped</small></span><span>
-      {selection.current && <button type="button" title="Refresh notes" aria-label="Refresh notes" onClick={() => void selection.current?.refresh()}>↻</button>}
-      <button type="button" title="Hide notes" aria-label="Hide notes" onClick={onClose}>×</button>
+      {selection.current && <button type="button" title="Refresh notes" aria-label="Refresh notes" onClick={() => void selection.current?.refresh()}><AppIcon name="refresh" size={14} /></button>}
+      <button type="button" title="Hide notes" aria-label="Hide notes" onClick={onClose}><AppIcon name="close" size={14} /></button>
     </span></header>
     <div className="notes-content">
       {!sessionId && <p className="muted-text">Select a session to view its notes.</p>}

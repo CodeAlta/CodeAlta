@@ -3,6 +3,7 @@ import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from
 import type { createMutationCapability } from "./sessionOperations";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown } from "./timeline";
+import { AppIcon } from "./AppIcon";
 
 export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
   store: ReturnType<typeof createSessionDisplayStore>; hostEpoch: string; sessionId: string;
@@ -65,9 +66,9 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
 function LiveTextMessage({ row }: { row: { kind: string; text: string; isComplete: boolean; isTruncated: boolean; startedWithDelta: boolean } }) {
   const [copied, setCopied] = useState(false);
   return <article className={`message timeline-message message-${row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "reasoning" : "assistant"}`}>
-    <div className="avatar">{row.kind.toLowerCase() === "user" ? "You" : "A"}</div><div className="message-body">
+    <div className="avatar"><AppIcon name={row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "brain" : "assistant"} size={17} /></div><div className="message-body">
       <div className="message-heading"><span><strong>{row.kind}</strong><small>{row.isComplete ? "Complete" : "Streaming"}</small></span><span className="message-actions">
-        <button type="button" className="copy-markdown" onClick={() => void writeMarkdown(text => navigator.clipboard.writeText(text), row.text).then(result => { setCopied(result === "copied"); if (result === "copied") window.setTimeout(() => setCopied(false), 1600); })}>{copied ? "Copied" : "Copy Markdown"}</button>
+        <button type="button" className="copy-markdown" aria-label={copied ? "Copied" : `Copy ${row.kind} as Markdown`} title={copied ? "Copied" : "Copy as Markdown"} onClick={() => void writeMarkdown(text => navigator.clipboard.writeText(text), row.text).then(result => { setCopied(result === "copied"); if (result === "copied") window.setTimeout(() => setCopied(false), 1600); })}><AppIcon name={copied ? "checked" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copied ? "Copied" : ""}</span></button>
       </span></div>
       <MarkdownContent source={row.text} />
       {row.isTruncated && <p className="detail">Text prefix truncated.</p>}

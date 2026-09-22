@@ -198,11 +198,12 @@ replacements without adding a `StreamEventsAsync` reader. History paging, full s
 shared interactions, original-effects routing changes and broader Desktop/TUI integration remain
 later M4 work; the scoped selected-session Desktop channel is described below.
 
-#### Selected-session Desktop channel (explicit owned mode only)
+#### Selected-session Desktop channel (owned mode)
 
 `SessionDisplayService` is registered in the real `DesktopApplication.RunOwnedAsync` against
-that host's `RuntimeService.Display`. Default boot/catalog-only modes do not register it; no
-startup opt-in, root, provider, tool or permission policy changes. `display.observe` is a generated
+that host's `RuntimeService.Display`. Normal no-argument startup now uses this route; the explicit
+catalog-only route does not register it. This default change does not expand tool or permission
+policy. `display.observe` is a generated
 NeoAstra 0.1.0 channel using `DesktopJsonContext`. Before creating a runtime observation it validates
 the expected **host epoch** and bounded, well-formed selected-session identity. Unknown/unobserved
 or evicted identities yield an explicit absent session and partial coverage, without catalog/store
@@ -487,14 +488,16 @@ The [parity ledger](dual-head-desktop-parity.md) records focused verification an
 uncovered paths: injected failed/null journal reads and retirement forced between setup capture
 and registration/publication. Source inspection is not dynamic proof of those interleavings.
 
-### Explicit Desktop submissions and owned reads
+### Desktop submissions and owned reads
 
 The in-development Desktop owned mode borrows `Commands` and `WorkspaceReads` from one
-`CodeAltaHost`. It requires the existing browser/catalog/cache-consent arguments plus all of
+`CodeAltaHost`. Normal no-argument startup uses this mode with the current directory, standard
+`~/.alta` profile and the same instruction/builtin discovery defaults as the TUI. The separate
+scoped form requires the existing browser/catalog/cache-consent arguments plus all of
 `--allow-owned-host`, `--project-root`, `--discovery-home`, `--instruction-root` and
-`--builtin-skill-root`. Every root is explicit and absolute; the instruction root must include
-the project. This is not default-profile startup or proof of task ownership or reparse isolation.
-Browser-only and catalog-copy-only modes retain their existing behavior.
+`--builtin-skill-root`. Every scoped root is explicit and absolute; the instruction root must
+include the project. This is not proof of task ownership or reparse isolation. Browser-only and
+catalog-copy-only modes retain their read-only behavior.
 
 Owned-mode consent includes lock, project catalog, journal, cache and provider-state writes;
 configuration, instruction and skill reads; and configured-provider registration, which can read
