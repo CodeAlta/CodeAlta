@@ -156,4 +156,42 @@ public sealed class DesktopHistoryTests
         Assert.IsFalse(response.Entries.Single().TextTruncated);
         Assert.IsTrue(JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.HistoryResponse).Length < 768 * 1024);
     }
+
+    [TestMethod]
+    public void Projection_ProvidesDetailedTimelinePayloads()
+    {
+        var prompt = new AgentSystemPromptEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+            "session_start", "sha256:abc", "default", "System text", "Developer text",
+            new("native-system-and-developer", true, false), JsonSerializer.SerializeToElement(new { tools = 3 }),
+            new(3, 4, 7, 11, 14), new("initial", ["system"], [], []),
+            new("default", "Default", ".alta/prompts/agents/default.prompt.md"));
+        var usage = new AgentSessionUsage(
+            new(6400, 128000, 12),
+            new("model-1", InputTokens: 100, OutputTokens: 25, ReasoningTokens: 8, Cost: .01, DurationMs: 1234, ReasoningEffort: "high"),
+            Scope: AgentUsageScope.CurrentWindow, Source: AgentUsageSource.ProviderUsage);
+        var events = new AgentEvent[]
+        {
+            prompt,
+            new AgentPlanSnapshotEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+                new(AgentPlanChangeKind.Updated, "Implementation plan", [new("Inspect", AgentPlanStepStatus.Completed), new("Build", AgentPlanStepStatus.InProgress)])),
+            new AgentSessionUpdateEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+                AgentSessionUpdateKind.UsageUpdated, "Usage refreshed", JsonSerializer.SerializeToElement(new { source = "provider" }), usage),
+            new AgentActivityEvent(new("provider"), "session", DateTimeOffset.UnixEpoch, new("run"),
+                AgentActivityKind.FileChange, AgentActivityPhase.Completed, "activity", null, "Update files", "Changed 2 files",
+                JsonSerializer.SerializeToElement(new { files = new[] { "a.cs", "b.cs" } })),
+        };
+
+        var response = WorkspaceService.ProjectHistory(new(events.Select((value, index) => new AgentSessionHistoryEntry(index, value)).ToArray(), null, false));
+
+        Assert.AreEqual("Default", response.Entries[0].Name);
+        StringAssert.Contains(response.Entries[0].Text, "Developer text");
+        StringAssert.Contains(response.Entries[0].Text, "Approximate tokens");
+        StringAssert.Contains(response.Entries[0].Details, "tools");
+        StringAssert.Contains(response.Entries[1].Text, "- [x] Inspect");
+        StringAssert.Contains(response.Entries[1].Text, "in progress");
+        StringAssert.Contains(response.Entries[2].Text, "6400 / 128000 tokens");
+        StringAssert.Contains(response.Entries[2].Text, "Reasoning tokens");
+        StringAssert.Contains(response.Entries[3].Details, "a.cs");
+        Assert.IsFalse(response.Entries.Any(static value => value.BodyOmitted));
+    }
 }

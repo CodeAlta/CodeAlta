@@ -54,7 +54,8 @@ test("timeline paging accumulates distinct rows and an explicit restart replaces
   const entry: HistoryResponse["entries"][number] = {
     offset: "0", eventType: "contentDelta", providerId: "p", sessionId: "runtime", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: "content",
-    activityId: null, parentActivityId: null, name: null, text: "delta", textTruncated: false, bodyOmitted: false,
+    activityId: null, parentActivityId: null, interactionId: null, name: null, text: "delta", details: null,
+    textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   };
   const cursor = { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" };
   const first = mergeHistoryPage(undefined, request, { ...page, entries: [entry], next: cursor });
@@ -69,7 +70,8 @@ test("timeline paging de-duplicates offsets and remains bounded", () => {
   const entries = Array.from({ length: 1000 }, (_, index) => ({
     offset: `${index}`, eventType: "contentCompleted", providerId: "p", sessionId: "s", runId: null,
     timestamp: "2026-01-01T00:00:00Z", kind: "Assistant", phase: null, contentId: `${index}`,
-    activityId: null, parentActivityId: null, name: null, text: `${index}`, textTruncated: false, bodyOmitted: false,
+    activityId: null, parentActivityId: null, interactionId: null, name: null, text: `${index}`, details: null,
+    textTruncated: false, detailsTruncated: false, bodyOmitted: false,
   }));
   const cursor = { version: 1, sessionId: "s", length: "2000", lastWriteUtcTicks: "7", offset: "1000" };
   const first = mergeHistoryPage(undefined, request, { ...page, entries, next: cursor });

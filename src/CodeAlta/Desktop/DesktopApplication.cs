@@ -278,7 +278,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             var builder = new NeoRpcBuilder(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true });
             builder.AddBootService(new BootService());
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
-            builder.AddConfigurationService(new ConfigurationService());
+            builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             await using var rpc = builder.Build();
             window.Show();
             await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions

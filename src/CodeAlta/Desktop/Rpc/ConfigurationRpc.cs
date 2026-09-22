@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins;
 using NeoAstra.Rpc;
 
@@ -9,6 +10,15 @@ internal sealed class ConfigurationService(
     ModelProviderRegistry? providerRegistry = null,
     PluginRuntimeManager? pluginRuntime = null)
 {
+    private readonly string? _catalogRoot;
+
+    internal ConfigurationService(string catalogRoot) : this()
+    {
+        if (string.IsNullOrWhiteSpace(catalogRoot) || !Path.IsPathFullyQualified(catalogRoot))
+            throw new ArgumentException("An absolute catalog root is required.", nameof(catalogRoot));
+        _catalogRoot = Path.GetFullPath(catalogRoot);
+    }
+
     [NeoRpcMethod("snapshot")]
     public ConfigurationSnapshot Snapshot(ConfigurationRequest request)
     {
@@ -35,6 +45,28 @@ internal sealed class ConfigurationService(
                 Bound(value.State.ToString()),
                 value.Contributions.Count))
             .ToArray();
+        if (providerRegistry is null && _catalogRoot is not null)
+        {
+            try
+            {
+                var document = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = _catalogRoot }).LoadGlobal();
+                var configuredProviders = document.Providers ?? [];
+                providers = configuredProviders.Take(32).Select(value => new ConfigurationProvider(
+                    Bound(value.Key), Bound(value.Value.DisplayName ?? value.Key), Bound(value.Value.ProviderType ?? value.Key),
+                    value.Value.Enabled ?? CodeAltaProviderDocument.DefaultEnabled,
+                    string.Equals(document.Chat?.DefaultProvider, value.Key, StringComparison.OrdinalIgnoreCase),
+                    BoundOptional(value.Value.Model), BoundOptional(value.Value.ReasoningEffort))).ToArray();
+                var configuredPlugins = document.Plugins ?? [];
+                plugins = configuredPlugins.Take(32).Select(value => new ConfigurationPlugin(
+                    Bound(value.Key), Bound(value.Key), null, value.Value.Enabled == false ? "Disabled" : "Configured", 0)).ToArray();
+                return new ConfigurationSnapshot(providers, plugins, false, false,
+                    configuredProviders.Count > providers.Length, configuredPlugins.Count > plugins.Length);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                return new ConfigurationSnapshot([], [], false, false, false, false);
+            }
+        }
         return new ConfigurationSnapshot(providers, plugins, providerRegistry is not null, pluginRuntime is not null,
             providerDescriptors.Count > providers.Length, pluginInstances.Count > plugins.Length);
     }

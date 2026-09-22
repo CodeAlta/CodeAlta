@@ -51,4 +51,48 @@ public sealed class ConfigurationRpcTests
         Assert.IsFalse(result.ProvidersTruncated);
         Assert.IsFalse(result.PluginsTruncated);
     }
+
+    [TestMethod]
+    public void Snapshot_ReadsCatalogConfigurationWithoutStartingProvidersOrPlugins()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"CodeAlta-desktop-configuration-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "config.toml"), """
+                [chat]
+                default_provider = "alpha"
+
+                [providers.alpha]
+                type = "openai"
+                display_name = "Alpha"
+                model = "alpha-1"
+                reasoning_effort = "high"
+
+                [providers.off]
+                type = "anthropic"
+                enabled = false
+
+                [plugins.mcp]
+                enabled = true
+                """);
+
+            var result = new ConfigurationService(root).Snapshot(new ConfigurationRequest());
+
+            Assert.IsFalse(result.ProviderRuntimeAvailable);
+            Assert.IsFalse(result.PluginRuntimeAvailable);
+            Assert.HasCount(2, result.Providers);
+            Assert.AreEqual("alpha", result.Providers[0].Id);
+            Assert.AreEqual("alpha-1", result.Providers[0].DefaultModel);
+            Assert.IsTrue(result.Providers[0].IsDefault);
+            Assert.IsFalse(result.Providers[1].Enabled);
+            Assert.HasCount(1, result.Plugins);
+            Assert.AreEqual("mcp", result.Plugins[0].Id);
+            Assert.AreEqual("Configured", result.Plugins[0].State);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
