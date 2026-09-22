@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -71,22 +73,29 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     internal static AgentRunLifecycle Combine(AgentRunLifecycle? first, AgentRunLifecycle second)
         => first is null ? second : new Combined(first, second);
 
-    private sealed class Combined(AgentRunLifecycle first, AgentRunLifecycle second) : AgentRunLifecycle
+    private sealed class Combined(AgentRunLifecycle first, AgentRunLifecycle second) : AgentRunLifecycle, AgentSession.IRunStartEvidence
     {
+        private readonly object _gate = new();
+        private ClosingPair? _closing;
+        private readonly AgentSession.RunStartInvocation _firstStart = new(OwnedProviderEventForwarding.HasRetention);
+        private readonly AgentSession.RunStartInvocation _secondStart = new(OwnedProviderEventForwarding.HasRetention);
+        AgentSession.RunStartInvocation? AgentSession.IRunStartEvidence.FailedStart
+            => _firstStart.Failure is not null ? _firstStart : _secondStart.Failure is not null ? _secondStart : null;
         public override async Task StartedAsync(AgentRunId runId, CancellationToken executionToken)
         {
-            await first.StartedAsync(runId, executionToken).ConfigureAwait(false);
-            await second.StartedAsync(runId, executionToken).ConfigureAwait(false);
+            await _firstStart.RunAsync(first, runId, executionToken).ConfigureAwait(false);
+            await _secondStart.RunAsync(second, runId, executionToken).ConfigureAwait(false);
         }
-        public override async Task ClosingAsync(AgentRunId runId)
+        public override Task ClosingAsync(AgentRunId runId)
         {
-            // Start both original closing obligations before joining either, including partial start.
-            Task a, b;
-            try { a = first.ClosingAsync(runId); } catch (Exception ex) { a = Task.FromException(ex); }
-            try { b = second.ClosingAsync(runId); } catch (Exception ex) { b = Task.FromException(ex); }
-            var both = Task.WhenAll(a, b);
-            try { await both.ConfigureAwait(false); }
-            catch { if (a.Exception is not null && b.Exception is not null) throw new AggregateException(a.Exception.InnerExceptions.Concat(b.Exception.InnerExceptions)); throw; }
+            ClosingPair closing;
+            lock (_gate)
+            {
+                if (_closing is not null) return _closing.Completion;
+                closing = _closing = new ClosingPair(() => first.ClosingAsync(runId), () => second.ClosingAsync(runId));
+            }
+            closing.Launch();
+            return closing.Completion;
         }
     }
 
@@ -114,35 +123,62 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
         }
     }
 
-    private sealed class Lifecycle(OwnedSessionAskExecution ask, AgentRunLifecycle? previous) : AgentRunLifecycle
+    internal sealed class Lifecycle(AgentRunLifecycle ask, AgentRunLifecycle? previous) : AgentRunLifecycle, AgentSession.IRunStartEvidence
     {
         private readonly object _gate = new();
-        private Task? _closing;
+        private ClosingPair? _closing;
+        private readonly AgentSession.RunStartInvocation _previousStart = new(OwnedProviderEventForwarding.HasRetention);
+        private readonly AgentSession.RunStartInvocation _askStart = new(OwnedProviderEventForwarding.HasRetention);
+        AgentSession.RunStartInvocation? AgentSession.IRunStartEvidence.FailedStart
+            => _previousStart.Failure is not null ? _previousStart : _askStart.Failure is not null ? _askStart : null;
         public override async Task StartedAsync(AgentRunId runId, CancellationToken executionToken)
         {
             // AgentSession retains this original start and always invokes Closing, including start failure.
-            if (previous is not null) await previous.StartedAsync(runId, executionToken).ConfigureAwait(false);
-            await ask.StartedAsync(runId, executionToken).ConfigureAwait(false);
+            if (previous is not null) await _previousStart.RunAsync(previous, runId, executionToken).ConfigureAwait(false);
+            await _askStart.RunAsync(ask, runId, executionToken).ConfigureAwait(false);
         }
         public override Task ClosingAsync(AgentRunId runId)
         {
-            TaskCompletionSource launch;
-            Task closing;
+            ClosingPair closing;
             lock (_gate)
             {
-                if (_closing is not null) return _closing;
-                launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                closing = _closing = CloseOriginalAsync(runId, launch.Task);
+                if (_closing is not null) return _closing.Completion;
+                closing = _closing = new ClosingPair(
+                    () => ask.ClosingAsync(runId),
+                    () => previous is null ? Task.CompletedTask : previous.ClosingAsync(runId), firstRequired: true);
             }
             // Independent ask closure precedes a potentially noncooperative permission join.
-            try { ask.Close(); }
-            finally { launch.TrySetResult(); }
-            return closing;
+            closing.Launch();
+            return closing.Completion;
         }
-        private async Task CloseOriginalAsync(AgentRunId runId, Task launch)
+    }
+
+    internal sealed class ClosingPair
+    {
+        private readonly bool _firstRequired;
+        internal ClosingPair(Func<Task> first, Func<Task> second, bool firstRequired = false)
         {
-            await launch.ConfigureAwait(false);
-            if (previous is not null) await previous.ClosingAsync(runId).ConfigureAwait(false);
+            _firstRequired = firstRequired;
+            First = new SessionPermissionService.DeliveryStage(first);
+            Second = new SessionPermissionService.DeliveryStage(second);
+            Completion = CompleteAsync();
+        }
+        internal SessionPermissionService.DeliveryStage First { get; }
+        internal SessionPermissionService.DeliveryStage Second { get; }
+        internal Task Completion { get; }
+        internal void Launch() { First.Launch(); Second.Launch(); }
+        private async Task CompleteAsync()
+        {
+            var first = await First.Outcome.ConfigureAwait(false);
+            var second = await Second.Outcome.ConfigureAwait(false);
+            var failures = new List<Exception>();
+            if (first is not null) failures.Add(First.Failure!);
+            if (second is not null) failures.Add(Second.Failure!);
+            if (First.Original is null || Second.Original is null
+                || (_firstRequired && first is not null) || failures.Any(OwnedProviderEventForwarding.HasRetention))
+                throw new AgentDependencyRetentionException("owned lifecycle", "closing", failures, this);
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
         }
     }
 }

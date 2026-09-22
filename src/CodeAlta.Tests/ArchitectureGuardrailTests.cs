@@ -766,7 +766,7 @@ public sealed class ArchitectureGuardrailTests
             "App/SessionPromptDispatchCoordinator.cs:232:_ = RecordResolvedReferenceUsageAsync(promptInput.ResolvedReferences);",
             "App/SessionHistoryCoordinator.cs:103:await Task.Run(",
             "App/SessionHistoryCoordinator.cs:493:var loadTask = Task.Run(() => LoadCoreAsync(session, tab, cancellationToken));",
-            "App/SessionRuntimeEventCoordinator.cs:281:Task.Run(async () =>",
+            "App/SessionRuntimeEventCoordinator.cs:275:Task.Run(async () =>",
             "Presentation/Editing/ProjectFileOpenDialogController.cs:217:_ = AcceptSelectedAsync(selected);",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:153:var sessionCreateTask = Task.Run(",
             "Presentation/Prompting/ProjectFileReferencePopupController.cs:164:_ = sessionCreateTask.ContinueWith(",

@@ -4,6 +4,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
@@ -22,6 +23,8 @@ namespace CodeAlta.Orchestration.Hosting;
 public sealed class CodeAltaHost : IAsyncDisposable
 {
     private readonly Lazy<Task> _disposeTask;
+    private readonly HostDisposalStage _earlyReadShutdown;
+    private readonly HostDisposalStage _earlyCommandShutdown;
 
     private CodeAltaHost(
         CatalogOptions catalogOptions,
@@ -57,14 +60,16 @@ public sealed class CodeAltaHost : IAsyncDisposable
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput);
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
-        _disposeTask = PluginEventDependencyBarrier.Wrap(PluginRuntime, CreateHostDisposal(
+        _earlyReadShutdown = new HostDisposalStage(() => WorkspaceReads.DisposeAsync().AsTask());
+        _earlyCommandShutdown = new HostDisposalStage(() => Commands.DisposeAsync().AsTask());
+        _disposeTask = CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,
             ModelProviderRegistry.DisposeAsync,
             PluginRuntime.DisposeAsync,
             LogManager.Shutdown,
             ownsPluginRuntime,
-            ownsLogging));
+            ownsLogging);
     }
 
     /// <summary>
@@ -241,6 +246,17 @@ public sealed class CodeAltaHost : IAsyncDisposable
             agentHub = new AgentHub(modelProviderRegistry, globalRoot, sessionViewCatalog.JournalStore.ProjectionCache);
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();
+            var eventFailurePolicy = options.PluginAgentEventFailurePolicy ??
+                ((RuntimePluginAgentEventEnvelope envelope, Exception failure) =>
+                {
+                    LogManager.GetLogger("CodeAlta.Host").Error(failure, $"Plugin agent event observer failed for session {envelope.SessionId}");
+                    return ValueTask.CompletedTask;
+                });
+            var eventObserver = new RuntimePluginAgentEventObserver(pluginRuntime, async (envelope, failure) =>
+            {
+                await eventFailurePolicy(envelope, failure).ConfigureAwait(false);
+                if (OwnedProviderEventForwarding.HasRetention(failure)) ExceptionDispatchInfo.Throw(failure);
+            });
             runtimeService = new SessionRuntimeService(
                 agentHub,
                 agentSessionCatalog,
@@ -251,6 +267,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 skillCatalog)
             {
                 FileSearchCache = projectFileSnapshotCache,
+                PluginEventObserver = eventObserver,
+                PluginEventCurrentProjectId = currentProject.Id,
+                PluginEventCurrentProjectPath = currentProject.ProjectPath,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,
@@ -278,9 +297,30 @@ public sealed class CodeAltaHost : IAsyncDisposable
         }
         catch (Exception creationFailure)
         {
-            await PluginEventDependencyBarrier.BeforeRollbackAsync(
-                pluginRuntime ?? options.PrestartedPluginRuntime, creationFailure,
-                new object?[] { pluginRuntime, runtimeService, agentHub, modelProviderRegistry, options }).ConfigureAwait(false);
+            var acquisitions = new { Plugin = pluginRuntime ?? options.PrestartedPluginRuntime, Runtime = runtimeService,
+                Hub = agentHub, Providers = modelProviderRegistry, Options = options, OwnsPlugins = ownsPluginRuntime, OwnsLogging = ownsLogging };
+            if (OwnedProviderEventForwarding.HasRetention(creationFailure))
+            {
+                var failures = new List<Exception> { creationFailure };
+                var drain = runtimeService is null ? null : new HostDisposalStage(() => runtimeService.DrainRetainedDependenciesAsync(creationFailure).AsTask());
+                if (drain is not null)
+                {
+                    drain.Launch();
+                    if (await drain.ReportedOutcome.ConfigureAwait(false) is { } drainFailure) failures.Add(drainFailure);
+                }
+                throw new AgentDependencyRetentionException("host creation", "retained inner acquisition", failures,
+                    new { Acquisitions = acquisitions, Drain = drain });
+            }
+            try
+            {
+                await PluginEventDependencyBarrier.BeforeRollbackAsync(
+                    pluginRuntime ?? options.PrestartedPluginRuntime, creationFailure, acquisitions).ConfigureAwait(false);
+            }
+            catch (Exception barrierFailure) when (OwnedProviderEventForwarding.HasRetention(barrierFailure))
+            {
+                // Retain this exact outer inventory even when an inner plugin marker already has OuterDependencies.
+                throw new AgentDependencyRetentionException("host creation", "plugin barrier", [barrierFailure], acquisitions);
+            }
             await RollbackHostCreationAsync(
                 creationFailure,
                 () => runtimeService?.DisposeAsync() ?? ValueTask.CompletedTask,
@@ -403,7 +443,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// </summary>
     /// <returns>The same underlying operation for repeated or concurrent callers, including its terminal failure.</returns>
     /// <remarks>
-    /// Joins owned commands and workspace reads, then attempts runtime, hub, registry, owned plugin and owned logging cleanup in order, even after a stage fails.
+    /// Starts read/command shutdown and plugin quiescence before joining their originals, then attempts
+    /// runtime, hub, registry, owned plugin and owned logging cleanup in order after ordinary failures.
+    /// Explicit retained-dependency failures prohibit later dependent releases; runtime instead drains
+    /// independent controls and genuinely active work without disposing retained dependencies.
     /// A lone failure is rethrown unchanged; multiple failures retain their direct references in execution order,
     /// without flattening aggregates. Cancellation is recorded like other failures and does not skip later stages.
     /// There are no retries or hard timeout guarantees. Reentrant disposal of this same host is unsupported.
@@ -412,42 +455,127 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="Exception">A single cleanup stage failed; the original exception is propagated.</exception>
     /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
     /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A required prerequisite was not released; dependent acquisitions remain owned.</exception>
     public ValueTask DisposeAsync() => PluginEventDependencyBarrier.EnterDispose(PluginRuntime, _disposeTask);
+
+    /// <summary>Closes owned read/command admission and starts their independent shutdown controls without joining them.</summary>
+    /// <remarks>
+    /// The host retains both original operations and their outcomes and joins them during disposal.
+    /// This does not dispose runtime, provider, plugin or logging dependencies. Frontend owners may
+    /// call it before joining their own plugin barrier; repeated calls do not retry either control.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">An admitted plugin callback would initiate its own shutdown.</exception>
+    public void BeginShutdownControls()
+    {
+        PluginRuntime.ThrowIfAgentEventSelfJoin();
+        _earlyReadShutdown.Launch();
+        _earlyCommandShutdown.Launch();
+    }
 
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
+        BeginShutdownControls();
         await DisposeOwnedWorkAsync(
-            () => Commands.DisposeAsync().AsTask(),
-            () => WorkspaceReads.DisposeAsync().AsTask(),
-            RuntimeService.DisposeAsync).ConfigureAwait(false);
+            () => _earlyCommandShutdown.Reported,
+            () => _earlyReadShutdown.Reported,
+            RuntimeService.DisposeAsync,
+            RuntimeService.DrainRetainedDependenciesAsync,
+            PluginRuntime.QuiesceAgentEventsAsync).ConfigureAwait(false);
     }
 
     // Mandatory callback seam for this existing host stage, not a replacement lifetime owner.
     internal static async ValueTask DisposeOwnedWorkAsync(
-        Func<Task> disposeCommands, Func<Task> disposeReads, Func<ValueTask> disposeRuntime)
+        Func<Task> disposeCommands, Func<Task> disposeReads, Func<ValueTask> disposeRuntime,
+        Func<Exception, ValueTask> drainRetainedRuntime, Func<Task> quiescePlugins)
     {
         ArgumentNullException.ThrowIfNull(disposeCommands);
         ArgumentNullException.ThrowIfNull(disposeReads);
         ArgumentNullException.ThrowIfNull(disposeRuntime);
-        // Close read admission first, then signal commands; retain both before either await.
-        var reads = Start(disposeReads);
-        var commands = Start(disposeCommands);
+        ArgumentNullException.ThrowIfNull(drainRetainedRuntime);
+        ArgumentNullException.ThrowIfNull(quiescePlugins);
+        Exception? retained = null;
+        var reads = new HostDisposalStage(disposeReads);
+        var commands = new HostDisposalStage(disposeCommands);
+        var plugins = new HostDisposalStage(quiescePlugins);
+        var runtime = new HostDisposalStage(() => (retained is null ? disposeRuntime() : drainRetainedRuntime(retained)).AsTask());
+        // Own every receipt before invocation. Close read admission and signal commands before any join,
+        // including plugin quiescence: plugin work may itself await one of these owned operations.
+        reads.Launch();
+        commands.Launch();
+        plugins.Launch();
         var failures = new List<Exception>();
-        try { await commands.ConfigureAwait(false); } catch (Exception ex) { failures.Add(ex); }
-        try { await reads.ConfigureAwait(false); } catch (Exception ex) { failures.Add(ex); }
-        try
-        {
-            var runtime = disposeRuntime();
-            await runtime.ConfigureAwait(false);
-        }
-        catch (Exception ex) { failures.Add(ex); }
+        if (await commands.ReportedOutcome.ConfigureAwait(false) is { } commandFailure) failures.Add(commandFailure);
+        if (await reads.ReportedOutcome.ConfigureAwait(false) is { } readFailure) failures.Add(readFailure);
+        if (await plugins.ReportedOutcome.ConfigureAwait(false) is { } pluginFailure)
+            failures.Add(new AgentDependencyRetentionException("host", "plugin quiescence", [pluginFailure], plugins));
+        if (failures.Any(OwnedProviderEventForwarding.HasRetention))
+            retained = failures.Count == 1 ? failures[0] : new AggregateException(failures);
+        runtime.Launch();
+        if (await runtime.ReportedOutcome.ConfigureAwait(false) is { } runtimeFailure) failures.Add(runtimeFailure);
+        if (failures.Any(OwnedProviderEventForwarding.HasRetention))
+            throw new AgentDependencyRetentionException("host", "owned work drainage", failures,
+                new { Commands = commands, Reads = reads, Plugins = plugins, Runtime = runtime });
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException(failures);
+    }
 
-        static Task Start(Func<Task> operation)
+    internal sealed class HostDisposalStage
+    {
+        private readonly Func<Task> _operation;
+        private readonly TaskCompletionSource _published = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Task<Exception?>? _outcome;
+        private int _launched;
+        internal HostDisposalStage(Func<Task> operation)
         {
-            try { return operation(); }
-            catch (Exception ex) { return Task.FromException(ex); }
+            ArgumentNullException.ThrowIfNull(operation);
+            _operation = operation;
+            Reported = ReportAsync();
+            ReportedOutcome = ObserveAsync(Reported);
+        }
+        internal Task? Original { get; private set; }
+        internal AggregateException? OriginalFaults { get; private set; }
+        internal Exception? AwaitedFailure { get; private set; }
+        internal Exception? InvocationFailure { get; private set; }
+        internal Task? Observer => _outcome;
+        internal Task Reported { get; }
+        internal Task<Exception?> ReportedOutcome { get; }
+        internal Task<Exception?> Outcome => _outcome ?? throw new InvalidOperationException("The host cleanup invocation has not launched.");
+        internal void Launch()
+        {
+            if (Interlocked.Exchange(ref _launched, 1) != 0) return;
+            try
+            {
+                Original = _operation() ?? throw new InvalidOperationException("A cleanup callback returned no original.");
+                _outcome = ObserveOriginalAsync(Original);
+            }
+            catch (Exception failure)
+            {
+                InvocationFailure = failure;
+                // A synchronous callback failure is a completed ordinary failure, not evidence that
+                // work escaped. Only an explicit retention marker may stop dependent cleanup.
+                _outcome = Task.FromResult<Exception?>(failure);
+            }
+            finally { _published.TrySetResult(); }
+        }
+        private async Task ReportAsync()
+        {
+            await _published.Task.ConfigureAwait(false);
+            if (await Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
+        }
+        private async Task<Exception?> ObserveOriginalAsync(Task original)
+        {
+            try { await original.ConfigureAwait(false); return null; }
+            catch (Exception failure)
+            {
+                AwaitedFailure = failure;
+                OriginalFaults = original.Exception;
+                return OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : failure;
+            }
+        }
+        private static async Task<Exception?> ObserveAsync(Task original)
+        {
+            try { await original.ConfigureAwait(false); return null; }
+            catch (Exception failure) { return failure; }
         }
     }
 
@@ -494,67 +622,26 @@ public sealed class CodeAltaHost : IAsyncDisposable
         bool ownsPluginRuntime,
         bool ownsLogging)
     {
-        List<Exception>? failures = null;
-        try
+        var stages = new[]
         {
-            await disposeRuntimeService().ConfigureAwait(false);
-        }
-        catch (Exception exception)
+            new HostDisposalStage(() => disposeRuntimeService().AsTask()),
+            new HostDisposalStage(() => disposeAgentHub().AsTask()),
+            new HostDisposalStage(() => disposeModelProviderRegistry().AsTask()),
+            new HostDisposalStage(() => disposePluginRuntime().AsTask()),
+            new HostDisposalStage(() => { shutdownLogging(); return Task.CompletedTask; }),
+        };
+        var failures = new List<Exception>();
+        for (var index = 0; index < stages.Length; index++)
         {
-            (failures ??= []).Add(exception);
+            if (index == 3 && !ownsPluginRuntime || index == 4 && !ownsLogging) continue;
+            stages[index].Launch();
+            if (await stages[index].ReportedOutcome.ConfigureAwait(false) is not { } failure) continue;
+            failures.Add(failure);
+            if (OwnedProviderEventForwarding.HasRetention(failure))
+                throw new AgentDependencyRetentionException("host", "dependent service release", failures, stages);
         }
-
-        try
-        {
-            await disposeAgentHub().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            (failures ??= []).Add(exception);
-        }
-
-        try
-        {
-            await disposeModelProviderRegistry().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            (failures ??= []).Add(exception);
-        }
-
-        if (ownsPluginRuntime)
-        {
-            try
-            {
-                await disposePluginRuntime().ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                (failures ??= []).Add(exception);
-            }
-        }
-
-        if (ownsLogging)
-        {
-            try
-            {
-                shutdownLogging();
-            }
-            catch (Exception exception)
-            {
-                (failures ??= []).Add(exception);
-            }
-        }
-
-        if (failures is { Count: 1 })
-        {
-            ExceptionDispatchInfo.Throw(failures[0]);
-        }
-
-        if (failures is { Count: > 1 })
-        {
-            throw new AggregateException(failures);
-        }
+        if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures.Count > 1) throw new AggregateException(failures);
     }
 
     /// <summary>
@@ -604,6 +691,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private static async Task RollbackHostCreationCoreAsync(Exception creationFailure, Lazy<Task> disposal)
     {
+        if (OwnedProviderEventForwarding.HasRetention(creationFailure))
+            throw new AgentDependencyRetentionException("host creation", "retained inner acquisition", [creationFailure], disposal);
         try
         {
             await disposal.Value.ConfigureAwait(false);

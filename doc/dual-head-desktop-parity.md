@@ -2754,3 +2754,21 @@ plugins only after release, preserving any committed-feedback failure. Recovered
 global-root precedence/first matching project identity without prompt discovery. The TUI task monitor
 reports faulted, not canceled tasks; its fatal path defaults to `Environment.FailFast` and has not been
 executed here. Existing headless API, history observation and readers remain unchanged. M4–M6 stay open.
+
+### M4 live plugin-effect cutover: functional-first integration — 2026-09-22
+
+Live provider, explicit append, notes and synthetic-failure plugin observation now runs from the
+shared runtime rather than the TUI event reader. Host composition supplies one captured-envelope
+observer and selects either ordinary standalone logging or the existing TUI logging/fatal policy.
+Publication ownership is released before arbitrary plugin callbacks; independent cache,
+parent-notification and queue work is still attempted after ordinary plugin failures. Historical
+replay remains on its existing route, so this does not claim a history/live watermark or exactly-once
+effects.
+
+The previously proposed rule that every synchronous cleanup throw implied escaped work was removed:
+ordinary synchronous failures now preserve their original identity and continue best-effort cleanup;
+only explicit dependency-retention evidence blocks dependent release. The Release solution builds
+cleanly, 165 live-event behavioral cases pass, and the existing Host/owned-services behavioral set
+passes. Exact source-text reconstruction for this cutover is deliberately ignored under the
+functional-first direction; those brittle shape checks are not release evidence and can be deleted or
+redesigned later. Native UI, configured providers and broad profile-dependent tests remain separate.

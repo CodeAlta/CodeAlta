@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CodeAlta.Tui\CodeAlta.Tui.csproj" />
+    <ProjectReference Include="..\CodeAlta.Tui\CodeAlta.Tui.csproj" Aliases="global,TuiApp" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Anthropic\CodeAlta.Agent.Anthropic.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />

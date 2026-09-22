@@ -20,9 +20,9 @@ public sealed class RuntimeEventForwardingSourceTests
         foreach (var expression in new[]
         {
             "@event => _ = PostAgentEventToActorAsync(actor, session.SessionId, projector, @event)",
-            "EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken)",
+            "EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture)",
             "var sessionHandleId = await _sessionActors.GetOrCreate(session.SessionId).QueryAsync(",
-            "var runId = await _agentHub.RunAsync(sessionHandleId, sendOptions, cancellationToken).ConfigureAwait(false);",
+            "=> _agentHub.RunAsync(sessionHandleId, sendOptions, cancellationToken);",
             "return await _agentHub.SteerAsync(sessionHandleId, steerOptions, cancellationToken).ConfigureAwait(false);",
             "await MarkActiveRunIfStillInFlightAsync(session.SessionId, runId, runStartedAt, cancellationToken)",
             "var result = await _sessionActors.GetOrCreate(session.SessionId).ExecuteAsync(",
@@ -38,7 +38,7 @@ public sealed class RuntimeEventForwardingSourceTests
         StringAssert.Contains(setup, "!ReferenceEquals(currentTicket, ticket)");
         StringAssert.Contains(setup, "entry.PendingAgentPromptId = previousEntry.PendingAgentPromptId;");
 
-        var send = Between(runtime, "    private async Task<AgentRunId> SendOwnedBodyAsync(", "    private async Task<AgentRunId> RunCapturedAsync(");
+        var send = Between(runtime, "    private async Task<AgentRunId> SendOwnedBodyAsync(", "    private Task<AgentRunId> RunCapturedAsync(");
         Before(send, "candidate.Matches(options, NormalizeOptionalText(candidate.PendingAgentPromptId)", "candidate.Attachment.TryAcquireHandleUse()");
         Before(send, "if (handleUse is null) return default(AgentSessionHandleId);", "candidate.PendingAgentPromptId = null;");
         StringAssert.Contains(send, "coordinationCancellationToken, candidate)");
@@ -50,8 +50,22 @@ public sealed class RuntimeEventForwardingSourceTests
 
         var post = Between(runtime, "    private async Task PostAgentEventToActorCoreAsync(", "    private static bool IsQueueDrainTrigger(");
         StringAssert.Contains(post, "projector.Entry!.TakeParentNotifications(sanitized)");
-        Before(post, "projectionUse.Dispose();", "await DeliverParentNotificationAsync(");
-        Before(post, "projectionUse.Dispose();", "await TryDrainNextQueuedPromptAsync(");
+        StringAssert.Contains(post, "}).AsTask(), projectionUse.Dispose, ObserveLivePluginEventAsync, () =>");
+        Before(post, "projectionUse.Dispose, ObserveLivePluginEventAsync, () =>", "effects.Add(() => InvalidateFileSearchCacheAsync(published, workingDirectory));");
+        StringAssert.Contains(post, "if (published is not null)\n                    effects.Add(() => InvalidateFileSearchCacheAsync(published, workingDirectory));");
+        Before(post, "effects.Add(() => InvalidateFileSearchCacheAsync(published, workingDirectory));", "effects.Add(() => DeliverParentNotificationAsync(notification));");
+        StringAssert.Contains(post, "foreach (var notification in notifications)\n                    effects.Add(() => DeliverParentNotificationAsync(notification));");
+        Before(post, "effects.Add(() => DeliverParentNotificationAsync(notification));", "effects.Add(() => TryDrainNextQueuedPromptAsync(sessionId));");
+        StringAssert.Contains(post, "var actorChoresCompleted = false;");
+        StringAssert.Contains(post, "notifications = projector.Entry!.TakeParentNotifications(sanitized);\n                    actorChoresCompleted = true;");
+        StringAssert.Contains(post, "if (actorChoresCompleted && IsQueueDrainTrigger(@event))\n                    effects.Add(() => TryDrainNextQueuedPromptAsync(sessionId));");
+        Before(post, "effects.Add(() => TryDrainNextQueuedPromptAsync(sessionId));", "publication.IndependentWork = new LiveEventIndependentWork(effects);");
+        StringAssert.Contains(post, "publication.IndependentWork = new LiveEventIndependentWork(effects);\n                return publication.IndependentWork.RunAsync();");
+        var publicationHelper = Read("CodeAlta.Orchestration/Runtime/SessionRuntimeService.PluginEvents.cs");
+        Before(publicationHelper, "await PublicationOriginal.ConfigureAwait(false);", "try { releasePublicationUse(); }");
+        Before(publicationHelper, "try { releasePublicationUse(); }", "IndependentOriginal = independent()");
+        StringAssert.Contains(publicationHelper, "Stages = _effects.Select(static _ => new OwnedSessionCommandService.OriginalInvocation()).ToArray();");
+        Before(publicationHelper, "Stages[index].Launch(_effects[index]);", "await Stages[index].Outcome.ConfigureAwait(false)");
         var drain = Between(runtime, "    private async Task TryDrainNextQueuedPromptAsync(", "    private async Task<QueuedPromptDrainWork?> TryMarkNextQueuedPromptSubmittingAsync(");
         StringAssert.Contains(drain, "MarkQueuedPromptSubmittedAsync(work.Entry,");
         StringAssert.Contains(drain, "MarkQueuedPromptFailedAsync(work.Entry,");
@@ -66,17 +80,17 @@ public sealed class RuntimeEventForwardingSourceTests
 
         var helper = Read(Helper);
         var forward = Between(helper, "    internal Task Forward(", "    internal Task RetireAsync(");
-        Before(forward, "_active.Add(ordinal, (work, ObserveOwnedAsync(ordinal, work)));", "launch.TrySetResult();");
+        Before(forward, "_active.Add(ordinal, (work, ObserveOwnedAsync(ordinal, work, attachment), receipt));", "launch.TrySetResult();");
         StringAssert.Contains(forward, "identity: attachment.Identity");
         var retire = Between(helper, "    private async Task RetireCoreAsync(", "    private async Task WaitUsesAsync(");
         Before(retire, "cancelStage.Launch();", "await attachment.Setup.Task");
         Before(retire, "abortStage.Launch();", "await attachment.Setup.Task");
         Before(retire, "attachment.CallbackAdmission = false;", "subscription?.Dispose();");
         Before(retire, "await WaitUsesAsync(attachment, projection: true)", "var stopStage = new RetirementStage(attachment.Stop);");
-        Before(retire, "if (!unsubscribe.IsCompletedSuccessfully)", "var stopStage = new RetirementStage(attachment.Stop);");
-        StringAssert.Contains(retire, "throw new AggregateException(new[] { cancellation, abort, unsubscribe }");
+        Before(retire, "if (!unsubscribeStage.Succeeded", "var stopStage = new RetirementStage(attachment.Stop);");
+        StringAssert.Contains(retire, "throw new AggregateException(failures);");
         Assert.IsFalse(retire.Contains("_active", StringComparison.Ordinal));
-        StringAssert.Contains(helper, "failure.Data[\"RetainedForwardingOwner\"] = this;");
+        StringAssert.Contains(helper, "new AgentDependencyRetentionException(\"provider forwarding\", stage, failures, new { Owner = this, Dependencies = dependencies })");
         StringAssert.Contains(helper, "internal sealed record AttachmentIdentity(string SessionId, string HandleId);");
         StringAssert.Contains(helper, "internal AttachmentIdentity Identity { get; }");
         foreach (var forbidden in new[] { "Task.Run(", "ContinueWith(", "WaitAsync(TimeSpan", "Task.Delay(" })

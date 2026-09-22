@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
+using CodeAlta.Agent;
 using CodeAlta.Hosting;
 using CodeAlta.Tui;
 using CodeAlta.Tui.App;
@@ -12,23 +15,324 @@ using XenoAtom.Logging;
 using XenoAtom.Terminal;
 
 var mainThreadId = Environment.CurrentManagedThreadId;
+Program.StartupOwner? startupOwner = null;
 try
 {
     return CodeAltaStartupAdmission.Run(
         args,
         Program.RunEarlyCommand,
-        static () => CodeAltaSingleInstanceGuard.Acquire(),
-        () => Program.RunAdmittedStartup(args, mainThreadId));
+        () =>
+        {
+            startupOwner = Program.StartupOwner.CreateProduction();
+            return startupOwner.AcquireAdmission(() => CodeAltaSingleInstanceGuard.Acquire(startupOwner.GuardEvidence));
+        },
+        () => Program.RunAdmittedStartup(args, mainThreadId, startupOwner!));
 }
 catch (Exception ex)
 {
+    startupOwner?.Capture(ex);
     // Admission/early-output failures must not initialize logging, crash reporting or Terminal.
     Console.Error.WriteLine(ex.Message);
     return 1;
 }
+finally
+{
+    startupOwner?.FinishAfterAdmissionUnwind();
+}
 
 internal partial class Program
 {
+    // One invocation owns one normal CLR handle. Only FinishAfterAdmissionUnwind may release it.
+    // Retained catastrophic failure intentionally keeps the actual graph rooted until CLR shutdown.
+    internal sealed class StartupOwner
+    {
+        private readonly object _gate = new();
+        private readonly Action<StartupOwner> _allocateAnchor;
+        private readonly Action<StartupOwner> _releaseAnchor;
+        private readonly AdmissionWrapper _admission;
+        private readonly List<StartupOperation> _operations = [];
+        private readonly List<Exception> _failures = [];
+        private GCHandle _anchor;
+        private bool _anchorAllocated;
+        private bool _anchorReleaseAttempted;
+        private bool _startupSettled;
+        private bool _admissionReleased;
+        private bool _admissionReleaseAttempted;
+        private bool _retained;
+        private StartupOperation? _pluginRelease;
+        private StartupOperation? _terminalRelease;
+        private StartupOperation? _loggingRelease;
+        private StartupOperation? _runSourceRelease;
+        private StartupOperation? _appRelease;
+
+        internal StartupOwner(Action<StartupOwner> allocateAnchor, Action<StartupOwner> releaseAnchor)
+        {
+            ArgumentNullException.ThrowIfNull(allocateAnchor);
+            ArgumentNullException.ThrowIfNull(releaseAnchor);
+            _allocateAnchor = allocateAnchor;
+            _releaseAnchor = releaseAnchor;
+            _admission = new AdmissionWrapper(this);
+        }
+
+        internal static StartupOwner CreateProduction() => new(
+            static owner => owner._anchor = GCHandle.Alloc(owner, GCHandleType.Normal),
+            static owner => owner._anchor.Free()) { ShutdownLogging = LogManager.Shutdown };
+
+        internal CodeAltaSingleInstanceGuard.AcquisitionEvidence<FileStream> GuardEvidence { get; } = new();
+        internal IDisposable? AdmissionLease { get; private set; }
+        internal object? Terminal { get; set; }
+        internal Action? ReleaseTerminal { get; set; }
+        internal PluginRuntimeManager? Plugins { get; set; }
+        internal DeferredCodeAltaApp? App { get; set; }
+        internal CancellationTokenSource? RunCancellation { get; set; }
+        internal bool LoggingRequired { get; set; }
+        internal Action? ShutdownLogging { get; init; }
+        internal bool HasRetainedEvidence { get { lock (_gate) return _retained; } }
+
+        internal IDisposable AcquireAdmission(Func<IDisposable> acquire)
+        {
+            ArgumentNullException.ThrowIfNull(acquire);
+            _allocateAnchor(this);
+            _anchorAllocated = true;
+            try
+            {
+                AdmissionLease = acquire() ?? throw new InvalidOperationException("Admission returned no lease.");
+                return _admission;
+            }
+            catch (Exception failure)
+            {
+                Capture(failure);
+                _startupSettled = true;
+                if (GuardEvidence.RollbackFailure is not null)
+                    throw Retain("guard rollback", failure);
+                throw;
+            }
+        }
+
+        internal void Capture(Exception failure)
+        {
+            ArgumentNullException.ThrowIfNull(failure);
+            var retained = ContainsRetention(failure);
+            lock (_gate)
+            {
+                _failures.Add(failure);
+                _retained |= retained;
+            }
+        }
+
+        internal static bool ContainsRetention(Exception failure)
+        {
+            if (AgentDependencyRetentionException.Contains(failure)) return true;
+            var pending = new Stack<Exception>();
+            var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+            pending.Push(failure);
+            while (pending.TryPop(out var current))
+            {
+                if (!visited.Add(current)) continue;
+                if (current is PluginEventDependencyException) return true;
+                if (current is AggregateException aggregate)
+                    foreach (var inner in aggregate.InnerExceptions) pending.Push(inner);
+                else if (current.InnerException is { } inner) pending.Push(inner);
+            }
+            return false;
+        }
+
+        private AgentDependencyRetentionException Retain(string stage, Exception failure)
+        {
+            var retained = new AgentDependencyRetentionException("startup", stage, [failure], this);
+            Capture(retained);
+            return retained;
+        }
+
+        internal StartupOperation Start(string stage, Func<Task> invoke)
+        {
+            var operation = new StartupOperation(this, stage, invoke);
+            lock (_gate) _operations.Add(operation);
+            operation.Launch();
+            return operation;
+        }
+
+        internal async ValueTask<int> RunCommandAsync(Func<ValueTask<int>> command)
+        {
+            var operation = Start("command callback", () => command().AsTask());
+            await operation.Completion;
+            return ((Task<int>)operation.Original!).GetAwaiter().GetResult();
+        }
+
+        internal void ReleasePluginsIfEligible() => ReleasePluginsIfEligibleAsync().AsTask().GetAwaiter().GetResult();
+
+        internal async ValueTask ReleasePluginsIfEligibleAsync()
+        {
+            if (HasRetainedEvidence || Plugins is null) return;
+            _pluginRelease ??= Start("plugin release", () => Plugins.DisposeAsync().AsTask());
+            try { await _pluginRelease.Completion; }
+            catch (Exception failure) { throw Retain("plugin release", failure); }
+        }
+
+        internal void ReleaseStartupIfEligible()
+        {
+            if (HasRetainedEvidence) return;
+            ReleasePluginsIfEligible();
+            if (RunCancellation is not null)
+                Release(ref _runSourceRelease, "run source release", RunCancellation.Dispose);
+            if (ReleaseTerminal is not null)
+                Release(ref _terminalRelease, "terminal release", ReleaseTerminal);
+            if (LoggingRequired)
+                Release(ref _loggingRelease, "logging release", ShutdownLogging
+                    ?? throw new InvalidOperationException("Logging shutdown was not supplied."));
+        }
+
+        private void Release(ref StartupOperation? record, string stage, Action release)
+        {
+            if (HasRetainedEvidence) return;
+            record ??= Start(stage, () => { release(); return Task.CompletedTask; });
+            try { record.Completion.GetAwaiter().GetResult(); }
+            catch (Exception failure) { throw Retain(stage, failure); }
+        }
+
+        internal void MarkStartupSettled() => _startupSettled = true;
+
+        internal StartupOperation StartAppRelease(DeferredCodeAltaApp app)
+        {
+            ArgumentNullException.ThrowIfNull(app);
+            if (!ReferenceEquals(App, app)) throw new InvalidOperationException("The startup owner does not own this application.");
+            return _appRelease ??= Start("deferred disposal", () => app.DisposeAsync().AsTask());
+        }
+
+        private bool RequiredDependenciesReleased()
+        {
+            lock (_gate)
+            {
+                if (_operations.Any(static operation => !operation.Outcome.IsCompleted)) return false;
+            }
+            return (Plugins is null || Released(_pluginRelease))
+                && (RunCancellation is null || Released(_runSourceRelease))
+                && (Terminal is null && ReleaseTerminal is null || Released(_terminalRelease))
+                && (!LoggingRequired || Released(_loggingRelease))
+                // Deferred disposal may report ordinary errors after its best-effort cleanup. Its
+                // explicit retained graphs are captured by StartupOperation before Outcome settles.
+                && (App is null || _appRelease is { Original: not null } appRelease && appRelease.Outcome.IsCompleted);
+
+            static bool Released(StartupOperation? release)
+                => release is { Original: not null } && release.Outcome.IsCompletedSuccessfully
+                    && release.Outcome.GetAwaiter().GetResult() is null;
+        }
+
+        private void ReleaseAdmission()
+        {
+            if (AdmissionLease is null || !TryAuthorizeRelease(false,
+                () => _startupSettled && RequiredDependenciesReleased())) return;
+            try
+            {
+                AdmissionLease.Dispose();
+                lock (_gate) _admissionReleased = true;
+            }
+            catch (Exception failure) { throw Retain("admission release", failure); }
+        }
+
+        internal void FinishAfterAdmissionUnwind()
+        {
+            if (!_anchorAllocated || !TryAuthorizeRelease(true,
+                () => _startupSettled && RequiredDependenciesReleased()
+                    && (AdmissionLease is null || _admissionReleased)
+                    && (GuardEvidence.Candidate is null || _admissionReleased || GuardEvidence.RollbackCompleted))) return;
+            try
+            {
+                _releaseAnchor(this);
+                lock (_gate) _anchorAllocated = false;
+            }
+            catch (Exception failure) { throw Retain("anchor release", failure); }
+        }
+
+        // Outcome inspection runs outside the gate; final retention/once-only authorization shares
+        // Capture's evidence gate. An original captures retention before publishing its Outcome.
+        internal bool TryAuthorizeRelease(bool anchor, Func<bool> prerequisites)
+        {
+            ArgumentNullException.ThrowIfNull(prerequisites);
+            lock (_gate)
+            {
+                if (_retained || (anchor ? _anchorReleaseAttempted : _admissionReleaseAttempted)) return false;
+            }
+            bool confirmed;
+            try { confirmed = prerequisites(); }
+            catch (Exception failure) { throw Retain("release eligibility", failure); }
+            var missing = confirmed ? null : new AgentDependencyRetentionException("startup", "release eligibility",
+                [new InvalidOperationException("Required startup dependency release was not confirmed.")], this);
+            lock (_gate)
+            {
+                // Revalidate after required outcomes settle; never authorize from the earlier latch read.
+                if (_retained || (anchor ? _anchorReleaseAttempted : _admissionReleaseAttempted)) return false;
+                if (missing is null)
+                {
+                    if (anchor) _anchorReleaseAttempted = true;
+                    else _admissionReleaseAttempted = true;
+                    return true;
+                }
+                _retained = true;
+                _failures.Add(missing);
+            }
+            throw missing;
+        }
+
+        private sealed class AdmissionWrapper(StartupOwner owner) : IDisposable
+        {
+            public void Dispose() => owner.ReleaseAdmission();
+        }
+
+        internal sealed class StartupOperation
+        {
+            private readonly StartupOwner _owner;
+            private readonly Func<Task> _invoke;
+            private readonly TaskCompletionSource<Task> _launched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            internal StartupOperation(StartupOwner owner, string stage, Func<Task> invoke)
+            {
+                _owner = owner;
+                _invoke = invoke;
+                Stage = stage;
+                Work = RunAsync();
+                Outcome = ObserveAsync();
+                Completion = ReportAsync();
+            }
+            internal string Stage { get; }
+            internal Task? Original { get; private set; }
+            internal Task Work { get; }
+            internal Task Completion { get; }
+            internal Task<Exception?> Outcome { get; }
+            internal AggregateException? OriginalFaults { get; private set; }
+            internal void Launch()
+            {
+                // Invoke on the admitting thread: terminal bootstrap must remain on the main thread.
+                try { Original = _invoke(); _launched.TrySetResult(Original); }
+                catch (Exception failure) { _launched.TrySetException(failure); }
+            }
+            private async Task RunAsync()
+            {
+                try
+                {
+                    var original = await _launched.Task.ConfigureAwait(false);
+                    await original.ConfigureAwait(false);
+                }
+                catch (Exception failure)
+                {
+                    OriginalFaults = Original?.Exception;
+                    _owner.Capture(failure);
+                    if (OriginalFaults is not null && ContainsRetention(OriginalFaults)) _owner.Capture(OriginalFaults);
+                    throw;
+                }
+            }
+            private async Task<Exception?> ObserveAsync()
+            {
+                try { await Work.ConfigureAwait(false); return null; }
+                catch (Exception failure) { return failure; }
+            }
+            private async Task ReportAsync()
+            {
+                var failure = await Outcome.ConfigureAwait(false);
+                if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+            }
+        }
+    }
+
     internal static int RunEarlyCommand(string argument)
     {
         var command = CodeAltaCliOptions.CreatePlainCommandApp(
@@ -36,11 +340,12 @@ internal partial class Program
         return command.RunAsync([argument]).AsTask().GetAwaiter().GetResult();
     }
 
-    internal static int RunAdmittedStartup(string[] args, int mainThreadId)
+    internal static int RunAdmittedStartup(string[] args, int mainThreadId, StartupOwner owner)
     {
         try
         {
             var homeRoot = Program.GetDefaultHomeRoot();
+            owner.LoggingRequired = true;
             CodeAltaLogging.Initialize(homeRoot);
 
             // Plugin runtime startup ordering: register MSBuild before any plugin build service, pipe-logger
@@ -48,33 +353,37 @@ internal partial class Program
             // still read by host-owned code before dynamic plugins are built or loaded.
             // Disabled for now until https://github.com/dotnet/sdk/pull/54172 is merged
             // //CodeAltaPluginRuntimeStartup.RegisterMsBuildDefaults();
-            using var session = Terminal.Open();
+            var session = Terminal.Open();
+            owner.Terminal = session;
+            owner.ReleaseTerminal = session.Dispose;
 
             _ = PluginRuntimeConfigResolver.IsSafeModeEnabled(args);
-            var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None);
+            var commandLinePluginRuntime = Program.StartPluginRuntimeForCommandLine(args, CancellationToken.None, owner);
             try
             {
                 var pluginCommandLineContributions = Program.GetPluginCommandLineContributions(commandLinePluginRuntime);
                 var command = CodeAltaCliOptions.CreateCommandApp(
-                    options => Program.RunAsync(options, mainThreadId, commandLinePluginRuntime),
+                    options => owner.RunCommandAsync(() => Program.RunAsync(options, mainThreadId, commandLinePluginRuntime, owner)),
                     pluginCommandLineContributions);
-                return command.RunAsync(args).AsTask().GetAwaiter().GetResult();
+                var invocation = owner.Start("command", () => command.RunAsync(args).AsTask());
+                invocation.Completion.GetAwaiter().GetResult();
+                return ((Task<int>)invocation.Original!).GetAwaiter().GetResult();
             }
+            catch (Exception failure) { owner.Capture(failure); throw; }
             finally
             {
-                if (commandLinePluginRuntime is not null)
-                {
-                    commandLinePluginRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                }
+                owner.ReleasePluginsIfEligible();
             }
         }
         catch (CodeAltaAlreadyRunningException ex)
         {
+            owner.Capture(ex);
             Terminal.WriteMarkupLine($"[bright-red]{AnsiMarkup.Escape(ex.Message)}[/]");
             return 1;
         }
         catch (Exception ex)
         {
+            owner.Capture(ex);
             try
             {
                 LogManager.GetLogger("CodeAlta.Program").Error(ex, "Top-level exception");
@@ -89,11 +398,12 @@ internal partial class Program
         }
         finally
         {
-            LogManager.Shutdown();
+            try { owner.ReleaseStartupIfEligible(); }
+            finally { owner.MarkStartupSettled(); }
         }
     }
 
-    internal static async ValueTask<int> RunAsync(CodeAltaCliOptions options, int mainThreadId, PluginRuntimeManager? prestartedPluginRuntime = null)
+    internal static async ValueTask<int> RunAsync(CodeAltaCliOptions options, int mainThreadId, PluginRuntimeManager? prestartedPluginRuntime, StartupOwner owner)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -103,11 +413,16 @@ internal partial class Program
         }
 
         var cancellationTokenSource = new CancellationTokenSource();
+        owner.RunCancellation = cancellationTokenSource;
 
         // Defer async app startup until the terminal loop is already running so XenoAtom keeps the UI
         // bound to the process main thread. Awaiting service creation before Terminal.RunAsync can move
         // the actual UI bootstrap onto a worker continuation instead.
-        await using var app = new DeferredCodeAltaApp(prestartedPluginRuntime);
+        var app = new DeferredCodeAltaApp(prestartedPluginRuntime);
+        owner.App = app;
+        Exception? bodyFailure = null;
+        try
+        {
         if (options.TestMode)
         {
             var logger = LogManager.GetLogger("CodeAlta.Program");
@@ -120,7 +435,8 @@ internal partial class Program
         // Enter the terminal immediately after synchronous setup; DeferredCodeAltaApp finishes async
         // initialization from inside the loop instead of before Terminal.RunAsync starts.
         Program.ThrowIfCurrentThreadIsNotMainThread(mainThreadId);
-        await app.RunAsync(cancellationTokenSource.Token);
+        var terminalRun = owner.Start("terminal run", () => app.RunAsync(cancellationTokenSource.Token).AsTask());
+        await terminalRun.Completion;
         PrintUpdateAvailableMessage(app.UpdateCheckSnapshot);
 
         if (options.TestMode)
@@ -132,6 +448,19 @@ internal partial class Program
         }
 
         return 0;
+        }
+        catch (Exception failure) { bodyFailure = failure; owner.Capture(failure); throw; }
+        finally
+        {
+            // Capture both originals before the command library can turn failure into an exit code.
+            var cleanup = owner.StartAppRelease(app);
+            try { await cleanup.Completion; }
+            catch (Exception failure)
+            {
+                if (bodyFailure is not null) throw new AggregateException(bodyFailure, failure);
+                throw;
+            }
+        }
     }
 
     private static void PrintUpdateAvailableMessage(CodeAltaUpdateCheckSnapshot snapshot)
@@ -147,12 +476,12 @@ internal partial class Program
 
     internal static PluginRuntimeManager? StartPluginRuntimeForCommandLine(
         IReadOnlyList<string> args,
-        CancellationToken cancellationToken)
-        => StartPluginRuntimeForCommandLineAsync(args, cancellationToken).AsTask().GetAwaiter().GetResult();
+        CancellationToken cancellationToken, StartupOwner owner)
+        => StartPluginRuntimeForCommandLineAsync(args, cancellationToken, owner).AsTask().GetAwaiter().GetResult();
 
     internal static async ValueTask<PluginRuntimeManager?> StartPluginRuntimeForCommandLineAsync(
         IReadOnlyList<string> args,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, StartupOwner owner)
     {
         ArgumentNullException.ThrowIfNull(args);
         var homeRoot = GetDefaultHomeRoot();
@@ -166,10 +495,11 @@ internal partial class Program
         }
 
         var runtime = new PluginRuntimeManager();
+        owner.Plugins = runtime;
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var result = await runtime.StartAsync(
+            var startup = owner.Start("plugin startup", () => runtime.StartAsync(
                 new PluginRuntimeManagerOptions
                 {
                     GlobalRoot = homeRoot,
@@ -186,14 +516,18 @@ internal partial class Program
                     RawArguments = args,
                     BuiltIns = CodeAltaBuiltInPlugins.All,
                 },
-                cancellationToken);
+                cancellationToken).AsTask());
+            await startup.Completion;
+            var result = ((Task<PluginRuntimeManagerStartResult>)startup.Original!).GetAwaiter().GetResult();
             stopwatch.Stop();
             ReportCommandLinePluginStartup(result, stopwatch.Elapsed, pluginBootstrapOptions);
             return runtime;
         }
-        catch
+        catch (Exception failure)
         {
-            await runtime.DisposeAsync();
+            owner.Capture(failure);
+            try { await owner.ReleasePluginsIfEligibleAsync(); }
+            catch (Exception cleanup) { throw new AggregateException(failure, cleanup); }
             throw;
         }
     }

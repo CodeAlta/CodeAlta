@@ -32,28 +32,34 @@ internal static class PluginAgentEventOwnershipSourceInverse
     internal static string RestoreCacheInput(string path, string source)
         => path is Host or OwnerInverse or DesktopProject ? Restore(path, source) : source;
     internal static string RestoreArchitectureInput(string path, string source)
-        => path is Shell or FrontendGuard or WorkspaceGuard or DeferredGuard or PromptGuard ? Restore(path, source) : source;
+        => path is Shell or FrontendGuard or WorkspaceGuard or DeferredGuard or PromptGuard ? Restore(path, source)
+            : path == RuntimePluginLiveEventSourceInverse.Deferred ? RuntimePluginLiveEventSourceInverse.Restore(path, source) : source;
     internal static string RestoreLifetimeInput(string path, string source)
-        => path is Project or Lifecycle or Adapter or Tasks or FrontendGuard or WorkspaceGuard or DeferredGuard or PromptGuard ? Restore(path, source) : source;
+        => path is Project or Lifecycle or Adapter or Tasks or FrontendGuard or WorkspaceGuard or DeferredGuard or PromptGuard ? Restore(path, source)
+            : RuntimePluginLiveEventSourceInverse.RestoreLifetimeInput(path, source);
     internal static string RestoreOwnerInput(string path, string source)
         => path is ProfileInverse ? Restore(path, source) : source;
     internal static string RestoreDiscoveryInput(string path, string source)
         => path is McpInverse ? Restore(path, source) : source;
     internal static string RestoreProfileInput(string path, string source)
-        => path is Owned ? Restore(path, source) : source;
+        => path is Owned ? Restore(path, source)
+            : path == RuntimePluginLiveEventSourceInverse.Program ? RuntimePluginLiveEventSourceInverse.Restore(path, source) : source;
     internal static string RestoreGitHubInput(string path, string source)
         => path is Lifecycle or Manager ? Restore(path, source) : source;
     internal static string RestoreMcpInput(string path, string source)
         => path is GitHubInverse ? Restore(path, source) : source;
     internal static string RestoreShellInput(string path, string source)
-        => path is Shell ? Restore(path, source) : source;
+        => path is Shell ? Restore(path, source)
+            : path == RuntimePluginLiveEventSourceInverse.Deferred ? RuntimePluginLiveEventSourceInverse.Restore(path, source) : source;
     internal static string RestoreDeferredInput(string path, string source)
-        => path is Shell or Owned or Host ? Restore(path, source) : source;
+        => path is Shell or Owned or Host ? Restore(path, source)
+            : path == RuntimePluginLiveEventSourceInverse.Deferred ? RuntimePluginLiveEventSourceInverse.Restore(path, source) : source;
     internal static string RestorePromptInput(string path, string source)
         => path is Shell or FrontendGuard ? Restore(path, source) : source;
 
     internal static string Restore(string path, string source)
     {
+        source = RuntimePluginLiveEventSourceInverse.RestoreInput(path, source);
         source = SourceTestText.Canonicalize(source);
         foreach (var (before, after, count) in Edits(path))
         {

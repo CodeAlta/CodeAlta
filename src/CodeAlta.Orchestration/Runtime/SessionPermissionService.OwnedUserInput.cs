@@ -11,7 +11,7 @@ public sealed partial class SessionPermissionService
         => _ownedDeliveries.Count + _inputDeliveries.Count < OwnedPendingLimit
             && execution.Deliveries.Count + execution.InputDeliveries.Count < OwnedPendingPerExecutionLimit;
 
-    private Task JoinOwnedDeliveries() => Task.WhenAll(_ownedDeliveries.Select(p => (Task)p.Delivery!)
+    private Task JoinOwnedDeliveries() => JoinDeliveryOriginalsAsync(_ownedDeliveries.Select(p => (Task)p.Delivery!)
         .Concat(_inputDeliveries.Select(p => (Task)p.Delivery!)));
 
     internal AgentUserInputRequestHandler CreateOwnedUserInputHandler(OwnedPermissionExecution execution)
@@ -46,29 +46,26 @@ public sealed partial class SessionPermissionService
         CancellationToken attachmentToken, CancellationToken runToken, Task launch)
     {
         await launch.ConfigureAwait(false);
-        try
+        pending.Lifetime = new OwnedDeliveryLifetime(pending);
+        return await pending.Lifetime.RunAsync(async token =>
         {
-            using var linked = new CancellationTokenSource();
-            await using var operation = operationToken.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), linked);
-            await using var attachment = attachmentToken.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), linked);
-            await using var run = runToken.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), linked);
-            await using var request = pending.Token.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), linked);
-            try { return await pending.Completion.Task.WaitAsync(linked.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            try { return await pending.Completion.Task.WaitAsync(token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
                 await ExecuteAsync(() => CompleteInput(pending.Snapshot.Handle, null), false).ConfigureAwait(false);
                 return await pending.Completion.Task.ConfigureAwait(false);
             }
-        }
-        catch
+        },
+        async () => { await _actor.AskAsync(_ => ValueTask.FromResult(CompleteInput(pending.Snapshot.Handle, null))).ConfigureAwait(false); },
+        async () =>
         {
-            await ExecuteAsync(() => CompleteInput(pending.Snapshot.Handle, null), false).ConfigureAwait(false);
-            throw;
-        }
-        finally
-        {
-            await ExecuteAsync(() => { pending.Execution.InputDeliveries.Remove(pending); _inputDeliveries.Remove(pending); return true; }, false).ConfigureAwait(false);
-        }
+            await _actor.AskAsync(_ =>
+            {
+                pending.Execution.InputDeliveries.Remove(pending);
+                _inputDeliveries.Remove(pending);
+                return ValueTask.FromResult(true);
+            }).ConfigureAwait(false);
+        }, [operationToken, attachmentToken, runToken, pending.Token]).ConfigureAwait(false);
     }
 
     private bool LiveInput(PendingUserInput pending) => pending.Execution.EnableUserInput && pending.Execution.RunBound
@@ -129,5 +126,6 @@ public sealed partial class SessionPermissionService
         internal CancellationToken Token { get; } = token;
         internal TaskCompletionSource<AgentUserInputResponse?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task<AgentUserInputResponse?>? Delivery { get; set; }
+        internal OwnedDeliveryLifetime? Lifetime { get; set; }
     }
 }

@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using System.Runtime.ExceptionServices;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -19,7 +20,10 @@ public sealed class AgentHub : IAsyncDisposable
     private readonly Dictionary<AgentSessionHandleId, SessionEntry> _sessions = new();
     private readonly BoundedRuntimeEventStream<OrchestrationEvent> _events = new();
     private readonly SemaphoreSlim _gate = new(initialCount: 1, maxCount: 1);
-    private bool _disposed;
+    private volatile bool _disposed;
+    private readonly object _disposalGate = new();
+    private Task? _disposeTask;
+    private SessionEntry[]? _disposalEntries;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentHub"/> class.
@@ -140,13 +144,17 @@ public sealed class AgentHub : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
 
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        var original = entry.Lifetime.RecordRun(() => entry.Coordinator.RunAsync(sessionHandleId, options, _events, cancellationToken));
         try
         {
-            return await entry.Coordinator.RunAsync(sessionHandleId, options, _events, cancellationToken).ConfigureAwait(false);
+            original.Launch();
+            if (await original.Outcome.ConfigureAwait(false) is not null)
+                ExceptionDispatchInfo.Capture(original.Failure!).Throw();
+            return ((Task<AgentRunId>)original.Original!).GetAwaiter().GetResult();
         }
         finally
         {
-            entry.ReleaseReference();
+            entry.Lifetime.CompleteReference(original.Failure, original);
         }
     }
 
@@ -311,10 +319,7 @@ public sealed class AgentHub : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_sessions.TryGetValue(sessionHandleId, out entry))
-            {
-                _sessions.Remove(sessionHandleId);
-            }
+            _sessions.TryGetValue(sessionHandleId, out entry);
         }
         finally
         {
@@ -323,19 +328,39 @@ public sealed class AgentHub : IAsyncDisposable
 
         if (entry is not null)
         {
-            await entry.DisposeAsync().ConfigureAwait(false);
+            entry.Lifetime.BeginShutdown();
+            try { await entry.DisposeAsync().ConfigureAwait(false); }
+            finally
+            {
+                if (entry.Lifetime.DependenciesReleased)
+                {
+                    await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                    try { _sessions.Remove(sessionHandleId); }
+                    finally { _gate.Release(); }
+                }
+            }
         }
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed)
+        TaskCompletionSource launch;
+        Task original;
+        lock (_disposalGate)
         {
-            return;
+            if (_disposeTask is not null) return new(_disposeTask);
+            _disposed = true;
+            launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            original = _disposeTask = DisposeCoreAsync(launch.Task);
         }
+        launch.TrySetResult();
+        return new(original);
+    }
 
-        _disposed = true;
+    private async Task DisposeCoreAsync(Task launch)
+    {
+        await launch.ConfigureAwait(false);
         _events.Complete();
 
         SessionEntry[] sessions;
@@ -343,19 +368,26 @@ public sealed class AgentHub : IAsyncDisposable
         try
         {
             sessions = _sessions.Values.ToArray();
-            _sessions.Clear();
+            _disposalEntries = sessions;
         }
         finally
         {
             _gate.Release();
         }
 
-        foreach (var session in sessions)
-        {
-            await session.DisposeAsync().ConfigureAwait(false);
-        }
-
+        // Start every independent abort before any session disposal joins an active reference.
+        foreach (var session in sessions) session.Lifetime.BeginShutdown();
+        var disposals = sessions.Select(session => new SessionPermissionService.DeliveryStage(() => session.DisposeAsync().AsTask())).ToArray();
+        foreach (var disposal in disposals) disposal.Launch();
+        var failures = new List<Exception>();
+        foreach (var disposal in disposals)
+            if (await disposal.Outcome.ConfigureAwait(false) is not null) failures.Add(disposal.Failure!);
+        if (failures.Any(OwnedProviderEventForwarding.HasRetention))
+            throw new AgentDependencyRetentionException("hub", "session disposal", failures, new { Owner = this, Entries = _disposalEntries, Disposals = disposals });
+        _sessions.Clear();
         _gate.Dispose();
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException(failures);
     }
 
     private async Task<AgentSessionHandle> AttachSessionAsync(
@@ -379,6 +411,7 @@ public sealed class AgentHub : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             _sessions[handleId] = entry;
         }
         finally
@@ -495,22 +528,25 @@ public sealed class AgentHub : IAsyncDisposable
 
     private static async ValueTask DisposeProviderRuntimeAsync(ProviderSessionRuntimeLease runtime)
     {
-        try
-        {
-            await runtime.StopAsync().ConfigureAwait(false);
-        }
-        catch
-        {
-            // Ignore shutdown exceptions from provider runtimes that did not finish starting.
-        }
-
-        await runtime.DisposeAsync().ConfigureAwait(false);
+        runtime.StopOriginal = new SessionPermissionService.DeliveryStage(() => runtime.StopAsync());
+        runtime.StopOriginal.Launch();
+        var stopFailure = await runtime.StopOriginal.Outcome.ConfigureAwait(false);
+        if (stopFailure is not null && OwnedProviderEventForwarding.HasRetention(runtime.StopOriginal.Failure!))
+            throw new AgentDependencyRetentionException("provider runtime", "stop", [runtime.StopOriginal.Failure!], runtime);
+        runtime.DisposalOriginal = new SessionPermissionService.DeliveryStage(() => runtime.DisposeAsync().AsTask());
+        runtime.DisposalOriginal.Launch();
+        if (await runtime.DisposalOriginal.Outcome.ConfigureAwait(false) is not null)
+            throw new AgentDependencyRetentionException("provider runtime", "disposal",
+                stopFailure is null ? [runtime.DisposalOriginal.Failure!] : [runtime.StopOriginal.Failure!, runtime.DisposalOriginal.Failure!], runtime);
+        if (stopFailure is not null) ExceptionDispatchInfo.Capture(runtime.StopOriginal.Failure!).Throw();
     }
 
     private sealed class ProviderSessionRuntimeLease : IAsyncDisposable
     {
         private readonly AgentRuntime? _runtime;
         private readonly IModelProviderSessionRuntime? _sessionRuntime;
+        internal SessionPermissionService.DeliveryStage? StopOriginal { get; set; }
+        internal SessionPermissionService.DeliveryStage? DisposalOriginal { get; set; }
 
         public ProviderSessionRuntimeLease(AgentRuntime runtime)
         {
@@ -543,12 +579,14 @@ public sealed class AgentHub : IAsyncDisposable
         private readonly IAgentSession _session;
         private readonly SemaphoreSlim _runGate = new(initialCount: 1, maxCount: 1);
         private readonly SemaphoreSlim _controlGate = new(initialCount: 1, maxCount: 1);
+        private readonly CoordinatorFailureOwner _failureOwner;
 
         public AgentSessionCoordinator(IAgentSession session)
         {
             ArgumentNullException.ThrowIfNull(session);
 
             _session = session;
+            _failureOwner = new CoordinatorFailureOwner(this);
         }
 
         public async Task<AgentRunId> RunAsync(
@@ -558,16 +596,17 @@ public sealed class AgentHub : IAsyncDisposable
             CancellationToken cancellationToken)
         {
             await _runGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var invocation = new OwnedSessionCommandService.OriginalInvocation();
             try
             {
-                var runId = await _session.SendAsync(options, cancellationToken).ConfigureAwait(false);
+                var runId = await _failureOwner.RunAsync(invocation, () => _session.SendAsync(options, cancellationToken)).ConfigureAwait(false);
                 events.TryPublish(new RunStartedEvent(DateTimeOffset.UtcNow, sessionHandleId, runId));
                 events.TryPublish(new RunCompletedEvent(DateTimeOffset.UtcNow, sessionHandleId, runId));
                 return runId;
             }
             catch (Exception ex)
             {
-                events.TryPublish(new RunFailedEvent(DateTimeOffset.UtcNow, sessionHandleId, ex.Message));
+                events.TryPublish(new RunFailedEvent(DateTimeOffset.UtcNow, sessionHandleId, (invocation.AwaitedFailure ?? ex).Message));
                 throw;
             }
             finally
@@ -629,18 +668,19 @@ public sealed class AgentHub : IAsyncDisposable
 
         public async Task AbortAsync(CancellationToken cancellationToken)
         {
+            var invocation = new OwnedSessionCommandService.OriginalInvocation();
             // This capability explicitly promises concurrent cancellation/control-read safety.
             // In particular retirement must not hold the control gate while joining a traversal
             // whose callback needs that gate. Legacy providers retain their serialization contract.
             if (_session is IAgentTargetedAbortProvider)
             {
-                await _session.AbortAsync(cancellationToken).ConfigureAwait(false);
+                await _failureOwner.AbortAsync(invocation, () => _session.AbortAsync(cancellationToken)).ConfigureAwait(false);
                 return;
             }
             await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await _session.AbortAsync(cancellationToken).ConfigureAwait(false);
+                await _failureOwner.AbortAsync(invocation, () => _session.AbortAsync(cancellationToken)).ConfigureAwait(false);
             }
             finally
             {
@@ -686,116 +726,208 @@ public sealed class AgentHub : IAsyncDisposable
 
         public async ValueTask DisposeAsync()
         {
-            _runGate.Dispose();
-            _controlGate.Dispose();
-            await _session.DisposeAsync().ConfigureAwait(false);
+            await _failureOwner.DisposeAsync(_session.DisposeAsync, () =>
+            {
+                _runGate.Dispose();
+                _controlGate.Dispose();
+            }).ConfigureAwait(false);
+        }
+    }
+
+    // Coordinator-specific evidence ownership, shared with inert fixtures. It does not schedule
+    // provider work: the existing run/control gates and entry reference owner retain that authority.
+    internal sealed class CoordinatorFailureOwner(object dependencies)
+    {
+        private readonly object _gate = new();
+        private readonly List<(Exception Failure, OwnedSessionCommandService.OriginalInvocation Invocation)> _retained = [];
+        private Task? _disposal;
+        internal bool Retained { get { lock (_gate) return _retained.Count != 0; } }
+        internal OwnedSessionCommandService.OriginalInvocation SessionDisposal { get; } = new();
+
+        internal async Task<T> RunAsync<T>(OwnedSessionCommandService.OriginalInvocation invocation, Func<Task<T>> send)
+        {
+            ThrowIfRetained();
+            try { return await invocation.RunAsync(send).ConfigureAwait(false); }
+            catch (Exception failure) { ExceptionDispatchInfo.Throw(Capture(invocation, failure, false)); throw; }
+        }
+
+        internal async Task AbortAsync(OwnedSessionCommandService.OriginalInvocation invocation, Func<Task> abort)
+        {
+            // Abort remains independently eligible, including after a retained send result.
+            invocation.Launch(abort);
+            if (await invocation.Outcome.ConfigureAwait(false) is { } failure)
+                ExceptionDispatchInfo.Throw(Capture(invocation, failure, true));
+        }
+
+        internal Task DisposeAsync(Func<ValueTask> disposeSession, Action releaseGates)
+        {
+            ArgumentNullException.ThrowIfNull(disposeSession);
+            ArgumentNullException.ThrowIfNull(releaseGates);
+            TaskCompletionSource launch;
+            Task disposal;
+            lock (_gate)
+            {
+                if (_disposal is not null) return _disposal;
+                launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                disposal = _disposal = DisposeCoreAsync(launch.Task, disposeSession, releaseGates);
+            }
+            launch.TrySetResult();
+            return disposal;
+        }
+
+        private async Task DisposeCoreAsync(Task launch, Func<ValueTask> disposeSession, Action releaseGates)
+        {
+            await launch.ConfigureAwait(false);
+            ThrowIfRetained();
+            SessionDisposal.Launch(() => disposeSession().AsTask());
+            var failure = await SessionDisposal.Outcome.ConfigureAwait(false);
+            if (failure is not null) failure = Capture(SessionDisposal, failure, true);
+            ThrowIfRetained();
+            try { releaseGates(); }
+            catch (Exception releaseFailure)
+            {
+                throw new AgentDependencyRetentionException("hub coordinator", "gate release",
+                    failure is null ? [releaseFailure] : [failure, releaseFailure], this);
+            }
+            if (failure is not null) ExceptionDispatchInfo.Throw(failure);
+        }
+
+        private Exception Capture(OwnedSessionCommandService.OriginalInvocation invocation, Exception failure, bool requiresOriginal)
+        {
+            var evidence = invocation.OriginalFaults is { InnerExceptions.Count: > 1 } faults ? faults : failure;
+            if (requiresOriginal && invocation.Original is null)
+                evidence = new AgentDependencyRetentionException("hub coordinator", "missing cleanup original", [evidence], invocation);
+            if (OwnedProviderEventForwarding.HasRetention(evidence))
+            {
+                lock (_gate) _retained.Add((evidence, invocation));
+            }
+            return evidence;
+        }
+
+        private void ThrowIfRetained()
+        {
+            Exception[] failures;
+            lock (_gate) failures = _retained.Select(static item => item.Failure).ToArray();
+            if (failures.Length != 0)
+                throw new AgentDependencyRetentionException("hub coordinator", "retained prerequisite", failures,
+                    new { Owner = dependencies, Lifetime = this });
         }
     }
 
     private sealed class SessionEntry : IAsyncDisposable
     {
-        private readonly object _sync = new();
-        private readonly ProviderSessionRuntimeLease _providerRuntime;
-        private readonly TaskCompletionSource _disposedCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private TaskCompletionSource? _idleCompletion;
-        private int _activeReferences;
-        private bool _disposeStarted;
-
         public SessionEntry(AgentSessionCoordinator coordinator, ProviderSessionRuntimeLease providerRuntime)
         {
             Coordinator = coordinator;
-            _providerRuntime = providerRuntime;
+            Lifetime = new SessionEntryLifetime(this, () => coordinator.AbortAsync(CancellationToken.None),
+                coordinator.DisposeAsync, () => DisposeProviderRuntimeAsync(providerRuntime));
         }
-
         public AgentSessionCoordinator Coordinator { get; }
+        internal SessionEntryLifetime Lifetime { get; }
+        public bool TryAddReference() => Lifetime.TryAddReference();
+        public void ReleaseReference() => Lifetime.CompleteReference(null, null);
+        public ValueTask DisposeAsync() => Lifetime.DisposeAsync();
+    }
 
-        public bool TryAddReference()
+    internal sealed class SessionEntryLifetime(object dependencies, Func<Task> abort,
+        Func<ValueTask> disposeSession, Func<ValueTask> disposeProvider)
+    {
+        private readonly object _gate = new();
+        private readonly List<(Exception Failure, object? Original)> _retained = [];
+        private readonly List<SessionPermissionService.DeliveryStage> _runs = [];
+        private TaskCompletionSource? _idle;
+        private bool _stopping;
+        private Task? _disposal;
+        internal int ActiveReferences { get; private set; }
+        internal int ReleasedReferences { get; private set; }
+        internal int RetainedReferences { get { lock (_gate) return _retained.Count; } }
+        internal bool DependenciesReleased { get; private set; }
+        internal SessionPermissionService.DeliveryStage? Abort { get; private set; }
+        internal SessionPermissionService.DeliveryStage? SessionDisposal { get; private set; }
+        internal SessionPermissionService.DeliveryStage? ProviderDisposal { get; private set; }
+
+        internal bool TryAddReference()
         {
-            lock (_sync)
+            lock (_gate)
             {
-                if (_disposeStarted)
-                {
-                    return false;
-                }
-
-                _activeReferences++;
+                if (_stopping || _retained.Count != 0) return false;
+                ActiveReferences++;
                 return true;
             }
         }
-
-        public void ReleaseReference()
+        internal SessionPermissionService.DeliveryStage RecordRun(Func<Task> invoke)
         {
-            TaskCompletionSource? idleCompletion = null;
-            lock (_sync)
-            {
-                if (_activeReferences <= 0)
-                {
-                    throw new InvalidOperationException("Session entry reference count is already zero.");
-                }
-
-                _activeReferences--;
-                if (_activeReferences == 0 && _disposeStarted)
-                {
-                    idleCompletion = _idleCompletion;
-                }
-            }
-
-            idleCompletion?.TrySetResult();
+            var run = new SessionPermissionService.DeliveryStage(invoke);
+            lock (_gate) _runs.Add(run);
+            return run;
         }
-
-        public async ValueTask DisposeAsync()
+        internal void CompleteReference(Exception? failure, object? original)
         {
-            Task? disposeTask;
-            Task? idleTask = null;
-            lock (_sync)
+            lock (_gate)
             {
-                if (_disposeStarted)
-                {
-                    disposeTask = _disposedCompletion.Task;
-                }
+                if (ActiveReferences == 0) throw new InvalidOperationException("Session reference count is already zero.");
+                if (failure is not null && OwnedProviderEventForwarding.HasRetention(failure)) _retained.Add((failure, original));
                 else
                 {
-                    _disposeStarted = true;
-                    disposeTask = null;
-                    if (_activeReferences > 0)
-                    {
-                        _idleCompletion ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                        idleTask = _idleCompletion.Task;
-                    }
+                    ReleasedReferences++;
+                    if (original is SessionPermissionService.DeliveryStage run) _runs.Remove(run);
                 }
+                if (--ActiveReferences == 0) _idle?.TrySetResult();
             }
-
-            if (disposeTask is not null)
+        }
+        internal void BeginShutdown()
+        {
+            SessionPermissionService.DeliveryStage control;
+            lock (_gate)
             {
-                await disposeTask.ConfigureAwait(false);
-                return;
+                if (_stopping) return;
+                _stopping = true;
+                if (ActiveReferences != 0) _idle = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                control = Abort = new SessionPermissionService.DeliveryStage(
+                    ActiveReferences != 0 || _retained.Count != 0 ? abort : static () => Task.CompletedTask);
             }
-
-            try
+            control.Launch();
+        }
+        internal ValueTask DisposeAsync()
+        {
+            BeginShutdown();
+            TaskCompletionSource launch;
+            Task original;
+            lock (_gate)
             {
-                if (idleTask is not null)
-                {
-                    try
-                    {
-                        await Coordinator.AbortAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // Ignore best-effort abort failures while the session is being disposed.
-                    }
-
-                    await idleTask.ConfigureAwait(false);
-                }
-
-                await Coordinator.DisposeAsync().ConfigureAwait(false);
-                await DisposeProviderRuntimeAsync(_providerRuntime).ConfigureAwait(false);
-                _disposedCompletion.TrySetResult();
+                if (_disposal is not null) return new(_disposal);
+                launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                original = _disposal = DisposeCoreAsync(launch.Task, _idle?.Task ?? Task.CompletedTask);
             }
-            catch (Exception ex)
+            launch.TrySetResult();
+            return new(original);
+        }
+        private async Task DisposeCoreAsync(Task launch, Task activeReferences)
+        {
+            await launch.ConfigureAwait(false);
+            var failures = new List<Exception>();
+            // Abort was initiated before either wait. The idle receipt counts active, not retained uses.
+            await activeReferences.ConfigureAwait(false);
+            if (await Abort!.Outcome.ConfigureAwait(false) is not null) failures.Add(Abort.Failure!);
+            lock (_gate) failures.AddRange(_retained.Select(static use => use.Failure));
+            if (Abort.Original is null || failures.Any(OwnedProviderEventForwarding.HasRetention))
+                throw new AgentDependencyRetentionException("hub entry", "retained run", failures, new { Owner = dependencies, Lifetime = this });
+            SessionDisposal = new SessionPermissionService.DeliveryStage(() => disposeSession().AsTask());
+            SessionDisposal.Launch();
+            if (await SessionDisposal.Outcome.ConfigureAwait(false) is not null) failures.Add(SessionDisposal.Failure!);
+            if (SessionDisposal.Original is null || failures.Any(OwnedProviderEventForwarding.HasRetention))
+                throw new AgentDependencyRetentionException("hub entry", "session release", failures, new { Owner = dependencies, Lifetime = this });
+            ProviderDisposal = new SessionPermissionService.DeliveryStage(() => disposeProvider().AsTask());
+            ProviderDisposal.Launch();
+            if (await ProviderDisposal.Outcome.ConfigureAwait(false) is not null)
             {
-                _disposedCompletion.TrySetException(ex);
-                throw;
+                failures.Add(ProviderDisposal.Failure!);
+                if (ProviderDisposal.Original is null || OwnedProviderEventForwarding.HasRetention(ProviderDisposal.Failure!))
+                    throw new AgentDependencyRetentionException("hub entry", "provider release", failures, new { Owner = dependencies, Lifetime = this });
             }
+            DependenciesReleased = true;
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
         }
     }
 }

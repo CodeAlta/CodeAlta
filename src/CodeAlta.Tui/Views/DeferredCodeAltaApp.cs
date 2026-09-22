@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using CodeAlta.Agent;
 using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins;
@@ -103,7 +104,15 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
             cancelStartup: () => startupCancellation?.Cancel(),
             disposeUpdate: _updateService.DisposeAsync,
             disposePresenter: _graphicsPresenter.Dispose,
-            disposeStartupCancellation: () => startupCancellation?.Dispose());
+            disposeStartupCancellation: () => startupCancellation?.Dispose(),
+            beginOwnedShutdown: () =>
+            {
+                // A constructed app is proof that this exact startup original returned its services.
+                // Signal their controls before ShellFrontendHost enters its unchanged plugin barrier.
+                if (app is not null) startupTask!.GetAwaiter().GetResult().BeginShutdownControls();
+            },
+            quiescePlugins: () => app is null ? Task.CompletedTask
+                : startupTask!.GetAwaiter().GetResult().PluginRuntime.QuiesceAgentEventsAsync());
     }
 
     private TerminalLoopResult OnIteration(CancellationToken cancellationToken)
@@ -361,16 +370,66 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
         Action disposePresenter,
         Action disposeStartupCancellation)
         where TServices : class, IAsyncDisposable
+        => DisposeDeferredStartupAsync(app, startupTask, reportedStartupFailure, startupToken, cancelStartup,
+            disposeUpdate, disposePresenter, disposeStartupCancellation, static () => { });
+
+    internal static Task DisposeDeferredStartupAsync<TServices>(
+        IAsyncDisposable? app,
+        Task<TServices>? startupTask,
+        Exception? reportedStartupFailure,
+        CancellationToken startupToken,
+        Action cancelStartup,
+        Func<ValueTask> disposeUpdate,
+        Action disposePresenter,
+        Action disposeStartupCancellation,
+        Action beginOwnedShutdown)
+        where TServices : class, IAsyncDisposable
+        => DisposeDeferredStartupAsync(app, startupTask, reportedStartupFailure, startupToken, cancelStartup,
+            disposeUpdate, disposePresenter, disposeStartupCancellation, beginOwnedShutdown, static () => Task.CompletedTask);
+
+    internal static Task DisposeDeferredStartupAsync<TServices>(
+        IAsyncDisposable? app,
+        Task<TServices>? startupTask,
+        Exception? reportedStartupFailure,
+        CancellationToken startupToken,
+        Action cancelStartup,
+        Func<ValueTask> disposeUpdate,
+        Action disposePresenter,
+        Action disposeStartupCancellation,
+        Action beginOwnedShutdown,
+        Func<Task> quiescePlugins)
+        where TServices : class, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(cancelStartup);
         ArgumentNullException.ThrowIfNull(disposeUpdate);
         ArgumentNullException.ThrowIfNull(disposePresenter);
         ArgumentNullException.ThrowIfNull(disposeStartupCancellation);
+        ArgumentNullException.ThrowIfNull(beginOwnedShutdown);
+        ArgumentNullException.ThrowIfNull(quiescePlugins);
         return CoreAsync();
 
         async Task CoreAsync()
         {
             List<Exception>? failures = null;
+            Task? appDisposalOriginal = null;
+            Task? servicesDisposalOriginal = null;
+            Task? pluginDrainOriginal = null;
+            var originalFailures = new List<DeferredOriginalFailure>();
+            DeferredOriginalFailure CaptureOriginalFailure(Task? original, Exception awaitedFailure)
+            {
+                var evidence = new DeferredOriginalFailure(original, awaitedFailure, original?.Exception);
+                originalFailures.Add(evidence);
+                return evidence;
+            }
+            void ThrowIfRetained()
+            {
+                if (failures is not null && failures.Any(Program.StartupOwner.ContainsRetention))
+                    throw new AgentDependencyRetentionException("deferred startup", "retained application dependencies", failures,
+                        new DeferredRetainedDependencies(new { App = app, Startup = startupTask, AppDisposal = appDisposalOriginal, ServicesDisposal = servicesDisposalOriginal,
+                            PluginDrain = pluginDrainOriginal, QuiescePlugins = quiescePlugins,
+                            Cancel = cancelStartup, BeginOwnedShutdown = beginOwnedShutdown, Update = disposeUpdate,
+                            Presenter = disposePresenter, Source = disposeStartupCancellation }, originalFailures.ToArray()));
+            }
             // A new disposal request must not excuse an already-terminal unrequested cancellation.
             var startupWasCompleted = startupTask?.IsCompleted == true;
             var cancellationWasRequested = startupToken.IsCancellationRequested;
@@ -384,16 +443,33 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 (failures ??= []).Add(ex);
             }
 
+            try { beginOwnedShutdown(); }
+            catch (Exception ex) { (failures ??= []).Add(ex); }
+            try
+            {
+                pluginDrainOriginal = quiescePlugins() ?? throw new InvalidOperationException("Plugin quiescence returned no original.");
+                await pluginDrainOriginal;
+            }
+            catch (Exception failure)
+            {
+                var originalFaults = pluginDrainOriginal?.Exception;
+                var reported = originalFaults is { InnerExceptions.Count: > 1 } ? originalFaults : failure;
+                (failures ??= []).Add(new AgentDependencyRetentionException("deferred startup", "plugin quiescence", [reported],
+                    new { Original = pluginDrainOriginal, AwaitedFailure = failure, OriginalFaults = originalFaults, Quiesce = quiescePlugins }));
+            }
+            ThrowIfRetained();
+
             if (app is not null)
             {
                 // No pending wait precedes frontend disposal in this branch.
                 try
                 {
-                    await app.DisposeAsync();
+                    appDisposalOriginal = app.DisposeAsync().AsTask();
+                    await appDisposalOriginal;
                 }
                 catch (Exception ex)
                 {
-                    (failures ??= []).Add(ex);
+                    (failures ??= []).Add(CaptureOriginalFailure(appDisposalOriginal, ex).Reported);
                 }
             }
             else if (startupTask is not null)
@@ -405,14 +481,15 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
+                    var evidence = CaptureOriginalFailure(startupTask, ex);
                     var requestedAtObservation = startupWasCompleted
                         ? cancellationWasRequested
                         : startupToken.IsCancellationRequested;
-                    if (!ReferenceEquals(ex, reportedStartupFailure) &&
-                        !IsExpectedDeferredStartupCancellation(
-                            startupTask, ex, startupToken, requestedAtObservation))
+                    if (evidence.HasRetention ||
+                        (!ReferenceEquals(ex, reportedStartupFailure) && !IsExpectedDeferredStartupCancellation(
+                            startupTask, ex, startupToken, requestedAtObservation)))
                     {
-                        (failures ??= []).Add(ex);
+                        (failures ??= []).Add(evidence.Reported);
                     }
                 }
 
@@ -420,14 +497,17 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 {
                     try
                     {
-                        await returnedServices.DisposeAsync();
+                        servicesDisposalOriginal = returnedServices.DisposeAsync().AsTask();
+                        await servicesDisposalOriginal;
                     }
                     catch (Exception ex)
                     {
-                        (failures ??= []).Add(ex);
+                        (failures ??= []).Add(CaptureOriginalFailure(servicesDisposalOriginal, ex).Reported);
                     }
                 }
             }
+
+            ThrowIfRetained();
 
             try
             {
@@ -467,6 +547,17 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
             }
         }
     }
+
+    // Failure evidence preserves the actual task (or missing synchronous launch), the exception
+    // selected by await, and every original fault without flattening or removing shared references.
+    internal sealed record DeferredOriginalFailure(Task? Original, Exception AwaitedFailure, AggregateException? OriginalFaults)
+    {
+        internal Exception Reported => OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : AwaitedFailure;
+        internal bool HasRetention => Program.StartupOwner.ContainsRetention(AwaitedFailure)
+            || OriginalFaults is not null && Program.StartupOwner.ContainsRetention(OriginalFaults);
+    }
+
+    internal sealed record DeferredRetainedDependencies(object Ownership, IReadOnlyList<DeferredOriginalFailure> OriginalFailures);
 
     /// <summary>
     /// Recognizes only canceled startup tasks carrying the exact requested, cancelable startup token.

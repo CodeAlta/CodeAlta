@@ -55,6 +55,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private ActiveRun? _activeRun;
     private readonly object _lifetimeGate = new();
     private int _operationUses;
+    private int _activeOperationUses;
+    private readonly List<OperationUse> _retainedOperations = [];
     private TaskCompletionSource? _operationsSettled;
     private Task? _disposeTask;
     private volatile bool _disposed;
@@ -183,21 +185,30 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // The forwarding callback only signals the one retained worker. It never synchronously
             // traverses provider callbacks, and its own disposal is joined before source release.
             callerRegistration = cancellationToken.UnsafeRegister(static state => ((ActiveRun)state!).SignalCancellation(), run);
-            return await ExecuteRunAsync(options, run.Id, run.Cancellation).ConfigureAwait(false);
+            run.Body = ExecuteRunAsync(options, run.Id, run.Cancellation, run);
+            return await run.Body.ConfigureAwait(false);
         }
         catch (Exception ex) { failure = ex; throw; }
         finally
         {
-            await FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure).ConfigureAwait(false);
+            run.Finish = FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure);
+            try { await run.Finish.ConfigureAwait(false); }
+            catch (Exception cleanup)
+            {
+                if (AgentDependencyRetentionException.Contains(cleanup)) operation.Retain(cleanup, run);
+                throw;
+            }
         }
     }
 
-    private async Task<AgentRunId> ExecuteRunAsync(AgentSendOptions options, AgentRunId runId, CancellationTokenSource linkedCts)
+    private async Task<AgentRunId> ExecuteRunAsync(AgentSendOptions options, AgentRunId runId, CancellationTokenSource linkedCts, ActiveRun run)
     {
         try
         {
             if (options.RunLifecycle is { } lifecycle)
-                await lifecycle.StartedAsync(runId, linkedCts.Token).ConfigureAwait(false);
+            {
+                await run.Start.RunAsync(lifecycle, runId, linkedCts.Token).ConfigureAwait(false);
+            }
             linkedCts.Token.ThrowIfCancellationRequested();
             var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.WorkingDirectory);
             var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
@@ -484,7 +495,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
         catch (Exception ex)
         {
-            await AppendRunErrorAsync(runId, ex).ConfigureAwait(false);
+            var originalBodyFailure = run.Start.PublicationFailure ?? ex;
+            run.OriginalBodyFailure = originalBodyFailure;
+            run.ErrorPublication = AppendRunErrorAsync(runId, originalBodyFailure);
+            try { await run.ErrorPublication.ConfigureAwait(false); }
+            catch (Exception publicationFailure) { throw new AggregateException(ex, publicationFailure); }
             throw;
         }
     }
@@ -524,7 +539,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// <inheritdoc />
     public async Task AbortAsync(CancellationToken cancellationToken = default)
     {
-        using var operation = EnterOperation();
+        using var operation = EnterOperation(allowRetained: true);
         ActiveRun? run;
         await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
@@ -543,7 +558,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     public async Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedRunId.Value);
-        using var operation = EnterOperation();
+        using var operation = EnterOperation(allowRetained: true);
         ActiveRun run;
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -630,7 +645,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// <inheritdoc />
     public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
     {
-        using var operation = EnterOperation();
+        using var operation = EnterOperation(allowRetained: true);
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult<IReadOnlyList<AgentEvent>>([.. _history]);
@@ -669,6 +684,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         // registration/traversal disposal. No new operation can enter after _disposed was published.
         try { await Task.WhenAll(operationsSettled, run?.CancellationWork ?? Task.CompletedTask).ConfigureAwait(false); }
         catch (Exception ex) { failures.Add(ex); }
+        lock (_lifetimeGate)
+        {
+            if (_retainedOperations.Count != 0)
+            {
+                failures.AddRange(_retainedOperations.Select(static operation => operation.Failure!));
+                throw new AgentDependencyRetentionException(SessionId, "session disposal", failures, this);
+            }
+        }
         try
         {
             if (_turnExecutor is IAgentProviderSessionCleanup providerSessionCleanup)
@@ -676,35 +699,61 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 await providerSessionCleanup.DisposeProviderSessionAsync(SessionId).ConfigureAwait(false);
             }
         }
-        catch (Exception ex) { failures.Add(ex); }
-        finally
+        catch (Exception ex)
         {
-            _pendingSteerInputs.Clear();
-            _stateGate.Dispose();
-            _eventChannel.Writer.TryComplete();
+            failures.Add(ex);
+            throw new AgentDependencyRetentionException(SessionId, "provider session cleanup", failures, this);
         }
+        _pendingSteerInputs.Clear();
+        _stateGate.Dispose();
+        _eventChannel.Writer.TryComplete();
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException(failures);
     }
 
     // These are session-local scopes, not detached wait wrappers. Release occurs only after the
     // original operation has joined its work; disposal cannot free the gate/provider underneath it.
-    private OperationUse EnterOperation()
+    private OperationUse EnterOperation(bool allowRetained = false)
     {
         lock (_lifetimeGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_operationUses++ == 0) _operationsSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!allowRetained && _retainedOperations.Count != 0)
+                throw new AgentDependencyRetentionException(SessionId, "run admission",
+                    _retainedOperations.Select(static operation => operation.Failure!), this);
+            _operationUses++;
+            if (_activeOperationUses++ == 0) _operationsSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
             return new OperationUse(this);
         }
     }
 
     private sealed class OperationUse(AgentSession owner) : IDisposable
     {
+        private bool _settled;
+        internal Exception? Failure { get; private set; }
+        internal object? Dependencies { get; private set; }
+        internal void Retain(Exception failure, object dependencies)
+        {
+            lock (owner._lifetimeGate)
+            {
+                if (_settled) return;
+                Failure = failure;
+                Dependencies = dependencies;
+                _settled = true;
+                owner._retainedOperations.Add(this);
+                // Settlement is not release: the unreleased-use count remains unchanged.
+                if (--owner._activeOperationUses == 0) owner._operationsSettled!.TrySetResult();
+            }
+        }
         public void Dispose()
         {
             lock (owner._lifetimeGate)
-                if (--owner._operationUses == 0) owner._operationsSettled!.TrySetResult();
+            {
+                if (_settled) return;
+                _settled = true;
+                owner._operationUses--;
+                if (--owner._activeOperationUses == 0) owner._operationsSettled!.TrySetResult();
+            }
         }
     }
 
@@ -716,6 +765,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         internal CancellationTokenSource Cancellation { get; } = new();
         internal Task CancellationWork { get; }
         internal Task? Traversal { get; private set; }
+        internal Task<AgentRunId>? Body { get; set; }
+        internal RunStartInvocation Start { get; } = new();
+        internal Task? Started => Start.Original;
+        internal Task? ErrorPublication { get; set; }
+        internal Exception? OriginalBodyFailure { get; set; }
+        internal Task? Finish { get; set; }
+        internal RunReleaseDecision? Release { get; set; }
         // State gate owns admission flags. Only the one worker can ever cancel this source.
         internal bool CancellationReserved { get; set; }
         internal bool CancellationSealed { get; set; }
@@ -739,29 +795,30 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             try { run.Closing = true; }
             finally { _stateGate.Release(); }
         }
-        // Launch Closing before dependent cancellation joins: permission delivery may itself be a
-        // cancellation dependency. Capture synchronous hook failures in the returned original task.
-        var closing = admitted && lifecycle is not null ? CloseLifecycleAsync(lifecycle, run.Id) : Task.CompletedTask;
-        var registrationDisposal = callerRegistration.DisposeAsync().AsTask();
-        var closureJoins = Task.WhenAll(closing, registrationDisposal);
-        Exception? cleanupFailure = null;
-        try { await closureJoins.ConfigureAwait(false); }
-        catch (Exception ex) { cleanupFailure = closureJoins.Exception ?? ex; }
-        // Keep trusted/disposal cancellation available while Closing is pending. Only after the hook
-        // and caller forwarding registration settle can a non-cancelled run seal its worker as a no-op.
-        await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-        try
-        {
-            run.CancellationSealed = true;
-            if (!run.CancellationReserved) run.CompleteWithoutCancellation();
-        }
-        finally { _stateGate.Release(); }
-        try { await run.CancellationWork.ConfigureAwait(false); }
-        catch (Exception ex) { cleanupFailure = cleanupFailure is null ? ex : new AggregateException(cleanupFailure, ex); }
-        finally
-        {
-            // Sole CTS disposer, after every original traversal and the Closing hook have settled.
-            run.Cancellation.Dispose();
+        run.Release = new RunReleaseDecision(run);
+        await run.Release.FinishAsync(
+            () => admitted && lifecycle is not null ? lifecycle.ClosingAsync(run.Id) : Task.CompletedTask,
+            callerRegistration.DisposeAsync,
+            async retain =>
+            {
+                await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    run.CancellationSealed = true;
+                    if (retain) run.CancellationReserved = true;
+                    if (run.CancellationReserved) run.SignalCancellation();
+                    else run.CompleteWithoutCancellation();
+                }
+                finally { _stateGate.Release(); }
+                try { await run.CancellationWork.ConfigureAwait(false); }
+                catch (Exception failure) when (run.CancellationReserved && run.Traversal is null)
+                {
+                    throw new AgentDependencyRetentionException(run.Id.Value, "cancellation launch", [failure], run);
+                }
+            },
+            run.Cancellation.Dispose,
+            async () =>
+            {
             if (admitted)
             {
                 await CompleteActiveTurnAsync(run.Id, CancellationToken.None).ConfigureAwait(false);
@@ -774,16 +831,161 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 }
                 finally { _stateGate.Release(); }
             }
-        }
-        if (cleanupFailure is not null)
+            }, bodyFailure).ConfigureAwait(false);
+    }
+
+    // Shared by the actual Agent finish path and inert fixtures, not by provider/store emulation.
+    internal sealed class RunReleaseDecision(object dependencies)
+    {
+        internal RunReleaseStage? Closing { get; private set; }
+        internal RunReleaseStage? Registration { get; private set; }
+        internal RunReleaseStage? Cancellation { get; private set; }
+        internal RunReleaseStage? Slot { get; private set; }
+        internal bool Retained { get; private set; }
+        internal bool SourceReleased { get; private set; }
+        internal bool SlotReleased { get; private set; }
+        internal Exception? SourceFailure { get; private set; }
+        internal async Task FinishAsync(Func<Task> close, Func<ValueTask> unregister,
+            Func<bool, Task> cancel, Action releaseSource, Func<Task> releaseSlot, Exception? bodyFailure)
         {
-            if (bodyFailure is not null) throw new AggregateException(bodyFailure, cleanupFailure);
-            ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
+            Closing = new RunReleaseStage(close);
+            Registration = new RunReleaseStage(() => unregister().AsTask());
+            // Both records and observers exist before either callback can execute.
+            Closing.Launch();
+            Registration.Launch();
+            var closingFailure = await Closing.Outcome.ConfigureAwait(false);
+            var registrationFailure = await Registration.Outcome.ConfigureAwait(false);
+            var failures = new List<Exception>();
+            if (bodyFailure is not null) failures.Add(bodyFailure);
+            if (closingFailure is not null) failures.Add(Closing.Failure!);
+            if (registrationFailure is not null) failures.Add(Registration.Failure!);
+            Retained = Closing.Original is null || registrationFailure is not null || failures.Any(AgentDependencyRetentionException.Contains)
+                || Closing.OriginalFaults is { } closingFaults && AgentDependencyRetentionException.Contains(closingFaults);
+            Cancellation = new RunReleaseStage(() => cancel(Retained));
+            Cancellation.Launch();
+            if (await Cancellation.Outcome.ConfigureAwait(false) is { } cancellationFailure)
+            {
+                failures.Add(Cancellation.Failure!);
+                Retained |= Cancellation.Original is null || AgentDependencyRetentionException.Contains(Cancellation.Failure!);
+            }
+            if (!Retained)
+            {
+                try { releaseSource(); SourceReleased = true; }
+                catch (Exception failure) { SourceFailure = failure; failures.Add(failure); Retained = true; }
+                if (!Retained)
+                {
+                    Slot = new RunReleaseStage(releaseSlot);
+                    Slot.Launch();
+                    if (await Slot.Outcome.ConfigureAwait(false) is { } slotFailure)
+                    {
+                        failures.Add(Slot.Failure!);
+                        Retained = true;
+                    }
+                    else SlotReleased = true;
+                }
+            }
+            if (Retained) throw new AgentDependencyRetentionException("agent run", "required release", failures, new { Owner = dependencies, Decision = this });
+            // SendAsync already propagates its body failure; this method must not double-report it.
+            if (bodyFailure is not null && failures.Count == 1) return;
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
         }
     }
 
-    private static async Task CloseLifecycleAsync(AgentRunLifecycle lifecycle, AgentRunId runId)
-        => await lifecycle.ClosingAsync(runId).ConfigureAwait(false);
+    internal sealed class RunReleaseStage
+    {
+        private readonly Func<Task> _invoke;
+        private readonly TaskCompletionSource<Task> _launched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal RunReleaseStage(Func<Task> invoke)
+        {
+            _invoke = invoke;
+            Outcome = ObserveAsync();
+        }
+        internal Task? Original { get; private set; }
+        internal AggregateException? OriginalFaults { get; private set; }
+        internal Exception? Failure { get; private set; }
+        internal Task<Exception?> Outcome { get; }
+
+        internal void Launch()
+        {
+            try { Original = _invoke(); _launched.TrySetResult(Original); }
+            catch (Exception failure) { _launched.TrySetException(failure); }
+        }
+        private async Task<Exception?> ObserveAsync()
+        {
+            try
+            {
+                var original = await _launched.Task.ConfigureAwait(false);
+                await original.ConfigureAwait(false);
+                return null;
+            }
+            catch (Exception failure)
+            {
+                OriginalFaults = Original?.Exception;
+                Failure = OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : failure;
+                return failure;
+            }
+        }
+    }
+
+    // Implemented only by lifecycle composition owners. Error publication uses the originally
+    // selected start error, while cleanup and the caller receive the complete escaping evidence.
+    internal interface IRunStartEvidence
+    {
+        RunStartInvocation? FailedStart { get; }
+    }
+
+    internal sealed class RunStartInvocation
+    {
+        private readonly Func<Exception, bool> _containsRetention;
+        private int _started;
+
+        internal RunStartInvocation() : this(AgentDependencyRetentionException.Contains) { }
+        internal RunStartInvocation(Func<Exception, bool> containsRetention)
+        {
+            ArgumentNullException.ThrowIfNull(containsRetention);
+            _containsRetention = containsRetention;
+        }
+
+        internal AgentRunLifecycle? Invocation { get; private set; }
+        internal Task? Original { get; private set; }
+        internal Task? Completion { get; private set; }
+        internal Exception? AwaitedFailure { get; private set; }
+        internal AggregateException? OriginalFaults { get; private set; }
+        internal Exception? PublicationFailure { get; private set; }
+        internal Exception? Failure { get; private set; }
+
+        internal Task RunAsync(AgentRunLifecycle lifecycle, AgentRunId runId, CancellationToken executionToken)
+        {
+            ArgumentNullException.ThrowIfNull(lifecycle);
+            if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Lifecycle start already invoked.");
+            Invocation = lifecycle;
+            Completion = InvokeAsync(lifecycle, runId, executionToken);
+            return Completion;
+        }
+
+        private async Task InvokeAsync(AgentRunLifecycle lifecycle, AgentRunId runId, CancellationToken executionToken)
+        {
+            try
+            {
+                Original = lifecycle.StartedAsync(runId, executionToken) ?? throw new InvalidOperationException("Lifecycle start returned no original.");
+                await Original.ConfigureAwait(false);
+            }
+            catch (Exception failure)
+            {
+                AwaitedFailure = failure;
+                OriginalFaults = Original?.Exception;
+                PublicationFailure = (lifecycle as IRunStartEvidence)?.FailedStart?.PublicationFailure ?? failure;
+                var evidence = OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : failure;
+                // Orchestration can recognize additional explicit marker families without making
+                // Agent depend on Plugins. Translate only that retention contract, not ordinary errors.
+                Failure = !AgentDependencyRetentionException.Contains(evidence) && _containsRetention(evidence)
+                    ? new AgentDependencyRetentionException("agent lifecycle", "start", [evidence], this) : evidence;
+                ExceptionDispatchInfo.Throw(Failure);
+                throw;
+            }
+        }
+    }
 
     private IReadOnlyList<AgentToolDefinition> BuildAvailableTools(AgentPermissionRequestHandler permissionRequestHandler,
         AgentUserInputRequestHandler? userInputRequestHandler, bool enableUserInputTool)

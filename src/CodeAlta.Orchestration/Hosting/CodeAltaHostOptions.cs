@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
@@ -117,4 +118,10 @@ public sealed class CodeAltaHostOptions
     /// Gets a value indicating whether the host should own process-wide logging initialization.
     /// </summary>
     public bool OwnsLogging { get; init; }
+
+    /// <summary>Gets the optional failure policy for backend-owned live plugin observation.</summary>
+    /// <remarks>Receives captured context and the escaping observer failure. Null uses an ordinary named
+    /// host logger without initializing logging. The returned operation is owned through completion;
+    /// explicit dependency-retention evidence cannot be handled away by successful reporting.</remarks>
+    public Func<RuntimePluginAgentEventEnvelope, Exception, ValueTask>? PluginAgentEventFailurePolicy { get; init; }
 }

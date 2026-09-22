@@ -18,8 +18,7 @@ public sealed partial class SessionRuntimeService
         OwnedSessionCommandReceipt receipt, bool reviewPermissions, CancellationToken cancellationToken, bool enableUserInput)
     {
         var item = new OwnedQueuedExecution(request, cancellationToken);
-        var cancellation = item.CancelExecutionAsync();
-        var callerRegistration = cancellationToken.UnsafeRegister(static state => ((OwnedQueuedExecution)state!).Stop.TrySetResult(), item);
+        item.CancellationWorker.Launch(item.CancelExecutionAsync);
         RuntimeSessionEntry? captured = null;
         Actors.SessionActor? capturedActor = null;
         OwnedProviderEventForwarding.Use? registrationUse = null;
@@ -30,6 +29,8 @@ public sealed partial class SessionRuntimeService
         var result = new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Failed, Code: "queue_target_unavailable");
         try
         {
+            item.CallerRegistration = cancellationToken.UnsafeRegister(static state => ((OwnedQueuedExecution)state!).Stop.TrySetResult(), item);
+            item.CallerRegistered = true;
             if (!_disposed && request.ExpectedRuntimeInstanceId == _runtimeInstanceId && _sessionActors.TryGet(request.SessionId, out var actor))
             {
                 capturedActor = actor;
@@ -47,6 +48,7 @@ public sealed partial class SessionRuntimeService
                     // The short setup use protects the source until publication or refused cleanup.
                     item.AttachmentRegistration = captured.Attachment.Cancellation.Token.UnsafeRegister(
                         static state => ((OwnedQueuedExecution)state!).Stop.TrySetResult(), item);
+                    item.AttachmentRegistered = true;
                     inserted = await actor.QueryAsync(_ =>
                     {
                         if (!_entries.TryGetValue(request.SessionId, out var current) || !ReferenceEquals(current, captured)
@@ -114,7 +116,10 @@ public sealed partial class SessionRuntimeService
                             OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permission), EnableUserInputTool = permission.EnableUserInput };
                     }
                     var startedAt = DateTimeOffset.UtcNow;
-                    var runId = await RunCapturedAsync(work.SessionHandleId, send, item.Execution.Token).ConfigureAwait(false);
+                    Task<AgentRunId>? runOriginal = null;
+                    item.Run.Launch(() => runOriginal = RunCapturedAsync(work.SessionHandleId, send, item.Execution.Token));
+                    if (await item.Run.Outcome.ConfigureAwait(false) is { } runFailure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(runFailure);
+                    var runId = await runOriginal!.ConfigureAwait(false);
                     if (lifecycle is not null && !lifecycle.WasBound) throw new QueueBindingException();
                     await PublishRunSubmittedIfStillInFlightAsync(captured.ToDescriptor(), runId, startedAt, CancellationToken.None, captured).ConfigureAwait(false);
                     result = new(OwnedSessionCommandOutcome.Completed, runId, "queue_dispatched");
@@ -125,30 +130,40 @@ public sealed partial class SessionRuntimeService
         {
             result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_binding_unavailable");
         }
-        catch (OperationCanceledException) when (preDispatchCancellationRefused || item.IsCancellationRequested || item.Execution.IsCancellationRequested)
+        catch (OperationCanceledException failure) when (preDispatchCancellationRefused || item.IsCancellationRequested || item.Execution.IsCancellationRequested)
         {
+            item.ReleaseDecision.Observe(failure);
             result = new(OwnedSessionCommandOutcome.Cancelled, Code: "queue_cancelled");
         }
-        catch (Exception)
+        catch (Exception failure)
         {
+            item.ReleaseDecision.Observe(failure);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_failed");
         }
         finally
         {
             // Begin permission closure independently of the already-running cancellation worker.
             // Neither may be substituted for the original provider send or registration joins.
-            Task permissionClose = permission is null ? Task.CompletedTask : Permissions.CloseOwnedExecutionAsync(permission);
-            try { await permissionClose.ConfigureAwait(false); }
-            catch { result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_cleanup_failed"); }
-            try
-            {
-                await callerRegistration.DisposeAsync().ConfigureAwait(false);
-                await item.AttachmentRegistration.DisposeAsync().ConfigureAwait(false);
-            }
-            catch { result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_cleanup_failed"); }
+            if (permission is not null) item.PermissionClose.Launch(() => Permissions.CloseOwnedExecutionAsync(permission));
+            if (item.CallerRegistered) item.CallerClose.Launch(() => item.CallerRegistration.DisposeAsync().AsTask());
+            if (item.AttachmentRegistered) item.AttachmentClose.Launch(() => item.AttachmentRegistration.DisposeAsync().AsTask());
             item.ExecutionSettled.TrySetResult();
-            try { await cancellation.ConfigureAwait(false); }
-            catch { result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_cancel_failed"); }
+            if (permission is not null) await Join(item.PermissionClose, "permission close", false).ConfigureAwait(false);
+            if (item.CallerRegistered) await Join(item.CallerClose, "caller registration", true).ConfigureAwait(false);
+            if (item.AttachmentRegistered) await Join(item.AttachmentClose, "attachment registration", true).ConfigureAwait(false);
+            await Join(item.CancellationWorker, "cancellation worker", false).ConfigureAwait(false);
+            if (item.ReleaseDecision.Retained)
+            {
+                var retained = new AgentDependencyRetentionException("owned queue", "retained terminal prerequisites", item.ReleaseDecision.Failures,
+                    new { Runtime = this, Item = item, Entry = captured, Permission = permission, RegistrationUse = registrationUse, Work = work });
+                _forwarding.RetainDependencies(retained, item);
+                registrationUse?.Retain(retained);
+                work?.Use.Retain(retained);
+                item.ReleaseDecision.Complete();
+                receipt.CompleteQueueInsertion(new(false, "queue_cleanup_failed"));
+                item.Drained.TrySetException(retained);
+                throw retained;
+            }
             try
             {
                 if (captured is not null)
@@ -159,18 +174,55 @@ public sealed partial class SessionRuntimeService
                         return ValueTask.FromResult(true);
                     }, CancellationToken.None).ConfigureAwait(false);
             }
-            catch { result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_cleanup_failed"); }
+            catch (Exception failure)
+            {
+                var retained = new AgentDependencyRetentionException("owned queue", "slot cleanup", [failure],
+                    new { Runtime = this, Item = item, RegistrationUse = registrationUse, Work = work });
+                item.ReleaseDecision.Observe(retained);
+                _forwarding.RetainDependencies(retained, item);
+                registrationUse?.Retain(retained);
+                work?.Use.Retain(retained);
+                item.Drained.TrySetException(retained);
+                throw retained;
+            }
             finally
             {
-                item.Execution.Dispose();
-                registrationUse?.Dispose();
-                work?.Use.Dispose();
+                if (!item.ReleaseDecision.Retained)
+                {
+                    try
+                    {
+                        item.Execution.Dispose();
+                        registrationUse?.Dispose();
+                        work?.Use.Dispose();
+                    }
+                    catch (Exception failure)
+                    {
+                        var retained = new AgentDependencyRetentionException("owned queue", "dependency release", [failure],
+                            new { Runtime = this, Item = item, RegistrationUse = registrationUse, Work = work });
+                        item.ReleaseDecision.Observe(retained);
+                        registrationUse?.Retain(retained);
+                        work?.Use.Retain(retained);
+                        _forwarding.RetainDependencies(retained, item);
+                        item.ReleaseDecision.Complete();
+                        receipt.CompleteQueueInsertion(new(false, "queue_cleanup_failed"));
+                        item.Drained.TrySetException(retained);
+                        throw retained;
+                    }
+                }
+                item.ReleaseDecision.Complete();
                 receipt.CompleteQueueInsertion(new(false, result.Code ?? "queue_failed"));
-                item.Drained.TrySetResult();
+                if (item.ReleaseDecision.Released) item.Drained.TrySetResult();
             }
         }
         return result;
 
+        async Task Join(OwnedSessionCommandService.OriginalInvocation invocation, string stage, bool requiredRelease)
+        {
+            if (await invocation.Outcome.ConfigureAwait(false) is not { } failure) return;
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_cleanup_failed");
+            item.ReleaseDecision.Observe(requiredRelease || invocation.Original is null
+                ? new AgentDependencyRetentionException("owned queue", stage, [failure], item) : failure);
+        }
     }
 
     // All entry reads/mutations below execute in the existing session mailbox.
@@ -201,30 +253,37 @@ public sealed partial class SessionRuntimeService
         return work;
     }
 
-    private async Task CloseOwnedQueueAttachmentAsync(OwnedProviderEventForwarding.Attachment attachment)
+    private Task CloseOwnedQueueAttachmentAsync(OwnedProviderEventForwarding.Attachment attachment)
     {
-        // Initiate existing invalidation before any queue join, retaining the original task.
-        var permissions = Permissions.InvalidateOwnedAttachmentAsync(attachment);
-        Task queue = Task.CompletedTask;
-        try
+        var closure = new AttachmentClosureJoin(new { Runtime = this, Attachment = attachment });
+        return closure.RunAsync(() => Permissions.InvalidateOwnedAttachmentAsync(attachment), () =>
         {
-            if (_sessionActors.TryGet(attachment.Identity.SessionId, out var actor))
-                queue = await actor.QueryAsync(_ =>
+            if (!_sessionActors.TryGet(attachment.Identity.SessionId, out var actor)) return null;
+            return actor.QueryAsync<Task?>(_ =>
                 {
                     if (_entries.TryGetValue(attachment.Identity.SessionId, out var entry)
                         && ReferenceEquals(entry.Attachment, attachment) && entry.OwnedQueue is { } item)
                     {
                         item.Stop.TrySetResult();
-                        return ValueTask.FromResult(item.Drained.Task);
+                        return ValueTask.FromResult<Task?>(item.Drained.Task);
                     }
-                    return ValueTask.FromResult(Task.CompletedTask);
-                }, CancellationToken.None).ConfigureAwait(false);
-        }
-        finally { await Task.WhenAll(permissions, queue).ConfigureAwait(false); }
+                    return ValueTask.FromResult<Task?>(null);
+                }, CancellationToken.None).AsTask();
+        });
     }
 
     private sealed class OwnedQueuedExecution(OwnedTextQueueRequest request, CancellationToken callerCancellation)
     {
+        internal OwnedSessionCommandService.DependencyReleaseDecision ReleaseDecision { get; } = new();
+        internal OwnedSessionCommandService.OriginalInvocation Run { get; } = new();
+        internal OwnedSessionCommandService.OriginalInvocation CancellationWorker { get; } = new();
+        internal OwnedSessionCommandService.OriginalInvocation CancellationTraversal { get; } = new();
+        internal OwnedSessionCommandService.OriginalInvocation PermissionClose { get; } = new();
+        internal OwnedSessionCommandService.OriginalInvocation CallerClose { get; } = new();
+        internal OwnedSessionCommandService.OriginalInvocation AttachmentClose { get; } = new();
+        internal CancellationTokenRegistration CallerRegistration { get; set; }
+        internal bool CallerRegistered { get; set; }
+        internal bool AttachmentRegistered { get; set; }
         internal OwnedTextQueueRequest Request { get; } = request;
         internal bool IsCancellationRequested => callerCancellation.IsCancellationRequested || Stop.Task.IsCompleted;
         internal CancellationTokenSource Execution { get; } = new();
@@ -236,7 +295,16 @@ public sealed partial class SessionRuntimeService
         internal async Task CancelExecutionAsync()
         {
             await Task.WhenAny(Stop.Task, ExecutionSettled.Task).ConfigureAwait(false);
-            if (Stop.Task.IsCompleted) await Execution.CancelAsync().ConfigureAwait(false);
+            if (Stop.Task.IsCompleted)
+            {
+                CancellationTraversal.Launch(Execution.CancelAsync);
+                if (await CancellationTraversal.Outcome.ConfigureAwait(false) is { } failure)
+                {
+                    if (CancellationTraversal.Original is null)
+                        throw new AgentDependencyRetentionException("owned queue", "cancellation launch", [failure], this);
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
+                }
+            }
         }
     }
 
@@ -251,7 +319,7 @@ public sealed partial class SessionRuntimeService
         {
             try { await inner.StartedAsync(runId, executionToken).ConfigureAwait(false); }
             catch (OperationCanceledException) { throw; }
-            catch { throw new QueueBindingException(); }
+            catch (Exception failure) when (!OwnedProviderEventForwarding.HasRetention(failure)) { throw new QueueBindingException(); }
             Volatile.Write(ref _bound, 1);
             Volatile.Write(ref _open, 1);
         }

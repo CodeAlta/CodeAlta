@@ -140,12 +140,6 @@ internal sealed class SessionRuntimeEventCoordinator
             }
         }
 
-        if (runtimeEvent is SessionAgentEvent agentRuntimeEvent)
-        {
-
-            ObservePluginAgentEvent(session, agentRuntimeEvent.Event);
-        }
-
         ApplyReduction(tab, reduction);
     }
 

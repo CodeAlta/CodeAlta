@@ -35,6 +35,18 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     public static CodeAltaSingleInstanceGuard Acquire()
         => Acquire(GetDefaultLockFilePath());
 
+    /// <summary>Acquires the default guard while publishing actual acquisition and rollback evidence.</summary>
+    /// <param name="evidence">A fresh, caller-owned slot established before acquisition.</param>
+    /// <returns>The acquired guard.</returns>
+    /// <exception cref="ArgumentNullException">The evidence is null.</exception>
+    /// <exception cref="InvalidOperationException">The evidence was already used or the profile is unavailable.</exception>
+    /// <exception cref="Exception">Acquisition or initialization fails; failed rollback preserves both failures.</exception>
+    public static CodeAltaSingleInstanceGuard Acquire(AcquisitionEvidence<FileStream> evidence)
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        return Acquire(GetDefaultLockFilePath(), evidence);
+    }
+
     /// <summary>Acquires the existing guard at an explicitly supplied lock-file path.</summary>
     /// <param name="lockFilePath">The lock-file path; automation must supply a task-owned path.</param>
     /// <returns>The caller-owned guard.</returns>
@@ -44,8 +56,20 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     /// <exception cref="UnauthorizedAccessException">Access to the lock directory or file is denied.</exception>
     /// <exception cref="IOException">The directory or PID write fails.</exception>
     public static CodeAltaSingleInstanceGuard Acquire(string lockFilePath)
+        => Acquire(lockFilePath, new AcquisitionEvidence<FileStream>());
+
+    /// <summary>Acquires the existing guard using a prepared candidate/rollback evidence slot.</summary>
+    /// <param name="lockFilePath">The unchanged lock-file path.</param>
+    /// <param name="evidence">A fresh caller-owned slot that retains the actual stream before PID writing.</param>
+    /// <returns>The caller-owned guard.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The path is empty or invalid.</exception>
+    /// <exception cref="InvalidOperationException">The evidence was already used.</exception>
+    /// <exception cref="Exception">Acquisition or initialization fails; failed rollback preserves both failures.</exception>
+    public static CodeAltaSingleInstanceGuard Acquire(string lockFilePath, AcquisitionEvidence<FileStream> evidence)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lockFilePath);
+        ArgumentNullException.ThrowIfNull(evidence);
 
         var fullLockFilePath = Path.GetFullPath(lockFilePath);
         var directory = Path.GetDirectoryName(fullLockFilePath);
@@ -54,16 +78,77 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
             Directory.CreateDirectory(directory);
         }
 
-        var lockStream = CreateLockFile(fullLockFilePath);
+        CodeAltaSingleInstanceGuard? guard = null;
+        AcquireCandidate(evidence, () => CreateLockFile(fullLockFilePath),
+            stream =>
+            {
+                WriteCurrentProcessId(stream);
+                guard = new CodeAltaSingleInstanceGuard(stream, fullLockFilePath);
+            },
+            static stream => stream.Dispose());
+        return guard!;
+    }
 
+    /// <summary>Retains one acquisition's actual candidate and distinct initialization/rollback outcomes.</summary>
+    /// <typeparam name="T">The concrete reference-type acquisition.</typeparam>
+    /// <remarks>A candidate remains available after successful rollback for identity auditing; it must not be disposed again.</remarks>
+    public sealed class AcquisitionEvidence<T> where T : class
+    {
+        internal bool Used { get; set; }
+        /// <summary>Gets the actual candidate, published before initialization begins.</summary>
+        public T? Candidate { get; internal set; }
+        /// <summary>Gets an acquisition failure before a candidate was returned.</summary>
+        public Exception? AcquisitionFailure { get; internal set; }
+        /// <summary>Gets the exact initialization failure.</summary>
+        public Exception? InitializationFailure { get; internal set; }
+        /// <summary>Gets whether initialization completed successfully.</summary>
+        public bool InitializationCompleted { get; internal set; }
+        /// <summary>Gets whether the sole rollback invocation began.</summary>
+        public bool RollbackAttempted { get; internal set; }
+        /// <summary>Gets whether the actual rollback completed successfully.</summary>
+        public bool RollbackCompleted { get; internal set; }
+        /// <summary>Gets the exact rollback failure, independently of initialization failure.</summary>
+        public Exception? RollbackFailure { get; internal set; }
+    }
+
+    /// <summary>Runs the guard's acquisition/publication/initialization/stream-only rollback decision.</summary>
+    /// <typeparam name="T">The concrete reference-type acquisition.</typeparam>
+    /// <param name="evidence">Fresh prepared evidence, retained by the caller before invoking this method.</param>
+    /// <param name="acquire">Returns the actual candidate; internally unreturned acquisitions remain its responsibility.</param>
+    /// <param name="initialize">Initializes the already-published candidate.</param>
+    /// <param name="rollback">Releases only that candidate after initialization failure; never retried.</param>
+    /// <returns>The initialized candidate.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="InvalidOperationException">The evidence was already used or acquisition returned null.</exception>
+    /// <exception cref="AggregateException">Both initialization and rollback fail, in that order without flattening.</exception>
+    /// <exception cref="Exception">The sole acquisition or initialization failure is rethrown unchanged.</exception>
+    public static T AcquireCandidate<T>(AcquisitionEvidence<T> evidence, Func<T> acquire,
+        Action<T> initialize, Action<T> rollback) where T : class
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        ArgumentNullException.ThrowIfNull(acquire);
+        ArgumentNullException.ThrowIfNull(initialize);
+        ArgumentNullException.ThrowIfNull(rollback);
+        if (evidence.Used) throw new InvalidOperationException("Acquisition evidence cannot be reused.");
+        evidence.Used = true;
+        try { evidence.Candidate = acquire() ?? throw new InvalidOperationException("Acquisition returned no candidate."); }
+        catch (Exception failure) { evidence.AcquisitionFailure = failure; throw; }
         try
         {
-            WriteCurrentProcessId(lockStream);
-            return new CodeAltaSingleInstanceGuard(lockStream, fullLockFilePath);
+            initialize(evidence.Candidate);
+            evidence.InitializationCompleted = true;
+            return evidence.Candidate;
         }
-        catch
+        catch (Exception primary)
         {
-            lockStream.Dispose();
+            evidence.InitializationFailure = primary;
+            evidence.RollbackAttempted = true;
+            try { rollback(evidence.Candidate); evidence.RollbackCompleted = true; }
+            catch (Exception cleanup)
+            {
+                evidence.RollbackFailure = cleanup;
+                throw new AggregateException(primary, cleanup);
+            }
             throw;
         }
     }
@@ -100,11 +185,21 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     {
         lockStream.SetLength(0);
         var processId = Environment.ProcessId.ToString(CultureInfo.InvariantCulture);
-        using var writer = new StreamWriter(lockStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
-        writer.WriteLine(processId);
-        writer.Flush();
-        lockStream.Flush(flushToDisk: true);
-        lockStream.Position = 0;
+        var writer = new StreamWriter(lockStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
+        Exception? bodyFailure = null;
+        try
+        {
+            writer.WriteLine(processId);
+            writer.Flush();
+            lockStream.Flush(flushToDisk: true);
+            lockStream.Position = 0;
+        }
+        catch (Exception failure) { bodyFailure = failure; throw; }
+        finally
+        {
+            try { writer.Dispose(); }
+            catch (Exception cleanup) when (bodyFailure is not null) { throw new AggregateException(bodyFailure, cleanup); }
+        }
     }
 
     private static FileStream CreateLockFile(string lockFilePath)

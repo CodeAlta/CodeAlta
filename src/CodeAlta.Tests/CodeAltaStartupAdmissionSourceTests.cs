@@ -43,7 +43,7 @@ public sealed class CodeAltaStartupAdmissionSourceTests
     public void Program_RunAsyncDoesNotReacquireAdmission()
     {
         RequireProgramAdmission(ReadSource("CodeAlta.Tui/Program.cs"));
-        var guard = ReadSource("CodeAlta.Hosting/CodeAltaSingleInstanceGuard.cs");
+        var guard = RuntimePluginLiveEventSourceInverse.Restore("CodeAlta.Hosting/CodeAltaSingleInstanceGuard.cs", ReadSource("CodeAlta.Hosting/CodeAltaSingleInstanceGuard.cs"));
         AssertOriginal(Invert(guard, GuardEdits()), 6402, 199, true,
             "F6612E04363045B2035BB91FD31803FFA30AFB2DA810D14080192675D66AC18C");
     }

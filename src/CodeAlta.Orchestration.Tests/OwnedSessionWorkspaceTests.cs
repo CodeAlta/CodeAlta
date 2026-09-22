@@ -76,7 +76,8 @@ public sealed class OwnedSessionWorkspaceTests
         _ = f.Keep(reads.ReadSnapshotAsync(CancellationToken.None));
         var commands = f.CreateGate();
         var disposal = f.Keep(CodeAltaHost.DisposeOwnedWorkAsync(
-            () => commands.Task, () => reads.DisposeAsync().AsTask(), () => ValueTask.CompletedTask).AsTask());
+            () => commands.Task, () => reads.DisposeAsync().AsTask(), () => ValueTask.CompletedTask,
+            _ => ValueTask.CompletedTask, () => Task.CompletedTask).AsTask());
         Assert.ThrowsExactly<ObjectDisposedException>(() => f.Keep(reads.ReadSnapshotAsync(CancellationToken.None)));
         Assert.IsFalse(disposal.IsCompleted);
         commands.TrySetResult();
@@ -95,7 +96,7 @@ public sealed class OwnedSessionWorkspaceTests
             {
                 runtimeDisposed = true;
                 return ValueTask.CompletedTask;
-            }).AsTask());
+            }, _ => ValueTask.CompletedTask, () => Task.CompletedTask).AsTask());
         Assert.IsFalse(runtimeDisposed);
         f.Release.TrySetResult();
         await f.Wait(disposal);
@@ -112,7 +113,8 @@ public sealed class OwnedSessionWorkspaceTests
         var read = f.Keep(Task.FromException(readFailure), typeof(InvalidDataException));
         var runtime = f.Keep(Task.FromException(runtimeFailure), typeof(IOException));
         var disposal = f.Keep(CodeAltaHost.DisposeOwnedWorkAsync(
-            () => command, () => read, () => new ValueTask(runtime)).AsTask(), typeof(AggregateException));
+            () => command, () => read, () => new ValueTask(runtime),
+            _ => ValueTask.CompletedTask, () => Task.CompletedTask).AsTask(), typeof(AggregateException));
         var error = await Assert.ThrowsExactlyAsync<AggregateException>(() => f.Wait(disposal));
         CollectionAssert.AreEqual(new Exception[] { commandFailure, readFailure, runtimeFailure }, error.InnerExceptions.ToArray());
     });

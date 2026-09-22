@@ -11,6 +11,7 @@ using CodeAlta.Hosting;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins;
+using CodeAlta.Tui.Views;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Tui.App;
@@ -59,11 +60,11 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         RuntimeService = host.RuntimeService;
         ProjectFileSearchService = host.ProjectFileSearchService;
         CurrentProject = host.CurrentProject;
-        _disposeTask = PluginEventDependencyBarrier.Wrap(PluginRuntime, CreateOwnedServicesDisposal(
+        _disposeTask = CreateOwnedServicesDisposal(
             _host.DisposeAsync,
             _modelsDevCatalogService.DisposeAsync,
             LogManager.Shutdown,
-            ownsLogging));
+            ownsLogging);
     }
 
     public CatalogOptions CatalogOptions { get; }
@@ -160,6 +161,10 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         PluginBuiltIns = CodeAltaBuiltInPlugins.All,
                         PluginServices = new CodeAltaPluginServices(pluginAltaServiceBridge),
                         ConfigureModelProviders = RegisterFrontendModelProviders,
+                        PluginAgentEventFailurePolicy = (envelope, failure) => RuntimePluginAgentEventFailurePolicy.ReportAsync(
+                            envelope.SessionId, failure,
+                            (message, error) => CodeAltaApp.UiLogger.Error(error, message),
+                            CodeAltaCrashReporter.ReportFatalTaskException),
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -187,9 +192,19 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         }
         catch (Exception creationFailure)
         {
-            await PluginEventDependencyBarrier.BeforeRollbackAsync(
-                sharedHost?.PluginRuntime ?? prestartedPluginRuntime, creationFailure,
-                new object?[] { sharedHost, modelsDevCatalogService, prestartedPluginRuntime }).ConfigureAwait(false);
+            var acquisitions = new { Host = sharedHost, Metadata = modelsDevCatalogService,
+                PrestartedPlugins = prestartedPluginRuntime, OwnsLogging = ownsLogging };
+            if (Program.StartupOwner.ContainsRetention(creationFailure))
+                throw new AgentDependencyRetentionException("terminal creation", "retained inner acquisition", [creationFailure], acquisitions);
+            try
+            {
+                await PluginEventDependencyBarrier.BeforeRollbackAsync(
+                    sharedHost?.PluginRuntime ?? prestartedPluginRuntime, creationFailure, acquisitions).ConfigureAwait(false);
+            }
+            catch (Exception barrierFailure) when (Program.StartupOwner.ContainsRetention(barrierFailure))
+            {
+                throw new AgentDependencyRetentionException("terminal creation", "plugin barrier", [barrierFailure], acquisitions);
+            }
             await RollbackOwnedServicesCreationAsync(
                 creationFailure,
                 () => sharedHost?.DisposeAsync() ?? ValueTask.CompletedTask,
@@ -215,6 +230,10 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     /// <exception cref="OperationCanceledException">The only cleanup failure was cancellation.</exception>
     /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
     public ValueTask DisposeAsync() => PluginEventDependencyBarrier.EnterDispose(PluginRuntime, _disposeTask);
+
+    // Deferred startup calls this before entering the unchanged ShellFrontendHost plugin barrier.
+    // The Host pre-owns and memoizes the actual originals; no borrowed dependency is disposed here.
+    internal void BeginShutdownControls() => _host.BeginShutdownControls();
 
     /// <summary>
     /// Creates a lazy, single-execution outer cleanup operation from mandatory, caller-supplied operations.
@@ -248,45 +267,50 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         Action shutdownLogging,
         bool ownsLogging)
     {
-        List<Exception>? failures = null;
-        try
+        var stages = new[]
         {
-            await disposeHost().ConfigureAwait(false);
-        }
-        catch (Exception exception)
+            new OwnedServicesRelease(disposeHost),
+            new OwnedServicesRelease(disposeModelsDevCatalog),
+            new OwnedServicesRelease(() => { shutdownLogging(); return ValueTask.CompletedTask; }),
+        };
+        var failures = new List<Exception>();
+        for (var index = 0; index < stages.Length; index++)
         {
-            (failures ??= []).Add(exception);
+            if (index == 2 && !ownsLogging) continue;
+            stages[index].Launch();
+            if (await stages[index].Outcome!.ConfigureAwait(false) is not { } failure) continue;
+            failures.Add(failure);
+            if (Program.StartupOwner.ContainsRetention(failure))
+                throw new AgentDependencyRetentionException("terminal owned services", "dependent service release", failures, stages);
         }
+        if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures.Count > 1) throw new AggregateException(failures);
+    }
 
-        try
-        {
-            await disposeModelsDevCatalog().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            (failures ??= []).Add(exception);
-        }
-
-        if (ownsLogging)
+    internal sealed class OwnedServicesRelease(Func<ValueTask> invoke)
+    {
+        internal Task? Original { get; private set; }
+        internal AggregateException? OriginalFaults { get; private set; }
+        internal Exception? AwaitedFailure { get; private set; }
+        internal Task<Exception?>? Outcome { get; private set; }
+        internal void Launch() => Outcome = InvokeAsync();
+        private async Task<Exception?> InvokeAsync()
         {
             try
             {
-                shutdownLogging();
+                Original = invoke().AsTask();
+                await Original.ConfigureAwait(false);
+                return null;
             }
-            catch (Exception exception)
+            catch (Exception failure)
             {
-                (failures ??= []).Add(exception);
+                AwaitedFailure = failure;
+                OriginalFaults = Original?.Exception;
+                var evidence = OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : failure;
+                // A synchronous callback failure has no Task receipt by construction, but no work
+                // escaped either. Preserve it as an ordinary failure and continue best-effort cleanup.
+                return evidence;
             }
-        }
-
-        if (failures is { Count: 1 })
-        {
-            ExceptionDispatchInfo.Throw(failures[0]);
-        }
-
-        if (failures is { Count: > 1 })
-        {
-            throw new AggregateException(failures);
         }
     }
 
@@ -324,6 +348,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
     private static async Task RollbackOwnedServicesCreationCoreAsync(Exception creationFailure, Lazy<Task> disposal)
     {
+        if (Program.StartupOwner.ContainsRetention(creationFailure))
+            throw new AgentDependencyRetentionException("terminal creation", "retained inner acquisition", [creationFailure], disposal);
         try
         {
             await disposal.Value.ConfigureAwait(false);

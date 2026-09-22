@@ -32,7 +32,10 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     private readonly List<Exception> _failures = [];
     private readonly List<Exception> _cleanupFailures = [];
     private bool _closed;
+    private bool _retained;
     private Task? _disposeTask;
+    private readonly OriginalInvocation _permissionShutdown = new();
+    private readonly OriginalInvocation _askDrain = new();
 
     internal OwnedSessionCommandService(
         SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions, bool enableAsks = false, bool enableUserInput = false)
@@ -81,7 +84,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                     string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal);
                 return Replay(previous, same);
             }
-            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
 
@@ -155,7 +158,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
                 return Replay(previous, previous.Steer == request);
-            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_steering.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Steer, request.SessionId);
@@ -175,20 +178,22 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            var runId = await _runtime.SteerOwnedCommandAsync(operation.Request, operation.Execution.Token).ConfigureAwait(false);
+            var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
             result = new(OwnedSessionCommandOutcome.Completed, runId);
         }
-        catch (OperationCanceledException) when (operation.Execution.IsCancellationRequested)
+        catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {
+            RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Cancelled);
         }
         catch (Exception ex)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "steer_failed");
         }
         lock (_gate)
         {
+            operation.ReleaseDecision.Complete();
             _steering.Remove(operation.Request.SessionId);
             operation.Receipt.Complete(result);
         }
@@ -213,7 +218,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
                 return Replay(previous, previous.Compact == request);
-            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_compacting.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Compact, request.SessionId);
@@ -233,26 +238,29 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            var outcome = await _runtime.CompactOwnedCommandAsync(operation.Request, operation.Execution.Token).ConfigureAwait(false);
+            var outcome = await operation.RuntimeInvocation.RunAsync(() => _runtime.CompactOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
             result = outcome is null ? new(OwnedSessionCommandOutcome.Failed, Code: "compact_busy")
                 : outcome.Success ? new(OwnedSessionCommandOutcome.Completed)
                 : new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsuccessful");
         }
-        catch (OperationCanceledException) when (operation.Execution.IsCancellationRequested)
+        catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {
+            RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Cancelled);
         }
-        catch (NotSupportedException)
+        catch (NotSupportedException failure)
         {
+            RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsupported");
         }
         catch (Exception ex)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_failed");
         }
         lock (_gate)
         {
+            operation.ReleaseDecision.Complete();
             _compacting.Remove(operation.Request.SessionId);
             operation.Receipt.Complete(result);
         }
@@ -272,7 +280,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.Queue == request);
-            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
@@ -326,12 +334,15 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            result = await _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, _reviewPermissions,
-                operation.Execution.Token, _enableUserInput).ConfigureAwait(false);
+            Task<OwnedSessionCommandResult>? runtimeOriginal = null;
+            operation.RuntimeInvocation.Launch(() => runtimeOriginal = _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, _reviewPermissions,
+                operation.Execution.Token, _enableUserInput));
+            if (await operation.RuntimeInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
+            result = await runtimeOriginal!.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_failed");
         }
         // Also covers runtime admission refusal before its original body starts.
@@ -350,7 +361,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
 
     private void ReleaseQueue(QueueOperation operation, OwnedSessionCommandResult result)
     {
-        operation.Released = true;
+        operation.ReleaseDecision.Complete();
+        operation.Released = operation.ReleaseDecision.Released;
         _queueing.Remove(operation.Request.SessionId);
         operation.Receipt.Complete(operation.CancellationFailed
             ? new(OwnedSessionCommandOutcome.Failed, Code: "queue_cancel_failed") : result);
@@ -370,13 +382,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             if (operation.Cancellation is null || operation.CancellationInitiated) return;
             operation.CancellationInitiated = true;
         }
-        try { operation.SourceCancellation = operation.Execution.CancelAsync(); }
-        catch (Exception ex)
-        {
-            operation.CancellationFailed = true;
-            RecordFailure(ex, cleanup: true);
-        }
-        finally { operation.CancelLaunch.TrySetResult(); }
+        operation.CancellationInvocation.Launch(() => operation.SourceCancellation = operation.Execution.CancelAsync());
+        operation.CancelLaunch.TrySetResult();
     }
 
     private async Task CancelQueueAsync(QueueOperation operation)
@@ -386,12 +393,17 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         {
             // Runtime owns the exact execution cancellation, registrations and send. Its callback
             // only signals that owner; joining this source alone would falsely report settled control.
-            await operation.SourceCancellation.ConfigureAwait(false);
+            if (await operation.CancellationInvocation.Outcome.ConfigureAwait(false) is { } failure)
+            {
+                if (operation.CancellationInvocation.Original is null)
+                    throw new AgentDependencyRetentionException("queue command", "cancellation launch", [failure], operation);
+                ExceptionDispatchInfo.Throw(failure);
+            }
         }
         catch (Exception ex)
         {
             operation.CancellationFailed = true;
-            RecordFailure(ex, cleanup: true);
+            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
         }
         await operation.RuntimeSettled.Task.ConfigureAwait(false);
         if (operation.RuntimeResult?.Code is "queue_cleanup_failed" or "queue_cancel_failed") operation.CancellationFailed = true;
@@ -443,7 +455,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            var outcome = await _runtime.AbortRunOwnedCommandAsync(operation.Request, operation.Execution.Token).ConfigureAwait(false);
+            var outcome = await operation.RuntimeInvocation.RunAsync(() => _runtime.AbortRunOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
             result = outcome switch
             {
                 AgentTargetedAbortOutcome.CancellationSignalled => new(OwnedSessionCommandOutcome.Completed,
@@ -453,21 +465,24 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                 _ => new(OwnedSessionCommandOutcome.Failed, Code: "abort_run_failed"),
             };
         }
-        catch (OperationCanceledException) when (operation.Execution.IsCancellationRequested)
+        catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {
+            RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "abort_run_failed");
         }
-        catch (NotSupportedException)
+        catch (NotSupportedException failure)
         {
+            RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "abort_run_unsupported");
         }
         catch (Exception ex)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "abort_run_failed");
         }
         lock (_gate)
         {
+            operation.ReleaseDecision.Complete();
             _abortingRuns.Remove(operation.Request.SessionId);
             operation.Receipt.Complete(result);
         }
@@ -490,20 +505,9 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         }
         // CancelAsync marks the token before returning, but runs callbacks asynchronously.
         // The retained control wrapper joins them; admission never runs callbacks under _gate.
-        try
-        {
-            operation.Cancellation = operation.Execution.CancelAsync();
-        }
-        catch (Exception ex)
-        {
-            operation.CancellationFailed = true;
-            RecordFailure(ex, cleanup: true);
-        }
-        finally
-        {
-            operation.CancellationStarted.TrySetResult();
-            operation.ControlLaunch.TrySetResult();
-        }
+        operation.CancellationInvocation.Launch(() => operation.Cancellation = operation.Execution.CancelAsync());
+        operation.CancellationStarted.TrySetResult();
+        operation.ControlLaunch.TrySetResult();
     }
 
     private async Task RunSendAsync(SendOperation operation)
@@ -512,8 +516,9 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            operation.Preparation = PrepareAsync(operation);
-            var prepared = await operation.Preparation.ConfigureAwait(false);
+            operation.PreparationInvocation.Launch(() => operation.Preparation = PrepareAsync(operation));
+            if (await operation.PreparationInvocation.Outcome.ConfigureAwait(false) is { } preparationFailure) ExceptionDispatchInfo.Throw(preparationFailure);
+            var prepared = await operation.Preparation!.ConfigureAwait(false);
             operation.Attachment.TrySetResult(prepared);
             if (prepared is null)
             {
@@ -540,9 +545,10 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                     {
                         if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
                         var sendOptions = new AgentSendOptions { Input = AgentInput.Text(operation.Request.Text), AskId = operation.AskSubmission?.AskId };
-                        operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
-                            operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission);
-                        var runId = await operation.Send.ConfigureAwait(false);
+                        operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
+                            operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
+                        if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);
+                        var runId = await operation.Send!.ConfigureAwait(false);
                         result = new(OwnedSessionCommandOutcome.Completed, runId);
                     }
                 }
@@ -550,22 +556,31 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         }
         catch (OperationCanceledException ex) when (operation.Execution.IsCancellationRequested)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Cancelled);
         }
         catch (Exception ex)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "send_failed");
         }
         // Also covers runtime admission failure before its body acquires a handle use.
-        operation.AskExecution?.Close();
+        try { operation.AskExecution?.Close(); }
+        catch (Exception ex)
+        {
+            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: "ask_close_failed");
+        }
         if (operation.PermissionExecution is { } permission)
         {
-            try { await _runtime.Permissions.CloseOwnedExecutionAsync(permission).ConfigureAwait(false); }
+            try
+            {
+                operation.PermissionCloseInvocation.Launch(() => _runtime.Permissions.CloseOwnedExecutionAsync(permission));
+                if (await operation.PermissionCloseInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
+            }
             catch (Exception ex)
             {
-                RecordFailure(ex, cleanup: true);
+                RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
                 result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_close_failed");
             }
         }
@@ -606,7 +621,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            RecordFailure(ex, cleanup: false);
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             return null;
         }
     }
@@ -621,12 +636,13 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         {
             // StartControl already initiated source cancellation independently. Close this exact
             // operation before preparation/provider/cancellation joins, including provider None tokens.
-            if (_reviewPermissions || _enableUserInput) await _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId).ConfigureAwait(false);
+            if (_reviewPermissions || _enableUserInput)
+                operation.PermissionInvalidationInvocation.Launch(() => _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId));
         }
         catch (Exception ex)
         {
             failed = true;
-            RecordFailure(ex, cleanup: true);
+            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
         }
         try
         {
@@ -634,22 +650,36 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             if (attached)
             {
                 // Do not wait cancellation callbacks before making the real abort route available.
-                await _runtime.AbortAsync(operation.SessionId, CancellationToken.None).ConfigureAwait(false);
+                operation.AbortInvocation.Launch(() => _runtime.AbortAsync(operation.SessionId, CancellationToken.None));
+                if (await operation.AbortInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
             }
         }
         catch (Exception ex)
         {
             failed = true;
-            RecordFailure(ex, cleanup: true);
+            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
         }
         try
         {
-            await operation.Cancellation.ConfigureAwait(false);
+            if (_reviewPermissions || _enableUserInput)
+            {
+                if (await operation.PermissionInvalidationInvocation.Outcome.ConfigureAwait(false) is { } permissionFailure)
+                {
+                    failed = true;
+                    RecordFailure(permissionFailure, cleanup: true, operation.ReleaseDecision);
+                }
+            }
+            if (await operation.CancellationInvocation.Outcome.ConfigureAwait(false) is { } failure)
+            {
+                if (operation.CancellationInvocation.Original is null)
+                    throw new AgentDependencyRetentionException("send command", "cancellation launch", [failure], operation);
+                ExceptionDispatchInfo.Throw(failure);
+            }
         }
         catch (Exception ex)
         {
             failed = true;
-            RecordFailure(ex, cleanup: true);
+            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
         }
         var result = new OwnedSessionCommandResult(
             failed ? OwnedSessionCommandOutcome.Failed : OwnedSessionCommandOutcome.Completed,
@@ -664,17 +694,86 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     // _gate owns slot release, receipt state and admission; no provider code runs here.
     private void Release(SendOperation operation, OwnedSessionCommandResult result)
     {
-        operation.Released = true;
+        operation.ReleaseDecision.Complete();
+        operation.Released = operation.ReleaseDecision.Released;
         _active.Remove(operation.SessionId);
         operation.Receipt.Complete(result);
     }
 
-    private void RecordFailure(Exception failure, bool cleanup)
+    private void RecordFailure(Exception failure, bool cleanup, DependencyReleaseDecision? decision = null)
     {
         lock (_gate)
         {
+            decision?.Observe(failure);
             _failures.Add(failure);
             if (cleanup) _cleanupFailures.Add(failure);
+            if (OwnedProviderEventForwarding.HasRetention(failure))
+            {
+                _retained = true;
+                if (!cleanup) _cleanupFailures.Add(failure);
+            }
+        }
+    }
+
+    // Actual work completion is distinct from permission to release its source and admission slot.
+    internal sealed class DependencyReleaseDecision
+    {
+        internal bool Active { get; private set; } = true;
+        internal bool Retained { get; private set; }
+        internal bool Released => !Active && !Retained;
+        internal List<Exception> Failures { get; } = [];
+        internal void Observe(Exception failure)
+        {
+            ArgumentNullException.ThrowIfNull(failure);
+            Failures.Add(failure);
+            Retained |= OwnedProviderEventForwarding.HasRetention(failure);
+        }
+        internal void Complete() => Active = false;
+    }
+
+    internal sealed class OriginalInvocation
+    {
+        private readonly TaskCompletionSource _launched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _started;
+        internal OriginalInvocation() => Outcome = ObserveAsync();
+        internal Task? Original { get; private set; }
+        internal Task<Exception?> Outcome { get; }
+        internal Exception? AwaitedFailure { get; private set; }
+        internal AggregateException? OriginalFaults { get; private set; }
+        internal object? Invocation { get; private set; }
+        internal async Task<T> RunAsync<T>(Func<Task<T>> invoke)
+        {
+            Task<T>? original = null;
+            Launch(() => original = invoke());
+            if (await Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
+            return await original!.ConfigureAwait(false);
+        }
+        internal void Launch(Func<Task> invoke)
+        {
+            ArgumentNullException.ThrowIfNull(invoke);
+            if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Invocation already launched.");
+            Invocation = invoke;
+            try
+            {
+                Original = invoke() ?? throw new InvalidOperationException("Invocation returned no original.");
+                _launched.TrySetResult();
+            }
+            catch (Exception failure) { _launched.TrySetException(failure); }
+        }
+        private async Task<Exception?> ObserveAsync()
+        {
+            try
+            {
+                await _launched.Task.ConfigureAwait(false);
+                await Original!.ConfigureAwait(false);
+                return null;
+            }
+            catch (Exception failure)
+            {
+                AwaitedFailure = failure;
+                OriginalFaults = Original?.Exception;
+                return OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : failure;
+            }
         }
     }
 
@@ -708,27 +807,36 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             disposal = _disposeTask;
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
-        Asks.CloseAdmission();
+        try { Asks.CloseAdmission(); }
+        catch (Exception failure)
+        {
+            RecordFailure(new AgentDependencyRetentionException("command owner", "ask admission closure", [failure], this), cleanup: true);
+        }
         foreach (var operation in operations) StartControl(operation);
         foreach (var queue in queues) StartQueueCancellation(queue);
         foreach (var steer in steers)
         {
             // Start every independent cancellation before any dependent join. No callbacks under _gate.
-            try { steer.Cancellation = steer.Execution.CancelAsync(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            steer.CancellationInvocation.Launch(() => steer.Cancellation = steer.Execution.CancelAsync());
         }
         foreach (var compact in compacts)
         {
-            try { compact.Cancellation = compact.Execution.CancelAsync(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            compact.CancellationInvocation.Launch(() => compact.Cancellation = compact.Execution.CancelAsync());
         }
         foreach (var abortRun in abortRuns)
         {
-            try { abortRun.Cancellation = abortRun.Execution.CancelAsync(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            abortRun.CancellationInvocation.Launch(() => abortRun.Cancellation = abortRun.Execution.CancelAsync());
         }
         launch.TrySetResult();
         return new(disposal);
+    }
+
+    private async Task ObserveCancellationAsync(OriginalInvocation invocation, DependencyReleaseDecision decision)
+    {
+        if (await invocation.Outcome.ConfigureAwait(false) is not { } failure) return;
+        RecordFailure(invocation.Original is null
+            ? new AgentDependencyRetentionException("command owner", "cancellation launch", [failure], this)
+            : failure, cleanup: true, decision);
     }
 
     private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, CompactOperation[] compacts,
@@ -737,8 +845,10 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         await launch.ConfigureAwait(false);
         if (_reviewPermissions || _enableUserInput)
         {
-            try { await _runtime.Permissions.CloseOwnedAdmissionAsync().ConfigureAwait(false); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            _permissionShutdown.Launch(() => _runtime.Permissions.CloseOwnedAdmissionAsync());
+            if (await _permissionShutdown.Outcome.ConfigureAwait(false) is { } failure)
+                RecordFailure(_permissionShutdown.Original is null
+                    ? new AgentDependencyRetentionException("command owner", "permission shutdown launch", [failure], this) : failure, cleanup: true);
         }
         foreach (var operation in operations)
         {
@@ -754,36 +864,24 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                 try { await control.ConfigureAwait(false); }
                 catch (Exception ex) { RecordFailure(ex, cleanup: true); }
             }
-            // The wrappers have joined preparation, send, abort and cancellation before this point.
-            try { operation.Execution.Dispose(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
         foreach (var steer in steers)
         {
             try { await steer.Work.ConfigureAwait(false); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            try { await steer.Cancellation.ConfigureAwait(false); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            try { steer.Execution.Dispose(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            await ObserveCancellationAsync(steer.CancellationInvocation, steer.ReleaseDecision).ConfigureAwait(false);
         }
         foreach (var compact in compacts)
         {
             try { await compact.Work.ConfigureAwait(false); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            try { await compact.Cancellation.ConfigureAwait(false); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            try { compact.Execution.Dispose(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            await ObserveCancellationAsync(compact.CancellationInvocation, compact.ReleaseDecision).ConfigureAwait(false);
         }
         foreach (var abortRun in abortRuns)
         {
             try { await abortRun.Work.ConfigureAwait(false); }
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            try { await abortRun.Cancellation.ConfigureAwait(false); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            try { abortRun.Execution.Dispose(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+            await ObserveCancellationAsync(abortRun.CancellationInvocation, abortRun.ReleaseDecision).ConfigureAwait(false);
         }
         foreach (var queue in queues)
         {
@@ -794,13 +892,35 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
                 try { await cancellation.ConfigureAwait(false); }
                 catch (Exception ex) { RecordFailure(ex, cleanup: true); }
             }
-            try { queue.Execution.Dispose(); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
         }
-        try { await Asks.DrainAsync().ConfigureAwait(false); }
-        catch (Exception ex) { RecordFailure(ex, cleanup: true); }
+        _askDrain.Launch(Asks.DrainAsync);
+        if (await _askDrain.Outcome.ConfigureAwait(false) is { } askFailure)
+            RecordFailure(_askDrain.Original is null
+                ? new AgentDependencyRetentionException("command owner", "ask drainage launch", [askFailure], this) : askFailure, cleanup: true);
+        // All real work and independent controls have settled. Only now is release eligibility stable:
+        // a later operation's retained marker must not arrive after an earlier dependent source release.
+        bool retained;
+        lock (_gate) retained = _retained;
+        if (!retained)
+        {
+            foreach (var source in operations.Select(static operation => operation.Execution)
+                .Concat(steers.Select(static operation => operation.Execution))
+                .Concat(compacts.Select(static operation => operation.Execution))
+                .Concat(abortRuns.Select(static operation => operation.Execution))
+                .Concat(queues.Select(static operation => operation.Execution)))
+            {
+                try { source.Dispose(); }
+                catch (Exception failure)
+                {
+                    RecordFailure(new AgentDependencyRetentionException("command owner", "source release", [failure], this), cleanup: true);
+                    break;
+                }
+            }
+        }
         Exception[] failures;
         lock (_gate) failures = [.. _cleanupFailures];
+        lock (_gate) retained = _retained;
+        if (retained) throw new AgentDependencyRetentionException("command owner", "retained terminal operations", failures, this);
         if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Length > 1) throw new AggregateException(failures);
     }
@@ -812,6 +932,9 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
 
     private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)
     {
+        internal DependencyReleaseDecision ReleaseDecision { get; } = new();
+        internal OriginalInvocation RuntimeInvocation { get; } = new();
+        internal OriginalInvocation CancellationInvocation { get; } = new();
         internal OwnedTextQueueRequest Request { get; } = request;
         internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
         internal CancellationTokenSource Execution { get; } = new();
@@ -820,7 +943,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         internal TaskCompletionSource RuntimeSettled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task Work { get; set; } = Task.CompletedTask;
         internal Task? Cancellation { get; set; }
-        internal Task SourceCancellation { get; set; } = Task.CompletedTask;
+        internal Task? SourceCancellation { get; set; }
         internal bool CancellationInitiated { get; set; }
         internal List<OwnedSessionCommandReceipt> CancelReceipts { get; } = [];
         internal OwnedSessionCommandResult? CancelResult { get; set; }
@@ -831,36 +954,52 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
 
     private sealed class AbortRunOperation(OwnedAbortRunRequest request, OwnedSessionCommandReceipt receipt)
     {
+        internal DependencyReleaseDecision ReleaseDecision { get; } = new();
+        internal OriginalInvocation RuntimeInvocation { get; } = new();
+        internal OriginalInvocation CancellationInvocation { get; } = new();
         internal OwnedAbortRunRequest Request { get; } = request;
         internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
         internal CancellationTokenSource Execution { get; } = new();
         internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task Work { get; set; } = Task.CompletedTask;
-        internal Task Cancellation { get; set; } = Task.CompletedTask;
+        internal Task? Cancellation { get; set; }
     }
 
     private sealed class CompactOperation(OwnedCompactRequest request, OwnedSessionCommandReceipt receipt)
     {
+        internal DependencyReleaseDecision ReleaseDecision { get; } = new();
+        internal OriginalInvocation RuntimeInvocation { get; } = new();
+        internal OriginalInvocation CancellationInvocation { get; } = new();
         internal OwnedCompactRequest Request { get; } = request;
         internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
         internal CancellationTokenSource Execution { get; } = new();
         internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task Work { get; set; } = Task.CompletedTask;
-        internal Task Cancellation { get; set; } = Task.CompletedTask;
+        internal Task? Cancellation { get; set; }
     }
 
     private sealed class SteerOperation(OwnedTextSteerRequest request, OwnedSessionCommandReceipt receipt)
     {
+        internal DependencyReleaseDecision ReleaseDecision { get; } = new();
+        internal OriginalInvocation RuntimeInvocation { get; } = new();
+        internal OriginalInvocation CancellationInvocation { get; } = new();
         internal OwnedTextSteerRequest Request { get; } = request;
         internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
         internal CancellationTokenSource Execution { get; } = new();
         internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task Work { get; set; } = Task.CompletedTask;
-        internal Task Cancellation { get; set; } = Task.CompletedTask;
+        internal Task? Cancellation { get; set; }
     }
 
     private sealed class SendOperation(OwnedTextSendRequest request, OwnedSessionCommandReceipt receipt)
     {
+        internal DependencyReleaseDecision ReleaseDecision { get; } = new();
+        internal OriginalInvocation PreparationInvocation { get; } = new();
+        internal OriginalInvocation SendInvocation { get; } = new();
+        internal OriginalInvocation PermissionCloseInvocation { get; } = new();
+        internal OriginalInvocation PermissionInvalidationInvocation { get; } = new();
+        internal OriginalInvocation AbortInvocation { get; } = new();
+        internal OriginalInvocation CancellationInvocation { get; } = new();
         internal OwnedTextSendRequest Request { get; } = request;
         internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
         internal string SessionId => Request.SessionId;
@@ -876,7 +1015,7 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         internal OwnedSessionAskExecution? AskExecution { get; set; }
         internal OwnedAskSubmission? AskSubmission { get; init; }
         internal Task? Control { get; set; }
-        internal Task Cancellation { get; set; } = Task.CompletedTask;
+        internal Task? Cancellation { get; set; }
         internal bool CancelRequested { get; set; }
         internal bool CancellationInitiated { get; set; }
         internal bool CancellationFailed { get; set; }

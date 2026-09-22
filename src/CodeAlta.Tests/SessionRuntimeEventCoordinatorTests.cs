@@ -87,7 +87,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
     }
 
     [TestMethod]
-    public void ApplyRuntimeEvent_ForwardsAgentEventsToPluginObserver()
+    public void ApplyRuntimeEvent_DoesNotObserveAgainButDirectAgentEventStillObserves()
     {
         var session = CreateSession();
         var tab = CreateOpenSessionState(session);
@@ -105,6 +105,9 @@ public sealed class SessionRuntimeEventCoordinatorTests
 
         coordinator.ApplyRuntimeEvent(new SessionAgentEvent(session.SessionId, agentEvent));
 
+        Assert.IsNull(observer.ObservedSession);
+        Assert.IsNull(observer.ObservedEvent);
+        coordinator.HandleAgentEvent(session, tab, agentEvent);
         Assert.AreSame(session, observer.ObservedSession);
         Assert.AreSame(agentEvent, observer.ObservedEvent);
     }

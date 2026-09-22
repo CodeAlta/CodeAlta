@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Actors;
 
@@ -205,32 +206,19 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         CancellationToken executionToken, CancellationToken attachmentToken, CancellationToken runToken, Task launch)
     {
         await launch.ConfigureAwait(false);
-        try
-        {
-            using var linked = new CancellationTokenSource();
-            // Join the actual forwarding registrations before disposing their destination source;
-            // a second Cancel call is not evidence that an earlier concurrent traversal has settled.
-            await using var execution = executionToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), linked);
-            await using var attachment = attachmentToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), linked);
-            await using var run = runToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), linked);
-            await using var request = pending.CancellationToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), linked);
-            return await AwaitDecisionAsync(pending.Snapshot.Handle, pending.Completion.Task, linked.Token).ConfigureAwait(false);
-        }
-        catch
-        {
-            // A failed cancellation registration must not leave an untracked pending entry.
-            await CancelAsync(pending.Snapshot.Handle).ConfigureAwait(false);
-            throw;
-        }
-        finally
-        {
-            await ExecuteAsync(() =>
+        pending.Lifetime = new OwnedDeliveryLifetime(pending);
+        return await pending.Lifetime.RunAsync(
+            token => AwaitDecisionAsync(pending.Snapshot.Handle, pending.Completion.Task, token),
+            async () => { await _actor.AskAsync(_ => ValueTask.FromResult(Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.Cancel))).ConfigureAwait(false); },
+            async () =>
             {
-                pending.OwnedExecution!.Deliveries.Remove(pending);
-                _ownedDeliveries.Remove(pending);
-                return true;
-            }, false).ConfigureAwait(false);
-        }
+                await _actor.AskAsync(_ =>
+                {
+                    pending.OwnedExecution!.Deliveries.Remove(pending);
+                    _ownedDeliveries.Remove(pending);
+                    return ValueTask.FromResult(true);
+                }).ConfigureAwait(false);
+            }, [executionToken, attachmentToken, runToken, pending.CancellationToken]).ConfigureAwait(false);
     }
 
     internal Task CloseOwnedExecutionAsync(OwnedPermissionExecution execution)
@@ -240,42 +228,90 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         => JoinOwnedClosureAsync(() => _ownedExecutions.TryGetValue(operationId, out var execution) ? CloseOwned(execution) : Task.CompletedTask);
 
     internal Task InvalidateOwnedAttachmentAsync(OwnedProviderEventForwarding.Attachment attachment)
-        => JoinOwnedClosureAsync(() => Task.WhenAll(_ownedExecutions.Values
+        => JoinOwnedClosureAsync(() => JoinDeliveryOriginalsAsync(_ownedExecutions.Values
             .Where(execution => ReferenceEquals(execution.Attachment, attachment)).ToArray().Select(CloseOwned)));
 
     internal Task CloseOwnedAdmissionAsync()
         => JoinOwnedClosureAsync(() =>
         {
             _ownedAdmissionClosed = true;
-            foreach (var execution in _ownedExecutions.Values.ToArray()) _ = CloseOwned(execution);
-            return JoinOwnedDeliveries();
+            return JoinDeliveryOriginalsAsync(_ownedExecutions.Values.ToArray().Select(CloseOwned));
         });
 
     private async Task JoinOwnedClosureAsync(Func<Task> close)
     {
-        var completion = await ExecuteAsync(close, Task.CompletedTask).ConfigureAwait(false);
-        await completion.ConfigureAwait(false);
+        var admission = new OwnedSessionCommandService.OriginalInvocation();
+        Task? completion;
+        try { completion = await admission.RunAsync(() => ExecuteAsync<Task?>(close, null).AsTask()).ConfigureAwait(false); }
+        catch (Exception failure) { throw new AgentDependencyRetentionException("permission", "closure admission", [failure], new { Owner = this, Admission = admission }); }
+        if (completion is null)
+        {
+            await JoinDeliveryOriginalsAsync([_shutdown.Task]).ConfigureAwait(false);
+            return;
+        }
+        await JoinDeliveryOriginalsAsync([completion]).ConfigureAwait(false);
         // A concurrently disposed service owns all remaining completions. Do not release a caller's
         // source/handle on ExecuteAsync's stopped fallback before that shutdown has actually joined.
-        if (Volatile.Read(ref _disposeStarted) != 0) await _shutdown.Task.ConfigureAwait(false);
+        if (Volatile.Read(ref _disposeStarted) != 0) await JoinDeliveryOriginalsAsync([_shutdown.Task]).ConfigureAwait(false);
     }
 
     private Task CloseOwned(OwnedPermissionExecution execution)
     {
         if (execution.Closure is not null) return execution.Closure;
         if (!Owns(execution)) return Task.CompletedTask;
-        execution.Closed = true;
-        _ownedExecutions.Remove(execution.OperationId);
+        var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controls = new List<Exception>();
         var deliveries = execution.Deliveries.ToArray();
-        foreach (var pending in deliveries) Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.Cancel);
         var inputs = execution.InputDeliveries.ToArray();
-        foreach (var pending in inputs) CompleteInput(pending.Snapshot.Handle, null);
-        execution.Attachment = null;
-        execution.ExecutionToken = default;
-        execution.AttachmentToken = default;
-        execution.RunToken = default;
-        return execution.Closure = Task.WhenAll(deliveries.Select(pending => (Task)pending.Delivery!)
-            .Concat(inputs.Select(pending => (Task)pending.Delivery!)));
+        execution.Closure = CloseCoreAsync();
+        execution.Closed = true;
+        foreach (var pending in deliveries)
+        {
+            try { Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.Cancel); }
+            catch (Exception failure) { controls.Add(failure); }
+            finally { pending.Completion.TrySetResult(new(AgentPermissionDecisionKind.Cancel)); }
+        }
+        foreach (var pending in inputs)
+        {
+            try { CompleteInput(pending.Snapshot.Handle, null); }
+            catch (Exception failure) { controls.Add(failure); }
+            finally { pending.Completion.TrySetResult(null); }
+        }
+        launch.TrySetResult();
+        return execution.Closure;
+
+        async Task CloseCoreAsync()
+        {
+            await launch.Task.ConfigureAwait(false);
+            var failures = new List<Exception>(controls);
+            try
+            {
+                await JoinDeliveryOriginalsAsync(deliveries.Select(pending => (Task)pending.Delivery!)
+                    .Concat(inputs.Select(pending => (Task)pending.Delivery!))).ConfigureAwait(false);
+            }
+            catch (Exception failure) { failures.Add(failure); }
+            if (controls.Count != 0 || failures.Any(OwnedProviderEventForwarding.HasRetention))
+                throw new AgentDependencyRetentionException(execution.SessionId, "permission closure", failures, new { Owner = this, Execution = execution, Deliveries = deliveries, Inputs = inputs });
+            try
+            {
+                await _actor.AskAsync(_ =>
+                {
+                    _ownedExecutions.Remove(execution.OperationId);
+                    execution.Attachment = null;
+                    execution.ExecutionToken = default;
+                    execution.AttachmentToken = default;
+                    execution.RunToken = default;
+                    return ValueTask.FromResult(true);
+                }).ConfigureAwait(false);
+            }
+            catch (Exception failure)
+            {
+                failures.Add(failure);
+                throw new AgentDependencyRetentionException(execution.SessionId, "permission closure index", failures, new { Owner = this, Execution = execution });
+            }
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
+        }
     }
 
     private bool Owns(OwnedPermissionExecution execution)
@@ -487,43 +523,46 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             return;
         }
 
+        var requiredCleanupConfirmed = false;
         try
         {
             var ownedCompletion = await _actor.AskAsync(actorCancellationToken =>
             {
                 _stopped = true;
                 _ownedAdmissionClosed = true;
-                foreach (var execution in _ownedExecutions.Values.ToArray()) _ = CloseOwned(execution);
-                var owned = JoinOwnedDeliveries();
+                var owned = JoinDeliveryOriginalsAsync(_ownedExecutions.Values.ToArray().Select(CloseOwned));
                 foreach (var entry in _pending.Values)
                 {
-                    entry.Completion.SetResult(new(AgentPermissionDecisionKind.Cancel));
+                    entry.Completion.TrySetResult(new(AgentPermissionDecisionKind.Cancel));
                 }
 
                 _pending.Clear();
                 return ValueTask.FromResult(owned);
             }).ConfigureAwait(false);
+            Exception? ordinaryFailure = null;
             try { await ownedCompletion.ConfigureAwait(false); }
-            finally
+            catch (Exception failure)
             {
-                try
-                {
-                    // Delivery cleanup uses the stopped fallback during disposal; release its bounded indexes here.
-                    await _actor.AskAsync(_ =>
-                    {
-                        foreach (var pending in _ownedDeliveries) pending.OwnedExecution!.Deliveries.Remove(pending);
-                        _ownedDeliveries.Clear();
-                        foreach (var pending in _inputDeliveries) pending.Execution.InputDeliveries.Remove(pending);
-                        _inputDeliveries.Clear();
-                        return ValueTask.FromResult(true);
-                    }).ConfigureAwait(false);
-                }
-                finally { await _actor.StopAsync().ConfigureAwait(false); }
+                if (OwnedProviderEventForwarding.HasRetention(failure)) throw;
+                ordinaryFailure = failure;
             }
-        }
-        finally
-        {
+            try { await _actor.StopAsync().ConfigureAwait(false); }
+            catch (Exception failure)
+            {
+                throw new AgentDependencyRetentionException("permission", "mailbox stop",
+                    ordinaryFailure is null ? [failure] : [ordinaryFailure, failure], this);
+            }
+            requiredCleanupConfirmed = true;
+            if (ordinaryFailure is not null) ExceptionDispatchInfo.Capture(ordinaryFailure).Throw();
             _shutdown.TrySetResult();
+        }
+        catch (Exception failure)
+        {
+            var reported = !requiredCleanupConfirmed && !OwnedProviderEventForwarding.HasRetention(failure)
+                ? new AgentDependencyRetentionException("permission", "shutdown prerequisite", [failure], this)
+                : failure;
+            _shutdown.TrySetException(reported);
+            ExceptionDispatchInfo.Capture(reported).Throw();
         }
     }
 
@@ -586,5 +625,107 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         internal CancellationToken CancellationToken { get; } = cancellationToken;
         internal OwnedPermissionExecution? OwnedExecution { get; } = ownedExecution;
         internal Task<AgentPermissionDecision>? Delivery { get; set; }
+        internal OwnedDeliveryLifetime? Lifetime { get; set; }
+    }
+
+    internal static async Task JoinDeliveryOriginalsAsync(IEnumerable<Task> originals)
+    {
+        var stages = originals.Select(original => new DeliveryStage(() => original)).ToArray();
+        foreach (var stage in stages) stage.Launch();
+        var failures = new List<Exception>();
+        foreach (var stage in stages)
+            if (await stage.Outcome.ConfigureAwait(false) is not null) failures.Add(stage.Failure!);
+        if (stages.Any(static stage => stage.Original is null) || failures.Any(OwnedProviderEventForwarding.HasRetention))
+            throw new AgentDependencyRetentionException("permission", "closure originals", failures, stages);
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException(failures);
+    }
+
+    // Owns actual delivery registrations and their destination, shared only by permission/input delivery.
+    internal sealed class OwnedDeliveryLifetime(object dependencies)
+    {
+        internal CancellationTokenSource? Source { get; private set; }
+        internal DeliveryStage? Body { get; private set; }
+        internal DeliveryStage? CancelPending { get; private set; }
+        internal DeliveryStage? IndexCleanup { get; private set; }
+        internal CancellationTokenRegistration[] Registrations { get; private set; } = [];
+        internal DeliveryStage[] RegistrationCleanup { get; private set; } = [];
+        internal bool SourceReleased { get; private set; }
+        internal bool IndexReleased { get; private set; }
+        internal Exception? SourceFailure { get; private set; }
+        internal async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> body,
+            Func<Task> cancelPending, Func<Task> removeIndex, CancellationToken[] tokens)
+        {
+            Source = new CancellationTokenSource();
+            Registrations = new CancellationTokenRegistration[tokens.Length];
+            var registered = 0;
+            var failures = new List<Exception>();
+            var retained = false;
+            try
+            {
+                for (; registered < tokens.Length; registered++)
+                    Registrations[registered] = tokens[registered].UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), Source);
+                Body = new DeliveryStage(() => body(Source.Token));
+                Body.Launch();
+                if (await Body.Outcome.ConfigureAwait(false) is not null) failures.Add(Body.Failure!);
+            }
+            catch (Exception failure) { failures.Add(failure); }
+            if (failures.Count != 0) CancelPending = new DeliveryStage(cancelPending);
+            RegistrationCleanup = Registrations.Take(registered)
+                .Select(registration => new DeliveryStage(() => registration.DisposeAsync().AsTask())).ToArray();
+            // Independent cancellation/index controls and every unregister start before a dependent join.
+            CancelPending?.Launch();
+            foreach (var cleanup in RegistrationCleanup) cleanup.Launch();
+            if (CancelPending is not null && await CancelPending.Outcome.ConfigureAwait(false) is not null)
+            {
+                failures.Add(CancelPending.Failure!);
+                retained = true;
+            }
+            foreach (var cleanup in RegistrationCleanup)
+                if (await cleanup.Outcome.ConfigureAwait(false) is not null) { failures.Add(cleanup.Failure!); retained = true; }
+            retained |= failures.Any(OwnedProviderEventForwarding.HasRetention);
+            if (!retained)
+            {
+                try { Source.Dispose(); SourceReleased = true; }
+                catch (Exception failure) { SourceFailure = failure; failures.Add(failure); retained = true; }
+            }
+            if (!retained)
+            {
+                IndexCleanup = new DeliveryStage(removeIndex);
+                IndexCleanup.Launch();
+                if (await IndexCleanup.Outcome.ConfigureAwait(false) is not null) { failures.Add(IndexCleanup.Failure!); retained = true; }
+                else IndexReleased = true;
+            }
+            if (retained) throw new AgentDependencyRetentionException("permission delivery", "required cleanup", failures, new { Owner = dependencies, Lifetime = this });
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
+            return ((Task<T>)Body!.Original!).GetAwaiter().GetResult();
+        }
+    }
+
+    internal sealed class DeliveryStage
+    {
+        private readonly Func<Task> _invoke;
+        private readonly TaskCompletionSource<Task> _launched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal DeliveryStage(Func<Task> invoke) { _invoke = invoke; Outcome = ObserveAsync(); }
+        internal Task? Original { get; private set; }
+        internal AggregateException? OriginalFaults { get; private set; }
+        internal Exception? Failure { get; private set; }
+        internal Task<Exception?> Outcome { get; }
+        internal void Launch()
+        {
+            try { Original = _invoke(); _launched.TrySetResult(Original); }
+            catch (Exception failure) { _launched.TrySetException(failure); }
+        }
+        private async Task<Exception?> ObserveAsync()
+        {
+            try { await (await _launched.Task.ConfigureAwait(false)).ConfigureAwait(false); return null; }
+            catch (Exception failure)
+            {
+                OriginalFaults = Original?.Exception;
+                Failure = OriginalFaults is { InnerExceptions.Count: > 1 } ? OriginalFaults : failure;
+                return failure;
+            }
+        }
     }
 }

@@ -266,8 +266,14 @@ This is a best-effort, noncancelable in-memory dirty mark, not a file scan, proo
 write, or durable effect acknowledgment. Blank directories and standalone runtimes without a
 borrowed cache do nothing. There is no additional worker, reader, retry or shutdown owner.
 History rebuild and Display observation no longer repeat cache invalidation through TUI handlers.
-Plugin observation—including its existing history replay, context and failure policy—is unchanged;
-shared plugin lifetime/effect ownership and history/live reconciliation remain unresolved.
+Live plugin observation is now owned by `SessionRuntimeService` at provider publication, explicit
+append, notes and synthetic-failure origins. The runtime captures the exact published event plus
+session/project/path context, releases publisher/actor/journal ownership before invoking plugins,
+and then runs cache, parent-notification and queue effects independently. The TUI no longer invokes
+plugins from its live event reader; history replay remains unchanged and still invokes plugin
+projection for historical reconstruction. There is no history/live watermark or exactly-once claim.
+Explicit dependency-retention failures keep their owners alive; ordinary synchronous cleanup
+failures remain ordinary and continue best-effort dependent cleanup.
 
 ### Durable session notes
 

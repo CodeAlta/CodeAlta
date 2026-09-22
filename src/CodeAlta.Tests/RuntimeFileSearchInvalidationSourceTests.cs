@@ -15,8 +15,9 @@ public sealed class RuntimeFileSearchInvalidationSourceTests
         Once(host, "FileSearchCache = projectFileSnapshotCache,");
         Once(host, "var projectFileSearchService = new ProjectFileSearchService(\n                projectFileSnapshotCache,");
         var runtime = Read("CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs");
-        Once(runtime, "ArgumentNullException.ThrowIfNull(session);\n        ArgumentNullException.ThrowIfNull(@event);\n        var effectWorkingDirectory = session.WorkingDirectory;\n        await AdmitAsync(() => AppendSessionEventOwnedBodyAsync(session, @event, effectWorkingDirectory, cancellationToken)");
-        Once(runtime, "await _agentSessionCatalog.InvalidateAsync(session.SessionId, cancellationToken).ConfigureAwait(false);\n        _events.TryPublish(new SessionAgentEvent(session.SessionId, @event));\n        await InvalidateFileSearchCacheAsync(@event, effectWorkingDirectory).ConfigureAwait(false);");
+        Once(runtime, "var effectWorkingDirectory = session.WorkingDirectory;\n        var sessionId = session.SessionId;\n        var projectId = session.ProjectRef;\n        await AdmitAsync(() => AppendSessionEventOwnedBodyAsync(session, @event, sessionId, projectId, effectWorkingDirectory, cancellationToken)");
+        Once(runtime, "await _agentSessionCatalog.InvalidateAsync(sessionId, cancellationToken).ConfigureAwait(false);\n        _events.TryPublish(new SessionAgentEvent(sessionId, @event));\n        mark(CapturePluginEvent(@event, sessionId, projectId, effectWorkingDirectory));");
+        Once(runtime, "() => publication.Published is null ? Task.CompletedTask : InvalidateFileSearchCacheAsync(@event, effectWorkingDirectory).AsTask()");
         var effect = Read("CodeAlta.Orchestration/Runtime/SessionRuntimeService.FileSearch.cs");
         Once(effect, "internal ProjectFileSnapshotCache? FileSearchCache { get; init; }");
         Once(effect, "AgentActivityEvent { Kind: AgentActivityKind.FileChange }");
@@ -30,12 +31,19 @@ public sealed class RuntimeFileSearchInvalidationSourceTests
     public void CurrentSources_UsePublicationReferenceOutsideActorBeforeNotificationAndQueueTails()
     {
         var runtime = Read("CodeAlta.Orchestration/Runtime/SessionRuntimeService.cs");
-        Once(runtime, "var projection = await actor.QueryAsync(_ =>");
-        Once(runtime, "return ValueTask.FromResult((Event: sanitized, WorkingDirectory: projector.Entry.WorkingDirectory, Notifications: notifications));");
-        Once(runtime, "projectionUse.Dispose();\n            await InvalidateFileSearchCacheAsync(projection.Event, projection.WorkingDirectory).ConfigureAwait(false);\n            foreach (var notification in projection.Notifications)");
+        Once(runtime, "await publication.CompleteAsync(mark => actor.QueryAsync(_ =>");
+        Once(runtime, "mark(CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory));");
+        Once(runtime, "}).AsTask(), projectionUse.Dispose, ObserveLivePluginEventAsync, () =>\n            {\n                var effects = new List<Func<Task>>();\n                if (published is not null)\n                    effects.Add(() => InvalidateFileSearchCacheAsync(published, workingDirectory));\n                foreach (var notification in notifications)\n                    effects.Add(() => DeliverParentNotificationAsync(notification));\n                if (actorChoresCompleted && IsQueueDrainTrigger(@event))\n                    effects.Add(() => TryDrainNextQueuedPromptAsync(sessionId));\n                publication.IndependentWork = new LiveEventIndependentWork(effects);\n                return publication.IndependentWork.RunAsync();");
         Once(runtime, "var sanitized = projector.Project(@event);");
-        Once(runtime, "await DeliverParentNotificationAsync(notification).ConfigureAwait(false);");
-        Once(runtime, "if (IsQueueDrainTrigger(@event))");
+        Once(runtime, "var actorChoresCompleted = false;");
+        Once(runtime, "notifications = projector.Entry!.TakeParentNotifications(sanitized);\n                    actorChoresCompleted = true;");
+        var publicationHelper = Read("CodeAlta.Orchestration/Runtime/SessionRuntimeService.PluginEvents.cs");
+        Once(publicationHelper, "try { releasePublicationUse(); }");
+        Once(publicationHelper, "IndependentOriginal = independent()");
+        Assert.IsTrue(publicationHelper.IndexOf("try { releasePublicationUse(); }", StringComparison.Ordinal)
+            < publicationHelper.IndexOf("IndependentOriginal = independent()", StringComparison.Ordinal));
+        Once(publicationHelper, "Stages = _effects.Select(static _ => new OwnedSessionCommandService.OriginalInvocation()).ToArray();");
+        Once(publicationHelper, "Stages[index].Launch(_effects[index]);\n                if (await Stages[index].Outcome.ConfigureAwait(false) is { } failure) failures.Add(failure);");
         var effect = Read("CodeAlta.Orchestration/Runtime/SessionRuntimeService.FileSearch.cs");
         Once(effect, "if (FileSearchCache is not { } cache || string.IsNullOrWhiteSpace(workingDirectory)");
         Once(effect, "catch\n        {\n            // Cache dirty marking remains best effort; this catch does not own any other event work.\n        }");
@@ -53,7 +61,7 @@ public sealed class RuntimeFileSearchInvalidationSourceTests
         Once(coordinator, "IProjectFileSearchService projectFileSearchService,");
         Once(coordinator, "ArgumentNullException.ThrowIfNull(projectFileSearchService);");
         Assert.AreEqual(2, coordinator.Split("ObservePluginAgentEvent(session, @event);", StringSplitOptions.None).Length - 1);
-        Once(coordinator, "ObservePluginAgentEvent(session, agentRuntimeEvent.Event);");
+        Assert.IsFalse(coordinator.Contains("ObservePluginAgentEvent(session, agentRuntimeEvent.Event);", StringComparison.Ordinal));
         Assert.AreEqual(2, coordinator.Split("if (!tab.HistoryLoading)\n        {\n            ProjectPluginSessionEvents", StringSplitOptions.None).Length - 1);
         var history = Read("CodeAlta.Tui/App/SessionHistoryCoordinator.cs");
         Once(history, "await _handleAgentEventAsync(session, tab, @event);");
