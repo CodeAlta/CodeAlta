@@ -21,3 +21,7 @@ export function showAskDetails(page: AskPage | undefined, retainedCount: number,
 export function showContextAction(observationPermits: boolean, retained: boolean): boolean {
   return observationPermits || retained;
 }
+
+export function promptEditorHeight(contentHeight: number, viewportHeight: number): number {
+  return Math.max(50, Math.min(contentHeight, viewportHeight * 0.3, 240));
+}

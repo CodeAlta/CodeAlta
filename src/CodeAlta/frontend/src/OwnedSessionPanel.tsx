@@ -10,7 +10,7 @@ import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
-import { showContextAction } from "./workspacePresentation";
+import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 
 export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -92,8 +92,19 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   useLayoutEffect(() => {
     const input = promptInput.current;
     if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, Math.min(window.innerHeight * 0.3, 240))}px`;
+    const measure = () => {
+      input.style.height = "auto";
+      input.style.height = `${promptEditorHeight(input.scrollHeight, window.innerHeight)}px`;
+    };
+    measure();
+    const workspace = input.closest<HTMLElement>(".session-workspace");
+    let width = workspace?.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (workspace && workspace.clientWidth !== width) { width = workspace.clientWidth; measure(); }
+    });
+    if (workspace) observer.observe(workspace);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
   }, [text, pending?.request.text]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);

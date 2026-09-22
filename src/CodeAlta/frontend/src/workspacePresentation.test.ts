@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { showAskDetails, showContextAction, showLiveDisplay } from "./workspacePresentation";
+import { promptEditorHeight, showAskDetails, showContextAction, showLiveDisplay } from "./workspacePresentation";
 import type { DisplayState } from "./sessionDisplay";
 import type { AskPage } from "./sessionAsks";
 import type { SessionDisplayView, SessionRuntimeStateResponse } from "#neoastra";
@@ -66,4 +66,12 @@ test("contextual controls appear only for an eligible observation or a retained 
   assert.equal(eligibleSteer({ ...observed, hostEpoch: "other" }), false);
   assert.equal(eligibleQueue(undefined), false);
   assert.equal(showContextAction(eligibleSteer(undefined), true), true);
+});
+
+test("prompt height grows with content and follows viewport changes without exceeding the bound", () => {
+  assert.equal(promptEditorHeight(20, 800), 50);
+  assert.equal(promptEditorHeight(110, 800), 110);
+  assert.equal(promptEditorHeight(400, 800), 240);
+  assert.equal(promptEditorHeight(400, 400), 120);
+  assert.equal(promptEditorHeight(400, 1000), 240);
 });
