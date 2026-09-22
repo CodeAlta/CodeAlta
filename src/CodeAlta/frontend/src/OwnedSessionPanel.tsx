@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -10,6 +10,7 @@ import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
+import { showContextAction } from "./workspacePresentation";
 
 export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -22,6 +23,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   configuration?: ConfigurationSnapshot;
 }) {
   const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
+  const promptInput = useRef<HTMLTextAreaElement>(null);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
@@ -83,6 +85,16 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const canCaptureCompact = captureCompaction(epoch, sessionId, observedTarget, "availability") !== null;
   const canCaptureAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability") !== null;
   const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
+  const showSteering = showContextAction(captureSteering(epoch, sessionId, observedTarget, "x", "availability") !== null,
+    !!pendingSteer || steerMessage !== "Refresh runtime state explicitly before targeting a run.");
+  const showQueue = showContextAction(captureQueue(epoch, sessionId, observedTarget, "x", "availability") !== null,
+    !!pendingQueue || pendingQueueCancellations.length > 0 || queueMessage !== "Refresh runtime state explicitly before queueing text in this host.");
+  useLayoutEffect(() => {
+    const input = promptInput.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, Math.min(window.innerHeight * 0.3, 240))}px`;
+  }, [text, pending?.request.text]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -218,7 +230,11 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     });
   }
   return <section className="owned-session" aria-label="Owned text submission">
-    <div className="composer-heading"><div><span className="eyebrow">Prompt</span><h3>Message CodeAlta</h3></div><span className="status-pill">Owned session</span></div>
+    <label className="sr-only" htmlFor="session-prompt">Message</label>
+    <textarea id="session-prompt" ref={promptInput} className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
+      onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
+        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
+      }} />
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value={runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
         <option value={runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "default"}>{runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "Session default"}</option>
@@ -234,23 +250,36 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       </button>
       <span className="prompt-state" title="MCP availability reported by the configured plugin runtime"><span>MCP</span><strong>{mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")}</strong></span>
     </div>
-    <label className="sr-only" htmlFor="session-prompt">Message</label>
-    <textarea id="session-prompt" className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
-      onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
-        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
-      }} />
     <div className="history-controls">
       <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
-       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
+      <button type="button" onClick={() => refresh()}>Refresh receipts</button>
+      <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>
-    <p role="status">{message}</p>
+    {(message !== "Ready to send to this owned session." || pending || pendingAborts.length > 0) && <p className="composer-notice" role="status">{message}</p>}
     {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}
+    {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred."}</p>}
+    {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
+    {(pendingCompact || pendingAbortRun) && <p className="composer-notice" role="status">{pendingCompact && compactMessage} {pendingAbortRun && abortRunMessage} Open advanced controls to inspect the exact targets or retry manually.</p>}
+    {(showSteering || showQueue) && <div className="context-actions">
+      {showSteering && <div><label>Steer observed run {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
+        {pendingSteer && <p className="detail">Retained run {pendingSteer.request.expectedRunId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · request {pendingSteer.request.clientRequestId}; refresh never retargets this request.</p>}
+        <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={steer}>{pendingSteer ? "Retry exact steering request" : "Steer observed run"}</button>
+        {steerMessage !== "Refresh runtime state explicitly before targeting a run." && <p role="status">{steerMessage}</p>}</div>}
+      {showQueue && <div><label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => setQueueText(event.target.value)} /></label>
+        <p className="detail">Reservation is not insertion, execution or durable storage. Refresh receipts manually.</p>
+        {pendingQueue && <p className="detail">Retained attachment {pendingQueue.request.expectedAttachmentGeneration} · request {pendingQueue.request.clientRequestId}; no durable recovery or retargeting.</p>}
+        <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={queueTextInHost}>{pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}</button>
+        {pendingQueueCancellations.map(value => <div key={value.intent.request.targetOperationId}>
+          <p className="detail">Retained cancellation · original operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
+          <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>Retry exact queued-operation cancellation</button>
+        </div>)}
+        {queueMessage !== "Refresh runtime state explicitly before queueing text in this host." && <p role="status">{queueMessage}</p>}</div>}
+    </div>}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
     <details className="advanced-session-controls"><summary>Advanced session controls and diagnostics</summary><div>
     <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
     <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>
     <button type="button" onClick={() => refresh()}>Refresh submissions</button>
-    {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
         {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>Malformed queue receipt; not actionable.</p>}</>
@@ -273,7 +302,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     <p className="detail">Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.</p>
     <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>Refresh runtime state</button>
     {runtimeState?.kind === "loading" && <p role="status">Reading current runtime facts…</p>}
-    {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {["stale_epoch", "stale_runtime"].includes(runtimeState.code) ? "Reload the Desktop UI before continuing; the old epoch cannot be retried." : "No idle or completion state is inferred."}</p>}
     {runtimeState?.kind === "ready" && <>
       <p className="detail">Runtime instance {runtimeState.snapshot.runtimeInstanceId} · coordinator transition recorded: {runtimeState.snapshot.coordinatorTransitionInProgress ? "yes" : "no"}</p>
       {runtimeState.snapshot.entry ? <>
@@ -294,29 +322,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
         </dl>
       </> : <p>No runtime entry observed. This does not imply idle, completion or absence of a durable session.</p>}
     </>}
-    <h3>Queue text — this host only</h3>
-    <p className="detail">Volatile, bounded, exact-attachment text. Busy/draining observations permit an attempt; the backend checks the exact attachment and owned-default policy. No retargeting or durable/restart recovery. Owner reservation, insertion retained IN THIS HOST ONLY, and execution/cleanup are separate phases. queue_accepted is not executed; queue_dispatched is not run completed. After document reload, browse receipts manually: lost local text and retry keys are not reconstructed.</p>
-    {pendingQueue && <p className="detail">Retained target: runtime {pendingQueue.request.expectedRuntimeInstanceId} · attachment {pendingQueue.request.expectedAttachmentGeneration} · request {pendingQueue.request.clientRequestId}</p>}
-    <label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue}
-      onChange={event => setQueueText(event.target.value)} /></label>
-    <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={queueTextInHost}>
-      {pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}
-    </button>
-    {pendingQueueCancellations.map(value => <div key={value.intent.request.targetOperationId}>
-      <p className="detail">Retained cancellation: original session {value.intent.sessionId} · operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
-      <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)}
-        onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>Retry exact queued-operation cancellation</button>
-    </div>)}
-    <p role="status">{queueMessage}</p>
-    <h3>Steer the explicitly observed run</h3>
-    <p className="detail">Exact-target text only; the host rejects stale, retiring or non-owned targets. No run ID recorded means steering is unavailable. Steering does not create permission authority or reopen a closed review window. Refreshes never change a retained request's target.</p>
-    {pendingSteer && <p className="detail">Retained target: runtime {pendingSteer.request.expectedRuntimeInstanceId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · run {pendingSteer.request.expectedRunId} · request {pendingSteer.request.clientRequestId}</p>}
-    <label>Steering text<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer}
-      onChange={event => setSteerText(event.target.value)} /></label>
-    <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={steer}>
-      {pendingSteer ? "Retry exact steering request" : "Steer observed run"}
-    </button>
-    <p role="status">{steerMessage}</p>
     <h3>Signal cancellation for observed run</h3>
     <p className="detail">Targets only the explicitly observed runtime, attachment and run. Unsupported, stale, retiring, transitioning or draining targets fail closed without fallback. Signalling is not run completion or rollback; previously accepted decisions remain accepted. Failure can occur after signalling. Refreshes never retarget a retained request.</p>
     {pendingAbortRun && <p className="detail">Retained target: runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}</p>}

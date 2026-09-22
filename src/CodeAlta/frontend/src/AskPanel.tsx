@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { sessionAsks } from "#neoastra";
 import { askWireHandle, captureAskAction, type AskPage, type createAskActions } from "./sessionAsks";
 import type { createMutationCapability } from "./sessionOperations";
+import { showAskDetails } from "./workspacePresentation";
 
 type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof createAskActions>; capability: ReturnType<typeof createMutationCapability> };
 
@@ -12,6 +13,7 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
   const [, repaint] = useState(0);
   const [text, setText] = useState<Record<number, string>>({});
   const [choices, setChoices] = useState<Record<number, number[]>>({});
+  const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
   useEffect(() => actions.subscribe(() => repaint(value => value + 1)), [actions]);
   useEffect(() => {
     const controller = new AbortController();
@@ -39,11 +41,15 @@ export function AskPanel({ epoch, sessionId, actions, capability }: Props) {
     } catch { setNotice("The answer is invalid or exceeds the 8,192-character aggregate limit."); }
   };
   const retained = actions.forSession(sessionId);
+  const refresh = () => setRevision(value => value + 1);
+  const visible = showAskDetails(page, retained.length, notice.startsWith("Ask read failed"), !canMutate);
+  if (!visible) return <button type="button" className="ask-refresh" onClick={refresh}>Check asks</button>;
   return <section aria-label="Owned asks">
     <h3>Pending asks</h3>
-    <p role="status">{notice}</p>
+    {(!page?.head || notice.startsWith("Ask read failed") || notice.startsWith("The answer is invalid")) && <p role={notice.startsWith("Ask read failed") || notice.startsWith("The answer is invalid") ? "alert" : "status"}>{notice}</p>}
+    {!canMutate && <p role="alert">Host identity changed. Reload required; retained ask actions cannot be retargeted.</p>}
     <p className="detail">Restricted caller-session asks only. Answer starts a new text submission; Cancel does not stop a run. No files, provider input, automatic retry or restart recovery.</p>
-    <button type="button" onClick={() => setRevision(value => value + 1)}>Refresh asks</button>
+    <button type="button" onClick={refresh}>Refresh asks</button>
     {page?.hasMore && <p>Additional retained asks or dispositions are omitted from this bounded view.</p>}
     {head && <fieldset disabled={blocked}>
       <legend>Original ask {head.handle.askId} · {head.state}</legend>

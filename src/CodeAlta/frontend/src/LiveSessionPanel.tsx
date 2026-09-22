@@ -4,6 +4,7 @@ import type { createMutationCapability } from "./sessionOperations";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown } from "./timeline";
 import { AppIcon } from "./AppIcon";
+import { showLiveDisplay } from "./workspacePresentation";
 
 export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
   store: ReturnType<typeof createSessionDisplayStore>; hostEpoch: string; sessionId: string;
@@ -21,9 +22,11 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
   const state = observed.hostEpoch === hostEpoch && observed.sessionId === sessionId ? observed : null;
   const snapshot = state?.snapshot;
   const session = snapshot?.session;
+  if (!showLiveDisplay(state)) return null;
   return <section className="live-display" aria-label="Selected session live display">
     <div className="section-heading"><div><span className="eyebrow">Now</span><h3>Live activity</h3></div><span className={`status-pill live-${state?.kind ?? "loading"}`}>{state?.kind ?? "loading"}</span></div>
     {state?.code === "stale_epoch" && <p role="alert">The host has changed. Reload the Desktop UI before continuing; reconnecting with this old host identity will not work.</p>}
+    {state?.kind === "error" && !state.code && <p role="alert">Live observation unavailable. No idle or completion state is inferred.</p>}
     {state?.cleanupBlocked && <p role="alert">Previous observation cleanup failed. Its owner is retained; no successor can open here. Reconnect cannot prove cleanup or recover effects.</p>}
     {(state?.code || state?.cleanupBlocked) && <button type="button" disabled={!canMutate || state?.code === "stale_epoch" || state?.cleanupBlocked} onClick={() => {
       const owned = scope.current;
@@ -52,7 +55,6 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
           <strong>{activity.name ?? "Unnamed tool"}</strong>{activity.isNameTruncated && <span className="detail"> · name prefix truncated</span>}
           <p>Reported {activity.phase} · provider {activity.providerId} · run {activity.runId ?? "not supplied"} · activity {activity.activityId}</p>
         </li>)}</ol></>}
-        {session.text.length === 0 && <p className="muted-text">Waiting for live output…</p>}
         <div className="messages live-messages">{session.text.map(row => <LiveTextMessage key={displayRowKey(session.sessionId, row)} row={row} />)}</div>
         <details className="live-metadata"><summary>Live-window coverage</summary>
           <p className="detail">Only this selected session is observed. This is not persisted history, a complete transcript, or a tool-results/usage/interaction view. Closing or reconnecting does not stop a run.</p>

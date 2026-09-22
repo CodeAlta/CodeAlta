@@ -234,18 +234,23 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* Existing owned-runtime controls keep their full semantics while fitting the workspace. */
 .owned-session, .live-display, .session-workspace > section:not(.conversation):not(.composer), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .timeline-scroll > section:not(.conversation):not(.live-display), .timeline-scroll > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.session-workspace > .owned-session { flex: 0 1 auto; max-height: min(48vh, 560px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
+.session-workspace > .owned-session { flex: 0 1 auto; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
 .owned-session h3, .owned-session h4, .live-display h3 { margin: 22px 0 8px; }
 .owned-session > h3:first-child, .live-display > h3:first-child { margin-top: 0; }
 .owned-session textarea, .owned-session input, .owned-session select, .session-workspace > section textarea, .session-workspace > section input { width: 100%; margin-top: 6px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
 .owned-session textarea { min-height: 90px; resize: vertical; }
 .owned-session button, .session-workspace > section button { margin: 3px 5px 3px 0; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); cursor: pointer; }
 .owned-session button:disabled, .session-workspace > section button:disabled { cursor: default; opacity: .45; }
-.composer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.composer-heading h3 { margin: 2px 0 8px; font-size: 18px; }
-.owned-session .prompt-input { min-height: 112px; padding: 13px 14px; border-radius: 10px; font: inherit; line-height: 1.5; }
+.owned-session .prompt-input { display: block; min-height: 50px; max-height: min(30vh, 240px); margin: 0; padding: 10px 12px; resize: none; overflow-y: auto; border-radius: 10px; font: inherit; line-height: 1.5; }
 .owned-session .prompt-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 9px 0; }
+.history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 5px 0 0; }
+.owned-session { padding: 11px 12px; }
+.owned-session .composer-notice { margin: 4px 0; color: var(--muted); font-size: 12px; }
+.owned-session .prompt-options { margin: 6px 0 0; }
+.context-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; border-top: 1px solid var(--line); }
+.context-actions > div { flex: 1 1 230px; min-width: 0; }
+.context-actions textarea { min-height: 50px; max-height: 120px; }
+.ask-refresh { margin: 8px 18px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); cursor: pointer; font-size: 11px; }
 .composer-hint { flex: 1; color: var(--muted); font-size: 11px; }
 .owned-session .primary-button { border-color: var(--accent-strong); color: white; background: var(--accent-strong); }
 .prompt-options { display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)) repeat(2, minmax(72px, auto)); gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 65%, transparent); }
