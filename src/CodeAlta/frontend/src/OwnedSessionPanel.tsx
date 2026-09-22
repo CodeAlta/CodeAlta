@@ -1,20 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { sessionOperations as sessions, workspace, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
+import { sessionOperations as sessions, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
 import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
 import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
-import { historyMessage, loadHistory, type HistoryState } from "./history";
-import { LiveSessionPanel } from "./LiveSessionPanel";
-import type { createSessionDisplayStore } from "./sessionDisplay";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 
-export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, display, runtimeReader, permissionReviewer }: {
+export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
-  display: ReturnType<typeof createSessionDisplayStore>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
   steering: ReturnType<typeof createSteeringSubmissions>;
@@ -29,9 +25,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const [abortRunMessage, setAbortRunMessage] = useState("Refresh runtime state explicitly before targeting cancellation.");
   const [queueText, setQueueText] = useState("");
   const [queueMessage, setQueueMessage] = useState("Refresh runtime state explicitly before queueing text in this host.");
-  const [message, setMessage] = useState("Refresh submissions to recover accepted receipts. Never automatically resend an uncertain request.");
+  const [message, setMessage] = useState("Ready to send to this owned session.");
   const [page, setPage] = useState<SessionReceiptPage>();
-  const [history, setHistory] = useState<HistoryState>();
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
@@ -39,7 +34,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const invalidEpoch = observedInvalidEpoch || !canMutate;
   const scope = useRef<AbortController | null>(null);
   const receiptRevision = useRef(0);
-  const historyRevision = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
     scope.current = controller;
@@ -56,7 +50,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     setCompactMessage(compaction.pending(sessionId)
       ? "A retained compaction request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and attachment once the previous wait settles."
       : "Refresh runtime state explicitly before attempting idle compaction.");
-    setHistory(undefined);
     setAbortRunMessage(abortRuns.pending(sessionId)
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
@@ -64,7 +57,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
     setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
       ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
-      : "Refresh submissions to recover accepted receipts. Uncertain requests are never resent automatically.");
+      : "Ready to send to this owned session.");
     return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
   }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
 
@@ -214,26 +207,24 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       setMessage(`Abort original Send: ${result.status}. Refresh receipts for control outcome, not rollback, decision retraction or run termination. Uncertainty retains the exact operation and key.`);
     });
   }
-  function readHistory(next = false) {
-    const signal = scope.current?.signal;
-    if (!signal) return;
-    const cursor = next && history?.kind === "ready" ? history.page.next : null;
-    const revision = ++historyRevision.current;
-    void loadHistory(workspace.history, { sessionId, cursor }, signal, value => {
-      if (revision === historyRevision.current) setHistory(value);
-    });
-  }
   return <section className="owned-session" aria-label="Owned text submission">
-    <h3>Owned text-only submission</h3>
-    <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A bounded live status/text window is available below. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
-    <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>
-    <label>Text<textarea maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending} onChange={event => setText(event.target.value)} /></label>
+    <div className="composer-heading"><div><span className="eyebrow">Prompt</span><h3>Message CodeAlta</h3></div><span className="status-pill">Owned session</span></div>
+    <label className="sr-only" htmlFor="session-prompt">Message</label>
+    <textarea id="session-prompt" className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
+      onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
+        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
+      }} />
     <div className="history-controls">
-      <button type="button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : "Send text"}</button>
-      <button type="button" onClick={() => refresh()}>Refresh submissions</button>
+      <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
+      <button type="button" className="primary-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : "Send"}</button>
     </div>
     <p role="status">{message}</p>
     {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}
+    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
+    <details className="advanced-session-controls"><summary>Advanced session controls and diagnostics</summary><div>
+    <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
+    <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>
+    <button type="button" onClick={() => refresh()}>Refresh submissions</button>
     {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
@@ -253,8 +244,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)}
         onClick={() => abort(undefined, value.intent.request.targetOperationId)}>Retry exact original Send Abort</button>
     </div>)}
-    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
-    <LiveSessionPanel store={display} hostEpoch={epoch} sessionId={sessionId} capability={capability} />
     <h3>Current runtime — manual point-in-time observation</h3>
     <p className="detail">Recorded facts at the last refresh, not provider inactivity or successful run completion. Queue depth is unknown. This does not acknowledge effects or synchronize Display, receipts or persisted history.</p>
     <button type="button" disabled={runtimeState?.kind === "error" && ["stale_epoch", "stale_runtime"].includes(runtimeState.code)} onClick={() => void runtimeScope.current?.refresh()}>Refresh runtime state</button>
@@ -317,19 +306,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       {pendingCompact ? "Retry exact compaction request" : "Compact observed attachment if idle"}
     </button>
     <p role="status">{compactMessage}</p>
-    <h3>Persisted history — not live run state</h3>
-    <p className="detail">Bounded journal pages; deltas and completed records remain separate. Actual cached-store reads are host-owned. Caller cancellation does not stop them. Copied paths/reparse points are not sandboxed.</p>
-    <button type="button" onClick={() => readHistory()}>Restart history</button>
-    {history?.kind === "error" && <p role="alert">{historyMessage(history.code)}</p>}
-    {history?.kind === "loading" && <p role="status">Reading persisted history…</p>}
-    {history?.kind === "ready" && <>
-      {history.page.tailOmitted && <p role="status">Malformed tail omitted; history is incomplete.</p>}
-      <ol className="history-records">{history.page.entries.map(entry => <li key={entry.offset}>
-        <strong>{entry.eventType}</strong><span className="detail"> · {entry.timestamp} · byte {entry.offset}</span>
-        {entry.text !== null && <pre>{entry.text}</pre>}
-        {(entry.textTruncated || entry.bodyOmitted) && <p className="detail">Display preview shortened or payload omitted.</p>}
-      </li>)}</ol>
-      {history.page.next && <button type="button" onClick={() => readHistory(true)}>Next history page</button>}
-    </>}
+    </div></details>
   </section>;
 }

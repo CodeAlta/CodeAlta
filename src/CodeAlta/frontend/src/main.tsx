@@ -23,6 +23,7 @@ import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
 import { MarkdownContent } from "./MarkdownContent";
+import { LiveSessionPanel } from "./LiveSessionPanel";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import "./style.css";
 
@@ -130,7 +131,7 @@ function App() {
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small></div>
       <nav className="topnav" aria-label="Primary navigation">
-        <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => setView("workspace")}>Workspace</button>
+        <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => setView("workspace")}>Sessions</button>
         <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => setView("configuration")}>Configuration</button>
       </nav>
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
@@ -155,7 +156,7 @@ function App() {
               <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.archived ? "Archived" : shortPath(project.path)}</small></span>
             </button></li>)}
             <li><button type="button" aria-pressed={projectId === null} onClick={() => selectProject(null)}>
-              <span className="project-icon muted">◇</span><span><strong>Global</strong><small>Unmatched sessions</small></span>
+              <span className="project-icon muted">◇</span><span><strong>Other sessions</strong><small>No matching project</small></span>
             </button></li>
           </ul>}
           <div className="rail-footer">
@@ -167,7 +168,7 @@ function App() {
 
         <aside className="session-rail" aria-label="Sessions">
           <div className="session-rail-header">
-            <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Global"}</h2></div>
+            <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
             <button type="button" className="icon-button" title="Refresh by relaunching the current desktop host" disabled>＋</button>
           </div>
           <label className="search"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
@@ -218,18 +219,22 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
       <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span><span>{status?.hostAvailable ? "Live" : "Persisted"}</span></div>
     </header>
     <details className="session-info"><summary>Session details</summary><dl>
-      <dt>ID</dt><dd>{session.id}</dd><dt>Workspace</dt><dd>{session.workspacePath || "Not recorded"}</dd><dt>Updated</dt><dd>{session.updatedAt}</dd>
+      <dt>ID</dt><dd>{session.id}</dd><dt>Project</dt><dd>{session.workspacePath || "Not recorded"}</dd><dt>Updated</dt><dd>{session.updatedAt}</dd>
     </dl></details>
     {demoMode
       ? <DemoConversation session={session} />
-      : status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
+      : <>
+        <History sessionId={session.id} />
+        {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
         ? <>
-          <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
+          <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation.capability} />
+          <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
           {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation.capability} />}
           <NotesPanel epoch={status.hostEpoch} sessionId={session.id} reader={notesReader} capability={mutation.capability} />
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation.capability} />}
         </>
-        : <History sessionId={session.id} />}
+        : <ReadOnlyComposer />}
+      </>}
   </div>;
 }
 
@@ -298,7 +303,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
 function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
 function LoadingRows() { return <div className="loading-rows"><span /><span /><span /></div>; }
 function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) {
-  return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your workspace…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
+  return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your sessions…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
 }
 function shortPath(path: string) { const parts = path.replaceAll("\\", "/").split("/").filter(Boolean); return parts.slice(-2).join("/") || path; }
 
@@ -328,7 +333,14 @@ function History({ sessionId }: { sessionId: string }) {
         </div>
       </article>)}
     </div>
-    {page?.next && <button type="button" className="load-more" onClick={() => setRequest({ sessionId, cursor: page.next })}>Load older events</button>}
+    {page?.next && <button type="button" className="load-more" onClick={() => setRequest({ sessionId, cursor: page.next })}>Load more history</button>}
+  </section>;
+}
+
+function ReadOnlyComposer() {
+  return <section className="composer catalog-composer" aria-label="Message composer">
+    <textarea aria-label="Message" disabled placeholder="Start the desktop in owned-session mode to send a message." />
+    <div className="composer-footer"><span>Catalog mode is read-only. Your existing `.alta` data is not modified.</span><button type="button" disabled>Send <span>↑</span></button></div>
   </section>;
 }
 

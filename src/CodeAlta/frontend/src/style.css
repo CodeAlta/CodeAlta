@@ -159,6 +159,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer-footer button, .load-more { padding: 7px 12px; border: 0; border-radius: 8px; color: white; background: var(--accent-strong); cursor: pointer; }
 .composer-footer button:disabled { cursor: default; opacity: .45; }
 .composer-footer button span { margin-left: 5px; }
+.catalog-composer textarea:disabled { cursor: not-allowed; opacity: .72; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; margin: 25px 4px 4px; }
 .section-heading h2 { margin: 0; font-size: 18px; }
 .empty-history { padding: 60px 20px; color: var(--muted); text-align: center; }
@@ -189,18 +190,32 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .segmented button[aria-pressed="true"] { color: var(--text); background: var(--panel-3); }
 
 /* Existing owned-runtime controls keep their full semantics while fitting the workspace. */
-.owned-session, .live-display, .session-workspace > section:not(.conversation), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.owned-session, .live-display, .session-workspace > section:not(.conversation):not(.composer), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .owned-session h3, .owned-session h4, .live-display h3 { margin: 22px 0 8px; }
 .owned-session > h3:first-child, .live-display > h3:first-child { margin-top: 0; }
 .owned-session textarea, .owned-session input, .owned-session select, .session-workspace > section textarea, .session-workspace > section input { width: 100%; margin-top: 6px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
 .owned-session textarea { min-height: 90px; resize: vertical; }
 .owned-session button, .session-workspace > section button { margin: 3px 5px 3px 0; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); cursor: pointer; }
 .owned-session button:disabled, .session-workspace > section button:disabled { cursor: default; opacity: .45; }
-.history-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0; }
+.composer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.composer-heading h3 { margin: 2px 0 8px; font-size: 18px; }
+.owned-session .prompt-input { min-height: 112px; padding: 13px 14px; border-radius: 10px; font: inherit; line-height: 1.5; }
+.owned-session .prompt-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 9px 0; }
+.composer-hint { flex: 1; color: var(--muted); font-size: 11px; }
+.owned-session .primary-button { border-color: var(--accent-strong); color: white; background: var(--accent-strong); }
+.advanced-session-controls { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.advanced-session-controls > summary, .live-metadata > summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+.advanced-session-controls > div { padding-top: 8px; }
+.live-display .section-heading { margin: 0 0 10px; }
+.live-display .section-heading h3 { margin: 0; }
+.live-display .live-messages { padding-bottom: 4px; }
+.live-display .live-metadata { margin-top: 10px; }
 .history-records { display: grid; gap: 8px; list-style: none; }
 .history-records li { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .history-records pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
 .path { overflow-wrap: anywhere; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @media (max-width: 980px) {
   body { overflow: auto; }

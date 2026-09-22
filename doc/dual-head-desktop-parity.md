@@ -2840,3 +2840,24 @@ WebView process remained running for an eight-second startup smoke before explic
 The obsolete frontend entrypoint source-text test was removed rather than updated to encode another
 implementation-shape contract. No mounted interaction, real-provider submission, broad solution test,
 website build or M7 qualification is claimed.
+
+### Unified transcript and prompt presentation — 2026-09-22
+
+Selecting a session now keeps the persisted Markdown transcript visible in both catalog-only and owned
+host modes. Owned mode adds the retained live window as a compact activity section whose finalized and
+streaming text uses the same safe Markdown presentation; runtime identity and bounded-window coverage
+remain inspectable without dominating the conversation. The previous second, literal persisted-history
+reader inside the owned control panel was removed, so the UI has one visible paged history path.
+
+The owned-session text operation is now presented as the primary prompt with Enter-to-send and
+Shift+Enter newline behavior. Receipt recovery, runtime observation, queue, steering, cancellation and
+compaction remain available under an advanced disclosure without changing their existing admission and
+uncertainty helpers. Catalog-only startup displays a disabled composer in the same location and labels
+the session read-only; it does **not** start providers/plugins, acquire ownership or mutate the shared
+profile. Navigation consistently calls the top-level surface Sessions and distinguishes project-bound
+sessions from Other sessions rather than introducing a separate user-facing workspace concept.
+
+The production TypeScript/Vite build and all **139 behavioral frontend tests** pass after this
+presentation change. No source-shape test was added. Mounted keyboard/pointer accessibility, an ordinary
+profile opt-in transition to owned mode, durable drafts, selectors/attachments, stream/history merging
+and M7 qualification remain open.
