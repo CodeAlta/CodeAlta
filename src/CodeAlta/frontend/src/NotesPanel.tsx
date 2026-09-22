@@ -26,7 +26,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
 
   const markdown = state?.kind === "ready" ? state.markdown : fallbackMarkdown;
   return <section className="notes-pane" aria-label="Alta notes" tabIndex={-1}>
-    <header><span><strong>Alta notes</strong><small>Markdown · session scoped</small></span><span>
+    <header><span><strong>Alta notes</strong><small title="Drag the bottom-right corner to resize notes">Markdown · session scoped</small></span><span>
       {selection.current && <button type="button" title="Refresh notes" aria-label="Refresh notes" onClick={() => void selection.current?.refresh()}><AppIcon name="refresh" size={14} /></button>}
       <button type="button" title="Hide notes" aria-label="Hide notes" onClick={onClose}><AppIcon name="close" size={14} /></button>
     </span></header>

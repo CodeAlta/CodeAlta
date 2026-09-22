@@ -18,3 +18,19 @@ test("resizing preserves a usable content pane and pane minimums", () => {
   assert.deepEqual(resizePane(defaultPaneLayout, "sessions", -1000, 1200), { projects: 240, sessions: 220 });
   assert.deepEqual(constrainPaneLayout({ projects: 440, sessions: 560 }, 1000), { projects: 284, sessions: 220 });
 });
+
+test("restoring preferences keeps rail widths across a narrow window and later expansion", () => {
+  const saved = '{"projects":400,"sessions":420}';
+  const preferred = restorePaneLayout(() => saved, 900);
+  assert.deepEqual(preferred, { projects: 400, sessions: 420 });
+  assert.deepEqual(constrainPaneLayout(preferred, 900), { projects: 184, sessions: 220 });
+  assert.deepEqual(constrainPaneLayout(preferred, 1400), { projects: 400, sessions: 420 });
+  assert.deepEqual(parsePaneLayout('{"projects":-1,"sessions":99999}', 1400), { projects: 160, sessions: 560 });
+  assert.deepEqual(parsePaneLayout('null', 1400), defaultPaneLayout);
+});
+
+test("dragging a constrained rail persists the visible result instead of a hidden preference", () => {
+  const visible = constrainPaneLayout({ projects: 400, sessions: 420 }, 1200);
+  assert.deepEqual(visible, { projects: 400, sessions: 304 });
+  assert.deepEqual(resizePane(visible, "sessions", -24, 1200), { projects: 400, sessions: 280 });
+});

@@ -33,15 +33,17 @@ export function resizePane(layout: PaneLayout, pane: PaneName, delta: number, av
   return { ...layout, [pane]: clamp(Math.round(layout[pane] + delta), minimum[pane], paneMaximum) };
 }
 
-export function parsePaneLayout(value: string | null, availableWidth: number): PaneLayout {
-  if (!value) return constrainPaneLayout(defaultPaneLayout, availableWidth);
+// Keep preferred widths independent of viewport constraints so expanding the window restores them.
+export function parsePaneLayout(value: string | null, _availableWidth: number): PaneLayout {
+  if (!value) return defaultPaneLayout;
   try {
-    const parsed = JSON.parse(value) as Partial<PaneLayout>;
-    if (!Number.isFinite(parsed.projects) || !Number.isFinite(parsed.sessions))
-      return constrainPaneLayout(defaultPaneLayout, availableWidth);
-    return constrainPaneLayout({ projects: parsed.projects!, sessions: parsed.sessions! }, availableWidth);
+    const parsed = JSON.parse(value) as Partial<PaneLayout> | null;
+    if (!parsed || !Number.isFinite(parsed.projects) || !Number.isFinite(parsed.sessions))
+      return defaultPaneLayout;
+    return { projects: clamp(Math.round(parsed.projects!), minimum.projects, maximum.projects),
+      sessions: clamp(Math.round(parsed.sessions!), minimum.sessions, maximum.sessions) };
   } catch {
-    return constrainPaneLayout(defaultPaneLayout, availableWidth);
+    return defaultPaneLayout;
   }
 }
 
@@ -49,7 +51,7 @@ export function restorePaneLayout(load: () => string | null, availableWidth: num
   try {
     return parsePaneLayout(load(), availableWidth);
   } catch {
-    return constrainPaneLayout(defaultPaneLayout, availableWidth);
+    return defaultPaneLayout;
   }
 }
 

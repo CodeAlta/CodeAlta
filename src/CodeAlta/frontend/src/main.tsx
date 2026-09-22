@@ -31,6 +31,7 @@ import { persistDraft, restoreDraft } from "./promptDraft";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import { AppIcon } from "./AppIcon";
+import { sessionTime } from "./sessionTime";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -75,20 +76,32 @@ function App() {
   const searchInput = useRef<HTMLInputElement>(null);
   const chordPending = useRef(false);
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
+  const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
+  const visiblePaneLayout = constrainPaneLayout(paneLayout, workspaceWidth);
+  const [clock, setClock] = useState(Date.now);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     persistPaneLayout(value => localStorage.setItem(paneLayoutStorageKey, value), paneLayout);
   }, [paneLayout]);
 
   useEffect(() => {
-    const constrain = () => setPaneLayout(current => constrainPaneLayout(current, workspaceShell.current?.clientWidth ?? window.innerWidth));
-    window.addEventListener("resize", constrain);
-    return () => window.removeEventListener("resize", constrain);
-  }, []);
+    if (view !== "workspace" || !workspaceShell.current) return;
+    const shell = workspaceShell.current;
+    const measure = () => setWorkspaceWidth(shell.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    measure();
+    return () => observer.disconnect();
+  }, [view]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -172,11 +185,16 @@ function App() {
   }
 
   function changePane(pane: PaneName, delta: number) {
-    setPaneLayout(current => resizePane(current, pane, delta, workspaceShell.current?.clientWidth ?? window.innerWidth));
+    setPaneLayout(current => {
+      const width = workspaceShell.current?.clientWidth ?? workspaceWidth;
+      const visible = constrainPaneLayout(current, width);
+      const next = resizePane(visible, pane, delta, width);
+      return next[pane] === visible[pane] ? current : next;
+    });
   }
 
   function resetPane(pane: PaneName) {
-    setPaneLayout(current => constrainPaneLayout({ ...current, [pane]: defaultPaneLayout[pane] }, workspaceShell.current?.clientWidth ?? window.innerWidth));
+    setPaneLayout(current => ({ ...current, [pane]: defaultPaneLayout[pane] }));
   }
 
   return <div className="app-shell">
@@ -195,8 +213,8 @@ function App() {
     {view === "configuration"
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} />
       : <div className="workspace-shell" ref={workspaceShell} style={{
-          "--project-pane-width": `${paneLayout.projects}px`,
-          "--session-pane-width": `${paneLayout.sessions}px`,
+          "--project-pane-width": `${visiblePaneLayout.projects}px`,
+          "--session-pane-width": `${visiblePaneLayout.sessions}px`,
         } as CSSProperties}>
         <aside className="project-rail" aria-label="Projects" ref={projectRail}>
           <div className="panel-title"><span>Projects</span><span><button type="button" className="rail-action" title="Open project (Ctrl+O)" onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
@@ -204,23 +222,19 @@ function App() {
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">No catalog configured. See the launch instructions below.</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
           {snapshot && <ul className="nav-list">
-            {snapshot.projects.map(project => <li key={project.id}><button type="button" aria-pressed={projectId === project.id} onClick={() => selectProject(project.id)}>
-              <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.archived ? "Archived" : shortPath(project.path)}</small></span>
+            {snapshot.projects.map(project => <li key={project.id}><button type="button" title={project.path} aria-pressed={projectId === project.id} onClick={() => selectProject(project.id)}>
+              <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small title={project.path}>{project.path}</small>{project.archived && <small>Archived</small>}</span>
             </button></li>)}
             <li><button type="button" aria-pressed={projectId === null} onClick={() => selectProject(null)}>
               <span className="project-icon muted">◇</span><span><strong>Other sessions</strong><small>No matching project</small></span>
             </button></li>
           </ul>}
-          {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
-            reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
-            fallbackMarkdown={historyNotes} onClose={() => setNotesVisible(false)} />}
           <div className="rail-footer">
-            {!notesVisible && <button type="button" className="quiet-button icon-label-button" onClick={() => setNotesVisible(true)}><AppIcon name="notes" size={14} />Show Alta notes</button>}
             <button type="button" className="quiet-button icon-label-button" onClick={() => setView("configuration")}><AppIcon name="settings" size={14} />Settings &amp; extensions</button>
           </div>
         </aside>
 
-        <PaneSplitter label="Resize projects" value={paneLayout.projects} onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
+        <PaneSplitter label="Resize projects" value={visiblePaneLayout.projects} onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
 
         <aside className="session-rail" aria-label="Sessions" ref={sessionRail}>
           <div className="session-rail-header">
@@ -232,13 +246,17 @@ function App() {
           <div className="session-list">
             {visibleSessions.map(session => <button type="button" key={session.id} aria-pressed={sessionId === session.id} onClick={() => setSessionId(session.id)}>
               <span className="session-title">{session.title}</span>
-              <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><time>{session.updatedAt}</time></span>
+              <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
             </button>)}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{search ? "No matching sessions." : "No sessions in this project."}</div>}
           </div>
+          {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
+            reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
+            fallbackMarkdown={historyNotes} onClose={() => setNotesVisible(false)} />}
+          {!notesVisible && <button type="button" className="quiet-button icon-label-button show-notes" onClick={() => setNotesVisible(true)}><AppIcon name="notes" size={14} />Show Alta notes</button>}
         </aside>
 
-        <PaneSplitter label="Resize sessions" value={paneLayout.sessions} onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />
+        <PaneSplitter label="Resize sessions" value={visiblePaneLayout.sessions} onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />
 
         <main className="content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
@@ -443,7 +461,10 @@ function LoadingRows() { return <div className="loading-rows"><span /><span /><s
 function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) {
   return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your sessions…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
 }
-function shortPath(path: string) { const parts = path.replaceAll("\\", "/").split("/").filter(Boolean); return parts.slice(-2).join("/") || path; }
+function SessionTime({ value, now }: { value: string; now: number }) {
+  const { label, title, dateTime } = sessionTime(value, now);
+  return <time dateTime={dateTime} title={title}>{label}</time>;
+}
 
 function History({ sessionId, onNotesChange }: { sessionId: string; onNotesChange: (markdown: string) => void }) {
   const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
