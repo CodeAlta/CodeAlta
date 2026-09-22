@@ -11,11 +11,12 @@ The CodeAlta terminal workspace is packaged as the .NET global tool `CodeAlta.Tu
 > [!NOTE]
 > This development branch documents the terminal package rename. The commands below apply once `CodeAlta.Tui` is released; older releases used `CodeAlta` / `alta`. The replacement desktop head is still in development. Existing `~/.alta` state is not renamed or migrated by the terminal rename.
 
-The development desktop includes a workspace snapshot browser. Run `alta` with no options to start
-with desktop-owned WebView data under the platform-local application-data directory. This default does
-not open or modify the legacy `~/.alta` profile, enable agent execution, providers or plugins, or acquire
-the terminal runtime lock, so it can run alongside an older CodeAlta installation. To browse an isolated
-catalog copy, use
+The development desktop includes a workspace snapshot browser. Run `alta` with no options to browse
+the current `~/.alta` catalog while keeping desktop-owned WebView data under the platform-local
+application-data directory. Catalog browsing can create or update the standard `cache/cache.sqlite3`
+projection and SQLite sidecars, but it adds no desktop-specific state to `.alta`, enables no agent
+execution, providers or plugins, and does not acquire the terminal runtime lock. Older terminal versions
+can continue to open the same catalog. To browse an isolated catalog copy, use
 `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`
 with trusted non-overlapping roots outside `.alta`. The browser shows
 persisted project/session metadata and bounded event-history pages, not live runs; use

@@ -2805,11 +2805,12 @@ so this checkpoint does not claim a complete repository test pass.
 ### Normal local startup and SDK output — 2026-09-22
 
 The desktop no longer requires an operator-created `--data-root` for ordinary startup. `alta` with
-no arguments stores WebView data beneath the platform-local application-data directory
-(`CodeAlta/desktop`) and leaves the workspace catalog unconfigured. This default does not open or
-modify legacy `~/.alta` state, start providers/plugins, expose owned-session mutation or acquire the
-terminal runtime lock, so it can coexist with an older CodeAlta installation. Explicit isolated-copy
-and owned-host flags remain available for their existing specialized paths.
+no arguments reads the current `~/.alta` catalog while storing WebView data beneath the platform-local
+application-data directory (`CodeAlta/desktop`). Catalog reads can create or update the existing
+`cache/cache.sqlite3` projection and SQLite sidecars, but the desktop adds no desktop-specific files to
+`.alta`, starts no providers/plugins, exposes no owned-session mutation and does not acquire the terminal
+runtime lock. Older terminal versions can therefore continue to open the same catalog. Explicit
+isolated-copy and owned-host flags remain available for their existing specialized paths.
 
 The desktop project also no longer overrides `BaseOutputPath` or `BaseIntermediateOutputPath`.
 New builds use standard SDK locations such as `bin/Debug/net10.0` and `obj/Debug/net10.0`; generated

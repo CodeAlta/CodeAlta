@@ -6,9 +6,9 @@ only to build. The installed application has no UI server or external asset orig
 
 **This is an in-development workspace browser with a separately opted-in text-submission mode,
 not full agent parity.** Use `CodeAlta.Tui` (`altatui`) for normal agent workflows. Running
-`alta` with no options keeps its WebView data in the platform-local application-data directory.
-It does not open legacy `~/.alta` state, start providers/plugins or acquire the terminal runtime
-lock, so the desktop can run alongside an older CodeAlta installation.
+`alta` with no options browses the current `~/.alta` catalog while keeping its WebView data in the
+platform-local application-data directory. It does not start providers/plugins or acquire the
+terminal runtime lock, so older terminal versions can continue to open the same catalog.
 
 ## Try the web workspace now
 
@@ -51,9 +51,11 @@ dotnet build -c Release
 ```
 
 No-argument startup derives a stable WebView data directory from the platform's local application-data
-location and leaves the workspace catalog unconfigured. It does not read, migrate or modify legacy
-`~/.alta` state. Help/version and rejected arguments do not initialize native services or create
-storage. Explicit catalog and owned-host options retain their stricter root validation.
+location and reads projects and sessions from the current `~/.alta` catalog. Catalog browsing may
+create or update the standard `~/.alta/cache/cache.sqlite3` projection and SQLite sidecars, but it adds
+no desktop-specific state there and performs no catalog migration. Help/version and rejected arguments
+do not initialize native services or create storage. Explicit catalog and owned-host options retain
+their stricter root validation.
 
 ## Browse a task-owned catalog copy
 

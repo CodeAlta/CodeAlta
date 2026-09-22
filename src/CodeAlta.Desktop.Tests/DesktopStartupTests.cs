@@ -22,7 +22,7 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
-    public void NoArguments_UsesStableLocalDesktopDataWithoutALegacyCatalog()
+    public void NoArguments_UsesStableLocalDesktopDataAndTheCurrentCatalog()
     {
         var calls = 0;
 
@@ -33,7 +33,9 @@ public sealed class DesktopStartupTests
             if (string.IsNullOrWhiteSpace(localData))
                 localData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
             Assert.AreEqual(Path.Combine(localData, "CodeAlta", "desktop"), actual.DataRoot);
-            Assert.IsNull(actual.CatalogRoot);
+            Assert.AreEqual(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta"),
+                actual.CatalogRoot);
             StringAssert.EndsWith(actual.DataRoot, Path.Combine("CodeAlta", "desktop"));
             return 7;
         });
