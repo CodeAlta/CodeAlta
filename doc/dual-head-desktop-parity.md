@@ -2852,9 +2852,9 @@ reader inside the owned control panel was removed, so the UI has one visible pag
 The owned-session text operation is now presented as the primary prompt with Enter-to-send and
 Shift+Enter newline behavior. Receipt recovery, runtime observation, queue, steering, cancellation and
 compaction remain available under an advanced disclosure without changing their existing admission and
-uncertainty helpers. Catalog-only startup displays a disabled composer in the same location and labels
-the session read-only; it does **not** start providers/plugins, acquire ownership or mutate the shared
-profile. Navigation consistently calls the top-level surface Sessions and distinguishes project-bound
+uncertainty helpers. Catalog-only startup displays an editable, locally persisted draft composer in the same location, but
+refuses Send and labels the session read-only; it does **not** start providers/plugins, acquire ownership
+or mutate the shared profile. Navigation consistently calls the top-level surface Sessions and distinguishes project-bound
 sessions from Other sessions rather than introducing a separate user-facing workspace concept.
 
 The production TypeScript/Vite build and all **139 behavioral frontend tests** pass after this
@@ -2893,3 +2893,41 @@ the unified session timeline. That method and three analogous exact-source inspe
 otherwise behavioral fixture classes are now explicitly skipped rather than rewritten around the new
 source shape. The focused result is **135 passed, 25 intentionally skipped, 0 failed**; backend RPC,
 projection, validation and lifetime behavior remains covered by the passing functional cases.
+
+### Desktop workspace usability repair — 2026-09-22
+
+Project and session lists, the unified transcript, configuration page, notes body and project/help
+dialogs now use bounded, always-visible scroll regions. The transcript initially follows its newest
+content, follows appended content only while the reader remains near the bottom, exposes an explicit
+“Jump to latest” affordance after scrolling up, and preserves the viewport when older pages are
+prepended. Pure scroll-policy tests cover initial, near-bottom, reading-position and prepend cases.
+
+Persisted history projection now includes bounded structured detail text and interaction identity.
+Dedicated timeline models and cards distinguish user/assistant/reasoning text, system-prompt information,
+usage/context statistics, plans, tools, file changes, permissions/input, notes, errors and generic
+activities. Provider-specific raw bodies and nested exception internals remain intentionally omitted.
+Text events render safe Markdown; their Copy Markdown action remains visually hidden until message hover
+or keyboard focus and is still reachable by keyboard. Live finalized/streaming text has the same action.
+
+The primary owned composer now restores and persists bounded per-session drafts, refreshes runtime state,
+shows observed agent-prompt/model/provider/context values and reports configured MCP runtime state. Enter
+sends and Shift+Enter inserts a newline through the existing retained Send flow. Catalog mode permits
+editing a saved local draft but refuses Send with a truthful owned-host requirement. Provider, model and
+agent-prompt selectors are deliberately disabled status controls: desktop mutation/listing contracts for
+those choices are still absent and are not simulated. The configuration snapshot can read bounded
+provider/model/plugin/MCP policy from the admitted catalog root without constructing provider or plugin
+runtimes.
+
+A bottom-left Alta notes pane renders the latest persisted notes event as Markdown and uses the owned
+current-notes RPC when available. Centralized keyboard dispatch covers project/session movement, search,
+prompt and rail focus, configuration/provider/model/prompt/plugin destinations, notes visibility, help,
+Escape and an Open project dialog over the existing catalog. It avoids ordinary shortcuts in text
+editors except intentional composer/chord commands. Opening an arbitrary new filesystem project still
+requires a future owned/native picker contract.
+
+All **152 frontend tests** and the TypeScript/Vite production build pass. The full Desktop test project
+passes **137 tests with 25 intentionally skipped source-shape/native cases**, and the Debug desktop build
+passes with zero warnings/errors and a current generated contract. The available Windows host creates a
+native window but fails WebView2 controller creation (`NeoAstraException`), so mounted visual/keyboard,
+screen-reader and native-WebView interaction remain unverified. Model/provider/prompt mutation, full MCP
+management, CodeMirror/attachments, native menus and broader M5/M6 parity remain open; M7 is not started.

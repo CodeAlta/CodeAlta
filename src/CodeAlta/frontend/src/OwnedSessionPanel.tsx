@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { sessionOperations as sessions, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
+import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
@@ -8,8 +8,9 @@ import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancel
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { persistDraft, restoreDraft } from "./promptDraft";
 
-export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer }: {
+export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
@@ -17,8 +18,9 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
   queue: ReturnType<typeof createQueueSubmissions>;
+  configuration?: ConfigurationSnapshot;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
@@ -37,7 +39,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   useEffect(() => {
     const controller = new AbortController();
     scope.current = controller;
-    setText(submissions.pending(sessionId)?.request.text ?? "");
+    setText(submissions.pending(sessionId)?.request.text ?? restoreDraft(key => localStorage.getItem(key), sessionId));
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
     setQueueText(queue.pending(sessionId)?.request.text ?? "");
     setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
@@ -55,11 +57,16 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       : "Refresh runtime state explicitly before targeting cancellation.");
     setRuntimeState(undefined);
     runtimeScope.current = runtimeReader.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, setRuntimeState, capability.observe);
+    void runtimeScope.current.refresh();
     setMessage(submissions.pending(sessionId) || submissions.aborts(sessionId).length
       ? "Retained Send/Abort intent exists. Refresh receipts manually or retry the exact request after its original waiter settles."
       : "Ready to send to this owned session.");
     return () => { controller.abort(); scope.current = null; runtimeScope.current = null; };
   }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
+
+  useEffect(() => {
+    if (!submissions.pending(sessionId)) persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text);
+  }, [sessionId, text, submissions]);
 
   const pending = submissions.pending(sessionId);
   const pendingAborts = submissions.aborts(sessionId);
@@ -69,6 +76,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const pendingQueue = queue.pending(sessionId);
   const pendingQueueCancellations = queue.cancellations(sessionId);
   const observedTarget = runtimeState?.kind === "ready" ? runtimeState.snapshot : undefined;
+  const runtimeConfiguration = observedTarget?.entry;
+  const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
   const canCaptureCompact = captureCompaction(epoch, sessionId, observedTarget, "availability") !== null;
   const canCaptureAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability") !== null;
@@ -209,6 +218,21 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   }
   return <section className="owned-session" aria-label="Owned text submission">
     <div className="composer-heading"><div><span className="eyebrow">Prompt</span><h3>Message CodeAlta</h3></div><span className="status-pill">Owned session</span></div>
+    <div className="prompt-options" aria-label="Session configuration">
+      <label><span>Agent prompt</span><select aria-label="Agent prompt" value={runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
+        <option value={runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "default"}>{runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "Session default"}</option>
+      </select></label>
+      <label><span>Model</span><select aria-label="Model" value={runtimeConfiguration?.modelId ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
+        <option value={runtimeConfiguration?.modelId ?? "default"}>{runtimeConfiguration?.modelId ?? "Provider default"}</option>
+      </select></label>
+      <label><span>Provider</span><select aria-label="Provider" value={runtimeConfiguration?.providerKey ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
+        <option value={runtimeConfiguration?.providerKey ?? "default"}>{runtimeConfiguration?.providerKey ?? "Session provider"}</option>
+      </select></label>
+      <button type="button" className="prompt-state" onClick={() => void runtimeScope.current?.refresh()} title="Refresh context and runtime configuration">
+        <span>Context</span><strong>{runtimeState?.kind === "loading" ? "Reading…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Ready" : "Refresh"}</strong>
+      </button>
+      <span className="prompt-state" title="MCP availability reported by the configured plugin runtime"><span>MCP</span><strong>{mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Not configured" : "Runtime unavailable")}</strong></span>
+    </div>
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
       onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {

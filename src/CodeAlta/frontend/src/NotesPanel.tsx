@@ -1,25 +1,40 @@
 import { useEffect, useRef, useState } from "react";
+import { MarkdownContent } from "./MarkdownContent";
 import { notesMessage, type createNotesReader, type NotesState } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
 
-export function NotesPanel({ epoch, sessionId, reader, capability }: {
-  epoch: string; sessionId: string; reader: ReturnType<typeof createNotesReader>; capability: ReturnType<typeof createMutationCapability>;
+export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkdown, onClose }: {
+  epoch?: string;
+  sessionId: string | null;
+  reader?: ReturnType<typeof createNotesReader>;
+  capability?: ReturnType<typeof createMutationCapability>;
+  fallbackMarkdown: string;
+  onClose: () => void;
 }) {
   const [state, setState] = useState<NotesState>();
-  const selection = useRef<ReturnType<typeof reader.forSelection> | undefined>(undefined);
+  const selection = useRef<ReturnType<ReturnType<typeof createNotesReader>["forSelection"]> | undefined>(undefined);
   useEffect(() => {
+    setState(undefined);
+    if (!epoch || !sessionId || !reader || !capability) return;
     const controller = new AbortController();
     selection.current = reader.forSelection(epoch, sessionId, controller.signal, setState,
       () => { capability.observe({ status: "stale_epoch", epoch }); });
+    void selection.current.refresh();
     return () => { controller.abort(); selection.current = undefined; };
   }, [epoch, sessionId, reader, capability]);
-  return <section aria-label="Current durable notes">
-    <h3>Current durable notes — read only</h3>
-    <p className="detail">Refresh reads the latest stored notes, not live progress. Complete literal text only, up to 16,384 UTF-16 units. The underlying journal scan is not bounded by this display limit.</p>
-    <button type="button" onClick={() => { void selection.current?.refresh(); }}>Refresh notes</button>
-    {!state && <p role="status">Notes have not been read. Use Refresh notes.</p>}
-    {state?.kind === "loading" && <p role="status">Reading notes…</p>}
-    {state?.kind === "error" && <p role="alert">{notesMessage(state.code)}</p>}
-    {state?.kind === "ready" && (state.markdown === "" ? <p role="status">No stored notes text.</p> : <pre>{state.markdown}</pre>)}
+
+  const markdown = state?.kind === "ready" ? state.markdown : fallbackMarkdown;
+  return <section className="notes-pane" aria-label="Alta notes" tabIndex={-1}>
+    <header><span><strong>Alta notes</strong><small>Markdown · session scoped</small></span><span>
+      {selection.current && <button type="button" title="Refresh notes" aria-label="Refresh notes" onClick={() => void selection.current?.refresh()}>↻</button>}
+      <button type="button" title="Hide notes" aria-label="Hide notes" onClick={onClose}>×</button>
+    </span></header>
+    <div className="notes-content">
+      {!sessionId && <p className="muted-text">Select a session to view its notes.</p>}
+      {state?.kind === "loading" && !markdown && <p role="status" className="muted-text">Reading notes…</p>}
+      {state?.kind === "error" && <p role="alert" className="error-text">{notesMessage(state.code)}</p>}
+      {sessionId && !markdown && state?.kind !== "loading" && <p className="muted-text">No notes for this session.</p>}
+      {markdown && <MarkdownContent source={markdown} />}
+    </div>
   </section>;
 }

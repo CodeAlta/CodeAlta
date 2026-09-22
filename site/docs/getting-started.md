@@ -19,12 +19,20 @@ execution, providers or plugins, and does not acquire the terminal runtime lock.
 can continue to open the same catalog. To browse an isolated catalog copy, use
 `--data-root <new-absolute-browser-directory> --catalog-root <existing-absolute-catalog-copy> --allow-catalog-cache`
 with trusted non-overlapping roots outside `.alta`. The browser shows
-persisted project/session metadata and bounded event-history pages, not live runs; use
-`altatui` for agent workflows. Selecting a session loads its first history page; Next page
-replaces the displayed page. Deltas and completed content remain separate records, and
-shortened previews or omitted payloads are marked. The bounded reader supports UTF-8
+persisted project/session metadata and bounded event history, not live runs. Project, session and
+timeline lists have dedicated scrollbars. Selecting a session accumulates up to 1,000 persisted
+events, starts at the latest content and preserves the viewport while older pages load. The timeline
+distinguishes messages, reasoning, tools/file changes, plans, prompt information, usage, interactions
+and errors; hover or focus a text message to copy its Markdown. Shortened previews or omitted raw
+provider payloads are marked. The bounded reader supports UTF-8
 LF/CRLF journals, with a 128 KiB record limit; unsupported or oversized records are not
 silently skipped. If the journal changes, restart history rather than refreshing the catalog.
+
+Catalog mode includes an editable session-scoped prompt draft and a bottom-left Alta notes Markdown
+pane, but Send is refused because no runtime is owned. The project picker opens projects already in the
+catalog; it does not add an arbitrary folder. Use the Shortcuts dialog (`F1`) to discover navigation,
+search, prompt, notes and configuration shortcuts. Provider/model/agent-prompt values shown in the
+composer are current-session status, not editable selections in this development version.
 
 A separate experimental owned-host mode adds existing-session text submission and explicit
 receipt refresh/retry. It additionally requires `--allow-owned-host`, `--project-root`,
@@ -39,7 +47,9 @@ changes, with up to 256 local intents combined. Use manual receipt refresh or ex
 original waiter settles; Abort-only recovery preserves unrelated composer text. Late epoch changes
 disable mutations even after leaving the old selection. Reload permits receipt browsing, not recovery
 of lost local text/keys. No automatic retry or rollback/run-termination guarantee is provided.
-Native lifecycle and full agent parity remain unqualified; continue using `altatui` for normal workflows.
+The owned composer supports Enter to send, Shift+Enter for a newline and a bounded local draft. It also
+shows observed provider/model/agent-prompt/context state plus configured MCP runtime state. Native
+lifecycle and full agent parity remain unqualified; continue using `altatui` for normal workflows.
 
 The experimental owned mode offers **Queue text — this host only** after manual runtime refresh,
 including when the observed attachment is busy. Reservation, insertion retained in this host and
@@ -101,11 +111,10 @@ can read retained same-host state but does not recreate lost intent, and restart
 This restricted workflow provides no general LiveTool dispatch, attached files or provider-input
 activation. Continue using `altatui` for complete agent workflows.
 
-In owned-host mode, **Current durable notes — read only** offers **Refresh notes** for the selected
-session without starting a provider. Refresh is manual; the view shows complete literal text up to
-16,384 UTF-16 units, not live progress or rich Markdown. Oversized notes are refused without truncation,
-and read failure is distinct from empty notes. Switching sessions does not stop an already-started
-read; refresh again explicitly after it settles. Editing and automatic refresh are not provided.
+In owned-host mode, the **Alta notes** pane automatically reads current durable notes for the selected
+session without starting a provider and renders the complete text as Markdown. The read remains bounded
+at 16,384 UTF-16 units; oversized notes are refused without truncation, and read failure is distinct
+from empty notes. Switching sessions does not stop an already-started read. Editing is not provided.
 
 For supported **nonsecret provider input**, separately add `--enable-owned-user-input` to the complete
 owned-mode command. It is off by default and does not approve commands or files. **Never enter secrets**:

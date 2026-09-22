@@ -1,9 +1,9 @@
-import { StrictMode, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { StrictMode, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus, type HistoryRequest,
-  type ConfigurationSnapshot, type WorkspaceSession,
+  type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
@@ -22,8 +22,12 @@ import { NotesPanel } from "./NotesPanel";
 import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
-import { MarkdownContent } from "./MarkdownContent";
 import { LiveSessionPanel } from "./LiveSessionPanel";
+import { TimelineMessage } from "./TimelineMessage";
+import { buildTimelineItems, latestNotes } from "./timeline";
+import { bottomScrollTop, shouldFollowTimeline } from "./timelineScroll";
+import { resolveShortcut, type ShortcutAction } from "./shortcuts";
+import { persistDraft, restoreDraft } from "./promptDraft";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import "./style.css";
@@ -42,6 +46,9 @@ function App() {
   const [view, setView] = useState<View>("workspace");
   const [search, setSearch] = useState("");
   const [theme, setTheme] = useState<Theme>("dark");
+  const [notesVisible, setNotesVisible] = useState(true);
+  const [historyNotes, setHistoryNotes] = useState("");
+  const [dialog, setDialog] = useState<"project" | "help" | null>(null);
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
@@ -62,6 +69,10 @@ function App() {
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   const workspaceShell = useRef<HTMLDivElement>(null);
+  const projectRail = useRef<HTMLElement>(null);
+  const sessionRail = useRef<HTMLElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const chordPending = useRef(false);
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
 
   useEffect(() => {
@@ -112,6 +123,45 @@ function App() {
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
+  const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+
+  useEffect(() => { setHistoryNotes(""); }, [sessionId]);
+
+  useEffect(() => {
+    function keyDown(event: globalThis.KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const editing = target?.matches("input, textarea, select, [contenteditable='true']") === true;
+      const resolved = resolveShortcut(event, chordPending.current, editing);
+      chordPending.current = resolved.chordPending;
+      if (!resolved.handled) return;
+      event.preventDefault();
+      if (resolved.action) runShortcut(resolved.action);
+    }
+    window.addEventListener("keydown", keyDown);
+    return () => window.removeEventListener("keydown", keyDown);
+  });
+
+  function runShortcut(action: ShortcutAction) {
+    const projects = snapshot?.projects ?? [];
+    if (action === "openProject") setDialog("project");
+    else if (action === "help") setDialog("help");
+    else if (action === "escape") { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
+    else if (action === "settings" || action === "providers" || action === "models" || action === "prompts" || action === "plugins") setView("configuration");
+    else if (action === "toggleNotes") setNotesVisible(value => !value);
+    else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
+    else if (action === "focusSearch") searchInput.current?.focus();
+    else if (action === "focusProjects") projectRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+    else if (action === "focusSessions") sessionRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+    else if (action === "nextProject" || action === "previousProject") {
+      if (!projects.length) return;
+      const index = Math.max(0, projects.findIndex(project => project.id === projectId));
+      selectProject(projects[(index + (action === "nextProject" ? 1 : -1) + projects.length) % projects.length].id);
+    } else if (action === "nextSession" || action === "previousSession") {
+      if (!visibleSessions.length) return;
+      const index = Math.max(0, visibleSessions.findIndex(session => session.id === sessionId));
+      setSessionId(visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id);
+    } else if (action === "context") document.querySelector<HTMLButtonElement>(".prompt-state")?.click();
+  }
 
   function selectProject(nextProjectId: string | null) {
     setProjectId(nextProjectId);
@@ -147,8 +197,8 @@ function App() {
           "--project-pane-width": `${paneLayout.projects}px`,
           "--session-pane-width": `${paneLayout.sessions}px`,
         } as CSSProperties}>
-        <aside className="project-rail" aria-label="Projects">
-          <div className="panel-title"><span>Projects</span><span className="count">{snapshot?.projects.length ?? 0}</span></div>
+        <aside className="project-rail" aria-label="Projects" ref={projectRail}>
+          <div className="panel-title"><span>Projects</span><span><button type="button" className="rail-action" title="Open project (Ctrl+O)" onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">No catalog configured. See the launch instructions below.</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
@@ -160,19 +210,23 @@ function App() {
               <span className="project-icon muted">◇</span><span><strong>Other sessions</strong><small>No matching project</small></span>
             </button></li>
           </ul>}
+          {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
+            reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
+            fallbackMarkdown={historyNotes} onClose={() => setNotesVisible(false)} />}
           <div className="rail-footer">
+            {!notesVisible && <button type="button" className="quiet-button" onClick={() => setNotesVisible(true)}>▤ Show Alta notes</button>}
             <button type="button" className="quiet-button" onClick={() => setView("configuration")}>⚙ Settings &amp; extensions</button>
           </div>
         </aside>
 
         <PaneSplitter label="Resize projects" value={paneLayout.projects} onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
 
-        <aside className="session-rail" aria-label="Sessions">
+        <aside className="session-rail" aria-label="Sessions" ref={sessionRail}>
           <div className="session-rail-header">
             <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
             <button type="button" className="icon-button" title="Refresh by relaunching the current desktop host" disabled>＋</button>
           </div>
-          <label className="search"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
+          <label className="search"><span>⌕</span><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
             {visibleSessions.map(session => <button type="button" key={session.id} aria-pressed={sessionId === session.id} onClick={() => setSessionId(session.id)}>
@@ -191,14 +245,17 @@ function App() {
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={selectedSession.id} session={selectedSession} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
-                askActions={askActions} display={display} runtimeReader={runtimeReader} notesReader={notesReader}
-                permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} />}
+                 askActions={askActions} display={display} runtimeReader={runtimeReader}
+                 permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
+                 onNotesChange={setHistoryNotes} onOpenConfiguration={() => setView("configuration")} />}
         </main>
       </div>}
+    {dialog === "project" && <OpenProjectDialog projects={snapshot?.projects ?? []} onOpen={id => { selectProject(id); setDialog(null); }} onClose={() => setDialog(null)} />}
+    {dialog === "help" && <ShortcutHelp onClose={() => setDialog(null)} />}
   </div>;
 }
 
-function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, askActions, display, runtimeReader, notesReader, permissionReviewer, inputReviewer }: {
+function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, askActions, display, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
   session: WorkspaceSession;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
@@ -210,10 +267,30 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   askActions: ReturnType<typeof createAskActions>;
   display: ReturnType<typeof createSessionDisplayStore>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
-  notesReader: ReturnType<typeof createNotesReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer>;
   inputReviewer: ReturnType<typeof createUserInputReviewer>;
+  configuration: ConfigurationSnapshot | undefined;
+  onNotesChange: (markdown: string) => void;
+  onOpenConfiguration: () => void;
 }) {
+  const timeline = useRef<HTMLDivElement>(null);
+  const followTimeline = useRef(true);
+  const [timelineFollowing, setTimelineFollowing] = useState(true);
+  useEffect(() => {
+    const element = timeline.current;
+    if (!element) return;
+    let frame = 0;
+    const scrollBottom = () => {
+      if (!followTimeline.current) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { element.scrollTop = bottomScrollTop(element); });
+    };
+    const observer = new MutationObserver(scrollBottom);
+    observer.observe(element, { childList: true, subtree: true, characterData: true });
+    scrollBottom();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [session.id]);
+  const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   return <div className="session-workspace">
     <header className="session-header">
       <div><span className="eyebrow">Session</span><h1>{session.title}</h1></div>
@@ -225,16 +302,27 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
     {demoMode
       ? <DemoConversation session={session} />
       : <>
-        <History sessionId={session.id} />
-        {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
+        <div className="timeline-scroll" ref={timeline} onScroll={event => {
+          followTimeline.current = shouldFollowTimeline(event.currentTarget);
+          setTimelineFollowing(followTimeline.current);
+        }}>
+        <History sessionId={session.id} onNotesChange={onNotesChange} />
+        {ownedSession && status?.hostEpoch
         ? <>
-          <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation.capability} />
-          <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
-          {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation.capability} />}
-          <NotesPanel epoch={status.hostEpoch} sessionId={session.id} reader={notesReader} capability={mutation.capability} />
-          {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation.capability} />}
+          <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
+          {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} />}
+          {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability} />}
         </>
-        : <ReadOnlyComposer />}
+        : null}
+        </div>
+        {!timelineFollowing && <button type="button" className="timeline-bottom-button" onClick={() => {
+          followTimeline.current = true;
+          setTimelineFollowing(true);
+          if (timeline.current) timeline.current.scrollTop = bottomScrollTop(timeline.current);
+        }}>Jump to latest ↓</button>}
+        {ownedSession && status?.hostEpoch
+          ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} />
+          : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} />}
       </>}
   </div>;
 }
@@ -278,6 +366,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
   const [scope, setScope] = useState<ConfigurationScope>("all");
   const [query, setQuery] = useState("");
   const visible = new Set(visibleConfigurationSections(scope, query));
+  const mcp = inventory?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   return <main className="configuration-page">
     <header className="page-heading"><span className="eyebrow">Desktop</span><h1>Configuration</h1><p>Inspect the active desktop environment and personalize this window.</p></header>
     <div className="settings-layout">
@@ -299,9 +388,10 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
         {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
       </div></section>}
-      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon">Aa</div><div><h2>Agent prompts</h2><p>Prompt selection is captured by the session runtime. Desktop editing is not exposed by the current bridge.</p><StatusPill label="Read-only in this version" /></div></section>}
+      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon">Aa</div><div><h2>Agent prompts</h2><p>The composer shows the prompt captured by an owned session. Persisted Prompt information entries include the applied system/developer text, prompt source, change summary, and token estimate.</p><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
       {visible.has("skills") && <section className="settings-card"><div className="settings-icon">⌘</div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
-      {visible.has("plugins") && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins</h2><p>Live plugin events now originate in the shared runtime, so desktop and terminal heads observe the same publications.</p>
+      {visible.has("plugins") && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
+        <div className="inventory-row"><span><strong>MCP servers</strong><small>Model Context Protocol runtime state</small></span><StatusPill label={mcp ? mcp.state : inventory?.pluginRuntimeAvailable ? "Not configured" : "Runtime not started"} /></div>
         {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}
         {inventory && inventory.plugins.length === 0 && <StatusPill label={inventory.pluginRuntimeAvailable ? "No active plugins" : "Requires packaged host"} />}
         {inventory?.pluginsTruncated && <p className="muted-text">Showing the first 32 active plugins.</p>}
@@ -314,13 +404,47 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
 }
 
 function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
+
+function OpenProjectDialog({ projects, onOpen, onClose }: { projects: ReadonlyArray<WorkspaceProject>; onOpen: (id: string) => void; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const normalized = query.trim().toLowerCase();
+  const matches = projects.filter(project => !normalized || `${project.name} ${project.path}`.toLowerCase().includes(normalized));
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="open-project-title">
+      <header><div><span className="eyebrow">Workspace</span><h2 id="open-project-title">Open project</h2></div><button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></header>
+      <label className="settings-search"><span>⌕</span><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Project name or catalog path" /></label>
+      <div className="dialog-list">{matches.map(project => <button type="button" key={project.id} onClick={() => onOpen(project.id)}>
+        <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.path}</small></span>
+      </button>)}</div>
+      {matches.length === 0 && <p className="muted-text">No catalog project matches this value. Adding a new folder requires an owned host; catalog mode never changes your `.alta` project list.</p>}
+      <footer><span><kbd>Ctrl</kbd>+<kbd>O</kbd> · <kbd>Esc</kbd></span><button type="button" className="quiet-button" onClick={onClose}>Cancel</button></footer>
+    </section>
+  </div>;
+}
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const shortcuts = [
+    ["Ctrl+O", "Open project"], ["Ctrl+F", "Search sessions"], ["Alt+↑ / Alt+↓", "Previous / next session"],
+    ["Alt+← / Alt+→", "Previous / next project"], ["Ctrl+,", "Configuration"], ["Ctrl+Shift+N", "Toggle Alta notes"],
+    ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
+    ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
+    ["F1 or ?", "Keyboard shortcuts"], ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
+  ];
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="app-dialog shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
+      <header><div><span className="eyebrow">Keyboard first</span><h2 id="shortcut-title">Shortcuts</h2></div><button autoFocus type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></header>
+      <dl>{shortcuts.map(([keys, label]) => <div key={keys}><dt>{keys}</dt><dd>{label}</dd></div>)}</dl>
+    </section>
+  </div>;
+}
+
 function LoadingRows() { return <div className="loading-rows"><span /><span /><span /></div>; }
 function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) {
   return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your sessions…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
 }
 function shortPath(path: string) { const parts = path.replaceAll("\\", "/").split("/").filter(Boolean); return parts.slice(-2).join("/") || path; }
 
-function History({ sessionId }: { sessionId: string }) {
+function History({ sessionId, onNotesChange }: { sessionId: string; onNotesChange: (markdown: string) => void }) {
   const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
   const [state, setState] = useState<HistoryState>();
   const [timeline, setTimeline] = useState<HistoryTimeline>();
@@ -333,38 +457,47 @@ function History({ sessionId }: { sessionId: string }) {
     });
     return () => abort.abort();
   }, [request]);
+  useEffect(() => { onNotesChange(latestNotes(timeline?.entries ?? [])); }, [timeline, onNotesChange]);
   const current = state?.request === request ? state : undefined;
+  useEffect(() => {
+    if (current?.kind !== "ready" || !current.page.next || timeline?.next !== current.page.next || timeline.limitReached) return;
+    const timer = window.setTimeout(() => setRequest({ sessionId, cursor: current.page.next }), 0);
+    return () => window.clearTimeout(timer);
+  }, [current, timeline, sessionId]);
+  const items = buildTimelineItems(timeline?.entries ?? []);
   return <section className="conversation history" aria-labelledby="history-heading">
     <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}>Refresh</button></div>
-    {(!current || current.kind === "loading") && <p role="status">Loading persisted history…</p>}
+    {(!current || current.kind === "loading") && <p role="status">Loading the latest persisted history…</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
     {timeline?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
     {timeline?.limitReached && <div role="status" className="banner">The timeline reached its 1,000-event display limit. Refresh to restart from the beginning.</div>}
-    {timeline?.entries.length === 0 && <div className="empty-history">No visible events in this history.</div>}
+    {items.length === 0 && <div className="empty-history">No visible events in this history.</div>}
     <div className="messages">
-      {timeline?.entries.map(entry => <article key={entry.offset} className={`message message-${entry.kind?.toLowerCase() === "user" ? "user" : "assistant"}`}>
-        <div className="avatar">{entry.kind?.toLowerCase() === "user" ? "You" : "A"}</div><div className="message-body">
-          <div className="message-heading"><strong>{entry.kind ?? entry.eventType}</strong><time>{formatTimestamp(entry.timestamp)}</time></div>
-          {entry.name && <p><strong>{entry.name}</strong></p>}{entry.text !== null && <MarkdownContent source={entry.text} />}
-          {(entry.textTruncated || entry.bodyOmitted) && <p className="muted-text">Some persisted content is not included in this preview.</p>}
-          <details className="event-meta"><summary>Event metadata</summary><code>{entry.eventType} · byte {entry.offset} · {entry.providerId}</code></details>
-        </div>
-      </article>)}
+      {items.map(item => <TimelineMessage key={item.key} item={item} />)}
     </div>
-    {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}>Load more history</button>}
+    {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}>Load older history</button>}
   </section>;
 }
 
-function ReadOnlyComposer() {
+function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration }: {
+  sessionId: string; provider: string | null; configuration?: ConfigurationSnapshot; onOpenConfiguration: () => void;
+}) {
+  const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
+  const [message, setMessage] = useState("Draft locally; sending requires an explicitly owned desktop host.");
+  useEffect(() => { persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text); }, [sessionId, text]);
   return <section className="composer catalog-composer" aria-label="Message composer">
-    <textarea aria-label="Message" disabled placeholder="Start the desktop in owned-session mode to send a message." />
-    <div className="composer-footer"><span>Catalog mode is read-only. Your existing `.alta` data is not modified.</span><button type="button" disabled>Send <span>↑</span></button></div>
+    <div className="prompt-options" aria-label="Session configuration">
+      <label><span>Agent prompt</span><select aria-label="Agent prompt" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
+      <label><span>Model</span><select aria-label="Model" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
+      <label><span>Provider</span><select aria-label="Provider" value={provider ?? "none"} disabled><option value={provider ?? "none"}>{provider ?? "Not recorded"}</option></select></label>
+      <button type="button" className="prompt-state" onClick={onOpenConfiguration}><span>Providers</span><strong>{configuration?.providers.length ?? 0} available</strong></button>
+      <span className="prompt-state"><span>Context / MCP</span><strong>Requires runtime</strong></span>
+    </div>
+    <textarea id="catalog-prompt" aria-label="Message" maxLength={32768} value={text} onChange={event => setText(event.target.value)}
+      onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage("Cannot send from catalog-only mode. Relaunch with owned-host consent; your draft is saved."); } }}
+      placeholder="Draft a prompt for this session…" />
+    <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage("Cannot send from catalog-only mode. Relaunch with owned-host consent; your draft is saved.")}>Send <span>↑</span></button></div>
   </section>;
-}
-
-function formatTimestamp(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 function PaneSplitter({ label, value, onResize, onReset }: {
@@ -388,7 +521,7 @@ function PaneSplitter({ label, value, onResize, onReset }: {
     lastX.current = undefined;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
-  function keyDown(event: KeyboardEvent<HTMLDivElement>) {
+  function keyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
       onResize(event.key === "ArrowLeft" ? -16 : 16);

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createSessionDisplayStore, displayRowKey, displayToolActivityKey } from "./sessionDisplay";
 import type { createMutationCapability } from "./sessionOperations";
 import { MarkdownContent } from "./MarkdownContent";
+import { writeMarkdown } from "./timeline";
 
 export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
   store: ReturnType<typeof createSessionDisplayStore>; hostEpoch: string; sessionId: string;
@@ -51,14 +52,7 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
           <p>Reported {activity.phase} · provider {activity.providerId} · run {activity.runId ?? "not supplied"} · activity {activity.activityId}</p>
         </li>)}</ol></>}
         {session.text.length === 0 && <p className="muted-text">Waiting for live output…</p>}
-        <div className="messages live-messages">{session.text.map(row => <article className="message message-assistant" key={displayRowKey(session.sessionId, row)}>
-          <div className="avatar">A</div><div className="message-body">
-            <div className="message-heading"><strong>{row.kind}</strong><span className="detail">{row.isComplete ? "Complete" : "Streaming"}</span></div>
-            <MarkdownContent source={row.text} />
-            {row.isTruncated && <p className="detail">Text prefix truncated.</p>}
-            {row.startedWithDelta && <p className="detail">Earlier text may be missing.</p>}
-          </div>
-        </article>)}</div>
+        <div className="messages live-messages">{session.text.map(row => <LiveTextMessage key={displayRowKey(session.sessionId, row)} row={row} />)}</div>
         <details className="live-metadata"><summary>Live-window coverage</summary>
           <p className="detail">Only this selected session is observed. This is not persisted history, a complete transcript, or a tool-results/usage/interaction view. Closing or reconnecting does not stop a run.</p>
           <p className="detail">A same-host reload obtains retained partial values only. Restart restores no authority. {session.evictedToolActivities} tool identities were evicted.</p>
@@ -66,4 +60,18 @@ export function LiveSessionPanel({ store, hostEpoch, sessionId, capability }: {
       </>}
     </>}
   </section>;
+}
+
+function LiveTextMessage({ row }: { row: { kind: string; text: string; isComplete: boolean; isTruncated: boolean; startedWithDelta: boolean } }) {
+  const [copied, setCopied] = useState(false);
+  return <article className={`message timeline-message message-${row.kind.toLowerCase() === "user" ? "user" : row.kind.toLowerCase().startsWith("reasoning") ? "reasoning" : "assistant"}`}>
+    <div className="avatar">{row.kind.toLowerCase() === "user" ? "You" : "A"}</div><div className="message-body">
+      <div className="message-heading"><span><strong>{row.kind}</strong><small>{row.isComplete ? "Complete" : "Streaming"}</small></span><span className="message-actions">
+        <button type="button" className="copy-markdown" onClick={() => void writeMarkdown(text => navigator.clipboard.writeText(text), row.text).then(result => { setCopied(result === "copied"); if (result === "copied") window.setTimeout(() => setCopied(false), 1600); })}>{copied ? "Copied" : "Copy Markdown"}</button>
+      </span></div>
+      <MarkdownContent source={row.text} />
+      {row.isTruncated && <p className="detail">Text prefix truncated.</p>}
+      {row.startedWithDelta && <p className="detail">Earlier text may be missing.</p>}
+    </div>
+  </article>;
 }
