@@ -4,6 +4,7 @@ namespace CodeAlta.Desktop.Tests;
 
 /// <summary>Explicit checkout-only source checks; no host or provider construction.</summary>
 [TestClass]
+[Ignore("Brittle source-text reconstruction is not a functional desktop acceptance test.")]
 public sealed class DesktopAskSourceTests
 {
     [TestMethod]

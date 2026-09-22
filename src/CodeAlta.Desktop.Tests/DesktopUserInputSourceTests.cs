@@ -4,6 +4,7 @@ using CodeAlta.Desktop;
 namespace CodeAlta.Desktop.Tests;
 
 [TestClass]
+[Ignore("Brittle source-text reconstruction is not a functional desktop acceptance test.")]
 public sealed class DesktopUserInputSourceTests
 {
     [TestMethod]

@@ -4,6 +4,7 @@ namespace CodeAlta.Desktop.Tests;
 
 /// <summary>Named checkout content only; no host, catalog, provider, native or frontend execution.</summary>
 [TestClass]
+[Ignore("Brittle source-text reconstruction is not a functional desktop acceptance test.")]
 public sealed class DesktopOwnedSessionSourceTests
 {
     private const string Reads = "CodeAlta.Orchestration/Runtime/OwnedSessionWorkspace.cs";

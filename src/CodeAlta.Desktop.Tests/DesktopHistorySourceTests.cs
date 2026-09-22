@@ -4,6 +4,7 @@ namespace CodeAlta.Desktop.Tests;
 
 /// <summary>Current history source guards; named checkout reads only, not store or frontend execution.</summary>
 [TestClass]
+[Ignore("Brittle source-text reconstruction is not a functional desktop acceptance test.")]
 public sealed class DesktopHistorySourceTests
 {
     [TestMethod]

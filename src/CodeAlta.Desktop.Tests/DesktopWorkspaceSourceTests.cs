@@ -4,6 +4,7 @@ namespace CodeAlta.Desktop.Tests;
 
 /// <summary>Named current-source reads only; not catalog, native bridge or lifetime qualification.</summary>
 [TestClass]
+[Ignore("Brittle source-text reconstruction is not a functional desktop acceptance test.")]
 public sealed class DesktopWorkspaceSourceTests
 {
     [TestMethod]

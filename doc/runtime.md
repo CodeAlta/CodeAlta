@@ -86,6 +86,13 @@ creates retries or refreshes. Its retained drain joins original frontend process
 pending work, separately from individual refresh outcomes. Neither generated timeout/cancellation
 nor frontend drain completion proves backend termination or reduces the backend read-ownership bound.
 
+Owned Desktop also exposes a read-only `configuration.snapshot` inventory. In owned-host mode it
+lists configured provider descriptors (including enabled/default/model/reasoning presentation fields)
+and currently active plugin descriptors/contribution counts from the same Host instances. Listing
+does not create provider runtimes, probe models, start plugins, read credentials or grant mutation
+authority. Catalog-only startup returns an explicit unavailable/empty inventory. This is an M6
+presentation foundation, not provider account/model refresh, prompt/skill CRUD or plugin management.
+
 ### Committed live display window (M4 foundation, not complete M4)
 
 `SessionRuntimeService.Display` exposes runtime-owned immutable renderer values. The runtime's

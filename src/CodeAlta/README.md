@@ -9,11 +9,43 @@ not full agent parity.** Use `CodeAlta.Tui` (`altatui`) for normal agent workflo
 catalog opt-in, only the boot surface is available and no provider, plugin, configuration or
 default profile is initialized. Catalog browsing alone does not compose a runtime host.
 
+## Try the web workspace now
+
+The frontend includes an interactive, in-memory browser demo. It does not need a .NET host,
+credentials, a profile or production data, and it never sends provider requests:
+
+```powershell
+cd src/CodeAlta/frontend
+npm ci                  # first checkout only; generated NeoAstra inputs must already exist
+npm run demo            # opens http://127.0.0.1:5173
+```
+
+If `../obj/neoastra` does not exist in a fresh checkout, first run the desktop build command in
+the next section to generate the typed contracts/client, then return here and run `npm ci`. This
+generates build inputs only; it does not launch the native host or read a profile.
+
+Select projects and sessions, send messages in the local composer, visit **Configuration**, and
+switch themes. Demo messages disappear on refresh. `npm run build:demo` produces the same preview
+as static files under `dist/`; `npm run build` builds the production NeoAstra-connected frontend.
+The packaged desktop uses the generated bridge and never includes the demo backend.
+
+For the real local desktop, build from `src` (the frontend dependency/build switches are shown for
+repeat builds that already have generated contracts and `node_modules`):
+
+```powershell
+cd src
+dotnet build CodeAlta/CodeAlta.csproj -c Release -p:NeoAstraRestoreFrontendDependencies=false -p:NeoAstraBuildFrontend=false
+./CodeAlta/bin/desktop/Release/net10.0/alta.exe --data-root "$env:TEMP/codealta-desktop-$([guid]::NewGuid())"
+```
+
+Use the catalog/owned-host flags documented below to browse or operate real existing sessions.
+
 ```powershell
 dotnet build -c Release
-./bin/desktop/Release/net10.0/alta.exe --help
-./bin/desktop/Release/net10.0/alta.exe --version
-./bin/desktop/Release/net10.0/alta.exe --data-root "$env:TEMP/codealta-desktop-$([guid]::NewGuid())"
+./CodeAlta/bin/desktop/Release/net10.0/alta.exe --help
+./CodeAlta/bin/desktop/Release/net10.0/alta.exe --version
+$dataRoot = Join-Path $env:TEMP ("codealta-desktop-" + [guid]::NewGuid())
+./CodeAlta/bin/desktop/Release/net10.0/alta.exe --data-root $dataRoot
 ```
 
 Native startup requires an explicitly injected **new absolute task-owned directory**, outside
@@ -216,8 +248,9 @@ Valid late host/runtime identity changes disable shared mutation controls even a
 
 Live file-change/diff notifications invalidate the host's shared file-search cache even without a
 terminal reader or when its event stream drops a notification. History replay and Display reconnect
-do not repeat that cache effect. This best-effort dirty mark does not scan files or confirm a write;
-plugin-effect ownership and shared history/live recovery remain separate, unfinished work.
+do not repeat that cache effect. This best-effort dirty mark does not scan files or confirm a write.
+Live plugin-effect observation now also belongs to the shared runtime rather than a terminal event
+reader; shared history/live recovery remains separate work.
 
 **Refresh runtime state** is a separate manual, point-in-time observation of the actual runtime
 entry, coordinator transition, recorded run, Shutdown, retirement and queue-drain facts. It does

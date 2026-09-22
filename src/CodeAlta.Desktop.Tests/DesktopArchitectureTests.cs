@@ -25,7 +25,7 @@ public sealed class DesktopArchitectureTests
         {
             Assert.IsFalse(reference.Name!.StartsWith("XenoAtom", StringComparison.Ordinal));
             if (reference.Name.StartsWith("CodeAlta", StringComparison.Ordinal))
-                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration", reference.Name);
+                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }

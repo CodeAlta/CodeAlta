@@ -1,9 +1,12 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { boot, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations, sessionAsks, sessionNotes, sessionUserInput, type BootStatus } from "#neoastra";
+import {
+  boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  sessionAsks, sessionNotes, sessionUserInput, type BootStatus, type HistoryRequest,
+  type ConfigurationSnapshot, type WorkspaceSession,
+} from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, type HistoryState } from "./history";
-import type { HistoryRequest } from "#neoastra";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
@@ -21,12 +24,21 @@ import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
 import "./style.css";
 
+const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+type View = "workspace" | "configuration";
+type Theme = "dark" | "light";
+
 function App() {
   const [status, setStatus] = useState<BootStatus>();
   const [error, setError] = useState<string>();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [view, setView] = useState<View>("workspace");
+  const [search, setSearch] = useState("");
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
+  const initialSelectionMade = useRef(false);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
   const [steering] = useState(() => createSteeringSubmissions(sessionOperations.steer));
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
@@ -44,6 +56,11 @@ function App() {
     request => sessionUserInput.cancel(request, { timeoutMilliseconds: 8000 })));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
   useEffect(() => {
     const abort = new AbortController();
     void boot.status({}, { signal: abort.signal, timeoutMilliseconds: 8_000 })
@@ -55,85 +72,205 @@ function App() {
       })
       .catch(() => { if (!abort.signal.aborted) setError("The desktop bridge could not be initialized. Close the window and try again."); });
     void loadWorkspace(workspace.snapshot, abort.signal, setWorkspaceState);
+    void configuration.snapshot({}, { signal: abort.signal, timeoutMilliseconds: 8_000 })
+      .then(value => { if (!abort.signal.aborted) setConfigurationState({ snapshot: value }); })
+      .catch(() => { if (!abort.signal.aborted) setConfigurationState({ error: "Configuration inventory is unavailable." }); });
     return () => abort.abort();
   }, []);
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
+  useEffect(() => {
+    if (!snapshot || initialSelectionMade.current) return;
+    initialSelectionMade.current = true;
+    const firstSession = snapshot.sessions[0];
+    if (!firstSession) return;
+    const project = snapshot.projects.find(value => value.path === firstSession.workspacePath);
+    setProjectId(project?.id ?? null);
+    setSessionId(firstSession.id);
+  }, [snapshot]);
+
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
-  const selectedSession = sessions.find(value => value.id === sessionId);
+  const visibleSessions = sessions.filter(session => !search || `${session.title} ${session.providerKey ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+  const selectedSession = snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
+  const connected = !!status?.hostAvailable;
 
-  return <main>
-    <h1>CodeAlta</h1>
-    <p className="badge">Desktop — in development</p>
-    {status?.hostAvailable
-      ? <p>Explicit owned-host mode: text submission, receipts and selected-session live status/text for existing sessions. The live window is partial; a submission receipt is not run completion. Configured providers may use authentication/storage/network; discovery roots are not a sandbox.</p>
-      : <p>Browse persisted workspace metadata from a trusted task-owned <strong>COPY</strong>. Read-only persisted history is available on selection. This is not live session state: sending, resuming and live events are not connected.</p>}
-    <p>Use <code>altatui</code> for current agent functionality.</p>
-    <p role="status">{error ?? (status ? `Desktop bridge ready · ${status.version}` : "Initializing desktop bridge…")}</p>
-    <p className="detail">Browser storage uses the separate new <code>--data-root</code>. Catalog browsing requires <code>--catalog-root</code> and <code>--allow-catalog-cache</code>: the shared loader may write <code>cache/cache.sqlite3</code> and SQLite sidecars in that copy. No default or production profile is opened. Path spelling does not prove ownership or isolate reparse points.</p>
-    {status?.hostAvailable
-      ? <p className="detail">Owned mode reads the host-shared cached store directly, with eight actual reads maximum. Full scans are not bounded by display limits. Shutdown joins actual reads and commands before dependencies; pending or unconfirmed cleanup keeps the lease.</p>
-      : <p className="detail">The shared session catalog retains its snapshot; this screen does not refresh or invalidate it. Close and relaunch to reload. Response limits do not bound the underlying scan. Canceling a request or closing this window does not guarantee stopping the catalog/cache load.</p>}
+  function selectProject(nextProjectId: string | null) {
+    setProjectId(nextProjectId);
+    const nextSessions = snapshot ? sessionsForProject(snapshot, nextProjectId) : [];
+    setSessionId(nextSessions[0]?.id ?? null);
+    setView("workspace");
+  }
 
-    <section aria-labelledby="workspace-heading">
-      <h2 id="workspace-heading">Workspace snapshot</h2>
-      {workspaceState.kind === "loading" && <p role="status">Loading persisted projects and sessions…</p>}
-      {workspaceState.kind === "unconfigured" && <p role="status">No catalog copy configured. Relaunch with a new browser data root, an existing absolute trusted task-owned COPY via <code>--catalog-root</code>, and <code>--allow-catalog-cache</code>.</p>}
-      {workspaceState.kind === "error" && <p role="alert">{workspaceState.message}</p>}
-      {snapshot && <>
-        {notice && <p role="status" className="notice">{notice}</p>}
-        {snapshot.projects.length === 0 && snapshot.sessions.length === 0 && <p role="status">The supplied catalog contains no projects or persisted sessions.</p>}
-        <div className="workspace-grid">
-          <nav aria-label="Project groups">
-            <h3>Projects</h3>
-            {snapshot.projects.length === 0 && <p>No projects in this snapshot.</p>}
-            <ul className="choices">
-              <li><button type="button" aria-pressed={projectId === null} onClick={() => { setProjectId(null); setSessionId(null); }}>Global / unmatched</button></li>
-              {snapshot.projects.map(project => <li key={project.id}><button type="button" aria-pressed={projectId === project.id} onClick={() => { setProjectId(project.id); setSessionId(null); }}>
-                {project.name}{project.archived ? " (archived)" : ""}
-              </button></li>)}
-            </ul>
-          </nav>
-          <section aria-labelledby="sessions-heading">
-            <h3 id="sessions-heading">{selectedProject?.name ?? "Global / unmatched"} — persisted sessions</h3>
-            {selectedProject && <p className="path">{selectedProject.path}</p>}
-            <p className="detail">Grouping uses exact persisted workspace paths, not active project ownership.</p>
-            {sessions.length === 0 && <p role="status">No persisted sessions in this group.</p>}
-            <ul className="choices">
-              {sessions.map(session => <li key={session.id}><button type="button" aria-pressed={sessionId === session.id} onClick={() => setSessionId(session.id)}>
-                {session.title} <span className="detail">· {session.updatedAt}</span>
-              </button></li>)}
-            </ul>
-          </section>
-        </div>
-        {selectedSession && <section aria-labelledby="session-details-heading" className="session-details">
-          <h3 id="session-details-heading">Persisted session details</h3>
-          <dl>
-            <dt>Title / summary</dt><dd>{selectedSession.title}</dd>
-            <dt>Session ID</dt><dd>{selectedSession.id}</dd>
-            <dt>Workspace path</dt><dd>{selectedSession.workspacePath || "Not recorded"}</dd>
-            <dt>Configured provider key</dt><dd>{selectedSession.providerKey || "Not recorded"}</dd>
-            <dt>Persisted update time</dt><dd>{selectedSession.updatedAt}</dd>
-          </dl>
-          {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
-            ? <OwnedSessionPanel key={JSON.stringify([selectedSession.id, status.hostEpoch])} sessionId={selectedSession.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
-            : <History key={selectedSession.id} sessionId={selectedSession.id} />}
-          {status?.ownedAsksEnabled && status.hostEpoch && mutation?.epoch === status.hostEpoch && <AskPanel
-            key={JSON.stringify([selectedSession.id, status.hostEpoch, "asks"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
-            actions={askActions} capability={mutation.capability} />}
-          {status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch && <NotesPanel
-            key={JSON.stringify([selectedSession.id, status.hostEpoch, "notes"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
-            reader={notesReader} capability={mutation.capability} />}
-          {status?.ownedUserInputEnabled && status.hostEpoch && mutation?.epoch === status.hostEpoch && <UserInputPanel
-            key={JSON.stringify([selectedSession.id, status.hostEpoch, "input"])} epoch={status.hostEpoch} sessionId={selectedSession.id}
-            reviewer={inputReviewer} capability={mutation.capability} />}
-        </section>}
-      </>}
-    </section>
+  return <div className="app-shell">
+    <header className="topbar">
+      <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small></div>
+      <nav className="topnav" aria-label="Primary navigation">
+        <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => setView("workspace")}>Workspace</button>
+        <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => setView("configuration")}>Configuration</button>
+      </nav>
+      <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
+        <span className="connection-dot" />
+        {error ? "Bridge unavailable" : demoMode ? "Local demo" : connected ? "Runtime connected" : "Catalog only"}
+      </div>
+    </header>
+
+    {view === "configuration"
+      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} />
+      : <div className="workspace-shell">
+        <aside className="project-rail" aria-label="Projects">
+          <div className="panel-title"><span>Projects</span><span className="count">{snapshot?.projects.length ?? 0}</span></div>
+          {workspaceState.kind === "loading" && <LoadingRows />}
+          {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">No catalog configured. See the launch instructions below.</div>}
+          {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
+          {snapshot && <ul className="nav-list">
+            {snapshot.projects.map(project => <li key={project.id}><button type="button" aria-pressed={projectId === project.id} onClick={() => selectProject(project.id)}>
+              <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.archived ? "Archived" : shortPath(project.path)}</small></span>
+            </button></li>)}
+            <li><button type="button" aria-pressed={projectId === null} onClick={() => selectProject(null)}>
+              <span className="project-icon muted">◇</span><span><strong>Global</strong><small>Unmatched sessions</small></span>
+            </button></li>
+          </ul>}
+          <div className="rail-footer">
+            <button type="button" className="quiet-button" onClick={() => setView("configuration")}>⚙ Settings &amp; extensions</button>
+          </div>
+        </aside>
+
+        <aside className="session-rail" aria-label="Sessions">
+          <div className="session-rail-header">
+            <div><span className="eyebrow">Workspace</span><h2>{selectedProject?.name ?? "Global"}</h2></div>
+            <button type="button" className="icon-button" title="Refresh by relaunching the current desktop host" disabled>＋</button>
+          </div>
+          <label className="search"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
+          {notice && <p role="status" className="notice">{notice}</p>}
+          <div className="session-list">
+            {visibleSessions.map(session => <button type="button" key={session.id} aria-pressed={sessionId === session.id} onClick={() => setSessionId(session.id)}>
+              <span className="session-title">{session.title}</span>
+              <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><time>{session.updatedAt}</time></span>
+            </button>)}
+            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{search ? "No matching sessions." : "No sessions in this project."}</div>}
+          </div>
+        </aside>
+
+        <main className="content">
+          {error && <div className="banner banner-error" role="alert">{error}</div>}
+          {!selectedSession
+            ? <EmptyWorkspace workspaceState={workspaceState} />
+            : <SessionWorkspace key={selectedSession.id} session={selectedSession} status={status} mutation={mutation}
+                submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
+                askActions={askActions} display={display} runtimeReader={runtimeReader} notesReader={notesReader}
+                permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} />}
+        </main>
+      </div>}
+  </div>;
+}
+
+function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, askActions, display, runtimeReader, notesReader, permissionReviewer, inputReviewer }: {
+  session: WorkspaceSession;
+  status: BootStatus | undefined;
+  mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
+  submissions: ReturnType<typeof createOwnedSubmissions>;
+  steering: ReturnType<typeof createSteeringSubmissions>;
+  compaction: ReturnType<typeof createCompactionSubmissions>;
+  abortRuns: ReturnType<typeof createAbortRunSubmissions>;
+  queue: ReturnType<typeof createQueueSubmissions>;
+  askActions: ReturnType<typeof createAskActions>;
+  display: ReturnType<typeof createSessionDisplayStore>;
+  runtimeReader: ReturnType<typeof createRuntimeStateReader>;
+  notesReader: ReturnType<typeof createNotesReader>;
+  permissionReviewer: ReturnType<typeof createPermissionReviewer>;
+  inputReviewer: ReturnType<typeof createUserInputReviewer>;
+}) {
+  return <div className="session-workspace">
+    <header className="session-header">
+      <div><span className="eyebrow">Session</span><h1>{session.title}</h1></div>
+      <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span><span>{status?.hostAvailable ? "Live" : "Persisted"}</span></div>
+    </header>
+    <details className="session-info"><summary>Session details</summary><dl>
+      <dt>ID</dt><dd>{session.id}</dd><dt>Workspace</dt><dd>{session.workspacePath || "Not recorded"}</dd><dt>Updated</dt><dd>{session.updatedAt}</dd>
+    </dl></details>
+    {demoMode
+      ? <DemoConversation session={session} />
+      : status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch
+        ? <>
+          <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} display={display} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} />
+          {status.ownedAsksEnabled && <AskPanel epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation.capability} />}
+          <NotesPanel epoch={status.hostEpoch} sessionId={session.id} reader={notesReader} capability={mutation.capability} />
+          {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation.capability} />}
+        </>
+        : <History sessionId={session.id} />}
+  </div>;
+}
+
+function DemoConversation({ session }: { session: WorkspaceSession }) {
+  const [text, setText] = useState("");
+  const [messages, setMessages] = useState([
+    { role: "user", text: "Create a usable desktop workspace I can run locally." },
+    { role: "assistant", text: "The first interactive workspace is running. Project and session navigation, configuration surfaces, a transcript, and this composer are ready to try." },
+  ]);
+  function submit() {
+    const value = text.trim();
+    if (!value) return;
+    setMessages(current => [...current, { role: "user", text: value }, { role: "assistant", text: "Demo response: the packaged app sends this through the shared session runtime. This browser preview keeps everything in memory." }]);
+    setText("");
+  }
+  return <section className="conversation" aria-label={`Demo conversation for ${session.title}`}>
+    <div className="demo-banner"><strong>Interactive browser demo</strong><span>Messages are local and disappear on refresh. Run the packaged desktop for real sessions.</span></div>
+    <div className="messages">
+      {messages.map((message, index) => <article key={index} className={`message message-${message.role}`}>
+        <div className="avatar">{message.role === "user" ? "You" : "A"}</div><div><strong>{message.role === "user" ? "You" : "CodeAlta"}</strong><p>{message.text}</p></div>
+      </article>)}
+    </div>
+    <div className="composer">
+      <textarea aria-label="Message" value={text} onChange={event => setText(event.target.value)} onKeyDown={event => {
+        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
+      }} placeholder="Ask CodeAlta to work on this project…" />
+      <div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button type="button" onClick={submit} disabled={!text.trim()}>Send <span>↑</span></button></div>
+    </div>
+  </section>;
+}
+
+function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme }: {
+  status: BootStatus | undefined;
+  selectedSession: WorkspaceSession | undefined;
+  configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+}) {
+  const inventory = configurationState.snapshot;
+  return <main className="configuration-page">
+    <header className="page-heading"><span className="eyebrow">Desktop</span><h1>Configuration</h1><p>Inspect the active desktop environment and personalize this window.</p></header>
+    <div className="settings-grid">
+      <section className="settings-card"><div className="settings-icon">◐</div><div><h2>Appearance</h2><p>Applied immediately to this window.</p><div className="segmented">
+        <button type="button" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
+        <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
+      </div></div></section>
+      <section className="settings-card"><div className="settings-icon">◆</div><div><h2>Providers &amp; models</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
+        {configurationState.error && <p className="error-text">{configurationState.error}</p>}
+        {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
+        {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}
+        {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
+        {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
+      </div></section>
+      <section className="settings-card"><div className="settings-icon">Aa</div><div><h2>Agent prompts</h2><p>Prompt selection is captured by the session runtime. Desktop editing is not exposed by the current bridge.</p><StatusPill label="Read-only in this version" /></div></section>
+      <section className="settings-card"><div className="settings-icon">⌘</div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>
+      <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins</h2><p>Live plugin events now originate in the shared runtime, so desktop and terminal heads observe the same publications.</p>
+        {inventory?.plugins.map(plugin => <div className="inventory-row" key={plugin.id}><span><strong>{plugin.name}</strong><small>{plugin.version ?? "No version"} · {plugin.contributionCount} contributions</small></span><StatusPill label={plugin.state} /></div>)}
+        {inventory && inventory.plugins.length === 0 && <StatusPill label={inventory.pluginRuntimeAvailable ? "No active plugins" : "Requires packaged host"} />}
+        {inventory?.pluginsTruncated && <p className="muted-text">Showing the first 32 active plugins.</p>}
+      </div></section>
+      <section className="settings-card"><div className="settings-icon">i</div><div><h2>About</h2><p>{status?.productName ?? "CodeAlta Desktop"} · {status?.version ?? "initializing"}</p><p className="muted-text">Use <code>altatui</code> for provider/account/plugin mutation until those commands are exposed by the desktop bridge.</p></div></section>
+    </div>
   </main>;
 }
+
+function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
+function LoadingRows() { return <div className="loading-rows"><span /><span /><span /></div>; }
+function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) {
+  return <div className="empty-workspace"><div className="empty-logo">A</div><h1>{workspaceState.kind === "loading" ? "Loading your workspace…" : "Select a session"}</h1><p>Choose a project and session from the sidebar to inspect its transcript and runtime.</p></div>;
+}
+function shortPath(path: string) { const parts = path.replaceAll("\\", "/").split("/").filter(Boolean); return parts.slice(-2).join("/") || path; }
 
 function History({ sessionId }: { sessionId: string }) {
   const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
@@ -145,34 +282,29 @@ function History({ sessionId }: { sessionId: string }) {
   }, [request]);
   const current = state?.request === request ? state : undefined;
   const page = current?.kind === "ready" ? current.page : undefined;
-  return <section aria-labelledby="history-heading">
-    <h3 id="history-heading">Persisted event history</h3>
-    <p className="detail">One bounded page in journal order, not a reconstructed conversation. Deltas and completed content remain separate records. UTF-8 LF/CRLF only; payloads may be omitted or previews shortened. This does not refresh the catalog.</p>
-    <p className="detail">Length/time checks detect changes, not same-stamp rewrites or all external-writer races. Canceling history forwards cancellation but does not guarantee stopping catalog loads or joining work on window close.</p>
+  return <section className="conversation history" aria-labelledby="history-heading">
+    <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button" onClick={() => setRequest({ sessionId, cursor: null })}>Refresh</button></div>
     {(!current || current.kind === "loading") && <p role="status">Loading persisted history…</p>}
-    {current?.kind === "error" && <p role="alert">{historyMessage(current.code)}</p>}
-    {page && <>
-      {page.entries.length === 0 && <p role="status">No visible events in this page. Metadata and blank records still count toward its read limit.</p>}
-      {page.tailOmitted && <p role="status">The malformed final journal record was omitted; this is not complete history.</p>}
-      <ol className="history-records">
-        {page.entries.map(entry => <li key={entry.offset}>
-          <strong>{entry.eventType}{entry.kind ? ` · ${entry.kind}` : ""}{entry.phase ? ` · ${entry.phase}` : ""}</strong>
-          <div className="detail">{entry.timestamp} · byte {entry.offset} · provider {entry.providerId} · recorded session {entry.sessionId}{entry.runId ? ` · run ${entry.runId}` : ""}</div>
-          {entry.contentId && <div className="detail">Content: {entry.contentId}</div>}
-          {entry.activityId && <div className="detail">Activity: {entry.activityId}</div>}
-          {entry.parentActivityId && <div className="detail">Parent activity: {entry.parentActivityId}</div>}
-          {entry.name && <p>{entry.name}</p>}
-          {entry.text !== null && <pre>{entry.text}</pre>}
-          {entry.textTruncated && <p className="detail">Display preview shortened.</p>}
-          {entry.bodyOmitted && <p className="detail">Additional stored payload omitted. No action is available for this record.</p>}
-        </li>)}
-      </ol>
-    </>}
-    <div className="history-controls">
-      <button type="button" onClick={() => setRequest({ sessionId, cursor: null })}>Restart history</button>
-      {page?.next && <button type="button" onClick={() => setRequest({ sessionId, cursor: page.next })}>Next page</button>}
+    {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
+    {page?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
+    {page?.entries.length === 0 && <div className="empty-history">No visible events in this page.</div>}
+    <div className="messages">
+      {page?.entries.map(entry => <article key={entry.offset} className={`message message-${entry.kind?.toLowerCase() === "user" ? "user" : "assistant"}`}>
+        <div className="avatar">{entry.kind?.toLowerCase() === "user" ? "You" : "A"}</div><div className="message-body">
+          <div className="message-heading"><strong>{entry.kind ?? entry.eventType}</strong><time>{formatTimestamp(entry.timestamp)}</time></div>
+          {entry.name && <p><strong>{entry.name}</strong></p>}{entry.text !== null && <pre>{entry.text}</pre>}
+          {(entry.textTruncated || entry.bodyOmitted) && <p className="muted-text">Some persisted content is not included in this preview.</p>}
+          <details className="event-meta"><summary>Event metadata</summary><code>{entry.eventType} · byte {entry.offset} · {entry.providerId}</code></details>
+        </div>
+      </article>)}
     </div>
+    {page?.next && <button type="button" className="load-more" onClick={() => setRequest({ sessionId, cursor: page.next })}>Load older events</button>}
   </section>;
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
