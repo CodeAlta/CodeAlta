@@ -43,6 +43,8 @@ import { createProjectRename, projectNameVisible, projectRenameMessage, projectR
 import { sessionHierarchy } from "./sessionHierarchy";
 import { SessionActionMenu } from "./SessionActionMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { persistProjectSort, projectRailProjection, projectSortStorageKey, restoreProjectSort, type ProjectSort } from "./projectRail";
+import { ProjectRailRows } from "./ProjectRailRows";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -58,6 +60,8 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<View>("workspace");
   const [search, setSearch] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [projectSort, setProjectSort] = useState<ProjectSort>(() => restoreProjectSort(() => localStorage.getItem(projectSortStorageKey)));
   const [theme, setTheme] = useState<Theme>("dark");
   const [notesVisible, setNotesVisible] = useState(true);
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
@@ -135,6 +139,7 @@ function App() {
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   const workspaceShell = useRef<HTMLDivElement>(null);
   const projectRail = useRef<HTMLElement>(null);
+  const projectFilterInput = useRef<HTMLInputElement>(null);
   const sessionRail = useRef<HTMLElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const chordPending = useRef(false);
@@ -157,6 +162,7 @@ function App() {
   }, [paneLayout]);
 
   useEffect(() => { persistNotesHeight(value => localStorage.setItem(notesHeightKey, value), notesHeight); }, [notesHeight]);
+  useEffect(() => { persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), projectSort); }, [projectSort]);
 
   useEffect(() => {
     if (view !== "workspace" || !workspaceShell.current) return;
@@ -186,6 +192,7 @@ function App() {
   }, []);
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
+  const projectListing = snapshot ? projectRailProjection(snapshot, projectFilter, projectSort) : null;
   useEffect(() => {
     if (!snapshot || initialSelectionMade.current) return;
     initialSelectionMade.current = true;
@@ -251,7 +258,7 @@ function App() {
   });
 
   function runShortcut(action: ShortcutAction) {
-    const projects = snapshot?.projects ?? [];
+    const projects = projectListing?.projects ?? [];
     if (action === "expandPrompt") {
       if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
     }
@@ -263,12 +270,17 @@ function App() {
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
-    else if (action === "focusProjects") projectRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+    else if (action === "focusProjects") {
+      const selected = projectRail.current?.querySelector<HTMLButtonElement>('.project-list button[aria-pressed="true"], .project-root-list button[aria-pressed="true"]');
+      (selected ?? projectFilterInput.current)?.focus();
+    }
     else if (action === "focusSessions") sessionRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
     else if (action === "nextProject" || action === "previousProject") {
       if (!projects.length) return;
-      const index = Math.max(0, projects.findIndex(project => project.id === projectId));
-      selectProject(projects[(index + (action === "nextProject" ? 1 : -1) + projects.length) % projects.length].id);
+      const index = projects.findIndex(project => project.id === projectId);
+      const nextIndex = index < 0 ? (action === "nextProject" ? 0 : projects.length - 1)
+        : (index + (action === "nextProject" ? 1 : -1) + projects.length) % projects.length;
+      selectProject(projects[nextIndex].id);
     } else if (action === "nextSession" || action === "previousSession") {
       if (!visibleSessions.length) return;
       setMenuTarget(null);
@@ -416,6 +428,8 @@ function App() {
         if (fresh && projectNameVisible(fresh, target, name) && capability.canMutate()
           && projectRenameSelectionCurrent(target, currentHostEpoch.current, selectedScope.current)
           && generation === projectRenameGeneration.current) {
+          if (!projectRailProjection(fresh, projectFilter, projectSort).projects.some(project => project.id === target.id))
+            projectFilterInput.current?.focus();
           setProjectRenameTarget(null);
           setProjectRenameNotice("");
         } else {
@@ -653,16 +667,24 @@ function App() {
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">No catalog configured. See the launch instructions below.</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
-          {snapshot && <ul className="nav-list">
-            {snapshot.projects.map(project => <li key={project.id}><button type="button" title={project.path} aria-pressed={projectId === project.id} onClick={() => selectProject(project.id)}>
-              <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small title={project.path}>{project.path}</small>{project.archived && <small>Archived</small>}</span>
-            </button>{owned && projectId === project.id && !project.archived && <button type="button" className="quiet-button"
-              aria-label={`Rename project ${project.name} (F2)`} disabled={projectRenameBusy || !mutation?.capability.canMutate()}
-              onClick={() => void beginProjectRename()}>Rename project (F2)</button>}</li>)}
-            <li><button type="button" aria-pressed={projectId === null} onClick={() => selectProject(null)}>
-              <span className="project-icon muted">◇</span><span><strong>Other sessions</strong><small>No matching project</small></span>
-            </button></li>
-          </ul>}
+          {snapshot && <div className="project-controls">
+            <label htmlFor="project-filter">Filter projects by name or path</label>
+            <input id="project-filter" ref={projectFilterInput} type="search" value={projectFilter} onChange={event => setProjectFilter(event.target.value)}
+              placeholder="Name or path" aria-controls="project-list" />
+            <div className="project-sort-controls"><label htmlFor="project-sort">Sort projects</label>
+              <select id="project-sort" value={projectSort} onChange={event => setProjectSort(event.target.value as ProjectSort)}>
+                <option value="name">Name</option><option value="recent">Recent visible updates</option>
+              </select>
+              <button type="button" className="quiet-button" disabled={!projectFilter} onClick={() => { setProjectFilter(""); projectFilterInput.current?.focus(); }}>Clear filter</button>
+            </div>
+          </div>}
+          {snapshot && projectListing?.evidenceNotice && <p className="project-evidence" role="status">{projectListing.evidenceNotice}</p>}
+          {snapshot && projectListing?.projects.length === 0 && <p className="sidebar-empty" role="status">
+            {projectFilter.trim() ? "No matching projects. Clear the filter to show them again." : "No projects in this snapshot."}
+            {projectId !== null && " The selected project and session remain open."}
+          </p>}
+          {snapshot && <ProjectRailRows projects={projectListing?.projects ?? []} selectedId={projectId} onSelect={selectProject}
+            canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()} />}
           {projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch &&
             <div className="project-rename" role="group" aria-label={`Rename project ${projectRenameTarget.name}`}>
               <label>Project name

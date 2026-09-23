@@ -75,6 +75,14 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 .count { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--panel-3); color: var(--muted); }
 ul { margin: 0; padding: 0; }
 .nav-list { flex: 1 1 auto; min-height: 0; list-style: none; display: block; overflow-y: scroll; padding-right: 3px; }
+.project-controls { flex: 0 0 auto; display: grid; gap: 5px; padding: 0 6px 10px; font-size: 11px; color: var(--muted); }
+.project-controls input, .project-controls select { width: 100%; min-width: 0; }
+.project-sort-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; }
+.project-sort-controls label { grid-column: 1 / -1; }
+.project-sort-controls select { flex: 1 1 auto; }
+.project-sort-controls .quiet-button { flex: 0 0 auto; font-size: 11px; padding: 5px; }
+.project-evidence { flex: 0 0 auto; max-height: 100px; overflow-y: auto; margin: 0 6px 8px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.project-root-list { flex: 0 0 auto; overflow: visible; border-top: 1px solid var(--line); }
 .nav-list li + li { margin-top: 3px; }
 .nav-list button { width: 100%; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
 .nav-list button:hover { background: var(--panel-2); }
