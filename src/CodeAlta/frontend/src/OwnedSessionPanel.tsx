@@ -26,20 +26,21 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   draftIndicators: ReturnType<typeof createDraftIndicators>;
   configuration?: ConfigurationSnapshot;
 }) {
-  const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
+  const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
+  const text = draft.text;
   const latestText = useRef(text);
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
   function editText(value: string) {
     latestText.current = value;
-    draftIndicators.edit(sessionId, value, restoredText.current);
-    setText(value);
+    const editGeneration = draftIndicators.edit(sessionId, value, restoredText.current);
+    setDraft({ text: value, editGeneration });
   }
   function clearText() {
     latestText.current = "";
     restoredText.current = "";
     draftIndicators.clear(sessionId);
-    setText("");
+    setDraft({ text: "", editGeneration: null });
   }
   const promptInput = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -87,7 +88,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     const restored = submissions.pending(sessionId)?.request.text ?? restoreDraft(key => localStorage.getItem(key), sessionId);
     restoredText.current = restored;
     latestText.current = restored;
-    setText(restored);
+    setDraft({ text: restored, editGeneration: null });
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
     setQueueText(queue.pending(sessionId)?.request.text ?? "");
     setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
@@ -113,10 +114,10 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
 
   useEffect(() => {
-    if (!submissions.pending(sessionId)) draftIndicators.persisted(sessionId,
-      persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text));
+    if (!submissions.pending(sessionId)) draftIndicators.persisted(sessionId, draft.editGeneration,
+      persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
     else draftIndicators.clear(sessionId);
-  }, [sessionId, text, submissions, draftIndicators]);
+  }, [sessionId, draft, submissions, draftIndicators]);
 
   const pending = submissions.pending(sessionId);
   const pendingAborts = submissions.aborts(sessionId);

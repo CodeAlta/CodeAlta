@@ -1027,13 +1027,14 @@ function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfigurat
   sessionId: string; provider: string | null; configuration?: ConfigurationSnapshot; onOpenConfiguration: () => void;
   draftIndicators: ReturnType<typeof createDraftIndicators>;
 }) {
-  const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
+  const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
+  const text = draft.text;
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
   const [message, setMessage] = useState("Draft locally; sending requires an explicitly owned desktop host.");
-  useEffect(() => { draftIndicators.persisted(sessionId,
-    persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text));
-  }, [sessionId, text, draftIndicators]);
+  useEffect(() => { draftIndicators.persisted(sessionId, draft.editGeneration,
+    persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
+  }, [sessionId, draft, draftIndicators]);
   return <section className="composer catalog-composer" aria-label="Message composer">
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
@@ -1043,7 +1044,8 @@ function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfigurat
       <span className="prompt-state"><span>Context / MCP</span><strong>Requires runtime</strong></span>
     </div>
     <textarea id="catalog-prompt" aria-label="Message" maxLength={32768} value={text} onChange={event => {
-      draftIndicators.edit(sessionId, event.target.value, restoredText.current); setText(event.target.value);
+      const value = event.target.value;
+      setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
     }}
       onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage("This explicit catalog-only launch is read-only; your draft remains saved."); } }}
       placeholder="Draft a prompt for this session…" />

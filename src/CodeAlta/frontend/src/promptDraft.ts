@@ -22,24 +22,31 @@ export function persistDraft(write: (key: string, value: string) => void, remove
 // An indicator describes edits observed by this window, never a restored value or a journal
 // guess. Failed storage leaves only the selected live editor authoritative.
 export function createDraftIndicators() {
-  const edits = new Map<string, boolean>();
+  const edits = new Map<string, { generation: number; persisted: boolean }>();
   const listeners = new Set<() => void>();
   let revision = 0;
+  let generation = 0;
   const publish = () => { revision++; for (const listener of listeners) listener(); };
   return {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     snapshot: () => revision,
-    visible: (id: string, selectedId: string | null) => edits.has(id) && (id === selectedId || edits.get(id) === true),
+    visible: (id: string, selectedId: string | null) => edits.has(id) && (id === selectedId || edits.get(id)?.persisted === true),
     edit(id: string, text: string, restored: string) {
       const valid = text.length > 0 && text.length <= maximumDraftUnits && text !== restored
         && !/^[\s\u0085]*$/u.test(text) && isWellFormed(text);
-      if (!valid) { if (edits.delete(id)) publish(); return; }
-      // A fresh edit is live immediately; persistence is confirmed by the composer's effect.
-      edits.set(id, false);
+      if (!valid) { if (edits.delete(id)) publish(); return null; }
+      // Each edit gets an exact identity; an earlier persistence effect cannot certify this edit.
+      const current = ++generation;
+      edits.set(id, { generation: current, persisted: false });
       publish();
+      return current;
     },
-    persisted(id: string, success: boolean) {
-      if (edits.has(id) && edits.get(id) !== success) { edits.set(id, success); publish(); }
+    persisted(id: string, editGeneration: number | null, success: boolean) {
+      const current = edits.get(id);
+      if (current && current.generation === editGeneration && current.persisted !== success) {
+        edits.set(id, { ...current, persisted: success });
+        publish();
+      }
     },
     clear(id: string) { if (edits.delete(id)) publish(); },
   };

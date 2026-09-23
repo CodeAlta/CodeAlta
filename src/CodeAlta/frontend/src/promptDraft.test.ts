@@ -18,10 +18,10 @@ test("edited indicator follows live edits, successful persistence, clearing and 
   const values = new Map<string, string>();
   const observed: number[] = [];
   const unsubscribe = indicators.subscribe(() => observed.push(indicators.snapshot()));
-  indicators.edit("one", "draft", "");
+  const first = indicators.edit("one", "draft", "");
   assert.equal(indicators.visible("one", "one"), true);
   assert.equal(indicators.visible("one", "two"), false);
-  indicators.persisted("one", persistDraft((key, value) => values.set(key, value), key => { values.delete(key); }, "one", "draft"));
+  indicators.persisted("one", first, persistDraft((key, value) => values.set(key, value), key => { values.delete(key); }, "one", "draft"));
   assert.equal(indicators.visible("one", "two"), true);
   indicators.edit("two", "second", "");
   assert.equal(indicators.visible("two", "two"), true);
@@ -41,15 +41,48 @@ test("restored, invalid, whitespace, oversized and uncertain retained drafts nev
   indicators.edit("one", "\ud800", "");
   indicators.edit("one", "x".repeat(32769), "");
   assert.equal(indicators.visible("one", "one"), false);
-  indicators.edit("one", "change", "restored");
-  indicators.persisted("one", persistDraft(() => { throw new Error("quota"); }, () => {}, "one", "change"));
+  const changed = indicators.edit("one", "change", "restored");
+  indicators.persisted("one", changed, persistDraft(() => { throw new Error("quota"); }, () => {}, "one", "change"));
   assert.equal(restoreDraft(() => { throw new Error("blocked"); }, "one"), "");
   assert.equal(indicators.visible("one", "one"), true);
   assert.equal(indicators.visible("one", "other"), false);
   indicators.clear("one"); // Send latched; uncertain retained text belongs to the pending operation.
   assert.equal(indicators.visible("one", "one"), false);
-  indicators.edit("one", "new edit", "restored");
-  indicators.persisted("one", true);
+  const renewed = indicators.edit("one", "new edit", "restored");
+  indicators.persisted("one", renewed, true);
   indicators.edit("one", "restored", "restored");
   assert.equal(indicators.visible("one", "other"), false);
+});
+
+test("stale persistence success cannot certify a newer edit across selection switches", () => {
+  const indicators = createDraftIndicators();
+  const first = indicators.edit("session", "first", "");
+  const second = indicators.edit("session", "second", "");
+  indicators.persisted("session", first, true); // Old first-write completion.
+  assert.equal(indicators.visible("session", "other"), false);
+  assert.equal(indicators.visible("session", "session"), true);
+  const other = indicators.edit("other", "other edit", "");
+  indicators.persisted("other", second, true); // Correct generation but wrong session.
+  assert.equal(indicators.visible("other", "session"), false);
+  indicators.persisted("other", other, true);
+  assert.equal(indicators.visible("other", "session"), true);
+  indicators.persisted("session", second, true);
+  assert.equal(indicators.visible("session", "other"), true);
+});
+
+test("stale persistence failure cannot revoke a newer confirmed edit or revive a remounted editor", () => {
+  const indicators = createDraftIndicators();
+  const first = indicators.edit("session", "first", "");
+  const second = indicators.edit("session", "second", "");
+  indicators.persisted("session", second, true); // New second-write completion.
+  indicators.persisted("session", first, false); // Old first-write completion.
+  assert.equal(indicators.visible("session", "other"), true);
+  indicators.clear("session"); // Remount or retained Send; an old callback cannot revive it.
+  indicators.persisted("session", second, true);
+  assert.equal(indicators.visible("session", "session"), false);
+  const remounted = indicators.edit("session", "new", "");
+  indicators.persisted("session", second, true);
+  assert.equal(indicators.visible("session", "other"), false);
+  indicators.persisted("session", remounted, true);
+  assert.equal(indicators.visible("session", "other"), true);
 });
