@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView } from "#neoastra";
+import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
@@ -11,6 +11,7 @@ import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
+import { changeSelection, restoreSelection } from "./sessionSelection";
 
 export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -24,6 +25,29 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
 }) {
   const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
   const promptInput = useRef<HTMLTextAreaElement>(null);
+  const [choices, setChoices] = useState<SessionChoicesResponse>();
+  const [selection, setSelection] = useState<SessionSelection | null>(null);
+  const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
+  const [choicesRevision, setChoicesRevision] = useState(0);
+  const selectionKey = `codealta.desktop.selection.${sessionId}`;
+  useEffect(() => {
+    const controller = new AbortController();
+    setChoices(undefined);
+    setSelection(null);
+    setChoicesNotice("Loading session choices…");
+    void sessions.choices({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 15000 })
+      .then(value => {
+        capability.observe(value);
+        if (controller.signal.aborted || value.sessionId !== sessionId) return;
+        if (value.status !== "ok" || value.epoch !== epoch || !value.current) {
+          setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
+        }
+        setChoices(value);
+        setSelection(restoreSelection(() => localStorage.getItem(selectionKey), value));
+        setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
+      }).catch(() => { if (!controller.signal.aborted) setChoicesNotice("Session choices could not be loaded. Retry to refresh the provider catalog."); });
+    return () => controller.abort();
+  }, [epoch, sessionId, capability, selectionKey, choicesRevision]);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
@@ -114,7 +138,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = submissions.pending(sessionId);
     if (retained?.inFlight) return;
-    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID());
+    const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), selection);
     if (!request || !capability.canSubmit(request)) return;
     setMessage("Submission admission pending…");
     void submissions.submit(request, signal, capability, result => {
@@ -240,6 +264,17 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       setMessage(`Abort original Send: ${result.status}. Refresh receipts for control outcome, not rollback, decision retraction or run termination. Uncertainty retains the exact operation and key.`);
     });
   }
+  const selected = pending?.request.selection ?? selection ?? choices?.current;
+  const selectionDisabled = !choices?.current || invalidEpoch || !!pending;
+  function select(field: "agentPromptId" | "modelId" | "reasoningEffort", value: string) {
+    if (!choices || !selected || selectionDisabled) return;
+    const next = changeSelection(choices, selected, field, value);
+    if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
+    setSelection(next);
+    try { localStorage.setItem(selectionKey, JSON.stringify(next)); } catch { /* Selection still applies in this view. */ }
+    setChoicesNotice("Selection saved for the next Send; active runs and queued text are unchanged.");
+  }
+  const efforts = choices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
   return <section className="owned-session" aria-label="Owned text submission">
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" ref={promptInput} className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
@@ -247,20 +282,26 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
         if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
       }} />
     <div className="prompt-options" aria-label="Session configuration">
-      <label><span>Agent prompt</span><select aria-label="Agent prompt" value={runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
-        <option value={runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "default"}>{runtimeConfiguration?.pendingAgentPromptId ?? runtimeConfiguration?.agentPromptId ?? "Session default"}</option>
+      <label><span>Agent prompt</span><select aria-label="Agent prompt" value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title="Agent prompt for the next Send">
+        {!choices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? "Loading…"}</option>}
+        {choices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
-      <label><span>Model</span><select aria-label="Model" value={runtimeConfiguration?.modelId ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
-        <option value={runtimeConfiguration?.modelId ?? "default"}>{runtimeConfiguration?.modelId ?? "Provider default"}</option>
+      <label><span>Model</span><select aria-label="Model" value={selected?.modelId ?? ""} disabled={selectionDisabled} onChange={event => select("modelId", event.target.value)} title={`Model for the next Send · ${selected?.providerKey ?? "session provider"}`}>
+        <option value="">Provider default</option>
+        {selected?.modelId && !choices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} (not in catalog)</option>}
+        {choices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select></label>
-      <label><span>Reasoning</span><select aria-label="Reasoning" value={runtimeConfiguration?.reasoningEffort ?? "default"} disabled title="Captured by this existing session; selection is not yet available in the desktop bridge">
-        <option value={runtimeConfiguration?.reasoningEffort ?? "default"}>{runtimeConfiguration?.reasoningEffort ?? "Provider default"}</option>
+      <label><span>Reasoning</span><select aria-label="Reasoning" value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title="Supported reasoning effort for the selected model">
+        <option value="">Model default</option>
+        {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} (not in catalog)</option>}
+        {efforts.map(e => <option key={e} value={e}>{e}</option>)}
       </select></label>
       <button type="button" className="prompt-state" onClick={() => void runtimeScope.current?.refresh()} aria-label="Refresh context and runtime configuration" title={`Refresh context · ${runtimeConfiguration?.providerKey ?? "session provider"}`}>
         <AppIcon name="refresh" size={13} /><strong>{runtimeState?.kind === "loading" ? "Reading…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Ready" : "Refresh"}</strong>
       </button>
       <span className="prompt-state" title="MCP availability reported by the configured plugin runtime"><span>MCP</span><strong>{mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")}</strong></span>
     </div>
+    <p className="composer-notice" role="status">{choicesNotice} <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Refresh choices</button></p>
     <div className="history-controls">
       <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
       <button type="button" onClick={() => refresh()}>Refresh receipts</button>

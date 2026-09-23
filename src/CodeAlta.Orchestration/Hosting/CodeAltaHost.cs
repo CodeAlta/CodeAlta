@@ -58,7 +58,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ProjectFileSearchService = projectFileSearchService;
         PluginRuntime = pluginRuntime;
         CurrentProject = currentProject;
-        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput);
+        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
+        {
+            SelectionModels = modelProviderInitializationService.GetModelsAsync,
+        };
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         _earlyReadShutdown = new HostDisposalStage(() => WorkspaceReads.DisposeAsync().AsTask());
         _earlyCommandShutdown = new HostDisposalStage(() => Commands.DisposeAsync().AsTask());

@@ -101,7 +101,7 @@ test("uncertain retry preserves epoch key session exact text and immutable bound
   const store = createOwnedSubmissions(value => { seen.push(value); return f.lost(); }, () => f.lost());
   const captured = request();
   assert.ok(Object.isFrozen(captured));
-  assert.deepEqual(captured, { expectedEpoch: "epoch", sessionId: "session", text: "  exact\ntext  ", clientRequestId: "key" });
+  assert.deepEqual(captured, { expectedEpoch: "epoch", sessionId: "session", text: "  exact\ntext  ", clientRequestId: "key", selection: null });
   assert.ok(captureSubmission("e".repeat(64), "s".repeat(256), "😀".repeat(16384), "k".repeat(256)));
   for (const text of ["", " \n", "\u0085", "\ud800", "\udc00", "x".repeat(32769)])
     assert.equal(captureSubmission("epoch", "session", text, "key"), null);

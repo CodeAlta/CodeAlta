@@ -16,6 +16,38 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopOwnedSessionTests
 {
     [TestMethod]
+    public void SelectedSend_ValidatesAndForwardsExactConfiguration()
+    {
+        OwnedTextSendRequest? captured = null;
+        var service = new SessionOperationsService("epoch", request =>
+        {
+            captured = request;
+            return new(OwnedSessionCommandAdmissionKind.Busy);
+        }, _ => throw new AssertFailedException("Unexpected abort"));
+        var selection = new SessionSelection("provider", "plan", "model", "High");
+        var request = new SessionSendRequest("epoch", "key", "session", "text") { Selection = selection };
+        Assert.AreEqual("busy", service.Send(request, CancellationToken.None).Status);
+        Assert.AreEqual(new OwnedSessionSelection("provider", "plan", "model", AgentReasoningEffort.High), captured!.Selection);
+        captured = null;
+        foreach (var invalid in new[] { selection with { ReasoningEffort = "999" }, selection with { ReasoningEffort = "1" },
+            selection with { AgentPromptId = "../bad\ud800" }, selection with { ModelId = new string('x', 257) } })
+            Assert.AreEqual("invalid_request", service.Send(request with { Selection = invalid }, CancellationToken.None).Status);
+        Assert.IsNull(captured);
+        Assert.AreEqual("stale_epoch", service.Send(request with { ExpectedEpoch = "old" }, CancellationToken.None).Status);
+        Assert.IsNull(captured);
+    }
+
+    [TestMethod]
+    public async Task SelectionChoices_RejectsUnconfiguredAndStaleHosts()
+    {
+        Assert.AreEqual("unconfigured", (await new SessionOperationsService().Choices(new("epoch", "session"), CancellationToken.None)).Status);
+        var service = new SessionOperationsService("epoch", _ => throw new AssertFailedException("Unexpected send"),
+            _ => throw new AssertFailedException("Unexpected abort"));
+        Assert.AreEqual("stale_epoch", (await service.Choices(new("old", "session"), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid_request", (await service.Choices(new("epoch", " session"), CancellationToken.None)).Status);
+    }
+
+    [TestMethod]
     public void OwnedFlags_RequireCompleteExplicitConsentBeforeAcquisition()
     {
         var root = OperatingSystem.IsWindows() ? @"Q:\owned" : "/owned";

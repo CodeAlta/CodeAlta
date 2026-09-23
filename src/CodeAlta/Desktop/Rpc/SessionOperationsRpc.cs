@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -20,6 +21,7 @@ internal sealed class SessionOperationsService
     private readonly Func<OwnedCancelQueueRequest, CancellationToken, OwnedSessionCommandAdmission>? _cancelQueue;
     private readonly Dictionary<Guid, OwnedSessionCommandReceipt> _receipts = [];
     private bool _closed;
+    private readonly Func<string, CancellationToken, Task<OwnedSelectionChoices?>>? _choices;
 
     internal SessionOperationsService() { }
     internal SessionOperationsService(OwnedSessionCommandService commands, string epoch)
@@ -33,6 +35,7 @@ internal sealed class SessionOperationsService
         _abortRun = commands.AdmitAbortRun;
         _queue = commands.AdmitQueue;
         _cancelQueue = commands.AdmitCancelQueue;
+        _choices = commands.GetSelectionChoicesAsync;
     }
     // Mandatory rejection-route seam: tests use throwing literal callbacks, never fabricate receipts.
     internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
@@ -81,11 +84,43 @@ internal sealed class SessionOperationsService
             if (!Identity(request.ClientRequestId, 256) || !Identity(request.SessionId, 256) || !Identity(request.Text, 32768, trim: false))
                 return new("invalid_request", _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
-            try { return Retain(_send!(new(request.ClientRequestId, request.SessionId, request.Text), cancellationToken)); }
+            if (request.Selection is { } selection && (!Identity(selection.ProviderKey, 256) || !Identity(selection.AgentPromptId, 256)
+                || selection.ModelId is not null && !Identity(selection.ModelId, 256)
+                || selection.ReasoningEffort is not null && (!Enum.TryParse<AgentReasoningEffort>(selection.ReasoningEffort, out var effort)
+                    || !Enum.IsDefined(effort) || effort.ToString() != selection.ReasoningEffort)))
+                return new("invalid_request", _epoch, null);
+            try { return Retain(_send!(new(request.ClientRequestId, request.SessionId, request.Text)
+            {
+                Selection = request.Selection is { } value ? new(value.ProviderKey, value.AgentPromptId, value.ModelId,
+                    value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort)) : null,
+            }, cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
             catch (OperationCanceledException) { throw; }
             catch (Exception) { return new("admission_failed", _epoch, null); }
         }
+    }
+
+    [NeoRpcMethod("choices")]
+    public async Task<SessionChoicesResponse> Choices(SessionChoicesRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null, [], []);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null, [], []);
+        }
+        try
+        {
+            var choices = _choices is null ? null : await _choices(request.SessionId, cancellationToken).ConfigureAwait(false);
+            if (choices is null) return new("unavailable", _epoch, request.SessionId, null, [], []);
+            return new("ok", _epoch, request.SessionId,
+                new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString()),
+                choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
+                choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())).ToArray());
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
     }
 
     [NeoRpcMethod("abort")]
@@ -318,7 +353,16 @@ internal sealed class SessionOperationsService
     }
 }
 
-internal sealed record SessionSendRequest(string ExpectedEpoch, string ClientRequestId, string SessionId, string Text);
+internal sealed record SessionSendRequest(string ExpectedEpoch, string ClientRequestId, string SessionId, string Text)
+{
+    public SessionSelection? Selection { get; init; }
+}
+internal sealed record SessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, string? ReasoningEffort);
+internal sealed record SessionChoicesRequest(string ExpectedEpoch, string SessionId);
+internal sealed record SessionPromptChoice(string Id, string Name);
+internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<string> Efforts);
+internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
+    IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);
 internal sealed record SessionSteerRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId, string Text);

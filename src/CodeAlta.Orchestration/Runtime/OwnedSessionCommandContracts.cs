@@ -6,7 +6,18 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>
 /// <param name="SessionId">Case-insensitive durable session identity, without leading or trailing whitespace.</param>
 /// <param name="Text">Exact text; whitespace is not normalized.</param>
-public sealed record OwnedTextSendRequest(string ClientRequestId, string SessionId, string Text);
+public sealed record OwnedTextSendRequest(string ClientRequestId, string SessionId, string Text)
+{
+    /// <summary>Gets the optional configuration captured for this send, never for an already-running turn.</summary>
+    public OwnedSessionSelection? Selection { get; init; }
+}
+
+/// <summary>Immutable next-send configuration. Null model/effort requests the provider default.</summary>
+/// <param name="ProviderKey">Expected configured provider; this does not switch providers.</param>
+/// <param name="AgentPromptId">Effective prompt identifier.</param>
+/// <param name="ModelId">Selected model, or null for the provider default.</param>
+/// <param name="ReasoningEffort">Supported effort, or null for the model default.</param>
+public sealed record OwnedSessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, AgentReasoningEffort? ReasoningEffort);
 
 /// <summary>Immutable abort input targeting one send, never a later send on the same session.</summary>
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>

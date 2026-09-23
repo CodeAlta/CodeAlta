@@ -9,7 +9,7 @@ namespace CodeAlta.Orchestration.Runtime;
 /// One send and independently one steer, compact, abort-run and volatile queue operation per session are reserved.
 /// No durable queue or event reader is created.
 /// </summary>
-public sealed class OwnedSessionCommandService : IAsyncDisposable
+public sealed partial class OwnedSessionCommandService : IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly SessionRuntimeService _runtime;
@@ -56,6 +56,8 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
     /// <summary>Gets the command-owned restricted ask service, disabled unless explicitly configured.</summary>
     public OwnedSessionAskService Asks { get; }
 
+    internal Func<ModelProviderId, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? SelectionModels { get; init; }
+
     internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
 
     /// <summary>Reserves an immutable text submission without doing catalog or provider work inline.</summary>
@@ -71,6 +73,12 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Text);
+        if (request.Selection is { } selection &&
+            (string.IsNullOrWhiteSpace(selection.ProviderKey) || selection.ProviderKey.Length > 256
+             || string.IsNullOrWhiteSpace(selection.AgentPromptId) || selection.AgentPromptId.Length > 256
+             || selection.ModelId is { } model && (string.IsNullOrWhiteSpace(model) || model.Length > 256)
+             || selection.ReasoningEffort is { } effort && !Enum.IsDefined(effort)))
+            throw new ArgumentException("Invalid next-send selection.", nameof(request));
         if (!string.Equals(request.SessionId, request.SessionId.Trim(), StringComparison.Ordinal))
             throw new ArgumentException("Session identities must not have leading or trailing whitespace.", nameof(request));
         SendOperation operation;
@@ -81,12 +89,15 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             {
                 var same = previous.Send is not null && SameAskContext(previous.Ask, askSubmission) &&
                     string.Equals(previous.Send.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal);
+                    string.Equals(previous.Send.Text, request.Text, StringComparison.Ordinal) && previous.Send.Selection == request.Selection;
                 return Replay(previous, same);
             }
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (request.Selection is not null && (_queueing.Contains(request.SessionId) || _compacting.Contains(request.SessionId)
+                || _steering.Contains(request.SessionId) || _abortingRuns.Contains(request.SessionId)))
+                return new(OwnedSessionCommandAdmissionKind.Busy);
 
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Send, request.SessionId);
             operation = new SendOperation(request, receipt) { AskSubmission = askSubmission };
@@ -610,13 +621,26 @@ public sealed class OwnedSessionCommandService : IAsyncDisposable
             if (session is null || !string.Equals(session.SessionId, operation.SessionId, StringComparison.OrdinalIgnoreCase)) return null;
             var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
                 : await _projects.GetByIdAsync(session.ProjectRef, CancellationToken.None).ConfigureAwait(false);
+            var selection = operation.Request.Selection;
+            if (selection is not null)
+            {
+                var choices = await GetSelectionChoicesAsync(operation.SessionId, CancellationToken.None).ConfigureAwait(false);
+                if (choices is null || !IsValidSelection(choices, selection))
+                    throw new ArgumentException("The selected session configuration is no longer available.");
+            }
             var policy = SessionExecutionPolicy.CaptureSession(
-                session, project, _catalog.GlobalRoot, default, session.ModelId, session.ReasoningEffort, session.AgentPromptId);
+                session, project, _catalog.GlobalRoot, default,
+                selection is null ? session.ModelId : selection.ModelId,
+                selection is null ? session.ReasoningEffort : selection.ReasoningEffort,
+                selection?.AgentPromptId ?? session.AgentPromptId);
             var options = SessionExecutionPolicy.BuildOptions(
                 policy, [],
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
-            await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
+            if (selection is null)
+                await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
+            else
+                await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options, useExplicitPrompt: true).ConfigureAwait(false);
             return new Prepared(session, options);
         }
         catch (Exception ex)

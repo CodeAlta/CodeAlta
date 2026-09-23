@@ -1,4 +1,4 @@
-import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest } from "#neoastra";
+import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest, SessionSelection } from "#neoastra";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null };
@@ -50,11 +50,19 @@ function guid(value: unknown): value is string {
 }
 function validSend(request: SessionSendRequest): boolean {
   return !!request && identity(request.expectedEpoch, 64) && identity(request.clientRequestId, 256)
-    && identity(request.sessionId, 256) && identity(request.text, 32768, false);
+    && identity(request.sessionId, 256) && identity(request.text, 32768, false)
+    && (request.selection == null || identity(request.selection.providerKey, 256) && identity(request.selection.agentPromptId, 256)
+      && (request.selection.modelId === null || identity(request.selection.modelId, 256))
+      && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32)));
 }
-export function captureSubmission(epoch: string, sessionId: string, text: string, key: string): Readonly<SessionSendRequest> | null {
-  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text })) return null;
-  return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text });
+export function captureSubmission(epoch: string, sessionId: string, text: string, key: string, selection: SessionSelection | null = null): Readonly<SessionSendRequest> | null {
+  if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection })) return null;
+  return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection: freezeSelection(selection) });
+}
+
+function freezeSelection(value: SessionSelection | null): Readonly<SessionSelection> | null {
+  return value == null ? null : Object.freeze({ providerKey: value.providerKey, agentPromptId: value.agentPromptId,
+    modelId: value.modelId, reasoningEffort: value.reasoningEffort });
 }
 
 // Match the existing wire validation. Legacy outcome/code/run nullability is deliberately independent
@@ -159,7 +167,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
       if (!entry) {
         if (sends.size + aborts.size >= 256) { publish({ status: "capacity", epoch: request.expectedEpoch, receipt: null }); return; }
         entry = { request: Object.freeze({ expectedEpoch: request.expectedEpoch, clientRequestId: request.clientRequestId,
-          sessionId: request.sessionId, text: request.text }), inFlight: false };
+          sessionId: request.sessionId, text: request.text, selection: freezeSelection(request.selection) }), inFlight: false };
         sends.set(key, entry);
       }
       entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.

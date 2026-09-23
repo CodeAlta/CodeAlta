@@ -902,10 +902,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    internal Task<AgentSessionHandleId> EnsureOwnedCoordinatorSessionAsync(SessionViewDescriptor session, SessionExecutionOptions options)
+    internal Task<AgentSessionHandleId> EnsureOwnedCoordinatorSessionAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool useExplicitPrompt = false)
         => AdmitAsync(async () =>
         {
-            var entry = await ResolveCoordinatorEntryAsync(session, options, ownedCommand: true).ConfigureAwait(false);
+            var entry = await ResolveCoordinatorEntryAsync(session, options, ownedCommand: true, useExplicitPrompt: useExplicitPrompt).ConfigureAwait(false);
             return entry.SessionHandleId;
         }, CancellationToken.None);
 
@@ -920,7 +920,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
     }
 
-    private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null)
+    private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false)
     {
         ReserveSessionIdentity(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -931,7 +931,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var prepared = await actor.QueryAsync(
                 actorCancellationToken => history && _entries.TryGetValue(session.SessionId, out var active) && !active.IsTerminated && !active.Attachment.IsRetiring
                     ? ValueTask.FromResult(new CoordinatorPreparation(active, null))
-                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture),
+                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt),
                 CancellationToken.None).ConfigureAwait(false);
             if (prepared.Entry is not null) return prepared.Entry;
             await prepared.Transition!.ConfigureAwait(false);
@@ -940,14 +940,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     // Actor prepare only: callers join the returned ticket outside the mailbox.
     private async ValueTask<CoordinatorPreparation> EnsureCoordinatorSessionCoreAsync(
-        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null)
+        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false)
     {
         actorCancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
         if (_transitions.TryGetValue(session.SessionId, out var transition))
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
-        var prompt = NormalizeOptionalText(existing?.PendingAgentPromptId) ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
+        var prompt = (useExplicitPrompt ? null : NormalizeOptionalText(existing?.PendingAgentPromptId))
+            ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
+        if (ownedCommand && existing is not null && !existing.Matches(options, prompt)
+            && (existing.HasActiveRun || existing.QueueDrainInProgress || !HasOwnedCommandDefaults(existing)))
+            throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
         // Carry a matching but incompatible entry to send admission without consuming its pending
         // prompt or updating the descriptor. Admission rechecks under the actor and owns rejection.
         if (ownedCommand && existing is not null && !existing.Attachment.IsRetiring
@@ -3238,6 +3242,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = session.ReasoningEffort,
             AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, project.ProjectPath),
         };
+    }
+
+    internal IReadOnlyList<AgentPromptDescriptor> ListOwnedPrompts(string? projectRoot)
+    {
+        ValidateDiscoveryProjectRoot(projectRoot);
+        return (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(new AgentPromptCatalogQuery
+        {
+            ProjectRoot = projectRoot,
+            ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
+            UserCodeAltaRoot = _catalogOptions.GlobalRoot,
+            UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        });
     }
 
     private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot)

@@ -17,6 +17,57 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class OwnedSessionCommandServiceTests
 {
     [TestMethod]
+    public Task SelectedConfiguration_ReachesProviderAndRetriesKeepExactSettings() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        Assert.IsTrue(choices.Prompts.Any(p => p.Id == "default"));
+        Assert.IsTrue(choices.Models.Any(m => m.Id == "selected-model"));
+        Assert.IsTrue(choices.Prompts.Any(p => p.Id == "plan"));
+        var selection = new OwnedSessionSelection(choices.Current.ProviderKey, "plan", "selected-model", AgentReasoningEffort.High);
+        var request = new OwnedTextSendRequest("selection-send", f.SessionId, "selected input") { Selection = selection };
+        var admission = f.AdmitSend(request);
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "selected send");
+        Assert.AreEqual("selected-model", f.Provider.Options!.Model);
+        Assert.AreEqual(AgentReasoningEffort.High, f.Provider.Options.ReasoningEffort);
+        var runtime = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        Assert.AreEqual("plan", runtime.Entry!.AgentPromptId);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict,
+            f.AdmitSend(request with { Selection = selection with { ReasoningEffort = null } }).Kind);
+        Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy,
+            f.AdmitSend(request with { ClientRequestId = "concurrent-selection" }).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+        await f.Observe(f.Host.RuntimeService.SetActiveSessionAgentPromptIdAsync(f.SessionId, "default"));
+        var next = f.AdmitSend(request with { ClientRequestId = "next-selected-send" });
+        Assert.IsNotNull(next.Receipt);
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, next.Receipt, "next selected send");
+        f.Provider.ReleaseSecondSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(next.Receipt.Completion)).Outcome);
+        runtime = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        Assert.AreEqual("plan", runtime.Entry!.AgentPromptId, "Explicit next-send selection takes precedence over an older pending prompt.");
+        Assert.IsNull(runtime.Entry.PendingAgentPromptId);
+    });
+
+    [TestMethod]
+    public void SelectedConfiguration_RejectsUnknownProviderPromptModelAndEffort()
+    {
+        var selection = new OwnedSessionSelection("provider", "default", "model", AgentReasoningEffort.High);
+        var choices = new OwnedSelectionChoices(selection, [new("default", "Default")],
+            [new("model", "Model", [AgentReasoningEffort.High])]);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { ProviderKey = "other" }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { AgentPromptId = "missing" }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { ModelId = "missing" }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { ReasoningEffort = AgentReasoningEffort.Low }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { ModelId = null }));
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection with { ModelId = null, ReasoningEffort = null }));
+    }
+
+    [TestMethod]
     public void PluginEnvironment_UsesExplicitSnapshotWithoutAmbientFallback()
     {
         var options = new CodeAltaHostOptions
@@ -1441,7 +1492,11 @@ public sealed class OwnedSessionCommandServiceTests
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("owned-fixture"), "Owned fixture") { DefaultModelId = "fixture-model" };
         public Task StartAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref _runtimeStarts); return Task.CompletedTask; }
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected provider probe.");
+        internal bool ExposeSelectionModels { get; set; }
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => ExposeSelectionModels
+            ? Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId,
+                Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High])] })
+            : throw new InvalidOperationException("Unexpected provider probe.");
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("Unexpected turn-executor route.");
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);
 
