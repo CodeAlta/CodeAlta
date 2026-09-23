@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -6,7 +6,7 @@ import {
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
-import { loadHistory, historyMessage, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
+import { loadHistory, historyMessage, historySettled, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
@@ -26,7 +26,7 @@ import { LiveSessionPanel, LiveTextMessage, LiveToolMessage } from "./LiveSessio
 import { reconcileTimeline } from "./reconcileTimeline";
 import { TimelineMessage } from "./TimelineMessage";
 import { latestNotes } from "./timeline";
-import { bottomScrollTop, shouldFollowTimeline } from "./timelineScroll";
+import { bottomScrollTop, createTimelineScrollMemory } from "./timelineScroll";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { persistDraft, restoreDraft } from "./promptDraft";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
@@ -63,6 +63,7 @@ function App() {
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
+  const [scrollMemory] = useState(createTimelineScrollMemory);
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [notesReader] = useState(() => createNotesReader(sessionNotes.current));
   const [inputReviewer] = useState(() => createUserInputReviewer(
@@ -269,7 +270,7 @@ function App() {
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={selectedSession.id} session={selectedSession} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
-                 askActions={askActions} display={display} runtimeReader={runtimeReader}
+                 askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
                  onNotesChange={setHistoryNotes} onOpenConfiguration={() => setView("configuration")} />}
         </main>
@@ -279,7 +280,7 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, askActions, display, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
+function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
   session: WorkspaceSession;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
@@ -290,6 +291,7 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   queue: ReturnType<typeof createQueueSubmissions>;
   askActions: ReturnType<typeof createAskActions>;
   display: ReturnType<typeof createSessionDisplayStore>;
+  scrollMemory: ReturnType<typeof createTimelineScrollMemory>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer>;
   inputReviewer: ReturnType<typeof createUserInputReviewer>;
@@ -298,25 +300,34 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   onOpenConfiguration: () => void;
 }) {
   const timeline = useRef<HTMLDivElement>(null);
+  const [scrollSelection] = useState(() => scrollMemory.open(session.id));
+  const restoreFrame = useRef(0);
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
   const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
     ? observedDisplay : null;
-  const followTimeline = useRef(true);
-  const [timelineFollowing, setTimelineFollowing] = useState(true);
+  const [timelineFollowing, setTimelineFollowing] = useState(scrollSelection.following);
   useEffect(() => {
     const element = timeline.current;
     if (!element) return;
     let frame = 0;
     const scrollBottom = () => {
-      if (!followTimeline.current) return;
+      if (!scrollSelection.following()) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => { element.scrollTop = bottomScrollTop(element); });
     };
     const observer = new MutationObserver(scrollBottom);
     observer.observe(element, { childList: true, subtree: true, characterData: true });
     scrollBottom();
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [session.id]);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); cancelAnimationFrame(restoreFrame.current); };
+  }, [scrollSelection]);
+  function restoreHistoryPosition() {
+    const element = timeline.current;
+    if (!element) return;
+    const top = scrollSelection.settle(element);
+    if (top === null) return;
+    element.scrollTop = top;
+    restoreFrame.current = requestAnimationFrame(() => scrollSelection.finishRestore());
+  }
   const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   return <div className="session-workspace">
     <header className="session-header">
@@ -330,10 +341,10 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
       ? <DemoConversation session={session} />
       : <>
         <div className="timeline-scroll" ref={timeline} onScroll={event => {
-          followTimeline.current = shouldFollowTimeline(event.currentTarget);
-          setTimelineFollowing(followTimeline.current);
+          setTimelineFollowing(scrollSelection.scroll(event.currentTarget));
         }}>
-        <History sessionId={session.id} onNotesChange={onNotesChange} live={ownedSession ? live?.snapshot?.session ?? null : null} />
+        <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={restoreHistoryPosition}
+          live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
@@ -343,7 +354,7 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
         : null}
         </div>
         {!timelineFollowing && <button type="button" className="timeline-bottom-button" onClick={() => {
-          followTimeline.current = true;
+          if (timeline.current) scrollSelection.jump(timeline.current);
           setTimelineFollowing(true);
           if (timeline.current) timeline.current.scrollTop = bottomScrollTop(timeline.current);
         }}><AppIcon name="arrowDown" size={14} />Jump to latest</button>}
@@ -475,7 +486,8 @@ function SessionTime({ value, now }: { value: string; now: number }) {
   return <time dateTime={dateTime} title={title}>{label}</time>;
 }
 
-function History({ sessionId, onNotesChange, live }: { sessionId: string; onNotesChange: (markdown: string) => void; live: SessionDisplayView | null }) {
+function History({ sessionId, onNotesChange, onSettled, live }: { sessionId: string; onNotesChange: (markdown: string) => void;
+  onSettled: () => void; live: SessionDisplayView | null }) {
   const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
   const [state, setState] = useState<HistoryState>();
   const [timeline, setTimeline] = useState<HistoryTimeline>();
@@ -495,6 +507,9 @@ function History({ sessionId, onNotesChange, live }: { sessionId: string; onNote
     const timer = window.setTimeout(() => setRequest({ sessionId, cursor: current.page.next }), 0);
     return () => window.clearTimeout(timer);
   }, [current, timeline, sessionId]);
+  useLayoutEffect(() => {
+    if (historySettled(current, timeline)) onSettled();
+  }, [current, timeline, onSettled]);
   const items = reconcileTimeline(timeline?.entries ?? [], live);
   return <section className="conversation history" aria-labelledby="history-heading">
     <div className="section-heading"><div><span className="eyebrow">Journal + recent live window</span><h2 id="history-heading">Session timeline</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}><AppIcon name="refresh" size={14} />Refresh history</button></div>

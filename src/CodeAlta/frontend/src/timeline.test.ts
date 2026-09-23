@@ -29,6 +29,22 @@ test("timeline replaces streamed deltas with completed content and preserves orp
   assert.equal(items[1].subtitle, "Streaming");
 });
 
+test("journal identities containing separators cannot alias another provider/run or tool", () => {
+  const rows = buildTimelineItems([
+    entry({ offset: "1", eventType: "contentDelta", providerId: "p\0r", runId: "x", contentId: "c", text: "stream" }),
+    entry({ offset: "2", providerId: "p", runId: "r\0x", contentId: "c", text: "complete" }),
+    entry({ offset: "3", eventType: "activity", providerId: "p\0r", runId: "x", activityId: "tool", kind: "ToolCall", phase: "Started" }),
+    entry({ offset: "4", eventType: "activity", providerId: "p", runId: "r\0x", activityId: "tool", kind: "ToolCall", phase: "Completed" }),
+  ]);
+  assert.deepEqual(rows.map(row => row.key), ["1", "2", "3", "4"]);
+  const output = buildTimelineItems([
+    entry({ offset: "5", eventType: "activity", providerId: "p\0r", runId: "x", activityId: "tool", kind: "ToolCall", phase: "Started" }),
+    entry({ offset: "6", providerId: "p", runId: "r\0x", eventType: "contentCompleted", kind: "ToolOutput",
+      contentId: "output", parentActivityId: "tool", text: "Distinct tool result" }),
+  ]);
+  assert.deepEqual(output.map(row => row.key), ["5", "6"]);
+});
+
 test("timeline maps prompts and usage to compact summaries with drill-down content", () => {
   const items = buildTimelineItems([
     entry({ offset: "1", eventType: "system_prompt", kind: "session_start", name: "Default",

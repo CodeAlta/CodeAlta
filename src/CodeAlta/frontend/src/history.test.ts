@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryResponse } from "#neoastra";
-import { loadHistory, historyMessage, mergeHistoryPage, type HistoryState } from "./history";
+import { loadHistory, historyMessage, historySettled, mergeHistoryPage, type HistoryState } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
@@ -112,4 +112,24 @@ test("history displays structured failures and omission notices", async () => {
   const last = states.at(-1);
   if (last?.kind !== "ready") assert.fail("missing page");
   assert.equal(last.page.tailOmitted, true);
+});
+
+test("reading position waits for final page or explicit error, never loading or an obsolete session page", async () => {
+  const states: HistoryState[] = [];
+  assert.equal(historySettled(undefined, undefined), false);
+  const next = { version: 1, sessionId: "s", length: "100", lastWriteUtcTicks: "7", offset: "10" };
+  await loadHistory(async () => ({ ...page, next }), request, signal, state => states.push(state));
+  const ready = states.at(-1);
+  assert.equal(historySettled(ready, undefined), false);
+  if (ready?.kind !== "ready") assert.fail("missing page");
+  const first = mergeHistoryPage(undefined, request, ready.page);
+  assert.equal(historySettled(ready, first), false);
+  assert.equal(historySettled(ready, { ...first, next: null, sessionId: "other" }), false);
+  const secondRequest = { ...request, cursor: next };
+  await loadHistory(async () => page, secondRequest, signal, state => states.push(state));
+  const last = states.at(-1);
+  if (last?.kind !== "ready") assert.fail("missing last page");
+  assert.equal(historySettled(last, mergeHistoryPage(first, secondRequest, last.page)), true);
+  await loadHistory(async () => { throw new Error("private failure"); }, request, signal, state => states.push(state));
+  assert.equal(historySettled(states.at(-1), undefined), true);
 });

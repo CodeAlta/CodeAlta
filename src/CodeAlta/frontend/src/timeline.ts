@@ -70,15 +70,15 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
 }
 
 function contentKey(entry: HistoryEntry): string {
-  return `${entry.providerId}\u0000${entry.runId ?? ""}\u0000${entry.kind ?? ""}\u0000${entry.contentId ?? ""}`;
+  return JSON.stringify([entry.providerId, entry.runId, entry.kind, entry.contentId]);
 }
 
 function activityKey(entry: HistoryEntry): string {
-  return `${entry.providerId}\u0000${entry.runId ?? ""}\u0000${entry.activityId ?? ""}`;
+  return JSON.stringify([entry.providerId, entry.runId, entry.activityId]);
 }
 
 function parentActivityKey(entry: HistoryEntry): string {
-  return `${entry.providerId}\u0000${entry.runId ?? ""}\u0000${entry.parentActivityId ?? ""}`;
+  return JSON.stringify([entry.providerId, entry.runId, entry.parentActivityId]);
 }
 
 function isTerminalPhase(phase: string | null): boolean {

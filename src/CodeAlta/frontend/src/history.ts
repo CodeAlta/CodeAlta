@@ -15,6 +15,10 @@ export type HistoryTimeline = Readonly<{
 
 const maximumTimelineEntries = 1000;
 
+export function historySettled(state: HistoryState | undefined, timeline: HistoryTimeline | undefined): boolean {
+  return state?.kind === "error" || (state?.kind === "ready" && timeline?.sessionId === state.request.sessionId && timeline.next === null);
+}
+
 export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: HistoryResponse): HistoryTimeline {
   const retained = request.cursor !== null && previous?.sessionId === request.sessionId ? previous : undefined;
   const accumulated = retained?.entries ?? [];
