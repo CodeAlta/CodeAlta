@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus, type HistoryRequest, type SessionDisplayView,
-  type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession,
+  type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { loadHistory, historyMessage, historySettled, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
@@ -47,6 +47,8 @@ import { persistProjectSort, projectRailProjection, projectSortStorageKey, resto
 import { ProjectRailRows } from "./ProjectRailRows";
 import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisibilityKey, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
+import { SessionInfoDialog } from "./SessionInfoDialog";
+import { restoreSessionInfoFocus, sessionInfoView } from "./sessionInfo";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -863,7 +865,7 @@ function App() {
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
-            : <SessionWorkspace key={selectedSession.id} session={selectedSession} status={status} mutation={mutation}
+            : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -887,8 +889,10 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
   session: WorkspaceSession;
+  snapshot: WorkspaceSnapshot;
+  selectedProjectId: string | null;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
   submissions: ReturnType<typeof createOwnedSubmissions>;
@@ -908,6 +912,13 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   onOpenConfiguration: () => void;
 }) {
   const timeline = useRef<HTMLDivElement>(null);
+  const infoTrigger = useRef<HTMLButtonElement>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
+  function closeInfo() {
+    const trigger = infoTrigger.current;
+    setInfoOpen(false);
+    requestAnimationFrame(() => restoreSessionInfoFocus(trigger));
+  }
   const [scrollSelection] = useState(() => scrollMemory.open(session.id));
   const restoreFrame = useRef(0);
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
@@ -939,12 +950,13 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   return <div className="session-workspace">
     <header className="session-header">
-      <div><span className="eyebrow">Session</span><h1>{session.title}</h1></div>
-      <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span><span>{status?.hostAvailable ? "Live" : "Persisted"}</span></div>
+      <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
+      <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span>
+        <span>{demoMode ? "Demo" : status?.hostAvailable ? "Host available" : "Catalog only"}</span>
+        <button ref={infoTrigger} type="button" className="quiet-button session-info-trigger" aria-haspopup="dialog" aria-expanded={infoOpen}
+          onClick={() => setInfoOpen(true)}>Session info</button></div>
     </header>
-    <details className="session-info"><summary>Session details</summary><dl>
-      <dt>ID</dt><dd>{session.id}</dd><dt>Project</dt><dd>{session.workspacePath || "Not recorded"}</dd><dt>Updated</dt><dd>{session.updatedAt}</dd>
-    </dl></details>
+    {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo} />}
     {demoMode
       ? <DemoConversation session={session} />
       : <>

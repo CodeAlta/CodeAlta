@@ -152,11 +152,13 @@ h1, h2, h3, p { margin-top: 0; }
 .content { min-width: 0; min-height: 0; overflow: hidden; background: radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 35%), var(--bg); }
 .session-workspace { width: min(1080px, calc(100% - 32px)); height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; margin: 0 auto; padding: 20px 0 14px; overflow: hidden; }
 .session-header { display: flex; justify-content: space-between; align-items: end; gap: 18px; padding: 0 4px 18px; border-bottom: 1px solid var(--line); }
-.session-header h1 { margin: 0; font-size: clamp(21px, 3vw, 28px); letter-spacing: -.035em; }
-.session-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.session-header > div:first-child { min-width: 0; }
+.session-header h1 { overflow: hidden; margin: 0; font-size: clamp(21px, 3vw, 28px); letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
+.session-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 50%; }
 .session-chips span, .status-pill { display: inline-flex; align-items: center; width: fit-content; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel); font-size: 11px; }
-.session-info { margin: 12px 4px; color: var(--muted); font-size: 12px; }
-.session-info summary, .event-meta summary { cursor: pointer; }
+.session-chips span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-info-trigger { flex: 0 0 auto; font-size: 11px; }
+.event-meta summary { cursor: pointer; }
 dl { display: grid; grid-template-columns: minmax(120px, auto) minmax(0, 1fr); gap: 7px 16px; }
 dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
@@ -338,6 +340,16 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .owned-session .expanded-prompt-dialog textarea { flex: 1; min-height: 0; margin: 0; resize: none; line-height: 1.5; }
 .expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
+.session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); }
+.session-info-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+.session-info-dialog > p { margin: 0 0 12px; font-size: 12px; }
+.session-info-fields { display: block; min-height: 0; overflow-y: auto; margin: 0; padding: 0 4px 0 0; }
+.session-info-fields > div { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.session-info-fields dt { margin-bottom: 3px; color: var(--muted); font-size: 11px; }
+.session-info-fields dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 13px; }
+.session-info-fields small { display: block; color: var(--muted); }
+.session-info-dialog > footer { gap: 12px; flex-wrap: wrap; }
+.session-info-dialog > footer span { overflow-wrap: anywhere; }
 .app-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .app-dialog > header h2 { margin: 0 0 14px; font-size: 21px; }
 .app-dialog .settings-search { flex: 0 0 auto; }
@@ -390,7 +402,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .content { min-height: 0; overflow: hidden; }
   .session-workspace { width: calc(100% - 24px); padding-top: 12px; }
   .session-header { align-items: start; flex-direction: column; }
-  .session-chips { justify-content: flex-start; }
+  .session-chips { justify-content: flex-start; max-width: 100%; }
   .settings-grid { grid-template-columns: 1fr; }
   .settings-navigation nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .configuration-page { height: auto; padding: 28px 14px 90px; }
