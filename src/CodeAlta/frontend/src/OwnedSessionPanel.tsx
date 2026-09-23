@@ -8,14 +8,14 @@ import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancel
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
-import { persistDraft, restoreDraft } from "./promptDraft";
+import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, restoreSelection } from "./sessionSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 
-export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
+export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
@@ -23,9 +23,24 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
   queue: ReturnType<typeof createQueueSubmissions>;
+  draftIndicators: ReturnType<typeof createDraftIndicators>;
   configuration?: ConfigurationSnapshot;
 }) {
   const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
+  const latestText = useRef(text);
+  const restoredText = useRef(text);
+  useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
+  function editText(value: string) {
+    latestText.current = value;
+    draftIndicators.edit(sessionId, value, restoredText.current);
+    setText(value);
+  }
+  function clearText() {
+    latestText.current = "";
+    restoredText.current = "";
+    draftIndicators.clear(sessionId);
+    setText("");
+  }
   const promptInput = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
@@ -69,7 +84,10 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   useEffect(() => {
     const controller = new AbortController();
     scope.current = controller;
-    setText(submissions.pending(sessionId)?.request.text ?? restoreDraft(key => localStorage.getItem(key), sessionId));
+    const restored = submissions.pending(sessionId)?.request.text ?? restoreDraft(key => localStorage.getItem(key), sessionId);
+    restoredText.current = restored;
+    latestText.current = restored;
+    setText(restored);
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
     setQueueText(queue.pending(sessionId)?.request.text ?? "");
     setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
@@ -95,8 +113,10 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   }, [sessionId, epoch, submissions, steering, compaction, abortRuns, queue, runtimeReader, capability]);
 
   useEffect(() => {
-    if (!submissions.pending(sessionId)) persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text);
-  }, [sessionId, text, submissions]);
+    if (!submissions.pending(sessionId)) draftIndicators.persisted(sessionId,
+      persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text));
+    else draftIndicators.clear(sessionId);
+  }, [sessionId, text, submissions, draftIndicators]);
 
   const pending = submissions.pending(sessionId);
   const pendingAborts = submissions.aborts(sessionId);
@@ -143,13 +163,14 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     if (retained?.inFlight) return;
     const request = retained?.request ?? captureSubmission(epoch, sessionId, text, crypto.randomUUID(), selection);
     if (!request || !capability.canSubmit(request)) return;
+    draftIndicators.clear(sessionId);
     setMessage("Submission admission pending…");
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       setMessage(result.status === "accepted" || result.status === "replay"
         ? "Submission accepted. Refresh submissions for dispatch outcome; this is not run completion."
         : `Submission: ${result.status}. Refresh receipts before considering an explicit retry.`);
-      if (result.status === "accepted" || result.status === "replay") setText("");
+      if ((result.status === "accepted" || result.status === "replay") && !signal.aborted) clearText();
     });
   }
   function refresh(offset = 0) {
@@ -161,7 +182,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       observeEpoch(result);
       setPage(result);
       const recovered = submissions.reconcile(sessionId, result, capability);
-      if (recovered.sendRecovered) setText("");
+      if (recovered.sendRecovered && !signal.aborted) clearText();
       if (recovered.sendRecovered || recovered.abortsRecovered > 0)
         setMessage("Send/Abort receipt reconciled without prompt text. Admission/control settlement is not rollback or run completion.");
       if (steering.reconcile(sessionId, result, capability)) {
@@ -193,6 +214,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       if (fromComposer) setMessage("Steering needs a non-empty prompt and a refreshed, eligible active run. Nothing was sent.");
       return;
     }
+    if (fromComposer) draftIndicators.clear(sessionId);
     // The App-owned helper latches synchronously before its first await, across panel remounts.
     setSteerMessage("Steering admission pending…");
     if (fromComposer) setMessage("Steering admission pending…");
@@ -201,7 +223,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       if (fromComposer) setMessage(`Steering: ${result.status}. Review steering controls for outcome or recovery.`);
       if (result.status === "accepted" || result.status === "replay") {
         setSteerText("");
-        if (fromComposer) setText(current => current === request.text ? "" : current);
+        if (fromComposer && latestText.current === request.text && !signal.aborted) clearText();
         setSteerMessage("Steering accepted. Refresh submissions for input dispatch outcome, not run completion.");
       } else setSteerMessage(`Steering: ${result.status}. Refresh submissions; uncertain requests retain their original text and target and are never retried automatically.`);
     });
@@ -289,10 +311,10 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   }
   const efforts = choices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
   return <section className="owned-session" aria-label="Owned text submission">
-    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={setText} onClose={() => setExpanded(false)} />}
+    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onClose={() => setExpanded(false)} />}
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" ref={promptInput} className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
-      onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
+      onChange={event => editText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,

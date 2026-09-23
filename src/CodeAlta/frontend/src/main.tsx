@@ -29,7 +29,8 @@ import { TimelineMessage } from "./TimelineMessage";
 import { latestNotes } from "./timeline";
 import { bottomScrollTop, createTimelineScrollMemory } from "./timelineScroll";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
-import { persistDraft, restoreDraft } from "./promptDraft";
+import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
+import { SessionDraftBadge } from "./SessionDraftBadge";
 import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import { AppIcon } from "./AppIcon";
@@ -64,6 +65,8 @@ function App() {
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
+  const [draftIndicators] = useState(createDraftIndicators);
+  useSyncExternalStore(draftIndicators.subscribe, draftIndicators.snapshot);
   const [steering] = useState(() => createSteeringSubmissions(sessionOperations.steer));
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
   const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
@@ -621,6 +624,7 @@ function App() {
                 style={{ paddingLeft: 11 + Math.min(depth, 8) * 12 }}
                 onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
                 <span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
+                <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
                 <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -666,7 +670,7 @@ function App() {
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={selectedSession.id} session={selectedSession} status={status} mutation={mutation}
-                submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
+                submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
                  onNotesChange={updateHistoryNotes} onOpenConfiguration={() => setView("configuration")} />}
@@ -689,7 +693,7 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
+function SessionWorkspace({ session, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
   session: WorkspaceSession;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
@@ -698,6 +702,7 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
   queue: ReturnType<typeof createQueueSubmissions>;
+  draftIndicators: ReturnType<typeof createDraftIndicators>;
   askActions: ReturnType<typeof createAskActions>;
   display: ReturnType<typeof createSessionDisplayStore>;
   scrollMemory: ReturnType<typeof createTimelineScrollMemory>;
@@ -768,8 +773,8 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
           if (timeline.current) timeline.current.scrollTop = bottomScrollTop(timeline.current);
         }}><AppIcon name="arrowDown" size={14} />Jump to latest</button>}
         {ownedSession && status?.hostEpoch
-          ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} />
-          : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} />}
+          ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} />
+          : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators} />}
       </>}
   </div>;
 }
@@ -1018,12 +1023,17 @@ function History({ sessionId, onNotesChange, onSettled, live }: { sessionId: str
   </section>;
 }
 
-function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration }: {
+function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration, draftIndicators }: {
   sessionId: string; provider: string | null; configuration?: ConfigurationSnapshot; onOpenConfiguration: () => void;
+  draftIndicators: ReturnType<typeof createDraftIndicators>;
 }) {
   const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
+  const restoredText = useRef(text);
+  useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
   const [message, setMessage] = useState("Draft locally; sending requires an explicitly owned desktop host.");
-  useEffect(() => { persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text); }, [sessionId, text]);
+  useEffect(() => { draftIndicators.persisted(sessionId,
+    persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text));
+  }, [sessionId, text, draftIndicators]);
   return <section className="composer catalog-composer" aria-label="Message composer">
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
@@ -1032,7 +1042,9 @@ function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfigurat
       <button type="button" className="prompt-state" onClick={onOpenConfiguration} aria-label="Open provider configuration" title={provider ?? "Provider not recorded"}><AppIcon name="settings" size={13} /><strong>{configuration?.providers.length ?? 0} providers</strong></button>
       <span className="prompt-state"><span>Context / MCP</span><strong>Requires runtime</strong></span>
     </div>
-    <textarea id="catalog-prompt" aria-label="Message" maxLength={32768} value={text} onChange={event => setText(event.target.value)}
+    <textarea id="catalog-prompt" aria-label="Message" maxLength={32768} value={text} onChange={event => {
+      draftIndicators.edit(sessionId, event.target.value, restoredText.current); setText(event.target.value);
+    }}
       onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage("This explicit catalog-only launch is read-only; your draft remains saved."); } }}
       placeholder="Draft a prompt for this session…" />
     <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage("This explicit catalog-only launch is read-only; your draft remains saved.")}>Send <AppIcon name="send" size={14} /></button></div>
