@@ -2766,7 +2766,9 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
-    public async Task ChildSession_FinalAssistantMessageSubmitsWhenParentIsIdle()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ChildSession_FinalAssistantMessageSubmitsWhenParentIsIdle(bool idleBeforeCompletion)
     {
         using var root = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = root.Path };
@@ -2792,8 +2794,15 @@ public sealed class AltaLiveToolTests
             .ConfigureAwait(false);
         var childRunId = await runtime.SendAsync(child, executionOptions, new AgentSendOptions { Input = AgentInput.Text("child work") }).ConfigureAwait(false);
 
+        if (idleBeforeCompletion)
+        {
+            providerRuntime.PublishIdle(child.SessionId, childRunId);
+            await ReadRuntimeEventAsync<SessionAgentEvent>(runtime,
+                runtimeEvent => runtimeEvent.SessionId == child.SessionId && runtimeEvent.Event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle })
+                .ConfigureAwait(false);
+        }
         providerRuntime.PublishAssistantCompleted(child.SessionId, childRunId, "queued final result");
-        providerRuntime.PublishIdle(child.SessionId, childRunId);
+        if (!idleBeforeCompletion) providerRuntime.PublishIdle(child.SessionId, childRunId);
 
         await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
         Assert.AreEqual(0, providerRuntime.SteeredOptions.Count);

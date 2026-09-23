@@ -3551,6 +3551,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         private ParentFinalNotificationCandidate? _lastParentFinalCandidate;
 
+        private string? _lastParentIdleRunId;
+
         private readonly HashSet<string> _sentParentProgressKeys = new(StringComparer.Ordinal);
 
         private readonly HashSet<string> _sentParentFinalKeys = new(StringComparer.Ordinal);
@@ -3658,6 +3660,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     }
                 }
 
+                // Event callbacks are forwarded independently; an idle update can reach the
+                // mailbox before the completed content from the same run.
+                if (completed.RunId?.Value is { } runId && string.Equals(_lastParentIdleRunId, runId, StringComparison.Ordinal))
+                    notifications.AddRange(TakeFinalParentNotification(runId));
+
                 return notifications;
             }
 
@@ -3673,28 +3680,25 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 return [CreateParentNotification("error", body, error.RunId?.Value, key)];
             }
 
-            if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } idle && _lastParentFinalCandidate is { } candidate)
+            if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } idle)
             {
-                if (idle.RunId is not null && candidate.RunId is not null && !string.Equals(idle.RunId?.Value, candidate.RunId, StringComparison.Ordinal))
-                {
-                    return [];
-                }
-
-                if (string.IsNullOrWhiteSpace(candidate.Content))
-                {
-                    return [];
-                }
-
-                var key = candidate.RunId ?? candidate.ContentId;
-                if (!_sentParentFinalKeys.Add(key))
-                {
-                    return [];
-                }
-
-                return [CreateParentNotification("answer", candidate.Content, candidate.RunId, candidate.ContentId)];
+                _lastParentIdleRunId = idle.RunId?.Value;
+                return TakeFinalParentNotification(_lastParentIdleRunId);
             }
 
             return [];
+        }
+
+        private IReadOnlyList<ParentNotificationWork> TakeFinalParentNotification(string? runId)
+        {
+            if (_lastParentFinalCandidate is not { } candidate
+                || (runId is not null && candidate.RunId is not null && !string.Equals(runId, candidate.RunId, StringComparison.Ordinal))
+                || string.IsNullOrWhiteSpace(candidate.Content))
+                return [];
+
+            var key = candidate.RunId ?? candidate.ContentId;
+            if (!_sentParentFinalKeys.Add(key)) return [];
+            return [CreateParentNotification("answer", candidate.Content, candidate.RunId, candidate.ContentId)];
         }
 
         private ParentNotificationWork CreateParentNotification(string kind, string body, string? runId, string contentId)
