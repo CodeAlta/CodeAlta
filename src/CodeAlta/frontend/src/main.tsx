@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
+import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -20,6 +20,7 @@ import { AskPanel } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
 import { NotesPanel } from "./NotesPanel";
 import { createNotesReader } from "./sessionNotes";
+import { notesHeightKey, defaultNotesHeight, restoreNotesHeight, persistNotesHeight, resizeNotesHeight } from "./notesHeight";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel, LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
@@ -50,7 +51,9 @@ function App() {
   const [search, setSearch] = useState("");
   const [theme, setTheme] = useState<Theme>("dark");
   const [notesVisible, setNotesVisible] = useState(true);
-  const [historyNotes, setHistoryNotes] = useState("");
+  const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
+  const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
+  const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
   const [dialog, setDialog] = useState<"project" | "help" | null>(null);
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
@@ -65,7 +68,7 @@ function App() {
   const [display] = useState(() => createSessionDisplayStore(sessionDisplay.observe));
   const [scrollMemory] = useState(createTimelineScrollMemory);
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
-  const [notesReader] = useState(() => createNotesReader(sessionNotes.current));
+  const [notesReader] = useState(() => createNotesReader(sessionNotes.current, sessionNotes.clear));
   const [inputReviewer] = useState(() => createUserInputReviewer(
     request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
     request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
@@ -94,6 +97,8 @@ function App() {
   useEffect(() => {
     persistPaneLayout(value => localStorage.setItem(paneLayoutStorageKey, value), paneLayout);
   }, [paneLayout]);
+
+  useEffect(() => { persistNotesHeight(value => localStorage.setItem(notesHeightKey, value), notesHeight); }, [notesHeight]);
 
   useEffect(() => {
     if (view !== "workspace" || !workspaceShell.current) return;
@@ -140,8 +145,6 @@ function App() {
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
-
-  useEffect(() => { setHistoryNotes(""); }, [sessionId]);
 
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
@@ -258,7 +261,9 @@ function App() {
           </div>
           {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
             reader={owned ? notesReader : undefined} capability={owned ? mutation?.capability : undefined}
-            fallbackMarkdown={historyNotes} onClose={() => setNotesVisible(false)} />}
+            fallbackMarkdown={historyNotes.sessionId === sessionId ? historyNotes.markdown : ""} onClose={() => setNotesVisible(false)}
+            preferredHeight={notesHeight} onResize={delta => setNotesHeight(height => resizeNotesHeight(height, -delta))}
+            onReset={() => setNotesHeight(defaultNotesHeight)} onCleared={target => { if (target === sessionId) setHistoryNotes({ sessionId: target, markdown: "" }); }} />}
           {!notesVisible && <button type="button" className="quiet-button icon-label-button show-notes" onClick={() => setNotesVisible(true)}><AppIcon name="notes" size={14} />Show Alta notes</button>}
         </aside>
 
@@ -272,7 +277,7 @@ function App() {
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
-                 onNotesChange={setHistoryNotes} onOpenConfiguration={() => setView("configuration")} />}
+                 onNotesChange={updateHistoryNotes} onOpenConfiguration={() => setView("configuration")} />}
         </main>
       </div>}
     {dialog === "project" && <OpenProjectDialog projects={snapshot?.projects ?? []} onOpen={id => { selectProject(id); setDialog(null); }} onClose={() => setDialog(null)} />}

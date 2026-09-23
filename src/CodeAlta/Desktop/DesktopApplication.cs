@@ -170,7 +170,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
-                    builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, epoch));
+                    builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));

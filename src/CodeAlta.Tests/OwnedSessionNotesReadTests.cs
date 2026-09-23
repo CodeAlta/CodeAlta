@@ -81,6 +81,25 @@ public sealed class OwnedSessionNotesReadTests
         await Assert.ThrowsAsync<SessionNotesSessionNotFoundException>(() => outside);
     });
 
+    [TestMethod]
+    public Task RuntimeClear_WritesOnlyTheExplicitTargetAndLeavesOtherNotesIntact() => Fixture.Run(async f =>
+    {
+        var runtime = f.CreateRuntime();
+        await f.Append(f.Note("# Target", AgentNotesUpdateKind.Set, 1));
+        await f.Keep(() => f.Store.UpsertSessionAsync(f.Summary("other", f.Root)));
+        await f.Keep(() => f.Store.AppendEventsAsync("fixture", "notes-provider", "other",
+            [new AgentNotesEvent(new("notes-provider"), "other", DateTimeOffset.UnixEpoch, null, AgentNotesUpdateKind.Set, "# Preserve")]));
+        Assert.AreEqual("# Target", await f.Keep(() => runtime.GetOwnedNotesMarkdownAsync("session")));
+        Assert.AreEqual("# Preserve", await f.Keep(() => runtime.GetOwnedNotesMarkdownAsync("other")));
+        var committed = new List<AgentNotesEvent>();
+        await f.Keep(() => runtime.UpdateNotesAsync("session", "", AgentNotesUpdateKind.Cleared, committed.Add));
+        Assert.AreEqual(1, committed.Count);
+        Assert.AreEqual("session", committed[0].SessionId);
+        Assert.AreEqual(AgentNotesUpdateKind.Cleared, committed[0].Kind);
+        Assert.AreEqual("", await f.Keep(() => runtime.GetOwnedNotesMarkdownAsync("session")));
+        Assert.AreEqual("# Preserve", await f.Keep(() => runtime.GetOwnedNotesMarkdownAsync("other")));
+    });
+
     private sealed class Fixture
     {
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "CodeAlta-owned-notes-" + Guid.NewGuid().ToString("N"));

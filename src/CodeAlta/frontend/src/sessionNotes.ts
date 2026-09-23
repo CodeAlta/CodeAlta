@@ -1,6 +1,7 @@
 import type { SessionNotesRequest } from "#neoastra";
 
 export type NotesState = { kind: "loading" } | { kind: "ready"; markdown: string } | { kind: "error"; code: string };
+export type NotesClearState = { kind: "clearing" } | { kind: "cleared" } | { kind: "error"; code: string };
 type Invoke = (request: SessionNotesRequest, options: { timeoutMilliseconds: number }) => Promise<unknown>;
 type Original = { work?: Promise<void>; waiter?: Promise<unknown> };
 
@@ -31,13 +32,15 @@ function status(value: unknown): value is string {
   return typeof value === "string" && ["ok", "invalid_request", "stale_epoch", "missing_session", "closed", "capacity", "read_failed", "wire_limit"].includes(value);
 }
 
-// App-owned observation coordination only. No cache, automatic read, retry, or mutation ledger.
-export function createNotesReader(invoke: Invoke) {
+// App-owned selection coordination. No cached notes or automatic mutation retry.
+export function createNotesReader(invoke: Invoke, clear?: Invoke) {
   let selection = 0;
   let active: Original | undefined;
+  let activeClear: Original | undefined;
+  const uncertainClears = new Map<string, NotesClearState>(); // No Markdown; retain uncertain outcomes across selection/unmount.
   let invalid = false;
   const observeEpoch = (value: unknown, epoch: string, revoke: () => void) => {
-    if (object(value) && guid(value.hostEpoch) && status(value.status)
+    if (object(value) && guid(value.hostEpoch) && (status(value.status) || value.status === "clear_unconfirmed")
       && (value.status === "stale_epoch" || value.hostEpoch !== epoch)) {
       invalid = true;
       try { revoke(); } catch { /* The local read latch still remains revoked. */ }
@@ -46,11 +49,14 @@ export function createNotesReader(invoke: Invoke) {
   return {
     forSelection(epoch: string, sessionId: string, signal: AbortSignal, publish: (state: NotesState) => void, revoke: () => void) {
       const selected = ++selection;
+      const clearKey = `${epoch}:${sessionId}`;
       const request = Object.freeze({ expectedHostEpoch: epoch, sessionId });
       const current = () => !signal.aborted && selected === selection;
       const show = (state: NotesState) => { if (current()) { try { publish(state); } catch { /* Presentation cannot change original ownership. */ } } };
       return {
+        uncertainClear(): NotesClearState | undefined { return uncertainClears.get(clearKey); },
         refresh(): Promise<void> {
+          if (activeClear) { show({ kind: "error", code: "busy" }); return activeClear.work!; }
           if (active) { show({ kind: "error", code: "busy" }); return active.work!; }
           if (!current()) return Promise.resolve();
           if (!guid(epoch) || !identity(sessionId)) { show({ kind: "error", code: "invalid_request" }); return Promise.resolve(); }
@@ -82,9 +88,50 @@ export function createNotesReader(invoke: Invoke) {
           release();
           return original.work;
         },
+        clear(publishResult: (state: NotesClearState) => void, onCleared: () => void): Promise<void> {
+          const result = (state: NotesClearState) => {
+            if (state.kind === "error" && state.code === "clear_unconfirmed") uncertainClears.set(clearKey, state);
+            if (state.kind === "cleared") uncertainClears.delete(clearKey);
+            if (current()) publishResult(state);
+          };
+          if (activeClear || active) { result({ kind: "error", code: "busy" }); return (activeClear ?? active)!.work!; }
+          if (!current() || !clear) return Promise.resolve();
+          if (!guid(epoch) || !identity(sessionId)) { result({ kind: "error", code: "invalid_request" }); return Promise.resolve(); }
+          if (invalid) { result({ kind: "error", code: "stale_epoch" }); return Promise.resolve(); }
+          const original: Original = {};
+          activeClear = original;
+          let release!: () => void;
+          const launch = new Promise<void>(resolve => { release = resolve; });
+          original.work = (async () => {
+            await launch;
+            try {
+              original.waiter = clear(request, { timeoutMilliseconds: 8000 });
+              const value = await original.waiter;
+              observeEpoch(value, epoch, revoke);
+              if (invalid) { result({ kind: "error", code: "stale_epoch" }); return; }
+              if (!object(value) || !guid(value.hostEpoch) || value.hostEpoch !== epoch || value.sessionId !== sessionId
+                || !["ok", "invalid_request", "missing_session", "closed", "stale_epoch", "clear_unconfirmed"].includes(String(value.status))) {
+                result({ kind: "error", code: "clear_unconfirmed" }); return;
+              }
+              if (value.status === "ok") {
+                if (current()) { show({ kind: "ready", markdown: "" }); onCleared(); }
+                result({ kind: "cleared" });
+              } else result({ kind: "error", code: value.status as string });
+            } catch { result({ kind: "error", code: "clear_unconfirmed" }); }
+            finally { if (activeClear === original) activeClear = undefined; }
+          })();
+          result({ kind: "clearing" });
+          release();
+          return original.work;
+        },
       };
     },
   };
+}
+
+export async function copyNotesMarkdown(markdown: string, write: (text: string) => Promise<void>): Promise<"copied" | "copy_failed"> {
+  try { await write(markdown); return "copied"; }
+  catch { return "copy_failed"; }
 }
 
 export function notesMessage(code: string): string {

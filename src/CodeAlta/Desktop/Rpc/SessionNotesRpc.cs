@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -9,14 +10,22 @@ internal sealed class SessionNotesService
     internal const int MaximumMarkdownUnits = 16384;
     internal const int MaximumResponseBytes = 128 * 1024;
     private readonly OwnedSessionWorkspace _reads;
+    private readonly Func<string, CancellationToken, Task>? _clear;
     private readonly string _epoch;
 
-    internal SessionNotesService(OwnedSessionWorkspace reads, string epoch)
+    internal SessionNotesService(OwnedSessionWorkspace reads, string epoch, Func<string, CancellationToken, Task>? clear = null)
     {
         ArgumentNullException.ThrowIfNull(reads);
         if (!Epoch(epoch)) throw new ArgumentException("Canonical host epoch required.", nameof(epoch));
         _reads = reads;
         _epoch = epoch;
+        _clear = clear;
+    }
+
+    internal SessionNotesService(OwnedSessionWorkspace reads, SessionRuntimeService runtime, string epoch)
+        : this(reads, epoch, (sessionId, token) => runtime.UpdateNotesAsync(sessionId, "", AgentNotesUpdateKind.Cleared, static _ => { }, token))
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
     }
 
     [NeoRpcMethod("current")]
@@ -49,6 +58,26 @@ internal sealed class SessionNotesService
         catch (Exception) { return Error("read_failed", sessionId); }
     }
 
+    [NeoRpcMethod("clear")]
+    public async Task<SessionNotesClearResponse> ClearAsync(SessionNotesRequest request, CancellationToken cancellationToken)
+    {
+        var sessionId = Identity(request?.SessionId) ? request!.SessionId : null;
+        SessionNotesClearResponse Error(string status) => new(status, _epoch, sessionId);
+        if (sessionId is null || !Epoch(request?.ExpectedHostEpoch)) return Error("invalid_request");
+        if (request!.ExpectedHostEpoch != _epoch) return Error("stale_epoch");
+        if (_clear is null) return Error("closed");
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await _clear(sessionId, cancellationToken).ConfigureAwait(false);
+            return Error("ok");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        // Even a recognizable exception can arise from post-commit feedback or a plugin.
+        // Never describe an admitted write as unsuccessful or retry it automatically.
+        catch (Exception) { return Error("clear_unconfirmed"); }
+    }
+
     private SessionNotesResponse Error(string status, string? sessionId) => new(status, _epoch, sessionId, null);
     private static bool Epoch(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out var guid)
         && guid != Guid.Empty && guid.ToString("D") == value;
@@ -65,3 +94,4 @@ internal sealed class SessionNotesService
 
 internal sealed record SessionNotesRequest(string ExpectedHostEpoch, string SessionId);
 internal sealed record SessionNotesResponse(string Status, string HostEpoch, string? SessionId, string? Markdown);
+internal sealed record SessionNotesClearResponse(string Status, string HostEpoch, string? SessionId);

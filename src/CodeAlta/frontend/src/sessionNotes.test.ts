@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createNotesReader, type NotesState } from "./sessionNotes";
+import { copyNotesMarkdown, createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
 import { createMutationCapability } from "./sessionOperations";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -161,6 +161,112 @@ test("failed notes reads allow only an explicit fresh read and accept the comple
     assert.equal(calls, 2);
   } catch (error) { primary = error; throw error; }
   finally { controller.abort(); await finish(originals, owner, primary); }
+});
+
+test("clear captures the selected session, excludes overlap and does not publish into a switched session", async () => {
+  let release!: (value: unknown) => void;
+  const pending = new Promise<unknown>(resolve => { release = resolve; });
+  const targets: string[] = [];
+  const owner = createNotesReader(async request => reply(request.sessionId), request => { targets.push(request.sessionId); return pending; });
+  const first = new AbortController(); const second = new AbortController();
+  const before: NotesState[] = []; const after: NotesState[] = [];
+  const actions: NotesClearState[] = [];
+  const originals: Promise<unknown>[] = [pending];
+  let primary: unknown;
+  try {
+    const a = owner.forSelection(epoch, "session", first.signal, state => before.push(state), () => {});
+    await join(acquire(originals, () => a.refresh()), owner);
+    let cleared = 0;
+    const work = acquire(originals, () => a.clear(state => actions.push(state), () => cleared++));
+    assert.equal(a.clear(state => actions.push(state), () => cleared++), work);
+    first.abort();
+    const b = owner.forSelection(epoch, "other", second.signal, state => after.push(state), () => {});
+    assert.equal(b.refresh(), work);
+    assert.equal(b.clear(state => actions.push(state), () => cleared++), work);
+    release({ status: "ok", hostEpoch: epoch, sessionId: "session" });
+    await join(work, owner);
+    assert.deepEqual(targets, ["session"]);
+    assert.equal(cleared, 0);
+    assert.equal(after.some(value => value.kind === "ready"), false);
+  } catch (error) { primary = error; throw error; }
+  finally { first.abort(); second.abort(); release({ status: "ok", hostEpoch: epoch, sessionId: "session" }); await finish(originals, owner, primary); }
+});
+
+test("clear reports success only for matching valid acknowledgement, preserves read and failures otherwise", async () => {
+  const responses: unknown[] = [null, {}, { status: "ok", hostEpoch: epoch, sessionId: "other" },
+    { status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "session" },
+    { status: "ok", hostEpoch: epoch, sessionId: "session" }];
+  for (const response of responses) {
+    const owner = createNotesReader(async () => reply("# Keep"), async () => response);
+    const controller = new AbortController();
+    const states: NotesState[] = []; const actions: NotesClearState[] = [];
+    const originals: Promise<unknown>[] = [];
+    let cleared = 0; let primary: unknown;
+    try {
+      const selected = owner.forSelection(epoch, "session", controller.signal, state => states.push(state), () => {});
+      await join(acquire(originals, () => selected.refresh()), owner);
+      await join(acquire(originals, () => selected.clear(state => actions.push(state), () => cleared++)), owner);
+      assert.equal(cleared, response === responses.at(-1) ? 1 : 0);
+      assert.deepEqual(states.at(-1), { kind: "ready", markdown: cleared ? "" : "# Keep" });
+      assert.deepEqual(actions.at(-1), cleared ? { kind: "cleared" } : { kind: "error", code: "clear_unconfirmed" });
+    } catch (error) { primary = error; throw error; }
+    finally { controller.abort(); await finish(originals, owner, primary); }
+  }
+});
+
+test("copy failure does not alter Markdown or silently claim success", async () => {
+  const content = "# Notes\r\nKeep exact Markdown";
+  let copied = "";
+  assert.equal(await copyNotesMarkdown(content, async text => { copied = text; }), "copied");
+  assert.equal(copied, content);
+  assert.equal(await copyNotesMarkdown(content, async () => { throw new Error("denied"); }), "copy_failed");
+  assert.equal(copied, content);
+});
+
+test("clear response from another host revokes future mutations even after switching sessions", async () => {
+  const owner = createNotesReader(async () => reply("# Current"), async () =>
+    ({ status: "clear_unconfirmed", hostEpoch: otherEpoch, sessionId: "session" }));
+  const first = new AbortController(); const second = new AbortController();
+  const original: Promise<unknown>[] = [];
+  let revoked = 0; let calls = 0; let primary: unknown;
+  try {
+    const a = owner.forSelection(epoch, "session", first.signal, () => {}, () => revoked++);
+    await join(acquire(original, () => a.refresh()), owner);
+    const clear = acquire(original, () => a.clear(() => {}, () => calls++));
+    first.abort();
+    owner.forSelection(epoch, "other", second.signal, () => {}, () => revoked++);
+    await join(clear, owner);
+    assert.equal(revoked, 1);
+    assert.equal(calls, 0);
+  } catch (error) { primary = error; throw error; }
+  finally { first.abort(); second.abort(); await finish(original, owner, primary); }
+});
+
+test("uncertain clear remains visible after switching or remounting until a confirmed clear", async () => {
+  let release!: (value: unknown) => void;
+  const pending = new Promise<unknown>(resolve => { release = resolve; });
+  let calls = 0;
+  const owner = createNotesReader(async request => ({ ...reply("# Keep"), sessionId: request.sessionId }),
+    async request => ++calls === 1 ? pending : { status: "ok", hostEpoch: epoch, sessionId: request.sessionId });
+  const first = new AbortController(); const second = new AbortController();
+  const originals: Promise<unknown>[] = [pending];
+  let primary: unknown;
+  try {
+    const old = owner.forSelection(epoch, "session", first.signal, () => {}, () => {});
+    await join(acquire(originals, () => old.refresh()), owner);
+    const work = acquire(originals, () => old.clear(() => {}, () => {}));
+    first.abort();
+    owner.forSelection(epoch, "other", second.signal, () => {}, () => {});
+    release({ status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "session" });
+    await join(work, owner);
+    const returned = owner.forSelection(epoch, "session", second.signal, () => {}, () => {});
+    assert.deepEqual(returned.uncertainClear(), { kind: "error", code: "clear_unconfirmed" });
+    assert.equal(owner.forSelection(otherEpoch, "session", second.signal, () => {}, () => {}).uncertainClear(), undefined);
+    const retry = owner.forSelection(epoch, "session", second.signal, () => {}, () => {});
+    await join(acquire(originals, () => retry.clear(() => {}, () => {})), owner);
+    assert.equal(retry.uncertainClear(), undefined);
+  } catch (error) { primary = error; throw error; }
+  finally { first.abort(); second.abort(); release({ status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "session" }); await finish(originals, owner, primary); }
 });
 
 function acquire<T>(originals: Promise<unknown>[], start: () => Promise<T>): Promise<T> {

@@ -276,13 +276,19 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .path { overflow-wrap: anywhere; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-.notes-pane { flex: 0 1 auto; height: 240px; min-height: 112px; max-height: 65%; display: flex; flex-direction: column; margin: 8px 9px 12px; overflow: hidden; resize: vertical; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.notes-splitter { position: relative; flex: 0 0 8px; margin: 2px 9px 0; cursor: row-resize; touch-action: none; }
+.notes-splitter::before { content: ""; position: absolute; inset: -3px 0; }
+.notes-splitter span { display: block; width: 36px; height: 4px; margin: 2px auto; border-radius: 4px; background: var(--line-strong); }
+.notes-splitter:hover span, .notes-splitter:focus-visible span { background: var(--accent); }
+.notes-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.notes-pane { flex: 0 1 auto; min-height: 112px; display: flex; flex-direction: column; margin: 0 9px 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .show-notes { flex: 0 0 auto; margin: 8px 9px 12px; text-align: left; }
 .notes-pane > header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 7px 10px; border-bottom: 1px solid var(--line); }
 .notes-pane > header > span:first-child { min-width: 0; display: grid; gap: 2px; }
 .notes-pane > header strong { font-size: 11px; }
 .notes-pane > header small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.notes-pane > header button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
+.notes-pane > header button { min-width: 24px; height: 24px; padding: 0 3px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10px; }
+.notes-pane > header button:disabled { opacity: .5; cursor: not-allowed; }
 .notes-pane > header button:hover { color: var(--text); background: var(--panel-3); }
 .notes-content { min-height: 0; padding: 5px 10px 12px; overflow-y: scroll; font-size: 11px; }
 .notes-content .markdown-content { line-height: 1.5; }
@@ -335,7 +341,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .session-rail { height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .session-list { display: flex; gap: 7px; overflow-x: auto; }
   .session-list > button { flex: 0 0 220px; }
-  .notes-pane { height: 140px; max-height: 48%; }
+  .notes-pane { max-height: 65%; }
   .content { min-height: 0; overflow: hidden; }
   .session-workspace { width: calc(100% - 24px); padding-top: 12px; }
   .session-header { align-items: start; flex-direction: column; }

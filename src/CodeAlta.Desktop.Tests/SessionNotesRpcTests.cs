@@ -14,6 +14,46 @@ public sealed class SessionNotesRpcTests
     private const string Epoch = "11111111-1111-4111-8111-111111111111";
 
     [TestMethod]
+    public Task Clear_UsesExplicitSessionTargetAndDoesNotMisreportUncertainWrites() => Fixture.Run(_ => Task.FromResult("# Existing"), async f =>
+    {
+        var targets = new List<string>();
+        var rpc = new SessionNotesService(f.Owner, Epoch, (session, _) =>
+        {
+            targets.Add(session);
+            return targets.Count == 1 ? Task.CompletedTask : Task.FromException(new IOException("private journal failure"));
+        });
+        var invalid = await rpc.ClearAsync(new(Epoch, " other"), default);
+        Assert.AreEqual("invalid_request", invalid.Status);
+        Assert.IsNull(invalid.SessionId);
+        Assert.AreEqual("stale_epoch", (await rpc.ClearAsync(new("22222222-2222-4222-8222-222222222222", "other"), default)).Status);
+        Assert.AreEqual(0, targets.Count);
+        var result = await rpc.ClearAsync(new(Epoch, "session-A"), default);
+        Assert.AreEqual(new SessionNotesClearResponse("ok", Epoch, "session-A"), result);
+        var wire = JsonSerializer.SerializeToUtf8Bytes(result, DesktopJsonContext.Default.SessionNotesClearResponse);
+        Assert.AreEqual(result, JsonSerializer.Deserialize(wire, DesktopJsonContext.Default.SessionNotesClearResponse));
+        result = await rpc.ClearAsync(new(Epoch, "session-B"), default);
+        Assert.AreEqual("clear_unconfirmed", result.Status);
+        Assert.AreEqual("session-B", result.SessionId);
+        Assert.IsFalse(JsonSerializer.Serialize(result, DesktopJsonContext.Default.SessionNotesClearResponse).Contains("private", StringComparison.Ordinal));
+        CollectionAssert.AreEqual(new[] { "session-A", "session-B" }, targets);
+        Assert.AreEqual("# Existing", (await f.Call(new(Epoch, "session"))).Markdown); // Failed clear cannot imply empty notes.
+    });
+
+    [TestMethod]
+    public Task Clear_MissingAndCancelled_DoNotMasqueradeAsSuccessful() => Fixture.Run(_ => Task.FromResult(""), async f =>
+    {
+        var rpc = new SessionNotesService(f.Owner, Epoch, (session, _) =>
+            Task.FromException(new SessionNotesSessionNotFoundException(session)));
+        Assert.AreEqual("clear_unconfirmed", (await rpc.ClearAsync(new(Epoch, "missing"), default)).Status);
+        var disposedAfterCommit = new SessionNotesService(f.Owner, Epoch, (_, _) =>
+            Task.FromException(new ObjectDisposedException("private observer")));
+        Assert.AreEqual("clear_unconfirmed", (await disposedAfterCommit.ClearAsync(new(Epoch, "session"), default)).Status);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => rpc.ClearAsync(new(Epoch, "missing"), cancelled.Token));
+    });
+
+    [TestMethod]
     public Task InvalidIdentityAndEpoch_RejectBeforeReadAndBoundErrors() => Fixture.Run(_ => throw new AssertFailedException("No read."), async f =>
     {
         foreach (var session in new string?[] { null, "", " ", " session", "session\n", new('x', 65536) })
