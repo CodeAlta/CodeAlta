@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { constrainPaneLayout, defaultPaneLayout, parsePaneLayout, persistPaneLayout, resizePane, restorePaneLayout } from "./paneLayout";
+import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, parsePaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout } from "./paneLayout";
 
 test("restores valid pane widths and rejects malformed desktop state", () => {
   assert.deepEqual(parsePaneLayout('{"projects":300,"sessions":360}', 1400), { projects: 300, sessions: 360 });
@@ -33,4 +33,12 @@ test("dragging a constrained rail persists the visible result instead of a hidde
   const visible = constrainPaneLayout({ projects: 400, sessions: 420 }, 1200);
   assert.deepEqual(visible, { projects: 400, sessions: 304 });
   assert.deepEqual(resizePane(visible, "sessions", -24, 1200), { projects: 400, sessions: 280 });
+});
+
+test("collapsed project width is retained, while the visible session rail can resize without a ghost project budget", () => {
+  const preferred = { projects: 400, sessions: 420 };
+  assert.equal(collapsedSessionWidth(preferred, 900), 412);
+  assert.deepEqual(resizeCollapsedSessionPane(preferred, -20, 900), { projects: 400, sessions: 392 });
+  assert.equal(collapsedSessionWidth(preferred, 1400), 420);
+  assert.deepEqual(constrainPaneLayout(preferred, 1400), preferred);
 });

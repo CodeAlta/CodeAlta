@@ -33,6 +33,18 @@ export function resizePane(layout: PaneLayout, pane: PaneName, delta: number, av
   return { ...layout, [pane]: clamp(Math.round(layout[pane] + delta), minimum[pane], paneMaximum) };
 }
 
+// The hidden project rail contributes no width; only an explicit resize changes either preference.
+export function collapsedSessionWidth(layout: PaneLayout, availableWidth: number): number {
+  const budget = Math.max(minimum.sessions, Math.floor(availableWidth) - minimumContentWidth - splitterWidth / 2);
+  return clamp(Math.round(layout.sessions), minimum.sessions, Math.min(maximum.sessions, budget));
+}
+
+export function resizeCollapsedSessionPane(layout: PaneLayout, delta: number, availableWidth: number): PaneLayout {
+  const visible = collapsedSessionWidth(layout, availableWidth);
+  const budget = Math.max(minimum.sessions, Math.floor(availableWidth) - minimumContentWidth - splitterWidth / 2);
+  return { ...layout, sessions: clamp(Math.round(visible + delta), minimum.sessions, Math.min(maximum.sessions, budget)) };
+}
+
 // Keep preferred widths independent of viewport constraints so expanding the window restores them.
 export function parsePaneLayout(value: string | null, _availableWidth: number): PaneLayout {
   if (!value) return defaultPaneLayout;

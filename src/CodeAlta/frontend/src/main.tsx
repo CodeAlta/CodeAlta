@@ -31,7 +31,7 @@ import { bottomScrollTop, createTimelineScrollMemory } from "./timelineScroll";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
-import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
+import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
@@ -45,6 +45,8 @@ import { SessionActionMenu } from "./SessionActionMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { persistProjectSort, projectRailProjection, projectSortStorageKey, restoreProjectSort, type ProjectSort } from "./projectRail";
 import { ProjectRailRows } from "./ProjectRailRows";
+import { ProjectRailToggle } from "./ProjectRailToggle";
+import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisibilityKey, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -139,13 +141,22 @@ function App() {
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
   const workspaceShell = useRef<HTMLDivElement>(null);
   const projectRail = useRef<HTMLElement>(null);
+  const projectRailToggle = useRef<HTMLButtonElement>(null);
+  const focusProjectPending = useRef(false);
   const projectFilterInput = useRef<HTMLInputElement>(null);
   const sessionRail = useRef<HTMLElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const chordPending = useRef(false);
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
+  const [railState, setRailState] = useState(() => ({
+    desktopCollapsed: restoreProjectRailCollapsed(() => localStorage.getItem(projectRailVisibilityKey)), narrowOpen: false,
+  }));
+  const railVisible = projectRailVisible(railState, narrow);
   const visiblePaneLayout = constrainPaneLayout(paneLayout, workspaceWidth);
+  const visibleSessionWidth = !narrow && railState.desktopCollapsed
+    ? collapsedSessionWidth(paneLayout, workspaceWidth) : visiblePaneLayout.sessions;
   const [clock, setClock] = useState(Date.now);
 
   useEffect(() => {
@@ -163,6 +174,27 @@ function App() {
 
   useEffect(() => { persistNotesHeight(value => localStorage.setItem(notesHeightKey, value), notesHeight); }, [notesHeight]);
   useEffect(() => { persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), projectSort); }, [projectSort]);
+  useEffect(() => { persistProjectRailCollapsed(value => localStorage.setItem(projectRailVisibilityKey, value), railState.desktopCollapsed); }, [railState.desktopCollapsed]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 875px)");
+    const changed = () => {
+      const next = media.matches;
+      if (next || railState.desktopCollapsed)
+        restoreProjectRailFocus(projectRail.current, document.activeElement, projectRailToggle.current);
+      focusProjectPending.current = false;
+      setRailState(resetNarrowRail);
+      setNarrow(next);
+    };
+    media.addEventListener("change", changed);
+    if (media.matches !== narrow) changed();
+    return () => media.removeEventListener("change", changed);
+  }, [railState.desktopCollapsed, narrow]);
+
+  useLayoutEffect(() => {
+    if (!railVisible || !focusProjectPending.current || view !== "workspace") return;
+    if (focusVisibleProject(projectRail.current, projectFilterInput.current)) focusProjectPending.current = false;
+  }, [railVisible, view, workspaceState.kind]);
 
   useEffect(() => {
     if (view !== "workspace" || !workspaceShell.current) return;
@@ -218,13 +250,13 @@ function App() {
     && visibleSessions.some(session => session.id === menuTarget.id)
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
   useLayoutEffect(() => {
-    if (activeMenu) menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
-  }, [activeMenu]);
+    if (activeMenu && !(narrow && railVisible)) menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+  }, [activeMenu, narrow, railVisible]);
   useLayoutEffect(() => {
-    if (menuTarget || !focusAction.current) return;
+    if (menuTarget || !focusAction.current || narrow && railVisible) return;
     const field = sessionRail.current?.querySelector<HTMLInputElement>(focusAction.current === "rename" ? ".session-rename input" : ".session-delete input");
     if (field) { field.focus(); focusAction.current = null; }
-  }, [menuTarget, renamingId, deletingId]);
+  }, [menuTarget, renamingId, deletingId, narrow, railVisible]);
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   useEffect(() => {
     if (!activeMenu) return;
@@ -265,18 +297,22 @@ function App() {
     else if (action === "openProject") setDialog("project");
     else if (action === "renameProject") void beginProjectRename();
     else if (action === "help") setDialog("help");
-    else if (action === "escape") { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
+    else if (action === "escape") {
+      if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
+      else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
+    }
     else if (action === "settings" || action === "providers" || action === "models" || action === "prompts" || action === "plugins") setView("configuration");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
     else if (action === "focusProjects") {
-      const selected = projectRail.current?.querySelector<HTMLButtonElement>('.project-list button[aria-pressed="true"], .project-root-list button[aria-pressed="true"]');
-      (selected ?? projectFilterInput.current)?.focus();
+      if (!railVisible) toggleProjects();
+      else focusVisibleProject(projectRail.current, projectFilterInput.current);
     }
-    else if (action === "focusSessions") sessionRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+    else if (action === "focusSessions" && !(narrow && railVisible))
+      sessionRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
     else if (action === "nextProject" || action === "previousProject") {
-      if (!projects.length) return;
+      if (!projects.length || !railVisible) return;
       const index = projects.findIndex(project => project.id === projectId);
       const nextIndex = index < 0 ? (action === "nextProject" ? 0 : projects.length - 1)
         : (index + (action === "nextProject" ? 1 : -1) + projects.length) % projects.length;
@@ -290,6 +326,14 @@ function App() {
       selectedSessionId.current = next;
       setSessionId(next);
     } else if (action === "context") document.querySelector<HTMLButtonElement>(".prompt-state")?.click();
+  }
+
+  function toggleProjects() {
+    if (railVisible) {
+      focusProjectPending.current = false;
+      restoreProjectRailFocus(projectRail.current, document.activeElement, projectRailToggle.current);
+    } else focusProjectPending.current = true;
+    setRailState(current => toggleProjectRail(current, narrow));
   }
 
   function selectProject(nextProjectId: string | null) {
@@ -633,6 +677,10 @@ function App() {
   function changePane(pane: PaneName, delta: number) {
     setPaneLayout(current => {
       const width = workspaceShell.current?.clientWidth ?? workspaceWidth;
+      if (pane === "sessions" && !narrow && railState.desktopCollapsed) {
+        const next = resizeCollapsedSessionPane(current, delta, width);
+        return next.sessions === current.sessions ? current : next;
+      }
       const visible = constrainPaneLayout(current, width);
       const next = resizePane(visible, pane, delta, width);
       return next[pane] === visible[pane] ? current : next;
@@ -645,7 +693,9 @@ function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small></div>
+      <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
+        {view === "workspace" && <ProjectRailToggle expanded={railVisible} onToggle={toggleProjects} buttonRef={projectRailToggle} />}
+      </div>
       <nav className="topnav" aria-label="Primary navigation">
         <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => setView("workspace")}>Sessions</button>
         <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => setView("configuration")}>Configuration</button>
@@ -658,11 +708,11 @@ function App() {
 
     {view === "configuration"
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} />
-      : <div className="workspace-shell" ref={workspaceShell} style={{
+      : <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
-          "--session-pane-width": `${visiblePaneLayout.sessions}px`,
+          "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
-        <aside className="project-rail" aria-label="Projects" ref={projectRail}>
+        <aside id="project-rail" className="project-rail" aria-label="Projects" ref={projectRail} hidden={!railVisible}>
           <div className="panel-title"><span>Projects</span><span><button type="button" className="rail-action" title="Open project (Ctrl+O)" onClick={() => setDialog("project")}>＋</button><span className="count">{snapshot?.projects.length ?? 0}</span></span></div>
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">No catalog configured. See the launch instructions below.</div>}
@@ -688,7 +738,7 @@ function App() {
           {projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch &&
             <div className="project-rename" role="group" aria-label={`Rename project ${projectRenameTarget.name}`}>
               <label>Project name
-                <input autoFocus value={projectRenameName} maxLength={256} disabled={projectRenameBusy || projectRenameLocked || projectRenameConflict}
+                <input autoFocus={railVisible} value={projectRenameName} maxLength={256} disabled={projectRenameBusy || projectRenameLocked || projectRenameConflict}
                   onChange={event => setProjectRenameName(event.target.value)}
                   onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
                     event.preventDefault(); event.stopPropagation(); projectRenameGeneration.current++; setProjectRenameTarget(null);
@@ -704,9 +754,10 @@ function App() {
           </div>
         </aside>
 
-        <PaneSplitter label="Resize projects" value={visiblePaneLayout.projects} onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
+        <PaneSplitter className="project-splitter" label="Resize projects" value={visiblePaneLayout.projects} hidden={!railVisible}
+          onResize={delta => changePane("projects", delta)} onReset={() => resetPane("projects")} />
 
-        <aside className="session-rail" aria-label="Sessions" ref={sessionRail}>
+        <aside className="session-rail" aria-label="Sessions" ref={sessionRail} hidden={narrow && railVisible}>
           <div className="session-rail-header">
             <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
             <button type="button" className="icon-button" aria-label="Create session" title="Create session in selected scope"
@@ -805,7 +856,8 @@ function App() {
           {!notesVisible && <button type="button" className="quiet-button icon-label-button show-notes" onClick={() => setNotesVisible(true)}><AppIcon name="notes" size={14} />Show Alta notes</button>}
         </aside>
 
-        <PaneSplitter label="Resize sessions" value={visiblePaneLayout.sessions} onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />
+        <PaneSplitter className="session-splitter" label="Resize sessions" value={visibleSessionWidth}
+          onResize={delta => changePane("sessions", delta)} onReset={() => resetPane("sessions")} />
 
         <main className="content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
@@ -1195,7 +1247,9 @@ function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfigurat
   </section>;
 }
 
-function PaneSplitter({ label, value, onResize, onReset }: {
+function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
+  className: string;
+  hidden?: boolean;
   label: string;
   value: number;
   onResize: (delta: number) => void;
@@ -1225,7 +1279,7 @@ function PaneSplitter({ label, value, onResize, onReset }: {
       onReset();
     }
   }
-  return <div className="pane-splitter" role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value}
+  return <div className={`pane-splitter ${className}`} hidden={hidden} role="separator" aria-label={label} aria-orientation="vertical" aria-valuenow={value}
     tabIndex={0} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}
     onDoubleClick={onReset} onKeyDown={keyDown}><span /></div>;
 }

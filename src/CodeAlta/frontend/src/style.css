@@ -55,19 +55,29 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 .topnav { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .topnav button { padding: 6px 13px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
 .topnav button[aria-current="page"] { color: var(--text); background: var(--panel-3); box-shadow: 0 1px 5px rgba(0, 0, 0, .12); }
+.project-rail-toggle { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-2); font-size: 11px; cursor: pointer; }
+.project-rail-toggle:hover { background: var(--accent-soft); }
+.project-rail-toggle[aria-expanded="true"] { border-color: var(--accent); }
 .connection { justify-self: end; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 15%, transparent); }
 .connection-live .connection-dot, .connection-readonly .connection-dot { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
 .connection-error .connection-dot { background: var(--red); }
 
-.workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px var(--session-pane-width, 310px) 8px minmax(480px, 1fr); overflow: hidden; }
+.workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px var(--session-pane-width, 310px) 8px minmax(480px, 1fr); grid-template-areas: "projects project-resize sessions session-resize content"; overflow: hidden; }
+.workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 var(--session-pane-width, 310px) 8px minmax(480px, 1fr); }
+.project-rail { grid-area: projects; }
+.project-splitter { grid-area: project-resize; }
+.session-rail { grid-area: sessions; }
+.session-splitter { grid-area: session-resize; }
+.content { grid-area: content; }
+.project-rail[hidden], .session-rail[hidden], .pane-splitter[hidden] { display: none; }
 .project-rail, .session-rail { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
 .pane-splitter { position: relative; z-index: 2; width: 8px; cursor: col-resize; touch-action: none; background: var(--line); }
 .pane-splitter::before { content: ""; position: absolute; inset: 0 -3px; }
 .pane-splitter span { position: absolute; top: 50%; left: 2px; width: 4px; height: 38px; border-radius: 3px; background: transparent; transform: translateY(-50%); }
 .pane-splitter:hover span, .pane-splitter:focus-visible span { background: var(--accent); }
 .pane-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.project-rail { display: flex; flex-direction: column; padding: 18px 12px 12px; }
+.project-rail { display: flex; flex-direction: column; overflow-y: auto; padding: 18px 12px 12px; }
 .panel-title { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 9px 12px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .panel-title > span:last-child { display: flex; align-items: center; gap: 5px; }
 .rail-action { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
@@ -364,13 +374,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 }
 
 @media (max-width: 875px) {
+  .brand small { display: none; }
   .topbar { position: sticky; top: 0; z-index: 5; height: auto; min-height: 58px; padding-block: 10px; }
   .topnav { position: fixed; z-index: 6; right: 10px; bottom: 10px; order: initial; grid-column: auto; transform: none; box-shadow: var(--shadow); }
   .connection { display: none; }
   .app-shell { grid-template-rows: auto minmax(0, 1fr); }
-  .workspace-shell { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); height: auto; }
+  .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); grid-template-areas: "sessions" "content"; height: auto; }
+  .workspace-shell.project-rail-open { grid-template-areas: "projects" "content"; }
   .pane-splitter { display: none; }
-  .project-rail { display: none; }
+  .project-rail:not([hidden]) { display: flex; border-bottom: 1px solid var(--line); }
   .session-rail { height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .session-list { display: flex; gap: 7px; overflow-x: auto; }
   .session-row { flex: 0 0 220px; }
@@ -386,4 +398,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .prompt-options { display: flex; overflow-x: auto; }
   .prompt-options > * { flex: 0 0 130px; }
   .shortcut-dialog dl { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 875px) and (max-height: 600px) {
+  .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-rows: minmax(180px, 40vh) minmax(0, 1fr); }
 }
