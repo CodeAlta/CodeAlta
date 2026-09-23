@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { SessionInfoDialog } from "./SessionInfoDialog";
-import { copySessionId, dismissSessionInfoOnKey, restoreSessionInfoFocus, sessionInfoCopyFeedback, sessionInfoView } from "./sessionInfo";
+import { copySessionId, dismissSessionInfoOnKey, restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoCopyFeedback, sessionInfoView } from "./sessionInfo";
 
 const session: WorkspaceSession = {
   id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
@@ -76,6 +76,19 @@ test("a session/project switch never reuses the previous selection's info or aut
   assert.equal(sessionInfoView(changed, next, null).title, "New selection");
   assert.equal(sessionInfoView(changed, next, null).scope, "Global session");
   assert.equal(sessionInfoView(snapshot, session, "another").scopeWarning !== null, true);
+});
+
+test("session info chord selection requires a unique current catalog row in the selected project or global scope", () => {
+  assert.equal(selectedSessionInfoAvailable(snapshot, session, "p"), true);
+  assert.equal(selectedSessionInfoAvailable(undefined, session, "p"), false);
+  assert.equal(selectedSessionInfoAvailable(snapshot, undefined, "p"), false);
+  assert.equal(selectedSessionInfoAvailable(snapshot, session, null), false);
+  assert.equal(selectedSessionInfoAvailable(snapshot, session, "other"), false);
+  assert.equal(selectedSessionInfoAvailable({ ...snapshot, sessions: [session, { ...session }] }, session, "p"), false);
+  assert.equal(selectedSessionInfoAvailable({ ...snapshot, sessions: [{ ...session }] }, session, "p"), false);
+  const global = { ...session, scopeKind: "global" as const, projectId: null };
+  assert.equal(selectedSessionInfoAvailable({ ...snapshot, sessions: [global] }, global, null), true);
+  assert.equal(selectedSessionInfoAvailable({ ...snapshot, sessions: [global] }, global, "p"), false);
 });
 
 test("bounded long text wraps in a scrollable modal without revealing longer summary-derived text", () => {

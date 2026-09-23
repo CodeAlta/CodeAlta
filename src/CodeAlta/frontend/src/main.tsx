@@ -1,4 +1,4 @@
-import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
+import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -28,7 +28,7 @@ import { reconcileTimeline } from "./reconcileTimeline";
 import { TimelineMessage } from "./TimelineMessage";
 import { latestNotes } from "./timeline";
 import { bottomScrollTop, createTimelineScrollMemory } from "./timelineScroll";
-import { resolveShortcut, type ShortcutAction } from "./shortcuts";
+import { resolveShortcut, sessionInfoChordContextAllowed, sessionInfoPrefixFromKey, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
@@ -48,7 +48,7 @@ import { ProjectRailRows } from "./ProjectRailRows";
 import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisibilityKey, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import { SessionInfoDialog } from "./SessionInfoDialog";
-import { restoreSessionInfoFocus, sessionInfoView } from "./sessionInfo";
+import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView } from "./sessionInfo";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -147,8 +147,10 @@ function App() {
   const focusProjectPending = useRef(false);
   const projectFilterInput = useRef<HTMLInputElement>(null);
   const sessionRail = useRef<HTMLElement>(null);
+  const sessionInfoTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const chordPending = useRef(false);
+  const sessionInfoPrefix = useRef(false);
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
@@ -277,12 +279,24 @@ function App() {
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target?.closest("dialog[open]")) { chordPending.current = false; return; }
+      if (target?.closest("dialog[open]")) { chordPending.current = false; sessionInfoPrefix.current = false; return; }
       const editing = target?.matches("input, textarea, select, [contenteditable='true']") === true;
       const focusedProject = !!(view === "workspace" && owned && selectedProject && !selectedProject.archived
         && target?.closest('button[aria-pressed="true"]') === projectRail.current?.querySelector('button[aria-pressed="true"]'));
-      const resolved = resolveShortcut(event, chordPending.current, editing, focusedProject);
+      const trigger = sessionInfoTrigger.current;
+      const sessionInfoAvailable = sessionInfoPrefix.current && event.key.toLowerCase() === "t" && sessionInfoChordContextAllowed({
+        workspaceActive: view === "workspace",
+        modalOpen: !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
+        inWorkspace: target instanceof Node && workspaceShell.current?.contains(target) === true,
+        editing, promptFocused: target?.matches("#session-prompt, #catalog-prompt") === true,
+        triggerReady: !!trigger?.isConnected && !trigger.disabled && trigger.getAttribute("aria-expanded") === "false"
+          && workspaceShell.current?.contains(trigger) === true,
+      })
+        && selectedSessionId.current === selectedSession?.id && selectedScope.current === projectId
+        && selectedSessionInfoAvailable(snapshot, selectedSession, projectId);
+      const resolved = resolveShortcut(event, chordPending.current, editing, focusedProject, sessionInfoAvailable);
       chordPending.current = resolved.chordPending;
+      sessionInfoPrefix.current = sessionInfoPrefixFromKey(event, resolved);
       if (!resolved.handled) return;
       event.preventDefault();
       if (resolved.action) runShortcut(resolved.action);
@@ -293,7 +307,8 @@ function App() {
 
   function runShortcut(action: ShortcutAction) {
     const projects = projectListing?.projects ?? [];
-    if (action === "expandPrompt") {
+    if (action === "sessionInfo") sessionInfoTrigger.current?.click();
+    else if (action === "expandPrompt") {
       if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
     }
     else if (action === "openProject") setDialog("project");
@@ -865,7 +880,7 @@ function App() {
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
-            : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} status={status} mutation={mutation}
+            : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -889,10 +904,11 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
+  infoTrigger: RefObject<HTMLButtonElement | null>;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
   submissions: ReturnType<typeof createOwnedSubmissions>;
@@ -912,7 +928,6 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, status, mutati
   onOpenConfiguration: () => void;
 }) {
   const timeline = useRef<HTMLDivElement>(null);
-  const infoTrigger = useRef<HTMLButtonElement>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   function closeInfo() {
     const trigger = infoTrigger.current;
@@ -1167,6 +1182,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["Alt+← / Alt+→", "Previous / next project"], ["Ctrl+,", "Configuration"], ["Ctrl+Shift+N", "Toggle Alta notes"],
     ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
     ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
+    ["Ctrl+G, Ctrl+T", "Session info (selected workspace session only)"],
     ["F1 or ?", "Keyboard shortcuts"], ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
     ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor"],
   ];

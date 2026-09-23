@@ -1,4 +1,5 @@
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { sessionsForProject } from "./workspace";
 
 export type SessionInfoView = Readonly<{
   id: string;
@@ -51,6 +52,12 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     provider: session.providerKey?.trim() ? session.providerKey : null,
     updatedAt, canCopyId: true,
   };
+}
+
+export function selectedSessionInfoAvailable(snapshot: WorkspaceSnapshot | undefined, session: WorkspaceSession | undefined,
+  selectedProjectId: string | null): boolean {
+  return !!snapshot && !!session && sessionsForProject(snapshot, selectedProjectId).includes(session)
+    && sessionInfoView(snapshot, session, selectedProjectId).canCopyId;
 }
 
 export async function copySessionId(id: string, writer: () => ((text: string) => Promise<void>) | undefined):
