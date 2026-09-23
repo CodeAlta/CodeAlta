@@ -41,6 +41,8 @@ import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, ses
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
+import { SessionActionMenu } from "./SessionActionMenu";
+import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -108,6 +110,10 @@ function App() {
   const uncertainRename = useRef<{ id: string; title: string; target: RenameTarget } | null>(null);
   const [renameLocked, setRenameLocked] = useState(false);
   const selectedSessionId = useRef<string | null>(null);
+  const [menuTarget, setMenuTarget] = useState<SessionMenuTarget | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuOrigin = useRef<HTMLButtonElement>(null);
+  const focusAction = useRef<"rename" | "delete" | null>(null);
   const [creatingVisible, setCreatingVisible] = useState(false);
   const [creatingTitle, setCreatingTitle] = useState("");
   const [creatingBusy, setCreatingBusy] = useState(false);
@@ -199,6 +205,28 @@ function App() {
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
   selectedScope.current = projectId;
   selectedSessionId.current = sessionId;
+  const activeMenu = menuTarget && view === "workspace" && menuTarget.id === sessionId
+    && menuTarget.projectId === projectId && menuTarget.hostEpoch === (status?.hostEpoch ?? null)
+    && selectedSession?.id === menuTarget.id && selectedSessionId.current === menuTarget.id && selectedScope.current === projectId
+    && visibleSessions.some(session => session.id === menuTarget.id)
+    && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
+  useLayoutEffect(() => {
+    if (activeMenu) menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+  }, [activeMenu]);
+  useLayoutEffect(() => {
+    if (menuTarget || !focusAction.current) return;
+    const field = sessionRail.current?.querySelector<HTMLInputElement>(focusAction.current === "rename" ? ".session-rename input" : ".session-delete input");
+    if (field) { field.focus(); focusAction.current = null; }
+  }, [menuTarget, renamingId, deletingId]);
+  useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
+  useEffect(() => {
+    if (!activeMenu) return;
+    const dismiss = (event: globalThis.PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node) && !menuOrigin.current?.contains(event.target as Node)) setMenuTarget(null);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
@@ -243,6 +271,8 @@ function App() {
       selectProject(projects[(index + (action === "nextProject" ? 1 : -1) + projects.length) % projects.length].id);
     } else if (action === "nextSession" || action === "previousSession") {
       if (!visibleSessions.length) return;
+      setMenuTarget(null);
+      focusAction.current = null;
       const index = Math.max(0, visibleSessions.findIndex(session => session.id === sessionId));
       const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
       selectedSessionId.current = next;
@@ -251,6 +281,8 @@ function App() {
   }
 
   function selectProject(nextProjectId: string | null) {
+    setMenuTarget(null);
+    focusAction.current = null;
     projectRenameGeneration.current++;
     setProjectRenameTarget(null);
     setProjectRenameConflict(false);
@@ -267,6 +299,61 @@ function App() {
     setView("workspace");
     setCreatingVisible(false);
     setCreatingMessage("");
+  }
+
+  function dismissSessionMenu(restoreFocus: boolean) {
+    setMenuTarget(null);
+    if (restoreFocus) restoreSessionMenuFocus(menuOrigin.current);
+  }
+
+  function openSessionMenu(id: string, origin: HTMLButtonElement | null) {
+    if (!snapshot || !origin || snapshot.sessions.filter(session => session.id === id).length !== 1
+      || !sessions.some(session => session.id === id)) return;
+    menuOrigin.current = origin;
+    if (menuTarget?.id === id && menuTarget.projectId === projectId) { dismissSessionMenu(true); return; }
+    const switching = selectedSessionId.current !== id || selectedScope.current !== projectId;
+    selectedSessionId.current = id;
+    selectedScope.current = projectId;
+    setSessionId(id);
+    if (switching) {
+      setRenamingId(null);
+      setRenamingMessage("");
+      setDeletingId(null);
+      setDeletingMessage("");
+    }
+    setMenuTarget({ id, projectId, hostEpoch: status?.hostEpoch ?? null });
+  }
+
+  function beginSessionRename(row: WorkspaceSession) {
+    setRenamingId(row.id);
+    setRenamingTitle(row.title);
+    setRenamingMessage(renameLocked ? "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." : "");
+  }
+
+  function beginSessionDelete(row: WorkspaceSession) {
+    setDeletingId(row.id);
+    setDeletingConfirmation("");
+    setDeletingMessage(deleteLocked ? "Earlier deletion is unconfirmed. Refresh and inspect; no retry will be sent." : "");
+  }
+
+  function runSessionMenuAction(action: SessionAction, row: WorkspaceSession, target: SessionMenuTarget) {
+    const access = sessionActionAccess(row, target,
+      selectedSession === row && selectedSessionId.current === row.id ? sessionId : null,
+      selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+      mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
+    if (!activeMenu || activeMenu !== target || !access.open) return;
+    if (action === "open") { dismissSessionMenu(false); sessionRail.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus(); return; }
+    if (action === "rename" && !access.rename || action === "delete" && !access.delete) return;
+    focusAction.current = action;
+    dismissSessionMenu(false);
+    if (action === "rename") {
+      beginSessionRename(row);
+      setDeletingId(null);
+    } else {
+      beginSessionDelete(row);
+      setRenamingId(null);
+    }
   }
 
   async function refreshProjects(signal: AbortSignal) {
@@ -413,6 +500,10 @@ function App() {
       || selectedScope.current !== (selectedProject?.id ?? null) || renamingPending.current
       || uncertainRename.current !== null || !owned || !mutation?.capability.canMutate()
       || !session.workspacePath || selectedProject?.archived) return;
+    if (!sessionActionAccess(session, { id: session.id, projectId: projectId, hostEpoch: status?.hostEpoch ?? null },
+      selectedSessionId.current, selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+      mutation.capability.canMutate(), renamingBusy || deletingBusy || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainDelete.current).rename) return;
     const target: RenameTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path }
       : { scope: "global", projectPath: session.workspacePath };
@@ -465,6 +556,10 @@ function App() {
       || selectedScope.current !== (selectedProject?.id ?? null) || deletingPending.current || uncertainDelete.current
       || !owned || !mutation?.capability.canMutate() || !session.workspacePath || selectedProject?.archived
       || deletingConfirmation !== session.title) return;
+    if (!sessionActionAccess(session, { id: session.id, projectId: projectId, hostEpoch: status?.hostEpoch ?? null },
+      selectedSessionId.current, selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+      mutation.capability.canMutate(), deletingBusy || renamingBusy || renamingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current).delete) return;
     const target: RenameTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path }
       : { scope: "global", projectPath: session.workspacePath };
@@ -619,22 +714,46 @@ function App() {
           <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
-            {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => <div className="session-row" key={session.id}>
+            {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => {
+              const menu = activeMenu?.id === session.id ? activeMenu : null;
+              const access = sessionActionAccess(session,
+                menu ?? { id: session.id, projectId, hostEpoch: status?.hostEpoch ?? null },
+                selectedSession === session && selectedSessionId.current === session.id ? sessionId : null,
+                selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+                mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+                renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id}
+                onContextMenu={event => {
+                  const target = event.target as HTMLElement;
+                  if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
+                  event.preventDefault();
+                  openSessionMenu(session.id, event.currentTarget.querySelector<HTMLButtonElement>(".session-actions-trigger"));
+                }}
+                onKeyDown={event => {
+                  const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
+                  if (!isSessionContextKey(event.key, event.shiftKey, event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229, editing)) return;
+                  event.preventDefault(); event.stopPropagation();
+                  openSessionMenu(session.id, event.currentTarget.querySelector<HTMLButtonElement>(".session-actions-trigger"));
+                }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: 11 + Math.min(depth, 8) * 12 }}
-                onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
+                onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
                 <span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
                 <SessionDraftBadge active={draftIndicators.visible(session.id, sessionId)} />
                 <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
+              <button type="button" className="quiet-button session-actions-trigger" aria-label={`Actions for ${session.title}`}
+                aria-haspopup="menu" aria-expanded={!!menu} aria-controls={menu ? `session-actions-${index}` : undefined}
+                onClick={event => openSessionMenu(session.id, event.currentTarget)}>Actions</button>
+              {menu && access.open && <SessionActionMenu id={`session-actions-${index}`} label={session.title}
+                rename={access.rename} deleteAllowed={access.delete} menuRef={menuRef}
+                onAction={action => runSessionMenuAction(action, session, menu)} onDismiss={dismissSessionMenu} />}
               {owned && sessionId === session.id && session.workspacePath && <button type="button" className="quiet-button" aria-label={`Rename ${session.title}`}
-                disabled={renamingBusy || !mutation?.capability.canMutate()} onClick={() => { setRenamingId(session.id); setRenamingTitle(session.title);
-                  setRenamingMessage(renameLocked ? "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." : ""); }}>Rename</button>}
+                disabled={!access.rename} onClick={() => beginSessionRename(session)}>Rename</button>}
               {owned && sessionId === session.id && session.workspacePath && <button type="button" className="quiet-button" aria-label={`Delete ${session.title}`}
-                disabled={deletingBusy || !mutation?.capability.canMutate()} onClick={() => { setDeletingId(session.id); setDeletingConfirmation("");
-                  setDeletingMessage(deleteLocked ? "Earlier deletion is unconfirmed. Refresh and inspect; no retry will be sent." : ""); }}>Delete</button>}
+                disabled={!access.delete} onClick={() => beginSessionDelete(session)}>Delete</button>}
               {renamingId === session.id && <div className="session-rename"><label>New title for {session.title}
                 <input value={renamingTitle} maxLength={256} disabled={!owned || renamingBusy || renameLocked} onChange={event => setRenamingTitle(event.target.value)}
                   onKeyDown={event => { if (event.key === "Enter") void renameSelectedSession(); if (event.key === "Escape") setRenamingId(null); }} /></label>
@@ -652,7 +771,8 @@ function App() {
                 <button type="button" disabled={deletingBusy} onClick={() => setDeletingId(null)}>Cancel</button>
                 {deletingMessage && <p role="alert" className="notice error-text">{deletingMessage}</p>}
               </div>}
-            </div>)}
+            </div>;
+            })}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{search ? "No matching sessions." : "No sessions in this project."}</div>}
           </div>
           {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}
