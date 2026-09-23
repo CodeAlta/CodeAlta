@@ -34,6 +34,7 @@ import { constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizePane, 
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
+import { canImportCheckedFolder, createProjectOpening, projectOpeningMessage } from "./projectOpening";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -69,6 +70,7 @@ function App() {
   const [scrollMemory] = useState(createTimelineScrollMemory);
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [notesReader] = useState(() => createNotesReader(sessionNotes.current, sessionNotes.clear));
+  const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [inputReviewer] = useState(() => createUserInputReviewer(
     request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
     request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
@@ -193,6 +195,15 @@ function App() {
     setView("workspace");
   }
 
+  async function refreshProjects(signal: AbortSignal) {
+    try {
+      const fresh = await workspace.snapshot({}, { signal, timeoutMilliseconds: 30_000 });
+      if (signal.aborted) return undefined;
+      setWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
+      return fresh;
+    } catch { return undefined; }
+  }
+
   function changePane(pane: PaneName, delta: number) {
     setPaneLayout(current => {
       const width = workspaceShell.current?.clientWidth ?? workspaceWidth;
@@ -280,7 +291,18 @@ function App() {
                  onNotesChange={updateHistoryNotes} onOpenConfiguration={() => setView("configuration")} />}
         </main>
       </div>}
-    {dialog === "project" && <OpenProjectDialog projects={snapshot?.projects ?? []} onOpen={id => { selectProject(id); setDialog(null); }} onClose={() => setDialog(null)} />}
+    {dialog === "project" && <OpenProjectDialog projects={snapshot?.projects ?? []} epoch={owned ? status?.hostEpoch : undefined}
+      capability={owned ? mutation?.capability : undefined} opening={projectOpening}
+      onOpen={id => { selectProject(id); setDialog(null); }} onRefresh={refreshProjects}
+      onImported={async (id, path, signal) => {
+        const fresh = await refreshProjects(signal);
+        if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate()
+          || !fresh.projects.some(project => project.id === id && project.path === path)) return false;
+        setProjectId(id);
+        setSessionId(sessionsForProject(fresh, id)[0]?.id ?? null);
+        setView("workspace");
+        return true;
+      }} onClose={() => setDialog(null)} />}
     {dialog === "help" && <ShortcutHelp onClose={() => setDialog(null)} />}
   </div>;
 }
@@ -448,19 +470,100 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
 
 function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
 
-function OpenProjectDialog({ projects, onOpen, onClose }: { projects: ReadonlyArray<WorkspaceProject>; onOpen: (id: string) => void; onClose: () => void }) {
+function OpenProjectDialog({ projects, epoch, capability, opening, onOpen, onRefresh, onImported, onClose }: {
+  projects: ReadonlyArray<WorkspaceProject>; epoch: string | undefined;
+  capability: ReturnType<typeof createMutationCapability> | undefined;
+  opening: ReturnType<typeof createProjectOpening>;
+  onOpen: (id: string) => void; onRefresh: (signal: AbortSignal) => Promise<{ configured: boolean } | undefined>;
+  onImported: (id: string, path: string, signal: AbortSignal) => Promise<boolean>;
+  onClose: () => void;
+}) {
   const [query, setQuery] = useState("");
+  const [preview, setPreview] = useState<{ requestedPath: string; path: string }>();
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState("");
+  const [, notifyCapability] = useState(0);
+  const canImport = !!epoch && !!capability?.canMutate();
+  const alive = useRef(true);
+  const followUp = useRef(new AbortController());
+  useEffect(() => {
+    alive.current = true;
+    followUp.current = new AbortController();
+    return () => { alive.current = false; followUp.current.abort(); };
+  }, []);
+  useEffect(() => {
+    return capability?.subscribe(() => notifyCapability(value => value + 1));
+  }, [capability]);
+  const close = () => { alive.current = false; followUp.current.abort(); onClose(); };
+  async function checkPath() {
+    if (busy || !canImport) return;
+    const requested = query.trim();
+    setBusy(true);
+    setPreview(undefined);
+    setConfirmed(false);
+    setMessage("");
+    setNotice("");
+    const result = await opening.preview(epoch, requested, capability);
+    if (!alive.current) return;
+    setBusy(false);
+    if (result.kind === "ready") setPreview(result);
+    else setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "invalid_response"));
+  }
+  async function importPath() {
+    if (!canImportCheckedFolder(preview, confirmed, busy, canImport) || !preview) return;
+    setBusy(true);
+    setMessage("");
+    setNotice("");
+    const result = await opening.import(epoch, preview, capability);
+    if (!alive.current) return;
+    if (result.kind === "imported") {
+      if (await onImported(result.id, result.path, followUp.current.signal)) { if (alive.current) close(); return; }
+      if (!alive.current) return;
+      setMessage("The project may have been imported, but the refreshed catalog did not show it. Inspect the project list before retrying.");
+    } else setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "import_unconfirmed"));
+    setPreview(undefined);
+    setConfirmed(false);
+    setBusy(false);
+  }
+  async function refreshList() {
+    if (busy) return;
+    setBusy(true);
+    const fresh = await onRefresh(followUp.current.signal);
+    if (!alive.current) return;
+    setBusy(false);
+    if (fresh) { setMessage(""); setNotice("Project list refreshed. Check the entries before requesting another import."); }
+    else setMessage("Could not refresh the project list. No import was requested.");
+  }
   const normalized = query.trim().toLowerCase();
   const matches = projects.filter(project => !normalized || `${project.name} ${project.path}`.toLowerCase().includes(normalized));
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="open-project-title">
-      <header><div><span className="eyebrow">Workspace</span><h2 id="open-project-title">Open project</h2></div><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" size={16} /></button></header>
-      <label className="settings-search"><AppIcon name="search" size={14} /><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Project name or catalog path" /></label>
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
+    <section className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="open-project-title"
+      onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>
+      <header><div><span className="eyebrow">Workspace</span><h2 id="open-project-title">Open project</h2></div><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={close}><AppIcon name="close" size={16} /></button></header>
+      <label className="settings-search"><AppIcon name="search" size={14} /><input autoFocus aria-label="Project name or absolute folder path" value={query} disabled={busy}
+        onChange={event => { setQuery(event.target.value); setPreview(undefined); setConfirmed(false); setMessage(""); setNotice(""); }}
+        onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); }
+          else if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); void checkPath(); } }}
+        placeholder="Project name or absolute folder path" /></label>
       <div className="dialog-list">{matches.map(project => <button type="button" key={project.id} onClick={() => onOpen(project.id)}>
         <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.path}</small></span>
       </button>)}</div>
-      {matches.length === 0 && <p className="muted-text">No catalog project matches this value. Adding a new folder requires an owned host; catalog mode never changes your `.alta` project list.</p>}
-      <footer><span><kbd>Ctrl</kbd>+<kbd>O</kbd> · <kbd>Esc</kbd></span><button type="button" className="quiet-button" onClick={onClose}>Cancel</button></footer>
+      {matches.length === 0 && <p className="muted-text">No known project matches. Enter an absolute path to check another existing folder.</p>}
+      {!canImport && <p className="muted-text">Adding a folder requires an owned host. Catalog-only browsing never changes the project list.</p>}
+      {canImport && <div className="project-import">
+        <button type="button" className="quiet-button" disabled={busy || !query.trim()} onClick={() => void checkPath()}>Check folder</button>
+        {preview && <><p>Existing folder: <code>{preview.path}</code></p>
+          <label><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} /> I trust this folder and want to add it to the active project catalog.</label>
+          <button type="button" className="quiet-button" disabled={!canImportCheckedFolder(preview, confirmed, busy, canImport)} onClick={() => void importPath()}>Import and open folder</button></>}
+      </div>}
+      {busy && <p role="status">Checking or importing the folder…</p>}
+      {notice && <p role="status">{notice}</p>}
+      {message && <p role="alert" className="error-text">{message}</p>}
+      <footer><span><kbd>Ctrl</kbd>+<kbd>O</kbd> · <kbd>Esc</kbd></span><span>
+        <button type="button" className="quiet-button" disabled={busy} onClick={() => void refreshList()}>Refresh projects</button>{" "}
+        <button type="button" className="quiet-button" onClick={close}>Cancel</button></span></footer>
     </section>
   </div>;
 }

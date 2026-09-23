@@ -94,10 +94,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         var roots = options.Owned!;
         var closeRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var workspacePrepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var allowClose = false;
         var shutdownUnconfirmed = false;
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
+        WorkspaceService? workspace = null;
         NeoWindow? window = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null;
         var bodyFailed = false;
@@ -140,12 +142,18 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             }, CancellationToken.None);
             // The retained application flow reacts even while a native acquisition is awaiting.
             // No native callback awaits this work; a close during host creation waits its actual result.
-            _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation);
+            _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, async () =>
+            {
+                await workspacePrepared.Task;
+                if (workspace is not null) await workspace.CloseImportsAsync();
+            });
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
+                workspace = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, epoch);
+                workspacePrepared.TrySetResult();
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 var assets = Path.Combine(AppContext.BaseDirectory, "assets");
@@ -166,7 +174,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                         MaximumChannelsPerSession = 2, MaximumUnacknowledgedChannelItems = 2,
                     });
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
-                    builder.AddWorkspaceService(new WorkspaceService(host.WorkspaceReads));
+                    builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
@@ -196,10 +204,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     }
                 }
             }
+            else workspacePrepared.TrySetResult();
             await closeRequested.Task;
         }
         catch (Exception failure)
         {
+            workspacePrepared.TrySetResult();
             LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "Owned desktop initialization or application flow failed");
             bodyFailed = true;
             closeRequested.TrySetResult();
@@ -267,10 +277,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         application.ForceShutdown(); // Only after confirmed host and native-resource disposal.
     }
 
-    private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation)
+    private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation, Func<Task> closeImports)
     {
         await closeRequested;
         var host = await creation;
+        await closeImports();
         _hostDisposal = host.DisposeAsync().AsTask();
         await _hostDisposal;
     }
