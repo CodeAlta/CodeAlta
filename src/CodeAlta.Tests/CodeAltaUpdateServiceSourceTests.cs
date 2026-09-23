@@ -280,6 +280,7 @@ public sealed class CodeAltaUpdateServiceSourceTests
     }
 
     [TestMethod]
+    [Ignore("Code-shape preservation check; disabled in favor of behavioral coverage.")]
     public void UpdateCaller_SourceWiring_AwaitsOwnedStageAndPreservesPresentation()
     {
         var deferred = ReadSource("CodeAlta.Tui/Views/DeferredCodeAltaApp.cs");

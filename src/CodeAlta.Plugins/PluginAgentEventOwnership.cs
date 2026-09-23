@@ -207,12 +207,19 @@ public sealed partial class ActivePluginInstance
         Contributions = [];
         await QuiesceAgentEventsAsync().ConfigureAwait(false);
         // A fault leaves the instance, context, CTS and load context retained; no finally-release.
+        await DeactivateAndReleaseInstanceAsync().ConfigureAwait(false);
+        VerifyUnload(_deactivationDiagnostics);
+        _lifetime.Dispose();
+    }
+
+    // Separate plugin-bearing locals from the frame that verifies collectibility, including
+    // Tier-0 code where synchronous plugin hooks can leave their arguments live on the stack.
+    private async ValueTask DeactivateAndReleaseInstanceAsync()
+    {
         await DeactivatePluginInstanceAsync(_instance, CancellationToken.None).ConfigureAwait(false);
         RuntimeContext.Invalidate();
         State = PluginRuntimeState.Deactivated;
         _instance = null;
-        VerifyUnload(_deactivationDiagnostics);
-        _lifetime.Dispose();
     }
 
     private async ValueTask<IReadOnlyList<PluginRuntimeDiagnostic>> WaitDeactivationAsync(TimeSpan timeout, CancellationToken cancellationToken)

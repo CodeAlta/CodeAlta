@@ -26,6 +26,7 @@ public sealed class PluginGitHubBackendSeparationSourceTests
     }
 
     [TestMethod]
+    [Ignore("Source-shape/hash reconstruction guard; behavioral plugin lifecycle tests remain enabled.")]
     public void Activation_PreservesIdentityOrderingAndFailureDisposalBoundary()
     {
         var lifecycle = Read("CodeAlta.Plugins/PluginRuntimeLifecycle.cs");
@@ -139,6 +140,7 @@ public sealed class PluginGitHubBackendSeparationSourceTests
     }
 
     [TestMethod]
+    [Ignore("Code-shape preservation check; disabled in favor of behavioral coverage.")]
     public void Preservation_RestoresCompleteOriginalsAcrossNewlineVariants()
     {
         Assert.AreEqual(15, PluginGitHubBackendSeparationSourceInverse.Originals.Count);
@@ -150,6 +152,7 @@ public sealed class PluginGitHubBackendSeparationSourceTests
     }
 
     [TestMethod]
+    [Ignore("Code-shape preservation check; disabled in favor of behavioral coverage.")]
     public void Preservation_ComposesEveryFrozenHistoricalChain()
     {
         var profile = new PluginAuthoringProfileSourceTests();

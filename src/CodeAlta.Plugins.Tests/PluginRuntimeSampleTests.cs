@@ -47,6 +47,8 @@ public sealed class PluginRuntimeSampleTests
         var root = new PluginRoot { RootPath = temp.Path, Scope = CodeAlta.Plugins.Abstractions.PluginScope.Global };
         var generation = await new PluginRootBuildFileGenerator().GenerateAsync(root, new PluginRootBuildFileOptions
         {
+            // This suite deliberately includes native terminal UI samples.
+            AuthoringProfile = PluginAuthoringProfile.Terminal,
             CodeAltaExeFolder = AppContext.BaseDirectory,
             GlobalJsonContent = """
 {
@@ -83,7 +85,7 @@ public sealed class PluginRuntimeSampleTests
 
     private static WeakReference LoadDiscoverAndStartUnload(PluginBuildResult buildResult)
     {
-        var loadResult = new PluginAssemblyLoader().Load(buildResult);
+        var loadResult = new PluginAssemblyLoader(PluginAuthoringProfile.Terminal).Load(buildResult);
         Assert.IsTrue(loadResult.Succeeded, string.Join(Environment.NewLine, loadResult.Diagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.IsNotNull(loadResult.LoadContext);
         Assert.IsTrue(new PluginTypeDiscoveryService().Discover(loadResult).Count > 0, buildResult.Package.PackageId);

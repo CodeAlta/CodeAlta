@@ -254,7 +254,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">The runtime has been disposed.</exception>
     public async Task UpdateNotesAsync(string sessionId, string markdown, AgentNotesUpdateKind kind,
         Action<AgentNotesEvent> committed, CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => UpdateNotesOwnedBodyAsync(sessionId, markdown, kind, committed, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        // The journal owns the cancellation cutoff: after commit, feedback must settle rather
+        // than presenting a cancelled waiter as though the write had not happened.
+        => await AdmitAsync(() => UpdateNotesOwnedBodyAsync(sessionId, markdown, kind, committed, cancellationToken), cancellationToken).ConfigureAwait(false);
 
     private async Task UpdateNotesOwnedBodyAsync(string sessionId, string markdown, AgentNotesUpdateKind kind,
         Action<AgentNotesEvent> committed, CancellationToken cancellationToken)
@@ -924,6 +926,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ReserveSessionIdentity(session);
         ArgumentNullException.ThrowIfNull(options);
+        string? preparedPrompt = null;
         while (true)
         {
             ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
@@ -931,16 +934,19 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var prepared = await actor.QueryAsync(
                 actorCancellationToken => history && _entries.TryGetValue(session.SessionId, out var active) && !active.IsTerminated && !active.Attachment.IsRetiring
                     ? ValueTask.FromResult(new CoordinatorPreparation(active, null))
-                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt),
+                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt, preparedPrompt),
                 CancellationToken.None).ConfigureAwait(false);
             if (prepared.Entry is not null) return prepared.Entry;
+            // Keep the pending prompt consumed by this request across its transition join.
+            // Otherwise stale caller options immediately recreate the just-prepared attachment.
+            preparedPrompt = prepared.SelectedPrompt ?? preparedPrompt;
             await prepared.Transition!.ConfigureAwait(false);
         }
     }
 
     // Actor prepare only: callers join the returned ticket outside the mailbox.
     private async ValueTask<CoordinatorPreparation> EnsureCoordinatorSessionCoreAsync(
-        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false)
+        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false, string? preparedPrompt = null)
     {
         actorCancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
@@ -948,7 +954,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
         var prompt = (useExplicitPrompt ? null : NormalizeOptionalText(existing?.PendingAgentPromptId))
-            ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
+            ?? preparedPrompt ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
         if (ownedCommand && existing is not null && !existing.Matches(options, prompt)
             && (existing.HasActiveRun || existing.QueueDrainInProgress || !HasOwnedCommandDefaults(existing)))
             throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
@@ -1008,10 +1014,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _transitions[session.SessionId] = transition;
         ticket = transition;
         launch.TrySetResult();
-        return new CoordinatorPreparation(null, transition);
+        return new CoordinatorPreparation(null, transition, prompt);
     }
 
-    private sealed record CoordinatorPreparation(RuntimeSessionEntry? Entry, Task? Transition);
+    private sealed record CoordinatorPreparation(RuntimeSessionEntry? Entry, Task? Transition, string? SelectedPrompt = null);
 
     private async ValueTask<AgentSessionHandleId> CreateCoordinatorSessionAsync(
         SessionViewDescriptor session,
@@ -2607,7 +2613,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 CancellationToken.None)
             .ConfigureAwait(false);
         if (transition is null) return work;
-        await transition.ConfigureAwait(false);
+        try { await transition.ConfigureAwait(false); }
+        catch (ObjectDisposedException failure) when (_forwarding.IsClosed
+            && failure.ObjectName == typeof(SessionRuntimeService).FullName)
+        {
+            // A late attachment can be retired by shutdown before publication. The original
+            // Ensure caller observes that refusal; an opportunistic queue tail has nothing to drain.
+            return null;
+        }
         // Re-read durable queue state after transition; never reuse the earlier state/item.
         }
         return null;

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
 
@@ -75,15 +76,12 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
 
     private void VerifyUnload(List<PluginRuntimeDiagnostic> diagnostics)
     {
-        var loadContext = _loadContext;
-        _loadContext = null;
-        if (loadContext is null)
+        var unloadReference = DetachLoadContext();
+        if (unloadReference is null)
         {
             return;
         }
 
-        var unloadReference = PluginAssemblyLoader.CreateUnloadWeakReference(loadContext);
-        loadContext = null;
         var unloaded = PluginAssemblyLoader.VerifyUnload(unloadReference);
         State = unloaded ? PluginRuntimeState.Unloaded : PluginRuntimeState.Failed;
         if (!unloaded)
@@ -94,6 +92,16 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
                 SourcePackage?.PackageId,
                 SourcePackage?.PackageDirectory));
         }
+    }
+
+    // Keep the last strong local out of the stack frame that forces GC. Assigning null in that
+    // frame is not sufficient: the JIT may keep the local live through unload verification.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private WeakReference? DetachLoadContext()
+    {
+        var loadContext = _loadContext;
+        _loadContext = null;
+        return loadContext is null ? null : PluginAssemblyLoader.CreateUnloadWeakReference(loadContext);
     }
 
     private static async ValueTask DeactivatePluginInstanceAsync(PluginBase? instance, CancellationToken cancellationToken)

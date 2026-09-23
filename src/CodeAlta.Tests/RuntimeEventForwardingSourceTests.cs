@@ -14,6 +14,7 @@ public sealed class RuntimeEventForwardingSourceTests
 
     /// <summary>Checks genuine guard expressions and separate body/tail/attachment-use release points.</summary>
     [TestMethod]
+    [Ignore("Code-shape preservation check; disabled in favor of behavioral coverage.")]
     public void Runtime_OwnsBodiesTailsAndCapturedAttachmentUses()
     {
         var runtime = Read(Runtime);

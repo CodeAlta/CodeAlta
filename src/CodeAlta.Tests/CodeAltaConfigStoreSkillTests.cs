@@ -1,4 +1,6 @@
 using CodeAlta.Catalog;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace CodeAlta.Tests;
 
@@ -6,7 +8,7 @@ namespace CodeAlta.Tests;
 public sealed class CodeAltaConfigStoreSkillTests
 {
     [TestMethod]
-    public void SaveDisabledSkillNames_NormalizesRoundTripsAndPrunesEmptySkillsSection()
+    public void SaveDisabledSkillNames_NormalizesRoundTripsAndClearsDisabledNames()
     {
         var tempPath = Path.Combine(Path.GetTempPath(), "CodeAltaConfigStoreSkillTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempPath);
@@ -20,8 +22,10 @@ public sealed class CodeAltaConfigStoreSkillTests
                 new[] { "other-skill", "sample-skill", "zed-skill" },
                 store.LoadGlobalDisabledSkillNames().OrderBy(static name => name, StringComparer.OrdinalIgnoreCase).ToArray());
             var content = File.ReadAllText(Path.Combine(tempPath, "config.toml"));
-            StringAssert.Contains(content, "[skills]");
-            StringAssert.Contains(content, "disabled = [\"other-skill\", \"sample-skill\", \"zed-skill\"]");
+            var table = TomlSerializer.Deserialize<TomlTable>(content)!;
+            var skills = (TomlTable)table["skills"];
+            CollectionAssert.AreEqual(new[] { "other-skill", "sample-skill", "zed-skill" },
+                ((TomlArray)skills["disabled"]).Cast<string>().ToArray());
 
             store.SaveGlobalSkillEnabled("sample-skill", enabled: true);
             CollectionAssert.AreEqual(
@@ -30,7 +34,14 @@ public sealed class CodeAltaConfigStoreSkillTests
 
             store.SaveGlobalDisabledSkillNames([]);
             content = File.ReadAllText(Path.Combine(tempPath, "config.toml"));
-            Assert.IsFalse(content.Contains("[skills]", StringComparison.OrdinalIgnoreCase));
+            // Syntax-preserving updates can retain a dotted key/table and its comments.
+            // Assert the saved meaning, not one particular TOML spelling or pruning strategy.
+            table = TomlSerializer.Deserialize<TomlTable>(content)!;
+            if (table.TryGetValue("skills", out var savedSkills)
+                && ((TomlTable)savedSkills).TryGetValue("disabled", out var disabled))
+            {
+                Assert.AreEqual(0, ((TomlArray)disabled).Count);
+            }
             Assert.AreEqual(0, store.LoadGlobalDisabledSkillNames().Count);
         }
         finally

@@ -232,7 +232,9 @@ internal sealed class OwnedProviderEventForwarding
         unsubscribeStage.Launch();
         await CaptureAsync(attachment.Ordinal, 3, unsubscribe, attachment.Identity).ConfigureAwait(false);
         await WaitUsesAsync(attachment, projection: true).ConfigureAwait(false);
-        await WaitCallbacksAsync(attachment).ConfigureAwait(false);
+        // A callback tail can replace this attachment (or drain a queued prompt) after releasing
+        // its projection use. Joining that tail here would join our own retirement. The runtime
+        // close still joins every complete callback through _active before releasing dependencies.
         foreach (var stage in attachment.Stages) await stage.Observer.ConfigureAwait(false);
         if (!unsubscribeStage.Succeeded || attachment.RetainedUses.Count != 0 || HasRetainedDependencies())
         {
@@ -275,20 +277,6 @@ internal sealed class OwnedProviderEventForwarding
             // A failed required receipt is itself evidence, even when no callback returned an original.
             if (failures.Length == 0) failures = [new InvalidOperationException("A required forwarding release receipt is missing.")];
             return new AgentDependencyRetentionException("provider forwarding", stage, failures, new { Owner = this, Dependencies = dependencies });
-        }
-    }
-
-    private async Task WaitCallbacksAsync(Attachment attachment)
-    {
-        while (true)
-        {
-            Task changed;
-            lock (_gate)
-            {
-                if (attachment.ActiveCallbacks == 0) return;
-                changed = _changed.Task;
-            }
-            await changed.ConfigureAwait(false);
         }
     }
 

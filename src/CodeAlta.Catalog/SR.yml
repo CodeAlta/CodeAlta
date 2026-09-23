@@ -9186,6 +9186,36 @@
   fr: "{0}m fenêtre"
   ja: "{0}m ウィンドウ"
   zh: "{0} 分钟窗口"
+"Continue":
+  de: "Fortfahren"
+  es: "Continuar"
+  fr: "Continuer"
+  ja: "続行"
+  zh: "继续"
+"Pending workspace changes saved.":
+  de: "Ausstehende Arbeitsbereichsänderungen gespeichert."
+  es: "Se guardaron los cambios pendientes del espacio de trabajo."
+  fr: "Les modifications en attente de l’espace de travail ont été enregistrées."
+  ja: "保留中のワークスペースの変更を保存しました。"
+  zh: "已保存待处理的工作区更改。"
+"Unknown error":
+  de: "Unbekannter Fehler"
+  es: "Error desconocido"
+  fr: "Erreur inconnue"
+  ja: "不明なエラー"
+  zh: "未知错误"
+"Workspace changes remain pending. Save failed: {0}":
+  de: "Arbeitsbereichsänderungen bleiben ausstehend. Speichern fehlgeschlagen: {0}"
+  es: "Los cambios del espacio de trabajo siguen pendientes. Error al guardar: {0}"
+  fr: "Les modifications de l’espace de travail restent en attente. Échec de l’enregistrement : {0}"
+  ja: "ワークスペースの変更は保留中です。保存に失敗しました: {0}"
+  zh: "工作区更改仍待处理。保存失败：{0}"
+"Workspace state changed externally. Changes remain pending and were not saved.":
+  de: "Der Arbeitsbereichszustand wurde extern geändert. Änderungen bleiben ausstehend und wurden nicht gespeichert."
+  es: "El estado del espacio de trabajo cambió externamente. Los cambios siguen pendientes y no se guardaron."
+  fr: "L’état de l’espace de travail a été modifié de l’extérieur. Les modifications restent en attente et n’ont pas été enregistrées."
+  ja: "ワークスペースの状態が外部で変更されました。変更は保留中のままで、保存されていません。"
+  zh: "工作区状态已被外部更改。更改仍待处理，尚未保存。"
 "| Quota | Usage | Status |":
   de: "| Kontingent | Nutzung | Status |"
   es: "| Cuota | Uso | Estado |"

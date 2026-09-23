@@ -110,7 +110,8 @@ public sealed partial class StringResourceTests
         var builder = ImmutableSortedSet.CreateBuilder<string>(StringComparer.Ordinal);
         foreach (var path in Directory.EnumerateFiles(sourceRoot.FullName, "*.cs", SearchOption.AllDirectories))
         {
-            if (IsGeneratedOrBuildOutput(path))
+            // Test fixtures contain quoted SR.T source snippets, not user-visible translation calls.
+            if (IsGeneratedOrBuildOutput(path) || path.Split(Path.DirectorySeparatorChar).Any(part => part.EndsWith(".Tests", StringComparison.Ordinal)))
             {
                 continue;
             }

@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Orchestration.Tests;
@@ -152,16 +153,21 @@ public sealed class OwnedProviderEventForwardingTests
         var callback = f.Track(f.Owner.Forward(attachment, _ => Task.FromException(callbackError)));
         Assert.AreSame(callbackError, await f.Expect<FormatException>(callback));
         var retirement = f.Track(f.Owner.RetireAsync(attachment));
-        var retirementFailure = await f.Expect<AggregateException>(retirement);
-        Assert.AreSame(unsubscribeError, retirementFailure.InnerExceptions.Single());
+        var retirementFailure = await f.Expect<AgentDependencyRetentionException>(retirement);
+        Assert.AreEqual("attachment prerequisites", retirementFailure.Stage);
+        Assert.IsNotNull(retirementFailure.Dependencies);
         var close = f.Track(f.Close());
-        var closeFailure = await f.Expect<AggregateException>(close);
+        var closeFailure = await f.Expect<AgentDependencyRetentionException>(close);
         Assert.IsFalse(stopStarted.Task.IsCompleted);
         Assert.IsFalse(attachment.Stopped);
         Assert.IsFalse(f.ActorsDisposed);
-        Assert.AreSame(f.Owner, closeFailure.Data["RetainedForwardingOwner"]);
-        Assert.AreEqual(2, closeFailure.InnerExceptions.Count);
-        var failures = closeFailure.InnerExceptions.Cast<OwnedProviderEventForwarding.AttachmentFailureException>().ToArray();
+        Assert.AreEqual("runtime drainage", closeFailure.Stage);
+        Assert.IsNotNull(closeFailure.Dependencies);
+        Assert.IsTrue(f.Owner.IsClosed);
+        Assert.IsTrue(closeFailure.InnerExceptions.Contains(retirementFailure));
+        var failures = retirementFailure.InnerExceptions.Cast<OwnedProviderEventForwarding.AttachmentFailureException>().ToArray();
+        Assert.AreEqual(2, failures.Length);
+        foreach (var failure in failures) Assert.IsTrue(closeFailure.InnerExceptions.Contains(failure));
         Assert.AreSame(unsubscribeError, failures[0].InnerException);
         Assert.AreEqual(3, failures[0].Stage);
         Assert.AreSame(callbackError, failures[1].InnerException);
