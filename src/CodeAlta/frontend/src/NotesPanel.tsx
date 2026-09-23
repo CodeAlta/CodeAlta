@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { MarkdownContent } from "./MarkdownContent";
-import { copyNotesMarkdown, notesMessage, type createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
+import { canClearNotes, copyNotesMarkdown, notesMessage, type createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
 import { notesResizeKey, visibleNotesHeight } from "./notesHeight";
 import { AppIcon } from "./AppIcon";
@@ -64,6 +64,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
   const copied = copyStatus && copyStatus.epoch === epoch && copyStatus.sessionId === sessionId ? copyStatus.kind : undefined;
   const selected = selection.current;
   const current = selected && selected.epoch === epoch && selected.sessionId === sessionId ? selected.actions : undefined;
+  const clearEnabled = !!current && canClearNotes(state, current.uncertainClear(), !!capability?.canMutate(), result);
   const markdown = state?.kind === "ready" ? state.markdown : fallbackMarkdown;
   const height = visibleNotesHeight(preferredHeight, railHeight);
   const showAction = (value: NotesClearState) => {
@@ -92,13 +93,17 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     <section ref={pane} className="notes-pane" aria-label="Alta notes" tabIndex={-1} style={{ height }}>
       <header><span><strong>Alta notes</strong><small>Markdown · session scoped</small></span><span>
         {current && <button type="button" title="Refresh notes" aria-label="Refresh notes" disabled={result?.kind === "clearing"}
-          onClick={() => void current.refresh()}><AppIcon name="refresh" size={14} /></button>}
+          onClick={() => void current.reconcile().then(() => {
+            if (selection.current?.actions === current && !current.uncertainClear())
+              setAction(previous => previous && previous.epoch === epoch && previous.sessionId === sessionId
+                && previous.state.kind === "error" && previous.state.code === "clear_unconfirmed" ? undefined : previous);
+          })}><AppIcon name="refresh" size={14} /></button>}
         <button type="button" title="Copy notes as Markdown" aria-label="Copy notes as Markdown"
           disabled={state?.kind !== "ready" || !state.markdown || result?.kind === "clearing"}
           onClick={() => { if (state?.kind === "ready" && epoch && sessionId) void copyNotesMarkdown(state.markdown, text => navigator.clipboard.writeText(text))
             .then(kind => { if (selection.current === selected) setCopyStatus({ epoch, sessionId, kind }); }); }}>Copy</button>
-        <button type="button" title="Clear notes" aria-label="Clear notes" disabled={!current || !capability?.canMutate() || state?.kind !== "ready" || !state.markdown || result?.kind === "clearing"}
-          onClick={() => { if (current && sessionId) void current.clear(showAction, () => onCleared(sessionId)); }}>Clear</button>
+        <button type="button" title="Clear notes" aria-label="Clear notes" disabled={!clearEnabled}
+          onClick={() => { if (clearEnabled && current && sessionId) void current.clear(showAction, () => onCleared(sessionId)); }}>Clear</button>
         <button type="button" title="Hide notes" aria-label="Hide notes" onClick={onClose}><AppIcon name="close" size={14} /></button>
       </span></header>
       <div className="notes-content">
@@ -109,7 +114,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
         {copied === "copy_failed" && <p role="alert" className="error-text">Clipboard write failed. Notes were not changed.</p>}
         {result?.kind === "clearing" && <p role="status">Clearing notes…</p>}
         {result?.kind === "error" && <p role="alert" className="error-text">{result.code === "stale_epoch" ? "Host changed. Reload before further operations." :
-          result.code === "clear_unconfirmed" ? "Clear outcome is uncertain. Read this session's notes again before retrying." :
+          result.code === "clear_unconfirmed" ? "Clear outcome is uncertain. Refresh and confirm notes still exist before another Clear." :
             "Notes could not be cleared. Read this session's notes again before retrying."}</p>}
         {result?.kind === "cleared" && <p role="status">Notes cleared.</p>}
         {sessionId && !markdown && state?.kind !== "loading" && <p className="muted-text">No notes for this session.</p>}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { copyNotesMarkdown, createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
+import { canClearNotes, copyNotesMarkdown, createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
 import { createMutationCapability } from "./sessionOperations";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -242,7 +242,7 @@ test("clear response from another host revokes future mutations even after switc
   finally { first.abort(); second.abort(); await finish(original, owner, primary); }
 });
 
-test("uncertain clear remains visible after switching or remounting until a confirmed clear", async () => {
+test("uncertain clear refuses repeat across selection and remount until an explicit fresh read proves content", async () => {
   let release!: (value: unknown) => void;
   const pending = new Promise<unknown>(resolve => { release = resolve; });
   let calls = 0;
@@ -261,12 +261,86 @@ test("uncertain clear remains visible after switching or remounting until a conf
     await join(work, owner);
     const returned = owner.forSelection(epoch, "session", second.signal, () => {}, () => {});
     assert.deepEqual(returned.uncertainClear(), { kind: "error", code: "clear_unconfirmed" });
-    assert.equal(owner.forSelection(otherEpoch, "session", second.signal, () => {}, () => {}).uncertainClear(), undefined);
+    assert.equal(canClearNotes({ kind: "ready", markdown: "# Keep" }, returned.uncertainClear(), true, undefined), false);
+    await join(acquire(originals, () => returned.clear(() => {}, () => {})), owner);
+    assert.equal(calls, 1);
+    await join(acquire(originals, () => returned.refresh()), owner); // Automatic selection refresh does not authorize retry.
+    await join(acquire(originals, () => returned.clear(() => {}, () => {})), owner);
+    assert.equal(calls, 1);
     const retry = owner.forSelection(epoch, "session", second.signal, () => {}, () => {});
+    await join(acquire(originals, () => retry.reconcile()), owner); // Explicit request, validated nonempty response.
+    assert.equal(retry.uncertainClear(), undefined);
+    assert.equal(canClearNotes({ kind: "ready", markdown: "# Keep" }, retry.uncertainClear(), true, undefined), true);
     await join(acquire(originals, () => retry.clear(() => {}, () => {})), owner);
+    assert.equal(calls, 2);
     assert.equal(retry.uncertainClear(), undefined);
   } catch (error) { primary = error; throw error; }
   finally { first.abort(); second.abort(); release({ status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "session" }); await finish(originals, owner, primary); }
+});
+
+test("uncertain clear stays locked after failed, malformed or empty explicit reads", async () => {
+  const reads: unknown[] = [reply("# Initial"), { ...reply(), status: "read_failed", markdown: null },
+    { ...reply(), sessionId: "other" }, reply(""), reply("# Verified")];
+  let calls = 0; let clears = 0;
+  const owner = createNotesReader(async () => reads[calls++], async () => { clears++; return { status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "session" }; });
+  const controller = new AbortController(); const originals: Promise<unknown>[] = [];
+  let primary: unknown;
+  try {
+    const selected = owner.forSelection(epoch, "session", controller.signal, () => {}, () => {});
+    await join(acquire(originals, () => selected.refresh()), owner);
+    await join(acquire(originals, () => selected.clear(() => {}, () => {})), owner);
+    for (let index = 1; index < reads.length - 1; index++) {
+      await join(acquire(originals, () => selected.reconcile()), owner);
+      assert.deepEqual(selected.uncertainClear(), { kind: "error", code: "clear_unconfirmed" });
+      assert.equal(canClearNotes({ kind: "ready", markdown: "# Initial" }, selected.uncertainClear(), true, undefined), false);
+      await join(acquire(originals, () => selected.clear(() => {}, () => {})), owner);
+      assert.equal(clears, 1);
+    }
+    await join(acquire(originals, () => selected.reconcile()), owner);
+    assert.equal(selected.uncertainClear(), undefined);
+    await join(acquire(originals, () => selected.clear(() => {}, () => {})), owner);
+    assert.equal(clears, 2);
+  } catch (error) { primary = error; throw error; }
+  finally { controller.abort(); await finish(originals, owner, primary); }
+});
+
+test("clear controls agree with owner lock, pending state and explicit reconciliation", () => {
+  const ready: NotesState = { kind: "ready", markdown: "# Retained" };
+  const uncertain: NotesClearState = { kind: "error", code: "clear_unconfirmed" };
+  assert.equal(canClearNotes(ready, uncertain, true, uncertain), false);
+  assert.equal(canClearNotes(ready, undefined, true, uncertain), false); // Until visible warning is cleared.
+  assert.equal(canClearNotes(ready, undefined, true, undefined), true);
+  assert.equal(canClearNotes(ready, undefined, false, undefined), false);
+  assert.equal(canClearNotes(ready, undefined, true, { kind: "clearing" }), false);
+  assert.equal(canClearNotes({ kind: "error", code: "read_failed" }, undefined, true, undefined), false);
+  assert.equal(canClearNotes({ kind: "ready", markdown: "" }, undefined, true, undefined), false);
+});
+
+test("host change drops old uncertainty without admitting stale callbacks on the new epoch", async () => {
+  let release!: (value: unknown) => void;
+  const pending = new Promise<unknown>(resolve => { release = resolve; });
+  let calls = 0; const owner = createNotesReader(async request => ({ ...reply("# Existing"), sessionId: request.sessionId }),
+    request => { calls++; return request.sessionId === "session" ? Promise.resolve({ status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "session" }) : pending; });
+  const first = new AbortController(); const second = new AbortController(); const originals: Promise<unknown>[] = [pending];
+  let primary: unknown;
+  try {
+    const before = owner.forSelection(epoch, "session", first.signal, () => {}, () => {});
+    await join(acquire(originals, () => before.refresh()), owner);
+    await join(acquire(originals, () => before.clear(() => {}, () => {})), owner);
+    assert.deepEqual(before.uncertainClear(), { kind: "error", code: "clear_unconfirmed" });
+    const other = owner.forSelection(epoch, "other", first.signal, () => {}, () => {});
+    await join(acquire(originals, () => other.refresh()), owner);
+    const original = acquire(originals, () => other.clear(() => {}, () => {}));
+    first.abort();
+    const after = owner.forSelection(otherEpoch, "session", second.signal, () => {}, () => {});
+    assert.equal(after.uncertainClear(), undefined);
+    assert.equal(before.uncertainClear(), undefined);
+    release({ status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "other" });
+    await join(original, owner);
+    assert.equal(after.uncertainClear(), undefined);
+    assert.equal(calls, 2);
+  } catch (error) { primary = error; throw error; }
+  finally { first.abort(); second.abort(); release({ status: "clear_unconfirmed", hostEpoch: epoch, sessionId: "other" }); await finish(originals, owner, primary); }
 });
 
 function acquire<T>(originals: Promise<unknown>[], start: () => Promise<T>): Promise<T> {
