@@ -37,6 +37,7 @@ import { sessionTime } from "./sessionTime";
 import { canImportCheckedFolder, createProjectOpening, projectOpeningMessage } from "./projectOpening";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
+import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -75,6 +76,14 @@ function App() {
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [createSession] = useState(() => createSessionCreation(workspace.createSession));
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
+  const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingConfirmation, setDeletingConfirmation] = useState("");
+  const [deletingBusy, setDeletingBusy] = useState(false);
+  const [deletingMessage, setDeletingMessage] = useState("");
+  const deletingPending = useRef(false);
+  const uncertainDelete = useRef<DeletedTarget | null>(null);
+  const [deleteLocked, setDeleteLocked] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [renamingBusy, setRenamingBusy] = useState(false);
@@ -227,6 +236,8 @@ function App() {
     selectedSessionId.current = nextSessions[0]?.id ?? null;
     setRenamingId(null);
     setRenamingMessage("");
+    setDeletingId(null);
+    setDeletingMessage("");
     setView("workspace");
     setCreatingVisible(false);
     setCreatingMessage("");
@@ -323,6 +334,68 @@ function App() {
     } else if (selectedSessionId.current === original.id) setRenamingMessage("Title not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
   }
 
+  async function deleteSelectedSession() {
+    const session = selectedSession;
+    if (!session || session.id !== deletingId || selectedSessionId.current !== session.id
+      || selectedScope.current !== (selectedProject?.id ?? null) || deletingPending.current || uncertainDelete.current
+      || !owned || !mutation?.capability.canMutate() || !session.workspacePath || selectedProject?.archived
+      || deletingConfirmation !== session.title) return;
+    const target: RenameTarget = selectedProject
+      ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path }
+      : { scope: "global", projectPath: session.workspacePath };
+    const captured: DeletedTarget = { target, id: session.id };
+    const capability = mutation.capability;
+    deletingPending.current = true;
+    setDeletingBusy(true);
+    setDeletingMessage("");
+    try {
+      const result = await deleteSession(status?.hostEpoch, target, session.id, session.title, deletingConfirmation, capability);
+      if (!creationAlive.current) return;
+      if (result.kind === "deleted") {
+        const fresh = await refreshProjects(creationRefresh.current.signal);
+        if (!creationAlive.current) return;
+        const recovered = fresh && deletedSessionRecovery(fresh, result);
+        if (recovered && capability.canMutate()) {
+          if (deleteSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
+            selectedSessionId.current = recovered.sessionId;
+            setSessionId(recovered.sessionId);
+          }
+          setDeletingId(null);
+          setDeletingConfirmation("");
+        } else {
+          uncertainDelete.current = captured;
+          setDeleteLocked(true);
+          if (selectedSessionId.current === session.id) setDeletingMessage("Deletion may have completed, but the refreshed catalog did not confirm absence. No retry will be sent.");
+        }
+      } else {
+        if (result.code === "delete_unconfirmed") {
+          uncertainDelete.current = captured;
+          setDeleteLocked(true);
+        }
+        if (selectedSessionId.current === session.id) setDeletingMessage(sessionDeletionMessage(result.code));
+      }
+    } finally { deletingPending.current = false; if (creationAlive.current) setDeletingBusy(false); }
+  }
+
+  async function refreshDeletedSession() {
+    const captured = uncertainDelete.current;
+    const fresh = await refreshProjects(creationRefresh.current.signal);
+    if (!creationAlive.current || !captured) return;
+    const recovered = fresh && deletedSessionRecovery(fresh, captured);
+    if (recovered) {
+      uncertainDelete.current = null;
+      setDeleteLocked(false);
+      if (deleteSelectionCurrent(captured, selectedScope.current, selectedSessionId.current)) {
+        selectedSessionId.current = recovered.sessionId;
+        setSessionId(recovered.sessionId);
+      }
+      setDeletingId(null);
+      setDeletingConfirmation("");
+      setDeletingMessage("");
+    } else if (selectedSessionId.current === captured.id)
+      setDeletingMessage("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
+  }
+
   function changePane(pane: PaneName, delta: number) {
     setPaneLayout(current => {
       const width = workspaceShell.current?.clientWidth ?? workspaceWidth;
@@ -398,24 +471,40 @@ function App() {
           {renameLocked && <div role="alert" className="notice error-text">A rename is unconfirmed. No further rename will be sent until the exact title is visible after refresh.
             <button type="button" className="quiet-button" onClick={() => void refreshRenamedSession()}>Refresh title</button>
           </div>}
+          {deleteLocked && <div role="alert" className="notice error-text">A deletion is unconfirmed. No further deletion will be sent until a complete refresh confirms absence.
+            <button type="button" className="quiet-button" onClick={() => void refreshDeletedSession()}>Refresh session list</button>
+          </div>}
           {!owned && <p className="muted-text">Session creation requires an owned host.</p>}
           <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
             {visibleSessions.map(session => <div className="session-row" key={session.id}>
-              <button type="button" aria-pressed={sessionId === session.id} onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); }}>
+              <button type="button" aria-pressed={sessionId === session.id} onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
                 <span className="session-title">{session.title}</span>
                 <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
               {owned && sessionId === session.id && session.workspacePath && <button type="button" className="quiet-button" aria-label={`Rename ${session.title}`}
                 disabled={renamingBusy || !mutation?.capability.canMutate()} onClick={() => { setRenamingId(session.id); setRenamingTitle(session.title);
                   setRenamingMessage(renameLocked ? "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." : ""); }}>Rename</button>}
+              {owned && sessionId === session.id && session.workspacePath && <button type="button" className="quiet-button" aria-label={`Delete ${session.title}`}
+                disabled={deletingBusy || !mutation?.capability.canMutate()} onClick={() => { setDeletingId(session.id); setDeletingConfirmation("");
+                  setDeletingMessage(deleteLocked ? "Earlier deletion is unconfirmed. Refresh and inspect; no retry will be sent." : ""); }}>Delete</button>}
               {renamingId === session.id && <div className="session-rename"><label>New title for {session.title}
                 <input value={renamingTitle} maxLength={256} disabled={!owned || renamingBusy || renameLocked} onChange={event => setRenamingTitle(event.target.value)}
                   onKeyDown={event => { if (event.key === "Enter") void renameSelectedSession(); if (event.key === "Escape") setRenamingId(null); }} /></label>
                 <button type="button" disabled={!owned || renamingBusy || renameLocked || !renamingTitle.trim()} onClick={() => void renameSelectedSession()}>Save title</button>
                 <button type="button" disabled={renamingBusy} onClick={() => setRenamingId(null)}>Cancel</button>
                 {renamingMessage && <p role="alert" className="notice error-text">{renamingMessage}</p>}
+              </div>}
+              {deletingId === session.id && <div className="session-delete" role="group" aria-label={`Confirm deletion of ${session.title}`}>
+                <p>Delete only this session's journal and history (ID: <code>{session.id}</code>). Project files are not deleted. This cannot be undone.</p>
+                <label>Type the exact session title: <strong>{session.title}</strong>
+                  <input value={deletingConfirmation} disabled={!owned || deletingBusy || deleteLocked} autoComplete="off"
+                    onChange={event => setDeletingConfirmation(event.target.value)} /></label>
+                <button type="button" disabled={!owned || deletingBusy || deleteLocked || deletingConfirmation !== session.title}
+                  onClick={() => void deleteSelectedSession()}>Delete this session</button>
+                <button type="button" disabled={deletingBusy} onClick={() => setDeletingId(null)}>Cancel</button>
+                {deletingMessage && <p role="alert" className="notice error-text">{deletingMessage}</p>}
               </div>}
             </div>)}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{search ? "No matching sessions." : "No sessions in this project."}</div>}

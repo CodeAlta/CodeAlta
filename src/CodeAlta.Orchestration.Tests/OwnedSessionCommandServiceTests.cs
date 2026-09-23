@@ -17,6 +17,30 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class OwnedSessionCommandServiceTests
 {
     [TestMethod]
+    public Task DeleteRefusesActiveOwnedRunWithoutLosingJournal() => Fixture.RunAsync(async f =>
+    {
+        var receipt = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, receipt, "send");
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogSessionAsync(
+            f.SessionId, project.Id, f.ProjectRoot, "Owned fixture")));
+        var state = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        var queued = f.Host.Commands.AdmitQueue(new("retained-queue", f.SessionId,
+            state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "queued input"));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, queued.Kind);
+        Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogSessionAsync(
+            f.SessionId, project.Id, f.ProjectRoot, "Owned fixture")));
+        Assert.IsNotNull(await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(f.SessionId)));
+        var cancellation = f.Host.Commands.AdmitCancelQueue(new("cancel-retained", queued.Receipt!.OperationId));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, cancellation.Kind);
+        await f.Observe(cancellation.Receipt!.Completion);
+        await f.Observe(queued.Receipt.Completion);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
     public Task SelectedConfiguration_ReachesProviderAndRetriesKeepExactSettings() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;

@@ -33,6 +33,7 @@ internal sealed partial class WorkspaceService
         lock (_sessionGate)
         {
             if (_sessionsClosed) return Reply("closed");
+            if (_deleteWork is not null) return Reply("busy");
             if (_renameWork is not null) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceRenameSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _renameWork = work = completion.Task;

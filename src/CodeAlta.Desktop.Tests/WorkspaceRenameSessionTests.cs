@@ -84,10 +84,11 @@ public sealed class WorkspaceRenameSessionTests
             var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var count = 0;
-            var rpc = new WorkspaceService(reads, catalog, Epoch, async (_, _, _, _) =>
+            Func<string, string?, string, string, Task<bool>> failRename = async (_, _, _, _) =>
             {
                 count++; entered.TrySetResult(); await release.Task; throw new IOException("Result lost after append");
-            });
+            };
+            var rpc = new WorkspaceService(reads, catalog, Epoch, failRename);
             var request = new WorkspaceRenameSessionRequest(Epoch, "global", null, global, "exact", "New");
             using var cancel = new CancellationTokenSource();
             var pending = rpc.RenameSessionAsync(request, cancel.Token);
@@ -101,8 +102,9 @@ public sealed class WorkspaceRenameSessionTests
             await closing;
             Assert.AreEqual(1, count);
             Assert.AreEqual("closed", (await rpc.RenameSessionAsync(request, CancellationToken.None)).Status);
-            var uncertain = new WorkspaceService(reads, catalog, Epoch, (_, _, _, _) =>
-                throw new IOException("Append may have committed"));
+            Func<string, string?, string, string, Task<bool>> uncertainRename = (_, _, _, _) =>
+                throw new IOException("Append may have committed");
+            var uncertain = new WorkspaceService(reads, catalog, Epoch, uncertainRename);
             Assert.AreEqual("rename_unconfirmed", (await uncertain.RenameSessionAsync(request, CancellationToken.None)).Status);
             await uncertain.CloseSessionsAsync();
             await rpc.CloseImportsAsync();

@@ -34,6 +34,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private bool _closed;
     private bool _retained;
     private Task? _disposeTask;
+    private Task<string>? _deleteWork;
     private readonly OriginalInvocation _permissionShutdown = new();
     private readonly OriginalInvocation _askDrain = new();
 
@@ -141,6 +142,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 return Replay(previous, same);
             }
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (request.Selection is not null && (_queueing.Contains(request.SessionId) || _compacting.Contains(request.SessionId)
@@ -218,6 +220,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
                 return Replay(previous, previous.Steer == request);
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_steering.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Steer, request.SessionId);
@@ -278,6 +281,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
                 return Replay(previous, previous.Compact == request);
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_compacting.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Compact, request.SessionId);
@@ -340,6 +344,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.Queue == request);
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
@@ -370,6 +375,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous)) return Replay(previous, previous.CancelQueue == request);
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (!_queues.TryGetValue(request.TargetOperationId, out var target)) return new(OwnedSessionCommandAdmissionKind.UnknownTarget);
             operation = target;
@@ -495,6 +501,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (_receipts.TryGetValue(request.ClientRequestId, out var previous))
                 return Replay(previous, previous.AbortRun == request);
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
+            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (_receipts.Count == _capacity) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_abortingRuns.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.AbortRun, request.SessionId);
@@ -860,6 +867,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         CompactOperation[] compacts;
         AbortRunOperation[] abortRuns;
         QueueOperation[] queues;
+        Task<string>? deleteWork;
         TaskCompletionSource launch;
         Task disposal;
         lock (_gate)
@@ -871,11 +879,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             compacts = [.. _compacts];
             abortRuns = [.. _abortRuns];
             queues = [.. _queues.Values];
+            deleteWork = _deleteWork;
             foreach (var queue in queues) EnsureQueueCancellation(queue);
             foreach (var operation in operations)
                 if (!operation.Released) EnsureControl(operation);
             launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, queues, launch.Task);
+            _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, queues, deleteWork, launch.Task);
             disposal = _disposeTask;
         }
         // Release every control before joining any of them. No cancellation callback runs under _gate.
@@ -912,9 +921,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, CompactOperation[] compacts,
-        AbortRunOperation[] abortRuns, QueueOperation[] queues, Task launch)
+        AbortRunOperation[] abortRuns, QueueOperation[] queues, Task<string>? deleteWork, Task launch)
     {
         await launch.ConfigureAwait(false);
+        if (deleteWork is not null) await deleteWork.ConfigureAwait(false);
         if (_reviewPermissions || _enableUserInput)
         {
             _permissionShutdown.Launch(() => _runtime.Permissions.CloseOwnedAdmissionAsync());

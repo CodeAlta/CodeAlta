@@ -109,6 +109,9 @@ h1, h2, h3, p { margin-top: 0; }
 .session-rename { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
 .session-rename label { width: 100%; display: grid; gap: 4px; }
 .session-rename input { min-width: 0; }
+.session-delete { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+.session-delete label { width: 100%; display: grid; gap: 4px; }
+.session-delete input { min-width: 0; }
 .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .session-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
 .session-meta span, .session-meta time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
