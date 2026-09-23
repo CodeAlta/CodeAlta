@@ -6,6 +6,7 @@ using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop;
 
@@ -20,6 +21,19 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
     internal int ExitCode { get; private set; } = 1;
 
     internal static int Run(DesktopLaunchOptions options)
+        => Run(options, RunCore);
+
+    // Initialize before any host/provider acquisition. A failed/unconfirmed lifetime can still
+    // own callbacks, so leave its logger available until process exit rather than breaking them.
+    internal static int Run(DesktopLaunchOptions options, Func<DesktopLaunchOptions, int> run)
+    {
+        var ownsLogging = DesktopLogging.Initialize(options.DataRoot);
+        var result = run(options);
+        if (ownsLogging && result == 0) LogManager.Shutdown();
+        return result;
+    }
+
+    private static int RunCore(DesktopLaunchOptions options)
     {
         if (options.Owned is not null) return RunOwned(options);
         Directory.CreateDirectory(options.DataRoot);
@@ -53,8 +67,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             else Console.Error.WriteLine("Owned shutdown unconfirmed; the application did not release its lease.");
             return result == 0 ? desktop.ExitCode : result;
         }
-        catch (Exception)
+        catch (Exception failure)
         {
+            LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "Owned desktop startup or native lifetime failed");
             Console.Error.WriteLine("Owned desktop startup or native lifetime failed; termination is not confirmed.");
             return 1;
         }
@@ -183,8 +198,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             }
             await closeRequested.Task;
         }
-        catch (Exception)
+        catch (Exception failure)
         {
+            LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "Owned desktop initialization or application flow failed");
             bodyFailed = true;
             closeRequested.TrySetResult();
         }
