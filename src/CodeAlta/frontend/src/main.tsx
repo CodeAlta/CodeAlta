@@ -36,6 +36,7 @@ import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
 import { canImportCheckedFolder, createProjectOpening, projectOpeningMessage } from "./projectOpening";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, type SessionTarget } from "./sessionCreation";
+import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -73,6 +74,15 @@ function App() {
   const [notesReader] = useState(() => createNotesReader(sessionNotes.current, sessionNotes.clear));
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [createSession] = useState(() => createSessionCreation(workspace.createSession));
+  const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState("");
+  const [renamingBusy, setRenamingBusy] = useState(false);
+  const [renamingMessage, setRenamingMessage] = useState("");
+  const renamingPending = useRef(false);
+  const uncertainRename = useRef<{ id: string; title: string; target: RenameTarget } | null>(null);
+  const [renameLocked, setRenameLocked] = useState(false);
+  const selectedSessionId = useRef<string | null>(null);
   const [creatingVisible, setCreatingVisible] = useState(false);
   const [creatingTitle, setCreatingTitle] = useState("");
   const [creatingBusy, setCreatingBusy] = useState(false);
@@ -154,6 +164,7 @@ function App() {
     selectedScope.current = project?.id ?? null;
     setProjectId(project?.id ?? null);
     setSessionId(firstSession.id);
+    selectedSessionId.current = firstSession.id;
   }, [snapshot]);
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
@@ -161,6 +172,7 @@ function App() {
   const selectedSession = snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
   selectedScope.current = projectId;
+  selectedSessionId.current = sessionId;
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
@@ -201,7 +213,9 @@ function App() {
     } else if (action === "nextSession" || action === "previousSession") {
       if (!visibleSessions.length) return;
       const index = Math.max(0, visibleSessions.findIndex(session => session.id === sessionId));
-      setSessionId(visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id);
+      const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
+      selectedSessionId.current = next;
+      setSessionId(next);
     } else if (action === "context") document.querySelector<HTMLButtonElement>(".prompt-state")?.click();
   }
 
@@ -210,6 +224,9 @@ function App() {
     setProjectId(nextProjectId);
     const nextSessions = snapshot ? sessionsForProject(snapshot, nextProjectId) : [];
     setSessionId(nextSessions[0]?.id ?? null);
+    selectedSessionId.current = nextSessions[0]?.id ?? null;
+    setRenamingId(null);
+    setRenamingMessage("");
     setView("workspace");
     setCreatingVisible(false);
     setCreatingMessage("");
@@ -252,6 +269,58 @@ function App() {
         } else setCreatingMessage("Creation may have completed, but the selected scope changed or the refreshed catalog did not show the session. Inspect and refresh sessions before creating another.");
       } else setCreatingMessage(sessionCreationMessage(result.code));
     } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
+  }
+
+  async function renameSelectedSession() {
+    const session = selectedSession;
+    if (!session || session.id !== renamingId || selectedSessionId.current !== session.id
+      || selectedScope.current !== (selectedProject?.id ?? null) || renamingPending.current
+      || uncertainRename.current !== null || !owned || !mutation?.capability.canMutate()
+      || !session.workspacePath || selectedProject?.archived) return;
+    const target: RenameTarget = selectedProject
+      ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path }
+      : { scope: "global", projectPath: session.workspacePath };
+    const capability = mutation.capability;
+    const title = renamingTitle;
+    renamingPending.current = true;
+    setRenamingBusy(true);
+    setRenamingMessage("");
+    try {
+      const result = await renameSession(status?.hostEpoch, target, session.id, title, capability);
+      if (!creationAlive.current) return;
+      if (result.kind === "renamed") {
+        const fresh = await refreshProjects(creationRefresh.current.signal);
+        if (!creationAlive.current) return;
+        if (fresh && renamedSessionVisible(fresh, result) && capability.canMutate()
+          && renameSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
+          setRenamingId(null);
+          setRenamingTitle("");
+        } else {
+          uncertainRename.current = { id: session.id, title, target };
+          setRenameLocked(true);
+          if (selectedSessionId.current === session.id) setRenamingMessage("Rename may have completed, but the selection changed or the refreshed catalog did not show the title. Refresh and inspect; no retry will be sent.");
+        }
+      } else {
+        if (result.code === "rename_unconfirmed") {
+          uncertainRename.current = { id: session.id, title, target };
+          setRenameLocked(true);
+        }
+        if (selectedSessionId.current === session.id) setRenamingMessage(sessionRenameMessage(result.code));
+      }
+    } finally { renamingPending.current = false; if (creationAlive.current) setRenamingBusy(false); }
+  }
+
+  async function refreshRenamedSession() {
+    const original = uncertainRename.current;
+    const fresh = await refreshProjects(creationRefresh.current.signal);
+    if (!creationAlive.current || !original) return;
+    const result = { kind: "renamed" as const, id: original.id, title: original.title, target: original.target };
+    if (fresh && renamedSessionVisible(fresh, result)) {
+      uncertainRename.current = null;
+      setRenameLocked(false);
+      if (renameSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) setRenamingId(null);
+      setRenamingMessage("");
+    } else if (selectedSessionId.current === original.id) setRenamingMessage("Title not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
   }
 
   function changePane(pane: PaneName, delta: number) {
@@ -326,14 +395,29 @@ function App() {
                 : "Could not refresh the session list. Inspect before creating another.");
             });
           }}>Refresh session list</button>}
+          {renameLocked && <div role="alert" className="notice error-text">A rename is unconfirmed. No further rename will be sent until the exact title is visible after refresh.
+            <button type="button" className="quiet-button" onClick={() => void refreshRenamedSession()}>Refresh title</button>
+          </div>}
           {!owned && <p className="muted-text">Session creation requires an owned host.</p>}
           <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
-            {visibleSessions.map(session => <button type="button" key={session.id} aria-pressed={sessionId === session.id} onClick={() => setSessionId(session.id)}>
-              <span className="session-title">{session.title}</span>
-              <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
-            </button>)}
+            {visibleSessions.map(session => <div className="session-row" key={session.id}>
+              <button type="button" aria-pressed={sessionId === session.id} onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); }}>
+                <span className="session-title">{session.title}</span>
+                <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
+              </button>
+              {owned && sessionId === session.id && session.workspacePath && <button type="button" className="quiet-button" aria-label={`Rename ${session.title}`}
+                disabled={renamingBusy || !mutation?.capability.canMutate()} onClick={() => { setRenamingId(session.id); setRenamingTitle(session.title);
+                  setRenamingMessage(renameLocked ? "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." : ""); }}>Rename</button>}
+              {renamingId === session.id && <div className="session-rename"><label>New title for {session.title}
+                <input value={renamingTitle} maxLength={256} disabled={!owned || renamingBusy || renameLocked} onChange={event => setRenamingTitle(event.target.value)}
+                  onKeyDown={event => { if (event.key === "Enter") void renameSelectedSession(); if (event.key === "Escape") setRenamingId(null); }} /></label>
+                <button type="button" disabled={!owned || renamingBusy || renameLocked || !renamingTitle.trim()} onClick={() => void renameSelectedSession()}>Save title</button>
+                <button type="button" disabled={renamingBusy} onClick={() => setRenamingId(null)}>Cancel</button>
+                {renamingMessage && <p role="alert" className="notice error-text">{renamingMessage}</p>}
+              </div>}
+            </div>)}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{search ? "No matching sessions." : "No sessions in this project."}</div>}
           </div>
           {notesVisible && <NotesPanel epoch={owned ? status?.hostEpoch : undefined} sessionId={sessionId}

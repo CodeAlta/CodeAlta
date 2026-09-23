@@ -365,6 +365,24 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     internal async Task<SessionViewDescriptor?> ResolveOwnedSessionAsync(string sessionId, CancellationToken cancellationToken)
         => await AdmitAsync(() => ResolveOwnedSessionBodyAsync(sessionId, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
 
+    internal Task<bool> RenameOwnedSessionAsync(string sessionId, string? projectId, string workspacePath, string title)
+        => AdmitAsync(() => GetActorForWork(sessionId).QueryAsync(async token =>
+        {
+            var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+            var metadata = await store.GetSessionAsync(sessionId, token).ConfigureAwait(false);
+            if (metadata is null) return false;
+            var projects = await _projectCatalog.LoadAsync(token).ConfigureAwait(false);
+            var session = TryCreateRecoverableSession(metadata, projects);
+            if (session is null || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession)
+                || session.ProjectRef != projectId || session.WorkingDirectory != workspacePath) return false;
+            var summary = await store.GetSessionSummaryAsync(sessionId, token).ConfigureAwait(false);
+            if (summary is null) return false;
+            await store.UpsertSessionAsync(summary with { Title = title }, token).ConfigureAwait(false);
+            if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) entry.Title = title;
+            await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, token).ConfigureAwait(false);
+            return true;
+        }).AsTask(), CancellationToken.None);
+
     private async Task<SessionViewDescriptor?> ResolveOwnedSessionBodyAsync(string sessionId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -3508,7 +3526,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public DateTimeOffset CreatedAt { get; }
 
-        public string Title { get; }
+        public string Title { get; set; }
 
         public string WorkingDirectory { get; }
 

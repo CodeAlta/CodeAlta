@@ -102,9 +102,13 @@ h1, h2, h3, p { margin-top: 0; }
 .search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
 .search input::placeholder { color: var(--muted); }
 .session-list { flex: 1 1 auto; min-height: 80px; overflow-y: scroll; padding: 0 9px 18px; }
-.session-list > button { width: 100%; display: grid; gap: 8px; padding: 12px 11px; border: 1px solid transparent; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
-.session-list > button:hover { background: var(--panel-2); }
-.session-list > button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--accent-soft); }
+.session-row { display: flex; flex-wrap: wrap; align-items: center; }
+.session-row > button:first-child { flex: 1; min-width: 0; display: grid; gap: 8px; padding: 12px 11px; border: 1px solid transparent; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
+.session-row > button:first-child:hover { background: var(--panel-2); }
+.session-row > button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--accent-soft); }
+.session-rename { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+.session-rename label { width: 100%; display: grid; gap: 4px; }
+.session-rename input { min-width: 0; }
 .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .session-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
 .session-meta span, .session-meta time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -347,7 +351,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .project-rail { display: none; }
   .session-rail { height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .session-list { display: flex; gap: 7px; overflow-x: auto; }
-  .session-list > button { flex: 0 0 220px; }
+  .session-row { flex: 0 0 220px; }
   .notes-pane { max-height: 65%; }
   .content { min-height: 0; overflow: hidden; }
   .session-workspace { width: calc(100% - 24px); padding-top: 12px; }

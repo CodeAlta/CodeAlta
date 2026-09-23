@@ -9,14 +9,17 @@ internal sealed partial class WorkspaceService
 {
     private readonly ModelProviderRegistry? _sessionProviders;
     private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, Task<SessionViewDescriptor>>? _createSession;
+    private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly object _sessionGate = new();
     private Task<WorkspaceCreateSessionResponse>? _sessionWork;
+    private Task<WorkspaceRenameSessionResponse>? _renameWork;
     private bool _sessionsClosed;
 
     internal WorkspaceService(CodeAltaHost host, string epoch) : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
     {
         _sessionProviders = host.ModelProviderRegistry;
         _createSession = host.Commands.CreateDraftSessionAsync;
+        _renameSession = host.Commands.RenameSessionAsync;
     }
 
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch,
@@ -72,9 +75,11 @@ internal sealed partial class WorkspaceService
 
     internal async Task CloseSessionsAsync()
     {
-        Task? work;
-        lock (_sessionGate) { _sessionsClosed = true; work = _sessionWork; }
-        if (work is not null) await work.ConfigureAwait(false);
+        Task? create;
+        Task? rename;
+        lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; }
+        if (create is not null) await create.ConfigureAwait(false);
+        if (rename is not null) await rename.ConfigureAwait(false);
     }
 
     private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor provider,

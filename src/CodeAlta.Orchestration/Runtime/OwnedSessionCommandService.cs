@@ -79,6 +79,31 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             : _runtime.CreateProjectSessionAsync(project, options, title, CancellationToken.None);
     }
 
+    /// <summary>Renames only an exact catalog session without changing its active run.</summary>
+    /// <param name="sessionId">Exact session identity.</param>
+    /// <param name="projectId">Exact project identity, or null for a global session.</param>
+    /// <param name="workspacePath">Exact catalog workspace path.</param>
+    /// <param name="title">Validated nonempty title.</param>
+    /// <returns>True if the session still belongs to the requested scope.</returns>
+    /// <exception cref="ArgumentException">An identity or title is invalid.</exception>
+    /// <exception cref="ObjectDisposedException">The owner is closing.</exception>
+    public Task<bool> RenameSessionAsync(string sessionId, string? projectId, string workspacePath, string title)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspacePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        if (title.Length > 256 || title != title.Trim() || title.Any(char.IsControl))
+            throw new ArgumentException("A title must be unpadded, free of control characters, and at most 256 characters.", nameof(title));
+        for (var index = 0; index < title.Length; index++)
+        {
+            if (!char.IsSurrogate(title[index])) continue;
+            if (!char.IsHighSurrogate(title[index]) || ++index == title.Length || !char.IsLowSurrogate(title[index]))
+                throw new ArgumentException("A title must contain only valid Unicode scalars.", nameof(title));
+        }
+        lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
+        return _runtime.RenameOwnedSessionAsync(sessionId, projectId, workspacePath, title);
+    }
+
     internal Func<ModelProviderId, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? SelectionModels { get; init; }
 
     internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
