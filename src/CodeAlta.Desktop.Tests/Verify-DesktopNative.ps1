@@ -66,7 +66,9 @@ function Invoke-Desktop([string] $Name, [string[]] $Arguments, [int] $ExpectedEx
     Set-Content (Join-Path $EvidenceRoot 'verification.log')
 Invoke-Desktop 'help' @('--help') 0
 Invoke-Desktop 'version' @('--version') 0
-Invoke-Desktop 'missing-root' @() 2
+# No arguments now start the interactive default owned host and may touch the user's profile.
+# Reject a missing explicit value instead; all native runs stay under the test-owned root.
+Invoke-Desktop 'missing-root-value' @('--data-root') 2
 Invoke-Desktop 'existing-root' @('--data-root', $EvidenceRoot) 2
 Invoke-Desktop 'removed-smoke-flag' @('--smoke', '--data-root', (Join-Path $EvidenceRoot 'not-created')) 2
 if (Test-Path (Join-Path $EvidenceRoot 'not-created')) { throw 'Rejected flags created storage.' }

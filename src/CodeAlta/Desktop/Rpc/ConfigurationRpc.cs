@@ -12,8 +12,9 @@ internal sealed class ConfigurationService(
 {
     private readonly string? _catalogRoot;
 
-    internal ConfigurationService(string catalogRoot) : this()
+    internal ConfigurationService(string? catalogRoot) : this()
     {
+        if (catalogRoot is null) return; // Browser-only mode has no admitted catalog.
         if (string.IsNullOrWhiteSpace(catalogRoot) || !Path.IsPathFullyQualified(catalogRoot))
             throw new ArgumentException("An absolute catalog root is required.", nameof(catalogRoot));
         _catalogRoot = Path.GetFullPath(catalogRoot);
