@@ -12,6 +12,7 @@ import { persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, restoreSelection } from "./sessionSelection";
+import { dispatchComposerKey } from "./composerKeyboard";
 
 export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -176,19 +177,29 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       }
     }, capability);
   }
-  function steer() {
+  function steer(fromComposer = false) {
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = steering.pending(sessionId);
+    if (fromComposer && retained) {
+      setMessage("A steering request is retained. Review or retry that exact request in the steering controls first.");
+      return;
+    }
     if (retained?.inFlight) return;
-    const request = retained?.request ?? captureSteering(epoch, sessionId, observedTarget, steerText, crypto.randomUUID());
-    if (!request || !capability.canSubmit(request)) return;
+    const request = retained?.request ?? captureSteering(epoch, sessionId, observedTarget, fromComposer ? text : steerText, crypto.randomUUID());
+    if (!request || !capability.canSubmit(request)) {
+      if (fromComposer) setMessage("Steering needs a non-empty prompt and a refreshed, eligible active run. Nothing was sent.");
+      return;
+    }
     // The App-owned helper latches synchronously before its first await, across panel remounts.
     setSteerMessage("Steering admission pending…");
+    if (fromComposer) setMessage("Steering admission pending…");
     void steering.submit(request, signal, capability, result => {
       observeEpoch(result);
+      if (fromComposer) setMessage(`Steering: ${result.status}. Review steering controls for outcome or recovery.`);
       if (result.status === "accepted" || result.status === "replay") {
         setSteerText("");
+        if (fromComposer) setText(current => current === request.text ? "" : current);
         setSteerMessage("Steering accepted. Refresh submissions for input dispatch outcome, not run completion.");
       } else setSteerMessage(`Steering: ${result.status}. Refresh submissions; uncertain requests retain their original text and target and are never retried automatically.`);
     });
@@ -279,7 +290,10 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" ref={promptInput} className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
       onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
-        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
+        if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
+          isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
+          repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) event.preventDefault();
       }} />
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title="Agent prompt for the next Send">
@@ -303,7 +317,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     </div>
     <p className="composer-notice" role="status">{choicesNotice} <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Refresh choices</button></p>
     <div className="history-controls">
-      <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
+      <span className="composer-hint">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
       <button type="button" onClick={() => refresh()}>Refresh receipts</button>
       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>
@@ -315,7 +329,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     {(showSteering || showQueue) && <div className="context-actions">
       {showSteering && <div><label>Steer observed run {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
         {pendingSteer && <p className="detail">Retained run {pendingSteer.request.expectedRunId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · request {pendingSteer.request.clientRequestId}; refresh never retargets this request.</p>}
-        <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={steer}>{pendingSteer ? "Retry exact steering request" : "Steer observed run"}</button>
+        <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={() => steer()}>{pendingSteer ? "Retry exact steering request" : "Steer observed run"}</button>
         {steerMessage !== "Refresh runtime state explicitly before targeting a run." && <p role="status">{steerMessage}</p>}</div>}
       {showQueue && <div><label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => setQueueText(event.target.value)} /></label>
         <p className="detail">Reservation is not insertion, execution or durable storage. Refresh receipts manually.</p>
