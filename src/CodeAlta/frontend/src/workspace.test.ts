@@ -61,14 +61,19 @@ test("workspace ignores failure after abort", async () => {
   assert.deepEqual(states, [{ kind: "loading" }]);
 });
 
-test("workspace groups by exact persisted path and keeps global or unmatched sessions", () => {
-  const session = { id: "s", title: "Saved title", workspacePath: "/p", providerKey: null, updatedAt: "2026-01-01T00:00:00Z" };
+test("workspace keeps persisted global/project scope and unverified or truncated unmatched sessions visible", () => {
+  const session = { id: "s", title: "Saved title", fullTitle: "Saved title", fullTitleTruncated: false, parentSessionId: null,
+    scopeKind: "project", projectId: "p", lineageIssue: null, workspacePath: "/p", providerKey: null, updatedAt: "2026-01-01T00:00:00Z" };
   const snapshot: WorkspaceSnapshot = {
     ...empty, projects: [{ id: "p", name: "Project", path: "/p", archived: false }],
-    sessions: [session, { ...session, id: "global", workspacePath: null }, { ...session, id: "unmatched", workspacePath: "/other" }],
+    sessions: [session, { ...session, id: "global", scopeKind: "global", projectId: null },
+      { ...session, id: "global-in-project", scopeKind: "global", projectId: null },
+      { ...session, id: "unmatched", scopeKind: null, projectId: null, workspacePath: "/other" },
+      { ...session, id: "unverified", scopeKind: null, projectId: null },
+      { ...session, id: "omitted", projectId: "omitted", workspacePath: "/omitted" }],
   };
-  assert.deepEqual(sessionsForProject(snapshot, "p").map(value => value.id), ["s"]);
-  assert.deepEqual(sessionsForProject(snapshot, null).map(value => value.id), ["global", "unmatched"]);
+  assert.deepEqual(sessionsForProject(snapshot, "p").map(value => value.id), ["s", "unverified"]);
+  assert.deepEqual(sessionsForProject(snapshot, null).map(value => value.id), ["global", "global-in-project", "unmatched", "omitted"]);
 });
 
 test("workspace shows truncation without implying paging", () => {

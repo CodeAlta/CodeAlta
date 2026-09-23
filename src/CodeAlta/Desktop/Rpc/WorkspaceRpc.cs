@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using NeoAstra.Rpc;
@@ -25,7 +26,7 @@ internal sealed partial class WorkspaceService
         {
             var actual = reads.ReadSnapshotAsync(token);
             var snapshot = await actual.ConfigureAwait(false);
-            return ProjectSnapshot(snapshot.Projects, snapshot.Sessions);
+            return ProjectSnapshot(snapshot.Projects, snapshot.Sessions, snapshot.SessionHeaders);
         };
     }
 
@@ -40,7 +41,7 @@ internal sealed partial class WorkspaceService
         IAgentSessionCatalog sessions = new AgentSessionCatalog(store);
         _readHistory = store.ReadHistoryPageAsync;
         _read = cancellationToken => ReadAsync(projects.LoadAsync,
-            token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), cancellationToken);
+            token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), journals, cancellationToken);
     }
 
     [NeoRpcMethod("snapshot")]
@@ -57,6 +58,13 @@ internal sealed partial class WorkspaceService
         Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> loadProjects,
         Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> loadSessions,
         CancellationToken cancellationToken)
+        => ReadAsync(loadProjects, loadSessions, null, cancellationToken);
+
+    private static Task<WorkspaceSnapshot> ReadAsync(
+        Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> loadProjects,
+        Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> loadSessions,
+        SessionViewJournalStore? journals,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(loadProjects);
         ArgumentNullException.ThrowIfNull(loadSessions);
@@ -70,12 +78,29 @@ internal sealed partial class WorkspaceService
             {
                 sessions.Add(session);
             }
-            return ProjectSnapshot(projects, sessions);
+            if (journals is null) return ProjectSnapshot(projects, sessions);
+            var headers = new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal);
+            foreach (var session in sessions.OrderByDescending(static value => value.UpdatedAt)
+                         .ThenByDescending(static value => value.SessionId, StringComparer.Ordinal).Take(500))
+            {
+                if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
+                SessionViewJournalHeader? header;
+                try { header = await journals.ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+                {
+                    continue; // Unreadable scope evidence cannot suppress an otherwise visible session.
+                }
+                if (header is not null && header.SessionId == session.SessionId && header.CreatedAt == session.CreatedAt
+                    && header.WorkingDirectory == session.WorkspacePath)
+                    headers.TryAdd(session.SessionId, header);
+            }
+            return ProjectSnapshot(projects, sessions, headers);
         }
     }
 
     internal static WorkspaceSnapshot ProjectSnapshot(
-        IReadOnlyList<ProjectDescriptor> projects, IReadOnlyList<AgentSessionMetadata> sessions)
+        IReadOnlyList<ProjectDescriptor> projects, IReadOnlyList<AgentSessionMetadata> sessions,
+        IReadOnlyDictionary<string, SessionViewJournalHeader>? headers = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -117,12 +142,34 @@ internal sealed partial class WorkspaceService
         {
             if (displayedSessions.Count == 500) break;
             var persistedTitle = (session.Details as RawApiSessionMetadataDetails)?.Title;
-            var title = DisplayText(!string.IsNullOrWhiteSpace(persistedTitle) ? persistedTitle
-                : !string.IsNullOrWhiteSpace(session.Summary) ? session.Summary : session.SessionId, ref shortened);
-            var cost = 512 + 6 * (session.SessionId.Length + title.Length + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0));
+            var sourceTitle = !string.IsNullOrWhiteSpace(persistedTitle) ? persistedTitle
+                : !string.IsNullOrWhiteSpace(session.Summary) ? session.Summary : session.SessionId;
+            var title = DisplayText(sourceTitle, ref shortened);
+            var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
+            var parent = session.ParentSessionId ?? session.ViewState?.ParentSessionId;
+            if (string.IsNullOrWhiteSpace(parent)) parent = null;
+            var lineageIssue = parent is not null && !ValidLineageId(parent) ? "invalid_parent" : null;
+            if (lineageIssue is not null) parent = null;
+            string? scopeKind = null;
+            string? projectId = null;
+            if (headers?.TryGetValue(session.SessionId, out var header) == true && header.SessionId == session.SessionId
+                && header.CreatedAt == session.CreatedAt && header.WorkingDirectory == session.WorkspacePath)
+            {
+                if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null)
+                    scopeKind = "global";
+                else if (header.Kind == SessionViewKind.ProjectSession && header.ProjectRef is { } reference
+                    && projects.Any(project => project.Id == reference && project.ProjectPath == session.WorkspacePath))
+                {
+                    scopeKind = "project";
+                    projectId = reference;
+                }
+            }
+            var cost = 512 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
+                + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0));
             if (cost > remaining) break;
             remaining -= cost;
-            displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt));
+            displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
+                fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -136,13 +183,27 @@ internal sealed partial class WorkspaceService
         ValidateUnicode(value);
     }
 
-    private static string DisplayText(string value, ref bool shortened)
+    private static string DisplayText(string value, ref bool shortened) => DisplayTextBounded(value, 256, ref shortened);
+
+    private static string DisplayTextBounded(string value, int maximum, ref bool shortened)
     {
         ValidateUnicode(value);
-        if (value.Length <= 256) return value;
+        if (value.Length <= maximum) return value;
         shortened = true;
-        var length = char.IsHighSurrogate(value[255]) ? 255 : 256;
+        var length = char.IsHighSurrogate(value[maximum - 1]) ? maximum - 1 : maximum;
         return value[..length];
+    }
+
+    private static bool ValidLineageId(string value)
+    {
+        if (value.Length is < 1 or > 256 || value != value.Trim() || string.IsNullOrWhiteSpace(value)) return false;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsControl(value[i])) return false;
+            if (!char.IsSurrogate(value[i])) continue;
+            if (!char.IsHighSurrogate(value[i]) || ++i == value.Length || !char.IsLowSurrogate(value[i])) return false;
+        }
+        return true;
     }
 
     private static void ValidateUnicode(string value)
@@ -161,4 +222,5 @@ internal sealed record WorkspaceRequest;
 internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Projects, WorkspaceSession[] Sessions,
     bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated);
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
-internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt);
+internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
+    string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue);

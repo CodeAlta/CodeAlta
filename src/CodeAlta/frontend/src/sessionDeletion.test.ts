@@ -11,7 +11,7 @@ const global = { scope: "global" as const, projectPath: "C:\\disposable-owned\\g
 const reply = (status: string, overrides = {}) => ({ status, hostEpoch: epoch, scope: project.scope,
   projectId: project.projectId, projectPath: project.projectPath, sessionId: "s1", ...overrides });
 const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "p1", name: "Project", path: project.projectPath, archived: false }],
-  sessions: [{ id: "s2", title: "Kept", workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" }],
+  sessions: [{ id: "s2", title: "Kept", fullTitle: "Kept", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p1", lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" }],
   projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
 
 test("confirmed delete freezes scope, session identity and title; recovered selection stays in exact scope", async () => {

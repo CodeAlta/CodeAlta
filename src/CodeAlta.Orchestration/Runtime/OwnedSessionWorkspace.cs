@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -13,6 +14,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> _projects;
     private readonly Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> _sessions;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _history;
+    private readonly SessionViewJournalStore? _journals;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
     private bool _closed;
@@ -25,6 +27,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         // This exact construction always supplies the journal's projection cache and shared file locks.
         // Never replace it with AgentSessionCatalog or a new/uncached filesystem store.
         var store = journals.CreateSessionStore();
+        _journals = journals;
         _projects = projects.LoadAsync;
         _sessions = token => store.ListSessionsAsync(filter: null, cancellationToken: token);
         _history = store.ReadHistoryPageAsync;
@@ -105,7 +108,27 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         var sessions = new List<AgentSessionMetadata>();
         // Fully consume the cached iterator, including its final awaited cache-completion write.
         await foreach (var session in _sessions(CancellationToken.None).ConfigureAwait(false)) sessions.Add(session);
-        return new(projects, sessions);
+        var headers = new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal);
+        if (_journals is not null)
+        {
+            // Only the rows eligible for the bounded desktop projection need header scope evidence.
+            foreach (var session in sessions.OrderByDescending(static value => value.UpdatedAt)
+                         .ThenByDescending(static value => value.SessionId, StringComparer.Ordinal).Take(500))
+            {
+                if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
+                SessionViewJournalHeader? header;
+                try { header = await _journals.ReadHeaderAsync(session.SessionId, session.CreatedAt, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+                {
+                    // Header enrichment is optional authority, not a reason to omit a cached session row.
+                    continue;
+                }
+                if (header is not null && header.SessionId == session.SessionId && header.CreatedAt == session.CreatedAt
+                    && header.WorkingDirectory == session.WorkspacePath)
+                    headers.TryAdd(session.SessionId, header);
+            }
+        }
+        return new(projects, sessions) { SessionHeaders = headers };
     }
 
     private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken)
@@ -176,4 +199,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
 /// <summary>A complete persisted workspace read; frontends independently bound their wire projection.</summary>
 /// <param name="Projects">Persisted projects.</param>
 /// <param name="Sessions">Direct cached-store session metadata.</param>
-public sealed record OwnedWorkspaceSnapshot(IReadOnlyList<ProjectDescriptor> Projects, IReadOnlyList<AgentSessionMetadata> Sessions);
+public sealed record OwnedWorkspaceSnapshot(IReadOnlyList<ProjectDescriptor> Projects, IReadOnlyList<AgentSessionMetadata> Sessions)
+{
+    /// <summary>Exact persisted journal headers for at most the first 500 displayed sessions; absent headers grant no scope authority.</summary>
+    public IReadOnlyDictionary<string, SessionViewJournalHeader> SessionHeaders { get; init; } = new Dictionary<string, SessionViewJournalHeader>();
+}

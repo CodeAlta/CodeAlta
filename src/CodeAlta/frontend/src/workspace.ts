@@ -26,10 +26,15 @@ export async function loadWorkspace(
 export function sessionsForProject(snapshot: WorkspaceSnapshot, projectId: string | null) {
   if (projectId !== null) {
     const project = snapshot.projects.find(value => value.id === projectId);
-    return project ? snapshot.sessions.filter(value => value.workspacePath === project.path) : [];
+    return project ? snapshot.sessions.filter(value => value.scopeKind === "project"
+      ? value.projectId === projectId && value.workspacePath === project.path
+      : value.scopeKind !== "global" && value.workspacePath === project.path) : [];
   }
   const knownPaths = new Set(snapshot.projects.map(value => value.path));
-  return snapshot.sessions.filter(value => !value.workspacePath || !knownPaths.has(value.workspacePath));
+  const knownIds = new Set(snapshot.projects.map(value => value.id));
+  return snapshot.sessions.filter(value => value.scopeKind === "global" || (value.scopeKind === "project"
+    ? !knownIds.has(value.projectId ?? "") || !snapshot.projects.some(project => project.id === value.projectId
+        && project.path === value.workspacePath) : !value.workspacePath || !knownPaths.has(value.workspacePath)));
 }
 
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {

@@ -39,6 +39,7 @@ import { createSessionCreation, createdSessionSelection, sessionCreationMessage,
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
+import { sessionHierarchy } from "./sessionHierarchy";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -189,7 +190,8 @@ function App() {
   }, [snapshot]);
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
-  const visibleSessions = sessions.filter(session => !search || `${session.title} ${session.providerKey ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+  const visibleSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, search, projectId) : [];
+  const visibleSessions = visibleSessionRows.map(row => row.session);
   const selectedSession = snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
   selectedScope.current = projectId;
@@ -614,11 +616,15 @@ function App() {
           <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
-            {visibleSessions.map(session => <div className="session-row" key={session.id}>
-              <button type="button" aria-pressed={sessionId === session.id} onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
-                <span className="session-title">{session.title}</span>
+            {visibleSessionRows.map(({ session, depth, diagnostic, tooltip }, index) => <div className="session-row" key={session.id}>
+              <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
+                style={{ paddingLeft: 11 + Math.min(depth, 8) * 12 }}
+                onClick={() => { selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
+                <span className="session-title">{depth > 0 && <span aria-hidden="true">↳ </span>}{diagnostic && <span aria-hidden="true">⚠ </span>}{session.title}</span>
                 <span className="session-meta"><span>{session.providerKey ?? "No provider"}</span><SessionTime value={session.updatedAt} now={clock} /></span>
               </button>
+              <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
+                tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
               {owned && sessionId === session.id && session.workspacePath && <button type="button" className="quiet-button" aria-label={`Rename ${session.title}`}
                 disabled={renamingBusy || !mutation?.capability.canMutate()} onClick={() => { setRenamingId(session.id); setRenamingTitle(session.title);
                   setRenamingMessage(renameLocked ? "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." : ""); }}>Rename</button>}
