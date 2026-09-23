@@ -144,6 +144,7 @@ function App() {
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
+      if (target?.closest("dialog[open]")) { chordPending.current = false; return; }
       const editing = target?.matches("input, textarea, select, [contenteditable='true']") === true;
       const resolved = resolveShortcut(event, chordPending.current, editing);
       chordPending.current = resolved.chordPending;
@@ -157,7 +158,10 @@ function App() {
 
   function runShortcut(action: ShortcutAction) {
     const projects = snapshot?.projects ?? [];
-    if (action === "openProject") setDialog("project");
+    if (action === "expandPrompt") {
+      if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
+    }
+    else if (action === "openProject") setDialog("project");
     else if (action === "help") setDialog("help");
     else if (action === "escape") { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     else if (action === "settings" || action === "providers" || action === "models" || action === "prompts" || action === "plugins") setView("configuration");
@@ -448,6 +452,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
     ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
     ["F1 or ?", "Keyboard shortcuts"], ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
+    ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor"],
   ];
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="app-dialog shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">

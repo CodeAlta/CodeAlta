@@ -13,6 +13,7 @@ import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, restoreSelection } from "./sessionSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
+import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 
 export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -26,6 +27,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
 }) {
   const [text, setText] = useState(() => restoreDraft(key => localStorage.getItem(key), sessionId));
   const promptInput = useRef<HTMLTextAreaElement>(null);
+  const [expanded, setExpanded] = useState(false);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
@@ -287,6 +289,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   }
   const efforts = choices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
   return <section className="owned-session" aria-label="Owned text submission">
+    {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={setText} onClose={() => setExpanded(false)} />}
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" ref={promptInput} className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
       onChange={event => setText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
@@ -318,6 +321,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     <p className="composer-notice" role="status">{choicesNotice} <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Refresh choices</button></p>
     <div className="history-controls">
       <span className="composer-hint">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
+      <button id="expand-session-prompt" type="button" disabled={!!pending || invalidEpoch} title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}>Expand</button>
       <button type="button" onClick={() => refresh()}>Refresh receipts</button>
       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>

@@ -288,6 +288,13 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .notes-content .markdown-content { line-height: 1.5; }
 
 .dialog-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .62); backdrop-filter: blur(3px); }
+.expanded-prompt-dialog { width: min(1000px, calc(100vw - 40px)); height: min(760px, calc(100dvh - 40px)); max-width: none; max-height: none; padding: 18px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 15px; box-shadow: var(--shadow); }
+.expanded-prompt-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+.expanded-prompt-dialog::backdrop { background: rgba(0, 0, 0, .62); backdrop-filter: blur(3px); }
+.expanded-prompt-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.expanded-prompt-dialog h2 { margin: 0; font-size: 20px; }
+.owned-session .expanded-prompt-dialog textarea { flex: 1; min-height: 0; margin: 0; resize: none; line-height: 1.5; }
+.expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
 .app-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .app-dialog > header h2 { margin: 0 0 14px; font-size: 21px; }

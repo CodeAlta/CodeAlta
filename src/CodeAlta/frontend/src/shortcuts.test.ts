@@ -25,3 +25,13 @@ test("ordinary shortcuts do not steal editor input but escape and intentional ch
   assert.equal(resolveShortcut({ key: "Escape" }, false, true).action, "escape");
   assert.equal(resolveShortcut({ key: "g", ctrlKey: true }, false, true).chordPending, true);
 });
+
+test("F6 expands from the composer or shell, without stealing IME or handled input", () => {
+  for (const editing of [true, false]) {
+    assert.equal(resolveShortcut({ key: "F6" }, false, editing).action, "expandPrompt");
+    for (const modifier of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }, { metaKey: true },
+      { isComposing: true }, { keyCode: 229 }, { repeat: true }, { defaultPrevented: true }])
+      assert.equal(resolveShortcut({ key: "F6", ...modifier }, false, editing).handled, false);
+  }
+  assert.equal(resolveShortcut({ key: "Escape", isComposing: true }, false, true).handled, false);
+});
