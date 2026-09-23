@@ -1,8 +1,8 @@
-import { StrictMode, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
+import { StrictMode, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionUserInput, type BootStatus, type HistoryRequest,
+  sessionAsks, sessionNotes, sessionUserInput, type BootStatus, type HistoryRequest, type SessionDisplayView,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
@@ -22,9 +22,10 @@ import { NotesPanel } from "./NotesPanel";
 import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
-import { LiveSessionPanel } from "./LiveSessionPanel";
+import { LiveSessionPanel, LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
+import { reconcileTimeline } from "./reconcileTimeline";
 import { TimelineMessage } from "./TimelineMessage";
-import { buildTimelineItems, latestNotes } from "./timeline";
+import { latestNotes } from "./timeline";
 import { bottomScrollTop, shouldFollowTimeline } from "./timelineScroll";
 import { resolveShortcut, type ShortcutAction } from "./shortcuts";
 import { persistDraft, restoreDraft } from "./promptDraft";
@@ -297,6 +298,9 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
   onOpenConfiguration: () => void;
 }) {
   const timeline = useRef<HTMLDivElement>(null);
+  const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
+  const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
+    ? observedDisplay : null;
   const followTimeline = useRef(true);
   const [timelineFollowing, setTimelineFollowing] = useState(true);
   useEffect(() => {
@@ -329,7 +333,7 @@ function SessionWorkspace({ session, status, mutation, submissions, steering, co
           followTimeline.current = shouldFollowTimeline(event.currentTarget);
           setTimelineFollowing(followTimeline.current);
         }}>
-        <History sessionId={session.id} onNotesChange={onNotesChange} />
+        <History sessionId={session.id} onNotesChange={onNotesChange} live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
@@ -471,7 +475,7 @@ function SessionTime({ value, now }: { value: string; now: number }) {
   return <time dateTime={dateTime} title={title}>{label}</time>;
 }
 
-function History({ sessionId, onNotesChange }: { sessionId: string; onNotesChange: (markdown: string) => void }) {
+function History({ sessionId, onNotesChange, live }: { sessionId: string; onNotesChange: (markdown: string) => void; live: SessionDisplayView | null }) {
   const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
   const [state, setState] = useState<HistoryState>();
   const [timeline, setTimeline] = useState<HistoryTimeline>();
@@ -491,18 +495,21 @@ function History({ sessionId, onNotesChange }: { sessionId: string; onNotesChang
     const timer = window.setTimeout(() => setRequest({ sessionId, cursor: current.page.next }), 0);
     return () => window.clearTimeout(timer);
   }, [current, timeline, sessionId]);
-  const items = buildTimelineItems(timeline?.entries ?? []);
+  const items = reconcileTimeline(timeline?.entries ?? [], live);
   return <section className="conversation history" aria-labelledby="history-heading">
-    <div className="section-heading"><div><span className="eyebrow">Journal</span><h2 id="history-heading">Persisted history</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}><AppIcon name="refresh" size={14} />Refresh</button></div>
+    <div className="section-heading"><div><span className="eyebrow">Journal + recent live window</span><h2 id="history-heading">Session timeline</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}><AppIcon name="refresh" size={14} />Refresh history</button></div>
     {(!current || current.kind === "loading") && <p role="status">Loading the latest persisted history…</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
     {timeline?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
     {timeline?.limitReached && <div role="status" className="banner">The timeline reached its 1,000-event display limit. Refresh to restart from the beginning.</div>}
     {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}><AppIcon name="history" size={14} />Load older history</button>}
-    {items.length === 0 && <div className="empty-history">No visible events in this history.</div>}
+    {items.length === 0 && current?.kind === "ready" && <div className="empty-history">No visible events in this history.</div>}
     <div className="messages">
-      {items.map(item => <TimelineMessage key={item.key} item={item} />)}
+      {items.map(item => item.source === "history" ? <TimelineMessage key={item.key} item={item.item} />
+        : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
+        : <LiveToolMessage key={item.key} row={item.row} />)}
     </div>
+    {items.some(item => item.source !== "history") && <p className="detail live-order-note">Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.</p>}
   </section>;
 }
 

@@ -233,8 +233,14 @@ settles. New observations never retarget it, and replay never repeats cancellati
 panel cancels only its wait; host shutdown retains and joins original work. No automatic retry,
 refresh or polling is added. This remains experimental, not full session-command/native parity.
 
-The selected session also has a **live status/text window**, separate from persisted-history
-browsing and submission receipts. It shows retained lifecycle, queue count, configuration labels
+The selected session also has a **live status/text window**, separate from submission receipts.
+Unmatched retained text and reported tools appear after the persisted journal rows in the same
+timeline, with a compact status/coverage indicator instead of an empty live panel. A run-scoped
+completion with an unambiguous matching provider replaces its live copy after manual history
+refresh; uncertain identities stay visible rather than being guessed away. The live projection
+has no timestamps or shared text/tool ordering, so its tail is **not** an exact chronological
+interleaving, a history watermark or automatic journal refresh. The window shows retained
+lifecycle, queue count, configuration labels
 and up to eight text items, plus two most recently updated **reported plain ToolCall activities**.
 Tool names may be shortened; arguments/results are not shown. Reported phases can regress, and
 missing/evicted activity is unknown—not idle or complete. Started may precede permission resolution

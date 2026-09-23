@@ -232,11 +232,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .segmented button[aria-pressed="true"] { color: var(--text); background: var(--panel-3); }
 
 /* Existing owned-runtime controls keep their full semantics while fitting the workspace. */
-.owned-session, .live-display, .session-workspace > section:not(.conversation):not(.composer), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-.timeline-scroll > section:not(.conversation):not(.live-display), .timeline-scroll > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.owned-session, .session-workspace > section:not(.conversation):not(.composer), .session-workspace > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.timeline-scroll > section:not(.conversation):not(.live-indicator), .timeline-scroll > form { margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .session-workspace > .owned-session { flex: 0 1 auto; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
-.owned-session h3, .owned-session h4, .live-display h3 { margin: 22px 0 8px; }
-.owned-session > h3:first-child, .live-display > h3:first-child { margin-top: 0; }
+.owned-session h3, .owned-session h4 { margin: 22px 0 8px; }
+.owned-session > h3:first-child { margin-top: 0; }
 .owned-session textarea, .owned-session input, .owned-session select, .session-workspace > section textarea, .session-workspace > section input { width: 100%; margin-top: 6px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
 .owned-session textarea { min-height: 90px; resize: vertical; }
 .owned-session button, .session-workspace > section button { margin: 3px 5px 3px 0; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); cursor: pointer; }
@@ -266,10 +266,10 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .advanced-session-controls { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .advanced-session-controls > summary, .live-metadata > summary { color: var(--muted); font-size: 12px; cursor: pointer; }
 .advanced-session-controls > div { padding-top: 8px; }
-.live-display .section-heading { margin: 0 0 10px; }
-.live-display .section-heading h3 { margin: 0; }
-.live-display .live-messages { padding-bottom: 4px; }
-.live-display .live-metadata { margin-top: 10px; }
+.live-indicator { margin: 8px 0; padding: 8px 12px; border-left: 2px solid var(--line-strong); background: var(--panel); font-size: 13px; }
+.live-indicator p { margin: 6px 0; }
+.live-indicator .live-metadata { margin-top: 6px; }
+.live-order-note { padding: 0 16px 10px; }
 .history-records { display: grid; gap: 8px; list-style: none; }
 .history-records li { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .history-records pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
