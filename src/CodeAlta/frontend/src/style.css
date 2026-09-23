@@ -82,6 +82,10 @@ ul { margin: 0; padding: 0; }
 .nav-list button > span:last-child { min-width: 0; display: grid; gap: 2px; }
 .nav-list strong, .nav-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-list strong { font-size: 13px; font-weight: 600; }
+.nav-list .quiet-button { padding: 4px 9px; font-size: 11px; }
+.project-rename { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border-top: 1px solid var(--line); }
+.project-rename label { width: 100%; display: grid; gap: 4px; }
+.project-rename input { min-width: 0; width: 100%; }
 .nav-list small { color: var(--muted); font-size: 11px; }
 .project-icon { flex: 0 0 30px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(145deg, var(--panel-3), var(--line)); color: var(--accent); font-size: 12px; font-weight: 700; }
 .project-icon.muted { color: var(--muted); }

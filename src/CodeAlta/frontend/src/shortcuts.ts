@@ -2,13 +2,13 @@ export type ShortcutAction =
   | "openProject" | "focusProjects" | "focusSessions" | "focusPrompt" | "focusSearch"
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
   | "settings" | "providers" | "models" | "prompts" | "context" | "plugins"
-  | "toggleNotes" | "help" | "escape" | "expandPrompt";
+  | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject";
 
 export type ShortcutKey = Readonly<{ key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean;
   isComposing?: boolean; keyCode?: number; defaultPrevented?: boolean; repeat?: boolean }>;
 export type ShortcutResolution = Readonly<{ action: ShortcutAction | null; chordPending: boolean; handled: boolean }>;
 
-export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editing: boolean): ShortcutResolution {
+export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editing: boolean, selectedProjectFocused = false): ShortcutResolution {
   if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.repeat)
     return { action: null, chordPending: false, handled: false };
   const key = event.key.toLowerCase();
@@ -26,6 +26,7 @@ export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editi
   if (primary && key === "g") return { action: null, chordPending: true, handled: true };
 
   if (!editing) {
+    if (selectedProjectFocused && key === "f2" && !primary && !event.altKey && !event.shiftKey) return action("renameProject");
     if (primary && key === "o") return action("openProject");
     if (primary && key === "f") return action("focusSearch");
     if (primary && key === ",") return action("settings");

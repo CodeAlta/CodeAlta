@@ -38,6 +38,7 @@ import { canImportCheckedFolder, createProjectOpening, projectOpeningMessage } f
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
+import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -74,6 +75,17 @@ function App() {
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [notesReader] = useState(() => createNotesReader(sessionNotes.current, sessionNotes.clear));
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
+  const [projectRename] = useState(() => createProjectRename(workspace.readProjectName, workspace.renameProject));
+  const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectNameTarget | null>(null);
+  const [projectRenameName, setProjectRenameName] = useState("");
+  const [projectRenameBusy, setProjectRenameBusy] = useState(false);
+  const [projectRenameConflict, setProjectRenameConflict] = useState(false);
+  const [projectRenameNotice, setProjectRenameNotice] = useState("");
+  const projectRenamePending = useRef(false);
+  const projectRenameRefreshPending = useRef(false);
+  const projectRenameGeneration = useRef(0);
+  const uncertainProjectRename = useRef<{ target: ProjectNameTarget; name: string } | null>(null);
+  const [projectRenameLocked, setProjectRenameLocked] = useState(false);
   const [createSession] = useState(() => createSessionCreation(workspace.createSession));
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
@@ -185,13 +197,17 @@ function App() {
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const currentHostEpoch = useRef(status?.hostEpoch);
+  currentHostEpoch.current = status?.hostEpoch;
 
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.closest("dialog[open]")) { chordPending.current = false; return; }
       const editing = target?.matches("input, textarea, select, [contenteditable='true']") === true;
-      const resolved = resolveShortcut(event, chordPending.current, editing);
+      const focusedProject = !!(view === "workspace" && owned && selectedProject && !selectedProject.archived
+        && target?.closest('button[aria-pressed="true"]') === projectRail.current?.querySelector('button[aria-pressed="true"]'));
+      const resolved = resolveShortcut(event, chordPending.current, editing, focusedProject);
       chordPending.current = resolved.chordPending;
       if (!resolved.handled) return;
       event.preventDefault();
@@ -207,6 +223,7 @@ function App() {
       if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
     }
     else if (action === "openProject") setDialog("project");
+    else if (action === "renameProject") void beginProjectRename();
     else if (action === "help") setDialog("help");
     else if (action === "escape") { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     else if (action === "settings" || action === "providers" || action === "models" || action === "prompts" || action === "plugins") setView("configuration");
@@ -229,6 +246,10 @@ function App() {
   }
 
   function selectProject(nextProjectId: string | null) {
+    projectRenameGeneration.current++;
+    setProjectRenameTarget(null);
+    setProjectRenameConflict(false);
+    setProjectRenameNotice(uncertainProjectRename.current ? "A previous project rename is unconfirmed. Refresh and inspect; no retry will be sent." : "");
     selectedScope.current = nextProjectId;
     setProjectId(nextProjectId);
     const nextSessions = snapshot ? sessionsForProject(snapshot, nextProjectId) : [];
@@ -250,6 +271,105 @@ function App() {
       setWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
       return fresh;
     } catch { return undefined; }
+  }
+
+  async function beginProjectRename() {
+    const project = selectedProject;
+    const capability = mutation?.capability;
+    if (!project || project.archived || !owned || !capability?.canMutate() || projectRenamePending.current) return;
+    if (uncertainProjectRename.current) {
+      setProjectRenameNotice("A previous project rename is unconfirmed. Refresh and inspect; no retry will be sent.");
+      return;
+    }
+    const generation = ++projectRenameGeneration.current;
+    projectRenamePending.current = true;
+    setProjectRenameBusy(true);
+    setProjectRenameNotice("");
+    try {
+      const result = await projectRename.preflight(status?.hostEpoch, project.id, project.path, capability);
+      if (!creationAlive.current || generation !== projectRenameGeneration.current || selectedScope.current !== project.id
+        || currentHostEpoch.current !== status?.hostEpoch || !capability.canMutate()) return;
+      if (result.kind === "ready") {
+        setProjectRenameTarget(result.target);
+        setProjectRenameName(result.target.name);
+        setProjectRenameConflict(false);
+      } else setProjectRenameNotice(projectRenameMessage(result.code));
+    } finally { projectRenamePending.current = false; if (creationAlive.current) setProjectRenameBusy(false); }
+  }
+
+  async function saveProjectRename() {
+    const target = projectRenameTarget;
+    const capability = mutation?.capability;
+    if (!target || !capability?.canMutate() || projectRenamePending.current || projectRenameConflict || projectRenameLocked
+      || selectedScope.current !== target.id || currentHostEpoch.current !== target.epoch) return;
+    const name = projectRenameName;
+    const generation = projectRenameGeneration.current;
+    projectRenamePending.current = true;
+    setProjectRenameBusy(true);
+    setProjectRenameNotice("");
+    try {
+      const result = await projectRename.rename(target, name, capability);
+      if (!creationAlive.current) return;
+      if (result.kind === "renamed") {
+        // The RPC can have committed even if a bridge refresh fails. Never retry this snapshot.
+        let fresh: Awaited<ReturnType<typeof workspace.snapshot>> | undefined;
+        if (currentHostEpoch.current === target.epoch && capability.canMutate()) {
+          try {
+            fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 });
+            if (creationAlive.current && currentHostEpoch.current === target.epoch && capability.canMutate() && fresh.configured)
+              setWorkspaceState({ kind: "ready", snapshot: fresh });
+          } catch { /* Outcome is uncertain if refresh fails. */ }
+        }
+        if (!creationAlive.current) return;
+        if (fresh && projectNameVisible(fresh, target, name) && capability.canMutate()
+          && projectRenameSelectionCurrent(target, currentHostEpoch.current, selectedScope.current)
+          && generation === projectRenameGeneration.current) {
+          setProjectRenameTarget(null);
+          setProjectRenameNotice("");
+        } else {
+          uncertainProjectRename.current = { target, name };
+          setProjectRenameLocked(true);
+          setProjectRenameNotice("The rename may have completed, but its exact project/name was not confirmed. Refresh and inspect; no retry will be sent.");
+        }
+      } else {
+        if (result.code === "rename_unconfirmed") {
+          uncertainProjectRename.current = { target, name };
+          setProjectRenameLocked(true);
+          setProjectRenameNotice(projectRenameMessage(result.code));
+        } else if (generation === projectRenameGeneration.current
+          && projectRenameSelectionCurrent(target, currentHostEpoch.current, selectedScope.current)) {
+          if (result.code === "conflict" || result.code === "unsupported") setProjectRenameConflict(true);
+          setProjectRenameNotice(projectRenameMessage(result.code));
+        }
+      }
+    } finally { projectRenamePending.current = false; if (creationAlive.current) setProjectRenameBusy(false); }
+  }
+
+  async function refreshProjectRename() {
+    const uncertain = uncertainProjectRename.current;
+    if (!uncertain || !creationAlive.current || projectRenameRefreshPending.current) return;
+    const capability = mutation?.capability;
+    if (!capability?.canMutate() || currentHostEpoch.current !== uncertain.target.epoch) {
+      setProjectRenameNotice("The host changed. Reload before reconciling this rename; no retry will be sent.");
+      return;
+    }
+    const generation = projectRenameGeneration.current;
+    projectRenameRefreshPending.current = true;
+    try {
+      const fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 });
+      if (!creationAlive.current || uncertainProjectRename.current !== uncertain || !capability.canMutate()
+        || currentHostEpoch.current !== uncertain.target.epoch || generation !== projectRenameGeneration.current) return;
+      if (fresh.configured) setWorkspaceState({ kind: "ready", snapshot: fresh });
+      if (projectNameVisible(fresh, uncertain.target, uncertain.name)) {
+        uncertainProjectRename.current = null;
+        setProjectRenameLocked(false);
+        if (selectedScope.current === uncertain.target.id) setProjectRenameTarget(null);
+        setProjectRenameNotice("");
+      } else setProjectRenameNotice("The exact project/name is not confirmed. Inspect or reload; no retry will be sent.");
+    } catch {
+      if (creationAlive.current && generation === projectRenameGeneration.current)
+        setProjectRenameNotice("Refresh failed. Inspect or reload; no retry will be sent.");
+    } finally { projectRenameRefreshPending.current = false; }
   }
 
   async function createSelectedSession() {
@@ -436,11 +556,27 @@ function App() {
           {snapshot && <ul className="nav-list">
             {snapshot.projects.map(project => <li key={project.id}><button type="button" title={project.path} aria-pressed={projectId === project.id} onClick={() => selectProject(project.id)}>
               <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small title={project.path}>{project.path}</small>{project.archived && <small>Archived</small>}</span>
-            </button></li>)}
+            </button>{owned && projectId === project.id && !project.archived && <button type="button" className="quiet-button"
+              aria-label={`Rename project ${project.name} (F2)`} disabled={projectRenameBusy || !mutation?.capability.canMutate()}
+              onClick={() => void beginProjectRename()}>Rename project (F2)</button>}</li>)}
             <li><button type="button" aria-pressed={projectId === null} onClick={() => selectProject(null)}>
               <span className="project-icon muted">◇</span><span><strong>Other sessions</strong><small>No matching project</small></span>
             </button></li>
           </ul>}
+          {projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch &&
+            <div className="project-rename" role="group" aria-label={`Rename project ${projectRenameTarget.name}`}>
+              <label>Project name
+                <input autoFocus value={projectRenameName} maxLength={256} disabled={projectRenameBusy || projectRenameLocked || projectRenameConflict}
+                  onChange={event => setProjectRenameName(event.target.value)}
+                  onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+                    event.preventDefault(); event.stopPropagation(); projectRenameGeneration.current++; setProjectRenameTarget(null);
+                  } }} /></label>
+              <button type="button" disabled={projectRenameBusy || projectRenameLocked || projectRenameConflict || !projectRenameName.trim()}
+                onClick={() => void saveProjectRename()}>Save project name</button>
+              <button type="button" disabled={projectRenameBusy} onClick={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }}>Cancel (Escape)</button>
+            </div>}
+          {projectRenameNotice && <p role="alert" className="notice error-text">{projectRenameNotice}</p>}
+          {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>Refresh project name (no retry)</button>}
           <div className="rail-footer">
             <button type="button" className="quiet-button icon-label-button" onClick={() => setView("configuration")}><AppIcon name="settings" size={14} />Settings &amp; extensions</button>
           </div>

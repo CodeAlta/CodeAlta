@@ -35,3 +35,12 @@ test("F6 expands from the composer or shell, without stealing IME or handled inp
   }
   assert.equal(resolveShortcut({ key: "Escape", isComposing: true }, false, true).handled, false);
 });
+
+test("F2 renames only a focused selected project outside editing, IME and modified focus", () => {
+  assert.equal(resolveShortcut({ key: "F2" }, false, false, true).action, "renameProject");
+  assert.equal(resolveShortcut({ key: "F2" }, false, false).handled, false);
+  assert.equal(resolveShortcut({ key: "F2" }, false, true, true).handled, false);
+  for (const modifier of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }, { metaKey: true },
+    { isComposing: true }, { keyCode: 229 }, { repeat: true }, { defaultPrevented: true }])
+    assert.equal(resolveShortcut({ key: "F2", ...modifier }, false, false, true).handled, false);
+});

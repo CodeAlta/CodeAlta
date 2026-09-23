@@ -21,6 +21,8 @@ internal sealed partial class WorkspaceService
         _importEpoch = epoch;
         _import = async path => await catalog.GetByPathAsync(path, CancellationToken.None).ConfigureAwait(false)
             ?? await catalog.UpsertFromPathAsync(path, CancellationToken.None).ConfigureAwait(false);
+        _projectNameWrite = (id, path, source, revision, name) =>
+            catalog.RenameDisplayNameAsync(id, path, source, revision, name, CancellationToken.None);
     }
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch, Func<string, Task<ProjectDescriptor>> import)
@@ -63,7 +65,7 @@ internal sealed partial class WorkspaceService
         lock (_importGate)
         {
             if (_importsClosed) return Reply("closed", request.DirectoryPath);
-            if (_importWork is not null) return Reply("busy", request.DirectoryPath);
+            if (_importWork is not null || _projectReadWork is not null || _projectRenameWork is not null) return Reply("busy", request.DirectoryPath);
             var completion = new TaskCompletionSource<WorkspaceOpenProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _importWork = work = completion.Task;
             _ = ImportAsync(path, request.DirectoryPath, completion);
@@ -75,8 +77,10 @@ internal sealed partial class WorkspaceService
     internal async Task CloseImportsAsync()
     {
         Task? work;
-        lock (_importGate) { _importsClosed = true; work = _importWork; }
-        if (work is not null) await work.ConfigureAwait(false);
+        Task? read;
+        Task? rename;
+        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; }
+        await Task.WhenAll(work ?? Task.CompletedTask, read ?? Task.CompletedTask, rename ?? Task.CompletedTask).ConfigureAwait(false);
     }
 
     private async Task ImportAsync(string path, string requestedPath, TaskCompletionSource<WorkspaceOpenProjectResponse> completion)
