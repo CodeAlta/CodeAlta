@@ -35,6 +35,7 @@ import { visibleConfigurationSections, type ConfigurationScope } from "./configu
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
 import { canImportCheckedFolder, createProjectOpening, projectOpeningMessage } from "./projectOpening";
+import { createSessionCreation, createdSessionSelection, sessionCreationMessage, type SessionTarget } from "./sessionCreation";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -71,6 +72,20 @@ function App() {
   const [runtimeReader] = useState(() => createRuntimeStateReader(sessionRuntimeState.current));
   const [notesReader] = useState(() => createNotesReader(sessionNotes.current, sessionNotes.clear));
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
+  const [createSession] = useState(() => createSessionCreation(workspace.createSession));
+  const [creatingVisible, setCreatingVisible] = useState(false);
+  const [creatingTitle, setCreatingTitle] = useState("");
+  const [creatingBusy, setCreatingBusy] = useState(false);
+  const [creatingMessage, setCreatingMessage] = useState("");
+  const creationPending = useRef(false);
+  const creationAlive = useRef(true);
+  const creationRefresh = useRef(new AbortController());
+  const selectedScope = useRef<string | null>(null);
+  useEffect(() => {
+    creationAlive.current = true;
+    creationRefresh.current = new AbortController();
+    return () => { creationAlive.current = false; creationRefresh.current.abort(); };
+  }, []);
   const [inputReviewer] = useState(() => createUserInputReviewer(
     request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
     request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
@@ -136,6 +151,7 @@ function App() {
     const firstSession = snapshot.sessions[0];
     if (!firstSession) return;
     const project = snapshot.projects.find(value => value.path === firstSession.workspacePath);
+    selectedScope.current = project?.id ?? null;
     setProjectId(project?.id ?? null);
     setSessionId(firstSession.id);
   }, [snapshot]);
@@ -144,6 +160,7 @@ function App() {
   const visibleSessions = sessions.filter(session => !search || `${session.title} ${session.providerKey ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   const selectedSession = snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
+  selectedScope.current = projectId;
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const connected = !!status?.hostAvailable;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
@@ -189,10 +206,13 @@ function App() {
   }
 
   function selectProject(nextProjectId: string | null) {
+    selectedScope.current = nextProjectId;
     setProjectId(nextProjectId);
     const nextSessions = snapshot ? sessionsForProject(snapshot, nextProjectId) : [];
     setSessionId(nextSessions[0]?.id ?? null);
     setView("workspace");
+    setCreatingVisible(false);
+    setCreatingMessage("");
   }
 
   async function refreshProjects(signal: AbortSignal) {
@@ -202,6 +222,36 @@ function App() {
       setWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
       return fresh;
     } catch { return undefined; }
+  }
+
+  async function createSelectedSession() {
+    if (creationPending.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
+      || projectId !== null && !selectedProject) return;
+    creationPending.current = true;
+    const target: SessionTarget = selectedProject
+      ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
+    const scopeAtAdmission = projectId;
+    const capability = mutation.capability;
+    setCreatingBusy(true);
+    setCreatingMessage("");
+    try {
+      const result = await createSession(status?.hostEpoch, target, creatingTitle.trim() || null, capability);
+      if (!creationAlive.current) return;
+      if (result.kind === "created") {
+        const fresh = await refreshProjects(creationRefresh.current.signal);
+        if (!creationAlive.current) return;
+        const selection = fresh && createdSessionSelection(fresh, result);
+        if (selection && selectedScope.current === scopeAtAdmission && capability.canMutate()) {
+          selectedScope.current = selection.projectId;
+          setProjectId(selection.projectId);
+          setSessionId(selection.sessionId);
+          setSearch("");
+          setCreatingVisible(false);
+          setCreatingTitle("");
+          setView("workspace");
+        } else setCreatingMessage("Creation may have completed, but the selected scope changed or the refreshed catalog did not show the session. Inspect and refresh sessions before creating another.");
+      } else setCreatingMessage(sessionCreationMessage(result.code));
+    } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
   }
 
   function changePane(pane: PaneName, delta: number) {
@@ -259,8 +309,24 @@ function App() {
         <aside className="session-rail" aria-label="Sessions" ref={sessionRail}>
           <div className="session-rail-header">
             <div><span className="eyebrow">Sessions</span><h2>{selectedProject?.name ?? "Other sessions"}</h2></div>
-            <button type="button" className="icon-button" title="Refresh by relaunching the current desktop host" disabled>＋</button>
+            <button type="button" className="icon-button" aria-label="Create session" title="Create session in selected scope"
+              disabled={!owned || !snapshot || !!selectedProject?.archived || projectId !== null && !selectedProject || creatingBusy}
+              onClick={() => { setCreatingVisible(value => !value); setCreatingMessage(""); }}>＋</button>
           </div>
+          {creatingVisible && <div className="session-create">
+            <label>New {selectedProject ? `session in ${selectedProject.name}` : "global session"}
+              <input value={creatingTitle} maxLength={256} disabled={creatingBusy} placeholder="Title (optional)" onChange={event => setCreatingTitle(event.target.value)} /></label>
+            <button type="button" className="quiet-button" disabled={creatingBusy} onClick={() => void createSelectedSession()}>Create and open</button>
+          </div>}
+          {creatingBusy && <p role="status" className="notice">Creating session…</p>}
+          {creatingMessage && <p role="alert" className="notice error-text">{creatingMessage}</p>}
+          {creatingMessage && <button type="button" className="quiet-button" disabled={creatingBusy} onClick={() => {
+            void refreshProjects(creationRefresh.current.signal).then(fresh => {
+              if (creationAlive.current) setCreatingMessage(fresh ? "Session list refreshed. Inspect the entries before creating another."
+                : "Could not refresh the session list. Inspect before creating another.");
+            });
+          }}>Refresh session list</button>}
+          {!owned && <p className="muted-text">Session creation requires an owned host.</p>}
           <label className="search"><AppIcon name="search" size={14} /><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /></label>
           {notice && <p role="status" className="notice">{notice}</p>}
           <div className="session-list">
@@ -298,6 +364,7 @@ function App() {
         const fresh = await refreshProjects(signal);
         if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate()
           || !fresh.projects.some(project => project.id === id && project.path === path)) return false;
+        selectedScope.current = id;
         setProjectId(id);
         setSessionId(sessionsForProject(fresh, id)[0]?.id ?? null);
         setView("workspace");

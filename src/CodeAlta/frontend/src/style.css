@@ -314,6 +314,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .project-import p { margin: 0; overflow-wrap: anywhere; }
 .project-import label { display: flex; align-items: start; gap: 6px; }
 .project-import label input { margin-top: 2px; }
+.session-create { display: grid; gap: 8px; min-width: 0; min-height: 0; overflow-y: auto; padding: 10px; }
+.session-create label { display: grid; gap: 5px; font-size: 12px; }
+.session-create input { min-width: 0; }
 .app-dialog > footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--muted); font-size: 11px; }
 kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); font: inherit; }
 .shortcut-dialog dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; overflow-y: auto; }

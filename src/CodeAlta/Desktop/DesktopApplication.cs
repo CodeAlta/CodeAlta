@@ -145,14 +145,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, async () =>
             {
                 await workspacePrepared.Task;
-                if (workspace is not null) await workspace.CloseImportsAsync();
+                if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
             });
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
-                workspace = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, epoch);
+                workspace = new WorkspaceService(host, epoch);
                 workspacePrepared.TrySetResult();
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);

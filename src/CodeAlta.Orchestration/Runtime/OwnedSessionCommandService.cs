@@ -56,6 +56,29 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// <summary>Gets the command-owned restricted ask service, disabled unless explicitly configured.</summary>
     public OwnedSessionAskService Asks { get; }
 
+    /// <summary>Creates a draft through the host runtime using the same restricted permission and input policy as owned sends.</summary>
+    /// <remarks>The caller owns admission and must drain the returned task before disposing the host.</remarks>
+    /// <param name="project">An already resolved, trusted catalog project; null creates a global session.</param>
+    /// <param name="provider">An enabled provider selected from the host registry.</param>
+    /// <param name="title">An optional validated title.</param>
+    /// <returns>The persisted session descriptor.</returns>
+    /// <exception cref="ArgumentNullException">The provider is null.</exception>
+    /// <exception cref="ArgumentException">The provider is disabled or the project is invalid.</exception>
+    /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
+    public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
+        lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
+        var directory = project?.ProjectPath ?? _catalog.GlobalRoot;
+        var policy = SessionExecutionPolicy.CapturePreferred(provider.ProviderId, directory,
+            project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
+        var options = SessionExecutionPolicy.BuildOptions(policy, [], _runtime.Permissions.OwnedDefaultPermissionHandler,
+            _runtime.Permissions.OwnedDefaultUserInputHandler);
+        return project is null ? _runtime.CreateGlobalSessionAsync(options, title, CancellationToken.None)
+            : _runtime.CreateProjectSessionAsync(project, options, title, CancellationToken.None);
+    }
+
     internal Func<ModelProviderId, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? SelectionModels { get; init; }
 
     internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
