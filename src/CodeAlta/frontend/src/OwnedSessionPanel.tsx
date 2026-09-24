@@ -314,13 +314,14 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   return <section className="owned-session" aria-label="Owned text submission">
     {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onClose={() => setExpanded(false)} />}
     <label className="sr-only" htmlFor="session-prompt">Message</label>
-    <textarea id="session-prompt" ref={promptInput} className="prompt-input" maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
+    <textarea id="session-prompt" ref={promptInput} className="prompt-input" rows={1} maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
       onChange={event => editText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, () => steer(true))) event.preventDefault();
       }} />
+    <div className="composer-toolbar">
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title="Agent prompt for the next Send">
         {!choices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? "Loading…"}</option>}
@@ -336,21 +337,20 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
         {selected?.reasoningEffort && !efforts.includes(selected.reasoningEffort) && <option value={selected.reasoningEffort}>{selected.reasoningEffort} (not in catalog)</option>}
         {efforts.map(e => <option key={e} value={e}>{e}</option>)}
       </select></label>
-      <button type="button" className="prompt-state" onClick={() => void runtimeScope.current?.refresh()} aria-label="Refresh context and runtime configuration" title={`Refresh context · ${runtimeConfiguration?.providerKey ?? "session provider"}`}>
-        <AppIcon name="refresh" size={13} /><strong>{runtimeState?.kind === "loading" ? "Reading…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Ready" : "Refresh"}</strong>
-      </button>
-      <span className="prompt-state" title="MCP availability reported by the configured plugin runtime"><span>MCP</span><strong>{mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")}</strong></span>
     </div>
-    <p className="composer-notice" role="status">{choicesNotice} <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Refresh choices</button></p>
     <div className="history-controls">
-      <span className="composer-hint">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
-      <button id="expand-session-prompt" type="button" disabled={!!pending || invalidEpoch} title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}>Expand</button>
-      <button type="button" onClick={() => refresh()}>Refresh receipts</button>
+      <span className="sr-only">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
+      <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>
+    </div>
+    {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}
+      {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Retry choices</button>}</p>}
     {(message !== "Ready to send to this owned session." || pending || pendingAborts.length > 0) && <p className="composer-notice" role="status">{message}</p>}
+    {(pending || pendingAborts.length > 0) && <button type="button" onClick={() => refresh()}>Refresh receipts</button>}
     {invalidEpoch && <p role="alert">Host/runtime identity changed. Reload required; mutations are disabled. The exact uncertain request is retained and will not be rebased or resent.</p>}
     {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred."}</p>}
+    {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">MCP plugin: {mcpPlugin.state}. Check advanced diagnostics.</p>}
     {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
     {(pendingCompact || pendingAbortRun) && <p className="composer-notice" role="status">{pendingCompact && compactMessage} {pendingAbortRun && abortRunMessage} Open advanced controls to inspect the exact targets or retry manually.</p>}
     {(showSteering || showQueue) && <div className="context-actions">
@@ -370,6 +370,10 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     </div>}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId} />}
     <details className="advanced-session-controls"><summary>Advanced session controls and diagnostics</summary><div>
+    <p className="detail">Selections apply on Send; active runs and queued text are unchanged.</p>
+    <button type="button" onClick={() => void runtimeScope.current?.refresh()} aria-label="Refresh context and runtime configuration" title={`Refresh context · ${runtimeConfiguration?.providerKey ?? "session provider"}`}><AppIcon name="refresh" size={14} /> Refresh context</button>
+    <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}><AppIcon name="refresh" size={14} /> Refresh choices</button>
+    <p className="detail">MCP: {mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")} · {runtimeState?.kind === "loading" ? "Reading context…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Context ready" : "Context unavailable"}.</p>
     <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
     <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>
     <button type="button" onClick={() => refresh()}>Refresh submissions</button>
