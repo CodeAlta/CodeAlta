@@ -57,6 +57,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(ModelCatalogProvidersRequest))]
 [JsonSerializable(typeof(ModelCatalogProvidersResponse))]
 [JsonSerializable(typeof(ModelCatalogProvider))]
+[JsonSerializable(typeof(ModelCatalogProbeRequest))]
+[JsonSerializable(typeof(ModelCatalogProbeResponse))]
 [JsonSerializable(typeof(ModelCatalogModelsRequest))]
 [JsonSerializable(typeof(ModelCatalogModelsResponse))]
 [JsonSerializable(typeof(ModelCatalogModel))]

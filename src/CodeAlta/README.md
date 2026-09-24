@@ -72,6 +72,18 @@ the selected agent prompt, and cannot change an in-flight/uncertain exact Send; 
 the running turn or queued work. A different provider, missing choices or changed host/session
 cannot apply the selection. Provider authentication and global defaults remain TUI workflows.
 
+The **Providers** tab (Settings → Open provider management, or `Ctrl+G`, then `Ctrl+R`)
+lists at most 32 configured providers with adapter type, enabled/default settings, configured
+default model and **cached** host initialization availability. Opening the tab or selecting a row
+does not probe. **Test selected provider** explicitly starts only that enabled provider through
+the shared initialization service; it can use configured provider storage or network in an owned
+launch. The result is a completed initialization/probe, not proof of authentication or a live
+connection, and arbitrary provider error messages/URLs/categories are not shown. An abandoned
+probe is still joined by the host before disposal; do not assume its outcome from a timed-out
+browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
+Provider enablement, defaults, authentication and configuration writes are not available here;
+they require a separately verified safe persisted-source mutation contract.
+
 The **Agent prompts** tab (Settings → Browse agent prompts, or `Ctrl+G`, then `Ctrl+H`)
 shows effective prompts discovered by the shared host catalog for the exact selected owned
 session. It shows name, ID, description, effective source scope and a read-only excerpt of the
@@ -171,7 +183,7 @@ lexical checks and the copy's `alta.lock` are not a reparse sandbox or race-free
 **This consent is broader than browsing:** lock/project/journal/cache/provider-state writes,
 configuration/instruction/skill reads and configured-provider registration are permitted.
 Registration can read declared credential environment variables and shipped defaults; later
-submissions can authenticate and use provider storage/network. Plugins and probes remain off.
+submissions can authenticate and use provider storage/network. Plugins and automatic provider probes remain off; explicit Models reads and Providers tests may probe.
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
 
 Select an existing session to send text (32,768 UTF-16 units maximum). Permissions are denied by

@@ -17,6 +17,8 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
   assert.match(app, /action === "models"\) navigate\("models"\)/, "the production shortcut dispatcher must navigate to the distinct catalog");
   assert.match(app, /readProviders=\{modelCatalog\.providers\} readModels=\{modelCatalog\.models\}/, "the production app uses host RPC reads");
   assert.match(app, /applyCatalogNextSend\(target/, "the production screen uses the same scoped choice owner as the mounted fixture");
+  assert.match(app, /action === "providers"\) navigate\("providers"\)/, "provider chord navigates to its own screen");
+  assert.match(app, /probe=\{modelCatalog\.probe\}/, "provider test is wired to owned host RPC");
   assert.match(app, /selections=\{nextSendSelections\}/, "the production composer receives the shared instance-owned selection");
   const root = await mkdtemp(join(tmpdir(), "codealta-model-catalog-"));
   let browser: ReturnType<typeof spawn> | undefined;
@@ -252,6 +254,64 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value === 'beta-text'"), "ready");
     assert.equal(await evaluate(`localStorage.getItem('codealta.desktop.selection.three')`), null,
       "a canceled catalog action cannot write even if its session is still selected");
+
+    // The separate production provider screen reads cached state without probing on navigation or selection.
+    await evaluate(`window.catalogFixture.openProviders('epoch-1')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 9"), "ready");
+    assert.equal(await evaluate(`window.catalogFixture.probeRequests.length`), 0);
+    await evaluate(`window.catalogFixture.providerReads[8].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
+      {id:'alpha',name:'Alpha',type:'literal',enabled:true,isDefault:true,defaultModel:'configured-only',availability:'Unknown',observedAt:null},
+      {id:'beta',name:'Beta',type:'literal',enabled:true,isDefault:false,defaultModel:null,availability:'Failed',observedAt:null}]})`);
+    assert.equal(await wait("document.querySelectorAll('[aria-label=\"Configured providers\"] button').length === 2"), "ready");
+    await evaluate(`document.querySelectorAll('[aria-label="Configured providers"] button')[0].click()`);
+    assert.equal(await wait("document.body.innerText.includes('configured-only')"), "ready");
+    assert.match((await snapshot()).text, /Cached availability\s+Unknown/);
+    assert.equal(await evaluate(`window.catalogFixture.probeRequests.length`), 0);
+    await evaluate(`document.querySelector('[aria-label="Provider details"] button').click()`);
+    assert.equal(await wait("window.catalogFixture.probeRequests.length === 1"), "ready");
+    assert.equal(await evaluate(`JSON.stringify(window.catalogFixture.probeRequests[0].providerId)`), '"alpha"');
+    await evaluate(`document.querySelectorAll('[aria-label="Configured providers"] button')[1].click();
+      window.catalogFixture.probeRequests[0].resolve({status:'ok',epoch:'epoch-1',providerId:'alpha',availability:'Ready'})`);
+    assert.equal(await wait("document.body.innerText.includes('Cached availability') && document.body.innerText.includes('Failed')"), "ready");
+    assert.doesNotMatch((await snapshot()).text, /Completed test for alpha/);
+    await evaluate(`document.querySelector('[aria-label="Provider details"] button').click()`);
+    assert.equal(await wait("window.catalogFixture.probeRequests.length === 2"), "ready");
+    await evaluate(`window.catalogFixture.probeRequests[1].reject(new Error('https://secret.invalid/token'))`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] [role=alert]')"), "ready");
+    assert.doesNotMatch((await snapshot()).text, /secret.invalid/);
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Provider details"] button').disabled`), true);
+    await evaluate(`window.catalogFixture.openModels()`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Model catalog\"]')"), "ready");
+    await evaluate(`window.catalogFixture.openProviders('epoch-1')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 11"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[10].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
+      {id:'beta',name:'Beta',type:'literal',enabled:true,isDefault:false,defaultModel:null,availability:'Failed',observedAt:null}]})`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Configured providers\"] button')"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Configured providers"] button').click()`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] button')"), "ready");
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Provider details"] button').disabled`), true,
+      "uncertain probe stays held across a same-host screen remount");
+    await evaluate(`window.catalogFixture.openProviders('epoch-2')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 12"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[11].resolve({status:'ok',epoch:'epoch-2',truncated:false,providers:[
+      {id:'beta',name:'Beta',type:'literal',enabled:true,isDefault:false,defaultModel:null,availability:'Failed',observedAt:null}]})`);
+    assert.equal(await wait("document.querySelectorAll('[aria-label=\"Configured providers\"] button').length === 1"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Configured providers"] button').click()`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] button')"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Provider details"] button').click()`);
+    assert.equal(await wait("window.catalogFixture.probeRequests.length === 3"), "ready");
+    await evaluate(`window.catalogFixture.probeRequests[2].resolve({status:'ok',epoch:'epoch-2',providerId:'beta',availability:'Ready'})`);
+    assert.equal(await wait("document.body.innerText.includes('Completed test for beta: Ready')"), "ready");
+    assert.match((await snapshot()).text, /Cached availability\s+Failed/, "the completed test is not mislabeled as the previous cached observation");
+    await evaluate(`window.catalogFixture.openProviders('epoch-3')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 13"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[12].resolve({status:'ok',epoch:'epoch-2',truncated:false,providers:[]})`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Configured providers\"] [role=alert]')"), "ready");
+    assert.match((await snapshot()).text, /Host identity changed/);
+    await evaluate(`window.catalogFixture.openProviders(null)`);
+    assert.equal(await wait("document.body.innerText.includes('Catalog-only mode: provider configuration is read-only')"), "ready");
+    assert.match((await snapshot()).text, /Configured only \(configured-only\)/);
+    assert.equal(await evaluate(`window.catalogFixture.probeRequests.length`), 3);
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });

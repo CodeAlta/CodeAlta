@@ -100,6 +100,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
+        ModelCatalogService? providers = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null;
@@ -120,6 +121,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     operations?.CloseAdmission();
                     asks?.CloseAdmission();
                     reminders?.CloseAdmission();
+                    providers?.CloseAdmission();
                     closeRequested.TrySetResult();
                     if (!shutdownUnconfirmed) window.Title = "CodeAlta — shutdown pending; lease retained";
                 }
@@ -149,6 +151,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                 await workspacePrepared.Task;
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
                 if (reminders is not null) await reminders.DisposeAsync();
+                if (providers is not null) await providers.DrainAsync();
             });
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
@@ -180,7 +183,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
-                    builder.AddModelCatalogService(new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch));
+                    providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
+                    builder.AddModelCatalogService(providers);
                     builder.AddPromptCatalogService(new PromptCatalogService(host.Commands, epoch));
                     builder.AddReminderService(reminders);
                     builder.AddSessionOperationsService(operations);
@@ -224,6 +228,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         operations?.CloseAdmission();
         asks?.CloseAdmission();
         reminders?.CloseAdmission();
+        providers?.CloseAdmission();
         if (_closeFlow is not null)
         {
             try

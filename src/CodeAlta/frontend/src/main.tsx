@@ -10,6 +10,7 @@ import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState
 import { History } from "./HistoryPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
+import { ProvidersPanel } from "./ProvidersPanel";
 import { PromptCatalogPanel } from "./PromptCatalogPanel";
 import { ReminderPanel } from "./ReminderPanel";
 import { createReminderActions } from "./reminderActions";
@@ -56,7 +57,7 @@ import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView 
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration" | "models" | "prompts" | "reminders";
+type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders";
 type Theme = "dark" | "light";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -87,6 +88,7 @@ function App() {
     const capability = reminderCapability.current;
     if (capability?.canSubmit({ expectedEpoch: target.epoch })) capability.observe(reply);
   }));
+  const [providerProbeHolds] = useState(() => new Set<string>());
   const [draftIndicators] = useState(createDraftIndicators);
   const [nextSendSelections] = useState(() => createNextSendSelectionStore(
     key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)));
@@ -340,7 +342,8 @@ function App() {
     }
     else if (action === "models") navigate("models");
     else if (action === "prompts") navigate("prompts");
-    else if (action === "settings" || action === "providers" || action === "plugins") navigate("configuration");
+    else if (action === "providers") navigate("providers");
+    else if (action === "settings" || action === "plugins") navigate("configuration");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
@@ -738,6 +741,7 @@ function App() {
       <nav className="topnav" aria-label="Primary navigation">
         <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>Sessions</button>
         <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => navigate("configuration")}>Configuration</button>
+        <button type="button" aria-current={view === "providers" ? "page" : undefined} onClick={() => navigate("providers")}>Providers</button>
         <button type="button" aria-current={view === "models" ? "page" : undefined} onClick={() => navigate("models")}>Models</button>
         <button type="button" aria-current={view === "prompts" ? "page" : undefined} onClick={() => navigate("prompts")}>Agent prompts</button>
         <button type="button" aria-current={view === "reminders" ? "page" : undefined} onClick={() => navigate("reminders")}>Reminders</button>
@@ -749,7 +753,10 @@ function App() {
     </header>
 
     {view === "configuration"
-      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
+      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
+      : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
+          read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
+          onOpenModels={() => navigate("models")} />
       : view === "reminders" ? <ReminderPanel key={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? JSON.stringify([status!.hostEpoch, selectedSession.id]) : "none"}
           target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
@@ -1067,13 +1074,14 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme, onOpenModels, onOpenPrompts }: {
+function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme, onOpenProviders, onOpenModels, onOpenPrompts }: {
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
   theme: Theme;
   setTheme: (theme: Theme) => void;
   onOpenModels: () => void;
+  onOpenProviders: () => void;
   onOpenPrompts: () => void;
 }) {
   const inventory = configurationState.snapshot;
@@ -1097,7 +1105,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
       </div></div></section>}
       {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
-        <button type="button" className="quiet-button" onClick={onOpenModels}>Browse host model catalog</button>
+        <button type="button" className="quiet-button" onClick={onOpenProviders}>Open provider management</button>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}
         {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
         {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}

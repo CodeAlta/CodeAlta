@@ -14,6 +14,9 @@ internal sealed class ModelCatalogService(
     string? epoch = null)
 {
     internal const int MaximumModelsResponseBytes = 96 * 1024;
+    private readonly object _probeGate = new();
+    private readonly HashSet<Task> _probes = [];
+    private bool _closed;
 
     [NeoRpcMethod("providers")]
     public ModelCatalogProvidersResponse Providers(ModelCatalogProvidersRequest request)
@@ -21,13 +24,69 @@ internal sealed class ModelCatalogService(
         ArgumentNullException.ThrowIfNull(request);
         var denied = CheckEpoch(request.ExpectedEpoch);
         if (denied is not null) return new(denied, epoch, [], false);
-        var descriptors = registry!.ListProviders(includeDisabled: true);
-        var visible = descriptors.Where(descriptor => ValidId(descriptor.ProviderId.Value)).Take(33).ToArray();
-        var states = initialization!.CurrentStates.ToDictionary(state => state.ProviderId.Value, StringComparer.OrdinalIgnoreCase);
-        return new("ok", epoch, visible.Take(32).Select(descriptor => new ModelCatalogProvider(
-            descriptor.ProviderId.Value, Bound(descriptor.DisplayName, 256), descriptor.IsEnabled,
-            states.TryGetValue(descriptor.ProviderId.Value, out var state) ? state.Availability.ToString() : "Unknown")).ToArray(),
-            descriptors.Count > 32 || descriptors.Count != visible.Length);
+        lock (_probeGate)
+        {
+            if (_closed) return new("closed", epoch, [], false);
+            var descriptors = registry!.ListProviders(includeDisabled: true);
+            var visible = descriptors.Where(descriptor => ValidId(descriptor.ProviderId.Value)).Take(33).ToArray();
+            var states = initialization!.CurrentStates.ToDictionary(state => state.ProviderId.Value, StringComparer.OrdinalIgnoreCase);
+            return new("ok", epoch, visible.Take(32).Select(descriptor => new ModelCatalogProvider(
+                descriptor.ProviderId.Value, Bound(descriptor.DisplayName, 256), descriptor.IsEnabled,
+                states.TryGetValue(descriptor.ProviderId.Value, out var state) ? state.Availability.ToString() : "Unknown")
+            {
+                Type = Bound(descriptor.ProviderType, 256), IsDefault = descriptor.IsDefault,
+                DefaultModel = descriptor.DefaultModelId is null ? null : Bound(descriptor.DefaultModelId, 256),
+                ObservedAt = state is { Availability: not ModelProviderAvailability.Unknown } ? state.ObservedAt : null,
+            }).ToArray(),
+                descriptors.Count > 32 || descriptors.Count != visible.Length);
+        }
+    }
+
+    [NeoRpcMethod("probe")]
+    public async Task<ModelCatalogProbeResponse> Probe(ModelCatalogProbeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var denied = CheckEpoch(request.ExpectedEpoch);
+        if (denied is not null) return new(denied, epoch, null, "Unknown");
+        if (!ValidId(request.ProviderId)) return new("invalid_request", epoch, null, "Unknown");
+        cancellationToken.ThrowIfCancellationRequested();
+        var completion = new TaskCompletionSource<ModelCatalogProbeResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ModelProviderDescriptor? descriptor;
+        lock (_probeGate)
+        {
+            if (_closed) return new("closed", epoch, request.ProviderId, "Unknown");
+            descriptor = registry!.ListProviders(includeDisabled: true).Where(value => ValidId(value.ProviderId.Value))
+                .Take(32).FirstOrDefault(value => string.Equals(value.ProviderId.Value, request.ProviderId, StringComparison.Ordinal));
+            if (descriptor is null) return new("not_found", epoch, null, "Unknown");
+            if (_probes.Count != 0) return new("busy", epoch, descriptor.ProviderId.Value, "Unknown");
+            _probes.Add(completion.Task);
+        }
+        // A caller abandoning its wait never cancels an admitted provider operation. Host shutdown joins it.
+        _ = ProbeOwnedAsync(descriptor, completion);
+        return await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ProbeOwnedAsync(ModelProviderDescriptor descriptor, TaskCompletionSource<ModelCatalogProbeResponse> completion)
+    {
+        ModelCatalogProbeResponse result;
+        try
+        {
+            await initialization!.RefreshProviderAsync(descriptor.ProviderId, CancellationToken.None).ConfigureAwait(false);
+            var state = initialization.CurrentStates.FirstOrDefault(value => value.ProviderId == descriptor.ProviderId);
+            result = state is null ? new("probe_failed", epoch, descriptor.ProviderId.Value, "Unknown")
+                : new("ok", epoch, descriptor.ProviderId.Value, state.Availability.ToString());
+        }
+        catch (Exception) { result = new("probe_failed", epoch, descriptor.ProviderId.Value, "Unknown"); }
+        completion.TrySetResult(result);
+        lock (_probeGate) _probes.Remove(completion.Task);
+    }
+
+    internal void CloseAdmission() { lock (_probeGate) _closed = true; }
+    internal async Task DrainAsync()
+    {
+        Task[] work;
+        lock (_probeGate) { _closed = true; work = [.. _probes]; }
+        await Task.WhenAll(work).ConfigureAwait(false);
     }
 
     [NeoRpcMethod("models")]
@@ -148,7 +207,15 @@ internal sealed class ModelCatalogService(
 
 internal sealed record ModelCatalogProvidersRequest(string ExpectedEpoch);
 internal sealed record ModelCatalogProvidersResponse(string Status, string? Epoch, IReadOnlyList<ModelCatalogProvider> Providers, bool Truncated);
-internal sealed record ModelCatalogProvider(string Id, string Name, bool Enabled, string Availability);
+internal sealed record ModelCatalogProvider(string Id, string Name, bool Enabled, string Availability)
+{
+    public string Type { get; init; } = "Unknown";
+    public bool IsDefault { get; init; }
+    public string? DefaultModel { get; init; }
+    public DateTimeOffset? ObservedAt { get; init; }
+}
+internal sealed record ModelCatalogProbeRequest(string ExpectedEpoch, string ProviderId);
+internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, string? ProviderId, string Availability);
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated);
 internal sealed record ModelCatalogModel(string Id, string Name, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort,

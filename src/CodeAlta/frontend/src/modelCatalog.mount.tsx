@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
+import { ProvidersPanel } from "./ProvidersPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
@@ -9,15 +10,19 @@ import { createAbortRunSubmissions } from "./sessionAbortRun";
 import { createQueueSubmissions } from "./sessionQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
-import type { ModelCatalogModelsResponse, ModelCatalogProvidersResponse, SessionChoicesResponse, SessionSendRequest } from "#neoastra";
+import type { ModelCatalogModelsResponse, ModelCatalogProbeResponse, ModelCatalogProvidersResponse, SessionChoicesResponse, SessionSendRequest } from "#neoastra";
 
 const providerReads: Array<{ epoch: string; resolve: (response: ModelCatalogProvidersResponse) => void; reject: (error: Error) => void }> = [];
 const modelReads: Array<{ epoch: string; providerId: string; resolve: (response: ModelCatalogModelsResponse) => void; reject: (error: Error) => void }> = [];
+const probeRequests: Array<{ epoch: string; providerId: string; resolve: (response: ModelCatalogProbeResponse) => void; reject: (error: Error) => void }> = [];
 const readProviders: React.ComponentProps<typeof ModelCatalogPanel>["readProviders"] = request => new Promise((resolve, reject) => {
   providerReads.push({ epoch: request.expectedEpoch, resolve, reject });
 });
 const readModels: React.ComponentProps<typeof ModelCatalogPanel>["readModels"] = request => new Promise((resolve, reject) => {
   modelReads.push({ epoch: request.expectedEpoch, providerId: request.providerId, resolve, reject });
+});
+const probe: React.ComponentProps<typeof ProvidersPanel>["probe"] = request => new Promise((resolve, reject) => {
+  probeRequests.push({ epoch: request.expectedEpoch, providerId: request.providerId, resolve, reject });
 });
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch-1", sessionId: "one",
   current: { providerKey: "beta", agentPromptId: "plan", modelId: "beta-text", reasoningEffort: "High" },
@@ -29,13 +34,15 @@ const capability = createMutationCapability("epoch-1");
 const submissions = createOwnedSubmissions(async request => { sent.push(request); throw Error("uncertain test-owned Send"); }, unavailable);
 const selections = createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value));
 const root = createRoot(document.getElementById("app")!);
+const providerProbeHolds = new Set<string>();
 const fixture = {
-  providerReads, modelReads, sent, choicesReads: 0, holdChoices: false,
+  providerReads, modelReads, probeRequests, sent, choicesReads: 0, holdChoices: false,
   releaseChoices: null as (() => void) | null,
-  epoch: "epoch-1" as string | null, sessionId: null as string | null, view: "models" as "models" | "composer",
+  epoch: "epoch-1" as string | null, sessionId: null as string | null, view: "models" as "models" | "providers" | "composer",
   show(epoch: string | null) { fixture.epoch = epoch; fixture.view = "models"; render(); },
   session(sessionId: string | null) { fixture.sessionId = sessionId; render(); },
   openModels() { fixture.view = "models"; render(); },
+  openProviders(epoch: string | null) { fixture.epoch = epoch; fixture.view = "providers"; render(); },
   leaveCatalog() { fixture.view = "composer"; render(); },
   readChoices: async (epoch: string, sessionId: string): Promise<SessionChoicesResponse> => {
     fixture.choicesReads++;
@@ -60,7 +67,12 @@ function render() {
       abortRuns={createAbortRunSubmissions(unavailable)} queue={createQueueSubmissions(unavailable, unavailable)}
       permissionReviewer={null} runtimeReader={createRuntimeStateReader(async () => ({ status: "ok", hostEpoch: epoch,
         sessionId, entry: null, runtimeInstanceId: "literal-runtime", coordinatorTransitionInProgress: false }))} /></div>);
-  } else root.render(<ModelCatalogPanel epoch={epoch} readProviders={readProviders} readModels={readModels}
+  } else if (fixture.view === "providers") root.render(<ProvidersPanel epoch={epoch} read={readProviders} probe={probe}
+    holds={providerProbeHolds}
+    catalogProviders={[{ id: "configured-only", name: "Configured only", type: "literal", enabled: false, isDefault: true,
+      defaultModel: "not-discovered", defaultReasoning: null }]}
+    onOpenModels={() => { fixture.view = "models"; render(); }} />);
+  else root.render(<ModelCatalogPanel epoch={epoch} readProviders={readProviders} readModels={readModels}
     readChoices={(request) => fixture.readChoices(request.expectedEpoch, request.sessionId)}
     selections={selections} target={epoch && sessionId ? { epoch, sessionId } : null}
     pendingSend={!!(sessionId && submissions.pending(sessionId))}
