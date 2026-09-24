@@ -55,21 +55,28 @@ internal sealed record McpServerPolicyOptions
 internal sealed class McpPolicyLoader
 {
     public McpPolicyOptions Load(string? globalConfigPath, string? projectConfigPath)
+        => LoadCore(globalConfigPath, projectConfigPath, bounded: false);
+
+    // Inventory callers do not need writability or unrestricted policy text; existing plugin callers keep Load semantics.
+    internal McpPolicyOptions LoadBoundedForInventory(string? globalConfigPath, string? projectConfigPath)
+        => LoadCore(globalConfigPath, projectConfigPath, bounded: true);
+
+    private static McpPolicyOptions LoadCore(string? globalConfigPath, string? projectConfigPath, bool bounded)
     {
         var policy = new McpPolicyOptions();
-        policy = ApplyFile(policy, globalConfigPath);
-        policy = ApplyFile(policy, projectConfigPath);
+        policy = ApplyFile(policy, globalConfigPath, bounded);
+        policy = ApplyFile(policy, projectConfigPath, bounded);
         return policy;
     }
 
-    private static McpPolicyOptions ApplyFile(McpPolicyOptions policy, string? path)
+    private static McpPolicyOptions ApplyFile(McpPolicyOptions policy, string? path, bool bounded)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             return policy;
         }
 
-        var model = TomlSerializer.Deserialize<TomlTable>(File.ReadAllText(path)) ?? new TomlTable();
+        var model = TomlSerializer.Deserialize<TomlTable>(bounded ? McpBoundedTextReader.Read(path) : File.ReadAllText(path)) ?? new TomlTable();
         if (!TryGetTable(model, "plugins", out var plugins) || !TryGetTable(plugins, "mcp", out var mcp))
         {
             return policy;

@@ -30,7 +30,7 @@ public sealed class McpInventoryReader
         McpPolicyOptions? policy;
         try
         {
-            policy = new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(userHomeDirectory),
+            policy = new McpPolicyLoader().LoadBoundedForInventory(McpPolicyWriter.GetGlobalPolicyPath(userHomeDirectory),
                 projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or Tomlyn.TomlException)
@@ -49,7 +49,7 @@ public sealed class McpInventoryReader
             McpServerPolicyOptions? serverPolicy = null;
             policy?.Servers.TryGetValue(name, out serverPolicy);
             rows.Add(new(name, server.Definition.SourceScope.ToString(), server.Definition.Transport.ToString(),
-                policy is null ? null : serverPolicy?.Enabled ?? policy.Enabled, server.OverridesGlobal));
+                policy is null ? null : policy.Enabled && (serverPolicy?.Enabled ?? true), server.OverridesGlobal));
         }
         return new(rows, sources, policy is null, omitted);
     }

@@ -1,5 +1,10 @@
+using System.Collections.Frozen;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
+using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
@@ -88,10 +93,158 @@ public sealed class McpInventoryRpcTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [TestMethod]
+    public async Task OversizedPolicyInEitherScopeIsUnknownAndNormalOverlayMatchesRuntimePolicy()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-mcp-policy-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var home = Path.Combine(root, "home");
+            var project = Path.Combine(root, "project");
+            Write(home, "mcp.json", """
+                {"mcpServers":{"shared":{"command":"SECRET_COMMAND"},"global":{"command":"SECRET_GLOBAL"}}}
+                """);
+            Write(project, "mcp.json", """
+                {"mcpServers":{"shared":{"command":"SECRET_OVERRIDE"},"local":{"command":"SECRET_LOCAL"}}}
+                """);
+            Write(home, "config.toml", "[plugins.mcp]\nenabled = false\n[plugins.mcp.servers.shared]\nenabled = true\n");
+            var service = new McpInventoryService((_, _) => Task.FromResult<OwnedMcpScope?>(new(project, "project")), "epoch", home);
+            var globalOnly = new McpInventoryService((_, _) => Task.FromResult<OwnedMcpScope?>(new(null, null)), "epoch", home);
+            var disabled = await globalOnly.List(new("epoch", "global-session"), CancellationToken.None);
+            Assert.AreEqual(false, disabled.Servers.Single(s => s.Name == "shared").Enabled,
+                "A server-local true cannot override globally disabled MCP policy.");
+            Write(project, "config.toml", "[plugins.mcp]\nenabled = true\n[plugins.mcp.servers.global]\nenabled = false\n");
+            var overlay = await service.List(new("epoch", "project-session"), CancellationToken.None);
+            Assert.IsFalse(overlay.PolicyReadError);
+            Assert.AreEqual(true, overlay.Servers.Single(s => s.Name == "shared").Enabled);
+            Assert.AreEqual(false, overlay.Servers.Single(s => s.Name == "global").Enabled);
+            Assert.AreEqual(true, overlay.Servers.Single(s => s.Name == "local").Enabled);
+            Write(project, "config.toml", "[plugins.mcp]\nenabled = false\n[plugins.mcp.servers.shared]\nenabled = true\n");
+            Assert.AreEqual(false, (await service.List(new("epoch", "project-session"), CancellationToken.None))
+                .Servers.Single(s => s.Name == "shared").Enabled);
+
+            var huge = "[plugins.mcp]\nenabled = false\n# SECRET_OVERSIZE" + new string(' ', 1024 * 1024);
+            Write(home, "config.toml", huge);
+            var oversizedGlobal = await service.List(new("epoch", "project-session"), CancellationToken.None);
+            Assert.IsTrue(oversizedGlobal.PolicyReadError);
+            Assert.IsTrue(oversizedGlobal.Servers.All(s => s.Enabled is null));
+            Assert.IsFalse(JsonSerializer.Serialize(oversizedGlobal, DesktopJsonContext.Default.McpInventoryResponse).Contains("SECRET_", StringComparison.Ordinal));
+            Write(home, "config.toml", "[plugins.mcp]\nenabled = true\n");
+            Write(project, "config.toml", huge);
+            var oversizedProject = await service.List(new("epoch", "project-session"), CancellationToken.None);
+            Assert.IsTrue(oversizedProject.PolicyReadError);
+            Assert.IsTrue(oversizedProject.Servers.All(s => s.Enabled is null));
+            Assert.IsFalse(JsonSerializer.Serialize(oversizedProject, DesktopJsonContext.Default.McpInventoryResponse).Contains("SECRET_", StringComparison.Ordinal));
+            Assert.IsFalse((await globalOnly.List(new("epoch", "global-session"), CancellationToken.None)).PolicyReadError,
+                "A project policy failure cannot affect a global-only session.");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
+    public async Task RealOwnedCatalogResolvesExactSessionScopeWithoutClientPathsOrPluginActivation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-mcp-owned-" + Guid.NewGuid().ToString("N"));
+        if (Directory.Exists(root)) throw new InvalidOperationException("Test root already exists.");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "catalog");
+            var home = Path.Combine(root, "home");
+            var projectPath = Path.Combine(root, "project");
+            var otherPath = Path.Combine(root, "other");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, home, projectPath, otherPath, builtin }) Directory.CreateDirectory(path);
+            Write(home, "mcp.json", """
+                {"mcpServers":{"shared":{"command":"SECRET_GLOBAL"},"global-only":{"command":"SECRET_GLOBAL_ONLY"}}}
+                """);
+            Write(projectPath, "mcp.json", """
+                {"mcpServers":{"shared":{"command":"SECRET_PROJECT"},"project-only":{"command":"SECRET_PROJECT_ONLY"}}}
+                """);
+            Write(otherPath, "mcp.json", """
+                {"mcpServers":{"other-only":{"command":"SECRET_OTHER"}}}
+                """);
+            var provider = new ModelProviderDescriptor(new("mcp-inventory-fixture"), "Literal fixture") { IsDefault = true };
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider, () => new InventoryRuntime(provider)),
+            });
+            Assert.IsEmpty(host.PluginRuntime.ActivePlugins);
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var other = await host.ProjectCatalog.UpsertFromPathAsync(otherPath);
+            var projectSession = await host.Commands.CreateDraftSessionAsync(project, provider, "Project draft");
+            var otherSession = await host.Commands.CreateDraftSessionAsync(other, provider, "Other draft");
+            var globalSession = await host.Commands.CreateDraftSessionAsync(null, provider, "Global draft");
+            var rpc = new McpInventoryService(host.Commands, "epoch", home);
+            var request = new McpInventoryRequest("epoch", projectSession.SessionId);
+            var wire = JsonSerializer.Serialize(request, DesktopJsonContext.Default.McpInventoryRequest);
+            Assert.IsFalse(wire.Contains(root, StringComparison.Ordinal));
+            Assert.IsFalse(wire.Contains("path", StringComparison.OrdinalIgnoreCase));
+            Assert.AreEqual("stale_epoch", (await rpc.List(request with { ExpectedEpoch = "old" }, CancellationToken.None)).Status);
+            var selected = await rpc.List(request, CancellationToken.None);
+            Assert.AreEqual("ok", selected.Status);
+            Assert.AreEqual(project.Id, selected.ProjectId);
+            Assert.HasCount(3, selected.Servers);
+            Assert.AreEqual("Project", selected.Servers.Single(row => row.Name == "shared").Scope);
+            Assert.IsTrue(selected.Servers.Single(row => row.Name == "shared").OverridesGlobal);
+            Assert.IsFalse(selected.Servers.Any(row => row.Name == "other-only"));
+            Assert.IsFalse(JsonSerializer.Serialize(selected, DesktopJsonContext.Default.McpInventoryResponse).Contains("SECRET_", StringComparison.Ordinal));
+            var otherSelected = await rpc.List(request with { SessionId = otherSession.SessionId }, CancellationToken.None);
+            Assert.AreEqual(other.Id, otherSelected.ProjectId);
+            Assert.IsTrue(otherSelected.Servers.Any(row => row.Name == "other-only"));
+            Assert.IsFalse(otherSelected.Servers.Any(row => row.Name == "project-only"));
+            var unscoped = await rpc.List(request with { SessionId = globalSession.SessionId }, CancellationToken.None);
+            Assert.AreEqual("ok", unscoped.Status);
+            Assert.IsNull(unscoped.ProjectId);
+            Assert.HasCount(2, unscoped.Servers);
+            Assert.IsTrue(unscoped.Servers.All(row => row.Scope == "Global"));
+            Assert.AreEqual("unavailable", (await rpc.List(request with { SessionId = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
+            Assert.IsTrue(await host.ProjectCatalog.DeleteAsync(project));
+            Assert.AreEqual("unavailable", (await rpc.List(request, CancellationToken.None)).Status,
+                "Removed project identity cannot be silently converted to global scope or a different project's path.");
+            Assert.IsEmpty(host.PluginRuntime.ActivePlugins);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static void Write(string directory, string name, string content)
     {
         var path = Path.Combine(directory, ".alta", name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
     }
+
+    private sealed class InventoryRuntime(ModelProviderDescriptor descriptor) : IModelProviderSessionRuntime
+    {
+        public ModelProviderDescriptor Descriptor => descriptor;
+        public Task StartAsync(CancellationToken token = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken token = default) => Task.CompletedTask;
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken token = default) => throw new AssertFailedException("Inventory must not probe providers.");
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new AssertFailedException("Inventory must not start turns.");
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken token = default)
+            => Task.FromResult<IAgentSession>(new InventorySession(descriptor.ProviderId, options.SessionId!, options.WorkingDirectory));
+        public Task<IAgentSession> ResumeSessionAsync(string id, AgentSessionResumeOptions options, CancellationToken token = default)
+            => Task.FromResult<IAgentSession>(new InventorySession(descriptor.ProviderId, id, options.WorkingDirectory));
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class InventorySession(ModelProviderId providerId, string id, string? path) : IAgentSession
+    {
+        public ModelProviderId ProviderId => providerId;
+        public string SessionId => id;
+        public string? WorkspacePath => path;
+        public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken token = default)
+        { await Task.CompletedTask; yield break; }
+        public IDisposable Subscribe(Action<AgentEvent> handler) => new InventorySubscription();
+        public Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken token = default) => throw new AssertFailedException("Inventory must not send.");
+        public Task AbortAsync(CancellationToken token = default) => Task.CompletedTask;
+        public Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken token = default) => throw new AssertFailedException("Inventory must not steer.");
+        public Task CompactAsync(CancellationToken token = default) => throw new AssertFailedException("Inventory must not compact.");
+        public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken token = default) => Task.FromResult<IReadOnlyList<AgentEvent>>([]);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class InventorySubscription : IDisposable { public void Dispose() { } }
 }

@@ -98,7 +98,8 @@ session changes and unavailable prompts cannot apply. Create/edit/delete remain 
 
 The **MCP Servers** tab shows fixed-file global configuration and the selected owned session's
 catalog-resolved project overlay. It displays at most 64 safe server identifiers, transport,
-effective configured policy enabled state and project/global override evidence. Missing or
+effective configured policy enabled state (merged MCP enabled AND server-local enabled) and
+project/global override evidence. Missing or
 unreadable config sources, policy read failure, and omitted definitions are disclosed without
 paths or raw diagnostics. Configuration is **not** a connection or tool-availability check:
 Desktop plugins remain off. This screen is read-only; connect, tools, add/edit/delete and

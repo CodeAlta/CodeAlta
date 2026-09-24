@@ -68,7 +68,7 @@ internal sealed class McpConfigDiscovery
 
         try
         {
-            var document = McpConfigFormatAdapter.ParseDocument(probeWritability ? File.ReadAllText(path) : ReadBoundedText(path));
+            var document = McpConfigFormatAdapter.ParseDocument(probeWritability ? File.ReadAllText(path) : McpBoundedTextReader.Read(path));
             var servers = McpConfigFormatAdapter.ReadServers(document, scope, path);
             return new McpConfigSource
             {
@@ -95,17 +95,6 @@ internal sealed class McpConfigDiscovery
                 Diagnostic = ex.Message,
             };
         }
-    }
-
-    // Read-only inventory never materializes an unbounded user-controlled JSON file.
-    private static string ReadBoundedText(string path)
-    {
-        using var stream = File.OpenRead(path);
-        using var reader = new StreamReader(stream);
-        var buffer = new char[1024 * 1024 + 1];
-        var count = reader.ReadBlock(buffer);
-        if (count == buffer.Length) throw new InvalidDataException("MCP config exceeds inventory read limit.");
-        return new string(buffer, 0, count);
     }
 
     private static (IReadOnlyList<McpEffectiveServer> Effective, IReadOnlyList<McpServerDefinition> Shadowed) BuildOverlay(IReadOnlyList<McpConfigSource> sources)
