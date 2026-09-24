@@ -14,11 +14,11 @@ internal sealed class McpConfigDiscovery
 
         var sources = new List<McpConfigSource>(2)
         {
-            ReadSource(McpConfigScope.Global, globalPath),
+            ReadSource(McpConfigScope.Global, globalPath, options.ProbeWritability),
         };
         if (projectPath is not null)
         {
-            sources.Add(ReadSource(McpConfigScope.Project, projectPath));
+            sources.Add(ReadSource(McpConfigScope.Project, projectPath, options.ProbeWritability));
         }
 
         var (effective, shadowed) = BuildOverlay(sources);
@@ -50,7 +50,7 @@ internal sealed class McpConfigDiscovery
         return Path.Combine(Path.GetFullPath(projectDirectory), ".alta", "mcp.json");
     }
 
-    private static McpConfigSource ReadSource(McpConfigScope scope, string path)
+    private static McpConfigSource ReadSource(McpConfigScope scope, string path, bool probeWritability)
     {
         var directory = Path.GetDirectoryName(path);
         var directoryExists = !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory);
@@ -62,13 +62,13 @@ internal sealed class McpConfigDiscovery
                 Path = path,
                 Exists = false,
                 DirectoryExists = directoryExists,
-                IsWritable = directoryExists ? IsDirectoryWritable(directory!) : CanCreateDirectory(directory),
+                IsWritable = probeWritability && (directoryExists ? IsDirectoryWritable(directory!) : CanCreateDirectory(directory)),
             };
         }
 
         try
         {
-            var document = McpConfigFormatAdapter.ParseDocument(File.ReadAllText(path));
+            var document = McpConfigFormatAdapter.ParseDocument(probeWritability ? File.ReadAllText(path) : ReadBoundedText(path));
             var servers = McpConfigFormatAdapter.ReadServers(document, scope, path);
             return new McpConfigSource
             {
@@ -76,7 +76,7 @@ internal sealed class McpConfigDiscovery
                 Path = path,
                 Exists = true,
                 DirectoryExists = directoryExists,
-                IsWritable = CanWriteFile(path),
+                IsWritable = probeWritability && CanWriteFile(path),
                 Flavor = document.Flavor,
                 RootKey = document.RootKey,
                 Servers = servers,
@@ -90,11 +90,22 @@ internal sealed class McpConfigDiscovery
                 Path = path,
                 Exists = true,
                 DirectoryExists = directoryExists,
-                IsWritable = CanWriteFile(path),
+                IsWritable = probeWritability && CanWriteFile(path),
                 IsValid = false,
                 Diagnostic = ex.Message,
             };
         }
+    }
+
+    // Read-only inventory never materializes an unbounded user-controlled JSON file.
+    private static string ReadBoundedText(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var reader = new StreamReader(stream);
+        var buffer = new char[1024 * 1024 + 1];
+        var count = reader.ReadBlock(buffer);
+        if (count == buffer.Length) throw new InvalidDataException("MCP config exceeds inventory read limit.");
+        return new string(buffer, 0, count);
     }
 
     private static (IReadOnlyList<McpEffectiveServer> Effective, IReadOnlyList<McpServerDefinition> Shadowed) BuildOverlay(IReadOnlyList<McpConfigSource> sources)

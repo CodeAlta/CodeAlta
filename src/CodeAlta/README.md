@@ -96,6 +96,14 @@ prompt are shown separately. Selecting a prompt validates fresh session choices 
 only that exact session's next Send, retaining its model/effort; pending exact Send, stale host,
 session changes and unavailable prompts cannot apply. Create/edit/delete remain TUI workflows.
 
+The **MCP Servers** tab shows fixed-file global configuration and the selected owned session's
+catalog-resolved project overlay. It displays at most 64 safe server identifiers, transport,
+effective configured policy enabled state and project/global override evidence. Missing or
+unreadable config sources, policy read failure, and omitted definitions are disclosed without
+paths or raw diagnostics. Configuration is **not** a connection or tool-availability check:
+Desktop plugins remain off. This screen is read-only; connect, tools, add/edit/delete and
+runtime lifecycle are not implemented. No MCP inventory is available in catalog-only mode.
+
 The **Reminders** tab is available only with a selected owned session. It lists that session's
 active and completed attempts, lets you create a delayed Markdown prompt (whole seconds 1–86400,
 1–20 attempts), refresh the list, and delete only after typing the exact reminder ID. At most 32

@@ -186,6 +186,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch);
                     builder.AddModelCatalogService(providers);
                     builder.AddPromptCatalogService(new PromptCatalogService(host.Commands, epoch));
+                    builder.AddMcpInventoryService(new McpInventoryService(host.Commands, epoch, roots.Home));
                     builder.AddReminderService(reminders);
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);

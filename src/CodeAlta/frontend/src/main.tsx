@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  boot, configuration, modelCatalog, promptCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, modelCatalog, promptCatalog, mcpInventory, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
@@ -12,6 +12,7 @@ import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { PromptCatalogPanel } from "./PromptCatalogPanel";
+import { McpServersPanel } from "./McpServersPanel";
 import { ReminderPanel } from "./ReminderPanel";
 import { createReminderActions } from "./reminderActions";
 import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
@@ -57,7 +58,7 @@ import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView 
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders";
+type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp";
 type Theme = "dark" | "light";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -744,6 +745,7 @@ function App() {
         <button type="button" aria-current={view === "providers" ? "page" : undefined} onClick={() => navigate("providers")}>Providers</button>
         <button type="button" aria-current={view === "models" ? "page" : undefined} onClick={() => navigate("models")}>Models</button>
         <button type="button" aria-current={view === "prompts" ? "page" : undefined} onClick={() => navigate("prompts")}>Agent prompts</button>
+        <button type="button" aria-current={view === "mcp" ? "page" : undefined} onClick={() => navigate("mcp")}>MCP Servers</button>
         <button type="button" aria-current={view === "reminders" ? "page" : undefined} onClick={() => navigate("reminders")}>Reminders</button>
       </nav>
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
@@ -757,6 +759,9 @@ function App() {
       : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
           read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers} holds={providerProbeHolds}
           onOpenModels={() => navigate("models")} />
+      : view === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
+          read={mcpInventory.list} />
       : view === "reminders" ? <ReminderPanel key={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? JSON.stringify([status!.hostEpoch, selectedSession.id]) : "none"}
           target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId

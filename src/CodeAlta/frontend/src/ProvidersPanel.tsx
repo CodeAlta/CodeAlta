@@ -61,6 +61,7 @@ export function ProvidersPanel({ epoch, read, probe, catalogProviders, holds, on
       const reply = await probe({ expectedEpoch: epoch, providerId: selected.id }, { signal: controller.signal, timeoutMilliseconds: 45000 });
       if (controller.signal.aborted) return;
       if (reply.epoch !== epoch || reply.providerId !== selected.id || reply.status === "stale_epoch") {
+        if (reply.status !== "stale_epoch") { uncertain.add(`${epoch}:${selected.id}`); setHeld(true); }
         setProbeError("Host or provider identity changed. Reload required."); return;
       }
       if (reply.status !== "ok") { setProbeError(reply.status === "busy" ? "A provider test is already running. Try again after it settles."

@@ -95,6 +95,7 @@ internal sealed record McpConfigSnapshot
 
 internal sealed record McpConfigPathOptions
 {
+    public bool ProbeWritability { get; init; } = true;
     public string? UserHomeDirectory { get; init; }
 
     public string? ProjectDirectory { get; init; }

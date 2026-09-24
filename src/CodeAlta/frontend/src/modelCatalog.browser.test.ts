@@ -312,6 +312,19 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     assert.equal(await wait("document.body.innerText.includes('Catalog-only mode: provider configuration is read-only')"), "ready");
     assert.match((await snapshot()).text, /Configured only \(configured-only\)/);
     assert.equal(await evaluate(`window.catalogFixture.probeRequests.length`), 3);
+    await evaluate(`window.catalogFixture.openProviders('epoch-4')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 14"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[13].resolve({status:'ok',epoch:'epoch-4',truncated:false,providers:[
+      {id:'alpha',name:'Alpha',type:'literal',enabled:true,isDefault:false,defaultModel:null,availability:'Unknown',observedAt:null}]})`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Configured providers\"] button')"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Configured providers"] button').click()`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] button')"), "ready");
+    await evaluate(`document.querySelector('[aria-label="Provider details"] button').click()`);
+    assert.equal(await wait("window.catalogFixture.probeRequests.length === 4"), "ready");
+    await evaluate(`window.catalogFixture.probeRequests[3].resolve({status:'ok',epoch:'epoch-4',providerId:'other',availability:'Ready'})`);
+    assert.equal(await wait("document.querySelector('[aria-label=\"Provider details\"] [role=alert]')"), "ready");
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Provider details"] button').disabled`), true,
+      "a mismatched probe reply cannot authorize retry after unknown admitted work");
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
