@@ -94,6 +94,24 @@ public sealed class ModelCatalogRpcTests
         Assert.AreEqual("model-127", result.Models[^1].Id);
     }
 
+    [TestMethod]
+    public async Task EscapedWorstCaseModelPayloadIsTruncatedBeforeTheBridgeLimit()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new("literal-provider"), "Literal provider");
+        var models = Enumerable.Range(0, 128).Select(index => new AgentModelInfo($"model-{index:D3}",
+            new string('\u0001', 256), new string('\u0001', 1024))).ToArray();
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => models));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+        var result = await service.Models(new("epoch", descriptor.ProviderId.Value), CancellationToken.None);
+        Assert.AreEqual("ok", result.Status);
+        Assert.IsTrue(result.Truncated);
+        Assert.IsTrue(result.Models.Count > 0 && result.Models.Count < 128);
+        var wireBytes = JsonSerializer.SerializeToUtf8Bytes(result, DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
+        Assert.IsTrue(wireBytes <= ModelCatalogService.MaximumModelsResponseBytes, $"Model response exceeded its bound: {wireBytes} bytes.");
+        Assert.AreEqual($"model-{result.Models.Count - 1:D3}", result.Models[^1].Id);
+    }
+
     private sealed class LiteralRuntime(ModelProviderDescriptor descriptor, Func<IReadOnlyList<AgentModelInfo>> models) : IModelProviderSessionRuntime
     {
         public ModelProviderDescriptor Descriptor => descriptor;

@@ -61,7 +61,7 @@ native services or create storage. Explicit catalog and scoped-owned options ret
 The **Models** tab (or `Ctrl+G`, then `Ctrl+O`) opens a separate read-only model catalog in owned
 mode. Select a registered provider to request its actual host-reported models; search their names,
 IDs and descriptions and open a model for supported efforts, capabilities and token limits. Provider
-reads are capped at 32 and model reads at 128, with omitted results identified; availability and
+reads are capped at 32 and model reads at 128 and 96 KiB serialized, with omitted results identified; availability and
 missing metadata, including pricing not reported by this inventory, remain explicit. Loading a
 provider can start its configured provider runtime/probe and may access its normal configured
 storage or network. The catalog-only copy and browser demo cannot discover model inventory from

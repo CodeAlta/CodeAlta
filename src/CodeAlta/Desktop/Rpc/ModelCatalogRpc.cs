@@ -13,6 +13,8 @@ internal sealed class ModelCatalogService(
     ModelProviderInitializationService? initialization = null,
     string? epoch = null)
 {
+    internal const int MaximumModelsResponseBytes = 96 * 1024;
+
     [NeoRpcMethod("providers")]
     public ModelCatalogProvidersResponse Providers(ModelCatalogProvidersRequest request)
     {
@@ -49,8 +51,20 @@ internal sealed class ModelCatalogService(
             if (state.Availability != ModelProviderAvailability.Ready)
                 return new("unavailable", epoch, descriptor.ProviderId.Value, availability, [], false);
             var valid = state.Models.Where(model => ValidId(model.Id)).Take(129).ToArray();
+            var models = new List<ModelCatalogModel>(Math.Min(valid.Length, 128));
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(
+                new ModelCatalogModelsResponse("ok", epoch, descriptor.ProviderId.Value, availability, [], true),
+                DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
+            foreach (var model in valid.Take(128))
+            {
+                var projected = ProjectModel(model);
+                var nextBytes = JsonSerializer.SerializeToUtf8Bytes(projected, DesktopJsonContext.Default.ModelCatalogModel).Length;
+                if (bytes + nextBytes + (models.Count > 0 ? 1 : 0) > MaximumModelsResponseBytes) break;
+                bytes += nextBytes + (models.Count > 0 ? 1 : 0);
+                models.Add(projected);
+            }
             return new("ok", epoch, descriptor.ProviderId.Value, availability,
-                valid.Take(128).Select(ProjectModel).ToArray(), valid.Length > 128);
+                models, valid.Length > models.Count);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("read_failed", epoch, descriptor.ProviderId.Value, "Unknown", [], false); }
