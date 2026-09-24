@@ -53,7 +53,7 @@ internal sealed class ModelCatalogService(
             var valid = state.Models.Where(model => ValidId(model.Id)).Take(129).ToArray();
             var models = new List<ModelCatalogModel>(Math.Min(valid.Length, 128));
             var bytes = JsonSerializer.SerializeToUtf8Bytes(
-                new ModelCatalogModelsResponse("ok", epoch, descriptor.ProviderId.Value, availability, [], true),
+                new ModelCatalogModelsResponse("ok", epoch, descriptor.ProviderId.Value, availability, [], false),
                 DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
             foreach (var model in valid.Take(128))
             {
