@@ -11,6 +11,7 @@ import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { resolveShortcut } from "./shortcuts";
 import { activateContextShortcut } from "./contextShortcut";
+import { createNextSendSelectionStore } from "./nextSendSelection";
 
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit operations"); };
 const epoch = "fixture-epoch";
@@ -33,6 +34,7 @@ const props = {
   steering: createSteeringSubmissions(unavailable), compaction: createCompactionSubmissions(unavailable),
   abortRuns: createAbortRunSubmissions(unavailable), queue: createQueueSubmissions(unavailable, unavailable),
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
+  selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
   runtimeReader: createRuntimeStateReader(async () => {
     counts.refreshes++;
     return { status: "ok", hostEpoch: epoch, sessionId,

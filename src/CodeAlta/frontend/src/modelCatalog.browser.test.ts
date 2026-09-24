@@ -14,14 +14,19 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 // Mounts the production ModelCatalogPanel; responses are literal test-owned inventory, never provider network/auth.
 test("mounted catalog selects providers, filters models and rejects errors, stale reads and catalog-only defaults", { skip: !edge, timeout: 60_000 }, async () => {
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
-  assert.match(app, /action === "models"\) setView\("models"\)/, "the production shortcut dispatcher must navigate to the distinct catalog");
+  assert.match(app, /action === "models"\) navigate\("models"\)/, "the production shortcut dispatcher must navigate to the distinct catalog");
   assert.match(app, /readProviders=\{modelCatalog\.providers\} readModels=\{modelCatalog\.models\}/, "the production app uses host RPC reads");
+  assert.match(app, /applyCatalogNextSend\(target/, "the production screen uses the same scoped choice owner as the mounted fixture");
+  assert.match(app, /selections=\{nextSendSelections\}/, "the production composer receives the shared instance-owned selection");
   const root = await mkdtemp(join(tmpdir(), "codealta-model-catalog-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./modelCatalog.mount.tsx", import.meta.url))],
-      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
+      outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife",
+      plugins: [{ name: "isolated-catalog-choices", setup(build) {
+        build.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./modelCatalog.neoastra.mount.ts", import.meta.url)) }));
+      } }] });
     await writeFile(join(root, "style.css"), readFileSync(fileURLToPath(new URL("./style.css", import.meta.url))));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
@@ -92,12 +97,13 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     await evaluate(`window.catalogFixture.modelReads[0].resolve({status:'ok',epoch:'epoch-1',providerId:'alpha',availability:'Ready',truncated:false,
       models:[{id:'stale-model',name:'Stale model',description:null,efforts:[],defaultEffort:null,contextTokens:null,inputTokens:null,
         outputTokens:null,reasoning:null,tools:null,structuredOutput:null,imageInput:null}]})`);
-    await evaluate(`window.catalogFixture.modelReads[1].resolve({status:'ok',epoch:'epoch-1',providerId:'beta',availability:'Ready',truncated:false,
+    await evaluate(`window.catalogFixture.modelReads[1].resolve({status:'ok',epoch:'epoch-1',providerId:'beta',availability:'Ready',truncated:true,
       models:[{id:'beta-image',name:'Image model',description:'Literal image',efforts:['Low','Medium'],defaultEffort:'Medium',contextTokens:32000,
         inputTokens:null,outputTokens:4000,reasoning:true,tools:false,structuredOutput:null,imageInput:true},
       {id:'beta-text',name:'Text model',description:null,efforts:[],defaultEffort:null,contextTokens:null,inputTokens:null,
         outputTokens:null,reasoning:null,tools:null,structuredOutput:null,imageInput:null}]})`);
     assert.equal(await wait("document.querySelectorAll('.model-catalog-list button').length === 2"), "ready");
+    assert.match((await snapshot()).text, /Showing 2 reported models; others are omitted/);
     assert.doesNotMatch((await snapshot()).text, /Stale model/);
     await evaluate(`document.querySelector('.model-catalog-list button').click()`);
     assert.equal(await wait("document.querySelector('.model-catalog-detail')?.innerText.includes('32,000') || document.querySelector('.model-catalog-detail')?.innerText.includes('32000')"), "ready");
@@ -143,6 +149,109 @@ test("mounted catalog selects providers, filters models and rejects errors, stal
     await evaluate(`window.catalogFixture.show(null)`);
     assert.equal(await wait("document.body.innerText.includes('Catalog-only mode has no owned model inventory')"), "ready");
     assert.equal((await snapshot()).models.length, 5);
+
+    // Real production panel -> production composer -> frozen captured Send, with only test-owned RPC replies.
+    await evaluate(`window.catalogFixture.session('one'); window.catalogFixture.show('epoch-1')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 5"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[4].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
+      {id:'alpha',name:'Alpha',availability:'Unknown',enabled:true},{id:'beta',name:'Beta',availability:'Unknown',enabled:true}]})`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-providers button').length === 2"), "ready");
+    await evaluate(`document.querySelectorAll('.model-catalog-providers button')[1].click()`);
+    assert.equal(await wait("window.catalogFixture.modelReads.length === 6"), "ready");
+    const betaResponse = `{status:'ok',epoch:'epoch-1',providerId:'beta',availability:'Ready',truncated:false,
+      models:[{id:'beta-image',name:'Image model',description:null,efforts:['Low','Medium'],defaultEffort:null,contextTokens:32000,
+        inputTokens:null,outputTokens:null,reasoning:true,tools:null,structuredOutput:null,imageInput:true},
+      {id:'beta-text',name:'Text model',description:null,efforts:[],defaultEffort:null,contextTokens:null,
+        inputTokens:null,outputTokens:null,reasoning:null,tools:null,structuredOutput:null,imageInput:null}]}`;
+    await evaluate(`window.catalogFixture.modelReads[5].resolve(${betaResponse})`);
+    await evaluate(`(() => { const input = document.querySelector('input[type=search]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'');
+      input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-list button').length === 2"), "ready");
+    await evaluate(`document.querySelector('.model-catalog-list button').click()`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('Session-recorded model: beta-text')"), "ready");
+    assert.match((await snapshot()).text, /Next Send: beta-text · effort High · prompt plan/);
+    await evaluate(`document.querySelector('.model-catalog-next select').value='Medium';
+      document.querySelector('.model-catalog-next select').dispatchEvent(new Event('change',{bubbles:true}))`);
+    // React's controlled select dispatches an actual change event, not a direct storage write.
+    await evaluate(`document.querySelector('.model-catalog-next button').click()`);
+    assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value === 'beta-image'"), "ready");
+    assert.equal(await evaluate(`document.querySelector('select[aria-label="Agent prompt"]').value`), "plan");
+    assert.equal(await evaluate(`document.querySelector('select[aria-label="Reasoning"]').value`), "Medium");
+    await evaluate(`(() => { const input = document.querySelector('#session-prompt');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Literal next Send');
+      input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    assert.equal(await wait("document.querySelector('#session-prompt')?.value === 'Literal next Send'"), "ready");
+    await evaluate(`document.querySelector('.send-button').click()`);
+    assert.equal(await wait("window.catalogFixture.sent.length === 1"), "ready");
+    const captured = JSON.parse((await evaluate(`JSON.stringify(window.catalogFixture.sent[0])`))!);
+    assert.deepEqual(captured.selection, { providerKey: "beta", agentPromptId: "plan", modelId: "beta-image", reasoningEffort: "Medium" });
+    assert.equal(captured.sessionId, "one");
+    await evaluate(`window.catalogFixture.openModels()`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 6"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[5].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
+      {id:'alpha',name:'Alpha',availability:'Unknown',enabled:true},{id:'beta',name:'Beta',availability:'Unknown',enabled:true}]})`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-providers button').length === 2"), "ready");
+    await evaluate(`document.querySelectorAll('.model-catalog-providers button')[1].click()`);
+    assert.equal(await wait("window.catalogFixture.modelReads.length === 7"), "ready");
+    await evaluate(`window.catalogFixture.modelReads[6].resolve(${betaResponse})`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-list button').length === 2"), "ready");
+    await evaluate(`document.querySelectorAll('.model-catalog-list button')[1].click()`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('Retained exact request')"), "ready");
+    assert.equal(await evaluate(`document.querySelector('.model-catalog-next button').disabled`), true);
+    assert.equal((await snapshot()).text.includes("Retained exact request (beta-image)"), true);
+    assert.deepEqual(JSON.parse((await evaluate(`JSON.stringify(window.catalogFixture.sent[0])`))!).selection, captured.selection);
+
+    await evaluate(`window.catalogFixture.session('two')`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('Session: two')"), "ready");
+    assert.equal(await wait("!document.querySelector('.model-catalog-next')?.innerText.includes('Loading session choices')"), "ready");
+    await evaluate(`window.catalogFixture.holdChoices=true; document.querySelector('.model-catalog-next button').click()`);
+    assert.equal(await wait("!!window.catalogFixture.releaseChoices"), "ready");
+    await evaluate(`window.catalogFixture.session('three'); window.catalogFixture.holdChoices=false; window.catalogFixture.releaseChoices()`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('Session: three')"), "ready");
+    assert.equal(await evaluate(`localStorage.getItem('codealta.desktop.selection.two')`), null,
+      "a switched session cannot receive the stale in-flight selection");
+    await evaluate(`document.querySelectorAll('.model-catalog-providers button')[0].click()`);
+    assert.equal(await wait("window.catalogFixture.modelReads.length === 8"), "ready");
+    await evaluate(`window.catalogFixture.modelReads[7].resolve({status:'ok',epoch:'epoch-1',providerId:'alpha',availability:'Ready',truncated:false,
+      models:[{id:'alpha-real',name:'Alpha real',description:null,efforts:[],defaultEffort:null,contextTokens:null,
+        inputTokens:null,outputTokens:null,reasoning:null,tools:null,structuredOutput:null,imageInput:null}]})`);
+    assert.equal(await wait("document.querySelector('.model-catalog-list button')?.innerText.includes('Alpha real')"), "ready");
+    await evaluate(`document.querySelector('.model-catalog-list button').click()`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next')?.innerText.includes('not the selected session')"), "ready");
+    assert.equal(await evaluate(`document.querySelector('.model-catalog-next button').disabled`), true);
+    assert.equal(await evaluate(`localStorage.getItem('codealta.desktop.selection.three')`), null);
+
+    await evaluate(`document.querySelectorAll('.model-catalog-providers button')[1].click()`);
+    assert.equal(await wait("window.catalogFixture.modelReads.length === 9"), "ready");
+    await evaluate(`window.catalogFixture.modelReads[8].resolve(${betaResponse})`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-list button').length === 2"), "ready");
+    await evaluate(`document.querySelector('.model-catalog-list button').click()`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next button:not(:disabled)')"), "ready");
+    await evaluate(`window.catalogFixture.holdChoices=true; document.querySelector('.model-catalog-next button').click()`);
+    assert.equal(await wait("!!window.catalogFixture.releaseChoices"), "ready");
+    await evaluate(`window.catalogFixture.show('epoch-2'); window.catalogFixture.holdChoices=false; window.catalogFixture.releaseChoices()`);
+    assert.equal(await wait("document.body.innerText.includes('Loading providers')"), "ready");
+    assert.equal(await evaluate(`localStorage.getItem('codealta.desktop.selection.three')`), null,
+      "the old host cannot write a new next-Send selection");
+
+    await evaluate(`window.catalogFixture.show('epoch-1')`);
+    assert.equal(await wait("window.catalogFixture.providerReads.length === 8"), "ready");
+    await evaluate(`window.catalogFixture.providerReads[7].resolve({status:'ok',epoch:'epoch-1',truncated:false,providers:[
+      {id:'beta',name:'Beta',availability:'Ready',enabled:true}]})`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-providers button').length === 1"), "ready");
+    await evaluate(`document.querySelector('.model-catalog-providers button').click()`);
+    assert.equal(await wait("window.catalogFixture.modelReads.length === 10"), "ready");
+    await evaluate(`window.catalogFixture.modelReads[9].resolve(${betaResponse})`);
+    assert.equal(await wait("document.querySelectorAll('.model-catalog-list button').length === 2"), "ready");
+    await evaluate(`document.querySelector('.model-catalog-list button').click()`);
+    assert.equal(await wait("document.querySelector('.model-catalog-next button:not(:disabled)')"), "ready");
+    await evaluate(`window.catalogFixture.holdChoices=true; document.querySelector('.model-catalog-next button').click()`);
+    assert.equal(await wait("!!window.catalogFixture.releaseChoices"), "ready");
+    await evaluate(`window.catalogFixture.holdChoices=false; window.catalogFixture.leaveCatalog(); window.catalogFixture.releaseChoices()`);
+    assert.equal(await wait("document.querySelector('select[aria-label=Model]')?.value === 'beta-text'"), "ready");
+    assert.equal(await evaluate(`localStorage.getItem('codealta.desktop.selection.three')`), null,
+      "a canceled catalog action cannot write even if its session is still selected");
   } finally {
     socket?.close(); browser?.kill();
     await rm(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });

@@ -11,11 +11,12 @@ import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
-import { changeSelection, restoreSelection } from "./sessionSelection";
+import { changeSelection } from "./sessionSelection";
+import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 
-export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators }: {
+export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
@@ -24,6 +25,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
   queue: ReturnType<typeof createQueueSubmissions>;
   draftIndicators: ReturnType<typeof createDraftIndicators>;
+  selections: ReturnType<typeof createNextSendSelectionStore>;
   configuration?: ConfigurationSnapshot;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -48,7 +50,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const [selection, setSelection] = useState<SessionSelection | null>(null);
   const [choicesNotice, setChoicesNotice] = useState("Loading session choices…");
   const [choicesRevision, setChoicesRevision] = useState(0);
-  const selectionKey = `codealta.desktop.selection.${sessionId}`;
   useEffect(() => {
     const controller = new AbortController();
     setChoices(undefined);
@@ -62,11 +63,11 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
           setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
         }
         setChoices(value);
-        setSelection(restoreSelection(() => localStorage.getItem(selectionKey), value));
+        setSelection(selections.get(epoch, sessionId, value));
         setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
       }).catch(() => { if (!controller.signal.aborted) setChoicesNotice("Session choices could not be loaded. Retry to refresh the provider catalog."); });
     return () => controller.abort();
-  }, [epoch, sessionId, capability, selectionKey, choicesRevision]);
+  }, [epoch, sessionId, capability, selections, choicesRevision]);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
@@ -300,17 +301,18 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       setMessage(`Abort original Send: ${result.status}. Refresh receipts for control outcome, not rollback, decision retraction or run termination. Uncertainty retains the exact operation and key.`);
     });
   }
-  const selected = pending?.request.selection ?? selection ?? choices?.current;
-  const selectionDisabled = !choices?.current || invalidEpoch || !!pending;
+  const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
+  const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
+  const selectionDisabled = !activeChoices?.current || invalidEpoch || !!pending;
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort", value: string) {
-    if (!choices || !selected || selectionDisabled) return;
-    const next = changeSelection(choices, selected, field, value);
+    if (!activeChoices || !selected || selectionDisabled) return;
+    const next = changeSelection(activeChoices, selected, field, value);
     if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
+    if (!selections.set(epoch, sessionId, activeChoices, next)) return;
     setSelection(next);
-    try { localStorage.setItem(selectionKey, JSON.stringify(next)); } catch { /* Selection still applies in this view. */ }
     setChoicesNotice("Selection saved for the next Send; active runs and queued text are unchanged.");
   }
-  const efforts = choices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
+  const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? [];
   return <section className="owned-session" aria-label="Owned text submission">
     {expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onClose={() => setExpanded(false)} />}
     <label className="sr-only" htmlFor="session-prompt">Message</label>
@@ -324,13 +326,13 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     <div className="composer-toolbar">
     <div className="prompt-options" aria-label="Session configuration">
       <label><span>Agent prompt</span><select aria-label="Agent prompt" value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title="Agent prompt for the next Send">
-        {!choices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? "Loading…"}</option>}
-        {choices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? "Loading…"}</option>}
+        {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
       <label><span>Model</span><select aria-label="Model" value={selected?.modelId ?? ""} disabled={selectionDisabled} onChange={event => select("modelId", event.target.value)} title={`Model for the next Send · ${selected?.providerKey ?? "session provider"}`}>
         <option value="">Provider default</option>
-        {selected?.modelId && !choices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} (not in catalog)</option>}
-        {choices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{selected.modelId} (not in catalog)</option>}
+        {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select></label>
       <label><span>Reasoning</span><select aria-label="Reasoning" value={selected?.reasoningEffort ?? ""} disabled={selectionDisabled || efforts.length === 0} onChange={event => select("reasoningEffort", event.target.value)} title="Supported reasoning effort for the selected model">
         <option value="">Model default</option>

@@ -65,9 +65,12 @@ reads are capped at 32 and model reads at 128 and 96 KiB serialized, with omitte
 missing metadata, including pricing not reported by this inventory, remain explicit. Loading a
 provider can start its configured provider runtime/probe and may access its normal configured
 storage or network. The catalog-only copy and browser demo cannot discover model inventory from
-saved defaults and show an unavailable state instead. This screen does not configure provider
-authentication, change the global default or select the next Send model; use the TUI for those
-management workflows.
+saved defaults and show an unavailable state instead. From a model's details, an owned session
+can explicitly select that provider's available model and supported reasoning effort for its
+**next Send**. This uses the existing per-session composer choices and Send validation, retains
+the selected agent prompt, and cannot change an in-flight/uncertain exact Send; it does not change
+the running turn or queued work. A different provider, missing choices or changed host/session
+cannot apply the selection. Provider authentication and global defaults remain TUI workflows.
 
 ## Browse a task-owned catalog copy
 
