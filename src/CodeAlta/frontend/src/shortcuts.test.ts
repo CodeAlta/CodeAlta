@@ -48,6 +48,16 @@ test("Ctrl+G then Ctrl+T opens session info only when available; otherwise brows
   assert.equal(resolveShortcut({ key: "g", ctrlKey: true, defaultPrevented: true }, false, true).handled, false);
 });
 
+test("Ctrl+G then Ctrl+D resolves only the exact eligible reminder chord", () => {
+  const prefix = resolveShortcut({ key: "g", ctrlKey: true }, false, true);
+  assert.equal(resolveShortcut({ key: "d", ctrlKey: true }, prefix.chordPending, true, false, false, true).action, "reminders");
+  for (const invalid of [{ key: "d" }, { key: "d", metaKey: true }, { key: "d", ctrlKey: true, altKey: true },
+    { key: "d", ctrlKey: true, isComposing: true }, { key: "d", ctrlKey: true, keyCode: 229 },
+    { key: "d", ctrlKey: true, repeat: true }, { key: "d", ctrlKey: true, defaultPrevented: true }])
+    assert.equal(resolveShortcut(invalid, true, true, false, false, true).handled, false);
+  assert.equal(resolveShortcut({ key: "d", ctrlKey: true }, true, true).handled, false);
+});
+
 test("info chord requires workspace focus, a ready trigger, no other modal, and editing only in the prompt", () => {
   const ready = { workspaceActive: true, modalOpen: false, inWorkspace: true,
     editing: false, promptFocused: false, triggerReady: true };

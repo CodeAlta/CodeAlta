@@ -34,6 +34,8 @@ The same experimental mode offers **Queue text — this host only** after manual
 
 Experimental Send/Abort also retains exact local intent and live-waiter exclusion across selection changes. Manual receipt refresh cannot release an in-flight request; Abort-only recovery preserves unrelated composer text. Late epoch changes disable mutations, and reload does not reconstruct lost text or retry keys. Abort control settlement is not rollback or run termination.
 
+In the owned Desktop composer, the Reminders icon or Ctrl+G, Ctrl+D (from the workspace or prompt) opens reminders for the verified selected session; it does not schedule anything or poll in the background. Create accepts whole seconds (1–86400) or invariant `HH:mm:ss` / `d.HH:mm:ss` with whole seconds only (`1.00:00:00` is the 24-hour maximum); total attempts remain 1–20. A list count is only as of its explicit refresh. Host changes or uncertain reminder admissions require inspection, not automatic retries. Catalog-only and unverified sessions cannot use the composer shortcut.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>

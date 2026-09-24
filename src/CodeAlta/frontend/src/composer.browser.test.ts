@@ -140,6 +140,8 @@ test("mounted composer stays compact and its controls remain legible in both the
     }
     assert.equal(await evaluate(`document.querySelector('.owned-session > .composer-toolbar button[aria-label="Expand prompt editor"]')?.title`),
       "Edit prompt in a large window (F6)");
+    assert.equal(await evaluate(`document.querySelector('.owned-session .composer-icon-button[aria-label="Reminders for selected session"]')?.title`),
+      "Reminders for selected session (Ctrl+G, Ctrl+D)");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar button.primary-button')?.textContent`), "Send");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar')?.textContent.includes('Refresh receipts')`), false);
     const beforeChord = Number(await evaluate("window.fixture.refreshes"));

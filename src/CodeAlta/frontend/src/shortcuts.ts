@@ -2,7 +2,7 @@ export type ShortcutAction =
   | "openProject" | "focusProjects" | "focusSessions" | "focusPrompt" | "focusSearch"
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
   | "settings" | "providers" | "models" | "prompts" | "context" | "plugins"
-  | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo";
+  | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders";
 
 export type ShortcutKey = Readonly<{ key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean;
   isComposing?: boolean; keyCode?: number; defaultPrevented?: boolean; repeat?: boolean }>;
@@ -22,7 +22,7 @@ export function sessionInfoChordContextAllowed(context: Readonly<{
 }
 
 export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editing: boolean, selectedProjectFocused = false,
-  sessionInfoAvailable = false): ShortcutResolution {
+  sessionInfoAvailable = false, remindersAvailable = false): ShortcutResolution {
   if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.repeat)
     return { action: null, chordPending: false, handled: false };
   const key = event.key.toLowerCase();
@@ -34,6 +34,8 @@ export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editi
     // Ctrl+T is a browser shortcut: prevent it only when this exact chord can open session info.
     if (key === "t") return event.ctrlKey === true && !event.metaKey && !event.altKey && !event.shiftKey && sessionInfoAvailable
       ? action("sessionInfo") : { action: null, chordPending: false, handled: false };
+    if (key === "d") return event.ctrlKey === true && !event.metaKey && !event.altKey && !event.shiftKey && remindersAvailable
+      ? action("reminders") : { action: null, chordPending: false, handled: false };
     const mappedAction = ({
       s: "focusProjects", p: "focusPrompt", w: "settings", r: "providers", o: "models",
       h: "prompts", u: "context", n: "plugins", g: "toggleNotes",

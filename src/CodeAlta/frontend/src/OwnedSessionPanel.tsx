@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -16,7 +16,7 @@ import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 
-export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections }: {
+export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, onOpenReminders }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
@@ -27,6 +27,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   draftIndicators: ReturnType<typeof createDraftIndicators>;
   selections: ReturnType<typeof createNextSendSelectionStore>;
   configuration?: ConfigurationSnapshot;
+  remindersTrigger?: Ref<HTMLButtonElement>;
+  onOpenReminders?: () => void;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
   const text = draft.text;
@@ -342,6 +344,9 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     </div>
     <div className="history-controls">
       <span className="sr-only">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
+      {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" disabled={invalidEpoch}
+        aria-label="Reminders for selected session" title="Reminders for selected session (Ctrl+G, Ctrl+D)"
+        onClick={onOpenReminders}><AppIcon name="reminder" size={16} /></button>}
       <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>

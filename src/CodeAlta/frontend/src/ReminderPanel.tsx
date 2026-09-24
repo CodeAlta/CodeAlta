@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReminderListRequest, ReminderListResponse } from "#neoastra";
 import type { ReminderTarget, createReminderActions } from "./reminderActions";
+import { reminderDelaySeconds } from "./reminderDuration";
 
 export function ReminderPanel({ target, read, actions, mutationAllowed, canMutate }: {
   target: ReminderTarget | null;
@@ -55,15 +56,15 @@ export function ReminderPanel({ target, read, actions, mutationAllowed, canMutat
   const active = page?.epoch === target?.epoch && page?.sessionId === target?.sessionId ? page : undefined;
   const row = active?.reminders.find(item => item.id === selected);
   const operation = target ? actions.get(target) : undefined;
-  const validDelay = /^[1-9]\d*$/.test(delay) && Number(delay) <= 86400;
+  const delaySeconds = reminderDelaySeconds(delay);
   const validRepeat = /^[1-9]\d*$/.test(repeat) && Number(repeat) <= 20;
   const full = target && actions.isFull(target);
   const blocked = !mutationAllowed || !!operation?.pending || !!operation?.hold || !!full;
   async function create() {
-    if (!target || !canMutate() || !content.trim() || content.length > 4096 || !validDelay || !validRepeat || blocked) return;
+    if (!target || !canMutate() || !content.trim() || content.length > 4096 || delaySeconds === null || !validRepeat || blocked) return;
     const captured = target;
     if (await actions.submit(captured, { expectedEpoch: captured.epoch, sessionId: captured.sessionId,
-      content, delaySeconds: Number(delay), repeatCount: Number(repeat) }, "create") &&
+      content, delaySeconds, repeatCount: Number(repeat) }, "create") &&
       latest.current?.epoch === captured.epoch && latest.current.sessionId === captured.sessionId) setReload(n => n + 1);
   }
   async function remove() {
@@ -95,13 +96,13 @@ export function ReminderPanel({ target, read, actions, mutationAllowed, canMutat
       </section><section className="model-catalog-results" aria-label="Reminder details and creation">
         <h2>Create reminder</h2><label htmlFor="reminder-content">Prompt to send</label>
         <textarea id="reminder-content" value={content} maxLength={4096} onChange={event => setContent(event.target.value)} />
-        <label htmlFor="reminder-delay">Delay in seconds (1–86400)</label>
-        <input id="reminder-delay" type="number" min="1" max="86400" step="1" value={delay} onChange={event => setDelay(event.target.value)} />
+        <label htmlFor="reminder-delay">Delay: whole seconds (1–86400) or invariant HH:mm:ss / d.HH:mm:ss</label>
+        <input id="reminder-delay" type="text" maxLength={24} value={delay} onChange={event => setDelay(event.target.value)} />
         <label htmlFor="reminder-repeat">Total attempts (1–20)</label>
         <input id="reminder-repeat" type="number" min="1" max="20" step="1" value={repeat} onChange={event => setRepeat(event.target.value)} />
-        {!validDelay && <p role="alert">Enter a whole delay between 1 and 86400 seconds.</p>}
+        {delaySeconds === null && <p role="alert">Enter 1–86400 whole seconds or HH:mm:ss (00–23 hours), optionally prefixed with d. (e.g. 1.00:00:00). Fractions are not accepted.</p>}
         {!validRepeat && <p role="alert">Enter a whole repeat count between 1 and 20.</p>}
-        <button type="button" disabled={blocked || !content.trim() || !validDelay || !validRepeat} onClick={() => void create()}>Create reminder</button>
+        <button type="button" disabled={blocked || !content.trim() || delaySeconds === null || !validRepeat} onClick={() => void create()}>Create reminder</button>
         {operation && <p role={operation.hold ? "alert" : "status"}>{operation.message}</p>}
         {full && <p role="alert">Pending or uncertain reminder admissions fill this window. No operation was retried or evicted.</p>}
         {row && <section aria-label="Selected reminder"><h3>Selected reminder</h3>

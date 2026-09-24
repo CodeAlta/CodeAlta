@@ -43,6 +43,6 @@ const props = {
 };
 createRoot(document.getElementById("app")!).render(createElement("div", { id: "workspace-shell" },
   createElement("div", { className: "session-workspace" },
-    createElement(OwnedSessionPanel, props),
+    createElement(OwnedSessionPanel, { ...props, onOpenReminders: () => { counts.catalogOpens++; } }),
     createElement("div", { className: "project-rename" }, createElement("label", null, "Project name", createElement("input", { defaultValue: "A project" }))),
     createElement("div", { className: "session-rename" }, createElement("label", null, "Session title", createElement("input", { defaultValue: "A session", disabled: true }))))));

@@ -33,7 +33,8 @@ import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useTimelinePosition } from "./timelineScroll";
-import { resolveShortcut, sessionInfoChordContextAllowed, sessionInfoPrefixFromKey, type ShortcutAction } from "./shortcuts";
+import type { ShortcutAction } from "./shortcuts";
+import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
@@ -171,9 +172,9 @@ function App() {
   const projectFilterInput = useRef<HTMLInputElement>(null);
   const sessionRail = useRef<HTMLElement>(null);
   const sessionInfoTrigger = useRef<HTMLButtonElement>(null);
+  const remindersTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const chordPending = useRef(false);
-  const sessionInfoPrefix = useRef(false);
+  const shortcutState = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: false, reminderPrefix: null });
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
@@ -302,27 +303,18 @@ function App() {
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target?.closest("dialog[open]")) { chordPending.current = false; sessionInfoPrefix.current = false; return; }
-      const editing = target?.matches("input, textarea, select, [contenteditable='true']") === true;
       const focusedProject = !!(view === "workspace" && owned && selectedProject && !selectedProject.archived
         && target?.closest('button[aria-pressed="true"]') === projectRail.current?.querySelector('button[aria-pressed="true"]'));
-      const trigger = sessionInfoTrigger.current;
-      const sessionInfoAvailable = sessionInfoPrefix.current && event.key.toLowerCase() === "t" && sessionInfoChordContextAllowed({
-        workspaceActive: view === "workspace",
+      dispatchWorkspaceShortcut(event, shortcutState.current, {
+        workspaceActive: view === "workspace", workspaceShell: workspaceShell.current,
         modalOpen: !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
-        inWorkspace: target instanceof Node && workspaceShell.current?.contains(target) === true,
-        editing, promptFocused: target?.matches("#session-prompt, #catalog-prompt") === true,
-        triggerReady: !!trigger?.isConnected && !trigger.disabled && trigger.getAttribute("aria-expanded") === "false"
-          && workspaceShell.current?.contains(trigger) === true,
-      })
-        && selectedSessionId.current === selectedSession?.id && selectedScope.current === projectId
-        && selectedSessionInfoAvailable(snapshot, selectedSession, projectId);
-      const resolved = resolveShortcut(event, chordPending.current, editing, focusedProject, sessionInfoAvailable);
-      chordPending.current = resolved.chordPending;
-      sessionInfoPrefix.current = sessionInfoPrefixFromKey(event, resolved);
-      if (!resolved.handled) return;
-      event.preventDefault();
-      if (resolved.action) runShortcut(resolved.action);
+        selectedProjectFocused: focusedProject, infoTrigger: sessionInfoTrigger.current,
+        reminderTrigger: remindersTrigger.current,
+        selection: owned && status?.hostEpoch && selectedSession && selectedSessionId.current === selectedSession.id
+          && selectedScope.current === projectId && selectedSessionInfoAvailable(snapshot, selectedSession, projectId)
+          ? { epoch: status.hostEpoch, sessionId: selectedSession.id, projectId } : null,
+        run: runShortcut,
+      });
     }
     window.addEventListener("keydown", keyDown);
     return () => window.removeEventListener("keydown", keyDown);
@@ -331,6 +323,7 @@ function App() {
   function runShortcut(action: ShortcutAction) {
     const projects = projectListing?.projects ?? [];
     if (action === "sessionInfo") sessionInfoTrigger.current?.click();
+    else if (action === "reminders") remindersTrigger.current?.click();
     else if (action === "expandPrompt") {
       if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
     }
@@ -369,6 +362,15 @@ function App() {
       selectedSessionId.current = next;
       setSessionId(next);
     } else if (action === "context") activateContextShortcut(workspaceShell.current);
+  }
+
+  function openSelectedReminders(session: string, epoch: string, scope: string | null) {
+    if (currentView.current !== "workspace" || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      || !status?.hostAvailable || currentHostEpoch.current !== epoch
+      || !mutation?.capability.canMutate() || selectedSessionId.current !== session || selectedScope.current !== scope
+      || selectedSession?.id !== session || projectId !== scope ||
+      !selectedSessionInfoAvailable(snapshot, selectedSession, scope)) return;
+    navigate("reminders");
   }
 
   function toggleProjects() {
@@ -960,7 +962,8 @@ function App() {
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
-            : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} status={status} mutation={mutation}
+            : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger}
+                onOpenReminders={openSelectedReminders} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -984,11 +987,13 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, onOpenReminders, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
   infoTrigger: RefObject<HTMLButtonElement | null>;
+  remindersTrigger: RefObject<HTMLButtonElement | null>;
+  onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
   submissions: ReturnType<typeof createOwnedSubmissions>;
@@ -1045,7 +1050,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, s
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={timeline.jump}><AppIcon name="arrowDown" size={14} />Jump to latest</button>}
         {ownedSession && status?.hostEpoch
-          ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections} />
+          ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+              remindersTrigger={remindersTrigger} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} />
           : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators} />}
       </>}
   </div>;
@@ -1239,6 +1245,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
     ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
     ["Ctrl+G, Ctrl+T", "Session info (selected workspace session only)"],
+    ["Ctrl+G, Ctrl+D", "Reminders (selected owned workspace session only)"],
     ["F1 or ?", "Keyboard shortcuts"], ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
     ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor"],
   ];
