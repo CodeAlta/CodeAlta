@@ -2,6 +2,7 @@ using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Runtime.Compaction;
+using CodeAlta.Catalog.Skills;
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Parsing;
@@ -248,6 +249,60 @@ public sealed class CodeAltaConfigStore
     {
         var document = LoadProject(projectRoot);
         return LoadDisabledSkillNames(document);
+    }
+
+    /// <summary>Reads globally disabled skill names with a hard byte limit; does not create or update files.</summary>
+    /// <remarks>Missing configuration means no disabled names. For every other non-complete outcome,
+    /// enablement is unknown; callers must not substitute an empty set.</remarks>
+    /// <param name="maxBytes">Byte budget, between 1 and 262144 inclusive.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Read outcome and names, without private diagnostics.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The budget is outside the supported range.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public Task<SkillDisabledNamesReadResult> LoadGlobalDisabledSkillNamesBoundedAsync(
+        int maxBytes, CancellationToken cancellationToken = default)
+        => LoadDisabledSkillNamesBoundedAsync(_options.ConfigPath, maxBytes, cancellationToken);
+
+    /// <summary>Reads project-disabled skill names with a hard byte limit; does not create or update files.</summary>
+    /// <remarks>A null project root omits project disablement. Other non-complete outcomes mean unknown enablement.</remarks>
+    /// <param name="projectRoot">Optional project root, resolved to its standard configuration path.</param>
+    /// <param name="maxBytes">Byte budget, between 1 and 262144 inclusive.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Read outcome and names, without private diagnostics.</returns>
+    /// <exception cref="ArgumentException">A non-null project root is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The budget is outside the supported range.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public Task<SkillDisabledNamesReadResult> LoadProjectDisabledSkillNamesBoundedAsync(
+        string? projectRoot, int maxBytes, CancellationToken cancellationToken = default)
+        => LoadDisabledSkillNamesBoundedAsync(
+            projectRoot is null ? null : GetProjectConfigPath(projectRoot), maxBytes, cancellationToken);
+
+    private static async Task<SkillDisabledNamesReadResult> LoadDisabledSkillNamesBoundedAsync(
+        string? path, int maxBytes, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxBytes, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBytes, SkillBoundedTextReader.MaximumBytes);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (path is null)
+        {
+            return new SkillDisabledNamesReadResult(SkillBoundedReadStatus.Missing, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        var read = await SkillBoundedTextReader.ReadAsync(path, maxBytes, cancellationToken).ConfigureAwait(false);
+        if (read.Status != SkillBoundedReadStatus.Complete)
+        {
+            return new SkillDisabledNamesReadResult(read.Status, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        try
+        {
+            return new SkillDisabledNamesReadResult(SkillBoundedReadStatus.Complete,
+                LoadDisabledSkillNames(ParseDocument(read.Content!, path)));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException or IOException or TomlException)
+        {
+            return new SkillDisabledNamesReadResult(SkillBoundedReadStatus.Invalid, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
     }
 
     /// <summary>
