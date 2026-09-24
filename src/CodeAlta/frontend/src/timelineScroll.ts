@@ -64,6 +64,11 @@ export function createTimelineScrollMemory() {
           following = true;
           remember(id, bottomScrollTop(metrics), true);
         },
+        pauseAt(top: number) {
+          following = false;
+          suppressedTop = null;
+          remember(id, top, false);
+        },
       };
     },
   };
@@ -76,6 +81,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const [selection] = useState(() => memory.open(sessionId));
   const [following, setFollowing] = useState(selection.following);
   const restoreFrame = useRef(0);
+  const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;
@@ -107,6 +113,27 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     restoreFrame.current = requestAnimationFrame(() => selection.finishRestore());
   }
   function scroll(element: HTMLDivElement) { setFollowing(selection.scroll(element)); }
+  function beforeOlderPage() {
+    const element = elementRef.current;
+    if (!element) return;
+    const viewport = element.getBoundingClientRect();
+    const anchor = Array.from(element.querySelectorAll<HTMLElement>(".timeline-message"))
+      .find(row => row.getBoundingClientRect().bottom > viewport.top) ?? null;
+    prependMetrics.current = { metrics: { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight },
+      anchor, top: anchor?.getBoundingClientRect().top ?? 0 };
+    selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+  }
+  function afterOlderPage() {
+    const element = elementRef.current;
+    const previous = prependMetrics.current;
+    prependMetrics.current = null;
+    if (!element || !previous) return;
+    element.scrollTop = previous.anchor?.isConnected && element.contains(previous.anchor)
+      ? element.scrollTop + previous.anchor.getBoundingClientRect().top - previous.top
+      : preservePrependScrollTop(previous.metrics, element.scrollHeight);
+    selection.pauseAt(element.scrollTop);
+  }
   function jump() {
     const element = elementRef.current;
     if (element) {
@@ -115,5 +142,5 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     }
     setFollowing(true);
   }
-  return { elementRef, following, settled, scroll, jump };
+  return { elementRef, following, settled, scroll, jump, beforeOlderPage, afterOlderPage };
 }

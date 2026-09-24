@@ -2,11 +2,11 @@ import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, 
 import { createRoot } from "react-dom/client";
 import {
   boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionUserInput, type BootStatus, type HistoryRequest, type SessionDisplayView,
+  sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
-import { loadHistory, historyMessage, historySettled, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
+import { History } from "./HistoryPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
@@ -23,10 +23,7 @@ import { createNotesReader } from "./sessionNotes";
 import { notesHeightKey, defaultNotesHeight, restoreNotesHeight, persistNotesHeight, resizeNotesHeight } from "./notesHeight";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
-import { LiveSessionPanel, LiveTextMessage, LiveToolMessage } from "./LiveSessionPanel";
-import { reconcileTimeline } from "./reconcileTimeline";
-import { TimelineMessage } from "./TimelineMessage";
-import { latestNotes } from "./timeline";
+import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useTimelinePosition } from "./timelineScroll";
 import { resolveShortcut, sessionInfoChordContextAllowed, sessionInfoPrefixFromKey, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
@@ -952,6 +949,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, s
       : <>
         <div className="timeline-scroll" ref={timeline.elementRef} onScroll={event => timeline.scroll(event.currentTarget)}>
         <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={timeline.settled}
+          onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} read={workspace.historyTail}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>
@@ -1170,48 +1168,6 @@ function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) 
 function SessionTime({ value, now }: { value: string; now: number }) {
   const { label, title, dateTime } = sessionTime(value, now);
   return <time dateTime={dateTime} title={title}>{label}</time>;
-}
-
-function History({ sessionId, onNotesChange, onSettled, live }: { sessionId: string; onNotesChange: (markdown: string) => void;
-  onSettled: () => void; live: SessionDisplayView | null }) {
-  const [request, setRequest] = useState<HistoryRequest>({ sessionId, cursor: null });
-  const [state, setState] = useState<HistoryState>();
-  const [timeline, setTimeline] = useState<HistoryTimeline>();
-  useEffect(() => {
-    const abort = new AbortController();
-    void loadHistory(workspace.history, request, abort.signal, value => {
-      setState(value);
-      if (value.kind === "ready") setTimeline(current => mergeHistoryPage(current, value.request, value.page));
-      else if (value.kind === "error" && value.code === "history_changed") setTimeline(undefined);
-    });
-    return () => abort.abort();
-  }, [request]);
-  useEffect(() => { onNotesChange(latestNotes(timeline?.entries ?? [])); }, [timeline, onNotesChange]);
-  const current = state?.request === request ? state : undefined;
-  useEffect(() => {
-    if (current?.kind !== "ready" || !current.page.next || timeline?.next !== current.page.next || timeline.limitReached) return;
-    const timer = window.setTimeout(() => setRequest({ sessionId, cursor: current.page.next }), 0);
-    return () => window.clearTimeout(timer);
-  }, [current, timeline, sessionId]);
-  useLayoutEffect(() => {
-    if (historySettled(current, timeline)) onSettled();
-  }, [current, timeline, onSettled]);
-  const items = reconcileTimeline(timeline?.entries ?? [], live);
-  return <section className="conversation history" aria-labelledby="history-heading">
-    <div className="section-heading"><div><span className="eyebrow">Journal + recent live window</span><h2 id="history-heading">Session timeline</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => { setTimeline(undefined); setRequest({ sessionId, cursor: null }); }}><AppIcon name="refresh" size={14} />Refresh history</button></div>
-    {(!current || current.kind === "loading") && <p role="status">Loading the latest persisted history…</p>}
-    {current?.kind === "error" && <p role="alert" className="error-text">{historyMessage(current.code)}</p>}
-    {timeline?.tailOmitted && <div role="status" className="banner">The malformed final journal record was omitted.</div>}
-    {timeline?.limitReached && <div role="status" className="banner">The timeline reached its 1,000-event display limit. Refresh to restart from the beginning.</div>}
-    {timeline?.next && <button type="button" className="load-more" disabled={current?.kind === "loading"} onClick={() => setRequest({ sessionId, cursor: timeline.next })}><AppIcon name="history" size={14} />Load older history</button>}
-    {items.length === 0 && current?.kind === "ready" && <div className="empty-history">No visible events in this history.</div>}
-    <div className="messages">
-      {items.map(item => item.source === "history" ? <TimelineMessage key={item.key} item={item.item} />
-        : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
-        : <LiveToolMessage key={item.key} row={item.row} />)}
-    </div>
-    {items.some(item => item.source !== "history") && <p className="detail live-order-note">Live rows are recent retained updates, not timestamped journal events; text/tool ordering and missing intervening activity are unknown.</p>}
-  </section>;
 }
 
 function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration, draftIndicators }: {

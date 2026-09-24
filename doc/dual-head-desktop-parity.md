@@ -2873,18 +2873,26 @@ plugin mutation, dirty-state persistence and backend-validated saves remain open
 
 ### Accumulated persisted timeline paging — 2026-09-22
 
-**2026-09-24 prerequisite (not yet mounted in the frontend):** The shared cached-store history
+**2026-09-24 latest-first history:** The shared cached-store history
 reader and desktop `workspace.historyTail` route now support a reverse, bounded 256 KiB/100-record
 page from the current journal end. Entries within each page remain chronological; version-2
 continuations identify the exclusive older byte boundary and reject forward version-1 cursors.
 The existing forward route remains unchanged. Each page checks the session identity, root,
 UTF-8/framing, revision, record and wire limits, and reports corruption within that page;
-unvisited older bytes are **not** validated until requested. The browser still uses the old
-forward route and can omit the latest turn beyond its 1,000-entry cap. Frontend bounded
-latest-first accumulation, older-page scroll anchoring, session-switch tests and mounted Edge
-acceptance remain necessary before claiming the user-visible issue fixed.
+unvisited older bytes are **not** validated until requested. The production browser now uses
+`historyTail` and loads up to 1,000 most-recent projected events initially. Automatic overflow
+keeps the newest and rewinds the older cursor to the first retained record (no skipped page
+entries). Explicit older requests prepend chronological rows and slide the window by dropping
+newer displayed events **only after a button warns of that replacement**; a banner discloses
+that newer history is omitted, and Refresh starts again at the journal tail. The browser never
+holds more than 1,000 projected history rows; old records beyond that window are not validated
+until paged, and a changing journal clears the stale window rather than merging revisions.
+The mounted test-owned Edge fixture covers the actual React history/scroll wiring, latest user
+prompt beyond 1,000, anchor retention, metadata-only pages, switching and error handling;
+it is not native mounted WebView2 or screen-reader acceptance. Live/persisted reconciliation
+and full TUI timeline semantics remain separate work.
 
-Loading another persisted-history page now appends distinct journal offsets to the visible timeline
+Previously (2026-09-22), loading another **forward** persisted-history page appended distinct journal offsets to the visible timeline
 instead of replacing the conversation with only the latest page. Empty pages retain continuation,
 explicit refresh starts over, a changed journal clears the stale accumulated view, and failures on later
 pages do not silently erase already displayed rows. The renderer stops at 1,000 events with an explicit
