@@ -1,7 +1,8 @@
 import { resolveShortcut, sessionInfoChordContextAllowed, sessionInfoPrefixFromKey, type ShortcutAction } from "./shortcuts";
+import type { SessionInfoSelection } from "./sessionInfo";
 
 export type ShortcutSession = Readonly<{ epoch: string; sessionId: string; projectId: string | null }>;
-export type WorkspaceShortcutState = { chordPending: boolean; sessionInfoPrefix: boolean; reminderPrefix: ShortcutSession | null };
+export type WorkspaceShortcutState = { chordPending: boolean; sessionInfoPrefix: SessionInfoSelection | null; reminderPrefix: ShortcutSession | null };
 
 // The mounted workspace and the production app share this keyboard dispatcher. Capture the
 // selection on the prefix so a subsequent session/host switch cannot redirect the chord.
@@ -12,16 +13,17 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
   selectedProjectFocused: boolean;
   infoTrigger: HTMLButtonElement | null;
   reminderTrigger: HTMLButtonElement | null;
+  infoSelection: SessionInfoSelection | null;
   selection: ShortcutSession | null;
   run: (action: ShortcutAction) => void;
 }>): void {
   const target = event.target instanceof HTMLElement ? event.target : null;
   if (target?.closest("dialog[open]")) {
-    state.chordPending = false; state.sessionInfoPrefix = false; state.reminderPrefix = null;
+    state.chordPending = false; state.sessionInfoPrefix = null; state.reminderPrefix = null;
     return;
   }
   if (context.modalOpen || target?.closest('[role="dialog"][aria-modal="true"]')) {
-    state.chordPending = false; state.sessionInfoPrefix = false; state.reminderPrefix = null;
+    state.chordPending = false; state.sessionInfoPrefix = null; state.reminderPrefix = null;
     // App-owned non-native dialogs still use the existing Escape handler.
     if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented && !event.repeat) {
       event.preventDefault(); context.run("escape");
@@ -34,7 +36,9 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
     editing, promptFocused: target?.matches("#session-prompt, #catalog-prompt") === true };
   const ready = (trigger: HTMLButtonElement | null) => !!trigger?.isConnected && !trigger.disabled &&
     context.workspaceShell?.contains(trigger) === true;
-  const infoAvailable = state.sessionInfoPrefix && event.key.toLowerCase() === "t" && !!context.selection &&
+  const infoAvailable = !!state.sessionInfoPrefix && !!context.infoSelection &&
+    state.sessionInfoPrefix.sessionId === context.infoSelection.sessionId &&
+    state.sessionInfoPrefix.projectId === context.infoSelection.projectId && event.key.toLowerCase() === "t" &&
     sessionInfoChordContextAllowed({ ...common, triggerReady: ready(context.infoTrigger) }) &&
     context.infoTrigger?.getAttribute("aria-expanded") === "false";
   const reminderAvailable = event.key.toLowerCase() === "d" && !!context.selection && !!state.reminderPrefix &&
@@ -45,8 +49,9 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
   const resolved = resolveShortcut(event, state.chordPending, editing, context.selectedProjectFocused,
     infoAvailable, reminderAvailable);
   state.chordPending = resolved.chordPending;
-  state.sessionInfoPrefix = sessionInfoPrefixFromKey(event, resolved);
-  state.reminderPrefix = state.sessionInfoPrefix && context.selection &&
+  const prefix = sessionInfoPrefixFromKey(event, resolved);
+  state.sessionInfoPrefix = prefix ? context.infoSelection : null;
+  state.reminderPrefix = prefix && context.selection &&
     sessionInfoChordContextAllowed({ ...common, triggerReady: ready(context.reminderTrigger) })
     ? context.selection : null;
   if (!resolved.handled) return;

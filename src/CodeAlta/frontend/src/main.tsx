@@ -55,7 +55,7 @@ import { ProjectRailRows } from "./ProjectRailRows";
 import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisibilityKey, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import { SessionInfoDialog } from "./SessionInfoDialog";
-import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView } from "./sessionInfo";
+import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -174,7 +174,7 @@ function App() {
   const sessionInfoTrigger = useRef<HTMLButtonElement>(null);
   const remindersTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const shortcutState = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: false, reminderPrefix: null });
+  const shortcutState = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
   const [paneLayout, setPaneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
@@ -303,6 +303,8 @@ function App() {
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
+      const infoSelection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
+        selectedSessionId.current, selectedScope.current);
       const focusedProject = !!(view === "workspace" && owned && selectedProject && !selectedProject.archived
         && target?.closest('button[aria-pressed="true"]') === projectRail.current?.querySelector('button[aria-pressed="true"]'));
       dispatchWorkspaceShortcut(event, shortcutState.current, {
@@ -310,9 +312,8 @@ function App() {
         modalOpen: !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
         selectedProjectFocused: focusedProject, infoTrigger: sessionInfoTrigger.current,
         reminderTrigger: remindersTrigger.current,
-        selection: owned && status?.hostEpoch && selectedSession && selectedSessionId.current === selectedSession.id
-          && selectedScope.current === projectId && selectedSessionInfoAvailable(snapshot, selectedSession, projectId)
-          ? { epoch: status.hostEpoch, sessionId: selectedSession.id, projectId } : null,
+        infoSelection,
+        selection: owned && status?.hostEpoch && infoSelection ? { epoch: status.hostEpoch, ...infoSelection } : null,
         run: runShortcut,
       });
     }

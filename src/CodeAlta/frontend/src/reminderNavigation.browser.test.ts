@@ -11,7 +11,7 @@ import { build } from "esbuild";
 const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 
-test("mounted owned composer dispatches reminder chord to selected production panel and exact create request", { skip: !edge, timeout: 60_000 }, async () => {
+test("mounted workspace dispatches owned reminders and catalog-only session info to exact production panels", { skip: !edge, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-reminder-nav-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -132,6 +132,65 @@ test("mounted owned composer dispatches reminder chord to selected production pa
     await evaluate(`document.querySelector('#workspace-shell').dispatchEvent(new KeyboardEvent('keydown',{key:'d',ctrlKey:true,bubbles:true,cancelable:true}))`);
     assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
     assert.equal(await evaluate("window.reminderNavigationFixture.writes.length"), 1);
+
+    // The same dispatcher and production dialog must work with no owned host or reminder trigger.
+    await evaluate("window.reminderNavigationFixture.setProject('project')");
+    const infoChord = `(selector='#catalog-prompt') => { const t=document.querySelector(selector); t.focus();
+      t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true}));
+      return !t.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true,cancelable:true})); }`;
+    assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), "ready");
+    assert.equal(await evaluate(`(${infoChord})()`), true);
+    assert.equal(await wait("document.querySelector('dialog[open] .session-info-fields code')?.textContent === 'two'"), "ready");
+    assert.equal(await evaluate("document.querySelector('dialog[open] .session-info-fields').textContent.includes('Title two')"), true);
+    assert.equal(await evaluate(`(${infoChord})()`), false);
+    assert.equal(await evaluate("document.querySelectorAll('dialog[open]').length"), 1);
+    await evaluate("document.querySelector('[aria-label=\"Close session info\"]').click()");
+    assert.equal(await wait("!document.querySelector('dialog[open]')"), "ready");
+    assert.equal(await evaluate(`(() => { const t=document.querySelector('#catalog-prompt'); t.focus();
+      t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true}));
+      return t.dispatchEvent(new KeyboardEvent('keydown',{key:'d',ctrlKey:true,bubbles:true,cancelable:true})); })()`), true);
+    assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
+    await evaluate("window.reminderNavigationFixture.modal(true)");
+    assert.equal(await wait("!!document.querySelector('[role=dialog] input')"), "ready");
+    assert.equal(await evaluate(`(${infoChord})()`), false);
+    assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+    await evaluate("window.reminderNavigationFixture.modal(false)");
+    assert.equal(await wait("!document.querySelector('[role=dialog]')"), "ready");
+    assert.equal(await evaluate(`(() => { const t=document.querySelector('#catalog-prompt'); t.focus();
+      t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true,isComposing:true}));
+      return t.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true,cancelable:true})); })()`), true);
+    assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+    assert.equal(await evaluate(`(() => { const t=document.querySelector('#catalog-prompt'); t.focus();
+      t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true}));
+      return t.dispatchEvent(new KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true,cancelable:true,keyCode:229})); })()`), true);
+    assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+    await evaluate("document.querySelector('[aria-expanded][type=button]').disabled = true");
+    assert.equal(await evaluate(`(${infoChord})()`), false);
+    await evaluate("document.querySelector('[aria-expanded][type=button]').disabled = false");
+    assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+    await evaluate("window.reminderNavigationFixture.ambiguous(true)");
+    assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.ambiguous === 'true'"), "ready");
+    assert.equal(await evaluate(`(${infoChord})()`), false);
+    assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+    await evaluate("window.reminderNavigationFixture.ambiguous(false); window.reminderNavigationFixture.setProject('other')");
+    assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.project === 'other' && document.querySelector('#workspace-shell')?.dataset.ambiguous === 'false'"), "ready");
+    assert.equal(await evaluate(`(${infoChord})()`), false);
+    await evaluate("window.reminderNavigationFixture.setProject('project'); window.reminderNavigationFixture.session('missing')");
+    assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.session === 'missing' && !document.querySelector('[aria-expanded][type=button]')"), "ready");
+    assert.equal(await evaluate(`(${infoChord})()`), false);
+    await evaluate("window.reminderNavigationFixture.session('one')");
+    assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.session === 'one'"), "ready");
+    await evaluate(`(() => { const t=document.querySelector('#catalog-prompt'); t.focus();
+      t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true})); })()`);
+    await evaluate("window.reminderNavigationFixture.session('two')");
+    assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.session === 'two'"), "ready");
+    assert.equal(await evaluate(`document.querySelector('#catalog-prompt').dispatchEvent(new KeyboardEvent('keydown',
+      {key:'t',ctrlKey:true,bubbles:true,cancelable:true}))`), true);
+    assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+    await evaluate("window.reminderNavigationFixture.host('e1')");
+    assert.equal(await wait("!!document.querySelector('#session-prompt')"), "ready");
+    assert.equal(await evaluate(`(${infoChord})('#session-prompt')`), true);
+    assert.equal(await wait("document.querySelector('dialog[open] .session-info-fields code')?.textContent === 'two'"), "ready");
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

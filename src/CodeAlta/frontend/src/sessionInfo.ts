@@ -60,6 +60,14 @@ export function selectedSessionInfoAvailable(snapshot: WorkspaceSnapshot | undef
     && sessionInfoView(snapshot, session, selectedProjectId).canCopyId;
 }
 
+export type SessionInfoSelection = Readonly<{ sessionId: string; projectId: string | null }>;
+
+export function selectedSessionInfoSelection(snapshot: WorkspaceSnapshot | undefined, session: WorkspaceSession | undefined,
+  projectId: string | null, selectedSessionId: string | null, selectedScope: string | null): SessionInfoSelection | null {
+  return session && session.id === selectedSessionId && selectedScope === projectId
+    && selectedSessionInfoAvailable(snapshot, session, projectId) ? { sessionId: session.id, projectId } : null;
+}
+
 export async function copySessionId(id: string, writer: () => ((text: string) => Promise<void>) | undefined):
   Promise<"copied" | "unavailable" | "failed"> {
   if (!id?.trim()) return "failed";
