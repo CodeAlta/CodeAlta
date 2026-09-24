@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -328,6 +329,117 @@ public sealed class DesktopOwnedSessionTests
     }
 
     [TestMethod]
+    public Task ReminderFiring_RealOwnerDeliversExactTextTwiceWithDistinctReceipts() => RealFixture.RunAsync(async f =>
+    {
+        using var clock = new ReminderRpcTests.LiteralClock();
+        await using var reminders = new ReminderService("fixture-epoch", (id, _) => Task.FromResult(id == f.SessionId),
+            request => f.Host.Commands.AdmitSend(request), clock);
+        const string text = "full reminder\nsecond line with emoji 😀";
+        var created = await f.Wait(reminders.Create(new("fixture-epoch", f.SessionId, text, 60, 2), default));
+        Assert.AreEqual("ok", created.Status);
+        await f.Wait(clock.TimerCreated());
+        clock.Advance(TimeSpan.FromSeconds(60));
+        var first = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
+        Assert.AreEqual(f.SessionId, first.SessionId);
+        Assert.AreEqual(text, ((AgentInputItem.Text)first.Options.Input.Items.Single()).Value);
+        var firstReplay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, text));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, firstReplay.Kind);
+        var firstReceipt = f.Retain(firstReplay);
+        Assert.IsFalse(firstReceipt.Completion.IsCompleted);
+        f.Provider.Release.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(firstReceipt.Completion)).Outcome);
+        var once = await f.Wait(ReminderCount(reminders, f.SessionId, 1));
+        Assert.AreEqual(1, once.ActiveCount);
+        Assert.AreEqual(0, once.CompletedCount);
+        Assert.AreEqual(0, once.Reminders.Single().LastExitCode);
+        await f.Wait(clock.TimerCreated());
+        clock.Advance(TimeSpan.FromSeconds(60));
+        var second = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
+        Assert.AreEqual(f.SessionId, second.SessionId);
+        Assert.AreEqual(text, ((AgentInputItem.Text)second.Options.Input.Items.Single()).Value);
+        var secondReplay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:1", f.SessionId, text));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, secondReplay.Kind);
+        var secondReceipt = f.Retain(secondReplay);
+        Assert.AreNotEqual(firstReceipt.OperationId, secondReceipt.OperationId);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(secondReceipt.Completion)).Outcome);
+        var done = await f.Wait(ReminderCount(reminders, f.SessionId, 2));
+        Assert.AreEqual(0, done.ActiveCount);
+        Assert.AreEqual(1, done.CompletedCount);
+        Assert.AreEqual(0, done.Reminders.Single().LastExitCode);
+        Assert.IsFalse(f.Provider.Sends.Reader.TryRead(out _));
+    });
+
+    [TestMethod]
+    public Task ReminderDeleteAndShutdown_DoNotRetractAcceptedOwnerSend() => RealFixture.RunAsync(async f =>
+    {
+        using var clock = new ReminderRpcTests.LiteralClock();
+        var reminders = new ReminderService("fixture-epoch", (id, _) => Task.FromResult(id == f.SessionId),
+            request => f.Host.Commands.AdmitSend(request), clock);
+        var created = await f.Wait(reminders.Create(new("fixture-epoch", f.SessionId, "retained exact text", 60, 3), default));
+        Assert.AreEqual("ok", created.Status);
+        await f.Wait(clock.TimerCreated());
+        clock.Advance(TimeSpan.FromSeconds(60));
+        var delivered = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
+        Assert.AreEqual(f.SessionId, delivered.SessionId);
+        Assert.AreEqual("retained exact text", ((AgentInputItem.Text)delivered.Options.Input.Items.Single()).Value);
+        var replay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, "retained exact text"));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, replay.Kind);
+        var receipt = f.Retain(replay);
+        Assert.AreEqual("ok", reminders.Delete(new("fixture-epoch", f.SessionId, created.ReminderId!, created.ReminderId!), default).Status);
+        Assert.HasCount(0, (await f.Wait(reminders.List(new("fixture-epoch", f.SessionId), default))).Reminders);
+        reminders.CloseAdmission();
+        Assert.AreEqual("closed", (await f.Wait(reminders.Create(new("fixture-epoch", f.SessionId, "new", 60, 1), default))).Status);
+        var drain = f.Keep(reminders.DisposeAsync().AsTask());
+        Assert.IsFalse(drain.IsCompleted, "Captured admitted send must be joined, not cancelled or forgotten.");
+        Assert.IsFalse(receipt.Completion.IsCompleted);
+        f.Provider.Release.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(receipt.Completion)).Outcome);
+        await f.Wait(drain);
+        await f.Wait(f.CloseHost());
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.IsFalse(f.Provider.Sends.Reader.TryRead(out _));
+    });
+
+    [TestMethod]
+    public Task ReminderFiring_FailedOwnerReceiptIsOneAttemptNotAnAutomaticRetry() => RealFixture.RunAsync(async f =>
+    {
+        using var clock = new ReminderRpcTests.LiteralClock();
+        f.Provider.FailSend = true;
+        await using var reminders = new ReminderService("fixture-epoch", (id, _) => Task.FromResult(id == f.SessionId),
+            request => f.Host.Commands.AdmitSend(request), clock);
+        var created = await f.Wait(reminders.Create(new("fixture-epoch", f.SessionId, "failure text", 60, 1), default));
+        Assert.AreEqual("ok", created.Status);
+        await f.Wait(clock.TimerCreated());
+        clock.Advance(TimeSpan.FromSeconds(60));
+        var send = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
+        Assert.AreEqual(f.SessionId, send.SessionId);
+        var replay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, "failure text"));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, replay.Kind);
+        var receipt = f.Retain(replay);
+        f.Provider.Release.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, (await f.Wait(receipt.Completion)).Outcome);
+        var done = await f.Wait(ReminderCount(reminders, f.SessionId, 1));
+        Assert.AreEqual(1, done.CompletedCount);
+        Assert.AreEqual(1, done.Reminders.Single().FiredCount);
+        Assert.AreNotEqual(0, done.Reminders.Single().LastExitCode);
+        Assert.IsNotNull(done.Reminders.Single().LastError);
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.IsFalse(f.Provider.Sends.Reader.TryRead(out _));
+    });
+
+    private static async Task<ReminderListResponse> ReminderCount(ReminderService reminders, string sessionId, int count)
+    {
+        for (var attempt = 0; attempt < 100000; attempt++)
+        {
+            var list = await reminders.List(new("fixture-epoch", sessionId), default);
+            if (list.Reminders.Single().FiredCount == count) return list;
+            await Task.Yield();
+        }
+        Assert.Fail("The owner receipt did not settle the reminder firing.");
+        throw new InvalidOperationException("Unreachable.");
+    }
+
+    [TestMethod]
     public Task OwnedRpc_UsesRealHostCachedStoreAndFakeProvider() => RealFixture.RunAsync(async f =>
     {
         var workspace = new WorkspaceService(f.Host.WorkspaceReads);
@@ -393,6 +505,7 @@ public sealed class DesktopOwnedSessionTests
         {
             lock (_gate) return _disposal ??= Keep(Host.DisposeAsync().AsTask());
         }
+        internal Task CloseHost() => DisposeHost();
 
         internal static async Task RunAsync(Func<RealFixture, Task> body)
         {
@@ -522,6 +635,8 @@ public sealed class DesktopOwnedSessionTests
         internal int Compactions { get; set; }
         internal readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly Channel<(string SessionId, AgentSendOptions Options)> Sends = Channel.CreateUnbounded<(string, AgentSendOptions)>();
+        internal bool FailSend { get; set; }
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("owned-fixture"), "Owned fixture") { DefaultModelId = "fixture-model" };
     }
 
@@ -557,8 +672,10 @@ public sealed class DesktopOwnedSessionTests
         public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
         {
             provider.Started.TrySetResult();
+            provider.Sends.Writer.TryWrite((sessionId, options));
             await provider.Release.Task;
             cancellationToken.ThrowIfCancellationRequested();
+            if (provider.FailSend) throw new InvalidOperationException("Fixture send failed.");
             return new("fixture-run");
         }
         public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

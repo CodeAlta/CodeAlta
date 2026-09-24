@@ -76,6 +76,35 @@ public sealed class ReminderRpcTests
     }
 
     [TestMethod]
+    public async Task UnconfirmedOwnerAdmissionDoesNotReplayCapturedFiring()
+    {
+        using var clock = new LiteralClock();
+        var calls = 0;
+        await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id == "one"), _ =>
+        {
+            Interlocked.Increment(ref calls);
+            throw new InvalidOperationException("Admission uncertain after callback entered.");
+        }, clock);
+        var created = await service.Create(new("epoch", "one", "exact", 60, 1), default);
+        Assert.AreEqual("ok", created.Status);
+        await clock.TimerCreated();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        ReminderListResponse? done = null;
+        for (var attempt = 0; attempt < 100000; attempt++)
+        {
+            done = await service.List(new("epoch", "one"), default);
+            if (done.CompletedCount == 1) break;
+            await Task.Yield();
+        }
+        Assert.IsNotNull(done);
+        Assert.AreEqual(1, done.CompletedCount);
+        Assert.AreEqual(1, done.Reminders.Single().FiredCount);
+        Assert.AreEqual("send_failed", done.Reminders.Single().LastError);
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.AreEqual(1, Volatile.Read(ref calls));
+    }
+
+    [TestMethod]
     public async Task RetainedRowsAreBoundedAndDeletionReleasesCapacity()
     {
         using var clock = new LiteralClock();
@@ -94,7 +123,7 @@ public sealed class ReminderRpcTests
         Assert.AreEqual("ok", (await service.Create(new("epoch", "one", "text", 86400, 1), CancellationToken.None)).Status);
     }
 
-    private sealed class LiteralClock : TimeProvider, IDisposable
+    internal sealed class LiteralClock : TimeProvider, IDisposable
     {
         private readonly object _gate = new();
         private readonly Channel<LiteralTimer> _created = Channel.CreateUnbounded<LiteralTimer>();
