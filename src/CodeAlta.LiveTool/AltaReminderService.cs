@@ -12,6 +12,7 @@ public sealed class AltaReminderService : IAsyncDisposable
 
     private readonly IServiceProvider _services;
     private readonly TimeProvider _timeProvider;
+    private readonly IAltaReminderDelivery? _delivery;
     private readonly object _gate = new();
     private readonly Dictionary<string, ReminderEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<ReminderEntry> _workers = [];
@@ -34,6 +35,18 @@ public sealed class AltaReminderService : IAsyncDisposable
         _services = services;
         _timeProvider = timeProvider;
         _disposeTask = new Lazy<Task>(DisposeCoreAsync);
+    }
+
+    /// <summary>Initializes a reminder owner with a host-owned delivery route and clock.</summary>
+    /// <param name="services">Services for the default command route (not used when delivery is supplied).</param>
+    /// <param name="timeProvider">Clock for scheduling.</param>
+    /// <param name="delivery">Host-owned delivery route; must retain admitted work until it settles.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public AltaReminderService(IServiceProvider services, TimeProvider timeProvider, IAltaReminderDelivery delivery)
+        : this(services, timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(delivery);
+        _delivery = delivery;
     }
 
     /// <summary>
@@ -474,6 +487,11 @@ public sealed class AltaReminderService : IAsyncDisposable
 
     private async Task<AltaReminderDeliveryResult> DeliverAsync(ReminderDeliverySnapshot snapshot)
     {
+        if (_delivery is not null)
+        {
+            try { return await _delivery.DeliverAsync(snapshot.Descriptor, snapshot.Content).ConfigureAwait(false); }
+            catch (Exception ex) { return new AltaReminderDeliveryResult(AltaExitCodes.Failure, ex.Message, string.Empty); }
+        }
         var dispatcher = _services.Get<AltaCommandDispatcher>() ?? new AltaCommandDispatcher(new AltaCommandRegistry(), _services);
         var caller = new AltaCallerIdentity
         {
@@ -1138,4 +1156,18 @@ public static class AltaReminderStates
     public const string Deleted = "deleted";
 }
 
-internal sealed record AltaReminderDeliveryResult(int ExitCode, string? Error, string Transcript);
+/// <summary>Outcome of one host-owned reminder delivery attempt; success means submission, not transcript completion.</summary>
+/// <param name="ExitCode">Zero for accepted delivery; nonzero for failure.</param>
+/// <param name="Error">Optional bounded failure description.</param>
+/// <param name="Transcript">Optional delivery transcript.</param>
+public sealed record AltaReminderDeliveryResult(int ExitCode, string? Error, string Transcript);
+
+/// <summary>Host-owned route for delivering reminder text to its exact target session.</summary>
+public interface IAltaReminderDelivery
+{
+    /// <summary>Submits a captured firing without retrying uncertain admission.</summary>
+    /// <param name="reminder">Immutable identity and schedule for this firing.</param>
+    /// <param name="content">Original prompt text.</param>
+    /// <returns>Outcome after the owned submission settles.</returns>
+    Task<AltaReminderDeliveryResult> DeliverAsync(AltaReminderDescriptor reminder, string content);
+}

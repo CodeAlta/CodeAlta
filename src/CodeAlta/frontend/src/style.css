@@ -294,6 +294,14 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .model-catalog-next button:disabled { opacity: .55; cursor: not-allowed; }
 .model-catalog-page p[role="alert"] { color: var(--red); }
 .prompt-catalog-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto; }
+.reminder-page .model-catalog-results label { margin: 14px 0 5px; }
+.reminder-page .model-catalog-results textarea, .reminder-page .model-catalog-results input { display: block; width: 100%; padding: 9px; }
+.reminder-page .model-catalog-results textarea { min-height: 90px; resize: vertical; }
+.reminder-page .model-catalog-results button, .reminder-page > button { margin-top: 12px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); cursor: pointer; }
+.reminder-page button:disabled { opacity: .55; cursor: not-allowed; }
+.reminder-page p[role="alert"] { color: var(--red); }
+.reminder-page code, .reminder-page .model-catalog-providers button strong { overflow-wrap: anywhere; white-space: normal; }
+.reminder-page section[aria-label="Selected reminder"] { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
 @media (max-width: 650px) { .model-catalog-layout { grid-template-columns: minmax(0, 1fr); } }
 
 /* Existing owned-runtime controls keep their full semantics while fitting the workspace. */

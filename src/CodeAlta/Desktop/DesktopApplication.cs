@@ -99,6 +99,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         var shutdownUnconfirmed = false;
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
+        ReminderService? reminders = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null;
@@ -118,6 +119,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     request.Cancel();
                     operations?.CloseAdmission();
                     asks?.CloseAdmission();
+                    reminders?.CloseAdmission();
                     closeRequested.TrySetResult();
                     if (!shutdownUnconfirmed) window.Title = "CodeAlta — shutdown pending; lease retained";
                 }
@@ -146,6 +148,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             {
                 await workspacePrepared.Task;
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
+                if (reminders is not null) await reminders.DisposeAsync();
             });
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
@@ -153,9 +156,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             {
                 var epoch = Guid.NewGuid().ToString("D");
                 workspace = new WorkspaceService(host, epoch);
-                workspacePrepared.TrySetResult();
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
+                reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
+                workspacePrepared.TrySetResult();
                 var assets = Path.Combine(AppContext.BaseDirectory, "assets");
                 var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
                 var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
@@ -178,6 +182,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
                     builder.AddModelCatalogService(new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch));
                     builder.AddPromptCatalogService(new PromptCatalogService(host.Commands, epoch));
+                    builder.AddReminderService(reminders);
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
@@ -218,6 +223,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
         }
         operations?.CloseAdmission();
         asks?.CloseAdmission();
+        reminders?.CloseAdmission();
         if (_closeFlow is not null)
         {
             try

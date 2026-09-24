@@ -26,7 +26,7 @@ public sealed class DesktopArchitectureTests
             if (reference.Name!.StartsWith("XenoAtom", StringComparison.Ordinal))
                 Assert.AreEqual("XenoAtom.Logging", reference.Name, "Desktop may log without referencing terminal presentation libraries.");
             if (reference.Name.StartsWith("CodeAlta", StringComparison.Ordinal))
-                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions", reference.Name);
+                Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.LiveTool" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }
@@ -43,7 +43,7 @@ public sealed class DesktopArchitectureTests
         CollectionAssert.AreEquivalent(new[] { "win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64" }, rids);
         Assert.AreEqual(8, tui.Descendants("RuntimeIdentifiers").Single().Value.Split(';').Length);
         Assert.AreEqual("altatui", tui.Descendants("ToolCommandName").Single().Value);
-        CollectionAssert.AreEqual(new[] { "../CodeAlta.Catalog/CodeAlta.Catalog.csproj", "../CodeAlta.Agent/CodeAlta.Agent.csproj", "../CodeAlta.Hosting/CodeAlta.Hosting.csproj", "../CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" },
+        CollectionAssert.AreEqual(new[] { "../CodeAlta.Catalog/CodeAlta.Catalog.csproj", "../CodeAlta.Agent/CodeAlta.Agent.csproj", "../CodeAlta.Hosting/CodeAlta.Hosting.csproj", "../CodeAlta.LiveTool/CodeAlta.LiveTool.csproj", "../CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" },
             desktop.Descendants("ProjectReference").Select(value => value.Attribute("Include")!.Value).ToArray());
         var outputs = XDocument.Load(Path.Combine(SourceRoot, "CodeAlta", "Directory.Build.props"));
         Assert.IsEmpty(outputs.Descendants("BaseOutputPath"));

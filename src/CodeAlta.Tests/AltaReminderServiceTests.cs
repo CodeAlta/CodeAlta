@@ -8,6 +8,47 @@ namespace CodeAlta.Tests;
 public sealed class AltaReminderServiceTests
 {
     [TestMethod]
+    public async Task OwnedDeliveryRoute_UsesCapturedSessionAndRepeatWithoutDispatcher()
+    {
+        using var clock = new ManualClock();
+        var route = new LiteralDelivery();
+        await using var reminders = new AltaReminderService(new AltaServiceCollection(), clock, route);
+        var created = reminders.Create(new AltaReminderCreateRequest
+        {
+            TargetSessionId = "exact-session", Content = "original prompt", Duration = TimeSpan.FromSeconds(60), RepeatCount = 2,
+        });
+        await clock.NextTimerAsync();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        await route.NextAsync();
+        await clock.NextTimerAsync();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        await route.NextAsync();
+        for (var attempt = 0; attempt < 200 && reminders.List("exact-session", true).Single().State != AltaReminderStates.Completed; attempt++)
+            await Task.Yield();
+        var finished = reminders.List("exact-session", true).Single();
+        Assert.AreEqual(AltaReminderStates.Completed, finished.State);
+        Assert.AreEqual(2, finished.FiredCount);
+        Assert.AreEqual(0, finished.LastExitCode);
+        Assert.HasCount(2, route.Deliveries);
+        Assert.IsTrue(route.Deliveries.All(item => item.ReminderId == created.ReminderId && item.TargetSessionId == "exact-session"));
+        CollectionAssert.AreEqual(new[] { 0, 1 }, route.Deliveries.Select(item => item.FiredCount).ToArray());
+    }
+
+    private sealed class LiteralDelivery : IAltaReminderDelivery
+    {
+        private readonly Channel<AltaReminderDescriptor> _called = Channel.CreateUnbounded<AltaReminderDescriptor>();
+        internal List<AltaReminderDescriptor> Deliveries { get; } = [];
+        public Task<AltaReminderDeliveryResult> DeliverAsync(AltaReminderDescriptor reminder, string content)
+        {
+            Assert.AreEqual("original prompt", content);
+            Deliveries.Add(reminder);
+            _called.Writer.TryWrite(reminder);
+            return Task.FromResult(new AltaReminderDeliveryResult(0, null, string.Empty));
+        }
+        internal Task<AltaReminderDescriptor> NextAsync() => _called.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [TestMethod]
     public void ObserverFailure_DoesNotSkipLaterObserver()
     {
         using var fixture = new ReminderFixture();

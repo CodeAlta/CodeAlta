@@ -1,8 +1,9 @@
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  boot, configuration, modelCatalog, promptCatalog, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, modelCatalog, promptCatalog, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
+  type ReminderListRequest,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
@@ -10,6 +11,8 @@ import { History } from "./HistoryPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { PromptCatalogPanel } from "./PromptCatalogPanel";
+import { ReminderPanel } from "./ReminderPanel";
+import { createReminderActions } from "./reminderActions";
 import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
@@ -53,7 +56,7 @@ import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView 
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration" | "models" | "prompts";
+type View = "workspace" | "configuration" | "models" | "prompts" | "reminders";
 type Theme = "dark" | "light";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -79,6 +82,11 @@ function App() {
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
+  const reminderCapability = useRef<ReturnType<typeof createMutationCapability> | undefined>(undefined);
+  const [reminderActions] = useState(() => createReminderActions(reminder.create, reminder.delete, (target, reply) => {
+    const capability = reminderCapability.current;
+    if (capability?.canSubmit({ expectedEpoch: target.epoch })) capability.observe(reply);
+  }));
   const [draftIndicators] = useState(createDraftIndicators);
   const [nextSendSelections] = useState(() => createNextSendSelectionStore(
     key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)));
@@ -147,6 +155,12 @@ function App() {
     request => sessionUserInput.cancel(request, { timeoutMilliseconds: 8000 })));
   const [permissionReviewer] = useState(() => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve));
   const [mutation, setMutation] = useState<{ epoch: string; capability: ReturnType<typeof createMutationCapability> }>();
+  reminderCapability.current = mutation?.capability;
+  const subscribeReminderCapability = useCallback((listener: () => void) =>
+    mutation?.capability.subscribe(listener) ?? (() => {}), [mutation?.capability]);
+  useSyncExternalStore(subscribeReminderCapability, () => mutation?.capability.canMutate() ?? false);
+  const readReminders = useCallback((request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) =>
+    reminder.list(request, options).then(value => { mutation?.capability.observe(value); return value; }), [mutation?.capability]);
   const workspaceShell = useRef<HTMLDivElement>(null);
   const projectRail = useRef<HTMLElement>(null);
   const projectRailToggle = useRef<HTMLButtonElement>(null);
@@ -726,6 +740,7 @@ function App() {
         <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => navigate("configuration")}>Configuration</button>
         <button type="button" aria-current={view === "models" ? "page" : undefined} onClick={() => navigate("models")}>Models</button>
         <button type="button" aria-current={view === "prompts" ? "page" : undefined} onClick={() => navigate("prompts")}>Agent prompts</button>
+        <button type="button" aria-current={view === "reminders" ? "page" : undefined} onClick={() => navigate("reminders")}>Reminders</button>
       </nav>
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
@@ -735,6 +750,12 @@ function App() {
 
     {view === "configuration"
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
+      : view === "reminders" ? <ReminderPanel key={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          ? JSON.stringify([status!.hostEpoch, selectedSession.id]) : "none"}
+          target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
+          read={readReminders} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
+          canMutate={() => !!mutation?.capability.canMutate()} />
       : view === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
           readChoices={sessionOperations.choices} target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
             ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}

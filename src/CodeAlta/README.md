@@ -84,6 +84,18 @@ prompt are shown separately. Selecting a prompt validates fresh session choices 
 only that exact session's next Send, retaining its model/effort; pending exact Send, stale host,
 session changes and unavailable prompts cannot apply. Create/edit/delete remain TUI workflows.
 
+The **Reminders** tab is available only with a selected owned session. It lists that session's
+active and completed attempts, lets you create a delayed Markdown prompt (whole seconds 1–86400,
+1–20 attempts), refresh the list, and delete only after typing the exact reminder ID. At most 32
+retained reminders per session and 256 per host are accepted; deleting a completed entry frees a slot. Schedules
+and results are **in memory, not persisted**: closing/restarting the host loses them. The host
+owns the timers and attempts one normal owned Send per firing, with the same permission policy
+and host drain as other sends. Busy, unavailable or failed sends count as failed attempts; there
+is no automatic retry beyond the requested repeats. A completed reminder means all attempts
+finished, not that the agent responded. A deletion cannot retract an already captured delivery
+or an admitted run. Counts are point-in-time as of Refresh; a lost mutation response is held as
+uncertain for that host/session, with no automatic retry. Catalog-only mode cannot schedule work.
+
 ## Browse a task-owned catalog copy
 
 To display persisted projects and sessions, supply an existing **trusted, task-owned catalog
