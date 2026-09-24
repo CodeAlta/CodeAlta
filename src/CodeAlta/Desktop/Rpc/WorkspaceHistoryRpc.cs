@@ -10,14 +10,28 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed partial class WorkspaceService
 {
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _readHistory;
+    private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _readHistoryTail;
 
     [NeoRpcMethod("history")]
     public Task<HistoryResponse> HistoryAsync(HistoryRequest request, CancellationToken cancellationToken) =>
         ReadHistoryAsync(request, _readHistory, cancellationToken);
 
-    // Actual RPC route. Tests supply literal callbacks, never instantiate a catalog/service.
-    internal static async Task<HistoryResponse> ReadHistoryAsync(HistoryRequest request,
+    [NeoRpcMethod("historyTail")]
+    public Task<HistoryResponse> HistoryTailAsync(HistoryRequest request, CancellationToken cancellationToken) =>
+        ReadHistoryTailAsync(request, _readHistoryTail, cancellationToken);
+
+    // Version 2 cursors are exclusive reverse boundaries; version 1 remains forward-only.
+    internal static Task<HistoryResponse> ReadHistoryTailAsync(HistoryRequest request,
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read,
+        CancellationToken cancellationToken) => ReadHistoryCoreAsync(request, read, 2, cancellationToken);
+
+    // Actual RPC route. Tests supply literal callbacks, never instantiate a catalog/service.
+    internal static Task<HistoryResponse> ReadHistoryAsync(HistoryRequest request,
+        Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read,
+        CancellationToken cancellationToken) => ReadHistoryCoreAsync(request, read, 1, cancellationToken);
+
+    private static async Task<HistoryResponse> ReadHistoryCoreAsync(HistoryRequest request,
+        Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? read, int version,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -26,7 +40,7 @@ internal sealed partial class WorkspaceService
         try
         {
             ValidateIdentity(request.SessionId, 256, required: true);
-            cursor = ParseCursor(request);
+            cursor = ParseCursor(request, version);
         }
         catch (Exception exception) when (exception is InvalidDataException or FormatException or OverflowException)
         {
@@ -37,7 +51,7 @@ internal sealed partial class WorkspaceService
         {
             var page = await read(request.SessionId, cursor, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            return ProjectHistory(page);
+            return ProjectHistory(page, version);
         }
         catch (OperationCanceledException) { throw; }
         catch (AgentSessionHistoryException exception)
@@ -50,11 +64,11 @@ internal sealed partial class WorkspaceService
         catch (Exception) { return Failure("read_failed"); } // Never serialize cache/provider/infrastructure exception details.
     }
 
-    private static AgentSessionHistoryCursor? ParseCursor(HistoryRequest request)
+    private static AgentSessionHistoryCursor? ParseCursor(HistoryRequest request, int version)
     {
         var value = request.Cursor;
         if (value is null) return null;
-        if (value.Version != 1 || !string.Equals(value.SessionId, request.SessionId, StringComparison.Ordinal)) throw new FormatException();
+        if (value.Version != version || !string.Equals(value.SessionId, request.SessionId, StringComparison.Ordinal)) throw new FormatException();
         var length = Decimal(value.Length);
         var ticks = Decimal(value.LastWriteUtcTicks);
         var offset = Decimal(value.Offset);
@@ -68,7 +82,7 @@ internal sealed partial class WorkspaceService
         return long.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
     }
 
-    internal static HistoryResponse ProjectHistory(AgentSessionHistoryPage page)
+    internal static HistoryResponse ProjectHistory(AgentSessionHistoryPage page, int version = 1)
     {
         ArgumentNullException.ThrowIfNull(page);
         if (page.Entries.Count > 100) return Failure("wire_limit");
@@ -169,7 +183,7 @@ internal sealed partial class WorkspaceService
         if (page.Next is { } cursor)
         {
             ValidateIdentity(cursor.SessionId, 256, required: true);
-            next = new(1, cursor.SessionId, cursor.Length.ToString(CultureInfo.InvariantCulture),
+            next = new(version, cursor.SessionId, cursor.Length.ToString(CultureInfo.InvariantCulture),
                 cursor.LastWriteUtcTicks.ToString(CultureInfo.InvariantCulture), cursor.Offset.ToString(CultureInfo.InvariantCulture));
         }
         return new("ok", rows.ToArray(), next, page.TailOmitted);

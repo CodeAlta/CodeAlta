@@ -157,12 +157,109 @@ public sealed class AgentSessionHistoryTests
         Assert.AreEqual(1, calls);
     }
 
+    [TestMethod]
+    public async Task ReadTail_LatestPromptAndOlderPagesStayBoundedAndOrdered()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-history-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "journal.jsonl");
+            var lines = Enumerable.Range(0, 1605).Select(index => Line(new AgentContentCompletedEvent(new("p"),
+                "runtime-other", DateTimeOffset.UnixEpoch, null, index == 1604 ? AgentContentKind.User : AgentContentKind.Assistant,
+                index.ToString(System.Globalization.CultureInfo.InvariantCulture), null, index == 1604 ? "latest user prompt" : "old")));
+            await File.WriteAllTextAsync(path, string.Concat(lines));
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            AgentSessionHistoryCursor? cursor = null;
+            var ids = new List<string>();
+            for (var pageNumber = 0; pageNumber < 17; pageNumber++)
+            {
+                var page = await ReadTail(file, cursor);
+                Assert.IsTrue(page.Entries.Count <= 100);
+                Assert.IsTrue(page.Entries.Zip(page.Entries.Skip(1)).All(pair => pair.First.Offset < pair.Second.Offset));
+                ids.InsertRange(0, page.Entries.Select(entry => ((AgentContentCompletedEvent)entry.Event).ContentId));
+                cursor = page.Next;
+                if (pageNumber == 0)
+                {
+                    Assert.AreEqual("1604", ids[^1]);
+                    Assert.AreEqual("latest user prompt", ((AgentContentCompletedEvent)page.Entries[^1].Event).Content);
+                }
+                if (cursor is null) break;
+            }
+            CollectionAssert.AreEqual(Enumerable.Range(0, 1605).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray(), ids);
+            Assert.IsNull(cursor);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task ReadTail_ValidatesCursorRevisionCorruptionAndReadFailures()
+    {
+        using var stream = new ProbeStream(Encoding.UTF8.GetBytes(Line() + Line() + Line()));
+        var page = await ReadTail(stream);
+        Assert.IsNull(page.Next);
+        using var many = new ProbeStream(Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat(Line(), 150))));
+        var newest = await ReadTail(many);
+        Assert.AreEqual(100, newest.Entries.Count);
+        Assert.IsNotNull(newest.Next);
+        Assert.IsTrue(many.BytesRead <= AgentJournalHistoryReader.PageBytes + 5);
+        var reads = many.BytesRead;
+        var older = await ReadTail(many, newest.Next);
+        Assert.AreEqual(50, older.Entries.Count);
+        Assert.IsTrue(older.Entries[^1].Offset < newest.Entries[0].Offset);
+        Assert.IsTrue(many.BytesRead - reads <= AgentJournalHistoryReader.PageBytes + 5);
+        using var window = new ProbeStream(Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat(Line(), 2000))));
+        await ReadTail(window);
+        Assert.IsTrue(window.BytesRead <= AgentJournalHistoryReader.PageBytes + 5);
+        Assert.IsTrue(window.MaximumRequest <= AgentJournalHistoryReader.PageBytes);
+        await Error("invalid_cursor", () => ReadTail(many, newest.Next with { SessionId = "other" }));
+        await Error("invalid_cursor", () => ReadTail(many, newest.Next with { Offset = newest.Next.Offset - 1 }));
+        await Error("history_changed", () => ReadTail(many, newest.Next with { LastWriteUtcTicks = 8 }));
+        var stamps = 0;
+        await Error("history_changed", () => AgentJournalHistoryReader.ReadTailAsync(many, "selected", null,
+            () => new(many.Length, ++stamps), CancellationToken.None));
+        using var corrupt = new ProbeStream(Encoding.UTF8.GetBytes(Line() + "{broken\n" + Line()));
+        await Error("corrupt_record", () => ReadTail(corrupt));
+        using var tail = new ProbeStream(Encoding.UTF8.GetBytes(Line() + "{broken\n"));
+        Assert.IsTrue((await ReadTail(tail)).TailOmitted);
+        using var oversized = new ProbeStream(Encoding.UTF8.GetBytes(new string('x', AgentJournalHistoryReader.RecordBytes + 1) + "\n"));
+        await Error("record_too_large", () => ReadTail(oversized));
+        many.Failure = new IOException("literal read failure");
+        Assert.AreSame(many.Failure, await Assert.ThrowsExactlyAsync<IOException>(() => ReadTail(many)));
+    }
+
+    [TestMethod]
+    public async Task ReadTail_PreservesFormatAndOnlyOmitsMalformedFinalRecord()
+    {
+        using var formatted = new ProbeStream([0xef, 0xbb, 0xbf, .. Encoding.UTF8.GetBytes(Line().Replace("\n", "\r\n") + "  \r\n" + Line().TrimEnd('\n'))]);
+        var page = await ReadTail(formatted);
+        Assert.AreEqual(2, page.Entries.Count);
+        Assert.AreEqual(3L, page.Entries[0].Offset);
+        Assert.IsNull(page.Next);
+        Assert.IsFalse(page.TailOmitted);
+        using var encoding = new ProbeStream([0xff, 0xfe, 0, 0]);
+        await Error("unsupported_format", () => ReadTail(encoding));
+        using var invalidUtf8 = new ProbeStream([0xff]);
+        await Error("unsupported_format", () => ReadTail(invalidUtf8));
+        using var interior = new ProbeStream(Encoding.UTF8.GetBytes("{broken\n" + string.Concat(Enumerable.Repeat(Line(), 101))));
+        var recent = await ReadTail(interior);
+        Assert.IsNotNull(recent.Next);
+        await Error("corrupt_record", () => ReadTail(interior, recent.Next));
+        using var large = new ProbeStream(Encoding.UTF8.GetBytes(new string(' ', AgentJournalHistoryReader.PageBytes + 20) + "\n" + Line()));
+        var latest = await ReadTail(large);
+        Assert.AreEqual(1, latest.Entries.Count);
+        await Error("record_too_large", () => ReadTail(large, latest.Next));
+    }
+
     private static string Line(AgentEvent? value = null) => JsonSerializer.Serialize(value ??
         new AgentContentCompletedEvent(new("p"), "runtime-other", DateTimeOffset.UnixEpoch, null,
             AgentContentKind.Assistant, "content", null, "hello"), AgentJsonSerializerContext.Default.AgentEvent) + "\n";
 
     private static Task<AgentSessionHistoryPage> Read(Stream stream, AgentSessionHistoryCursor? cursor = null) =>
         AgentJournalHistoryReader.ReadAsync(stream, "selected", cursor, () => new(stream.Length, 7), CancellationToken.None);
+
+    private static Task<AgentSessionHistoryPage> ReadTail(Stream stream, AgentSessionHistoryCursor? cursor = null) =>
+        AgentJournalHistoryReader.ReadTailAsync(stream, "selected", cursor, () => new(stream.Length, 7), CancellationToken.None);
 
     private static async Task Error(string code, Func<Task> action) =>
         Assert.AreEqual(code, (await Assert.ThrowsExactlyAsync<AgentSessionHistoryException>(action)).Code);

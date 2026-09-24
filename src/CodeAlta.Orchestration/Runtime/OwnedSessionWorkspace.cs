@@ -14,6 +14,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> _projects;
     private readonly Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> _sessions;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _history;
+    private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _tailHistory;
     private readonly SessionViewJournalStore? _journals;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
@@ -31,6 +32,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _projects = projects.LoadAsync;
         _sessions = token => store.ListSessionsAsync(filter: null, cancellationToken: token);
         _history = store.ReadHistoryPageAsync;
+        _tailHistory = store.ReadHistoryTailPageAsync;
     }
 
     internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals, SessionRuntimeService runtime)
@@ -52,6 +54,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _projects = projects;
         _sessions = sessions;
         _history = history;
+        _tailHistory = history; // Literal test seam; production always uses the reverse store reader.
     }
 
     internal OwnedSessionWorkspace(
@@ -99,6 +102,23 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return Admit(() => _history(sessionId, cursor, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>Reads a bounded reverse journal page through the same admission, cached store and locks.</summary>
+    /// <param name="sessionId">Selected durable session identity.</param>
+    /// <param name="cursor">Exclusive boundary of the newer page, or null for the tail.</param>
+    /// <param name="cancellationToken">Cancels this wait, not an admitted underlying read.</param>
+    /// <returns>Canonical events in journal order and an optional older-page cursor.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Read admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Eight actual reads are already admitted.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="Exception">Lookup, cursor validation or the history read fails.</exception>
+    public Task<AgentSessionHistoryPage> ReadHistoryTailPageAsync(
+        string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => _tailHistory(sessionId, cursor, CancellationToken.None), cancellationToken);
     }
 
     private async Task<OwnedWorkspaceSnapshot> ReadSnapshotCoreAsync()

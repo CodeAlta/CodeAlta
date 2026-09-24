@@ -78,6 +78,37 @@ public sealed class DesktopHistoryTests
     }
 
     [TestMethod]
+    public async Task ReadTail_UsesSeparateVersionedCursorAndPreservesWireAndFailureGuards()
+    {
+        var request = new HistoryRequest("selected", null);
+        var page = await WorkspaceService.ReadHistoryTailAsync(request, (id, cursor, _) =>
+        {
+            Assert.AreEqual("selected", id);
+            Assert.IsNull(cursor);
+            return Task.FromResult(new AgentSessionHistoryPage([], new("selected", 400, 7, 200), false));
+        }, CancellationToken.None);
+        Assert.AreEqual(2, page.Next!.Version);
+        var continued = new HistoryRequest("selected", page.Next);
+        var result = await WorkspaceService.ReadHistoryTailAsync(continued, (_, cursor, _) =>
+        {
+            Assert.AreEqual(200L, cursor!.Offset);
+            return Task.FromResult(new AgentSessionHistoryPage([], null, false));
+        }, CancellationToken.None);
+        Assert.AreEqual("ok", result.Status);
+        Assert.AreEqual("invalid_cursor", (await WorkspaceService.ReadHistoryAsync(continued, (_, _, _) =>
+            throw new AssertFailedException("Tail cursor reached forward reader."), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid_cursor", (await WorkspaceService.ReadHistoryTailAsync(new("selected", page.Next with { Version = 1 }),
+            (_, _, _) => throw new AssertFailedException("Forward cursor reached tail reader."), CancellationToken.None)).Status);
+        Assert.AreEqual("unconfigured", (await WorkspaceService.ReadHistoryTailAsync(request, null, CancellationToken.None)).Status);
+        Assert.AreEqual("history_changed", (await WorkspaceService.ReadHistoryTailAsync(continued,
+            (_, _, _) => Task.FromException<AgentSessionHistoryPage>(new AgentSessionHistoryException("history_changed")), CancellationToken.None)).Status);
+        Assert.AreEqual("wire_limit", (await WorkspaceService.ReadHistoryTailAsync(request,
+            (_, _, _) => Task.FromResult(new AgentSessionHistoryPage(Enumerable.Range(0, 101)
+                .Select(i => new AgentSessionHistoryEntry(i, new AgentErrorEvent(new("p"), "runtime", DateTimeOffset.UnixEpoch, "error"))).ToArray(),
+                new("selected", 400, 7, 200), false)), CancellationToken.None)).Status);
+    }
+
+    [TestMethod]
     public void Projection_PreservesPersistedEventMeaning()
     {
         var events = new AgentEvent[]

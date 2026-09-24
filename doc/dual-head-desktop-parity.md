@@ -2873,6 +2873,17 @@ plugin mutation, dirty-state persistence and backend-validated saves remain open
 
 ### Accumulated persisted timeline paging — 2026-09-22
 
+**2026-09-24 prerequisite (not yet mounted in the frontend):** The shared cached-store history
+reader and desktop `workspace.historyTail` route now support a reverse, bounded 256 KiB/100-record
+page from the current journal end. Entries within each page remain chronological; version-2
+continuations identify the exclusive older byte boundary and reject forward version-1 cursors.
+The existing forward route remains unchanged. Each page checks the session identity, root,
+UTF-8/framing, revision, record and wire limits, and reports corruption within that page;
+unvisited older bytes are **not** validated until requested. The browser still uses the old
+forward route and can omit the latest turn beyond its 1,000-entry cap. Frontend bounded
+latest-first accumulation, older-page scroll anchoring, session-switch tests and mounted Edge
+acceptance remain necessary before claiming the user-visible issue fixed.
+
 Loading another persisted-history page now appends distinct journal offsets to the visible timeline
 instead of replacing the conversation with only the latest page. Empty pages retain continuation,
 explicit refresh starts over, a changed journal clears the stale accumulated view, and failures on later

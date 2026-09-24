@@ -113,6 +113,91 @@ internal static class AgentJournalHistoryReader
         return new(entries.ToArray(), next, tailOmitted);
     }
 
+    // A reverse page cursor's offset is the exclusive end (the first record of the newer page).
+    // The returned entries remain in journal order. This probes at most one bounded window,
+    // not the intervening journal; older corruption is reported when its page is requested.
+    internal static async Task<AgentSessionHistoryPage> ReadTailAsync(Stream stream, string sessionId,
+        AgentSessionHistoryCursor? cursor, Func<Stamp> getStamp, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(getStamp);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateCursor(sessionId, cursor);
+        if (!stream.CanRead || !stream.CanSeek) throw new ArgumentException("History requires a readable seekable stream.", nameof(stream));
+        var stamp = getStamp();
+        if (stamp.Length < 0 || stamp.Length != stream.Length ||
+            (cursor is not null && (cursor.Length != stamp.Length || cursor.LastWriteUtcTicks != stamp.LastWriteUtcTicks)))
+            throw Failure("history_changed");
+
+        var prefix = new byte[4];
+        stream.Position = 0;
+        var prefixLength = await FillAsync(stream, prefix.AsMemory(0, (int)Math.Min(4, stamp.Length)), cancellationToken).ConfigureAwait(false);
+        if ((prefixLength >= 2 && ((prefix[0] == 0xff && prefix[1] == 0xfe) || (prefix[0] == 0xfe && prefix[1] == 0xff))) ||
+            (prefixLength >= 4 && prefix[0] == 0 && prefix[1] == 0 && prefix[2] == 0xfe && prefix[3] == 0xff))
+            throw Failure("unsupported_format");
+        var bom = prefixLength >= 3 && prefix[0] == 0xef && prefix[1] == 0xbb && prefix[2] == 0xbf ? 3 : 0;
+        var end = cursor?.Offset ?? stamp.Length;
+        if (cursor is not null)
+        {
+            if (end <= bom) throw Failure("invalid_cursor");
+            stream.Position = end - 1;
+            if (await FillAsync(stream, prefix.AsMemory(0, 1), cancellationToken).ConfigureAwait(false) != 1 || prefix[0] != (byte)'\n')
+                throw Failure("invalid_cursor");
+        }
+        // Include the alignment probe within the 256 KiB window, leaving just four
+        // BOM bytes and (for a continuation) one exclusive-end boundary probe outside it.
+        var windowStart = Math.Max(bom, end - PageBytes + 1);
+        var start = windowStart > bom ? windowStart - 1 : windowStart;
+        stream.Position = start;
+        var buffer = new byte[(int)(end - start)];
+        var count = await FillAsync(stream, buffer, cancellationToken).ConfigureAwait(false);
+        if (count != buffer.Length) throw Failure("history_changed");
+
+        var probe = start < windowStart ? 1 : 0;
+        var aligned = probe == 0 || buffer[0] == (byte)'\n';
+        var first = aligned ? probe : buffer.AsSpan(probe).IndexOf((byte)'\n') + probe + 1;
+        if ((!aligned && first == probe) || (first == count && start > bom)) throw Failure("record_too_large");
+        var boundaries = new List<int>();
+        if (first < count) boundaries.Add(first);
+        for (var index = first; index < count; index++)
+            if (buffer[index] == (byte)'\n' && index + 1 < count) boundaries.Add(index + 1);
+
+        var firstRetained = Math.Max(0, boundaries.Count - 100);
+        var entries = new List<AgentSessionHistoryEntry>();
+        var tailOmitted = false;
+        for (var index = firstRetained; index < boundaries.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var position = boundaries[index];
+            var recordEnd = index + 1 < boundaries.Count ? boundaries[index + 1] : count;
+            var terminated = buffer[recordEnd - 1] == (byte)'\n';
+            var length = recordEnd - position - (terminated ? 1 : 0);
+            if (length > RecordBytes) throw Failure("record_too_large");
+            var record = buffer.AsMemory(position, length);
+            if (terminated && length > 0 && record.Span[^1] == (byte)'\r') record = record[..^1];
+            if (record.Span.IndexOf((byte)'\r') >= 0 || record.Span.IndexOf((byte)0) >= 0) throw Failure("unsupported_format");
+            string text;
+            try { text = StrictUtf8.GetString(record.Span); }
+            catch (DecoderFallbackException) { throw Failure("unsupported_format"); }
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            AgentEvent value;
+            try { value = JsonSerializer.Deserialize(text, AgentJsonSerializerContext.Default.AgentEvent) ?? throw new JsonException("Null journal event."); }
+            catch (JsonException)
+            {
+                if (start + recordEnd != stamp.Length) throw Failure("corrupt_record");
+                tailOmitted = true;
+                continue;
+            }
+            if (value is not AgentRawEvent { BackendEventType: "local.sessionSummary" or "local.sessionState" or "codealta.sessionHeader" or "codealta.sessionState" })
+                entries.Add(new(start + position, value));
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (getStamp() != stamp || stream.Length != stamp.Length) throw Failure("history_changed");
+        var nextOffset = boundaries.Count == 0 ? start + first : start + boundaries[firstRetained];
+        var next = nextOffset > bom ? new AgentSessionHistoryCursor(sessionId, stamp.Length, stamp.LastWriteUtcTicks, nextOffset) : null;
+        return new(entries.ToArray(), next, tailOmitted);
+    }
+
     private static async Task<int> FillAsync(Stream stream, Memory<byte> buffer, CancellationToken cancellationToken)
     {
         var count = 0;

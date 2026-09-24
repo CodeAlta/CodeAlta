@@ -367,6 +367,25 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
     public async Task<AgentSessionHistoryPage> ReadHistoryPageAsync(
         string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
+        => await ReadHistoryPageCoreAsync(sessionId, cursor, tail: false, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Reads one bounded page backwards from the journal tail or an older-page cursor, returning events in journal order.</summary>
+    /// <param name="sessionId">Durable catalog identity.</param>
+    /// <param name="cursor">The exclusive older-page boundary, or null for the current journal tail.</param>
+    /// <param name="cancellationToken">Cancels lookup, gate admission and asynchronous reads.</param>
+    /// <returns>Up to 100 physical records from a 256 KiB window and an optional older-page cursor.</returns>
+    /// <remarks>Unvisited older records are not validated until paged. Uses the same cache resolution, root, locks and revision checks as forward paging.</remarks>
+    /// <exception cref="ArgumentException">The session identifier is empty.</exception>
+    /// <exception cref="AgentSessionHistoryException">The cursor, journal format, revision or resolved path cannot be used.</exception>
+    /// <exception cref="IOException">Journal access fails.</exception>
+    /// <exception cref="UnauthorizedAccessException">Journal access is denied.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public Task<AgentSessionHistoryPage> ReadHistoryTailPageAsync(
+        string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
+        => ReadHistoryPageCoreAsync(sessionId, cursor, tail: true, cancellationToken);
+
+    private async Task<AgentSessionHistoryPage> ReadHistoryPageCoreAsync(
+        string sessionId, AgentSessionHistoryCursor? cursor, bool tail, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         AgentJournalHistoryReader.ValidateCursor(sessionId, cursor);
@@ -376,12 +395,14 @@ public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore
             _journalFile.WithPathLockAsync(containedPath, async () =>
             {
                 await using var stream = await OpenHistoryReadStreamAsync(containedPath, token).ConfigureAwait(false);
-                return await AgentJournalHistoryReader.ReadAsync(stream, sessionId, cursor, () =>
+                AgentJournalHistoryReader.Stamp Stamp()
                 {
                     var stamp = GetFileStamp(containedPath);
                     return stamp is null ? throw new AgentSessionHistoryException("history_changed")
                         : new AgentJournalHistoryReader.Stamp(stamp.Value.Length, stamp.Value.LastWriteTimeUtc.Ticks);
-                }, token).ConfigureAwait(false);
+                }
+                return await (tail ? AgentJournalHistoryReader.ReadTailAsync(stream, sessionId, cursor, Stamp, token)
+                    : AgentJournalHistoryReader.ReadAsync(stream, sessionId, cursor, Stamp, token)).ConfigureAwait(false);
             }, token), cancellationToken).ConfigureAwait(false);
     }
 
