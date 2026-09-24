@@ -27,7 +27,7 @@ import { LiveSessionPanel, LiveTextMessage, LiveToolMessage } from "./LiveSessio
 import { reconcileTimeline } from "./reconcileTimeline";
 import { TimelineMessage } from "./TimelineMessage";
 import { latestNotes } from "./timeline";
-import { bottomScrollTop, createTimelineScrollMemory } from "./timelineScroll";
+import { createTimelineScrollMemory, useTimelinePosition } from "./timelineScroll";
 import { resolveShortcut, sessionInfoChordContextAllowed, sessionInfoPrefixFromKey, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
@@ -927,41 +927,16 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, s
   onNotesChange: (markdown: string) => void;
   onOpenConfiguration: () => void;
 }) {
-  const timeline = useRef<HTMLDivElement>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   function closeInfo() {
     const trigger = infoTrigger.current;
     setInfoOpen(false);
     requestAnimationFrame(() => restoreSessionInfoFocus(trigger));
   }
-  const [scrollSelection] = useState(() => scrollMemory.open(session.id));
-  const restoreFrame = useRef(0);
+  const timeline = useTimelinePosition(session.id, scrollMemory);
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
   const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
     ? observedDisplay : null;
-  const [timelineFollowing, setTimelineFollowing] = useState(scrollSelection.following);
-  useEffect(() => {
-    const element = timeline.current;
-    if (!element) return;
-    let frame = 0;
-    const scrollBottom = () => {
-      if (!scrollSelection.following()) return;
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => { element.scrollTop = bottomScrollTop(element); });
-    };
-    const observer = new MutationObserver(scrollBottom);
-    observer.observe(element, { childList: true, subtree: true, characterData: true });
-    scrollBottom();
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); cancelAnimationFrame(restoreFrame.current); };
-  }, [scrollSelection]);
-  function restoreHistoryPosition() {
-    const element = timeline.current;
-    if (!element) return;
-    const top = scrollSelection.settle(element);
-    if (top === null) return;
-    element.scrollTop = top;
-    restoreFrame.current = requestAnimationFrame(() => scrollSelection.finishRestore());
-  }
   const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   return <div className="session-workspace">
     <header className="session-header">
@@ -975,10 +950,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, s
     {demoMode
       ? <DemoConversation session={session} />
       : <>
-        <div className="timeline-scroll" ref={timeline} onScroll={event => {
-          setTimelineFollowing(scrollSelection.scroll(event.currentTarget));
-        }}>
-        <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={restoreHistoryPosition}
+        <div className="timeline-scroll" ref={timeline.elementRef} onScroll={event => timeline.scroll(event.currentTarget)}>
+        <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={timeline.settled}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
         ? <>
@@ -988,11 +961,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, s
         </>
         : null}
         </div>
-        {!timelineFollowing && <button type="button" className="timeline-bottom-button" onClick={() => {
-          if (timeline.current) scrollSelection.jump(timeline.current);
-          setTimelineFollowing(true);
-          if (timeline.current) timeline.current.scrollTop = bottomScrollTop(timeline.current);
-        }}><AppIcon name="arrowDown" size={14} />Jump to latest</button>}
+        {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={timeline.jump}><AppIcon name="arrowDown" size={14} />Jump to latest</button>}
         {ownedSession && status?.hostEpoch
           ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} />
           : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators} />}

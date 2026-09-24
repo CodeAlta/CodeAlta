@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 export type ScrollMetrics = Readonly<{ scrollTop: number; scrollHeight: number; clientHeight: number }>;
 
 export const timelineFollowThreshold = 72;
@@ -65,4 +67,53 @@ export function createTimelineScrollMemory() {
       };
     },
   };
+}
+
+// Keep scroller, history settlement and follow wiring together so mounted layout changes
+// receive the same per-session scroll policy as content mutations.
+export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof createTimelineScrollMemory>) {
+  const elementRef = useRef<HTMLDivElement>(null);
+  const [selection] = useState(() => memory.open(sessionId));
+  const [following, setFollowing] = useState(selection.following);
+  const restoreFrame = useRef(0);
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+    let frame = 0;
+    const scrollBottom = () => {
+      if (!selection.following()) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { element.scrollTop = bottomScrollTop(element); });
+    };
+    // DOM mutations do not report layout growth from images, fonts or CSS. Observe the
+    // scroller's own viewport and each direct panel, including panels mounted later.
+    const sizes = new ResizeObserver(scrollBottom);
+    sizes.observe(element);
+    const changed = () => {
+      for (let index = 0; index < element.children.length; index++) sizes.observe(element.children.item(index)!);
+      scrollBottom();
+    };
+    const observer = new MutationObserver(changed);
+    observer.observe(element, { childList: true, subtree: true, characterData: true });
+    changed();
+    return () => { observer.disconnect(); sizes.disconnect(); cancelAnimationFrame(frame); cancelAnimationFrame(restoreFrame.current); };
+  }, [selection]);
+  function settled() {
+    const element = elementRef.current;
+    if (!element) return;
+    const top = selection.settle(element);
+    if (top === null) return;
+    element.scrollTop = top;
+    restoreFrame.current = requestAnimationFrame(() => selection.finishRestore());
+  }
+  function scroll(element: HTMLDivElement) { setFollowing(selection.scroll(element)); }
+  function jump() {
+    const element = elementRef.current;
+    if (element) {
+      selection.jump(element);
+      element.scrollTop = bottomScrollTop(element);
+    }
+    setFollowing(true);
+  }
+  return { elementRef, following, settled, scroll, jump };
 }
