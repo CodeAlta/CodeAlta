@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
-import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
+import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { captureSubmission, createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 
 const current: SessionSelection = { providerKey: "alpha", agentPromptId: "plan", modelId: "old", reasoningEffort: "High" };
@@ -70,4 +70,36 @@ test("instance-owned selection survives a denied storage write but never revives
   assert.deepEqual(store.get("epoch", "one", choices), next);
   assert.equal(store.get("epoch", "one", { ...choices, models: [choices.models[0]] }), null);
   assert.equal(store.get("new-epoch", "one", { ...choices, epoch: "new-epoch" }), null);
+});
+
+test("prompt handoff retains model/effort and refuses changed session, epoch, unavailable or pending exact Send", async () => {
+  const store = createNextSendSelectionStore(() => null, () => {});
+  const promptTarget = { epoch: "epoch", sessionId: "one", promptId: "default" };
+  let sessionId: string | null = "one", epoch = "epoch", active = true, pending = false;
+  const admission = () => ({ epoch, sessionId, active, canMutate: true, pending });
+  let finish!: (value: SessionChoicesResponse) => void;
+  const switching = applyPromptNextSend(promptTarget, admission, () => new Promise(resolve => { finish = resolve; }), store);
+  sessionId = "two"; finish(choices);
+  assert.equal(await switching, "selection_changed");
+  sessionId = "one";
+  const leaving = applyPromptNextSend(promptTarget, admission, () => new Promise(resolve => { finish = resolve; }), store);
+  active = false; finish(choices);
+  assert.equal(await leaving, "selection_changed");
+  active = true;
+  assert.equal(await applyPromptNextSend(promptTarget, admission, async () => ({ ...choices, prompts: [] }), store), "unavailable");
+  assert.equal(await applyPromptNextSend(promptTarget, admission, async () => ({ ...choices, models: [] }), store), "unavailable");
+  assert.equal(await applyPromptNextSend(promptTarget, admission, async () => ({ ...choices, epoch: "other" }), store), "stale_epoch");
+  assert.equal(await applyPromptNextSend(promptTarget, admission, async () => ({ ...choices, sessionId: "two" }), store), "unavailable");
+  const stale = applyPromptNextSend(promptTarget, admission, () => new Promise(resolve => { finish = resolve; }), store);
+  epoch = "other"; finish(choices);
+  assert.equal(await stale, "stale_epoch");
+  epoch = "epoch";
+  pending = true;
+  assert.equal(await applyPromptNextSend(promptTarget, admission, async () => { throw Error("must not read"); }, store), "pending");
+  pending = false;
+  assert.equal(await applyPromptNextSend(promptTarget, admission, async () => choices, store), "applied");
+  const selected = store.get("epoch", "one", choices);
+  assert.deepEqual(selected, { ...current, agentPromptId: "default" });
+  assert.deepEqual(captureSubmission("epoch", "one", "literal text", "prompt-key", selected)?.selection,
+    { ...current, agentPromptId: "default" });
 });

@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -21,6 +22,21 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
 
 public sealed partial class OwnedSessionCommandService
 {
+    /// <summary>Reads effective prompts only in the resolved owned session's host-authorized project scope.</summary>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its read.</exception>
+    public async Task<IReadOnlyList<AgentPromptDescriptor>?> GetPromptCatalogAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate) { if (_closed || _retained) return null; }
+        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (session is null) return null;
+        var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
+            : await _projects.GetByIdAsync(session.ProjectRef, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(session.ProjectRef) && project is null) return null;
+        return _runtime.ListOwnedPrompts(project?.ProjectPath);
+    }
+
     /// <summary>Reads bounded choices for an existing session, probing its configured provider if needed.</summary>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its read.</exception>

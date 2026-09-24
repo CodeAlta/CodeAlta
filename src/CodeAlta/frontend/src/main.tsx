@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  boot, configuration, modelCatalog, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, modelCatalog, promptCatalog, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
@@ -9,7 +9,8 @@ import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState
 import { History } from "./HistoryPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
-import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
+import { PromptCatalogPanel } from "./PromptCatalogPanel";
+import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
@@ -52,7 +53,7 @@ import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView 
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration" | "models";
+type View = "workspace" | "configuration" | "models" | "prompts";
 type Theme = "dark" | "light";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -324,7 +325,8 @@ function App() {
       else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     }
     else if (action === "models") navigate("models");
-    else if (action === "settings" || action === "providers" || action === "prompts" || action === "plugins") navigate("configuration");
+    else if (action === "prompts") navigate("prompts");
+    else if (action === "settings" || action === "providers" || action === "plugins") navigate("configuration");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
@@ -723,6 +725,7 @@ function App() {
         <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>Sessions</button>
         <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => navigate("configuration")}>Configuration</button>
         <button type="button" aria-current={view === "models" ? "page" : undefined} onClick={() => navigate("models")}>Models</button>
+        <button type="button" aria-current={view === "prompts" ? "page" : undefined} onClick={() => navigate("prompts")}>Agent prompts</button>
       </nav>
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
@@ -731,7 +734,25 @@ function App() {
     </header>
 
     {view === "configuration"
-      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenModels={() => navigate("models")} />
+      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} />
+      : view === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
+          readChoices={sessionOperations.choices} target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+            ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
+          selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
+          pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
+          onApply={async (target, signal) => {
+            const result = await applyPromptNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
+              active: currentView.current === "prompts" && !signal.aborted,
+              sessionId: selectedScope.current === projectId ? selectedSessionId.current : null,
+              canMutate: !!mutation?.capability.canMutate(), pending: !!submissions.pending(target.sessionId) }),
+            async (epoch, sessionId) => {
+              const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
+              mutation?.capability.observe(value);
+              return value;
+            }, nextSendSelections);
+            if (result === "applied" && !signal.aborted) navigate("workspace");
+            return result;
+          }} />
       : view === "models" ? <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
           readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
           target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
@@ -1025,13 +1046,14 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme, onOpenModels }: {
+function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme, onOpenModels, onOpenPrompts }: {
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
   theme: Theme;
   setTheme: (theme: Theme) => void;
   onOpenModels: () => void;
+  onOpenPrompts: () => void;
 }) {
   const inventory = configurationState.snapshot;
   const [scope, setScope] = useState<ConfigurationScope>("all");
@@ -1061,7 +1083,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         {inventory?.providers.map(provider => <div className="inventory-row" key={provider.id}><span><strong>{provider.name}</strong><small>{provider.type} · {provider.defaultModel ?? "No default model"}</small></span><StatusPill label={provider.enabled ? "Enabled" : "Disabled"} /></div>)}
         {inventory?.providersTruncated && <p className="muted-text">Showing the first 32 configured providers.</p>}
       </div></section>}
-      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon"><AppIcon name="prompt" size={19} /></div><div><h2>Agent prompts</h2><p>The composer shows the prompt captured by an owned session. Persisted Prompt information entries include the applied system/developer text, prompt source, change summary, and token estimate.</p><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
+      {visible.has("prompts") && <section className="settings-card"><div className="settings-icon"><AppIcon name="prompt" size={19} /></div><div><h2>Agent prompts</h2><p>Inspect effective host prompts for the selected session and choose its next Send prompt.</p><button type="button" className="quiet-button" onClick={onOpenPrompts}>Browse agent prompts</button><StatusPill label={status?.hostAvailable ? "Session state available" : "Catalog history available"} /></div></section>}
       {visible.has("skills") && <section className="settings-card"><div className="settings-icon"><AppIcon name="tool" size={19} /></div><div><h2>Skills</h2><p>Skills remain project/global filesystem resources and are available to shared agent sessions.</p><StatusPill label="Managed by CodeAlta runtime" /></div></section>}
       {visible.has("plugins") && <section className="settings-card"><div className="settings-icon">⬡</div><div><h2>Plugins &amp; MCP</h2><p>Configured plugin policy is visible in catalog mode. Active state is shown only when the owned runtime has started that plugin.</p>
         <div className="inventory-row"><span><strong>MCP servers</strong><small>Model Context Protocol runtime state</small></span><StatusPill label={mcp ? mcp.state : inventory?.pluginRuntimeAvailable ? "Not configured" : "Runtime not started"} /></div>

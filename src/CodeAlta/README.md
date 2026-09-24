@@ -72,6 +72,18 @@ the selected agent prompt, and cannot change an in-flight/uncertain exact Send; 
 the running turn or queued work. A different provider, missing choices or changed host/session
 cannot apply the selection. Provider authentication and global defaults remain TUI workflows.
 
+The **Agent prompts** tab (Settings → Browse agent prompts, or `Ctrl+G`, then `Ctrl+H`)
+shows effective prompts discovered by the shared host catalog for the exact selected owned
+session. It shows name, ID, description, effective source scope and a read-only excerpt of the
+effective agent prompt body (up to 2,048 characters per prompt). An appended prompt may include
+lower-precedence source content; source paths and system prompts are not exposed. The inventory
+is capped at 64 prompts and 96 KiB serialized, and identifies omitted or truncated content.
+Built-in prompts are read-only; no prompt editing or source storage is available here. Catalog-only
+mode and the browser demo have no owned prompt inventory. The recorded prompt and next-Send
+prompt are shown separately. Selecting a prompt validates fresh session choices and changes
+only that exact session's next Send, retaining its model/effort; pending exact Send, stale host,
+session changes and unavailable prompts cannot apply. Create/edit/delete remain TUI workflows.
+
 ## Browse a task-owned catalog copy
 
 To display persisted projects and sessions, supply an existing **trusted, task-owned catalog
