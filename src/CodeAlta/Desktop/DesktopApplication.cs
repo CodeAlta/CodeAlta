@@ -176,6 +176,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
                     builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput));
                     builder.AddWorkspaceService(workspace);
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime));
+                    builder.AddModelCatalogService(new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch));
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
@@ -309,6 +310,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options)
             builder.AddBootService(new BootService());
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
+            builder.AddModelCatalogService(new ModelCatalogService());
             await using var rpc = builder.Build();
             window.Show();
             await using var view = await environment.CreateWebViewAsync(NeoAstraHost.FillWindow(window), new NeoAstraOptions

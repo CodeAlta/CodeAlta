@@ -1,13 +1,14 @@
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  boot, configuration, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, modelCatalog, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
+import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
@@ -50,7 +51,7 @@ import { restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoView 
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "configuration";
+type View = "workspace" | "configuration" | "models";
 type Theme = "dark" | "light";
 const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
@@ -316,7 +317,8 @@ function App() {
       if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
       else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     }
-    else if (action === "settings" || action === "providers" || action === "models" || action === "prompts" || action === "plugins") setView("configuration");
+    else if (action === "models") setView("models");
+    else if (action === "settings" || action === "providers" || action === "prompts" || action === "plugins") setView("configuration");
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
     else if (action === "focusSearch") searchInput.current?.focus();
@@ -714,6 +716,7 @@ function App() {
       <nav className="topnav" aria-label="Primary navigation">
         <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => setView("workspace")}>Sessions</button>
         <button type="button" aria-current={view === "configuration" ? "page" : undefined} onClick={() => setView("configuration")}>Configuration</button>
+        <button type="button" aria-current={view === "models" ? "page" : undefined} onClick={() => setView("models")}>Models</button>
       </nav>
       <div className={`connection ${error ? "connection-error" : connected ? "connection-live" : "connection-readonly"}`}>
         <span className="connection-dot" />
@@ -722,7 +725,9 @@ function App() {
     </header>
 
     {view === "configuration"
-      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} />
+      ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState} theme={theme} setTheme={setTheme} onOpenModels={() => setView("models")} />
+      : view === "models" ? <ModelCatalogPanel epoch={status?.hostAvailable ? status.hostEpoch ?? null : null}
+          readProviders={modelCatalog.providers} readModels={modelCatalog.models} />
       : <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
           "--project-pane-width": `${visiblePaneLayout.projects}px`,
           "--session-pane-width": `${visibleSessionWidth}px`,
@@ -996,12 +1001,13 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme }: {
+function ConfigurationPanel({ status, selectedSession, configurationState, theme, setTheme, onOpenModels }: {
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  onOpenModels: () => void;
 }) {
   const inventory = configurationState.snapshot;
   const [scope, setScope] = useState<ConfigurationScope>("all");
@@ -1015,6 +1021,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         <label className="settings-search"><AppIcon name="search" size={14} /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search settings" /></label>
         <nav>{([ ["all", "All settings"], ["general", "General"], ["agent", "Agent"], ["extensions", "Extensions"] ] as const).map(([value, label]) =>
           <button type="button" key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}</nav>
+        <button type="button" onClick={onOpenModels}>Open model catalog</button>
         <p>Configuration is read-only unless a card explicitly offers an editable control.</p>
       </aside>
       <div className="settings-grid">
@@ -1022,7 +1029,8 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
         <button type="button" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>Dark</button>
         <button type="button" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>Light</button>
       </div></div></section>}
-      {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers &amp; models</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
+      {visible.has("providers") && <section className="settings-card"><div className="settings-icon"><AppIcon name="model" size={19} /></div><div><h2>Providers</h2><p>Current session provider: <strong>{selectedSession?.providerKey ?? "not recorded"}</strong>.</p>
+        <button type="button" className="quiet-button" onClick={onOpenModels}>Browse host model catalog</button>
         {configurationState.error && <p className="error-text">{configurationState.error}</p>}
         {!inventory && !configurationState.error && <p>Loading configured providers…</p>}
         {inventory && inventory.providers.length === 0 && <p>No provider inventory is exposed in this launch mode.</p>}

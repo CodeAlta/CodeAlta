@@ -66,6 +66,10 @@ export const configuration = Object.freeze({ snapshot: async (): Promise<Configu
     { id: "sample.workspace", name: "Workspace insights", version: "0.1.0", state: "Active", contributionCount: 2 },
   ],
 }) });
+export const modelCatalog = Object.freeze({
+  providers: async () => ({ status: "unconfigured", epoch: null, providers: [], truncated: false }),
+  models: async () => ({ status: "unconfigured", epoch: null, providerId: null, availability: "Unknown", models: [], truncated: false }),
+});
 export const workspace = Object.freeze({
   snapshot: async () => snapshot,
   history: async (request: HistoryRequest): Promise<HistoryResponse> => ({

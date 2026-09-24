@@ -58,6 +58,17 @@ submissions may authenticate or use configured provider storage/network. It adds
 state to `.alta` and performs no storage migration. Help/version and rejected arguments do not initialize
 native services or create storage. Explicit catalog and scoped-owned options retain stricter validation.
 
+The **Models** tab (or `Ctrl+G`, then `Ctrl+O`) opens a separate read-only model catalog in owned
+mode. Select a registered provider to request its actual host-reported models; search their names,
+IDs and descriptions and open a model for supported efforts, capabilities and token limits. Provider
+reads are capped at 32 and model reads at 128, with omitted results identified; availability and
+missing metadata, including pricing not reported by this inventory, remain explicit. Loading a
+provider can start its configured provider runtime/probe and may access its normal configured
+storage or network. The catalog-only copy and browser demo cannot discover model inventory from
+saved defaults and show an unavailable state instead. This screen does not configure provider
+authentication, change the global default or select the next Send model; use the TUI for those
+management workflows.
+
 ## Browse a task-owned catalog copy
 
 To display persisted projects and sessions, supply an existing **trusted, task-owned catalog
