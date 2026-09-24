@@ -26,6 +26,7 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useTimelinePosition } from "./timelineScroll";
 import { resolveShortcut, sessionInfoChordContextAllowed, sessionInfoPrefixFromKey, type ShortcutAction } from "./shortcuts";
+import { activateContextShortcut } from "./contextShortcut";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
@@ -339,7 +340,7 @@ function App() {
       const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
       selectedSessionId.current = next;
       setSessionId(next);
-    } else if (action === "context") document.querySelector<HTMLButtonElement>(".prompt-state")?.click();
+    } else if (action === "context") activateContextShortcut(workspaceShell.current);
   }
 
   function toggleProjects() {

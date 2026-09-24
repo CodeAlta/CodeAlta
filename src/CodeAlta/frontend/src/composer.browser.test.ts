@@ -13,6 +13,9 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 
 // Mounts the actual OwnedSessionPanel with production style.css, not an OS select popup or native WebView2.
 test("mounted composer stays compact and its controls remain legible in both themes", { skip: !edge, timeout: 60_000 }, async () => {
+  const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
+  assert.match(app, /action === "context"\) activateContextShortcut\(workspaceShell\.current\)/,
+    "the mounted shortcut dispatcher must remain wired to the production app");
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -139,6 +142,22 @@ test("mounted composer stays compact and its controls remain legible in both the
       "Edit prompt in a large window (F6)");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar button.primary-button')?.textContent`), "Send");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar')?.textContent.includes('Refresh receipts')`), false);
+    const beforeChord = Number(await evaluate("window.fixture.refreshes"));
+    assert.equal(await evaluate(`document.querySelector('.advanced-session-controls').open`), false);
+    await evaluate(`(() => { const prompt = document.querySelector('#session-prompt'); prompt.focus();
+      for (const key of ['g', 'u']) prompt.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
+    assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
+      if (window.fixture.refreshes > ${beforeChord}) resolve('refreshed');
+      else if (Date.now() > end) resolve('not refreshed'); else setTimeout(check, 25); }; check(); })`), "refreshed",
+    "Ctrl+G, Ctrl+U must invoke the mounted composer runtime reader through production shortcut dispatch");
+    assert.equal(await evaluate(`document.querySelector('.advanced-session-controls').open`), true,
+      "shortcut must reveal the hidden context control and diagnostics");
+    assert.equal(await evaluate(`document.activeElement?.id`), "refresh-session-context", "revealed refresh must be discoverable by focus");
+    await evaluate(`(() => { const dialog = document.createElement('dialog'); dialog.setAttribute('open', '');
+      const button = document.createElement('button'); dialog.append(button); document.body.append(dialog);
+      for (const key of ['g', 'u']) button.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true }));
+      dialog.remove(); })()`);
+    assert.equal(Number(await evaluate("window.fixture.refreshes")), beforeChord + 1, "modal chord cannot refresh context");
     await evaluate(`(() => { window.fixtureChoicesFail = true; document.querySelector('.advanced-session-controls').open = true;
       [...document.querySelectorAll('.advanced-session-controls button')].find(button => button.textContent.includes('Refresh choices')).click(); })()`);
     assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
@@ -146,6 +165,13 @@ test("mounted composer stays compact and its controls remain legible in both the
       else if (Date.now() > end) resolve('missing'); else setTimeout(check, 25); }; check(); })`), "visible",
     "choice failure and explicit retry must remain visible outside advanced controls");
     assert.equal(await evaluate(`document.querySelector('.composer-notice[role="alert"] button')?.textContent`), "Retry choices");
+    await evaluate(`(() => { document.querySelector('.owned-session').remove();
+      const catalog = document.createElement('section'); catalog.className = 'composer catalog-composer';
+      const button = document.createElement('button'); button.className = 'prompt-state';
+      button.onclick = () => window.fixture.catalogOpens++;
+      catalog.append(button); document.querySelector('.session-workspace').append(catalog);
+      for (const key of ['g', 'u']) button.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
+    assert.equal(Number(await evaluate("window.fixture.catalogOpens")), 1, "catalog-only context chord retains its provider-configuration action");
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 999, method: "Browser.close" }));
     socket?.close();
