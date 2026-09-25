@@ -146,6 +146,7 @@ function App() {
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
   const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
   const [dialog, setDialog] = useState<"project" | "help" | "about" | null>(null);
+  const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
   const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
   function openAbout(element: HTMLElement | null) {
     if (dialog || document.querySelector('dialog[open]:not(.settings-dialog), [role="dialog"][aria-modal="true"]:not(.settings-dialog)')) return;
@@ -229,6 +230,20 @@ function App() {
   const creationAlive = useRef(true);
   const creationRefresh = useRef(new AbortController());
   const selectedScope = useRef<string | null>(null);
+  function openHelp() {
+    if (paletteOpen || dialog || settingsVisible.current || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    focusRestoration.cancel();
+    helpOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      view: currentView.current, sessionId: selectedSessionId.current, scope: selectedScope.current };
+    setDialog("help");
+  }
+  function closeHelp() {
+    const origin = helpOrigin.current;
+    setDialog(null);
+    focusRestoration.schedule(origin?.element ?? null, () => currentView.current === origin?.view &&
+      selectedSessionId.current === origin.sessionId && selectedScope.current === origin.scope,
+      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+  }
   useEffect(() => {
     creationAlive.current = true;
     creationRefresh.current = new AbortController();
@@ -508,9 +523,10 @@ function App() {
     }
     else if (action === "openProject") setDialog("project");
     else if (action === "renameProject") void beginProjectRename();
-    else if (action === "help") setDialog("help");
+    else if (action === "help") openHelp();
     else if (action === "escape") {
-      if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
+      if (dialog === "help") closeHelp();
+      else if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
       else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     }
     else if (action === "models") navigate("models");
@@ -1095,7 +1111,7 @@ function App() {
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger}
-                onOpenReminders={openSelectedReminders} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
+                onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenPalette={openPalette} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -1181,7 +1197,7 @@ function App() {
         navigate("workspace");
         return true;
       }} onClose={() => setDialog(null)} />}
-    {dialog === "help" && <ShortcutHelp onClose={() => setDialog(null)} />}
+    {dialog === "help" && <ShortcutHelp onClose={closeHelp} />}
     {dialog === "about" && <AboutDialog status={status} bootError={!!error} demo={demoMode} onClose={closeAbout} />}
     {paletteOpen && paletteCapture.current && <CommandPalette context={paletteContext()} captured={paletteCapture.current}
       onChoose={choosePalette} onClose={dismissPalette} />}
@@ -1226,13 +1242,15 @@ function SettingsOverlay({ section, onSection, onClose, onAbout, children }: {
   </dialog>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, selections, timelineCommand }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
   infoTrigger: RefObject<HTMLButtonElement | null>;
   remindersTrigger: RefObject<HTMLButtonElement | null>;
   onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
+  onOpenHelp: () => void;
+  onOpenPalette: () => void;
   readReminders: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
   reminderActions: ReturnType<typeof createReminderActions>;
   compactTrigger: RefObject<HTMLButtonElement | null>;
@@ -1335,9 +1353,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
               usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
-              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)}
+              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
-          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators}
+          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
@@ -1437,7 +1455,10 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
     ["Ctrl+G, Ctrl+T", "Session info (selected workspace session only)"],
     ["Ctrl+G, Ctrl+D", "Reminders (selected owned workspace session only)"],
-    ["F1 or ?", "Keyboard shortcuts"], ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
+    ["F1 / ? outside text", "Keyboard shortcuts"],
+    ["? in empty regular prompt", "Keyboard shortcuts"],
+    ["/ in empty regular prompt", "Implemented actions palette (not slash-command execution)"],
+    ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
     ["F3 / F4", "Previous / next retained user or assistant message"],
     ["Ctrl+F3", "First retained message (not journal first)"],
     ["Ctrl+F4", "Refresh newest persisted history, then follow on success"],

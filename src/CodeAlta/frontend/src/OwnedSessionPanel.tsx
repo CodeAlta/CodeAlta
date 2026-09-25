@@ -13,14 +13,14 @@ import { AppIcon } from "./AppIcon";
 import { promptEditorHeight, showContextAction } from "./workspacePresentation";
 import { changeSelection, validSelection } from "./sessionSelection";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
-import { dispatchComposerKey } from "./composerKeyboard";
+import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
 import type { UsageTarget } from "./sessionUsage";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, reminderActions, readReminderCount }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   usageTarget?: UsageTarget | null;
@@ -36,6 +36,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
   remindersTrigger?: Ref<HTMLButtonElement>;
   compactTrigger?: Ref<HTMLButtonElement>;
   onOpenReminders?: () => void;
+  onOpenHelp?: () => void;
+  onOpenPalette?: () => void;
   reminderActions?: ReturnType<typeof createReminderActions>;
   readReminderCount?: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
 }) {
@@ -396,6 +398,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     <label className="sr-only" htmlFor="session-prompt">Message</label>
     <textarea id="session-prompt" ref={promptInput} className="prompt-input" rows={1} maxLength={32768} value={pending?.request.text ?? text} disabled={!!pending}
       onChange={event => editText(event.target.value)} placeholder="Ask CodeAlta to work on this project…" onKeyDown={event => {
+        if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
+          altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
+          keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
+        event.currentTarget, onOpenHelp, onOpenPalette)) { event.preventDefault(); return; }
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,

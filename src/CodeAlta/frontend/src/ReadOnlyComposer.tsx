@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { promptEditorHeight } from "./workspacePresentation";
+import { dispatchTransientComposerKey } from "./composerKeyboard";
 
-export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason }: {
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, onOpenHelp, onOpenPalette }: {
   sessionId: string; provider: string | null;
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
+  onOpenHelp?: () => void; onOpenPalette?: () => void;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
   const text = draft.text;
@@ -37,6 +39,11 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason 
       maxLength={32768} value={text} onChange={event => {
         const value = event.target.value;
         setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
+      }} onKeyDown={event => {
+        if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
+          altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
+          keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
+        event.currentTarget, onOpenHelp, onOpenPalette)) event.preventDefault();
       }} placeholder="Draft a prompt for this session…" />
     <div className="composer-toolbar">
       <p id="catalog-draft-status" role="status">Draft only — {reason ?? "No owned desktop host; sending is unavailable. Drafts stay local when storage permits."}</p>

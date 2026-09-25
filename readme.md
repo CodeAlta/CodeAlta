@@ -36,6 +36,8 @@ Experimental Send/Abort also retains exact local intent and live-waiter exclusio
 
 In the owned Desktop composer, the Reminders icon or Ctrl+G, Ctrl+D (from the workspace or prompt) opens reminders for the verified selected session; it does not schedule anything or poll in the background. Create accepts whole seconds (1–86400) or invariant `HH:mm:ss` / `d.HH:mm:ss` with whole seconds only (`1.00:00:00` is the 24-hour maximum); total attempts remain 1–20. A list count is only as of its explicit refresh. Host changes or uncertain reminder admissions require inspection, not automatic retries. Catalog-only and unverified sessions cannot use the composer shortcut.
 
+In the Desktop regular composer (owned or catalog/archived draft-only), typing `?` into an **exactly empty** prompt opens keyboard help; typing `/` opens the existing implemented-actions palette. These are transient keyboard shortcuts, not slash-command execution. Pasted text, composition, selection replacement and nonempty drafts remain literal; the expanded editor and other search/input fields do not use these shortcuts. Draft-only scopes can navigate/help but cannot gain mutation permissions from the palette.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>
