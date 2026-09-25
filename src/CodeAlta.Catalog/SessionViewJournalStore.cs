@@ -11,7 +11,7 @@ namespace CodeAlta.Catalog;
 /// <summary>
 /// Stores durable session metadata in the session JSONL journal.
 /// </summary>
-public sealed class SessionViewJournalStore
+public sealed partial class SessionViewJournalStore
 {
     /// <summary>
     /// Provider raw-event type used for the first-line session header.

@@ -82,6 +82,151 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task OwnedUsage_RequiresPersistedScopeAndCompleteUnarchivedCatalogWithoutActivation() => Fixture.Run(async f =>
+    {
+        var absent = await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath));
+        Assert.AreEqual("missing_session", absent.Status);
+        Assert.AreEqual(0, f.Provider.Creates);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        Assert.AreEqual("no_observation", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath))).Status);
+        Assert.AreEqual("scope_mismatch", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "global", null, null))).Status);
+        Assert.AreEqual("scope_mismatch", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", Guid.NewGuid().ToString("D"), f.ProjectPath))).Status);
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(0, long.MaxValue, null)), timestamp: DateTimeOffset.UnixEpoch);
+        var observed = await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath));
+        Assert.AreEqual("ok", observed.Status);
+        Assert.AreEqual(long.MaxValue, observed.Usage!.Window!.Value.TokenLimit);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot });
+        var project = (await catalog.GetByIdAsync(f.ProjectId))!;
+        project.Archived = true;
+        await catalog.SaveAsync(project);
+        Assert.AreEqual("archived_project", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath))).Status);
+    });
+
+    [TestMethod]
+    public Task OwnedUsage_RefusesChangedPersistedHeaderAndIncompleteOrAmbiguousCatalog() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var read = () => f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath);
+        var journal = new AgentRuntimePathLayout(f.GlobalRoot).GetSessionFilePath(f.Session.SessionId, f.Session.CreatedAt);
+        var originalHeader = await File.ReadAllTextAsync(journal);
+        File.Delete(journal);
+        Assert.AreEqual("metadata_missing", (await f.Wait(read())).Status);
+        await File.WriteAllTextAsync(journal, new string('x', SessionViewJournalStore.MaximumBoundedHeaderBytes + 1) + "\n");
+        Assert.AreEqual("metadata_incomplete", (await f.Wait(read())).Status);
+        await File.WriteAllTextAsync(journal, originalHeader.Replace(f.ProjectId, Guid.NewGuid().ToString("D"), StringComparison.Ordinal));
+        Assert.AreEqual("metadata_mismatch", (await f.Wait(read())).Status);
+        await File.WriteAllTextAsync(journal, originalHeader);
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot });
+        var descriptor = (await catalog.GetByIdAsync(f.ProjectId))!;
+        var projectFile = Path.Combine(f.GlobalRoot, "projects", descriptor.Slug + ".md");
+        var originalProject = await File.ReadAllTextAsync(projectFile);
+        File.Delete(projectFile);
+        Assert.AreEqual("missing_project", (await f.Wait(read())).Status);
+        await File.WriteAllTextAsync(projectFile, originalProject + new string('x', ProjectCatalog.MaximumOwnershipFileBytes));
+        Assert.AreEqual("incomplete_project", (await f.Wait(read())).Status);
+        await File.WriteAllTextAsync(projectFile, "not a project descriptor");
+        Assert.AreEqual("invalid_project", (await f.Wait(read())).Status);
+        await File.WriteAllTextAsync(projectFile, originalProject);
+        descriptor.Id = Guid.NewGuid().ToString("D");
+        descriptor.Slug = "different";
+        await catalog.SaveAsync(descriptor);
+        Assert.AreEqual("ambiguous_project", (await f.Wait(read())).Status);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+    });
+
+    [TestMethod]
+    public Task OwnedUsage_GlobalRequiresPositiveActorAndPersistedGlobalScope() => Fixture.Run(async f =>
+    {
+        var global = f.NewSession();
+        global.Kind = SessionViewKind.GlobalSession;
+        global.ProjectRef = null;
+        await f.Persist(global);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(global, f.Options));
+        Assert.AreEqual("no_observation", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(global.SessionId, "global", null, null))).Status);
+        Assert.AreEqual("scope_mismatch", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(global.SessionId, "project", f.ProjectId, f.ProjectPath))).Status);
+        Assert.AreEqual("missing_session", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(Guid.NewGuid().ToString("D"), "global", null, null))).Status);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+    });
+
+    [TestMethod]
+    public Task OwnedUsage_TransitionCancellationAndClosedHostNeverReleasePriorObservation() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(5, 10, null)), timestamp: DateTimeOffset.UnixEpoch);
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        await f.ExpectCancellation(f.Track(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath, canceled.Token)));
+        f.Provider.HoldAbort = true;
+        var replacement = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("new-model")));
+        await f.Ready(f.Provider.AbortStarted.Task);
+        var transition = await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath));
+        Assert.AreEqual("transition", transition.Status);
+        Assert.IsNull(transition.Usage);
+        f.Provider.ReleaseAbort.TrySetResult();
+        await f.Wait(replacement);
+        var after = await f.Wait(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath));
+        Assert.AreEqual("no_observation", after.Status);
+        await f.Wait(f.Runtime.DisposeAsync().AsTask());
+        await f.Expect<ObjectDisposedException>(f.Track(f.Runtime.ReadOwnedUsageAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath)));
+    });
+
+    [TestMethod]
+    public Task OwnedUsage_RechecksOriginalAttachmentAfterAsyncPersistedRead() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(13, 50, null)), timestamp: DateTimeOffset.UnixEpoch);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot });
+        var read = f.Track(f.Runtime.ReadOwnedUsageWithReadersAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath,
+            async (id, at, token) =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(token);
+                return await f.Journal.ReadBoundedHeaderAsync(id, at, token);
+            }, catalog.ReadBoundedOwnershipAsync));
+        try
+        {
+            await f.Ready(entered.Task);
+            await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("replacement")));
+        }
+        finally { release.TrySetResult(); }
+        var result = await f.Wait(read);
+        Assert.AreEqual("stale_attachment", result.Status);
+        Assert.IsNull(result.Usage);
+        Assert.IsNull(result.AttachmentGeneration);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+    });
+
+    [TestMethod]
+    public Task OwnedUsage_HostClosureDuringAsyncOwnershipReadDoesNotReleaseObservation() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(22, 50, null)), timestamp: DateTimeOffset.UnixEpoch);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot });
+        var read = f.Track(f.Runtime.ReadOwnedUsageWithReadersAsync(f.Session.SessionId, "project", f.ProjectId, f.ProjectPath,
+            async (id, at, token) =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(token);
+                return await f.Journal.ReadBoundedHeaderAsync(id, at, token);
+            }, catalog.ReadBoundedOwnershipAsync));
+        await f.Ready(entered.Task);
+        Task close;
+        try { close = f.Track(f.Runtime.DisposeAsync().AsTask()); }
+        finally { release.TrySetResult(); }
+        await f.Expect<ObjectDisposedException>(read);
+        await f.Wait(close);
+    });
+
+    [TestMethod]
     public Task UsageState_InvalidValuesDoNotBecomeZeroOrReusePriorFields() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
@@ -806,6 +951,9 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         private Task? _body;
         private bool _cleaning;
         private string _projectId = string.Empty;
+        internal string ProjectId => _projectId;
+        internal string GlobalRoot => Path.Combine(_root, "global");
+        internal string ProjectPath => Path.Combine(_root, "project");
         internal Provider Provider { get; } = new();
         internal SessionViewDescriptor Session { get; private set; } = null!;
         internal SessionViewJournalStore Journal { get; private set; } = null!;

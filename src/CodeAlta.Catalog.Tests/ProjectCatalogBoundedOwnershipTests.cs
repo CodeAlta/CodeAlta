@@ -73,6 +73,8 @@ public sealed class ProjectCatalogBoundedOwnershipTests
         File.Delete(Path.Combine(fixture.Projects, "bad.md"));
         fixture.Write("bad", OtherId, fixture.OtherWorkspace, body: "", overrideText: "---\nid: [broken\n---");
         Assert.AreEqual(ProjectOwnershipStatus.Invalid, (await fixture.ReadAsync(Id, fixture.Workspace)).Status);
+        fixture.Write("bad", OtherId, fixture.OtherWorkspace, overrideText: "not a project descriptor");
+        Assert.AreEqual(ProjectOwnershipStatus.Invalid, (await fixture.ReadAsync(Id, fixture.Workspace)).Status);
     }
 
     [TestMethod]

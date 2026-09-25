@@ -176,7 +176,8 @@ public sealed partial class ProjectCatalog
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         { return result(ProjectOwnershipStatus.ReadError); }
-        catch (Exception ex) when (ex is ArgumentException or FormatException or YamlException or DecoderFallbackException
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or InvalidOperationException or FormatException
+            or YamlException or DecoderFallbackException
             or NotSupportedException or PathTooLongException)
         { return result(ProjectOwnershipStatus.Invalid); }
     }

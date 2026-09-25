@@ -296,6 +296,18 @@ Canceling an RPC waiter does not stop the shared catalog's background load. Exis
 teardown waits only a bounded time, so cache work can outlive bridge teardown; complete
 native lifecycle qualification remains open.
 
+### Read-only owned usage RPC (no popup)
+
+`sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host epoch.
+It requires explicit project ID/path or global scope, checks the exact persisted session header using a
+bounded first-line read, confirms complete unarchived project ownership when applicable, and rechecks
+the original attachment after asynchronous reads. Statuses distinguish unknown, unavailable,
+transitioning/closed/stale and read failures from a real zero. It returns only bounded last-observed
+typed numeric usage, source/timestamps, omission/invalid flags and decimal-string 64-bit counters; no
+history, provider probe, catalog limits, inferred totals or raw paths/details. External catalog and
+journal changes are checked point-in-time, not with a cross-process atomic guarantee. There is no
+usage popup or full/native usage parity yet.
+
 ### Persisted event history
 
 Selecting a session accumulates bounded pages of its persisted canonical events up to a 1,000-event

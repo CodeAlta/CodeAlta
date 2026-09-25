@@ -198,6 +198,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
+                    builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, epoch));
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;

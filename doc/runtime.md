@@ -93,7 +93,7 @@ does not create provider runtimes, probe models, start plugins, read credentials
 authority. Catalog-only startup returns an explicit unavailable/empty inventory. This is an M6
 presentation foundation, not provider account/model refresh, prompt/skill CRUD or plugin management.
 
-### Bounded last-observed usage (shared prerequisite only)
+### Bounded last-observed usage and owned read-only RPC
 
 `SessionRuntimeService.GetUsageStateAsync(sessionId, token)` uses the same admitted, non-creating
 existing-actor query as `GetCurrentStateAsync`. It returns runtime-instance/session/attachment
@@ -115,7 +115,20 @@ per-attachment actor-admission sequence, neither timestamp orders observations. 
 observation does not mean zero; a reported window need not describe current occupancy, and
 neither the sequence nor this query certifies completeness, recency or provider truth. Readers
 must fence host epoch, selection and exact runtime/session/attachment identity themselves.
-There is no Desktop RPC or popup for this prerequisite.
+The owned-only `sessionUsage.read` Desktop RPC now checks the actual host epoch and explicit project/global
+request before calling `SessionRuntimeService.ReadOwnedUsageAsync`. The owner captures an **existing** actor
+and attachment (no activation), then validates exact persisted session ID, creation time, provider,
+working directory and positive scope using the new first-line-only `ReadBoundedHeaderAsync` (32 KiB actual
+read plus one sentinel; no journal/history/cache scan). Project scope also requires the complete,
+unarchived `ProjectCatalog.ReadBoundedOwnershipAsync` result against the actor-owned ID and normalized
+path; an unknown project is never reclassified as global. The owner rechecks the original actor,
+attachment and transition/retirement state **after** asynchronous storage checks. Missing usage,
+stale/closed/transitioned attachments, invalid/ambiguous/incomplete metadata/catalog and read failures
+remain distinct and never imply zero. Numeric Int64s (including generation, sequence, tokens, omissions)
+and finite provider-reported cost/duration cross JavaScript as decimal strings; cost has no inferred
+currency. The response omits paths, details, raw provider events, labels and history. Neither the
+catalog nor journal read is an atomic cross-process snapshot or CAS against external changes/link swaps.
+This adds no popup, polling or full/native usage parity qualification.
 
 ### Committed live display window (M4 foundation, not complete M4)
 
