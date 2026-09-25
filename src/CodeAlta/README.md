@@ -177,6 +177,18 @@ Cache/read failures are surfaced; the desktop does not substitute a header scan.
 The screen shows a bounded persisted snapshot, project/session selection and metadata, not
 live run status. Wire responses are capped at 200 projects and 500 sessions with a truncation
 notice; these limits do not bound the underlying catalog load or implement paging/history.
+In **Open project** (`Ctrl+O`), search the saved-project list by name or full path; use Up/Down
+and Enter or click a row. It uses deterministic name order, **not** last-active or recent order.
+Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
+snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
+drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
+can also navigate saved projects read-only. Missing, changed, duplicated, omitted and unreadable
+entries cannot be opened from a stale list. The separate absolute-folder field still requires an
+owned host, preview and explicit trust confirmation to import an arbitrary existing directory.
+If Refresh projects fails, saved selection pauses until a successful refresh.
+During an import and after an uncertain import attempt, saved selection is unavailable until the
+dialog is closed; refresh only observes the catalog and never retries the import. This is not
+directory completion, archive mutation or full project-management parity.
 The shared catalog caches its snapshot, and closing/reloading the document is not a refresh
 or run-abort contract. Relaunch with a fresh browser data directory to load another snapshot.
 Canceling an RPC waiter does not stop the shared catalog's background load. Existing RPC

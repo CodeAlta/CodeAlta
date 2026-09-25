@@ -5,7 +5,7 @@ import {
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ReminderListRequest,
   type ReminderDetailRequest,
-  type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
+  type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
@@ -43,7 +43,9 @@ import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistP
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
 import { AppIcon } from "./AppIcon";
 import { sessionTime } from "./sessionTime";
-import { canImportCheckedFolder, createProjectOpening, projectOpeningMessage } from "./projectOpening";
+import { createProjectOpening } from "./projectOpening";
+import { OpenProjectDialog } from "./OpenProjectDialog";
+import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
@@ -74,6 +76,11 @@ function App() {
   const [status, setStatus] = useState<BootStatus>();
   const [error, setError] = useState<string>();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
+  const currentSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
+  function publishWorkspaceState(value: WorkspaceState) {
+    currentSnapshot.current = value.kind === "ready" ? value.snapshot : undefined;
+    setWorkspaceState(value);
+  }
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<View>("workspace");
@@ -259,7 +266,7 @@ function App() {
           : value.hostEpoch ? { epoch: value.hostEpoch, capability: createMutationCapability(value.hostEpoch) } : undefined);
       })
       .catch(() => { if (!abort.signal.aborted) setError("The desktop bridge could not be initialized. Close the window and try again."); });
-    void loadWorkspace(workspace.snapshot, abort.signal, setWorkspaceState);
+    void loadWorkspace(workspace.snapshot, abort.signal, publishWorkspaceState);
     void configuration.snapshot({}, { signal: abort.signal, timeoutMilliseconds: 8_000 })
       .then(value => { if (!abort.signal.aborted) setConfigurationState({ snapshot: value }); })
       .catch(() => { if (!abort.signal.aborted) setConfigurationState({ error: "Configuration inventory is unavailable." }); });
@@ -285,6 +292,8 @@ function App() {
   const visibleSessions = visibleSessionRows.map(row => row.session);
   const selectedSession = snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
+  const currentProjectWritable = () => projectId === null || !!selectedProject && !selectedProject.archived
+    && !!savedProjectSelection(selectedProject, currentSnapshot.current);
   selectedScope.current = projectId;
   selectedSessionId.current = sessionId;
   const activeMenu = menuTarget && view === "workspace" && menuTarget.id === sessionId
@@ -464,7 +473,7 @@ function App() {
     if (currentView.current !== "workspace" || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
       || !status?.hostAvailable || currentHostEpoch.current !== epoch
       || !mutation?.capability.canMutate() || selectedSessionId.current !== session || selectedScope.current !== scope
-      || selectedSession?.id !== session || projectId !== scope ||
+      || selectedSession?.id !== session || projectId !== scope || !currentProjectWritable() ||
       !selectedSessionInfoAvailable(snapshot, selectedSession, scope)) return;
     navigate("reminders");
   }
@@ -557,7 +566,7 @@ function App() {
     try {
       const fresh = await workspace.snapshot({}, { signal, timeoutMilliseconds: 30_000 });
       if (signal.aborted) return undefined;
-      setWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
+      publishWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
       return fresh;
     } catch { return undefined; }
   }
@@ -606,7 +615,7 @@ function App() {
           try {
             fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 });
             if (creationAlive.current && currentHostEpoch.current === target.epoch && capability.canMutate() && fresh.configured)
-              setWorkspaceState({ kind: "ready", snapshot: fresh });
+              publishWorkspaceState({ kind: "ready", snapshot: fresh });
           } catch { /* Outcome is uncertain if refresh fails. */ }
         }
         if (!creationAlive.current) return;
@@ -650,7 +659,7 @@ function App() {
       const fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 });
       if (!creationAlive.current || uncertainProjectRename.current !== uncertain || !capability.canMutate()
         || currentHostEpoch.current !== uncertain.target.epoch || generation !== projectRenameGeneration.current) return;
-      if (fresh.configured) setWorkspaceState({ kind: "ready", snapshot: fresh });
+      if (fresh.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
       if (projectNameVisible(fresh, uncertain.target, uncertain.name)) {
         uncertainProjectRename.current = null;
         setProjectRenameLocked(false);
@@ -861,14 +870,14 @@ function App() {
       : view === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
           read={mcpInventory.list} />
-      : view === "reminders" ? <ReminderPanel key={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+      : view === "reminders" ? <ReminderPanel key={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? JSON.stringify([status!.hostEpoch, selectedSession.id]) : "none"}
-          target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
           read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
           canMutate={() => !!mutation?.capability.canMutate()} />
       : view === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
-          readChoices={sessionOperations.choices} target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          readChoices={sessionOperations.choices} target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
             ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
           selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
           pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
@@ -876,7 +885,7 @@ function App() {
             const result = await applyPromptNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
               active: currentView.current === "prompts" && !signal.aborted,
               sessionId: selectedScope.current === projectId ? selectedSessionId.current : null,
-              canMutate: !!mutation?.capability.canMutate(), pending: !!submissions.pending(target.sessionId) }),
+              canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
             async (epoch, sessionId) => {
               const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
               mutation?.capability.observe(value);
@@ -887,7 +896,7 @@ function App() {
           }} />
       : view === "models" ? <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
           readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
-          target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
+          target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
             ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
           selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}
           pendingSelection={selectedSession ? submissions.pending(selectedSession.id)?.request.selection ?? null : null}
@@ -895,7 +904,7 @@ function App() {
             const result = await applyCatalogNextSend(target, () => ({ epoch: currentHostEpoch.current ?? null,
               active: currentView.current === "models",
               sessionId: !signal.aborted && selectedScope.current === projectId ? selectedSessionId.current : null,
-              canMutate: !!mutation?.capability.canMutate(), pending: !!submissions.pending(target.sessionId) }),
+              canMutate: !!mutation?.capability.canMutate() && currentProjectWritable(), pending: !!submissions.pending(target.sessionId) }),
             async (epoch, sessionId) => {
               const value = await sessionOperations.choices({ expectedEpoch: epoch, sessionId }, { signal, timeoutMilliseconds: 15000 });
               mutation?.capability.observe(value);
@@ -1068,9 +1077,13 @@ function App() {
                 timelineCommand={timelineCommand} />}
         </main>
       </div>}
-    {dialog === "project" && <OpenProjectDialog projects={snapshot?.projects ?? []} epoch={owned ? status?.hostEpoch : undefined}
+    {dialog === "project" && <OpenProjectDialog snapshot={snapshot} getCurrentSnapshot={() => currentSnapshot.current}
+      epoch={owned ? status?.hostEpoch : undefined}
       capability={owned ? mutation?.capability : undefined} opening={projectOpening}
-      onOpen={id => { selectProject(id); setDialog(null); }} onRefresh={refreshProjects}
+      onOpen={shown => {
+        if (currentSnapshot.current !== snapshot || !savedProjectSelection(shown, currentSnapshot.current)) return false;
+        selectProject(shown.id); setDialog(null); return true;
+      }} onRefresh={refreshProjects}
       onImported={async (id, path, signal) => {
         const fresh = await refreshProjects(signal);
         if (!fresh?.configured || signal.aborted || !mutation?.capability.canMutate()
@@ -1152,12 +1165,13 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
   const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
     ? observedDisplay : null;
-  const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const archivedScope = selectedProjectId !== null && snapshot.projects.some(project => project.id === selectedProjectId && project.archived);
+  const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch && !archivedScope);
   return <div className="session-workspace">
     <header className="session-header">
       <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
       <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span>
-        <span>{demoMode ? "Demo" : status?.hostAvailable ? "Host available" : "Catalog only"}</span>
+        <span>{demoMode ? "Demo" : archivedScope ? "Archived (read-only)" : status?.hostAvailable ? "Host available" : "Catalog only"}</span>
         <button ref={infoTrigger} type="button" className="quiet-button session-info-trigger" aria-haspopup="dialog" aria-expanded={infoOpen}
           onClick={() => setInfoOpen(true)}>Session info</button></div>
     </header>
@@ -1188,7 +1202,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
         {ownedSession && status?.hostEpoch
           ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} />
-          : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators} />}
+          : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
+              reason={archivedScope ? "Archived project; this session is read-only. Your draft remains saved." : undefined} />}
       </>}
   </div>;
 }
@@ -1276,104 +1291,6 @@ function ConfigurationPanel({ status, selectedSession, configurationState, theme
 
 function StatusPill({ label }: { label: string }) { return <span className="status-pill">{label}</span>; }
 
-function OpenProjectDialog({ projects, epoch, capability, opening, onOpen, onRefresh, onImported, onClose }: {
-  projects: ReadonlyArray<WorkspaceProject>; epoch: string | undefined;
-  capability: ReturnType<typeof createMutationCapability> | undefined;
-  opening: ReturnType<typeof createProjectOpening>;
-  onOpen: (id: string) => void; onRefresh: (signal: AbortSignal) => Promise<{ configured: boolean } | undefined>;
-  onImported: (id: string, path: string, signal: AbortSignal) => Promise<boolean>;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [preview, setPreview] = useState<{ requestedPath: string; path: string }>();
-  const [confirmed, setConfirmed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [notice, setNotice] = useState("");
-  const [, notifyCapability] = useState(0);
-  const canImport = !!epoch && !!capability?.canMutate();
-  const alive = useRef(true);
-  const followUp = useRef(new AbortController());
-  useEffect(() => {
-    alive.current = true;
-    followUp.current = new AbortController();
-    return () => { alive.current = false; followUp.current.abort(); };
-  }, []);
-  useEffect(() => {
-    return capability?.subscribe(() => notifyCapability(value => value + 1));
-  }, [capability]);
-  const close = () => { alive.current = false; followUp.current.abort(); onClose(); };
-  async function checkPath() {
-    if (busy || !canImport) return;
-    const requested = query.trim();
-    setBusy(true);
-    setPreview(undefined);
-    setConfirmed(false);
-    setMessage("");
-    setNotice("");
-    const result = await opening.preview(epoch, requested, capability);
-    if (!alive.current) return;
-    setBusy(false);
-    if (result.kind === "ready") setPreview(result);
-    else setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "invalid_response"));
-  }
-  async function importPath() {
-    if (!canImportCheckedFolder(preview, confirmed, busy, canImport) || !preview) return;
-    setBusy(true);
-    setMessage("");
-    setNotice("");
-    const result = await opening.import(epoch, preview, capability);
-    if (!alive.current) return;
-    if (result.kind === "imported") {
-      if (await onImported(result.id, result.path, followUp.current.signal)) { if (alive.current) close(); return; }
-      if (!alive.current) return;
-      setMessage("The project may have been imported, but the refreshed catalog did not show it. Inspect the project list before retrying.");
-    } else setMessage(projectOpeningMessage(result.kind === "error" ? result.code : "import_unconfirmed"));
-    setPreview(undefined);
-    setConfirmed(false);
-    setBusy(false);
-  }
-  async function refreshList() {
-    if (busy) return;
-    setBusy(true);
-    const fresh = await onRefresh(followUp.current.signal);
-    if (!alive.current) return;
-    setBusy(false);
-    if (fresh) { setMessage(""); setNotice("Project list refreshed. Check the entries before requesting another import."); }
-    else setMessage("Could not refresh the project list. No import was requested.");
-  }
-  const normalized = query.trim().toLowerCase();
-  const matches = projects.filter(project => !normalized || `${project.name} ${project.path}`.toLowerCase().includes(normalized));
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
-    <section className="app-dialog" role="dialog" aria-modal="true" aria-labelledby="open-project-title"
-      onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>
-      <header><div><span className="eyebrow">Workspace</span><h2 id="open-project-title">Open project</h2></div><button type="button" className="icon-button" aria-label="Close" title="Close" onClick={close}><AppIcon name="close" size={16} /></button></header>
-      <label className="settings-search"><AppIcon name="search" size={14} /><input autoFocus aria-label="Project name or absolute folder path" value={query} disabled={busy}
-        onChange={event => { setQuery(event.target.value); setPreview(undefined); setConfirmed(false); setMessage(""); setNotice(""); }}
-        onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); }
-          else if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); void checkPath(); } }}
-        placeholder="Project name or absolute folder path" /></label>
-      <div className="dialog-list">{matches.map(project => <button type="button" key={project.id} onClick={() => onOpen(project.id)}>
-        <span className="project-icon">{project.name.slice(0, 1).toUpperCase()}</span><span><strong>{project.name}</strong><small>{project.path}</small></span>
-      </button>)}</div>
-      {matches.length === 0 && <p className="muted-text">No known project matches. Enter an absolute path to check another existing folder.</p>}
-      {!canImport && <p className="muted-text">Adding a folder requires an owned host. Catalog-only browsing never changes the project list.</p>}
-      {canImport && <div className="project-import">
-        <button type="button" className="quiet-button" disabled={busy || !query.trim()} onClick={() => void checkPath()}>Check folder</button>
-        {preview && <><p>Existing folder: <code>{preview.path}</code></p>
-          <label><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} /> I trust this folder and want to add it to the active project catalog.</label>
-          <button type="button" className="quiet-button" disabled={!canImportCheckedFolder(preview, confirmed, busy, canImport)} onClick={() => void importPath()}>Import and open folder</button></>}
-      </div>}
-      {busy && <p role="status">Checking or importing the folder…</p>}
-      {notice && <p role="status">{notice}</p>}
-      {message && <p role="alert" className="error-text">{message}</p>}
-      <footer><span><kbd>Ctrl</kbd>+<kbd>O</kbd> · <kbd>Esc</kbd></span><span>
-        <button type="button" className="quiet-button" disabled={busy} onClick={() => void refreshList()}>Refresh projects</button>{" "}
-        <button type="button" className="quiet-button" onClick={close}>Cancel</button></span></footer>
-    </section>
-  </div>;
-}
-
 function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const shortcuts = [
     ["Ctrl+O", "Open project"], ["Ctrl+F", "Search sessions"], ["Alt+↑ / Alt+↓", "Previous / next session"],
@@ -1407,15 +1324,16 @@ function SessionTime({ value, now }: { value: string; now: number }) {
   return <time dateTime={dateTime} title={title}>{label}</time>;
 }
 
-function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration, draftIndicators }: {
+function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration, draftIndicators, reason }: {
   sessionId: string; provider: string | null; configuration?: ConfigurationSnapshot; onOpenConfiguration: () => void;
-  draftIndicators: ReturnType<typeof createDraftIndicators>;
+  draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
   const text = draft.text;
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
-  const [message, setMessage] = useState("Draft locally; sending requires an explicitly owned desktop host.");
+  const [message, setMessage] = useState(reason ?? "Draft locally; sending requires an explicitly owned desktop host.");
+  useEffect(() => { setMessage(reason ?? "Draft locally; sending requires an explicitly owned desktop host."); }, [reason]);
   useEffect(() => { draftIndicators.persisted(sessionId, draft.editGeneration,
     persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
   }, [sessionId, draft, draftIndicators]);
@@ -1431,9 +1349,9 @@ function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfigurat
       const value = event.target.value;
       setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
     }}
-      onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage("This explicit catalog-only launch is read-only; your draft remains saved."); } }}
+      onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage(reason ?? "This explicit catalog-only launch is read-only; your draft remains saved."); } }}
       placeholder="Draft a prompt for this session…" />
-    <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage("This explicit catalog-only launch is read-only; your draft remains saved.")}>Send <AppIcon name="send" size={14} /></button></div>
+    <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage(reason ?? "This explicit catalog-only launch is read-only; your draft remains saved.")}>Send <AppIcon name="send" size={14} /></button></div>
   </section>;
 }
 

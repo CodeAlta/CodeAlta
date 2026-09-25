@@ -413,7 +413,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .dialog-list > button:hover, .dialog-list > button:focus-visible { background: var(--accent-soft); }
 .dialog-list > button > span:last-child { min-width: 0; display: grid; gap: 2px; }
 .dialog-list small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.app-dialog #saved-project-filter { width: 100%; min-width: 0; }
+.app-dialog #saved-project-results { min-height: 0; }
+.app-dialog #saved-project-results [aria-selected="true"] { background: var(--accent-soft); }
 .project-import { display: grid; justify-items: start; gap: 8px; min-width: 0; overflow-y: auto; margin-top: 10px; }
+.project-import #project-folder-path { width: 100%; min-width: 0; }
 .project-import p { margin: 0; overflow-wrap: anywhere; }
 .project-import label { display: flex; align-items: start; gap: 6px; }
 .project-import label input { margin-top: 2px; }
