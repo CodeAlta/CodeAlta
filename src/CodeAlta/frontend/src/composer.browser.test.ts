@@ -16,6 +16,10 @@ test("mounted composer stays compact and its controls remain legible in both the
   const app = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(app, /action === "context"\) activateContextShortcut\(workspaceShell\.current\)/,
     "the mounted shortcut dispatcher must remain wired to the production app");
+  assert.match(app, /compactTrigger: compactTrigger\.current/,
+    "the mounted compaction shortcut trigger must remain wired to the production dispatcher");
+  assert.match(app, /action === "compact"[\s\S]*?trigger\.dataset\.epoch === status\.hostEpoch[\s\S]*?trigger\.click\(\)/,
+    "production shortcut dispatch must recheck the selected epoch and live trigger");
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -147,10 +151,109 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar')?.textContent.includes('Refresh receipts')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), false,
       "host availability without an observed run cannot expose cancellation");
-    await evaluate(`window.fixture.observe('run-one', 12)`);
-    await evaluate(`document.querySelector('#refresh-session-context').click()`);
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
+      "host availability without an observed entry cannot imply idle");
+    await evaluate(`window.fixture.observe(null, 12); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        const layout = await sample();
+        assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2,
+          `${theme} ${width}px compaction toolbar overflows: ${JSON.stringify(layout)}`);
+        assert.ok(layout.toolbar <= (width === 390 ? 100 : 80), `${theme} ${width}px compaction toolbar grew: ${JSON.stringify(layout)}`);
+        await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]').focus()`);
+        assert.equal(await evaluate(`getComputedStyle(document.activeElement).outlineStyle`), "solid");
+      }
+    }
+    const compactKey = (target: string, extras = "") => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(target)});
+      const key = new KeyboardEvent('keydown', { key: 'F11', ctrlKey: true, bubbles: true, cancelable: true, ${extras} });
+      el.dispatchEvent(key); return key.defaultPrevented; })()`);
+    for (const extra of ["altKey: true", "shiftKey: true", "metaKey: true", "repeat: true", "isComposing: true", "keyCode: 229"]) {
+      assert.equal(await compactKey('#session-prompt', extra), false);
+    }
+    assert.equal(await compactKey('.project-rename input'), false, "another editor must retain its keyboard shortcut");
+    await evaluate(`window.fixture.workspaceActive(false)`);
+    assert.equal(await compactKey('#session-prompt'), false, "unrelated screens do not intercept Ctrl+F11");
+    await evaluate(`window.fixture.workspaceActive(true); window.fixture.shortcutSelection(null)`);
+    assert.equal(await compactKey('#session-prompt'), false, "unverified selection does not intercept Ctrl+F11");
+    await evaluate(`window.fixture.shortcutSelection({ epoch: 'fixture-epoch', sessionId: 'fixture-other', projectId: null })`);
+    assert.equal(await compactKey('#session-prompt'), false, "different selected session cannot dispatch compaction");
+    await evaluate(`window.fixture.shortcutSelection({ epoch: 'wrong', sessionId: 'fixture-session', projectId: null })`);
+    assert.equal(await compactKey('#session-prompt'), false, "stale selection cannot dispatch compaction");
+    await evaluate(`window.fixture.shortcutSelection({ epoch: 'fixture-epoch', sessionId: 'fixture-session', projectId: 'other' })`);
+    assert.equal(await compactKey('#session-prompt'), false, "wrong project scope cannot dispatch compaction");
+    await evaluate(`window.fixture.shortcutSelection({ epoch: 'fixture-epoch', sessionId: 'fixture-session', projectId: null })`);
+    assert.equal(await evaluate(`(() => { const modal = document.createElement('dialog'); modal.setAttribute('open', '');
+      const button = document.createElement('button'); modal.append(button); document.body.append(modal);
+      const key = new KeyboardEvent('keydown', { key: 'F11', ctrlKey: true, bubbles: true, cancelable: true });
+      button.dispatchEvent(key);
+      const composerKey = new KeyboardEvent('keydown', { key: 'F11', ctrlKey: true, bubbles: true, cancelable: true });
+      document.querySelector('#session-prompt').dispatchEvent(composerKey);
+      modal.remove(); return key.defaultPrevented || composerKey.defaultPrevented; })()`), false);
+    assert.equal(await evaluate(`window.fixture.compactCalls.length`), 0);
+    await evaluate(`window.fixture.flags({retiring:true}); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Attachment retiring') && el.nextElementSibling?.textContent === 'yes')`), "ready");
+    assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    await evaluate(`window.fixture.flags({transitioning:true}); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls .detail')].some(el => el.textContent.includes('coordinator transition recorded: yes'))`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    await evaluate(`window.fixture.flags({draining:true}); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Queue drain in progress') && el.nextElementSibling?.textContent === 'yes')`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    await evaluate(`window.fixture.flags({}); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    await evaluate(`(() => { const el = document.querySelector('.prompt-input');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'Draft for compaction');
+      el.dispatchEvent(new Event('input', { bubbles: true })); window.fixture.compactMode('uncertain'); })()`);
+    assert.equal(await compactKey('#session-prompt'), true, "production shortcut dispatcher routes Ctrl+F11 from composer");
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]:not(:disabled)')`), "ready");
+    assert.equal(await evaluate(`JSON.stringify(window.fixture.compactCalls[0])`),
+      JSON.stringify({ expectedEpoch: "fixture-epoch", clientRequestId: await evaluate(`window.fixture.compactCalls[0].clientRequestId`),
+        sessionId: "fixture-session", expectedRuntimeInstanceId: "fixture-runtime", expectedAttachmentGeneration: "gen-12" }));
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Draft for compaction");
+    assert.equal(await evaluate(`document.querySelector('.composer-notice:not([role])')?.textContent.includes('gen-12')`), true);
+    await evaluate(`window.fixture.observe('new-run', 13); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-13'`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')?.title.includes('gen-12')`), true);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
+      "a new observed run does not displace the older retained compaction target or cancellation control");
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        const layout = await sample();
+        assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2
+          && layout.toolbar <= (width === 390 ? 100 : 80), `${theme} ${width}px retained compaction plus cancellation toolbar: ${JSON.stringify(layout)}`);
+      }
+    }
+    await evaluate(`window.fixture.compactMode('hold'); document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]').click();
+      document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]').click()`);
+    assert.equal(await evaluate(`window.fixture.compactCalls.length`), 2, "original waiter excludes repeated retry");
+    assert.equal(await evaluate(`window.fixture.compactCalls[0].clientRequestId === window.fixture.compactCalls[1].clientRequestId &&
+      window.fixture.compactCalls[1].expectedAttachmentGeneration === 'gen-12'`), true);
+    assert.equal(await compactKey('#session-prompt'), false, "in-flight control cannot intercept Ctrl+F11");
+    await evaluate(`window.fixture.switchSession('fixture-other')`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')`), false);
+    await evaluate(`window.fixture.settleCompact(); window.fixture.switchSession('fixture-session')`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]:not(:disabled)')`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Draft for compaction");
+    await evaluate(`window.fixture.compactMode('busy'); document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls [role="status"]')].some(el => el.textContent.includes('busy'))`), "ready");
+    assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice[role="status"]')].some(el => el.textContent.includes('busy') && el.textContent.includes('cannot be retried'))`), true);
+    assert.equal(await evaluate(`window.fixture.compactCalls[2].expectedAttachmentGeneration`), "gen-12");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
+      "busy ends the old intent but an active observation does not authorize a fresh attempt");
+    await evaluate(`window.fixture.observe(null, 13); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready",
+      "a new idle observation permits a separate explicit attempt after busy");
+    await evaluate(`window.fixture.observe('run-one', 12)`);
+    await evaluate(`document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
     for (const width of [390, 1120]) {
@@ -234,10 +337,19 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
       "pending exact Send recovery does not disappear when observed-run cancellation is available");
+    await evaluate(`window.fixture.observe(null, 13); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Retry exact request",
+      "eligible compaction cannot hide exact Send recovery");
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
     await evaluate(`window.fixture.observe('run-three', 14, 'replacement-runtime'); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.owned-session [role="alert"]')].some(el => el.textContent.includes('Reload required'))`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]') === null`), true,
       "stale runtime identity cannot authorize another observed-run action");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]') === null`), true,
+      "stale runtime identity cannot authorize an idle compaction attempt");
+    assert.equal(await compactKey('.project-rename input'), false);
+    assert.equal(await compactKey('.composer-toolbar .send-button'), false);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.disabled`), true);
     assert.equal(await evaluate(`window.fixture.abortCalls.length`), 3);
     await evaluate(`(() => { document.querySelector('.owned-session').remove();

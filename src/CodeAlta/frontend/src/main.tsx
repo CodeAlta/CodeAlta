@@ -186,6 +186,7 @@ function App() {
   const sessionRail = useRef<HTMLElement>(null);
   const sessionInfoTrigger = useRef<HTMLButtonElement>(null);
   const remindersTrigger = useRef<HTMLButtonElement>(null);
+  const compactTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const shortcutState = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
   const timelineCommand = useRef<TimelineCommand | null>(null);
@@ -379,7 +380,7 @@ function App() {
         workspaceActive: view === "workspace", workspaceShell: workspaceShell.current,
         modalOpen: !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
         selectedProjectFocused: focusedProject, infoTrigger: sessionInfoTrigger.current,
-        reminderTrigger: remindersTrigger.current,
+        reminderTrigger: remindersTrigger.current, compactTrigger: compactTrigger.current,
         infoSelection,
         selection: owned && status?.hostEpoch && infoSelection ? { epoch: status.hostEpoch, ...infoSelection } : null,
         messageAvailable: !!infoSelection && timelineCommand.current?.sessionId === infoSelection.sessionId
@@ -410,6 +411,15 @@ function App() {
     }
     else if (action === "sessionInfo") sessionInfoTrigger.current?.click();
     else if (action === "reminders") remindersTrigger.current?.click();
+    else if (action === "compact") {
+      const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
+        selectedSessionId.current, selectedScope.current);
+      const trigger = compactTrigger.current;
+      if (view === "workspace" && owned && status?.hostEpoch && mutation?.capability.canMutate()
+        && selection && trigger?.isConnected && !trigger.disabled
+        && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
+        && trigger.dataset.projectId === (selection.projectId ?? "")) trigger.click();
+    }
     else if (action === "expandPrompt") {
       if (!dialog) document.querySelector<HTMLButtonElement>("#expand-session-prompt")?.click();
     }
@@ -1050,7 +1060,7 @@ function App() {
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger}
-                onOpenReminders={openSelectedReminders} status={status} mutation={mutation}
+                onOpenReminders={openSelectedReminders} compactTrigger={compactTrigger} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -1077,13 +1087,14 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, onOpenReminders, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections, timelineCommand }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections, timelineCommand }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
   infoTrigger: RefObject<HTMLButtonElement | null>;
   remindersTrigger: RefObject<HTMLButtonElement | null>;
   onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
+  compactTrigger: RefObject<HTMLButtonElement | null>;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
   submissions: ReturnType<typeof createOwnedSubmissions>;
@@ -1176,7 +1187,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
         {messageNotice && <p role="status" className="detail timeline-navigation-notice">{messageNotice}</p>}
         {ownedSession && status?.hostEpoch
           ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
-              remindersTrigger={remindersTrigger} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} />
+              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} />
           : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators} />}
       </>}
   </div>;
@@ -1376,6 +1387,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["F3 / F4", "Previous / next retained user or assistant message"],
     ["Ctrl+F3", "First retained message (not journal first)"],
     ["Ctrl+F4", "Refresh newest persisted history, then follow on success"],
+    ["Ctrl+F11", "Attempt compaction of the observed idle attachment (selected owned session only)"],
     ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor"],
   ];
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>

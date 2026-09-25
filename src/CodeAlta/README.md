@@ -383,17 +383,23 @@ Only one steering dispatch per session is in flight, independently of an owned s
 shares the host's 256-receipt limit. Closing presentation cancels only the waiter, while host
 shutdown retains and joins accepted steering and cancellation work.
 
-**Compact observed attachment if idle** uses the same manual runtime observation, but requires
-no recorded run or queue drain. That is only eligibility: the host and supported provider must
-admit compaction without waiting for active work. Unsupported or stale targets fail without
-fallback, discovery or replacement. Compaction summarizes the attachment's context **at provider
-admission**, not a history snapshot captured by the UI, and may use the configured model/network
-and persist context changes. It creates no new permission authority. One compaction per session
+The compact prompt toolbar offers **Compact observed idle attachment** (or `Ctrl+F11` from the
+selected owned workspace/prompt) only for an eligible point-in-time runtime observation or a
+retained exact compaction intent. Send, exact Send recovery and observed-run cancellation remain
+separate. An uncertain intent shows its original epoch, session, runtime, attachment and request
+key next to the composer; deliberate **Retry exact compaction request** never retargets after
+refresh or session switch and waits for the original waiter to settle. No polling or automatic
+retry occurs. The action requires no recorded run or queue drain. That is only eligibility: the
+host and supported provider must admit compaction without waiting for active work. Unsupported
+or stale targets fail without fallback, discovery or replacement. Compaction summarizes the
+attachment's context **at provider admission**, not a history snapshot captured by the UI, and
+may use the configured model/network and persist context changes. It creates no new permission
+authority. One compaction per session
 may be in flight and shares the 256-receipt limit. Refresh submissions for the settled outcome;
-busy, unsupported and unsuccessful compaction are not success. An uncertain request survives
-selection changes with its exact key and attachment for manual reconciliation or deliberate retry.
-Replaying a busy receipt does not try again: a new explicit action uses a fresh key. Closing the
-panel cancels only the wait; shutdown retains and joins accepted compaction and cancellation work.
+busy, unsupported and unsuccessful compaction are not success. Uncertain requests survive
+selection changes for manual receipt reconciliation. Replaying a busy receipt does not try again:
+a new explicit action uses a fresh key. Closing the panel cancels only the wait; shutdown retains
+and joins accepted compaction and cancellation work.
 
 **Queue text — this host only** uses an explicitly refreshed runtime/attachment observation, including
 busy/draining attachments. `sessions.queue` reserves exact text for that attachment only; the receipt

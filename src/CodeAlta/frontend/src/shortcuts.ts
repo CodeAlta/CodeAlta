@@ -3,7 +3,7 @@ export type ShortcutAction =
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
   | "settings" | "providers" | "models" | "prompts" | "context" | "plugins"
   | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders"
-  | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest";
+  | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "compact";
 
 export type ShortcutKey = Readonly<{ key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean;
   isComposing?: boolean; keyCode?: number; defaultPrevented?: boolean; repeat?: boolean }>;
@@ -23,7 +23,8 @@ export function sessionInfoChordContextAllowed(context: Readonly<{
 }
 
 export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editing: boolean, selectedProjectFocused = false,
-  sessionInfoAvailable = false, remindersAvailable = false, messageAvailable = false, latestAvailable = false): ShortcutResolution {
+  sessionInfoAvailable = false, remindersAvailable = false, messageAvailable = false, latestAvailable = false,
+  compactAvailable = false, compactPromptFocused = false): ShortcutResolution {
   if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.repeat)
     return { action: null, chordPending: false, handled: false };
   const key = event.key.toLowerCase();
@@ -44,6 +45,9 @@ export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editi
     return { action: mappedAction, chordPending: false, handled: mappedAction !== null };
   }
   if (primary && key === "g") return { action: null, chordPending: true, handled: true };
+
+  if (compactAvailable && (!editing || compactPromptFocused) && key === "f11" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey)
+    return action("compact");
 
   if (!editing) {
     if (messageAvailable && !event.metaKey && !event.altKey && !event.shiftKey) {

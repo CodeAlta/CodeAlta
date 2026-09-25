@@ -16,8 +16,9 @@ import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 
-export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, onOpenReminders }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
+  projectId?: string | null;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
   steering: ReturnType<typeof createSteeringSubmissions>;
@@ -28,6 +29,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   selections: ReturnType<typeof createNextSendSelectionStore>;
   configuration?: ConfigurationSnapshot;
   remindersTrigger?: Ref<HTMLButtonElement>;
+  compactTrigger?: Ref<HTMLButtonElement>;
   onOpenReminders?: () => void;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -133,7 +135,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const runtimeConfiguration = observedTarget?.entry;
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
-  const canCaptureCompact = captureCompaction(epoch, sessionId, observedTarget, "availability") !== null;
+  const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
   const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
   const showSteering = showContextAction(captureSteering(epoch, sessionId, observedTarget, "x", "availability") !== null,
@@ -244,7 +246,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
       observeEpoch(result);
       setCompactMessage(result.status === "accepted" || result.status === "replay"
         ? "Compaction attempt accepted. Refresh submissions for its settled outcome; busy requires a new explicit action, not replay."
-        : `Compaction: ${result.status}. Refresh submissions; uncertain requests retain their exact attachment and key. No automatic retry.`);
+        : result.status === "busy" ? "Compaction: busy. This attempt cannot be retried; refresh runtime state for a new explicit attempt."
+          : `Compaction: ${result.status}. Refresh submissions; uncertain requests retain their exact attachment and key. No automatic retry.`);
     });
   }
   function abortRun() {
@@ -348,6 +351,15 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
         aria-label="Reminders for selected session" title="Reminders for selected session (Ctrl+G, Ctrl+D)"
         onClick={onOpenReminders}><AppIcon name="reminder" size={16} /></button>}
       <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
+      {(availableCompact || pendingCompact) && <button ref={compactTrigger} type="button" className="composer-icon-button" onClick={compact}
+        data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
+        disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
+          ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
+        aria-label={pendingCompact ? `Retry exact compaction request for attachment ${pendingCompact.request.expectedAttachmentGeneration}` : "Compact observed idle attachment"}
+        aria-describedby="observed-compaction-help"
+        title={pendingCompact ? `Manual retry of exact compaction: epoch ${pendingCompact.request.expectedEpoch}, session ${pendingCompact.request.sessionId}, runtime ${pendingCompact.request.expectedRuntimeInstanceId}, attachment ${pendingCompact.request.expectedAttachmentGeneration}, request ${pendingCompact.request.clientRequestId}`
+          : `Compact observed idle attachment (Ctrl+F11; point-in-time idle observation permits only an attempt; provider must prove idle)`}>
+        <AppIcon name="compact" size={16} /></button>}
       {(availableAbortRun || pendingAbortRun) && <button type="button" className="composer-icon-button" onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
@@ -360,6 +372,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     </div>
     </div>
     <span id="observed-run-cancellation-help" className="sr-only">Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.</span>
+    <span id="observed-compaction-help" className="sr-only">Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.</span>
     {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}
       {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Retry choices</button>}</p>}
     {(message !== "Ready to send to this owned session." || pending || pendingAborts.length > 0) && <p className="composer-notice" role="status">{message}</p>}
@@ -368,7 +381,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred."}</p>}
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">MCP plugin: {mcpPlugin.state}. Check advanced diagnostics.</p>}
     {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
-    {(pendingCompact || pendingAbortRun) && <p className="composer-notice" role="status">{pendingCompact && compactMessage} {pendingAbortRun && abortRunMessage} {pendingCompact && "Open advanced controls to inspect the exact target or retry manually."}</p>}
+    {(compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." || pendingAbortRun) && <p className="composer-notice" role="status">{compactMessage !== "Refresh runtime state explicitly before attempting idle compaction." && compactMessage} {pendingAbortRun && abortRunMessage}</p>}
+    {pendingCompact && <p className="composer-notice">Manual exact compaction retry only: epoch {pendingCompact.request.expectedEpoch} · session {pendingCompact.request.sessionId} · runtime {pendingCompact.request.expectedRuntimeInstanceId} · attachment {pendingCompact.request.expectedAttachmentGeneration} · request {pendingCompact.request.clientRequestId}. Refresh never retargets this intent.</p>}
     {pendingAbortRun && <p className="composer-notice">Manual exact cancellation retry only: epoch {pendingAbortRun.request.expectedEpoch} · session {pendingAbortRun.request.sessionId} · runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}. Refresh never retargets this intent.</p>}
     {(showSteering || showQueue) && <div className="context-actions">
       {showSteering && <div><label>Steer observed run {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
@@ -443,9 +457,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     <h3>Compact the observed attachment if idle now</h3>
     <p className="detail">Recorded idleness only permits an attempt: the provider must prove idle without waiting. Compacts context current at provider admission, not the history from your observation. Stale, retiring, non-owned or unsupported targets are rejected without fallback. No new permission authority is created. A busy receipt is permanent; a new explicit action uses a fresh key. Refreshes never retarget an uncertain request.</p>
     {pendingCompact && <p className="detail">Retained target: runtime {pendingCompact.request.expectedRuntimeInstanceId} · attachment {pendingCompact.request.expectedAttachmentGeneration} · request {pendingCompact.request.clientRequestId}</p>}
-    <button type="button" disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact ? !capability.canSubmit(pendingCompact.request) : !canCaptureCompact)} onClick={compact}>
-      {pendingCompact ? "Retry exact compaction request" : "Compact observed attachment if idle"}
-    </button>
     <p role="status">{compactMessage}</p>
     </div></details>
   </section>;
