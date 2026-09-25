@@ -385,6 +385,13 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
 .session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); }
+.command-palette { width: min(560px, calc(100vw - 32px)); max-height: min(600px, calc(100dvh - 32px)); color: var(--text); }
+.command-palette::backdrop { background: rgba(0, 0, 0, .62); }
+.command-palette > label { font-size: 12px; }
+.command-palette > input { width: 100%; min-width: 0; margin-top: 6px; }
+.command-palette .dialog-list { min-height: 0; padding: 4px 0; overflow-y: auto; }
+.command-palette .dialog-list [aria-selected="true"] { background: var(--accent-soft); }
+.command-palette .dialog-list p { color: var(--muted); }
 .session-info-dialog::backdrop { background: rgba(0, 0, 0, .62); }
 .session-info-dialog > p { margin: 0 0 12px; font-size: 12px; }
 .session-info-fields { display: block; min-height: 0; overflow-y: auto; margin: 0; padding: 0 4px 0 0; }
@@ -431,7 +438,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 
 @media (max-width: 875px) {
   .brand small { display: none; }
-  .topbar { position: sticky; top: 0; z-index: 5; height: auto; min-height: 58px; padding-block: 10px; }
+  .brand { flex-wrap: wrap; }
+  .topbar { position: sticky; top: 0; z-index: 5; grid-template-columns: minmax(0, 1fr); height: auto; min-height: 58px; padding-block: 10px; }
   .topnav { position: fixed; z-index: 6; right: 10px; bottom: 10px; order: initial; grid-column: auto; transform: none; box-shadow: var(--shadow); }
   .connection { display: none; }
   .app-shell { grid-template-rows: auto minmax(0, 1fr); }

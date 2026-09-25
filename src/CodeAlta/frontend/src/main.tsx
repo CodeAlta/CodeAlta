@@ -57,6 +57,8 @@ import { ProjectRailToggle } from "./ProjectRailToggle";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisibilityKey, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
+import { CommandPalette } from "./CommandPalette";
+import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAction, type PaletteContext } from "./paletteActions";
 import "./style.css";
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
@@ -83,6 +85,10 @@ function App() {
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
   const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
   const [dialog, setDialog] = useState<"project" | "help" | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteCapture = useRef<PaletteContext | null>(null);
+  const paletteOrigin = useRef<HTMLElement | null>(null);
+  const palettePending = useRef<{ action: PaletteAction; captured: PaletteContext } | null>(null);
   const [configurationState, setConfigurationState] = useState<{ snapshot?: ConfigurationSnapshot; error?: string }>({});
   const initialSelectionMade = useRef(false);
   const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
@@ -303,8 +309,58 @@ function App() {
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
 
+  function paletteContext(): PaletteContext {
+    const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
+      selectedSessionId.current, selectedScope.current);
+    return { workspace: currentView.current === "workspace", selection,
+      epoch: owned && mutation?.capability.canMutate() ? status?.hostEpoch ?? null : null,
+      infoReady: !!sessionInfoTrigger.current?.isConnected && !sessionInfoTrigger.current.disabled &&
+        sessionInfoTrigger.current.getAttribute("aria-expanded") === "false",
+      promptReady: !!document.querySelector("#session-prompt, #catalog-prompt"),
+      searchReady: !!searchInput.current?.isConnected };
+  }
+
+  function openPalette() {
+    if (paletteOpen || dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    paletteOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    paletteCapture.current = paletteContext();
+    setPaletteOpen(true);
+  }
+
+  function dismissPalette() {
+    const origin = paletteOrigin.current;
+    const originView = currentView.current;
+    setPaletteOpen(false);
+    requestAnimationFrame(() => {
+      restorePaletteFocus(origin, currentView.current === originView,
+        !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
+    });
+  }
+
+  function choosePalette(action: PaletteAction) {
+    if (!paletteCapture.current || !paletteAvailable(action, paletteCapture.current, paletteContext())) return;
+    palettePending.current = { action, captured: paletteCapture.current };
+    setPaletteOpen(false);
+  }
+
+  useLayoutEffect(() => {
+    if (paletteOpen || !palettePending.current) return;
+    const { action, captured } = palettePending.current;
+    palettePending.current = null;
+    if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
+      !paletteAvailable(action, captured, paletteContext())) return;
+    if (action === "sessionInfo") sessionInfoTrigger.current?.click();
+    else if (action === "reminders") navigate("reminders");
+    else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
+    else if (action === "focusSearch") searchInput.current?.focus();
+    else navigate(action === "settings" ? "configuration" : action);
+  });
+
   useEffect(() => {
     function keyDown(event: globalThis.KeyboardEvent) {
+      if (paletteShortcut(event, paletteOpen || !!dialog || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'))) {
+        event.preventDefault(); openPalette(); return;
+      }
       const target = event.target as HTMLElement | null;
       const infoSelection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
         selectedSessionId.current, selectedScope.current);
@@ -744,6 +800,7 @@ function App() {
     <header className="topbar">
       <div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span><small>{demoMode ? "interactive preview" : "desktop"}</small>
         {view === "workspace" && <ProjectRailToggle expanded={railVisible} onToggle={toggleProjects} buttonRef={projectRailToggle} />}
+        <button type="button" className="project-rail-toggle" aria-label="Open command palette" aria-haspopup="dialog" onClick={openPalette}>Commands <kbd>Ctrl+P</kbd></button>
       </div>
       <nav className="topnav" aria-label="Primary navigation">
         <button type="button" aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>Sessions</button>
@@ -988,6 +1045,8 @@ function App() {
         return true;
       }} onClose={() => setDialog(null)} />}
     {dialog === "help" && <ShortcutHelp onClose={() => setDialog(null)} />}
+    {paletteOpen && paletteCapture.current && <CommandPalette context={paletteContext()} captured={paletteCapture.current}
+      onChoose={choosePalette} onClose={dismissPalette} />}
   </div>;
 }
 
@@ -1245,7 +1304,8 @@ function OpenProjectDialog({ projects, epoch, capability, opening, onOpen, onRef
 function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const shortcuts = [
     ["Ctrl+O", "Open project"], ["Ctrl+F", "Search sessions"], ["Alt+↑ / Alt+↓", "Previous / next session"],
-    ["Alt+← / Alt+→", "Previous / next project"], ["Ctrl+,", "Configuration"], ["Ctrl+Shift+N", "Toggle Alta notes"],
+    ["Alt+← / Alt+→", "Previous / next project"], ["Ctrl+,", "Configuration"], ["Ctrl+P", "Implemented actions palette"],
+    ["Ctrl+Shift+N", "Toggle Alta notes"],
     ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
     ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
     ["Ctrl+G, Ctrl+T", "Session info (selected workspace session only)"],

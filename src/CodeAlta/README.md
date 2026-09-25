@@ -121,6 +121,13 @@ finished, not that the agent responded. A deletion cannot retract an already cap
 or an admitted run. Counts are point-in-time as of Refresh; a lost mutation response is held as
 uncertain for that host/session, with no automatic retry. Catalog-only mode cannot schedule work.
 
+The **Commands** button or `Ctrl+P` outside editors and dialogs opens a searchable palette of
+implemented navigation and inspection actions. Arrow keys choose a result, Enter opens it and
+Escape closes the palette. Session Info requires a verified selected session; Reminders requires
+an exact owned session with a mutable host. Selection-sensitive actions are rechecked on activation.
+This palette does not expose Send, deletion, configuration writes, Skills or plugin management,
+and is not the full TUI command/shortcut set.
+
 ## Browse a task-owned catalog copy
 
 To display persisted projects and sessions, supply an existing **trusted, task-owned catalog

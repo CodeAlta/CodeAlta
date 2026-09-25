@@ -2,6 +2,9 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReminderPanel } from "./ReminderPanel";
+import { McpServersPanel } from "./McpServersPanel";
+import { CommandPalette } from "./CommandPalette";
+import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAction, type PaletteContext } from "./paletteActions";
 import { createReminderActions } from "./reminderActions";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
@@ -43,7 +46,11 @@ function App() {
   const [session, setSession] = useState("one");
   const [epoch, setEpoch] = useState<string | null>("e1");
   const [project, setProject] = useState<string | null>("project");
-  const [view, setView] = useState<"workspace" | "reminders">("workspace");
+  const [view, setView] = useState<"workspace" | "reminders" | "mcp" | "configuration" | "providers" | "models" | "prompts">("workspace");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const captured = useRef<PaletteContext | null>(null);
+  const pending = useRef<{ action: PaletteAction; context: PaletteContext } | null>(null);
+  const origin = useRef<HTMLElement | null>(null);
   const [modal, setModal] = useState(false);
   const [ambiguous, setAmbiguous] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -72,8 +79,40 @@ function App() {
   const snapshot = ambiguous && duplicate ? { ...catalog, sessions: [...sessions, { ...duplicate }] } : catalog;
   const selectedSession = snapshot.sessions.find(value => value.id === session);
   const infoSelection = selectedSessionInfoSelection(snapshot, selectedSession, project, session, project);
+  function paletteContext(): PaletteContext {
+    return { workspace: view === "workspace", selection: infoSelection,
+      epoch: epoch === "e1" && capability.canMutate() ? epoch : null,
+      infoReady: !!infoButton.current?.isConnected && infoButton.current.getAttribute("aria-expanded") === "false",
+      promptReady: !!document.querySelector("#session-prompt, #catalog-prompt"), searchReady: false };
+  }
+  function openPalette() {
+    if (paletteOpen || modal || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    origin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    captured.current = paletteContext(); setPaletteOpen(true);
+  }
+  function closePalette() {
+    const element = origin.current;
+    const previousView = view;
+    setPaletteOpen(false);
+    requestAnimationFrame(() => restorePaletteFocus(element, current.current.view === previousView,
+      !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')));
+  }
   useLayoutEffect(() => {
-    const keyDown = (event: KeyboardEvent) => dispatchWorkspaceShortcut(event, chord.current, {
+    if (paletteOpen || !pending.current) return;
+    const { action, context } = pending.current;
+    pending.current = null;
+    if (modal || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
+      !paletteAvailable(action, context, paletteContext())) return;
+    if (action === "sessionInfo") infoButton.current?.click();
+    else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
+    else if (action !== "focusSearch") setView(action === "settings" ? "configuration" : action);
+  });
+  useLayoutEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      if (paletteShortcut(event, paletteOpen || modal || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'))) {
+        event.preventDefault(); openPalette(); return;
+      }
+      dispatchWorkspaceShortcut(event, chord.current, {
       workspaceActive: view === "workspace", workspaceShell: shell.current, modalOpen: modal,
       selectedProjectFocused: false, infoTrigger: infoButton.current, reminderTrigger: button.current,
       infoSelection,
@@ -81,10 +120,11 @@ function App() {
         ? { epoch, ...infoSelection } : null,
       run: action => { if (action === "sessionInfo") infoButton.current?.click();
         else if (action === "reminders") button.current?.click(); else if (action === "escape") setModal(false); },
-    });
+      });
+    };
     window.addEventListener("keydown", keyDown);
     return () => window.removeEventListener("keydown", keyDown);
-  }, [view, session, epoch, project, modal, capability, infoSelection]);
+  }, [view, session, epoch, project, modal, capability, infoSelection, paletteOpen]);
   function openReminders() {
     const captured = current.current;
     if (captured.view !== "workspace" || captured.modal || captured.epoch !== "e1" || !capability.canMutate()
@@ -92,6 +132,9 @@ function App() {
     setView("reminders");
   }
   return <div id="workspace-shell" ref={shell} data-ambiguous={ambiguous} data-project={project} data-session={session}>
+    <header className="topbar"><div className="brand"><span className="brand-mark">A</span><span>CodeAlta</span>
+      <button type="button" className="project-rail-toggle" aria-label="Open command palette" onClick={openPalette}>Commands <kbd>Ctrl+P</kbd></button>
+    </div></header>
     {view === "workspace" && <div className="session-workspace">
       {selectedSession && <><button type="button" ref={infoButton} aria-expanded={infoOpen} onClick={() => setInfoOpen(true)}>Session info</button>
         {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, selectedSession, project)} demo={false}
@@ -110,6 +153,16 @@ function App() {
         activeCount: 0, completedCount: 0, reminders: [] })}
       readDetail={async request => ({ status: "missing_reminder", epoch: request.expectedEpoch, sessionId: request.sessionId,
         reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null })} />}
+    {view === "mcp" && <McpServersPanel target={epoch ? { epoch, sessionId: session, projectId: project } : null}
+      read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
+        projectId: project, servers: [], sources: project ? ["Global: read", "Project: read"] : ["Global: read"],
+        omitted: 0, policyReadError: false })} />}
+    {view !== "workspace" && view !== "reminders" && view !== "mcp" && <main aria-label={view}>{view}</main>}
+    {paletteOpen && captured.current && <CommandPalette captured={captured.current} context={paletteContext()}
+      onClose={closePalette} onChoose={action => {
+        if (!captured.current || !paletteAvailable(action, captured.current, paletteContext())) return;
+        pending.current = { action, context: captured.current }; setPaletteOpen(false);
+      }} />}
   </div>;
 }
 createRoot(document.getElementById("app")!).render(<App />);
