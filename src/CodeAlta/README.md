@@ -171,6 +171,16 @@ internal raw persistence records duplicated by typed events are hidden rather th
 Permissions and other stored requests are historical records, not actionable approvals. Previews can be
 shortened explicitly; arbitrary provider payloads are not sent to the frontend.
 
+In the focused session workspace, `F3`/`F4` move among **persisted user and assistant
+messages in the currently retained window** (not tool/status cards); `Ctrl+F3` moves
+to its first retained message, which may not be the journal's first message. These
+keys unfollow the timeline and report retained-window boundaries. They do not fetch
+older pages or infer that a running session has finished persisting events. Use
+**Load older history** to browse older pages or **Refresh newest history** to explicitly
+read the newest persisted window. `Ctrl+F4` is not bound: jumping to the bottom of
+an older retained page is not a safe latest-history action. The bottom button follows
+the displayed window only and labels older windows accordingly.
+
 The shared reader limits page input to 256 KiB, individual records to 128 KiB and work to
 100 physical records, plus bounded framing probes. Blank and metadata-only records count,
 so an empty visible page can still offer continuation. UTF-8 journals with optional BOM

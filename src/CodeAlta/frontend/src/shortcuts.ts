@@ -2,7 +2,8 @@ export type ShortcutAction =
   | "openProject" | "focusProjects" | "focusSessions" | "focusPrompt" | "focusSearch"
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
   | "settings" | "providers" | "models" | "prompts" | "context" | "plugins"
-  | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders";
+  | "toggleNotes" | "help" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders"
+  | "messagePrevious" | "messageNext" | "messageFirst";
 
 export type ShortcutKey = Readonly<{ key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean;
   isComposing?: boolean; keyCode?: number; defaultPrevented?: boolean; repeat?: boolean }>;
@@ -22,7 +23,7 @@ export function sessionInfoChordContextAllowed(context: Readonly<{
 }
 
 export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editing: boolean, selectedProjectFocused = false,
-  sessionInfoAvailable = false, remindersAvailable = false): ShortcutResolution {
+  sessionInfoAvailable = false, remindersAvailable = false, messageAvailable = false): ShortcutResolution {
   if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.repeat)
     return { action: null, chordPending: false, handled: false };
   const key = event.key.toLowerCase();
@@ -45,6 +46,10 @@ export function resolveShortcut(event: ShortcutKey, chordPending: boolean, editi
   if (primary && key === "g") return { action: null, chordPending: true, handled: true };
 
   if (!editing) {
+    if (messageAvailable && !event.metaKey && !event.altKey && !event.shiftKey) {
+      if (key === "f3") return action(event.ctrlKey ? "messageFirst" : "messagePrevious");
+      if (key === "f4" && !event.ctrlKey) return action("messageNext");
+    }
     if (selectedProjectFocused && key === "f2" && !primary && !event.altKey && !event.shiftKey) return action("renameProject");
     if (primary && key === "o") return action("openProject");
     if (primary && key === "f") return action("focusSearch");

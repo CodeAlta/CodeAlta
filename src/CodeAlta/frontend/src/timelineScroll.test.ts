@@ -62,3 +62,17 @@ test("scroll memory has a bounded per-session window", () => {
   for (let index = 0; index < 64; index++) memory.open(`other-${index}`).jump({ scrollTop: 0, scrollHeight: 100, clientHeight: 100 });
   assert.equal(memory.open("first").following(), true);
 });
+
+test("keyboard-positioned bottom stays unfollowed through repeated native scrolls until the user moves", () => {
+  const selection = createTimelineScrollMemory().open("reader");
+  selection.settle({ scrollTop: 0, scrollHeight: 1000, clientHeight: 200 });
+  selection.finishRestore();
+  selection.pauseAt(800);
+  for (let index = 0; index < 3; index++)
+    assert.equal(selection.scroll({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 }), false);
+  assert.equal(selection.scroll({ scrollTop: 650, scrollHeight: 1000, clientHeight: 200 }), false);
+  assert.equal(selection.scroll({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 }), true);
+  selection.pauseAt(800);
+  selection.jump({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 });
+  assert.equal(selection.following(), true);
+});

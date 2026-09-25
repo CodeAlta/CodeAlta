@@ -9,9 +9,11 @@ import { TimelineMessage } from "./TimelineMessage";
 
 // The production caller supplies workspace.historyTail. The injection seam lets the mounted
 // browser fixture exercise this exact component with an isolated, revisioned test journal.
-export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, live, read }: {
+export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset, live, read }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
+  onNewerOmitted?: (value: boolean) => void;
+  onNavigationReset?: () => void;
   read: typeof workspace.historyTail;
 }) {
   const [target, setTarget] = useState<{ request: HistoryRequest; explicitOlder: boolean }>(() =>
@@ -21,6 +23,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   const beforeOlder = useRef(onBeforeOlder);
   beforeOlder.current = onBeforeOlder;
   const request = target.request;
+  useEffect(() => { onNavigationReset?.(); }, [target, onNavigationReset]);
   useEffect(() => {
     const abort = new AbortController();
     void loadHistory(read, request, abort.signal, value => {
@@ -51,8 +54,10 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
   useLayoutEffect(() => {
     if (historySettled(current, timeline)) onSettled();
   }, [current, timeline, onSettled]);
+  useLayoutEffect(() => { onNewerOmitted?.(timeline?.newerOmitted === true); }, [timeline?.newerOmitted, onNewerOmitted]);
   const items = reconcileTimeline(timeline?.entries ?? [], live);
-  return <section className="conversation history" aria-labelledby="history-heading">
+  return <section className="conversation history" aria-labelledby="history-heading"
+    data-window-ready={current?.kind === "ready" && historySettled(current, timeline)}>
     <div className="section-heading"><div><span className="eyebrow">Journal + recent live window</span><h2 id="history-heading">Session timeline</h2></div><button type="button" className="quiet-button icon-label-button" onClick={() => {
       setTimeline(undefined); setTarget({ request: { sessionId, cursor: null }, explicitOlder: false });
     }}><AppIcon name="refresh" size={14} />Refresh newest history</button></div>

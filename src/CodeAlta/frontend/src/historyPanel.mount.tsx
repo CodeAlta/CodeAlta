@@ -1,9 +1,10 @@
 // Test-owned mounted production History + scroll hook with isolated journal-like reverse pages.
-import { createElement, useLayoutEffect, useState, type UIEvent } from "react";
+import { createElement, useCallback, useLayoutEffect, useRef, useState, type UIEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
 import { createTimelineScrollMemory, useTimelinePosition } from "./timelineScroll";
+import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 
 const memory = createTimelineScrollMemory();
 const calls: string[] = [];
@@ -12,8 +13,8 @@ let holdNext = false;
 let release: (() => void) | undefined;
 const stable = () => {};
 function row(index: number, session: string): HistoryResponse["entries"][number] {
-  return { offset: `${index * 200}`, eventType: "contentCompleted", providerId: "fixture", sessionId: session,
-    runId: null, timestamp: "2026-01-01T00:00:00Z", kind: index === 1204 ? "User" : "Assistant", phase: null,
+  return { offset: `${index * 200}`, eventType: index === 1203 ? "sessionUpdate" : "contentCompleted", providerId: "fixture", sessionId: session,
+    runId: null, timestamp: "2026-01-01T00:00:00Z", kind: index === 1204 ? "User" : index === 1202 ? "CommandOutput" : "Assistant", phase: null,
     contentId: `${index}`, activityId: null, parentActivityId: null, interactionId: null, name: null,
     text: index === 1204 ? "latest user prompt" : `turn-${index}`, details: null,
     textTruncated: false, detailsTruncated: false, bodyOmitted: false };
@@ -32,12 +33,37 @@ async function read(request: HistoryRequest): Promise<HistoryResponse> {
 }
 function Mounted({ sessionId }: { sessionId: string }) {
   const position = useTimelinePosition(sessionId, memory);
-  return createElement("div", { className: "timeline-scroll", ref: position.elementRef,
+  const shell = useRef<HTMLDivElement>(null);
+  const shortcut = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
+  const [notice, setNotice] = useState("");
+  const resetNotice = useCallback(() => { position.resetMessageNavigation(); setNotice(""); }, [position.resetMessageNavigation]);
+  useLayoutEffect(() => {
+    const keyDown = (event: KeyboardEvent) => dispatchWorkspaceShortcut(event, shortcut.current, {
+      workspaceActive: true, workspaceShell: shell.current, modalOpen: false, selectedProjectFocused: false,
+      infoTrigger: null, reminderTrigger: null, infoSelection: { sessionId, projectId: null }, selection: null,
+      messageAvailable: position.messageReady(),
+      run: action => {
+        if (action !== "messagePrevious" && action !== "messageNext" && action !== "messageFirst") return;
+        const result = position.navigateMessage(action);
+        setNotice(result.status === "boundary" ? action === "messageNext" ? "Last retained message; refresh newest history."
+          : "First retained message; older journal history may exist." : result.label ?? result.status);
+      },
+    });
+    window.addEventListener("keydown", keyDown);
+    return () => window.removeEventListener("keydown", keyDown);
+  });
+  return createElement("div", { className: "workspace-shell", ref: shell },
+    createElement("button", { type: "button", className: "keyboard-target" }, "Timeline keyboard target"),
+    createElement("button", { type: "button", className: "follow-target", onClick: position.jump }, "Follow visible window"),
+    createElement("div", { className: "timeline-scroll", ref: position.elementRef,
     "data-following": position.following,
     onScroll: (event: UIEvent<HTMLDivElement>) => position.scroll(event.currentTarget),
     style: { height: "260px", overflowY: "scroll", width: "650px" } },
     createElement(History, { sessionId, read, live: null, onNotesChange: stable,
-      onSettled: position.settled, onBeforeOlder: position.beforeOlderPage, onAfterOlder: position.afterOlderPage }));
+      onSettled: position.settled, onBeforeOlder: position.beforeOlderPage, onAfterOlder: position.afterOlderPage,
+      onNavigationReset: resetNotice })),
+    createElement("p", { role: "status", className: "navigation-notice" }, notice),
+    createElement("textarea", { id: "session-prompt", "aria-label": "Prompt" }));
 }
 function Fixture() {
   const [session, setSession] = useState("A");
@@ -45,7 +71,10 @@ function Fixture() {
     Object.assign(window, { fixture: { select: setSession, calls, failNext: (code: string) => { failCode = code; },
       holdNext: () => { holdNext = true; }, release: () => { release?.(); release = undefined; } } });
   }, []);
-  return createElement(Mounted, { key: session, sessionId: session });
+  return createElement("div", { className: "outer-scroll", style: { height: "360px", overflowY: "scroll" } },
+    createElement(Mounted, { key: session, sessionId: session }),
+    createElement("button", { type: "button", className: "outside-target" }, "Outside workspace"),
+    createElement("div", { style: { height: "600px" } }, "Outer filler"));
 }
 const style = document.createElement("style");
 style.textContent = ".timeline-message { height: 48px; box-sizing: border-box; overflow: hidden; } .message-body p { margin: 0; }";

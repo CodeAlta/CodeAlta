@@ -85,6 +85,51 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     assert.match(result.last, /latest user prompt/);
     assert.equal(result.following, "true");
     assert.ok(result.calls.length <= 11 && result.calls.every(call => call.startsWith("A:tail") || call.startsWith("A:2:")));
+    await evaluate(`(() => { const outer = document.querySelector('.outer-scroll');
+      document.querySelector('.keyboard-target').focus(); outer.scrollTop = 35;
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('turn-205')");
+    assert.equal((await snapshot())!.includes('"following":"false"'), true, "first retained explicitly unfollows");
+    const firstPosition = JSON.parse((await evaluate(`JSON.stringify({ offset: document.querySelector('.timeline-message').getBoundingClientRect().top -
+      document.querySelector('.timeline-scroll').getBoundingClientRect().top, outer: document.querySelector('.outer-scroll').scrollTop,
+      focus: document.activeElement.className })`))!) as { offset: number; outer: number; focus: string };
+    assert.ok(Math.abs(firstPosition.offset) < 2, "Ctrl+F3 positions the first retained row, not the outer scroller");
+    assert.equal(firstPosition.outer, 35);
+    assert.equal(firstPosition.focus, "keyboard-target");
+    await evaluate(`(() => { const outside = document.querySelector('.outside-target'); outside.focus();
+      outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
+      document.querySelector('.keyboard-target').focus();
+      const modal = document.createElement('dialog'); modal.setAttribute('open', '');
+      modal.innerHTML = '<button class="modal-target">Modal</button>'; document.querySelector('.workspace-shell').append(modal);
+      modal.querySelector('button').focus();
+      modal.querySelector('button').dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
+      modal.remove(); document.querySelector('.keyboard-target').focus();
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', isComposing: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    assert.match((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /turn-205/,
+      "outside focus, modal and IME must not navigate");
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }))`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('turn-206')");
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true, cancelable: true }))`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('turn-205')");
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true, cancelable: true }))`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('First retained message; older journal')");
+    await evaluate(`(() => { const scroller = document.querySelector('.timeline-scroll');
+      const row = [...document.querySelectorAll('.timeline-message')].find(row => row.textContent.includes('turn-1198'));
+      scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      for (let i = 0; i < 4; i++)
+        document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('latest user prompt')");
+    assert.equal((await snapshot())!.includes('"following":"false"'), true, "navigating onto the bottom row stays unfollowed");
+    await evaluate(`(() => { const prompt = document.querySelector('#session-prompt'); prompt.focus();
+      prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    assert.match((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /latest user prompt/,
+      "composer editing keeps its own shortcuts and focus");
+    await evaluate("document.querySelector('.keyboard-target').focus()");
     await evaluate(`(() => { const scroller = document.querySelector('.timeline-scroll'); scroller.scrollTop = 2000;
       scroller.dispatchEvent(new Event('scroll', { bubbles: true })); const viewport = scroller.getBoundingClientRect();
       const anchor = [...document.querySelectorAll('.timeline-message')].find(row => row.getBoundingClientRect().bottom > viewport.top);
@@ -100,6 +145,20 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
       delta: window.fixture.anchor.getBoundingClientRect().top - window.fixture.anchorTop })`))!) as { connected: boolean; delta: number };
     assert.equal(anchored.connected, true);
     assert.ok(Math.abs(anchored.delta) < 2, `older-page prepend moved the reading anchor: ${JSON.stringify(anchored)}`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }))`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('turn-105')");
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true, cancelable: true }))`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('First retained message; older journal')");
+    await evaluate(`(() => { const scroller = document.querySelector('.timeline-scroll'); scroller.scrollTop = scroller.scrollHeight;
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      for (let i = 0; i < 8; i++)
+        document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Last retained message; refresh newest')");
+    const olderBottom = (await snapshot())!;
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }))`);
+    assert.equal((await snapshot())!, olderBottom, "Ctrl+F4 must not masquerade as latest when browsing older pages");
+    assert.equal(await evaluate("document.activeElement.className"), "keyboard-target");
     await evaluate("window.fixture.select('B')");
     await wait("document.querySelectorAll('.timeline-message').length === 3 && document.body.innerText.includes('turn-2')");
     await evaluate("window.fixture.select('A')");
@@ -109,6 +168,7 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     assert.ok(result.top > 2000, "returning session should restore its reading position after loading");
     await evaluate("window.fixture.holdNext(); document.querySelector('.load-more').click()");
     await wait("window.fixture.calls.at(-1).startsWith('A:2:')");
+    assert.equal(await evaluate("document.querySelector('.history').dataset.windowReady"), "false", "pending read blocks keyboard navigation");
     await evaluate("window.fixture.select('B'); window.fixture.release()");
     await wait("document.querySelectorAll('.timeline-message').length === 3 && document.body.innerText.includes('turn-2')");
     assert.doesNotMatch((await snapshot())!, /latest user prompt/);
@@ -121,11 +181,35 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     await evaluate("window.fixture.failNext('history_changed'); document.querySelector('.load-more').click()");
     await wait("document.querySelector('[role=alert]')?.textContent.includes('journal changed')");
     assert.equal(JSON.parse((await snapshot())!).rows, 0, "stale revision must clear accumulated history");
+    assert.equal(await evaluate("document.querySelector('.history').dataset.windowReady"), "false");
     await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Refresh newest')).click()");
     await wait("document.querySelectorAll('.timeline-message').length === 1000 && document.body.innerText.includes('latest user prompt')");
     await evaluate("window.fixture.failNext('read_failed'); document.querySelector('.load-more').click()");
     await wait("document.querySelector('[role=alert]')?.textContent.includes('could not be read')");
     assert.equal(JSON.parse((await snapshot())!).rows, 1000, "non-revision older failure retains known recent history");
+    assert.equal(await evaluate("document.querySelector('.history').dataset.windowReady"), "false", "failed page is not navigable as a settled revision");
+    await evaluate(`(() => { document.querySelector('.keyboard-target').focus();
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    assert.equal(await evaluate("document.querySelector('.navigation-notice').textContent"), "",
+      "failed reads cannot present an old-window navigation as settled");
+    await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Refresh newest')).click()");
+    await wait("document.querySelector('.history').dataset.windowReady === 'true' && document.querySelectorAll('.timeline-message').length === 1000");
+    await evaluate("document.querySelector('.follow-target').click()");
+    await evaluate(`(() => { const style = document.createElement('style'); style.textContent = '.timeline-message { height: 72px; }';
+      document.head.append(style); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
+    const grown = JSON.parse((await snapshot())!);
+    assert.equal(grown.following, "true");
+    assert.ok(Math.abs(grown.top - (grown.height - 260)) < 2, "following catches deferred row growth");
+    await evaluate(`(() => { document.querySelector('.keyboard-target').focus();
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("document.querySelector('.timeline-scroll').dataset.following === 'false'");
+    const pausedTop = JSON.parse((await snapshot())!).top;
+    await evaluate(`(() => { const style = document.createElement('style'); style.textContent = '.timeline-message { height: 96px; }';
+      document.head.append(style); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
+    assert.equal(JSON.parse((await snapshot())!).top, pausedTop, "deferred layout cannot override keyboard unfollow");
+    assert.equal(await evaluate("document.activeElement.className"), "keyboard-target");
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 999, method: "Browser.close" }));
     socket?.close();

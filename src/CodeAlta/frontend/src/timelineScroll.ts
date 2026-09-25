@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ScrollMetrics = Readonly<{ scrollTop: number; scrollHeight: number; clientHeight: number }>;
 
@@ -20,6 +20,9 @@ export function preservePrependScrollTop(previous: ScrollMetrics, nextScrollHeig
   return Math.max(0, previous.scrollTop + nextScrollHeight - previous.scrollHeight);
 }
 
+export type MessageNavigation = "messagePrevious" | "messageNext" | "messageFirst";
+export type MessageNavigationResult = Readonly<{ status: "moved" | "boundary" | "unavailable"; label?: string }>;
+
 // App-owned, bounded in-memory preferences. A new mounted session owns its own selection;
 // restoring an old position must wait for its journal (or an explicit read error), not the loading skeleton.
 export function createTimelineScrollMemory() {
@@ -36,10 +39,13 @@ export function createTimelineScrollMemory() {
       let restoring = true; // Ignore loading/layout scroll events even for a new following session.
       let pendingFinish = false;
       let suppressedTop: number | null = null;
+      let pausedTop: number | null = null;
       return {
         following: () => following,
         scroll(metrics: ScrollMetrics) {
           if (restoring) return following;
+          if (pausedTop !== null && metrics.scrollTop === pausedTop) return false;
+          pausedTop = null;
           if (suppressedTop !== null && metrics.scrollTop === suppressedTop) {
             suppressedTop = null; // Browser may report the programmatic restoration as a scroll.
             return following;
@@ -61,12 +67,14 @@ export function createTimelineScrollMemory() {
         jump(metrics: ScrollMetrics) {
           restoring = pendingFinish = false;
           suppressedTop = null;
+          pausedTop = null;
           following = true;
           remember(id, bottomScrollTop(metrics), true);
         },
         pauseAt(top: number) {
           following = false;
-          suppressedTop = null;
+          suppressedTop = top; // A keyboard/older-page programmatic scroll must not re-enable follow at the bottom.
+          pausedTop = top;
           remember(id, top, false);
         },
       };
@@ -82,6 +90,8 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const [following, setFollowing] = useState(selection.following);
   const restoreFrame = useRef(0);
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
+  const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
+  const resetMessageNavigation = useCallback(() => { messageAnchor.current = null; }, []);
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;
@@ -89,7 +99,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const scrollBottom = () => {
       if (!selection.following()) return;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => { element.scrollTop = bottomScrollTop(element); });
+      frame = requestAnimationFrame(() => { if (selection.following()) element.scrollTop = bottomScrollTop(element); });
     };
     // DOM mutations do not report layout growth from images, fonts or CSS. Observe the
     // scroller's own viewport and each direct panel, including panels mounted later.
@@ -142,5 +152,34 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     }
     setFollowing(true);
   }
-  return { elementRef, following, settled, scroll, jump, beforeOlderPage, afterOlderPage };
+  function messageReady() {
+    const element = elementRef.current;
+    return !!element?.querySelector('.history[data-window-ready="true"] .timeline-message.message-user, .history[data-window-ready="true"] .timeline-message.message-assistant');
+  }
+  function navigateMessage(action: MessageNavigation): MessageNavigationResult {
+    const element = elementRef.current;
+    if (!element || !messageReady()) return { status: "unavailable" };
+    const rows = Array.from(element.querySelectorAll<HTMLElement>(
+      '.history[data-window-ready="true"] .timeline-message.message-user, .history[data-window-ready="true"] .timeline-message.message-assistant'));
+    const viewport = element.getBoundingClientRect();
+    const anchor = messageAnchor.current;
+    const anchoredIndex = anchor?.top === element.scrollTop ? rows.indexOf(anchor.row) : -1;
+    const firstAtOrBelow = rows.findIndex(row => row.getBoundingClientRect().top >= viewport.top - 1);
+    const index = action === "messageFirst" ? 0 : action === "messageNext"
+      ? anchoredIndex >= 0 ? anchoredIndex + 1 : rows.findIndex(row => row.getBoundingClientRect().top > viewport.top + 1)
+      : anchoredIndex >= 0 ? anchoredIndex - 1 : firstAtOrBelow < 0 ? rows.length - 1 : firstAtOrBelow - 1;
+    if (index < 0 || index >= rows.length) {
+      selection.pauseAt(element.scrollTop);
+      setFollowing(false);
+      return { status: "boundary" };
+    }
+    const row = rows[index];
+    element.scrollTop += row.getBoundingClientRect().top - viewport.top;
+    messageAnchor.current = { row, top: element.scrollTop };
+    selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+    return { status: "moved", label: row.querySelector(".message-body")?.textContent?.trim().slice(0, 120) };
+  }
+  return { elementRef, following, settled, scroll, jump, beforeOlderPage, afterOlderPage,
+    messageReady, navigateMessage, resetMessageNavigation };
 }

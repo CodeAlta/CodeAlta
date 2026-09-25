@@ -169,6 +169,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .conversation { margin-top: 12px; }
 .timeline-scroll { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: scroll; overscroll-behavior: contain; padding: 0 8px 28px 0; }
 .timeline-bottom-button { z-index: 3; align-self: center; margin: -45px 0 8px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text); background: var(--panel-3); box-shadow: var(--shadow); cursor: pointer; }
+.timeline-navigation-notice { margin: 4px 8px 0; }
 .demo-banner, .banner { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 10px; background: var(--accent-soft); color: color-mix(in srgb, var(--accent) 75%, var(--text)); font-size: 12px; }
 .demo-banner span { color: var(--muted); }
 .banner-error { border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); }
