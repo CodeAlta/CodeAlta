@@ -44,6 +44,11 @@ public sealed class WorkspaceDirectoryCompletionTests
             Assert.IsTrue(WorkspaceService.DirectoryCompletionEnvelopeBytes(response) <= WorkspaceService.MaximumDirectoryCompletionEnvelopeBytes);
             Directory.Delete(Path.Combine(root, ".AlreadyHidden"));
             Assert.AreEqual("complete", (await service.CompleteDirectoryAsync(new(Epoch, root, "Alpha"), CancellationToken.None)).Status);
+            var trailingDirectory = root + Path.DirectorySeparatorChar;
+            var trailing = await service.CompleteDirectoryAsync(new(Epoch, trailingDirectory, "Alpha"), CancellationToken.None);
+            Assert.AreEqual("complete", trailing.Status, "A canonical directory with a trailing separator must retain its valid child suggestions.");
+            Assert.AreEqual(trailingDirectory, trailing.DirectoryPath, "The response must still echo the exact request.");
+            CollectionAssert.AreEqual(new[] { Path.Combine(root, "Alpha") }, trailing.Directories);
             Assert.AreEqual("missing", (await service.CompleteDirectoryAsync(new(Epoch, Path.Combine(root, "missing"), ""), CancellationToken.None)).Status);
             Assert.AreEqual("not_directory", (await service.CompleteDirectoryAsync(new(Epoch, Path.Combine(root, "Alfile"), ""), CancellationToken.None)).Status);
             Assert.IsFalse(Directory.Exists(catalog.Options.ProjectsRoot));
@@ -115,6 +120,50 @@ public sealed class WorkspaceDirectoryCompletionTests
             Assert.IsFalse(Directory.Exists(catalog.Options.ProjectsRoot));
         }
         finally { pending.TrySetCanceled(); Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
+    public async Task ProjectedChildren_RequireExactDirectParentWithOrWithoutTrailingSeparator()
+    {
+        var root = FixtureRoot();
+        Directory.CreateDirectory(root);
+        try
+        {
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = Path.Combine(root, "catalog") });
+            await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
+            var child = Path.Combine(root, "Alpha");
+            var rejected = new[]
+            {
+                Path.Combine(root + "-sibling", "Alpha"),
+                Path.Combine(root, "Nested", "Alpha"),
+                Path.Combine(Path.GetDirectoryName(root)!, "foreign", "Alpha"),
+            };
+            foreach (var directory in new[] { root, root + Path.DirectorySeparatorChar })
+            {
+                var accepted = new WorkspaceService(reads, catalog, Epoch, (_, _) =>
+                    Task.FromResult(new DirectoryCompletionResult(DirectoryCompletionStatus.Complete, [child], 1, false)));
+                var response = await accepted.CompleteDirectoryAsync(new(Epoch, directory, "Al"), CancellationToken.None);
+                Assert.AreEqual("complete", response.Status);
+                Assert.AreEqual(directory, response.DirectoryPath);
+                Assert.AreEqual("Al", response.Prefix);
+                CollectionAssert.AreEqual(new[] { child }, response.Directories);
+                await accepted.CloseImportsAsync();
+
+                foreach (var other in rejected)
+                {
+                    var service = new WorkspaceService(reads, catalog, Epoch, (_, _) =>
+                        Task.FromResult(new DirectoryCompletionResult(DirectoryCompletionStatus.Complete, [other], 1, false)));
+                    var refusal = await service.CompleteDirectoryAsync(new(Epoch, directory, "Al"), CancellationToken.None);
+                    Assert.AreEqual("read_error", refusal.Status, other);
+                    Assert.AreEqual(directory, refusal.DirectoryPath);
+                    Assert.AreEqual("Al", refusal.Prefix);
+                    Assert.IsEmpty(refusal.Directories);
+                    await service.CloseImportsAsync();
+                }
+            }
+            Assert.IsFalse(Directory.Exists(catalog.Options.ProjectsRoot));
+        }
+        finally { Directory.Delete(root, true); }
     }
 
     [TestMethod]

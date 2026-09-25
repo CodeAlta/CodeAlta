@@ -88,11 +88,13 @@ internal sealed partial class WorkspaceService
         if (status is not ("complete" or "incomplete"))
             return new(status, _importEpoch, directory, prefix, [], result.EntriesVisited, result.OmittedUnsafeEntries);
         var paths = new List<string>(result.Directories.Count);
+        // The reader accepts a canonical trailing separator; children do not retain it in their parent.
+        var childParent = Path.TrimEndingDirectorySeparator(directory);
         var total = 0;
         foreach (var path in result.Directories)
         {
             if (path is null || path.Length > DirectoryCompletionReader.MaximumDirectoryLength || !ValidWireText(path)
-                || Path.GetDirectoryName(path) != directory || path != Path.GetFullPath(path)) return Error();
+                || Path.GetDirectoryName(path) != childParent || path != Path.GetFullPath(path)) return Error();
             total += path.Length;
             if (total > DirectoryCompletionReader.MaximumTotalResultCharacters) return Error();
             paths.Add(path);
