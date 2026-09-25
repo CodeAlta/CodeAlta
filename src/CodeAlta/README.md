@@ -307,14 +307,19 @@ With a provider supporting run-bound review, cancellation of the actual owning r
 its pending requests, even when individual requests omit a run ID. A request naming another run is
 denied. Previously accepted decisions remain accepted; trusted TUI approval policy is unchanged.
 
-After **Refresh runtime state**, **Signal cancellation for observed run** targets only that exact
-runtime, attachment and run. This is distinct from **Abort original Send operation**. Unsupported, stale,
-retiring, transitioning and draining targets fail closed without fallback. Refresh submissions
+The compact prompt toolbar offers **Cancel observed run** (square icon with an accessible label)
+only for an eligible point-in-time runtime observation or a retained exact cancellation intent.
+Send and exact Send recovery remain separate. This action is distinct from **Abort original Send
+operation**, which controls its receipt, not the running provider. The observed target names the
+exact epoch, session, runtime, attachment and run; it is not inferred from host availability or
+display state. Unsupported, stale, retiring, transitioning and draining targets fail closed
+without fallback. Refresh submissions
 for the result: **Cancellation signalled; run completion is not confirmed.** Failure can occur
 after signalling; neither failure nor success promises rollback of accepted decisions or effects.
 An uncertain request retains its original target/key across selection changes and remounts.
-Reconcile manually or deliberately **Retry exact cancellation request** after the previous wait
-settles. New observations never retarget it, and replay never repeats cancellation. Closing the
+Reconcile manually or deliberately **Retry exact cancellation request** from the toolbar after the
+previous wait settles; its exact target and key remain visible next to the composer and in advanced
+diagnostics. New observations never retarget it, and replay never repeats cancellation. Closing the
 panel cancels only its wait; host shutdown retains and joins original work. No automatic retry,
 refresh or polling is added. This remains experimental, not full session-command/native parity.
 

@@ -79,7 +79,7 @@ test("mounted composer stays compact and its controls remain legible in both the
       if (document.querySelector('select[aria-label="Agent prompt"]:not(:disabled)')) resolve('ready');
       else if (Date.now() > end) resolve(document.body.innerText.slice(0, 300)); else setTimeout(check, 35); }; check(); })`);
     assert.equal(ready, "ready");
-    type Sample = { panel: number; editor: number; scroll: number; client: number; overflow: string; padding: string;
+    type Sample = { panel: number; toolbar: number; editor: number; scroll: number; client: number; overflow: string; padding: string;
       controls: Record<string, { color: string; background: string; border: string; outline: string; opacity: string }>;
       pageWidth: number; viewWidth: number; panelWidth: number; panelScrollWidth: number };
     const sample = async (): Promise<Sample> => JSON.parse((await evaluate(`JSON.stringify((() => {
@@ -88,6 +88,7 @@ test("mounted composer stays compact and its controls remain legible in both the
         .map(selector => { const s = getComputedStyle(document.querySelector(selector)); return [selector, { color: s.color,
           background: s.backgroundColor, border: s.borderColor, outline: s.outlineStyle, opacity: s.opacity }]; }));
       return { panel: document.querySelector('.owned-session').getBoundingClientRect().height,
+        toolbar: document.querySelector('.composer-toolbar').getBoundingClientRect().height,
         editor: editor.getBoundingClientRect().height, scroll: editor.scrollHeight, client: editor.clientHeight,
         overflow: getComputedStyle(editor).overflowY, padding: getComputedStyle(document.querySelector('.owned-session')).paddingTop,
         controls, pageWidth: document.documentElement.scrollWidth, viewWidth: document.documentElement.clientWidth,
@@ -144,6 +145,67 @@ test("mounted composer stays compact and its controls remain legible in both the
       "Reminders for selected session (Ctrl+G, Ctrl+D)");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar button.primary-button')?.textContent`), "Send");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar')?.textContent.includes('Refresh receipts')`), false);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), false,
+      "host availability without an observed run cannot expose cancellation");
+    await evaluate(`window.fixture.observe('run-one', 12)`);
+    await evaluate(`document.querySelector('#refresh-session-context').click()`);
+    const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
+      if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        const result = await sample();
+        assert.ok(result.pageWidth <= result.viewWidth + 2 && result.panelScrollWidth <= result.panelWidth + 2,
+          `${theme} ${width}px observed-run controls overflow: ${JSON.stringify(result)}`);
+        assert.ok(result.toolbar <= (width === 390 ? 100 : 80), `${theme} ${width}px observed-run toolbar grew: ${JSON.stringify(result)}`);
+        await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]').focus()`);
+        assert.equal(await evaluate(`JSON.stringify([document.activeElement?.getAttribute('aria-label'), getComputedStyle(document.activeElement).outlineStyle])`),
+          '["Cancel observed run","solid"]');
+      }
+    }
+    await evaluate(`(() => { const el = document.querySelector('.prompt-input');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'Keep this unsent text');
+      el.dispatchEvent(new Event('input', { bubbles: true })); window.fixture.mode('uncertain'); })()`);
+    assert.equal(await waitFor(`document.querySelector('.prompt-input').value === 'Keep this unsent text'`), "ready");
+    await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]').focus()`);
+    assert.equal(await evaluate(`document.activeElement?.getAttribute('aria-label')`), "Cancel observed run");
+    await command("Page.bringToFront");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')`), "ready",
+      `keyboard activation: ${await evaluate(`JSON.stringify([window.fixture.abortCalls.length,document.activeElement?.outerHTML?.slice(0,300)])`)}`);
+    assert.equal(await evaluate(`document.querySelector('.composer-notice[role="status"]')?.textContent.includes('uncertain')`), true);
+    assert.equal(await evaluate(`document.querySelector('.composer-notice:not([role])')?.textContent.includes('run run-one')`), true);
+    assert.equal(await evaluate(`JSON.stringify(window.fixture.abortCalls.map(({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}) =>
+      ({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId})))`),
+      JSON.stringify([{ expectedEpoch: "fixture-epoch", sessionId: "fixture-session", expectedRuntimeInstanceId: "fixture-runtime",
+        expectedAttachmentGeneration: "gen-12", expectedRunId: "run-one" }]));
+    assert.match((await evaluate(`window.fixture.abortCalls[0].clientRequestId`))!, /^[0-9a-f-]{36}$/i);
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Keep this unsent text");
+    await evaluate(`window.fixture.observe('run-two', 13); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-13'`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.getAttribute('aria-label').includes('run-one')`), true);
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.title.includes('gen-12')`), true);
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
+    await evaluate(`window.fixture.mode('hold'); document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click();
+      document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click()`);
+    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 2, "in-flight retry excludes repeated admission");
+    assert.equal(await evaluate(`window.fixture.abortCalls[0].clientRequestId === window.fixture.abortCalls[1].clientRequestId &&
+      window.fixture.abortCalls[1].expectedRunId === 'run-one'`), true);
+    await evaluate(`window.fixture.switchSession('fixture-other')`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]') === null`), true);
+    await evaluate(`window.fixture.settle(); window.fixture.switchSession('fixture-session')`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Keep this unsent text");
+    await evaluate(`window.fixture.mode('fail'); document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click()`);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls [role="status"]')?.textContent.includes('busy')`), "ready");
+    assert.equal(await evaluate(`window.fixture.abortCalls[2].expectedRunId`), "run-one");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
+      "a settled failure permits only a new explicit observation-targeted action");
     const beforeChord = Number(await evaluate("window.fixture.refreshes"));
     assert.equal(await evaluate(`document.querySelector('.advanced-session-controls').open`), false);
     await evaluate(`(() => { const prompt = document.querySelector('#session-prompt'); prompt.focus();
@@ -167,6 +229,17 @@ test("mounted composer stays compact and its controls remain legible in both the
       else if (Date.now() > end) resolve('missing'); else setTimeout(check, 25); }; check(); })`), "visible",
     "choice failure and explicit retry must remain visible outside advanced controls");
     assert.equal(await evaluate(`document.querySelector('.composer-notice[role="alert"] button')?.textContent`), "Retry choices");
+    await evaluate(`window.fixture.retainSend('Pending exact Send text')`);
+    assert.equal(await waitFor(`document.querySelector('.composer-toolbar .send-button')?.textContent === 'Retry exact request'`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
+      "pending exact Send recovery does not disappear when observed-run cancellation is available");
+    await evaluate(`window.fixture.observe('run-three', 14, 'replacement-runtime'); document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('.owned-session [role="alert"]')].some(el => el.textContent.includes('Reload required'))`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]') === null`), true,
+      "stale runtime identity cannot authorize another observed-run action");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.disabled`), true);
+    assert.equal(await evaluate(`window.fixture.abortCalls.length`), 3);
     await evaluate(`(() => { document.querySelector('.owned-session').remove();
       const catalog = document.createElement('section'); catalog.className = 'composer catalog-composer';
       const button = document.createElement('button'); button.className = 'prompt-state';

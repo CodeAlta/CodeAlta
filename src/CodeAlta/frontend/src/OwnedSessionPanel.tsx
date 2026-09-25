@@ -134,7 +134,7 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const canCaptureSteer = captureSteering(epoch, sessionId, observedTarget, steerText, "availability") !== null;
   const canCaptureCompact = captureCompaction(epoch, sessionId, observedTarget, "availability") !== null;
-  const canCaptureAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability") !== null;
+  const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
   const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
   const showSteering = showContextAction(captureSteering(epoch, sessionId, observedTarget, "x", "availability") !== null,
     !!pendingSteer || steerMessage !== "Refresh runtime state explicitly before targeting a run.");
@@ -348,9 +348,18 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
         aria-label="Reminders for selected session" title="Reminders for selected session (Ctrl+G, Ctrl+D)"
         onClick={onOpenReminders}><AppIcon name="reminder" size={16} /></button>}
       <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
+      {(availableAbortRun || pendingAbortRun) && <button type="button" className="composer-icon-button" onClick={abortRun}
+        disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
+          ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
+        aria-label={pendingAbortRun ? `Retry exact cancellation request for observed run ${pendingAbortRun.request.expectedRunId}` : "Cancel observed run"}
+        aria-describedby="observed-run-cancellation-help"
+        title={pendingAbortRun ? `Manual retry of exact cancellation: epoch ${pendingAbortRun.request.expectedEpoch}, session ${pendingAbortRun.request.sessionId}, runtime ${pendingAbortRun.request.expectedRuntimeInstanceId}, attachment ${pendingAbortRun.request.expectedAttachmentGeneration}, run ${pendingAbortRun.request.expectedRunId}, request ${pendingAbortRun.request.clientRequestId}`
+          : `Cancel observed run ${availableAbortRun?.expectedRunId} (point-in-time runtime observation, not original Send Abort; signalling does not confirm completion)`}>
+        <AppIcon name="stop" size={16} /></button>}
       <button type="button" className="primary-button send-button" disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : captureSubmission(epoch, sessionId, text, "availability") === null)} onClick={submit}>{pending ? "Retry exact request" : <><span>Send</span><AppIcon name="send" size={14} /></>}</button>
     </div>
     </div>
+    <span id="observed-run-cancellation-help" className="sr-only">Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.</span>
     {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}
       {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Retry choices</button>}</p>}
     {(message !== "Ready to send to this owned session." || pending || pendingAborts.length > 0) && <p className="composer-notice" role="status">{message}</p>}
@@ -359,7 +368,8 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     {runtimeState?.kind === "error" && <p role="alert">Runtime observation unavailable ({runtimeState.code}). {['stale_epoch', 'stale_runtime'].includes(runtimeState.code) ? "Reload required." : "No idle or completion state is inferred."}</p>}
     {mcpPlugin && /fail|error/i.test(mcpPlugin.state) && <p role="alert">MCP plugin: {mcpPlugin.state}. Check advanced diagnostics.</p>}
     {page && page.status !== "ok" && <p role="alert">Receipt snapshot: {page.status}</p>}
-    {(pendingCompact || pendingAbortRun) && <p className="composer-notice" role="status">{pendingCompact && compactMessage} {pendingAbortRun && abortRunMessage} Open advanced controls to inspect the exact targets or retry manually.</p>}
+    {(pendingCompact || pendingAbortRun) && <p className="composer-notice" role="status">{pendingCompact && compactMessage} {pendingAbortRun && abortRunMessage} {pendingCompact && "Open advanced controls to inspect the exact target or retry manually."}</p>}
+    {pendingAbortRun && <p className="composer-notice">Manual exact cancellation retry only: epoch {pendingAbortRun.request.expectedEpoch} · session {pendingAbortRun.request.sessionId} · runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}. Refresh never retargets this intent.</p>}
     {(showSteering || showQueue) && <div className="context-actions">
       {showSteering && <div><label>Steer observed run {pendingSteer?.request.expectedRunId ?? observedTarget?.entry?.activeRunId}<textarea maxLength={32768} value={pendingSteer?.request.text ?? steerText} disabled={!!pendingSteer} onChange={event => setSteerText(event.target.value)} /></label>
         {pendingSteer && <p className="detail">Retained run {pendingSteer.request.expectedRunId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · request {pendingSteer.request.clientRequestId}; refresh never retargets this request.</p>}
@@ -429,9 +439,6 @@ export function OwnedSessionPanel({ sessionId, epoch, submissions, steering, com
     <h3>Signal cancellation for observed run</h3>
     <p className="detail">Targets only the explicitly observed runtime, attachment and run. Unsupported, stale, retiring, transitioning or draining targets fail closed without fallback. Signalling is not run completion or rollback; previously accepted decisions remain accepted. Failure can occur after signalling. Refreshes never retarget a retained request.</p>
     {pendingAbortRun && <p className="detail">Retained target: runtime {pendingAbortRun.request.expectedRuntimeInstanceId} · attachment {pendingAbortRun.request.expectedAttachmentGeneration} · run {pendingAbortRun.request.expectedRunId} · request {pendingAbortRun.request.clientRequestId}</p>}
-    <button type="button" disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun ? !capability.canSubmit(pendingAbortRun.request) : !canCaptureAbortRun)} onClick={abortRun}>
-      {pendingAbortRun ? "Retry exact cancellation request" : "Signal cancellation for observed run"}
-    </button>
     <p role="status">{abortRunMessage}</p>
     <h3>Compact the observed attachment if idle now</h3>
     <p className="detail">Recorded idleness only permits an attempt: the provider must prove idle without waiting. Compacts context current at provider admission, not the history from your observation. Stale, retiring, non-owned or unsupported targets are rejected without fallback. No new permission authority is created. A busy receipt is permanent; a new explicit action uses a fresh key. Refreshes never retarget an uncertain request.</p>
