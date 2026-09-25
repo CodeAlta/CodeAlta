@@ -38,6 +38,159 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task UsageState_AbsentZeroUnknownAndTypedEvent_AreAttachmentScoped() => Fixture.Run(async f =>
+    {
+        var absent = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.IsNull(absent.AttachmentGeneration);
+        Assert.IsNull(absent.Observation);
+        Assert.AreEqual(0, f.Provider.Creates);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var empty = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.IsNotNull(empty.AttachmentGeneration);
+        Assert.IsNull(empty.Observation);
+        var when = new DateTimeOffset(2026, 9, 24, 1, 2, 3, TimeSpan.Zero);
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
+            Window: new AgentWindowUsageSnapshot(0, null, null, new string('x', 100_000)),
+            LastOperation: new AgentOperationUsageSnapshot(InputTokens: 0, OutputTokens: 12, Model: new string('m', 100_000)),
+            Scope: AgentUsageScope.LastOperation, Source: AgentUsageSource.CodexTokenCountEvent, UpdatedAt: when), timestamp: when);
+        var state = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.AreEqual(empty.RuntimeInstanceId, state.RuntimeInstanceId);
+        Assert.AreEqual(empty.AttachmentGeneration, state.AttachmentGeneration);
+        Assert.AreEqual(1L, state.Observation!.Sequence);
+        Assert.AreEqual(0L, state.Observation.Window?.CurrentTokens);
+        Assert.IsNull(state.Observation.Window?.TokenLimit);
+        Assert.AreEqual(0L, state.Observation.LastOperation?.InputTokens);
+        Assert.AreEqual(12L, state.Observation.LastOperation?.OutputTokens);
+        Assert.AreEqual(when, state.Observation.SourceUpdatedAt);
+        Assert.AreEqual(AgentUsageScope.LastOperation, state.Observation.Scope);
+        Assert.AreEqual(AgentUsageSource.CodexTokenCountEvent, state.Observation.Source);
+        Assert.IsFalse(state.Observation.HadInvalidValues);
+        Assert.IsTrue(state.Observation.HadOmittedData);
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(55, 90, null)),
+            timestamp: when, eventProviderId: new ModelProviderId("other-provider"));
+        var rejected = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.AreEqual(1L, rejected.OmittedUsageEvents);
+        Assert.AreEqual(0L, rejected.Observation!.Window?.CurrentTokens);
+        Assert.AreEqual(1L, rejected.Observation.Sequence);
+        Assert.AreEqual(0, f.Provider.HistoryReads);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null, timestamp: when);
+        var terminated = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.IsTrue(terminated.IsTerminated);
+        Assert.IsNull(terminated.Observation);
+    });
+
+    [TestMethod]
+    public Task UsageState_InvalidValuesDoNotBecomeZeroOrReusePriorFields() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
+            Window: new AgentWindowUsageSnapshot(23, 100, 1)), timestamp: DateTimeOffset.UnixEpoch);
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
+            Window: new AgentWindowUsageSnapshot(-1, 0, -2),
+            LastOperation: new AgentOperationUsageSnapshot(InputTokens: -5, OutputTokens: 0, Cost: double.NaN, DurationMs: double.PositiveInfinity),
+            Scope: (AgentUsageScope)1000, Source: (AgentUsageSource)1000), timestamp: DateTimeOffset.UnixEpoch);
+        var observation = (await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId))).Observation!;
+        Assert.AreEqual(2L, observation.Sequence);
+        Assert.IsTrue(observation.HadInvalidValues);
+        Assert.IsNull(observation.Window?.CurrentTokens);
+        Assert.IsNull(observation.Window?.TokenLimit);
+        Assert.IsNull(observation.Window?.MessageCount);
+        Assert.IsNull(observation.LastOperation?.InputTokens);
+        Assert.AreEqual(0L, observation.LastOperation?.OutputTokens);
+        Assert.IsNull(observation.LastOperation?.Cost);
+        Assert.IsNull(observation.LastOperation?.DurationMs);
+        Assert.AreEqual(AgentUsageSource.Unknown, observation.Source);
+        Assert.AreEqual(AgentUsageScope.Unknown, observation.Scope);
+    });
+
+    [TestMethod]
+    public Task UsageState_IsolatedFromOtherSessionsAndRetiredCallbacks() => Fixture.Run(async f =>
+    {
+        var second = f.NewSession();
+        await f.Persist(second);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var firstSession = f.Provider.Latest;
+        var staleCallback = firstSession.CapturedCallback;
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(7, 30, null)),
+            timestamp: DateTimeOffset.UnixEpoch);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(second, f.Options));
+        var secondState = await f.Wait(f.Runtime.GetUsageStateAsync(second.SessionId));
+        Assert.IsNull(secondState.Observation);
+        var firstState = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.AreEqual(7L, firstState.Observation!.Window?.CurrentTokens);
+        Assert.AreNotEqual(firstState.SessionId, secondState.SessionId);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("new-model")));
+        var replacement = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.AreNotEqual(firstState.AttachmentGeneration, replacement.AttachmentGeneration);
+        Assert.IsNull(replacement.Observation);
+        staleCallback(new AgentSessionUpdateEvent(f.Provider.Descriptor.ProviderId, f.Session.SessionId,
+            DateTimeOffset.UnixEpoch, null, AgentSessionUpdateKind.UsageUpdated, "stale", Usage:
+            new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(999, 1000, null))));
+        var stillEmpty = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.IsNull(stillEmpty.Observation);
+        Assert.AreEqual(0L, stillEmpty.OmittedUsageEvents);
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(0, null, null)),
+            timestamp: DateTimeOffset.UnixEpoch, eventSessionId: "wrong-session");
+        var omitted = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.IsNull(omitted.Observation);
+        Assert.AreEqual(1L, omitted.OmittedUsageEvents);
+        await f.Wait(f.Runtime.DetachRuntimeSessionAsync(f.Session.SessionId));
+        Assert.IsNull((await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId))).Observation);
+    });
+
+    [TestMethod]
+    public Task UsageState_TransitionCancellationAndCloseWithholdObservation() => Fixture.Run(async f =>
+    {
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        await f.ExpectCancellation(f.Track(f.Runtime.GetUsageStateAsync(f.Session.SessionId, canceled.Token)));
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null,
+            usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(3, 10, null)),
+            timestamp: DateTimeOffset.UnixEpoch);
+        f.Provider.HoldAbort = true;
+        var replacement = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("new-model")));
+        await f.Ready(f.Provider.AbortStarted.Task);
+        var transitioning = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.IsTrue(transitioning.CoordinatorTransitionInProgress);
+        Assert.IsTrue(transitioning.IsRetiring);
+        Assert.IsNull(transitioning.Observation);
+        f.Provider.ReleaseAbort.TrySetResult();
+        await f.Wait(replacement);
+        Assert.IsNull((await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId))).Observation);
+        await f.Wait(f.Runtime.DisposeAsync().AsTask());
+        await f.Expect<ObjectDisposedException>(f.Track(f.Runtime.GetUsageStateAsync(f.Session.SessionId)));
+    });
+
+    [TestMethod]
+    public Task UsageState_CancellationAfterAdmissionStopsWaitWithoutReplacingObservation() => Fixture.Run(async f =>
+    {
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        var before = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        var held = new HeldEmptyTools();
+        Task? ensure = null;
+        try
+        {
+            ensure = f.Track(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", held)));
+            await f.Ready(held.Entered.Task);
+            using var cancellation = new CancellationTokenSource();
+            var query = f.Track(f.Runtime.GetUsageStateAsync(f.Session.SessionId, cancellation.Token));
+            Assert.IsFalse(query.IsCompleted);
+            cancellation.Cancel();
+            await f.ExpectCancellation(query);
+            Assert.IsFalse(ensure.IsCompleted);
+        }
+        finally { held.Release.TrySetResult(); }
+        await f.Wait(ensure!);
+        Assert.AreEqual(before, await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId)));
+        await f.Wait(f.Runtime.DisposeAsync().AsTask());
+    });
+
+    [TestMethod]
     public Task CurrentState_CancellationAfterAdmissionStopsWait_NotOwnedActorWork() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
@@ -740,14 +893,16 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal async Task ExpectCancellation(Task task)
             => Expected(await Assert.ThrowsAsync<OperationCanceledException>(() => task));
 
-        internal async Task EmitAndObserve(AgentSessionUpdateKind kind, AgentRunId? runId, List<SessionRuntimeEvent>? observed = null)
+        internal async Task EmitAndObserve(AgentSessionUpdateKind kind, AgentRunId? runId, List<SessionRuntimeEvent>? observed = null,
+            AgentSessionUsage? usage = null, DateTimeOffset? timestamp = null, string? eventSessionId = null,
+            ModelProviderId? eventProviderId = null)
         {
             using var cancellation = new CancellationTokenSource();
             var marker = Guid.NewGuid().ToString();
             Task observation = Task.CompletedTask;
             try
             {
-                Provider.Latest.EmitState(kind, runId, marker);
+                Provider.Latest.EmitState(kind, runId, marker, usage, timestamp, eventSessionId, eventProviderId);
                 observation = Track(Observe());
                 await Wait(observation);
             }
@@ -977,6 +1132,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         {
             private readonly object _gate = new();
             private Action<AgentEvent>? _handler;
+            internal Action<AgentEvent> CapturedCallback { get { lock (_gate) return _handler!; } }
             private int _active;
             internal int Active => Volatile.Read(ref _active);
             internal TaskCompletionSource SendStarted { get; } = NewGate();
@@ -998,8 +1154,11 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
             private void Emit(AgentEvent value) { Action<AgentEvent>? handler; lock (_gate) handler = _handler; handler?.Invoke(value); }
             internal void EmitIdle() => Emit(new AgentSessionUpdateEvent(ProviderId, id, DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Idle, "fixture"));
-            internal void EmitState(AgentSessionUpdateKind kind, AgentRunId? runId, string message)
-                => Emit(new AgentSessionUpdateEvent(ProviderId, id, DateTimeOffset.UtcNow, runId, kind, message));
+            internal void EmitState(AgentSessionUpdateKind kind, AgentRunId? runId, string message,
+                AgentSessionUsage? usage = null, DateTimeOffset? timestamp = null, string? eventSessionId = null,
+                ModelProviderId? eventProviderId = null)
+                => Emit(new AgentSessionUpdateEvent(eventProviderId ?? ProviderId, eventSessionId ?? id,
+                    timestamp ?? DateTimeOffset.UtcNow, runId, kind, message, Usage: usage));
             internal void EmitNotification(string content) => Emit(new AgentContentCompletedEvent(ProviderId, id, DateTimeOffset.UtcNow, null, AgentContentKind.Assistant, Guid.NewGuid().ToString(), null, "<notify-parent>" + content + "</notify-parent>"));
             public async Task<AgentRunId> SendAsync(AgentSendOptions send, CancellationToken cancellationToken = default)
             {

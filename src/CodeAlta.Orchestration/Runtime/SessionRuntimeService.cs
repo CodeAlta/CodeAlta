@@ -1827,6 +1827,41 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Reads the latest bounded, typed usage event admitted by the existing attachment's actor.
+    /// Does not activate a session, read history, probe a provider or establish completeness/freshness.
+    /// </summary>
+    /// <param name="sessionId">Exact session identifier to inspect.</param>
+    /// <param name="cancellationToken">Cancels the caller's wait, not work already admitted to the actor.</param>
+    /// <returns>Attachment-scoped last-observed usage or explicit absence/transition state.</returns>
+    /// <exception cref="ArgumentNullException">The session identifier is null.</exception>
+    /// <exception cref="ArgumentException">The session identifier is blank.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closed.</exception>
+    /// <exception cref="OperationCanceledException">The caller's wait is canceled.</exception>
+    public async Task<SessionRuntimeUsageState> GetUsageStateAsync(string sessionId, CancellationToken cancellationToken = default)
+        => await AdmitAsync(() => GetUsageStateOwnedBodyAsync(sessionId), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+
+    private async Task<SessionRuntimeUsageState> GetUsageStateOwnedBodyAsync(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (!_sessionActors.TryGet(sessionId, out var actor))
+            return new(_runtimeInstanceId, sessionId, false, null, false, false, null, 0);
+
+        return await actor.QueryAsync(_ =>
+        {
+            var transitioning = _transitions.ContainsKey(sessionId);
+            if (!_entries.TryGetValue(sessionId, out var entry))
+                return ValueTask.FromResult(new SessionRuntimeUsageState(_runtimeInstanceId, sessionId,
+                    transitioning, null, false, false, null, 0));
+            var retiring = entry.Attachment.IsRetiring;
+            return ValueTask.FromResult(new SessionRuntimeUsageState(_runtimeInstanceId, sessionId,
+                transitioning, entry.Attachment.Ordinal, retiring, entry.IsTerminated,
+                transitioning || retiring || entry.IsTerminated ? null : entry.LastObservedUsage,
+                entry.OmittedUsageEvents));
+        }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Returns whether the session's active coordinator session has an in-flight run.
     /// </summary>
     public async Task<bool> HasActiveRunAsync(SessionViewDescriptor session, CancellationToken cancellationToken = default)
@@ -2469,6 +2504,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             await publication.CompleteAsync(mark => actor.QueryAsync(_ =>
                 {
                     var sanitized = projector.Project(@event);
+                    ObserveAdmittedUsage(sessionId, projector.Entry!, sanitized);
                     published = sanitized;
                     if (sanitized is not null)
                         mark(CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory));
@@ -2508,6 +2544,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         catch (UnauthorizedAccessException) when (publication.CanToleratePrepublicationFailure)
         {
         }
+    }
+
+    // Actor-only; do not alter the existing event stream/journal path for nonmatching provider callbacks.
+    private void ObserveAdmittedUsage(string sessionId, RuntimeSessionEntry entry, AgentEvent? @event)
+    {
+        if (@event is not AgentSessionUpdateEvent { Usage: not null } update
+            || !_entries.TryGetValue(sessionId, out var active) || !ReferenceEquals(active, entry)
+            || _transitions.ContainsKey(sessionId) || entry.Attachment.IsRetiring || entry.IsTerminated)
+            return;
+        if (!string.Equals(update.SessionId, sessionId, StringComparison.Ordinal)
+            || !string.Equals(update.ProviderId.Value, entry.ProviderId.Value, StringComparison.Ordinal))
+        {
+            entry.OmittedUsageEvents = entry.OmittedUsageEvents == long.MaxValue ? long.MaxValue : entry.OmittedUsageEvents + 1;
+            return;
+        }
+        entry.UsageSequence = entry.UsageSequence == long.MaxValue ? long.MaxValue : entry.UsageSequence + 1;
+        entry.LastObservedUsage = SessionRuntimeUsageObservation.FromEvent(entry.UsageSequence, update);
     }
 
     private static bool IsQueueDrainTrigger(AgentEvent @event)
@@ -3559,6 +3612,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public EventProjector Projector { get; }
 
         public bool IsTerminated { get; private set; }
+
+        public SessionRuntimeUsageObservation? LastObservedUsage { get; set; }
+        public long UsageSequence { get; set; }
+        public long OmittedUsageEvents { get; set; }
 
         public AgentRunId? ActiveRunId { get; private set; }
 

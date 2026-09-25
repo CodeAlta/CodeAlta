@@ -93,6 +93,30 @@ does not create provider runtimes, probe models, start plugins, read credentials
 authority. Catalog-only startup returns an explicit unavailable/empty inventory. This is an M6
 presentation foundation, not provider account/model refresh, prompt/skill CRUD or plugin management.
 
+### Bounded last-observed usage (shared prerequisite only)
+
+`SessionRuntimeService.GetUsageStateAsync(sessionId, token)` uses the same admitted, non-creating
+existing-actor query as `GetCurrentStateAsync`. It returns runtime-instance/session/attachment
+identity and transition/retirement/termination status together with **one last observed typed
+usage event on that attachment**, never a provider probe, metadata lookup, history scan or
+catalog-derived limit. The existing attachment event path records a fixed-size projection only
+after projecting the event on the session actor; it accepts exact session/provider identity and
+the current non-retiring entry. Old callbacks cannot populate a replacement attachment.
+Transition, retirement and termination withhold the observation. No new subscription is opened.
+
+Window and operation fields are independently nullable; zero is retained when legitimately
+reported. Invalid negatives/nonfinite values and nonpositive context limits become unknown and
+set `HadInvalidValues`. Rate limits, model/operation labels, provider Details and nonprojected
+fields are discarded, flagged by `HadOmittedData` if supplied. Wrong-identity typed callbacks
+increment `OmittedUsageEvents` on the current attachment; events never admitted by forwarding
+cannot be counted. No fields are carried forward from earlier events, summed or inferred from
+catalog metadata. The usage-source timestamp and event timestamp are separate from the
+per-attachment actor-admission sequence, neither timestamp orders observations. A missing
+observation does not mean zero; a reported window need not describe current occupancy, and
+neither the sequence nor this query certifies completeness, recency or provider truth. Readers
+must fence host epoch, selection and exact runtime/session/attachment identity themselves.
+There is no Desktop RPC or popup for this prerequisite.
+
 ### Committed live display window (M4 foundation, not complete M4)
 
 `SessionRuntimeService.Display` exposes runtime-owned immutable renderer values. The runtime's
