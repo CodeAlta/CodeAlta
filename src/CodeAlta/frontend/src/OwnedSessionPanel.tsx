@@ -140,9 +140,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
   const canCaptureQueue = captureQueue(epoch, sessionId, observedTarget, queueText, "availability") !== null;
+  const availableComposerQueue = captureQueue(epoch, sessionId, observedTarget, text, "availability");
+  const observedQueueAttachment = captureQueue(epoch, sessionId, observedTarget, "x", "availability");
   const showSteering = showContextAction(captureSteering(epoch, sessionId, observedTarget, "x", "availability") !== null,
     !!pendingSteer || steerMessage !== "Refresh runtime state explicitly before targeting a run.");
-  const showQueue = showContextAction(captureQueue(epoch, sessionId, observedTarget, "x", "availability") !== null,
+  const showQueue = showContextAction(observedQueueAttachment !== null,
     !!pendingQueue || pendingQueueCancellations.length > 0 || queueMessage !== "Refresh runtime state explicitly before queueing text in this host.");
   useLayoutEffect(() => {
     const input = promptInput.current;
@@ -268,19 +270,25 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
         : `Exact cancellation: ${result.status}. Uncertain requests retain their original run and key. No automatic retry.`);
     });
   }
-  function queueTextInHost() {
+  function queueTextInHost(fromComposer: boolean) {
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = queue.pending(sessionId);
-    const request = retained?.request ?? captureQueue(epoch, sessionId, observedTarget, queueText, crypto.randomUUID());
+    // Only the secondary editor can explicitly retry its retained exact request.
+    if (fromComposer && (submissions.pending(sessionId) || retained)) return;
+    const request = retained?.request ?? captureQueue(epoch, sessionId, observedTarget, fromComposer ? text : queueText, crypto.randomUUID());
     if (!request || retained?.inFlight || !capability.canSubmit(request)) return;
     setQueueMessage("Owner reservation pending; host-only insertion and execution are not yet confirmed.");
+    if (fromComposer) setMessage("Owner queue reservation pending; composer draft retained.");
     void queue.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (result.status === "accepted" || result.status === "replay") {
-        setQueueText("");
-        setQueueMessage("Owner reservation accepted. Refresh submissions manually for host-only insertion and execution/cleanup; neither durability nor run completion is implied.");
+        if (!fromComposer) setQueueText("");
+        setQueueMessage(`Owner reservation accepted. Refresh submissions manually for host-only insertion and execution/cleanup; neither durability nor run completion is implied.${fromComposer ? " Composer draft is retained." : ""}`);
       } else setQueueMessage(`Queue: ${result.status}. Uncertain requests retain exact text, key and attachment. No automatic retry.`);
+      if (fromComposer) setMessage(result.status === "accepted" || result.status === "replay"
+        ? "Queue reservation accepted; composer draft retained. Host-only insertion, durability and execution are not confirmed. Refresh receipts manually."
+        : `Queue: ${result.status}. Composer draft retained. Review the exact queue request in the separate controls; no automatic retry.`);
     });
   }
   function cancelQueued(row?: SessionReceiptView, retainedOperationId?: string) {
@@ -359,6 +367,11 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
         aria-label="Steer current composer to observed run" aria-describedby="observed-steering-help"
         title={`Steer current composer to observed run ${observedSteerRun.expectedRunId} (Ctrl+Enter; point-in-time observation, not run completion; retained steering requires separate manual review)`}>
         <AppIcon name="steer" size={16} /></button>}
+      {observedQueueAttachment && <button type="button" className="composer-icon-button" onClick={() => queueTextInHost(true)}
+        disabled={invalidEpoch || !!pending || !!pendingQueue || !availableComposerQueue || !capability.canSubmit(availableComposerQueue)}
+        aria-label="Queue current composer in this host" aria-describedby="observed-queue-help"
+        title={`Queue current composer for observed attachment ${observedQueueAttachment.expectedAttachmentGeneration} in this host only; no run target. Reservation does not confirm insertion or execution; composer draft stays editable.`}>
+        <AppIcon name="queue" size={16} /></button>}
       {(availableCompact || pendingCompact) && <button ref={compactTrigger} type="button" className="composer-icon-button" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || !!pendingCompact?.inFlight || (pendingCompact
@@ -381,6 +394,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     </div>
     <span id="observed-run-cancellation-help" className="sr-only">Targets a point-in-time observed run, not the original Send receipt. Cancellation signalled does not confirm run completion. Retained requests are only retried manually against their original target after the previous wait settles.</span>
     <span id="observed-steering-help" className="sr-only">Uses current composer text and the point-in-time observed run. Admission is not run completion. Retained steering is reviewed or retried separately, never from this button.</span>
+    <span id="observed-queue-help" className="sr-only">Uses current editable composer text and the point-in-time observed attachment, including busy or draining attachments; never targets a run. Reservation does not prove host-only insertion, durability or execution. The composer draft is preserved. Retained queue requests are reviewed or retried separately, never from this button.</span>
     <span id="observed-compaction-help" className="sr-only">Point-in-time idle observation permits only an attempt; the provider must prove idle. Busy is a permanent outcome, not an automatic retry. Retained requests are retried manually against their original attachment after the previous wait settles.</span>
     {choicesNotice !== "Selections apply on Send; active runs and queued text are unchanged." && <p className="composer-notice" role={choicesNotice.includes("could not") || choicesNotice.includes("unavailable") ? "alert" : "status"}>{choicesNotice}
       {(choicesNotice.includes("could not") || choicesNotice.includes("unavailable")) && <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}>Retry choices</button>}</p>}
@@ -401,7 +415,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
       {showQueue && <div><label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => setQueueText(event.target.value)} /></label>
         <p className="detail">Reservation is not insertion, execution or durable storage. Refresh receipts manually.</p>
         {pendingQueue && <p className="detail">Retained attachment {pendingQueue.request.expectedAttachmentGeneration} · request {pendingQueue.request.clientRequestId}; no durable recovery or retargeting.</p>}
-        <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={queueTextInHost}>{pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}</button>
+        <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={() => queueTextInHost(false)}>{pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}</button>
         {pendingQueueCancellations.map(value => <div key={value.intent.request.targetOperationId}>
           <p className="detail">Retained cancellation · original operation {value.intent.request.targetOperationId} · request {value.intent.request.clientRequestId}</p>
           <button type="button" disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>Retry exact queued-operation cancellation</button>

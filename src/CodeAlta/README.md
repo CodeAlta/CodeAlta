@@ -536,8 +536,16 @@ and joins accepted compaction and cancellation work.
 **Queue text — this host only** uses an explicitly refreshed runtime/attachment observation, including
 busy/draining attachments. `sessions.queue` reserves exact text for that attachment only; the receipt
 separately reports reservation, host-only insertion and execution/cleanup. `queue_accepted` is not
-durable or executed, and `queue_dispatched` is not proof of run completion. **Cancel this queued
-operation** uses `sessions.cancelQueue` with the original operation ID, never a later/current run.
+durable or executed, and `queue_dispatched` is not proof of run completion. When the attachment is
+eligible, the compact composer also offers **Queue current composer in this host**. It captures
+the current editable draft for that observed attachment (idle or active, never a run target) using
+the same queue owner as the separate editor. A pending Send or retained queue request disables it;
+only the separate controls can manually retry the original queue key, attachment and text. The
+composer draft stays editable and is **not cleared by owner reservation**, because that reservation
+does not establish insertion, durability or execution; even newer draft edits are preserved. The
+secondary queue editor remains independent. Refresh receipts manually to inspect distinct phases.
+**Cancel this queued operation** uses `sessions.cancelQueue` with the original operation ID,
+never a later/current run.
 Cancellation signalling is not rollback or target cleanup completion. Uncertain queue/cancel intents
 retain exact keys and targets in App memory across selection/remount, with manual refresh/retry only
 and a combined 256-intent bound. Cancellation-only recovery preserves unrelated queue draft text.

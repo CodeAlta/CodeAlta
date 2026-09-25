@@ -12,14 +12,15 @@ import { createDraftIndicators } from "./promptDraft";
 import { dispatchWorkspaceShortcut, type ShortcutSession, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import type { SessionAbortRunRequest, SessionCompactRequest, SessionSteerRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
+import type { SessionAbortRunRequest, SessionCompactRequest, SessionSteerRequest, SessionQueueRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit operations"); };
 const epoch = "fixture-epoch";
 const sessionId = "fixture-session";
 let observedRun: string | null = null;
 let attachment = 12;
-let runtime = "fixture-runtime";
+const originalRuntime = "11111111-1111-4111-8111-111111111111";
+let runtime = originalRuntime;
 let hasEntry = false;
 let retiring = false;
 let transitioning = false;
@@ -34,8 +35,22 @@ let compactMode: "hold" | "busy" | "uncertain" = "hold";
 let settleCompact: ((value: SessionAdmission) => void) | undefined;
 let steerMode: "hold" | "uncertain" = "hold";
 let settleSteer: ((value: SessionAdmission) => void) | undefined;
+let queueMode: "hold" | "uncertain" = "hold";
+let settleQueue: ((value: SessionAdmission) => void) | undefined;
 const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
   steerCalls: [] as SessionSteerRequest[],
+  queueCalls: [] as SessionQueueRequest[],
+  queueMode(value: typeof queueMode) { queueMode = value; },
+  queuePending(id = currentSession) { return props.queue.pending(id); },
+  settleQueue(reply: "matching" | "mismatched" | "malformed" = "matching") {
+    const request = counts.queueCalls.at(-1)!;
+    settleQueue?.({ status: "accepted", epoch: request.expectedEpoch,
+      receipt: { kind: "Queue", clientRequestId: reply === "mismatched" ? "wrong-key" : request.clientRequestId,
+        sessionId: request.sessionId, operationId: "33333333-3333-4333-8333-333333333333", targetOperationId: null,
+        state: "pending", outcome: null, code: null, runId: null,
+        queueInsertion: reply === "malformed" ? null : { state: "pending", accepted: null, code: null } } });
+    settleQueue = undefined;
+  },
   steerMode(value: typeof steerMode) { steerMode = value; },
   settleSteer() {
     const request = counts.steerCalls.at(-1)!;
@@ -45,7 +60,7 @@ const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRu
         runId: request.expectedRunId, queueInsertion: null } });
     settleSteer = undefined;
   },
-  observe(run: string | null, generation = 12, instance = "fixture-runtime") {
+  observe(run: string | null, generation = 12, instance = originalRuntime) {
     observedRun = run; attachment = generation; runtime = instance; hasEntry = true;
   },
   flags(value: { retiring?: boolean; transitioning?: boolean; draining?: boolean }) {
@@ -111,13 +126,17 @@ const props = {
     if (abortMode === "fail") return { status: "busy", epoch: request.expectedEpoch, receipt: null };
     if (abortMode === "uncertain") throw new Error("fixture wait timed out");
     return new Promise(resolve => { settleAbort = resolve; });
-  }), queue: createQueueSubmissions(unavailable, unavailable),
+  }), queue: createQueueSubmissions(async request => {
+    counts.queueCalls.push(request);
+    if (queueMode === "uncertain") throw new Error("fixture queue waiter lost");
+    return new Promise(resolve => { settleQueue = resolve; });
+  }, unavailable),
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
   runtimeReader: createRuntimeStateReader(async request => {
     counts.refreshes++;
     return { status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
-      entry: hasEntry ? { attachmentGeneration: `gen-${attachment}`, activeRunId: observedRun,
+      entry: hasEntry ? { attachmentGeneration: String(attachment), activeRunId: observedRun,
         isRetiring: retiring, isTerminated: false, queueDrainInProgress: draining,
         providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null,
         reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null } : null,

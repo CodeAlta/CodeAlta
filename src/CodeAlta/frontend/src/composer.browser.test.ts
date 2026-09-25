@@ -153,12 +153,18 @@ test("mounted composer stays compact and its controls remain legible in both the
       "host availability without an observed run cannot expose cancellation");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false,
       "host availability without an observed run cannot expose steering");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false,
+      "host availability without an observed attachment cannot expose queueing");
     const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
       if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
       "host availability without an observed entry cannot imply idle");
     await evaluate(`window.fixture.observe(null, 12); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), true,
+      "an idle attachment with a valid identity permits a host-only queue attempt without a run");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')?.disabled`), true,
+      "empty text is not a queueable composer draft");
     for (const width of [390, 1120]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       for (const theme of ["dark", "light"]) {
@@ -200,17 +206,23 @@ test("mounted composer stays compact and its controls remain legible in both the
     await evaluate(`window.fixture.flags({retiring:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Attachment retiring') && el.nextElementSibling?.textContent === 'yes')`), "ready");
     assert.equal(await waitFor(`!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({transitioning:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls .detail')].some(el => el.textContent.includes('coordinator transition recorded: yes'))`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({draining:true}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls dt')].some(el => el.textContent.includes('Queue drain in progress') && el.nextElementSibling?.textContent === 'yes')`), "ready");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false);
+    assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), true,
+      "draining blocks idle compaction but permits an attachment-targeted queue attempt");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false);
     await evaluate(`window.fixture.flags({}); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), "ready",
+      "queueing is permitted with either idle or active observations");
     await evaluate(`(() => { const el = document.querySelector('.prompt-input');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'Draft for compaction');
       el.dispatchEvent(new Event('input', { bubbles: true })); window.fixture.compactMode('uncertain'); })()`);
@@ -218,12 +230,12 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]:not(:disabled)')`), "ready");
     assert.equal(await evaluate(`JSON.stringify(window.fixture.compactCalls[0])`),
       JSON.stringify({ expectedEpoch: "fixture-epoch", clientRequestId: await evaluate(`window.fixture.compactCalls[0].clientRequestId`),
-        sessionId: "fixture-session", expectedRuntimeInstanceId: "fixture-runtime", expectedAttachmentGeneration: "gen-12" }));
+        sessionId: "fixture-session", expectedRuntimeInstanceId: "11111111-1111-4111-8111-111111111111", expectedAttachmentGeneration: "12" }));
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Draft for compaction");
-    assert.equal(await evaluate(`document.querySelector('.composer-notice:not([role])')?.textContent.includes('gen-12')`), true);
+    assert.equal(await evaluate(`document.querySelector('.composer-notice:not([role])')?.textContent.includes('12')`), true);
     await evaluate(`window.fixture.observe('new-run', 13); document.querySelector('#refresh-session-context').click()`);
-    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-13'`), "ready");
-    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')?.title.includes('gen-12')`), true);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === '13'`), "ready");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]')?.title.includes('12')`), true);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), true,
       "a new observed run does not displace the older retained compaction target or cancellation control");
     for (const width of [390, 1120]) {
@@ -239,7 +251,7 @@ test("mounted composer stays compact and its controls remain legible in both the
       document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]').click()`);
     assert.equal(await evaluate(`window.fixture.compactCalls.length`), 2, "original waiter excludes repeated retry");
     assert.equal(await evaluate(`window.fixture.compactCalls[0].clientRequestId === window.fixture.compactCalls[1].clientRequestId &&
-      window.fixture.compactCalls[1].expectedAttachmentGeneration === 'gen-12'`), true);
+      window.fixture.compactCalls[1].expectedAttachmentGeneration === '12'`), true);
     assert.equal(await compactKey('#session-prompt'), false, "in-flight control cannot intercept Ctrl+F11");
     await evaluate(`window.fixture.switchSession('fixture-other')`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
@@ -250,7 +262,7 @@ test("mounted composer stays compact and its controls remain legible in both the
     await evaluate(`window.fixture.compactMode('busy'); document.querySelector('.composer-toolbar [aria-label^="Retry exact compaction"]').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.advanced-session-controls [role="status"]')].some(el => el.textContent.includes('busy'))`), "ready");
     assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice[role="status"]')].some(el => el.textContent.includes('busy') && el.textContent.includes('cannot be retried'))`), true);
-    assert.equal(await evaluate(`window.fixture.compactCalls[2].expectedAttachmentGeneration`), "gen-12");
+    assert.equal(await evaluate(`window.fixture.compactCalls[2].expectedAttachmentGeneration`), "12");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
       "busy ends the old intent but an active observation does not authorize a fresh attempt");
     await evaluate(`window.fixture.observe(null, 13); document.querySelector('#refresh-session-context').click()`);
@@ -298,7 +310,7 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`JSON.stringify((({text,expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId})=>
       ({text,expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}))(window.fixture.steerCalls[0]))`),
       JSON.stringify({text:"Toolbar instruction",expectedEpoch:"fixture-epoch",sessionId:"fixture-session",
-        expectedRuntimeInstanceId:"fixture-runtime",expectedAttachmentGeneration:"gen-12",expectedRunId:"run-one"}));
+        expectedRuntimeInstanceId:"11111111-1111-4111-8111-111111111111",expectedAttachmentGeneration:"12",expectedRunId:"run-one"}));
     await writePrompt("Edited after toolbar click");
     await evaluate(`window.fixture.settleSteer()`);
     assert.equal(await waitFor(`document.querySelector('#session-prompt').value === 'Edited after toolbar click' &&
@@ -311,7 +323,7 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(steerButton)})?.disabled`), true);
     await writePrompt("Newer independent draft");
     await evaluate(`window.fixture.observe('run-two',13); document.querySelector('#refresh-session-context').click()`);
-    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-13'`), "ready");
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === '13'`), "ready");
     assert.equal(await steerKey(), true);
     await evaluate(`document.querySelector(${JSON.stringify(steerButton)})?.click()`);
     assert.equal(await evaluate(`window.fixture.steerCalls.length`), 2, "retained steering never retries or retargets from composer");
@@ -333,11 +345,11 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.steerCalls.length`), 4);
     assert.equal(await evaluate(`JSON.stringify([window.fixture.steerCalls[3].text,window.fixture.steerCalls[3].expectedRunId,
       window.fixture.steerCalls[3].expectedAttachmentGeneration,window.fixture.steerCalls[3].clientRequestId !== window.fixture.steerCalls[1].clientRequestId])`),
-      '["Newer independent draft","run-two","gen-13",true]');
+      '["Newer independent draft","run-two","13",true]');
     await evaluate(`window.fixture.settleSteer()`);
     assert.equal(await waitFor(`document.querySelector('#session-prompt').value === ''`), "ready");
     await evaluate(`window.fixture.observe('run-one',12);document.querySelector('#refresh-session-context').click()`);
-    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-12'`), "ready");
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === '12'`), "ready");
     for (const width of [390, 1120]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
       for (const theme of ["dark", "light"]) {
@@ -366,14 +378,14 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`[...document.querySelectorAll('.composer-notice:not([role])')].some(el=>el.textContent.includes('run run-one'))`), true);
     assert.equal(await evaluate(`JSON.stringify(window.fixture.abortCalls.map(({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}) =>
       ({expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId})))`),
-      JSON.stringify([{ expectedEpoch: "fixture-epoch", sessionId: "fixture-session", expectedRuntimeInstanceId: "fixture-runtime",
-        expectedAttachmentGeneration: "gen-12", expectedRunId: "run-one" }]));
+      JSON.stringify([{ expectedEpoch: "fixture-epoch", sessionId: "fixture-session", expectedRuntimeInstanceId: "11111111-1111-4111-8111-111111111111",
+        expectedAttachmentGeneration: "12", expectedRunId: "run-one" }]));
     assert.match((await evaluate(`window.fixture.abortCalls[0].clientRequestId`))!, /^[0-9a-f-]{36}$/i);
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Keep this unsent text");
     await evaluate(`window.fixture.observe('run-two', 13); document.querySelector('#refresh-session-context').click()`);
-    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === 'gen-13'`), "ready");
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === '13'`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.getAttribute('aria-label').includes('run-one')`), true);
-    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.title.includes('gen-12')`), true);
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]')?.title.includes('12')`), true);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Send");
     await evaluate(`window.fixture.mode('hold'); document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click();
       document.querySelector('.composer-toolbar [aria-label^="Retry exact cancellation"]').click()`);
@@ -414,6 +426,103 @@ test("mounted composer stays compact and its controls remain legible in both the
       else if (Date.now() > end) resolve('missing'); else setTimeout(check, 25); }; check(); })`), "visible",
     "choice failure and explicit retry must remain visible outside advanced controls");
     assert.equal(await evaluate(`document.querySelector('.composer-notice[role="alert"] button')?.textContent`), "Retry choices");
+    const queueButton = '.composer-toolbar [aria-label="Queue current composer in this host"]';
+    const retryQueue = () => evaluate(`(() => {const b=[...document.querySelectorAll('.context-actions button')]
+      .find(el=>el.textContent.includes('Retry exact host-only queue request'));b?.click();return !!b;})()`);
+    await writePrompt("  ");
+    assert.equal(await waitFor(`document.querySelector(${JSON.stringify(queueButton)})?.disabled`), "ready");
+    await writePrompt("Queue exact first\n");
+    assert.equal(await waitFor(`!document.querySelector(${JSON.stringify(queueButton)})?.disabled`), "ready");
+    await evaluate(`(() => {const el=[...document.querySelectorAll('.context-actions label')]
+      .find(x=>x.textContent.includes('Host-only queued text')).querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'Separate secondary queue text');
+      el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        const layout = await sample();
+        const icon = JSON.parse((await evaluate(`JSON.stringify((() => {const b=document.querySelector(${JSON.stringify(queueButton)}),s=getComputedStyle(b);
+          b.focus();return {label:b.getAttribute('aria-label'),description:document.getElementById(b.getAttribute('aria-describedby'))?.textContent,
+            title:b.title,svg:!!b.querySelector('svg[aria-hidden="true"]'),color:s.color,background:s.backgroundColor,
+            outline:getComputedStyle(b).outlineStyle};})())`))!) as
+          {label:string;description:string;title:string;svg:boolean;color:string;background:string;outline:string};
+        assert.equal(icon.label, "Queue current composer in this host");
+        assert.ok(icon.title.includes('attachment 13') && icon.description.includes('never targets a run') && icon.svg && icon.outline === "solid");
+        assert.ok(contrast(icon.color, icon.background) >= 4.5, `${width}/${theme} queue contrast: ${JSON.stringify(icon)}`);
+        assert.ok(layout.pageWidth <= layout.viewWidth + 2 && layout.panelScrollWidth <= layout.panelWidth + 2
+          && layout.toolbar <= (width === 390 ? 100 : 80), `${width}/${theme} queue toolbar overflow: ${JSON.stringify(layout)}`);
+      }
+    }
+    const queueReads = await evaluate(`window.fixture.refreshes`);
+    await evaluate(`(() => {const b=document.querySelector(${JSON.stringify(queueButton)});b.click();b.click();})()`);
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 1, "the real queue owner excludes synchronous duplicate clicks");
+    assert.equal(await evaluate(`window.fixture.refreshes`), queueReads, "toolbar does not refresh runtime state or provider choices");
+    assert.equal(await evaluate(`JSON.stringify((({text,expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId})=>
+      ({text,expectedEpoch,sessionId,expectedRuntimeInstanceId,expectedAttachmentGeneration,expectedRunId}))(window.fixture.queueCalls[0]))`),
+      JSON.stringify({text:"Queue exact first\n",expectedEpoch:"fixture-epoch",sessionId:"fixture-session",
+        expectedRuntimeInstanceId:"11111111-1111-4111-8111-111111111111",expectedAttachmentGeneration:"13"}),
+      "queue targets the exact attachment; it must not invent a run target");
+    assert.equal(await evaluate(`Object.isFrozen(window.fixture.queuePending().request)`), true);
+    await writePrompt("Edited after reservation");
+    await evaluate(`window.fixture.settleQueue()`);
+    assert.equal(await waitFor(`!document.querySelector(${JSON.stringify(queueButton)})?.disabled`), "ready");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Edited after reservation",
+      "accepted owner reservation cannot clear an edited composer draft");
+    assert.equal(await evaluate(`document.querySelector('.composer-notice[role="status"]')?.textContent.includes('insertion, durability and execution are not confirmed')`), true);
+    assert.equal(await evaluate(`[...document.querySelectorAll('.context-actions label')].find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value`),
+      "Separate secondary queue text", "the secondary queue editor is independent of composer queueing");
+    await evaluate(`document.querySelector(${JSON.stringify(queueButton)}).focus(); window.fixture.queueMode('uncertain')`);
+    await command("Page.bringToFront");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await waitFor(`!!window.fixture.queuePending() && !window.fixture.queuePending().inFlight`), "ready");
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 2);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.disabled`), true);
+    await writePrompt("Newer independent queue draft");
+    await evaluate(`window.fixture.observe(null,14);document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`document.querySelector('.advanced-session-controls dd')?.textContent === '14'`), "ready");
+    await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.click()`);
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 2, "toolbar cannot retry or retarget retained uncertainty");
+    await evaluate(`window.fixture.switchSession('fixture-other')`);
+    assert.equal(await waitFor(`!!document.querySelector('#session-prompt')`), "ready");
+    assert.equal(await evaluate(`!!window.fixture.queuePending()`), false);
+    await evaluate(`window.fixture.switchSession('fixture-session')`);
+    assert.equal(await waitFor(`!!window.fixture.queuePending()`), "ready");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
+    await evaluate(`window.fixture.queueMode('hold')`);
+    assert.equal(await retryQueue(), true);
+    await retryQueue();
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 3);
+    assert.equal(await evaluate(`window.fixture.queueCalls[2].clientRequestId === window.fixture.queueCalls[1].clientRequestId &&
+      window.fixture.queueCalls[2].expectedAttachmentGeneration === '13' && window.fixture.queueCalls[2].text === 'Edited after reservation'`), true);
+    await evaluate(`window.fixture.settleQueue('mismatched')`);
+    assert.equal(await waitFor(`!!window.fixture.queuePending() && !window.fixture.queuePending().inFlight`), "ready",
+      "mismatched accepted receipt cannot clear retained intent");
+    assert.equal(await retryQueue(), true);
+    await evaluate(`window.fixture.settleQueue()`);
+    assert.equal(await waitFor(`!window.fixture.queuePending()`), "ready");
+    assert.equal(await evaluate(`window.fixture.queueCalls[3].clientRequestId === window.fixture.queueCalls[1].clientRequestId &&
+      window.fixture.queueCalls[3].text === 'Edited after reservation'`), true);
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
+    await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.click()`);
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 5);
+    assert.equal(await evaluate(`JSON.stringify([window.fixture.queueCalls[4].text,window.fixture.queueCalls[4].expectedAttachmentGeneration,
+      window.fixture.queueCalls[4].clientRequestId !== window.fixture.queueCalls[1].clientRequestId])`),
+      '["Newer independent queue draft","14",true]');
+    await evaluate(`window.fixture.settleQueue('malformed')`);
+    assert.equal(await waitFor(`!!window.fixture.queuePending() && !window.fixture.queuePending().inFlight`), "ready",
+      "a malformed reservation receipt is not confirmation and retains the original request");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.disabled`), true);
+    await retryQueue();
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 6);
+    assert.equal(await evaluate(`window.fixture.queueCalls[5].clientRequestId === window.fixture.queueCalls[4].clientRequestId &&
+      window.fixture.queueCalls[5].expectedAttachmentGeneration === '14'`), true);
+    await evaluate(`window.fixture.settleQueue()`);
+    assert.equal(await waitFor(`!window.fixture.queuePending()`), "ready");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
+    await evaluate(`window.fixture.observe('run-two',14);document.querySelector('#refresh-session-context').click()`);
+    assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
     await evaluate(`window.fixture.retainSend('Pending exact Send text')`);
     assert.equal(await waitFor(`document.querySelector('.composer-toolbar .send-button')?.textContent === 'Retry exact request'`), "ready");
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
@@ -421,17 +530,24 @@ test("mounted composer stays compact and its controls remain legible in both the
       "pending exact Send recovery does not disappear when observed-run cancellation is available");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')?.disabled`), true,
       "the retained Send text shown in a disabled editor is not an editable steering draft");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.disabled`), true,
+      "pending Send recovery is never editable queue text");
+    const queueCount = await evaluate(`window.fixture.queueCalls.length`);
+    await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.click()`);
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), queueCount);
     await evaluate(`window.fixture.observe(null, 13); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar .send-button')?.textContent`), "Retry exact request",
       "eligible compaction cannot hide exact Send recovery");
     assert.equal(await evaluate(`document.querySelector('.prompt-input').value`), "Pending exact Send text");
-    await evaluate(`window.fixture.observe('run-three', 14, 'replacement-runtime'); document.querySelector('#refresh-session-context').click()`);
+    await evaluate(`window.fixture.observe('run-three', 14, '22222222-2222-4222-8222-222222222222'); document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`[...document.querySelectorAll('.owned-session [role="alert"]')].some(el => el.textContent.includes('Reload required'))`), "ready");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]') === null`), true,
       "stale runtime identity cannot authorize another observed-run action");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]') === null`), true,
       "stale runtime identity cannot authorize an idle compaction attempt");
+    await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.click()`);
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), queueCount, "stale runtime/capability cannot dispatch queueing");
     const steerCount = await evaluate(`window.fixture.steerCalls.length`);
     await evaluate(`document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')?.click()`);
     assert.equal(await evaluate(`window.fixture.steerCalls.length`), steerCount,
@@ -449,6 +565,7 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(Number(await evaluate("window.fixture.catalogOpens")), 1, "catalog-only context chord retains its provider-configuration action");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer current composer to observed run"]')`), false,
       "catalog-only view never exposes owned steering");
+    assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(queueButton)})`), false);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 999, method: "Browser.close" }));
     socket?.close();
