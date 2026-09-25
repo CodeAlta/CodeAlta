@@ -182,9 +182,17 @@ and Enter or click a row. It uses deterministic name order, **not** last-active 
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
-can also navigate saved projects read-only. Missing, changed, duplicated, omitted and unreadable
-entries cannot be opened from a stale list. The separate absolute-folder field still requires an
-owned host, preview and explicit trust confirmation to import an arbitrary existing directory.
+can also navigate saved projects read-only. In an owned host, if the *current* project becomes
+archived after an action was captured, its exact pending/uncertain Send, Steer, host-only Queue,
+compaction, observed-run cancellation and Abort/cancel-Queue intents remain visible in a
+read-only recovery card for the same unique project path, session and host epoch. The Reminders
+view likewise retains exact pending/uncertain Save evidence while disabling Create, Save,
+Delete and panel shortcuts. Neither card sends, retries or retargets an operation; a late
+definite outcome can remove an owner intent. Drafts remain local to the read-only composer,
+and this does not persist recovery across app reloads. Missing, changed, duplicated, omitted
+and unreadable entries cannot be opened from a stale list. The separate absolute-folder field
+still requires an owned host, preview and explicit trust confirmation to import an arbitrary
+existing directory.
 If Refresh projects fails, saved selection pauses until a successful refresh.
 During an admitted import, its original host epoch, requested/verified paths and pending or
 uncertain outcome remain visible when Open project is closed and reopened. Saved selection and

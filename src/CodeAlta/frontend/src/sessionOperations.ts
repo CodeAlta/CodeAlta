@@ -1,4 +1,5 @@
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest, SessionSelection } from "#neoastra";
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 export type SubmissionResult = SessionAdmission | { status: "uncertain"; epoch: string; receipt: null };
@@ -130,8 +131,10 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
   invokeAbort: (request: SessionAbortRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const sends = new Map<string, PendingSend>();
   const aborts = new Map<string, PendingAbort>();
+  const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     pending(sessionId: string) {
       const entry = sends.get(sessionKey(sessionId));
       return entry ? Object.freeze({ request: entry.request, inFlight: entry.inFlight }) : undefined;
@@ -158,6 +161,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
           aborts.delete(operation); recovered.abortsRecovered++;
         }
       }
+      if (recovered.sendRecovered || recovered.abortsRecovered) change.changed();
       return recovered;
     },
     async submit(request: SessionSendRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -171,6 +175,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
         sends.set(key, entry);
       }
       entry.inFlight = true; // Synchronous ownership precedes transport, not a React render-time guard.
+      change.changed();
       const captured = entry.request;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
       try {
@@ -182,7 +187,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
           }
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.expectedEpoch, receipt: null };
       } catch { /* Transport failure/cancellation is not non-admission. Preserve exact uncertainty. */ }
-      finally { entry.inFlight = false; entry.waiter = undefined; }
+      finally { entry.inFlight = false; entry.waiter = undefined; change.changed(); }
       if (!signal.aborted) publish(result);
     },
     async abort(intent: AbortIntent, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -198,6 +203,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
         aborts.set(key, entry);
       }
       entry.inFlight = true;
+      change.changed();
       const captured = entry.intent;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.request.expectedEpoch, receipt: null };
       try {
@@ -209,7 +215,7 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
           }
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.request.expectedEpoch, receipt: null };
       } catch { /* Keep the original operation/key/session; never retarget cancellation. */ }
-      finally { entry.inFlight = false; entry.waiter = undefined; }
+      finally { entry.inFlight = false; entry.waiter = undefined; change.changed(); }
       if (!signal.aborted) publish(result);
     },
   };

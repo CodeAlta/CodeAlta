@@ -1,5 +1,6 @@
 import type { SessionAdmission, SessionCompactRequest, SessionReceiptPage, SessionReceiptView, SessionRuntimeStateResponse } from "#neoastra";
 import type { createMutationCapability, SubmissionResult } from "./sessionOperations";
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -23,8 +24,10 @@ function matches(request: SessionCompactRequest, row: SessionReceiptView): boole
 // App-owned bounded retention survives selection loss/remount. No automatic retry or refresh.
 export function createCompactionSubmissions(invoke: (request: SessionCompactRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const pending = new Map<string, Pending>();
+  const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     pending(sessionId: string): Readonly<Pending> | undefined {
       const value = pending.get(sessionKey(sessionId));
       return value ? Object.freeze({ ...value }) : undefined;
@@ -36,6 +39,7 @@ export function createCompactionSubmissions(invoke: (request: SessionCompactRequ
       if (!entry || entry.inFlight || !capability.canSubmit(entry.request) || page.status !== "ok"
         || page.epoch !== entry.request.expectedEpoch || !page.rows.some(row => matches(entry.request, row))) return false;
       pending.delete(key);
+      change.changed();
       return true;
     },
     async submit(request: SessionCompactRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -49,6 +53,7 @@ export function createCompactionSubmissions(invoke: (request: SessionCompactRequ
         pending.set(key, entry);
       }
       entry.inFlight = true; // Synchronous before transport invocation, independent of React renders.
+      change.changed();
       const retained = entry;
       const captured = retained.request;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
@@ -68,6 +73,7 @@ export function createCompactionSubmissions(invoke: (request: SessionCompactRequ
         // A lost response cannot prove non-admission. Only exact explicit retry or receipt reconciliation releases it.
       } finally {
         retained.inFlight = false;
+        change.changed();
       }
       if (!signal.aborted) publish(result);
     },

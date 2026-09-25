@@ -1,5 +1,6 @@
 import type { SessionAdmission, SessionCancelQueueRequest, SessionQueueRequest, SessionReceiptPage, SessionReceiptView, SessionRuntimeStateResponse } from "#neoastra";
 import type { createMutationCapability, SubmissionResult } from "./sessionOperations";
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -128,8 +129,10 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
   invokeCancel: (request: SessionCancelQueueRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const queues = new Map<string, Pending>();
   const cancellations = new Map<string, PendingCancel>();
+  const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     pending(sessionId: string): Readonly<Pending> | undefined {
       const entry = queues.get(sessionKey(sessionId)); return entry ? Object.freeze({ ...entry }) : undefined;
     },
@@ -152,6 +155,7 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
           cancellations.delete(operation); recovered.cancellationsRecovered++;
         }
       }
+      if (recovered.queueRecovered || recovered.cancellationsRecovered) change.changed();
       return recovered;
     },
     async submit(request: SessionQueueRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -163,6 +167,7 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
         entry = { request: Object.freeze({ ...request }), inFlight: false }; queues.set(key, entry);
       }
       entry.inFlight = true;
+      change.changed();
       const captured = entry.request;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
       try {
@@ -173,7 +178,7 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
           }
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.expectedEpoch, receipt: null };
       } catch { /* Transport loss is not proof of non-admission. Retain the exact request. */ }
-      finally { entry.inFlight = false; }
+      finally { entry.inFlight = false; change.changed(); }
       if (!signal.aborted) publish(result);
     },
     async cancel(intent: CancelIntent, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -187,6 +192,7 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
         cancellations.set(key, entry);
       }
       entry.inFlight = true;
+      change.changed();
       const captured = entry.intent;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.request.expectedEpoch, receipt: null };
       try {
@@ -197,7 +203,7 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
           }
         } else if (!signal.aborted && !capability.canMutate()) result = { status: "stale_epoch", epoch: captured.request.expectedEpoch, receipt: null };
       } catch { /* The original target/key/session survives uncertain cancellation. */ }
-      finally { entry.inFlight = false; }
+      finally { entry.inFlight = false; change.changed(); }
       if (!signal.aborted) publish(result);
     },
   };

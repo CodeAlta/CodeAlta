@@ -10,11 +10,13 @@ import {
 import { loadWorkspace, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
+import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { PromptCatalogPanel } from "./PromptCatalogPanel";
 import { McpServersPanel } from "./McpServersPanel";
-import { ReminderPanel } from "./ReminderPanel";
+import { archivedProjectScope, ReminderScopeGate, SessionComposerGate } from "./ArchivedScopeGates";
+import { ArchivedActionRecovery } from "./ArchivedActionRecovery";
 import { createReminderActions } from "./reminderActions";
 import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
@@ -37,7 +39,7 @@ import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePositi
 import type { ShortcutAction } from "./shortcuts";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
-import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
+import { createDraftIndicators } from "./promptDraft";
 import { SessionDraftBadge } from "./SessionDraftBadge";
 import { collapsedSessionWidth, constrainPaneLayout, defaultPaneLayout, persistPaneLayout, resizeCollapsedSessionPane, resizePane, restorePaneLayout, type PaneName } from "./paneLayout";
 import { visibleConfigurationSections, type ConfigurationScope } from "./configurationSections";
@@ -391,7 +393,7 @@ function App() {
         selectedProjectFocused: focusedProject, infoTrigger: sessionInfoTrigger.current,
         reminderTrigger: remindersTrigger.current, compactTrigger: compactTrigger.current,
         infoSelection,
-        selection: owned && status?.hostEpoch && infoSelection ? { epoch: status.hostEpoch, ...infoSelection } : null,
+        selection: owned && currentProjectWritable() && status?.hostEpoch && infoSelection ? { epoch: status.hostEpoch, ...infoSelection } : null,
         messageAvailable: !!infoSelection && timelineCommand.current?.sessionId === infoSelection.sessionId
           && timelineCommand.current.projectId === infoSelection.projectId
           && timelineCommand.current.epoch === (status?.hostEpoch ?? null) && timelineCommand.current.ready(),
@@ -424,7 +426,7 @@ function App() {
       const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
         selectedSessionId.current, selectedScope.current);
       const trigger = compactTrigger.current;
-      if (view === "workspace" && owned && status?.hostEpoch && mutation?.capability.canMutate()
+      if (view === "workspace" && owned && currentProjectWritable() && status?.hostEpoch && mutation?.capability.canMutate()
         && selection && trigger?.isConnected && !trigger.disabled
         && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
         && trigger.dataset.projectId === (selection.projectId ?? "")) trigger.click();
@@ -870,10 +872,9 @@ function App() {
       : view === "mcp" ? <McpServersPanel target={owned && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch!, projectId: selectedSession.projectId ?? null } : null}
           read={mcpInventory.list} />
-      : view === "reminders" ? <ReminderPanel key={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-          ? JSON.stringify([status!.hostEpoch, selectedSession.id]) : "none"}
-          target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
-          ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
+      : view === "reminders" ? <ReminderScopeGate snapshot={snapshot} projectId={projectId}
+          session={selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId ? selectedSession : undefined}
+          epoch={owned && (currentProjectWritable() || !!snapshot && archivedProjectScope(snapshot, projectId)) ? status!.hostEpoch! : null}
           read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
           canMutate={() => !!mutation?.capability.canMutate()} />
       : view === "prompts" ? <PromptCatalogPanel epoch={owned ? status!.hostEpoch : null} readPrompts={promptCatalog.list}
@@ -1174,8 +1175,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   const observedDisplay = useSyncExternalStore(display.subscribe, display.getSnapshot);
   const live = status?.hostEpoch && observedDisplay.hostEpoch === status.hostEpoch && observedDisplay.sessionId === session.id
     ? observedDisplay : null;
-  const archivedScope = selectedProjectId !== null && snapshot.projects.some(project => project.id === selectedProjectId && project.archived);
-  const ownedSession = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch && !archivedScope);
+  const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
+  const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const ownedSession = ownedHost && !archivedScope;
   return <div className="session-workspace">
     <header className="session-header">
       <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
@@ -1208,11 +1210,14 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible"}</button>}
         {messageNotice && <p role="status" className="detail timeline-navigation-notice">{messageNotice}</p>}
-        {ownedSession && status?.hostEpoch
-          ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
-              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} />
-          : <ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
+        <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
+          epoch={ownedHost ? status!.hostEpoch! : null}
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} /> : null}
+          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
               reason={archivedScope ? "Archived project; this session is read-only. Your draft remains saved." : undefined} />}
+          recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
+            steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} /> : null} />
       </>}
   </div>;
 }
@@ -1331,37 +1336,6 @@ function EmptyWorkspace({ workspaceState }: { workspaceState: WorkspaceState }) 
 function SessionTime({ value, now }: { value: string; now: number }) {
   const { label, title, dateTime } = sessionTime(value, now);
   return <time dateTime={dateTime} title={title}>{label}</time>;
-}
-
-function ReadOnlyComposer({ sessionId, provider, configuration, onOpenConfiguration, draftIndicators, reason }: {
-  sessionId: string; provider: string | null; configuration?: ConfigurationSnapshot; onOpenConfiguration: () => void;
-  draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
-}) {
-  const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
-  const text = draft.text;
-  const restoredText = useRef(text);
-  useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
-  const [message, setMessage] = useState(reason ?? "Draft locally; sending requires an explicitly owned desktop host.");
-  useEffect(() => { setMessage(reason ?? "Draft locally; sending requires an explicitly owned desktop host."); }, [reason]);
-  useEffect(() => { draftIndicators.persisted(sessionId, draft.editGeneration,
-    persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
-  }, [sessionId, draft, draftIndicators]);
-  return <section className="composer catalog-composer" aria-label="Message composer">
-    <div className="prompt-options" aria-label="Session configuration">
-      <label><span>Agent prompt</span><select aria-label="Agent prompt" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
-      <label><span>Model</span><select aria-label="Model" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
-      <label><span>Reasoning</span><select aria-label="Reasoning" value="recorded" disabled><option value="recorded">Recorded by session</option></select></label>
-      <button type="button" className="prompt-state" onClick={onOpenConfiguration} aria-label="Open provider configuration" title={provider ?? "Provider not recorded"}><AppIcon name="settings" size={13} /><strong>{configuration?.providers.length ?? 0} providers</strong></button>
-      <span className="prompt-state"><span>Context / MCP</span><strong>Requires runtime</strong></span>
-    </div>
-    <textarea id="catalog-prompt" aria-label="Message" maxLength={32768} value={text} onChange={event => {
-      const value = event.target.value;
-      setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
-    }}
-      onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); setMessage(reason ?? "This explicit catalog-only launch is read-only; your draft remains saved."); } }}
-      placeholder="Draft a prompt for this session…" />
-    <div className="composer-footer"><span role="status">{message}</span><button type="button" disabled={!text.trim()} onClick={() => setMessage(reason ?? "This explicit catalog-only launch is read-only; your draft remains saved.")}>Send <AppIcon name="send" size={14} /></button></div>
-  </section>;
 }
 
 function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {

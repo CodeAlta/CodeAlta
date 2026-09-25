@@ -1,5 +1,6 @@
 import type { SessionAbortRunRequest, SessionAdmission, SessionReceiptPage, SessionReceiptView, SessionRuntimeStateResponse } from "#neoastra";
 import type { createMutationCapability, SubmissionResult } from "./sessionOperations";
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -23,8 +24,10 @@ function matches(request: SessionAbortRunRequest, row: SessionReceiptView): bool
 // App-owned bounded uncertainty/latches survive panel remount. No background reader, retry or retargeting.
 export function createAbortRunSubmissions(invoke: (request: SessionAbortRunRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const pending = new Map<string, Pending>();
+  const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     pending(sessionId: string): Readonly<Pending> | undefined {
       const value = pending.get(sessionKey(sessionId));
       return value ? Object.freeze({ ...value }) : undefined;
@@ -36,6 +39,7 @@ export function createAbortRunSubmissions(invoke: (request: SessionAbortRunReque
       if (!entry || entry.inFlight || !capability.canSubmit(entry.request) || page.status !== "ok"
         || page.epoch !== entry.request.expectedEpoch || !page.rows.some(row => matches(entry.request, row))) return false;
       pending.delete(key);
+      change.changed();
       return true;
     },
     async submit(request: SessionAbortRunRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -49,6 +53,7 @@ export function createAbortRunSubmissions(invoke: (request: SessionAbortRunReque
         pending.set(key, entry);
       }
       entry.inFlight = true; // Synchronous exclusion, before invoking transport or yielding.
+      change.changed();
       const retained = entry;
       const captured = retained.request;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
@@ -68,6 +73,7 @@ export function createAbortRunSubmissions(invoke: (request: SessionAbortRunReque
         // Wait cancellation/timeout is not proof of non-admission. Keep every immutable target field.
       } finally {
         retained.inFlight = false;
+        change.changed();
       }
       if (!signal.aborted) publish(result);
     },

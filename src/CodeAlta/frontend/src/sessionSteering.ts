@@ -1,5 +1,6 @@
 import type { SessionAdmission, SessionReceiptPage, SessionReceiptView, SessionRuntimeStateResponse, SessionSteerRequest } from "#neoastra";
 import type { createMutationCapability, SubmissionResult } from "./sessionOperations";
+import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -24,8 +25,10 @@ function matches(request: SessionSteerRequest, row: SessionReceiptView): boolean
 // There is no background reader or automatic retry. A live waiter keeps its latch until it settles.
 export function createSteeringSubmissions(invoke: (request: SessionSteerRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const pending = new Map<string, Pending>();
+  const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
   return {
+    subscribe: change.subscribe, getSnapshot: change.getSnapshot,
     pending(sessionId: string): Readonly<Pending> | undefined {
       const value = pending.get(sessionKey(sessionId));
       return value ? Object.freeze({ ...value }) : undefined;
@@ -37,6 +40,7 @@ export function createSteeringSubmissions(invoke: (request: SessionSteerRequest,
       if (!entry || entry.inFlight || !capability.canSubmit(entry.request) || page.status !== "ok"
         || page.epoch !== entry.request.expectedEpoch || !page.rows.some(row => matches(entry.request, row))) return false;
       pending.delete(key);
+      change.changed();
       return true;
     },
     async submit(request: SessionSteerRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
@@ -51,6 +55,7 @@ export function createSteeringSubmissions(invoke: (request: SessionSteerRequest,
         pending.set(key, entry);
       }
       entry.inFlight = true; // Before invoking transport or yielding, not a React render-time guard.
+      change.changed();
       const retained = entry;
       const captured = retained.request;
       let result: SubmissionResult = { status: "uncertain", epoch: captured.expectedEpoch, receipt: null };
@@ -71,6 +76,7 @@ export function createSteeringSubmissions(invoke: (request: SessionSteerRequest,
         // Cancellation/timeout or transport failure is not non-admission; retain every target/text field.
       } finally {
         retained.inFlight = false;
+        change.changed();
       }
       if (!signal.aborted) publish(result);
     },

@@ -3,9 +3,10 @@ import type { ReminderDetailRequest, ReminderDetailResponse, ReminderListRequest
 import type { ReminderTarget, createReminderActions } from "./reminderActions";
 import { reminderDelaySeconds } from "./reminderDuration";
 
-export function ReminderPanel({ target, read, readDetail, actions, mutationAllowed, canMutate }: {
+export function ReminderPanel({ target, read, readDetail, actions, mutationAllowed, canMutate, readOnly = false }: {
   target: ReminderTarget | null;
   mutationAllowed: boolean;
+  readOnly?: boolean;
   canMutate: () => boolean;
   read: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
   readDetail: (request: ReminderDetailRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderDetailResponse>;
@@ -189,7 +190,9 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
       <p>Delayed prompts for the selected session. Schedules are in memory only and are lost when the host stops.
         At firing, the owned host attempts one Send; busy, unavailable or failed sends are not retried. Completion means the attempt finished, not that the agent answered.</p></header>
     {!target ? <p role="status">Select an owned session to manage its reminders.</p> : <>
-      {!mutationAllowed && <p role="alert">Host identity is invalidated. Reload before changing reminders.</p>}
+      {!mutationAllowed && <p role="alert">{readOnly
+        ? "Archived project is read-only. Retained evidence can be inspected, but no Save, Create, Delete or shortcut write is available."
+        : "Host identity is invalidated. Reload before changing reminders."}</p>}
       <p>Session: <code>{target.sessionId}</code>.</p>
       <button ref={refreshTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
         onClick={() => setReload(n => n + 1)}>Refresh reminders</button>
