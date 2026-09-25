@@ -262,17 +262,40 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await evaluate("JSON.stringify(window.reminderFixture.writes[3].request)"),
       JSON.stringify({ expectedEpoch: "e2", sessionId: "one", reminderId: "reminder-2", editRevision: "0", content: "unsaved full message" }));
     assert.equal(await evaluate("document.querySelector('#reminder-edit').disabled"), true);
+    const pendingRead = Number(await evaluate("window.reminderFixture.reads.length"));
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${pendingRead}`), "ready");
+    await evaluate("window.reminderFixture.reads.at(-1).reject(new Error('private list error'))");
+    assert.equal(await wait("document.body.innerText.includes('Reminder list could not be read')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre')?.textContent"), "unsaved full message");
+    assert.equal(await evaluate("JSON.stringify([...document.querySelectorAll('[aria-label=\"Retained reminder Save\"] code')].map(node=>node.textContent))"),
+      JSON.stringify(["e2", "one", "reminder-2", "0"]));
+    await command("Emulation.setDeviceMetricsOverride", { width: 375, height: 700, deviceScaleFactor: 1, mobile: false });
+    for (const theme of ["light", "dark"]) {
+      await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+      assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true);
+      assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre')?.textContent"), "unsaved full message");
+    }
+    await command("Emulation.clearDeviceMetricsOverride");
     await evaluate("window.reminderFixture.session('two')");
     assert.equal(await wait("window.reminderFixture.reads.length >= 1 && document.body.innerText.includes('Loading reminders')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"Retained reminder Save\"]')"), false);
+    assert.doesNotMatch((await evaluate("document.body.innerText"))!, /unsaved full message/);
     await evaluate("window.reminderFixture.writes[3].resolve({status:'ok',epoch:'e2',sessionId:'one',reminderId:'wrong-id'})");
     await evaluate("window.reminderFixture.session('one')");
     const readsNow = Number(await evaluate("window.reminderFixture.reads.length"));
-    await evaluate(`window.reminderFixture.reads[${readsNow - 1}].resolve(${list("one", row).replace("epoch:'e1'", "epoch:'e2'")})`);
+    await evaluate(`window.reminderFixture.reads[${readsNow - 1}].reject(new Error('private list error'))`);
     assert.equal(await wait("document.body.innerText.includes('Admission is uncertain')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] pre')?.textContent"), "unsaved full message");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained reminder Save\"] h2')?.textContent"), "Uncertain reminder Save");
+    assert.equal(await evaluate("JSON.stringify([...document.querySelectorAll('[aria-label=\"Retained reminder Save\"] code')].map(node=>node.textContent))"),
+      JSON.stringify(["e2", "one", "reminder-2", "0"]));
     assert.equal(await evaluate("window.reminderFixture.writes[3].request.content"), "unsaved full message");
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 4);
     await evaluate("window.reminderFixture.host('e3')");
     assert.equal(await wait("document.body.innerText.includes('Loading reminders')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"Retained reminder Save\"]')"), false);
+    assert.doesNotMatch((await evaluate("document.body.innerText"))!, /unsaved full message/);
     await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", row).replace("epoch:'e1'", "epoch:'e3'")})`);
     assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminder list\"] button')"), "ready");
     await evaluate(`document.querySelector('[aria-label="Reminder list"] button').click()`);
@@ -297,17 +320,35 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await wait("window.reminderFixture.writes.length === 6"), "ready");
     await evaluate("window.reminderFixture.writes[5].resolve({status:'conflict',epoch:'e3',sessionId:'one',reminderId:null})");
     assert.equal(await wait("document.body.innerText.includes('draft is retained')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "conflicting draft");
     assert.equal(await evaluate("window.reminderFixture.writes[5].request.editRevision"), "1");
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 6);
+    const conflictRead = Number(await evaluate("window.reminderFixture.reads.length"));
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${conflictRead}`), "ready");
+    await evaluate("window.reminderFixture.reads.at(-1).reject(new Error('private list error'))");
+    assert.equal(await wait("document.body.innerText.includes('Reminder list could not be read')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "conflicting draft");
     const beforeConflictRefresh = Number(await evaluate("window.reminderFixture.reads.length"));
     await evaluate("document.querySelector('.reminder-page > button').click()");
     assert.equal(await wait(`window.reminderFixture.reads.length > ${beforeConflictRefresh}`), "ready");
     const beforeConflictDetail = Number(await evaluate("window.reminderFixture.details.length"));
     await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", row).replace("epoch:'e1'", "epoch:'e3'")})`);
     assert.equal(await wait(`window.reminderFixture.details.length > ${beforeConflictDetail}`), "ready");
+    await evaluate("window.reminderFixture.details.at(-1).reject(new Error('private detail error'))");
+    assert.equal(await wait("document.body.innerText.includes('detail could not be read')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "conflicting draft");
+    const retryRead = Number(await evaluate("window.reminderFixture.reads.length"));
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${retryRead}`), "ready");
+    const retryDetail = Number(await evaluate("window.reminderFixture.details.length"));
+    await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", row).replace("epoch:'e1'", "epoch:'e3'")})`);
+    assert.equal(await wait(`window.reminderFixture.details.length > ${retryDetail}`), "ready");
     await evaluate(`window.reminderFixture.details.at(-1).resolve({status:'ok',epoch:'e3',sessionId:'one',reminderId:'reminder-1',
       content:'another writer',delaySeconds:60,repeatCount:1,editRevision:'2'})`);
     assert.equal(await wait("document.querySelector('#reminder-edit')?.value === 'conflicting draft'"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"]')"), false);
+    assert.equal(await evaluate("document.querySelectorAll('#reminder-edit').length"), 1);
     assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Save message').disabled"), true);
     await click("Discard edit draft");
     await click("Confirm discard edit");
@@ -318,13 +359,31 @@ test("mounted reminders show exact detail, load a guarded new Create, and fence 
     assert.equal(await evaluate("window.reminderFixture.writes[6].request.editRevision"), "2");
     await evaluate("window.reminderFixture.writes[6].resolve({status:'missing_reminder',epoch:'e3',sessionId:'one',reminderId:null})");
     assert.equal(await wait("document.body.innerText.includes('draft is retained')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "deleted reminder draft");
     assert.equal(await evaluate("window.reminderFixture.writes.length"), 7);
+    const deletedRead = Number(await evaluate("window.reminderFixture.reads.length"));
+    await evaluate("document.querySelector('.reminder-page > button').click()");
+    assert.equal(await wait(`window.reminderFixture.reads.length > ${deletedRead}`), "ready");
+    await evaluate(`window.reminderFixture.reads.at(-1).resolve(${list("one", "").replace("epoch:'e1'", "epoch:'e3'")})`);
+    assert.equal(await wait("document.body.innerText.includes('No reminders for this session')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "deleted reminder draft");
+    assert.equal(await evaluate("JSON.stringify([...document.querySelectorAll('[aria-label=\"Unsaved reminder edit recovery\"] code')].map(node=>node.textContent))"),
+      JSON.stringify(["e3", "one", "reminder-1", "2"]));
+    await click("Discard unsaved edit");
+    assert.equal(await wait("document.body.innerText.includes('Discard unsaved message changes?')"), "ready");
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "deleted reminder draft");
+    await click("Keep edit draft");
     await command("Emulation.setDeviceMetricsOverride", { width: 375, height: 700, deviceScaleFactor: 1, mobile: false });
     for (const theme of ["light", "dark"]) {
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
       assert.equal(await evaluate("getComputedStyle(document.querySelector('.model-catalog-layout')).gridTemplateColumns.split(' ').length"), 1);
       assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true);
+      assert.equal(await evaluate("document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"] pre')?.textContent"), "deleted reminder draft");
     }
+    await click("Discard unsaved edit");
+    await click("Confirm discard edit");
+    assert.equal(await wait("!document.querySelector('[aria-label=\"Unsaved reminder edit recovery\"]')"), "ready");
+    assert.equal(await evaluate("window.reminderFixture.writes.length"), 7);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

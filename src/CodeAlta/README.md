@@ -120,7 +120,14 @@ one later changed back to the original message), missing reminder or completed s
 without overwriting it. Save preserves the delay, due time, repeat count and attempt counts: it only
 affects future firing captures, never an already captured or admitted send. Pending or uncertain Save
 admissions remain held for their original host/session, with no automatic retry; refresh observes
-state but cannot certify an uncertain response. Schedules and results are **in memory, not persisted**:
+state but cannot certify an uncertain response. The exact pending/uncertain Save's host epoch,
+session, reminder ID, original revision and full submitted message remain visible for that target
+even if its list/detail read fails or the reminder disappears; switching targets does not show
+another session's retained message. While viewing that target, a local unsaved edit remains
+selectable for recovery after conflict, failed detail/list refresh or deletion, even with an empty
+list; discarding that draft requires confirmation and never clears an outstanding Save admission.
+A refreshed detail does not silently rebase an old draft or retry it.
+Schedules and results are **in memory, not persisted**:
 closing/restarting the host loses them. The host
 owns the timers and attempts one normal owned Send per firing, with the same permission policy
 and host drain as other sends. Busy, unavailable or failed sends count as failed attempts; there

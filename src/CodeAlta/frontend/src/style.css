@@ -302,6 +302,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .reminder-page button:disabled { opacity: .55; cursor: not-allowed; }
 .reminder-page p[role="alert"] { color: var(--red); }
 .reminder-page code, .reminder-page .model-catalog-providers button strong { overflow-wrap: anywhere; white-space: normal; }
+.reminder-page .reminder-recovery { min-width: 0; max-width: 100%; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow-wrap: anywhere; }
+.reminder-page .reminder-recovery pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reminder-page .reminder-recovery button { margin: 8px 8px 0 0; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
 .reminder-page section[aria-label="Selected reminder"] { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
 @media (max-width: 650px) { .model-catalog-layout { grid-template-columns: minmax(0, 1fr); } }
 

@@ -96,6 +96,11 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const full = target && actions.isFull(target);
   const blocked = !mutationAllowed || !!operation?.pending || !!operation?.hold || !!full;
   const dirtyEdit = !!editor && editor.text !== editor.base.content;
+  const orphanDraft = target && dirtyEdit && editor && editor.base.epoch === target.epoch &&
+    editor.base.sessionId === target.sessionId && !shownDetail ? editor : undefined;
+  const retainedSave = target && operation?.kind === "save" && (operation.pending || operation.hold) &&
+    operation.request && "editRevision" in operation.request && operation.request.expectedEpoch === target.epoch &&
+    operation.request.sessionId === target.sessionId ? operation.request : undefined;
   function choose(id: string, discard = false) {
     if (id === selected) return;
     if (dirtyEdit && !discard) { setConfirmSelection(id); return; }
@@ -155,6 +160,28 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
       <button type="button" onClick={() => setReload(n => n + 1)}>Refresh reminders</button>
       {error && <p role="alert" className="error-text">{error}</p>}
       {!active && !error && <p role="status">Loading reminders.</p>}
+      {operation && <p role={operation.hold ? "alert" : "status"}>{operation.message}</p>}
+      {full && <p role="alert">Pending or uncertain reminder admissions fill this window. No operation was retried or evicted.</p>}
+      {retainedSave && <section className="reminder-recovery" aria-label="Retained reminder Save">
+        <h2>{operation?.pending ? "Pending" : "Uncertain"} reminder Save</h2>
+        <p>This exact Save may already have committed. Refresh only observes the schedule; it does not retry, rebase or retarget this request.</p>
+        <p>Host epoch: <code>{retainedSave.expectedEpoch}</code>. Session: <code>{retainedSave.sessionId}</code>.
+          Reminder ID: <code>{retainedSave.reminderId}</code>. Original edit revision: <code>{retainedSave.editRevision}</code>.</p>
+        <pre aria-label="Retained Save full message">{retainedSave.content}</pre>
+      </section>}
+      {orphanDraft && <section className="reminder-recovery" aria-label="Unsaved reminder edit recovery">
+        <h2>Unsaved reminder edit</h2>
+        <p>The original detail is unavailable. This is local draft text, not a confirmed Save. Refresh does not resubmit it.</p>
+        <p>Host epoch: <code>{orphanDraft.base.epoch}</code>. Session: <code>{orphanDraft.base.sessionId}</code>.
+          Reminder ID: <code>{orphanDraft.base.reminderId}</code>. Original edit revision: <code>{orphanDraft.base.editRevision}</code>.</p>
+        <pre aria-label="Unsaved edit full message">{orphanDraft.text}</pre>
+        {!operation?.pending && !operation?.hold && <>
+          <button type="button" onClick={() => setConfirmDiscardEdit(true)}>Discard unsaved edit</button>
+          {confirmDiscardEdit && <p role="alert">Discard unsaved message changes?
+            <button type="button" onClick={() => { setEditor(undefined); setConfirmDiscardEdit(false); }}>Confirm discard edit</button>{" "}
+            <button type="button" onClick={() => setConfirmDiscardEdit(false)}>Keep edit draft</button></p>}
+        </>}
+      </section>}
       {active && <div className="model-catalog-layout"><section className="model-catalog-providers" aria-label="Reminder list">
         <h2>Schedules</h2><p role="status">As of refresh: {active.activeCount} active, {active.completedCount} completed.</p>
         {active.reminders.length === 0 && <p>No reminders for this session.</p>}
@@ -175,8 +202,6 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
         {delaySeconds === null && <p role="alert">Enter 1–86400 whole seconds or HH:mm:ss (00–23 hours), optionally prefixed with d. (e.g. 1.00:00:00). Fractions are not accepted.</p>}
         {!validRepeat && <p role="alert">Enter a whole repeat count between 1 and 20.</p>}
         <button type="button" disabled={blocked || !content.trim() || delaySeconds === null || !validRepeat} onClick={() => void create()}>Create reminder</button>
-        {operation && <p role={operation.hold ? "alert" : "status"}>{operation.message}</p>}
-        {full && <p role="alert">Pending or uncertain reminder admissions fill this window. No operation was retried or evicted.</p>}
         {row && <section aria-label="Selected reminder"><h3>Selected reminder</h3>
           <p><code>{row.id}</code> · {row.state} · {row.firedCount}/{row.repeatCount} attempts · every {row.delaySeconds} seconds.</p>
           <p>Next due: {row.dueAt ?? "None"}. Last send exit code: {row.lastExitCode ?? "None"}.
