@@ -194,12 +194,15 @@ Delete and panel shortcuts. Neither card sends, retries or retargets an operatio
   observes or acknowledges those owners: in particular, explicitly observing a terminal
   command-permission decision in the mutable review would enable a fresh review, but this card
   does not. No archived controls can resolve, cancel or retry an interaction. These records are
-  bounded app-instance evidence, not host execution/completion proof. Drafts remain local to the
-  read-only composer,
-and this does not persist recovery across app reloads. Missing, changed, duplicated, omitted
-and unreadable entries cannot be opened from a stale list. The separate absolute-folder field
-still requires an owned host, preview and explicit trust confirmation to import an arbitrary
-existing directory.
+  bounded app-instance evidence, not host execution/completion proof. The archived and catalog-only
+  composer is a compact, auto-growing **draft-only** editor: ordinary Enter makes a new line, Send
+  is unavailable, and the configuration icon still opens provider settings (Ctrl+G, Ctrl+U).
+  Model/prompt/reasoning are not inferred from unavailable runtime state. Draft restoration uses
+  WebView-local storage when available; a failed write does not certify an off-session draft badge.
+  Recovery evidence does not persist across app reloads. Missing, changed, duplicated, omitted
+  and unreadable entries cannot be opened from a stale list. The separate absolute-folder field
+  still requires an owned host, preview and explicit trust confirmation to import an arbitrary
+  existing directory.
 If Refresh projects fails, saved selection pauses until a successful refresh.
 During an admitted import, its original host epoch, requested/verified paths and pending or
 uncertain outcome remain visible when Open project is closed and reopened. Saved selection and

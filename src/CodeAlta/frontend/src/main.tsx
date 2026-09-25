@@ -1214,8 +1214,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} /> : null}
-          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} configuration={configurationSnapshot} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
-              reason={archivedScope ? "Archived project; this session is read-only. Your draft remains saved." : undefined} />}
+          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
+              reason={archivedScope ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />

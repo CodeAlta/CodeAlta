@@ -354,7 +354,7 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.abortCalls.length`), 3);
     await evaluate(`(() => { document.querySelector('.owned-session').remove();
       const catalog = document.createElement('section'); catalog.className = 'composer catalog-composer';
-      const button = document.createElement('button'); button.className = 'prompt-state';
+      const button = document.createElement('button'); button.id = 'open-provider-configuration';
       button.onclick = () => window.fixture.catalogOpens++;
       catalog.append(button); document.querySelector('.session-workspace').append(catalog);
       for (const key of ['g', 'u']) button.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })); })()`);

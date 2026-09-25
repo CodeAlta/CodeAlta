@@ -15,6 +15,7 @@ import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
+import { activateContextShortcut } from "./contextShortcut";
 import { createAskActions, captureAskAction } from "./sessionAsks";
 import { createUserInputReviewer } from "./sessionUserInput";
 import { createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
@@ -58,7 +59,10 @@ let setArchived: (value: boolean) => void = () => {};
 let setSession: (value: string) => void = () => {};
 let setHost: (value: string | null) => void = () => {};
 let setView: (value: "workspace" | "reminders") => void = () => {};
-const fixture = { calls, reads, archive: (value: boolean) => setArchived(value), session: (value: string) => setSession(value),
+let configurationOpens = 0;
+const fixture = { calls, reads, configurationOpens: () => configurationOpens,
+  draftVisible: (id: string, selected: string | null) => drafts.visible(id, selected),
+  archive: (value: boolean) => setArchived(value), session: (value: string) => setSession(value),
   host: (value: string | null) => setHost(value), view: (value: "workspace" | "reminders") => setView(value),
   ask: (sessionId: string, kind: "answer" | "cancel") => asks.submit(kind, captureAskAction(epoch, {
     operationId: "33333333-3333-3333-3333-333333333333", runtimeInstanceId: "22222222-2222-2222-2222-222222222222",
@@ -119,7 +123,8 @@ function App() {
       selectedProjectFocused: false, infoTrigger: null, reminderTrigger: null, compactTrigger: trigger.current,
       infoSelection: selected ? { sessionId, projectId: "project" } : null,
       selection: current && !archived ? { epoch, sessionId, projectId: "project" } : null,
-      run: action => { if (action === "compact" && !archived && current && trigger.current?.isConnected && !trigger.current.disabled)
+      run: action => { if (action === "context") activateContextShortcut(shell.current);
+        if (action === "compact" && !archived && current && trigger.current?.isConnected && !trigger.current.disabled)
         trigger.current.click(); },
     });
     window.addEventListener("keydown", listener);
@@ -134,7 +139,7 @@ function App() {
         capability={capability} runtimeReader={runtimeReader} permissionReviewer={null} draftIndicators={drafts}
         selections={selections} compactTrigger={trigger} /> : null}
       readOnly={<ReadOnlyComposer key={sessionId} sessionId={sessionId} provider="fixture" draftIndicators={drafts}
-        onOpenConfiguration={() => {}} reason="Archived project; this session is read-only. Your draft remains saved." />}
+        onOpenConfiguration={() => { configurationOpens++; }} reason={archived ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
       recovery={current ? <ArchivedActionRecovery epoch={epoch} sessionId={sessionId} submissions={submissions}
         steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} asks={asks} inputs={inputs} permissions={permissions} /> : null} />}
     {view === "reminders" && <ReminderScopeGate snapshot={snapshot} projectId="project" session={current || undefined}

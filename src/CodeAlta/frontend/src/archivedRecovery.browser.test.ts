@@ -87,6 +87,11 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("[...window.archivedRecoveryFixture.reads].sort().join(',')"), "input:one,permission:one");
     await evaluate("window.archivedRecoveryFixture.archive(true)");
     assert.equal(await wait("!!document.querySelector('.catalog-composer #catalog-prompt')"), "ready");
+    assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Archived project; this session is read-only.')"), true);
+    assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Recorded by session')"), false);
+    assert.equal(await evaluate("document.querySelector('.catalog-composer .send-button')?.disabled"), true);
+    assert.equal(await evaluate("document.querySelector('.catalog-composer .prompt-input')?.rows"), 1);
+    assert.equal(await evaluate("document.querySelector('.catalog-composer .composer-toolbar').compareDocumentPosition(document.querySelector('#catalog-prompt')) & Node.DOCUMENT_POSITION_PRECEDING"), 2);
     assert.equal(await wait("document.body.innerText.includes('Original Send text')"), "ready");
     assert.equal(await wait("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('Original one answer')"), "ready");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('Original two answer')"), false);
@@ -95,13 +100,58 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('allow_once')"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('input-one')"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Archived interaction recovery\"]')?.innerText.includes('88888888-8888-8888-8888-888888888888')"), true);
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+        assert.equal(await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); const toolbar=document.querySelector('.catalog-composer .composer-toolbar');
+          const button=document.querySelector('#open-provider-configuration'); const status=document.querySelector('#catalog-draft-status');
+          if (!input || !toolbar || !button || !status) return false;
+          const rect=input.getBoundingClientRect(), bar=toolbar.getBoundingClientRect(), icon=button.getBoundingClientRect();
+          const color=s=>getComputedStyle(s).color.match(/\\d+/g).slice(0,3).map(Number);
+          const bg=getComputedStyle(button).backgroundColor.match(/\\d+/g).slice(0,3).map(Number);
+          const lum=v=>{const x=v/255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4};
+          const l=a=>.2126*lum(a[0])+.7152*lum(a[1])+.0722*lum(a[2]);
+          const ratio=(Math.max(l(color(button)),l(bg))+.05)/(Math.min(l(color(button)),l(bg))+.05);
+          return rect.width<=${width} && rect.height>=50 && rect.height<80 && input.scrollHeight<=input.clientHeight+2
+            && bar.top>=rect.bottom && icon.width>=30 && icon.height>=30 && status.getBoundingClientRect().width>0
+            && ratio>=4.5 && document.documentElement.scrollWidth<=${width}; })()`), true, `${width}px ${theme} compact layout and icon contrast`);
+      }
+    }
+    await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); input.focus();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'line one\\nline two');
+      input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    assert.equal(await wait("document.querySelector('#catalog-prompt').value==='line one\\nline two'"), "ready");
+    assert.equal(await evaluate("(() => {const input=document.querySelector('#catalog-prompt');return input.getBoundingClientRect().height>50 && input.scrollHeight<=input.clientHeight+2})()"), true);
+    await evaluate("(() => { const input=document.querySelector('#catalog-prompt'); input.setSelectionRange(input.value.length,input.value.length); input.focus(); })()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait("document.querySelector('#catalog-prompt').value==='line one\\nline two\\n'"), "ready");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
+    assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), 14);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    assert.equal(await evaluate("document.activeElement?.id==='open-provider-configuration' && getComputedStyle(document.activeElement).outlineWidth==='2px'"), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
+    assert.equal(await evaluate("window.archivedRecoveryFixture.configurationOpens()"), 1);
+    await evaluate(`(() => { const input=document.querySelector('#catalog-prompt');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,Array(50).fill('draft line').join('\\n'));
+      input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    assert.equal(await wait("document.querySelector('#catalog-prompt').value.split('\\n').length===50"), "ready");
+    assert.equal(await evaluate("(() => {const input=document.querySelector('#catalog-prompt');return input.getBoundingClientRect().height<=240 && input.scrollHeight>input.clientHeight+2})()"), true);
+    assert.equal(await evaluate("document.querySelector('#catalog-prompt').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))"), true);
+    assert.equal(await evaluate("document.querySelector('#catalog-prompt').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,repeat:true,isComposing:true,bubbles:true,cancelable:true}))"), true);
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained Steer text\"]')?.textContent"), "Steer exact one");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained Queue text\"]')?.textContent"), "Queue exact one");
     assert.equal(await evaluate("document.body.innerText.includes('compact-one') && document.body.innerText.includes('cancel-one') && document.body.innerText.includes('abort-one') && document.body.innerText.includes('cancel-queue-one') && !document.body.innerText.includes('Steer exact two')"), true);
     const countAtArchive = await evaluate("window.archivedRecoveryFixture.calls.length");
     await evaluate(`(() => { const input=document.querySelector('#catalog-prompt'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Private local draft'); input.dispatchEvent(new Event('input',{bubbles:true})); input.focus(); })()`);
     assert.equal(await wait("document.querySelector('#catalog-prompt').value==='Private local draft'"), "ready");
-    await evaluate("document.querySelector('.catalog-composer .composer-footer button').click()");
+    await evaluate("document.querySelector('.catalog-composer .send-button').click()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "F11", code: "F11", windowsVirtualKeyCode: 122, modifiers: 2 });
@@ -123,7 +173,7 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Retained Send text\"]')?.textContent"), "Original Send text");
     await evaluate("window.archivedRecoveryFixture.calls.find(x=>x.kind==='compact').resolve({status:'busy',epoch:'12345678-1234-1234-1234-123456789abc',receipt:null})");
     assert.equal(await wait("!document.body.innerText.includes('compact-one')"), "ready");
-    assert.equal(await evaluate("document.body.innerText.includes('Original Send text') && !document.querySelector('.send-button')"), true);
+    assert.equal(await evaluate("document.body.innerText.includes('Original Send text') && document.querySelector('.catalog-composer .send-button')?.disabled"), true);
     await evaluate("window.archivedRecoveryFixture.session('two')");
     assert.equal(await wait("document.body.innerText.includes('Steer exact two')"), "ready");
     assert.equal(await evaluate("!document.body.innerText.includes('Original Send text') && !document.body.innerText.includes('Steer exact one')"), true);
@@ -154,6 +204,35 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await wait("document.body.innerText.includes('Saved exact message for two') && !document.body.innerText.includes('Saved exact message for one')"), "ready");
     await evaluate("window.archivedRecoveryFixture.host(null)");
     assert.equal(await wait("document.body.innerText.includes('Select an owned session')"), "ready");
+    await evaluate("window.archivedRecoveryFixture.view('workspace'); window.archivedRecoveryFixture.archive(false); window.archivedRecoveryFixture.session('one')");
+    assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), "ready");
+    assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('Draft only')"), true);
+    assert.equal(await evaluate("document.querySelector('#catalog-draft-status')?.textContent.includes('archived')"), false);
+    assert.equal(await evaluate("document.querySelector('#catalog-prompt').value"), "Private local draft");
+    const opens = await evaluate("window.archivedRecoveryFixture.configurationOpens()");
+    await evaluate("document.querySelector('#open-provider-configuration').click(); document.querySelector('#catalog-prompt').focus()");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "g", code: "KeyG", windowsVirtualKeyCode: 71, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "u", code: "KeyU", windowsVirtualKeyCode: 85, modifiers: 2 });
+    assert.equal(await evaluate("window.archivedRecoveryFixture.configurationOpens()"), Number(opens) + 2);
+    assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), countAtArchive);
+    await evaluate("window.archivedRecoveryFixture.session('two')");
+    assert.equal(await wait("document.querySelector('#catalog-prompt')?.value===''"), "ready");
+    await evaluate(`(() => { window.fixtureSetItem=Storage.prototype.setItem; Storage.prototype.setItem=()=>{throw Error('storage unavailable')};
+      const input=document.querySelector('#catalog-prompt'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Unsaved local two');
+      input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    assert.equal(await wait("document.querySelector('#catalog-prompt').value==='Unsaved local two'"), "ready");
+    assert.equal(await wait("window.archivedRecoveryFixture.draftVisible('two','two')"), "ready");
+    await evaluate("new Promise(resolve=>setTimeout(resolve,40))");
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.prompt.two')===null"), true);
+    await evaluate("Storage.prototype.setItem=window.fixtureSetItem");
+    await evaluate("window.archivedRecoveryFixture.session('one')");
+    assert.equal(await wait("document.querySelector('#catalog-prompt')?.value==='Private local draft'"), "ready");
+    assert.equal(await evaluate("window.archivedRecoveryFixture.draftVisible('two','one')"), false);
+    await evaluate("window.archivedRecoveryFixture.session('two')");
+    assert.equal(await wait("document.querySelector('#catalog-prompt')?.value===''"), "ready");
+    assert.equal(await evaluate("window.archivedRecoveryFixture.calls.length"), countAtArchive);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

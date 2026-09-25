@@ -8,5 +8,5 @@ export function activateContextShortcut(root: ParentNode | null): void {
     refresh.click();
     return;
   }
-  root?.querySelector<HTMLButtonElement>(".catalog-composer button.prompt-state")?.click();
+  root?.querySelector<HTMLButtonElement>(".catalog-composer #open-provider-configuration")?.click();
 }
