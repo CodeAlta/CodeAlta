@@ -303,20 +303,81 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))");
     assert.equal(await evaluate("!!document.querySelector('.command-palette')"), true);
     const paletteColors: string[] = [];
+    const activeVisible = `(() => { const list=document.querySelector('#palette-results');
+      const active=document.getElementById(document.querySelector('#palette-search').getAttribute('aria-activedescendant'));
+      const bounds=list.getBoundingClientRect(), option=active?.getBoundingClientRect();
+      return !!option && option.top >= bounds.top-1 && option.bottom <= bounds.bottom+1 &&
+        option.top >= 0 && option.bottom <= innerHeight; })()`;
+    const scrollOutsideResults = `JSON.stringify([document.scrollingElement.scrollTop,
+      document.querySelector('.command-palette').scrollTop, document.querySelector('#workspace-shell').scrollTop])`;
     for (const theme of ["dark", "light"]) {
-      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 700, deviceScaleFactor: 1, mobile: false });
+      await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 300, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`);
       assert.equal(await evaluate(`(() => { const box=document.querySelector('.command-palette').getBoundingClientRect();
         const input=document.querySelector('#palette-search').getBoundingClientRect();
         const trigger=document.querySelector('[aria-label="Open command palette"]').getBoundingClientRect();
-        return box.left>=0 && box.right<=innerWidth && input.right<=box.right && input.width>100 &&
+        return box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight &&
+          input.right<=box.right && input.width>100 &&
           trigger.left>=0 && trigger.right<=innerWidth &&
           getComputedStyle(document.querySelector('.command-palette')).backgroundColor !== 'rgba(0, 0, 0, 0)'; })()`), true);
       paletteColors.push(String(await evaluate("getComputedStyle(document.querySelector('.command-palette')).backgroundColor")));
+      await evaluate(`(${searchPalette})('MCP')`);
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 1"), "ready");
+      await evaluate(`(${searchPalette})('')`);
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length >= 7"), "ready");
+      assert.equal(await evaluate("document.querySelector('#palette-results').scrollHeight > document.querySelector('#palette-results').clientHeight + 20"), true);
+      const ids = JSON.parse(String(await evaluate("JSON.stringify([...document.querySelectorAll('#palette-results [role=option]')].map(option => option.id))"))) as string[];
+      await evaluate("document.querySelector('#palette-search').focus()");
+      assert.equal(await evaluate("document.activeElement?.id"), "palette-search");
+      const outerScroll = await evaluate(scrollOutsideResults);
+      const dialogBounds = await evaluate(`(() => { const box=document.querySelector('.command-palette').getBoundingClientRect();
+        return JSON.stringify([box.top, box.bottom]); })()`);
+      let currentIndex = 0;
+      for (const key of [...Array(ids.length + 2).fill("ArrowDown"), ...Array(ids.length + 2).fill("ArrowUp")]) {
+        await evaluate(`document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'${key}',bubbles:true,cancelable:true}))`);
+        currentIndex = (currentIndex + (key === "ArrowDown" ? 1 : ids.length - 1)) % ids.length;
+        assert.equal(await wait(`document.querySelector('#palette-search')?.getAttribute('aria-activedescendant') === '${ids[currentIndex]}'`), "ready");
+        assert.equal(await evaluate(activeVisible), true, `${theme}: ${key} ${ids[currentIndex]}`);
+        assert.equal(await evaluate(scrollOutsideResults), outerScroll);
+        assert.equal(await evaluate(`(() => { const box=document.querySelector('.command-palette').getBoundingClientRect();
+          return JSON.stringify([box.top, box.bottom]); })()`), dialogBounds);
+        assert.equal(await evaluate("document.activeElement?.id"), "palette-search");
+      }
+      await evaluate(`(${searchPalette})('MCP')`);
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 1"), "ready");
+      assert.equal(await evaluate(activeVisible), true);
+      assert.equal(await evaluate(scrollOutsideResults), outerScroll);
+      assert.equal(await evaluate("document.activeElement?.id"), "palette-search");
+      await evaluate(`(${searchPalette})('')`);
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 8"), "ready");
+      await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}))");
+      assert.equal(await wait("document.querySelector('#palette-search')?.getAttribute('aria-activedescendant') === 'palette-option-focusPrompt'"), "ready");
+      assert.equal(await evaluate(activeVisible), true);
+      await evaluate("window.reminderNavigationFixture.host('e2')");
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 6"), "ready");
+      assert.equal(await evaluate(activeVisible), true);
+      assert.equal(await evaluate(scrollOutsideResults), outerScroll);
+      assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
+      await evaluate("window.reminderNavigationFixture.host('e1')");
+      assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 8"), "ready");
+      assert.equal(await evaluate(activeVisible), true);
+      assert.equal(await evaluate(scrollOutsideResults), outerScroll);
+      assert.equal(await evaluate("document.activeElement?.id"), "palette-search");
     }
     assert.notEqual(paletteColors[0], paletteColors[1]);
-    await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+    await evaluate(`(${searchPalette})('MCP')`);
+    assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length === 1"), "ready");
+    await evaluate(`(${searchPalette})('')`);
+    assert.equal(await wait("document.querySelectorAll('#palette-results [role=option]').length >= 7"), "ready");
+    for (let index = 0; index < 5; index++)
+      await evaluate("document.querySelector('#palette-search').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
+    assert.equal(await wait("document.querySelector('#palette-search')?.getAttribute('aria-activedescendant') === 'palette-option-reminders'"), "ready");
+    assert.equal(await evaluate(activeVisible), true);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.equal(await wait("!document.querySelector('.command-palette')"), "ready");
+    assert.equal(await wait("document.querySelector('.reminder-page')?.textContent.includes('Session: one')"), "ready");
+    assert.equal(await evaluate("window.reminderNavigationFixture.writes.length"), 1);
   } finally {
     socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }

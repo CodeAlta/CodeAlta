@@ -8,6 +8,7 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const results = useRef<HTMLDivElement>(null);
   const composingEscape = useRef(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -20,6 +21,16 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
     element?.showModal();
     return () => { if (element?.open) element.close(); };
   }, []);
+  useLayoutEffect(() => {
+    const list = results.current;
+    const option = list?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    if (!list || !option) return;
+    // Keep keyboard selection visible inside the results, without scrolling the dialog or workspace.
+    const viewport = list.getBoundingClientRect();
+    const selected = option.getBoundingClientRect();
+    if (selected.top < viewport.top) list.scrollTop += selected.top - viewport.top;
+    else if (selected.bottom > viewport.bottom) list.scrollTop += selected.bottom - viewport.bottom;
+  });
   return <dialog ref={dialog} className="app-dialog command-palette" aria-modal="true" aria-labelledby="palette-title"
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}
     onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
@@ -46,7 +57,7 @@ export function CommandPalette({ context, captured, onChoose, onClose }: {
     <input autoFocus id="palette-search" type="search" role="combobox" aria-autocomplete="list" aria-expanded={matches.length > 0}
       aria-controls="palette-results" aria-activedescendant={index >= 0 ? `palette-option-${matches[index].id}` : undefined}
       value={query} onChange={event => { setQuery(event.target.value); setActive(0); }} />
-    <div id="palette-results" className="dialog-list" role="listbox" aria-label="Available commands">
+    <div ref={results} id="palette-results" className="dialog-list" role="listbox" aria-label="Available commands">
       {matches.map((command, i) => <button type="button" role="option" id={`palette-option-${command.id}`} key={command.id}
         aria-selected={i === index} tabIndex={-1} onMouseEnter={() => setActive(i)} onClick={() => onChoose(command.id)}>{command.label}</button>)}
       {!matches.length && <p role="status">No available commands match.</p>}
