@@ -1,11 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { promptEditorHeight } from "./workspacePresentation";
 import { dispatchTransientComposerKey } from "./composerKeyboard";
 
-export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, onOpenHelp, onOpenPalette }: {
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenPalette }: {
   sessionId: string; provider: string | null;
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
+  infoControl?: ReactNode;
   onOpenHelp?: () => void; onOpenPalette?: () => void;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -48,6 +49,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     <div className="composer-toolbar">
       <p id="catalog-draft-status" role="status">Draft only — {reason ?? "No owned desktop host; sending is unavailable. Drafts stay local when storage permits."}</p>
       <div className="history-controls">
+        {infoControl}
         <button type="button" className="primary-button send-button" disabled aria-describedby="catalog-draft-status">Send unavailable</button>
       </div>
     </div>

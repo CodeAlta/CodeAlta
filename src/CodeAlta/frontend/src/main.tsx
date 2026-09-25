@@ -68,7 +68,7 @@ import { AboutDialog, AboutSettingsEntry } from "./AboutDialog";
 import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog } from "./SessionInfoDialog";
-import { restoreSessionInfoFocus, selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
+import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { CommandPalette } from "./CommandPalette";
 import { createPaletteFocusRestoration, paletteAvailable, paletteShortcut, type PaletteAction, type PaletteContext } from "./paletteActions";
 import "./style.css";
@@ -1274,10 +1274,21 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   timelineCommand: RefObject<TimelineCommand | null>;
 }) {
   const [infoOpen, setInfoOpen] = useState(false);
+  const infoActive = useRef(false);
+  const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
+  useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
+  function openInfo() {
+    if (infoActive.current || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    infoFocusRestoration.cancel();
+    infoActive.current = true;
+    setInfoOpen(true);
+  }
   function closeInfo() {
     const trigger = infoTrigger.current;
+    infoActive.current = false;
     setInfoOpen(false);
-    requestAnimationFrame(() => restoreSessionInfoFocus(trigger));
+    infoFocusRestoration.schedule(trigger, () => !infoActive.current && infoTrigger.current === trigger && !trigger?.disabled,
+      () => !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'));
   }
   const timeline = useTimelinePosition(session.id, scrollMemory);
   const [messageNotice, setMessageNotice] = useState("");
@@ -1313,13 +1324,15 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
+  const infoControl = <button ref={infoTrigger} type="button" className="composer-icon-button session-info-trigger"
+    aria-label="Session info" title="Session info (Ctrl+G, Ctrl+T)" aria-haspopup="dialog" aria-expanded={infoOpen}
+    onClick={openInfo}><AppIcon name="info" size={16} /></button>;
   return <div className="session-workspace">
     <header className="session-header">
       <div><span className="eyebrow">Session</span><h1 title={session.title}>{session.title}</h1></div>
       <div className="session-chips"><span>{session.providerKey ?? "Provider not recorded"}</span>
         <span>{demoMode ? "Demo" : archivedScope ? "Archived (read-only)" : status?.hostAvailable ? "Host available" : "Catalog only"}</span>
-        <button ref={infoTrigger} type="button" className="quiet-button session-info-trigger" aria-haspopup="dialog" aria-expanded={infoOpen}
-          onClick={() => setInfoOpen(true)}>Session info</button></div>
+        {demoMode && infoControl}</div>
     </header>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo} />}
     {demoMode
@@ -1353,9 +1366,9 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
               usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
-              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
-          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
+          readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenPalette={onOpenPalette}
               reason={archivedScope ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
@@ -1453,7 +1466,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["Ctrl+Shift+N", "Toggle Alta notes"],
     ["Ctrl+G, Ctrl+P", "Focus prompt"], ["Ctrl+G, Ctrl+S", "Focus projects"], ["Ctrl+G, Ctrl+R", "Providers"],
     ["Ctrl+G, Ctrl+O", "Models"], ["Ctrl+G, Ctrl+H", "Agent prompts"], ["Ctrl+G, Ctrl+U", "Context state"],
-    ["Ctrl+G, Ctrl+T", "Session info (selected workspace session only)"],
+    ["Ctrl+G, Ctrl+T", "Selected session info (also in composer controls; saved catalog only)"],
     ["Ctrl+G, Ctrl+D", "Reminders (selected owned workspace session only)"],
     ["F1 / ? outside text", "Keyboard shortcuts"],
     ["? in empty regular prompt", "Keyboard shortcuts"],

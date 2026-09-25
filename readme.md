@@ -38,6 +38,8 @@ In the owned Desktop composer, the Reminders icon or Ctrl+G, Ctrl+D (from the wo
 
 In the Desktop regular composer (owned or catalog/archived draft-only), typing `?` into an **exactly empty** prompt opens keyboard help; typing `/` opens the existing implemented-actions palette. These are transient keyboard shortcuts, not slash-command execution. Pasted text, composition, selection replacement and nonempty drafts remain literal; the expanded editor and other search/input fields do not use these shortcuts. Draft-only scopes can navigate/help but cannot gain mutation permissions from the palette.
 
+The adjacent **Session info** icon opens saved catalog metadata for the selected session in owned, catalog-only, and archived draft-only regular composers. It does not read live runtime/model/prompt/usage data or grant mutation rights. Ctrl+G, Ctrl+T and the implemented-actions palette retain their exact unique selected-session eligibility; ambiguous identity still displays unverified scope through the icon but disables Copy ID. Closing info restores focus only while its original composer control remains current and no newer focus or modal owns it.
+
 <p align="center">
   <img src="site/img/alta-theme-default.png" alt="CodeAlta terminal workspace using the default dark theme" width="920">
 </p>

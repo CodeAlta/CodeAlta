@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -20,10 +20,11 @@ import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
 import type { UsageTarget } from "./sessionUsage";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTarget, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenPalette, reminderActions, readReminderCount }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   usageTarget?: UsageTarget | null;
+  infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
   steering: ReturnType<typeof createSteeringSubmissions>;
@@ -426,6 +427,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, usageTar
     </div>
     <div className="history-controls">
       <span className="sr-only">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
+      {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} />}
       {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}

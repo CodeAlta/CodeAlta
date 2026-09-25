@@ -2,10 +2,13 @@
 // No native bridge or user data is touched.
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const session = { id: "one", title: "one", fullTitle: "one", fullTitleTruncated: false,
-  parentSessionId: null, scopeKind: "project", projectId: "project", lineageIssue: null,
+  parentSessionId: null, scopeKind: localStorage.getItem("infoFixtureUnknown") === "true" ? null : "project",
+  projectId: localStorage.getItem("infoFixtureUnknown") === "true" ? null
+    : localStorage.getItem("infoFixtureMismatched") === "true" ? "wrong" : "project", lineageIssue: null,
   workspacePath: "/fixture/project", providerKey: "fixture", updatedAt: "2026-09-24T00:00:00Z" };
 const catalog = { configured: true, projects: [{ id: "project", name: "Project", path: "/fixture/project", archived: localStorage.getItem("usageFixtureArchived") === "true" }],
-  sessions: [session, { ...session, id: "two", title: "two", fullTitle: "two" }],
+  sessions: [session, { ...session, id: "two", title: "two", fullTitle: "two" },
+    ...(localStorage.getItem("infoFixtureAmbiguous") === "true" ? [{ ...session, title: "duplicate" }] : [])],
   projectsTruncated: localStorage.getItem("usageFixtureTruncated") === "true", sessionsTruncated: false, displayTextTruncated: false };
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
 const calls: string[] = [];
