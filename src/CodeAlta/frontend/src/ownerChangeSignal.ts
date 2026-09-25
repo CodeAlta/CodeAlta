@@ -5,6 +5,6 @@ export function createOwnerChangeSignal() {
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => revision,
-    changed() { revision++; for (const listener of listeners) listener(); },
+    changed() { revision++; for (const listener of listeners) { try { listener(); } catch { /* Presentation cannot interrupt owner transport or retention. */ } } },
   };
 }
