@@ -12,7 +12,8 @@ import { createDraftIndicators } from "./promptDraft";
 import { dispatchWorkspaceShortcut, type ShortcutSession, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import type { SessionAbortRunRequest, SessionCompactRequest, SessionSteerRequest, SessionQueueRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
+import { createReminderActions } from "./reminderActions";
+import type { ReminderListRequest, ReminderListResponse, SessionAbortRunRequest, SessionCompactRequest, SessionSteerRequest, SessionQueueRequest, SessionAdmission, SessionRuntimeStateResponse } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("Fixture must not submit operations"); };
 const epoch = "fixture-epoch";
@@ -37,7 +38,36 @@ let steerMode: "hold" | "uncertain" = "hold";
 let settleSteer: ((value: SessionAdmission) => void) | undefined;
 let queueMode: "hold" | "uncertain" = "hold";
 let settleQueue: ((value: SessionAdmission) => void) | undefined;
+const reminderReads: ReminderListRequest[] = [];
+const reminderSettlers: ((value: ReminderListResponse) => void)[] = [];
+let settleReminderMutation: ((uncertain: boolean) => void) | undefined;
+const reminderActions = createReminderActions(async request => new Promise(resolve => {
+  settleReminderMutation = uncertain => resolve({ status: uncertain ? "unconfirmed" : "ok", epoch: request.expectedEpoch,
+    sessionId: request.sessionId, reminderId: uncertain ? null : "new" });
+}), unavailable);
+const readReminderCount = (request: ReminderListRequest): Promise<ReminderListResponse> => {
+  reminderReads.push(request);
+  return new Promise(resolve => { reminderSettlers.push(resolve); });
+};
 const counts = { refreshes: 0, catalogOpens: 0, abortCalls: [] as SessionAbortRunRequest[], compactCalls: [] as SessionCompactRequest[],
+  reminderReads,
+  startReminderMutation() { void reminderActions.submit({ epoch, sessionId: currentSession },
+    { expectedEpoch: epoch, sessionId: currentSession, content: "test", delaySeconds: 300, repeatCount: 1 }, "create"); },
+  settleReminderMutation(uncertain = false) { settleReminderMutation?.(uncertain); settleReminderMutation = undefined; },
+  settleReminder(reply: "matching" | "completed" | "empty" | "mismatch" | "error" | "invalid" = "matching") {
+    const request = reminderReads[reminderReads.length - reminderSettlers.length];
+    const settle = reminderSettlers.shift();
+    if (!settle || !request) throw new Error("No reminder read is pending");
+    const row = (id: string, state: "active" | "completed") => ({ id, state, preview: "test",
+      delaySeconds: 300, repeatCount: 1, firedCount: state === "completed" ? 1 : 0,
+      dueAt: null, lastExitCode: null, lastError: null });
+    const reminders = reply === "matching" || reply === "invalid" ? [row("a", "active"), row("b", "active"), row("c", "completed")]
+      : reply === "completed" ? [row("a", "active"), row("b", "completed")] : [];
+    settle({ status: reply === "error" ? "read_failed" : "ok", epoch: request.expectedEpoch,
+      sessionId: reply === "mismatch" ? "other" : request.sessionId, reminders,
+      activeCount: reply === "invalid" ? 0 : reminders.filter(item => item.state === "active").length,
+      completedCount: reminders.filter(item => item.state === "completed").length });
+  },
   steerCalls: [] as SessionSteerRequest[],
   queueCalls: [] as SessionQueueRequest[],
   queueMode(value: typeof queueMode) { queueMode = value; },
@@ -146,7 +176,8 @@ const props = {
 const root = createRoot(document.getElementById("app")!);
 const panel = (selectedSession: string) => createElement("div", { id: "workspace-shell" },
   createElement("div", { className: "session-workspace" },
-    createElement(OwnedSessionPanel, { ...props, sessionId: selectedSession, key: selectedSession, compactTrigger, onOpenReminders: () => { counts.catalogOpens++; } }),
+    createElement(OwnedSessionPanel, { ...props, sessionId: selectedSession, key: selectedSession, compactTrigger,
+      reminderActions, readReminderCount, onOpenReminders: () => { counts.catalogOpens++; } }),
     createElement("div", { className: "project-rename" }, createElement("label", null, "Project name", createElement("input", { defaultValue: "A project" }))),
     createElement("div", { className: "session-rename" }, createElement("label", null, "Session title", createElement("input", { defaultValue: "A session", disabled: true })))));
 root.render(panel(sessionId));

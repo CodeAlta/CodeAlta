@@ -6,6 +6,7 @@ import { McpServersPanel } from "./McpServersPanel";
 import { CommandPalette } from "./CommandPalette";
 import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAction, type PaletteContext } from "./paletteActions";
 import { createReminderActions } from "./reminderActions";
+import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSteeringSubmissions } from "./sessionSteering";
@@ -17,7 +18,7 @@ import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
 import { SessionInfoDialog } from "./SessionInfoDialog";
 import { selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
-import type { ReminderCreateRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { ReminderCreateRequest, ReminderListRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 
 const sessions: WorkspaceSession[] = ["one", "two"].map(id => ({
   id, title: `Title ${id}`, fullTitle: `Title ${id}`, fullTitleTruncated: false, parentSessionId: null,
@@ -35,6 +36,8 @@ const actions = createReminderActions(async request => {
   writes.push(request);
   return { status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId, reminderId: "created" };
 }, unavailable);
+const readReminders = async (request: ReminderListRequest) => ({ status: "ok", epoch: request.expectedEpoch,
+  sessionId: request.sessionId, activeCount: 0, completedCount: 0, reminders: [] });
 const selections = createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value));
 const drafts = createDraftIndicators();
 const fixture = { writes, session: (_id: string) => {}, host: (_epoch: string | null) => {},
@@ -127,7 +130,7 @@ function App() {
   }, [view, session, epoch, project, modal, capability, infoSelection, paletteOpen]);
   function openReminders() {
     const captured = current.current;
-    if (captured.view !== "workspace" || captured.modal || captured.epoch !== "e1" || !capability.canMutate()
+    if (captured.view !== "workspace" || captured.modal || captured.epoch !== "e1" || !capability.canMutate() || !infoSelection
       || captured.session !== session || captured.project !== project || captured.epoch !== epoch) return;
     setView("reminders");
   }
@@ -142,15 +145,15 @@ function App() {
       {epoch === "e1" ? <OwnedSessionPanel key={JSON.stringify([epoch, session])} sessionId={session} epoch={epoch}
         submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
         capability={capability} runtimeReader={runtimeReader} permissionReviewer={null}
-        draftIndicators={drafts} selections={selections} remindersTrigger={button} onOpenReminders={openReminders} />
+        draftIndicators={drafts} selections={selections} remindersTrigger={button} onOpenReminders={openReminders}
+        reminderActions={actions} readReminderCount={selectedSession && verifiedReminderCountTarget(snapshot, selectedSession, project) ? readReminders : undefined} />
         : <textarea id="catalog-prompt" aria-label="Catalog prompt" />}
       {modal && <div role="dialog" aria-modal="true"><input aria-label="Modal input" /></div>}
     </div>}
     {view === "reminders" && <ReminderPanel key={JSON.stringify([epoch, session])}
       target={epoch ? { epoch, sessionId: session } : null} actions={actions}
       mutationAllowed={capability.canMutate()} canMutate={capability.canMutate}
-      read={async request => ({ status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
-        activeCount: 0, completedCount: 0, reminders: [] })}
+      read={readReminders}
       readDetail={async request => ({ status: "missing_reminder", epoch: request.expectedEpoch, sessionId: request.sessionId,
         reminderId: request.reminderId, content: null, delaySeconds: null, repeatCount: null, editRevision: null })} />}
     {view === "mcp" && <McpServersPanel target={epoch ? { epoch, sessionId: session, projectId: project } : null}

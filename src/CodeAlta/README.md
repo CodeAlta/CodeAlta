@@ -160,6 +160,14 @@ The **Reminders** tab is available only with a selected owned session. It lists 
 active and completed attempts, lets you create a delayed Markdown prompt (whole seconds 1–86400,
 1–20 attempts), refresh the list, and delete only after typing the exact reminder ID. At most 32
 retained reminders per session and 256 per host are accepted; deleting a completed entry frees a slot.
+The compact owned composer displays `?` for an unknown active count, or a number from a successful
+bounded list for the exact selected host and session. The accessible icon label says **active at last
+observation; may have changed**: completed schedules are excluded, and timer completion or changes
+after the read are not tracked live. The composer reads once when opened; **Refresh reminder count**
+under Advanced session controls requests a new observation (not a schedule mutation). Errors,
+incomplete/mismatched responses, changed host/session/scope, invalid catalog identity and pending
+or uncertain reminder admissions leave the count unknown until an eligible explicit refresh. No
+polling or automatic retry is performed. The timer icon and `Ctrl+G`, `Ctrl+D` open Reminders as before.
 Select a schedule to inspect its full stored message, beyond the list preview. **Use as new reminder**
 copies that message, delay and repeat count into the local Create form (with confirmation before
 discarding an edited draft); it does not change the selected schedule or create a new one until

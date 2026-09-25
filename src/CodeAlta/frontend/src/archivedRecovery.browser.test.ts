@@ -87,6 +87,8 @@ test("production archived composer/reminder gates retain exact owner evidence wi
     assert.equal(await evaluate("[...window.archivedRecoveryFixture.reads].sort().join(',')"), "input:one,permission:one");
     await evaluate("window.archivedRecoveryFixture.archive(true)");
     assert.equal(await wait("!!document.querySelector('.catalog-composer #catalog-prompt')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('[data-reminder-count]')"), false,
+      "archived read-only composer never exposes an owned reminder observation");
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Archived project; this session is read-only.')"), true);
     assert.equal(await evaluate("document.querySelector('.catalog-composer').innerText.includes('Recorded by session')"), false);
     assert.equal(await evaluate("document.querySelector('.catalog-composer .send-button')?.disabled"), true);

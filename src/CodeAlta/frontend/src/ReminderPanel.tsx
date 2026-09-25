@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent a
 import type { ReminderDetailRequest, ReminderDetailResponse, ReminderListRequest, ReminderListResponse } from "#neoastra";
 import type { ReminderTarget, createReminderActions } from "./reminderActions";
 import { reminderDelaySeconds } from "./reminderDuration";
+import { validReminderList } from "./reminderListObservation";
 
 export function ReminderPanel({ target, read, readDetail, actions, mutationAllowed, canMutate, readOnly = false }: {
   target: ReminderTarget | null;
@@ -51,17 +52,7 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
     void read({ expectedEpoch: target.epoch, sessionId: target.sessionId },
       { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
       if (controller.signal.aborted) return;
-      if (value.epoch !== target.epoch || value.sessionId !== target.sessionId || value.status !== "ok" ||
-        !Array.isArray(value.reminders) || value.reminders.length > 32 ||
-        new Set(value.reminders.map(row => row.id)).size !== value.reminders.length ||
-        value.reminders.some(row => typeof row.id !== "string" || !row.id || row.id.length > 256 ||
-          !["active", "completed"].includes(row.state) || typeof row.preview !== "string" || row.preview.length > 160 ||
-          !Number.isInteger(row.delaySeconds) || row.delaySeconds < 1 || row.delaySeconds > 86400 ||
-          !Number.isInteger(row.repeatCount) || row.repeatCount < 1 || row.repeatCount > 20 ||
-          !Number.isInteger(row.firedCount) || row.firedCount < 0 || row.firedCount > row.repeatCount ||
-          row.lastError != null && (typeof row.lastError !== "string" || row.lastError.length > 128)) ||
-        value.activeCount !== value.reminders.filter(row => row.state === "active").length ||
-        value.completedCount !== value.reminders.filter(row => row.state === "completed").length) {
+      if (!validReminderList(target, value)) {
         setError(value.status === "stale_epoch" || value.epoch !== target.epoch ? "Host identity changed. Reload required."
           : `Reminder list unavailable (${value.status}).`); return;
       }

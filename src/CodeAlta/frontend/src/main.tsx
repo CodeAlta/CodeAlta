@@ -4,6 +4,7 @@ import {
   boot, configuration, applicationLogs, modelCatalog, promptCatalog, mcpInventory, reminder, workspace, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionUserInput, type BootStatus,
   type ReminderListRequest,
+  type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
 } from "#neoastra";
@@ -18,6 +19,7 @@ import { McpServersPanel } from "./McpServersPanel";
 import { archivedProjectScope, ReminderScopeGate, SessionComposerGate } from "./ArchivedScopeGates";
 import { ArchivedActionRecovery } from "./ArchivedActionRecovery";
 import { createReminderActions } from "./reminderActions";
+import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, applyPromptNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
 import { createSessionDisplayStore } from "./sessionDisplay";
@@ -1116,7 +1118,7 @@ function App() {
           {!selectedSession
             ? <EmptyWorkspace workspaceState={workspaceState} />
             : <SessionWorkspace key={JSON.stringify([projectId, selectedSession.id])} session={selectedSession} snapshot={snapshot!} selectedProjectId={projectId} infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger}
-                onOpenReminders={openSelectedReminders} compactTrigger={compactTrigger} status={status} mutation={mutation}
+                onOpenReminders={openSelectedReminders} readReminders={readReminders} reminderActions={reminderActions} compactTrigger={compactTrigger} status={status} mutation={mutation}
                 submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                  askActions={askActions} display={display} scrollMemory={scrollMemory} runtimeReader={runtimeReader}
                  permissionReviewer={permissionReviewer} inputReviewer={inputReviewer} configuration={configurationState.snapshot}
@@ -1157,13 +1159,15 @@ function App() {
   </div>;
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections, timelineCommand }: {
+function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, remindersTrigger, compactTrigger, onOpenReminders, readReminders, reminderActions, status, mutation, submissions, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, onNotesChange, onOpenConfiguration, selections, timelineCommand }: {
   session: WorkspaceSession;
   snapshot: WorkspaceSnapshot;
   selectedProjectId: string | null;
   infoTrigger: RefObject<HTMLButtonElement | null>;
   remindersTrigger: RefObject<HTMLButtonElement | null>;
   onOpenReminders: (sessionId: string, epoch: string, projectId: string | null) => void;
+  readReminders: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
+  reminderActions: ReturnType<typeof createReminderActions>;
   compactTrigger: RefObject<HTMLButtonElement | null>;
   status: BootStatus | undefined;
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
@@ -1262,7 +1266,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session}
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
-              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} /> : null}
+              remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)}
+              reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer sessionId={session.id} provider={session.providerKey} onOpenConfiguration={onOpenConfiguration} draftIndicators={draftIndicators}
               reason={archivedScope ? "Archived project; this session is read-only. Sending is unavailable." : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}

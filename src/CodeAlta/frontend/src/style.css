@@ -357,6 +357,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .owned-session .history-controls { flex: 0 0 auto; flex-wrap: nowrap; gap: 3px; margin: 0; }
 .owned-session .history-controls button { min-height: 30px; margin: 0; padding: 5px 8px; }
 .owned-session .history-controls .composer-icon-button { display: grid; place-items: center; width: 30px; padding: 4px; }
+.owned-session .history-controls [data-reminder-count] { display: inline-flex; align-items: center; gap: 2px; width: auto; }
+.owned-session .reminder-count { font-size: 10px; line-height: 1; font-weight: 700; }
 .owned-session .history-controls .primary-button:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--panel-3); }
 .owned-session .composer-notice { margin: 4px 0; color: var(--muted); font-size: 12px; }
 .owned-session .prompt-options { flex: 1 1 218px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; }

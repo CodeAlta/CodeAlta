@@ -83,6 +83,66 @@ test("mounted composer stays compact and its controls remain legible in both the
       if (document.querySelector('select[aria-label="Agent prompt"]:not(:disabled)')) resolve('ready');
       else if (Date.now() > end) resolve(document.body.innerText.slice(0, 300)); else setTimeout(check, 35); }; check(); })`);
     assert.equal(ready, "ready");
+    const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
+      if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
+    const countLabel = () => evaluate(`document.querySelector('.composer-toolbar [data-reminder-count]')?.getAttribute('aria-label')`);
+    assert.match((await countLabel()) ?? "", /active count unknown/i, "an unsettled list is not zero");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .reminder-count')?.textContent`), "?");
+    assert.equal(await evaluate(`JSON.stringify(window.fixture.reminderReads[0])`),
+      JSON.stringify({ expectedEpoch: "fixture-epoch", sessionId: "fixture-session" }));
+    await evaluate(`window.fixture.settleReminder('matching')`);
+    const countReady = async (text: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
+      if (document.querySelector('.composer-toolbar [data-reminder-count]')?.getAttribute('aria-label')?.includes(${JSON.stringify(text)})) resolve('ready');
+      else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
+    assert.equal(await countReady("2 active at last observation"), "ready");
+    assert.match((await countLabel()) ?? "", /may have changed/i, "completion since observation is unknown");
+    assert.equal(await evaluate(`document.querySelector('.composer-toolbar .reminder-count')?.textContent`), "2");
+    await evaluate(`window.fixture.startReminderMutation()`);
+    assert.equal(await countReady("active count unknown"), "ready", "pending mutation invalidates the count");
+    await evaluate(`window.fixture.settleReminderMutation()`);
+    assert.equal(await countLabel(), "Reminders for selected session: active count unknown",
+      "an accepted mutation cannot resurrect the old observation");
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    assert.equal(await evaluate(`window.fixture.reminderReads.length`), 2);
+    await evaluate(`window.fixture.settleReminder('completed')`);
+    assert.equal(await countReady("1 active at last observation"), "ready", "completed rows are not active");
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    await evaluate(`window.fixture.settleReminder('mismatch')`);
+    assert.equal(await countReady("active count unknown"), "ready", "mismatched response cannot assert zero");
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    await evaluate(`window.fixture.settleReminder('error')`);
+    assert.equal(await countReady("active count unknown"), "ready", "error-path zeros are not an observation");
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    await evaluate(`window.fixture.settleReminder('empty')`);
+    assert.equal(await countReady("0 active at last observation"), "ready", "only an exact successful empty list proves zero");
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    await evaluate(`window.fixture.settleReminder('invalid')`);
+    assert.equal(await countReady("active count unknown"), "ready", "inconsistent active totals cannot assert zero");
+    await evaluate(`document.querySelector('.composer-toolbar [data-reminder-count]').click()`);
+    assert.equal(await evaluate(`window.fixture.catalogOpens`), 1, "count retains the reminder navigation action");
+    await evaluate(`window.fixture.catalogOpens = 0`);
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    assert.equal(await waitFor(`window.fixture.reminderReads.length === 7`), "ready");
+    await evaluate(`window.fixture.switchSession('fixture-other')`);
+    assert.equal(await waitFor(`window.fixture.reminderReads.length === 8`), "ready");
+    assert.match((await countLabel()) ?? "", /active count unknown/i, "switching sessions clears the prior observation");
+    await evaluate(`window.fixture.settleReminder('matching')`);
+    assert.match((await countLabel()) ?? "", /active count unknown/i, "late old-session list cannot certify new session");
+    await evaluate(`window.fixture.settleReminder('completed')`);
+    assert.equal(await countReady("1 active at last observation"), "ready");
+    await evaluate(`window.fixture.switchSession('fixture-session')`);
+    assert.equal(await waitFor(`window.fixture.reminderReads.length === 9`), "ready");
+    assert.match((await countLabel()) ?? "", /active count unknown/i, "returning does not reuse an old observation");
+    await evaluate(`window.fixture.settleReminder('empty')`);
+    assert.equal(await countReady("0 active at last observation"), "ready");
+    await evaluate(`window.fixture.startReminderMutation()`);
+    assert.equal(await countReady("active count unknown"), "ready");
+    await evaluate(`window.fixture.settleReminderMutation(true)`);
+    await evaluate(`document.querySelector('[aria-label="Refresh observed reminder count"]').click()`);
+    assert.equal(await waitFor(`window.fixture.reminderReads.length === 10`), "ready");
+    await evaluate(`window.fixture.settleReminder('matching')`);
+    assert.match((await countLabel()) ?? "", /active count unknown/i,
+      "an uncertain admission cannot be certified by a later read");
     type Sample = { panel: number; toolbar: number; editor: number; scroll: number; client: number; overflow: string; padding: string;
       controls: Record<string, { color: string; background: string; border: string; outline: string; opacity: string }>;
       pageWidth: number; viewWidth: number; panelWidth: number; panelScrollWidth: number };
@@ -91,6 +151,10 @@ test("mounted composer stays compact and its controls remain legible in both the
       const controls = Object.fromEntries(['.prompt-options select', '.prompt-options option', '.project-rename input', '.session-rename input']
         .map(selector => { const s = getComputedStyle(document.querySelector(selector)); return [selector, { color: s.color,
           background: s.backgroundColor, border: s.borderColor, outline: s.outlineStyle, opacity: s.opacity }]; }));
+      const reminder = document.querySelector('.reminder-count');
+      const badge = getComputedStyle(reminder); const button = getComputedStyle(reminder.closest('button'));
+      controls['.reminder-count'] = { color: badge.color, background: button.backgroundColor,
+        border: button.borderColor, outline: button.outlineStyle, opacity: button.opacity };
       return { panel: document.querySelector('.owned-session').getBoundingClientRect().height,
         toolbar: document.querySelector('.composer-toolbar').getBoundingClientRect().height,
         editor: editor.getBoundingClientRect().height, scroll: editor.scrollHeight, client: editor.clientHeight,
@@ -145,8 +209,7 @@ test("mounted composer stays compact and its controls remain legible in both the
     }
     assert.equal(await evaluate(`document.querySelector('.owned-session > .composer-toolbar button[aria-label="Expand prompt editor"]')?.title`),
       "Edit prompt in a large window (F6)");
-    assert.equal(await evaluate(`document.querySelector('.owned-session .composer-icon-button[aria-label="Reminders for selected session"]')?.title`),
-      "Reminders for selected session (Ctrl+G, Ctrl+D)");
+    assert.match((await evaluate(`document.querySelector('.owned-session [data-reminder-count]')?.title`)) ?? "", /Ctrl\+G, Ctrl\+D/);
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar button.primary-button')?.textContent`), "Send");
     assert.equal(await evaluate(`document.querySelector('.composer-toolbar')?.textContent.includes('Refresh receipts')`), false);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), false,
@@ -155,8 +218,6 @@ test("mounted composer stays compact and its controls remain legible in both the
       "host availability without an observed run cannot expose steering");
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Queue current composer in this host"]')`), false,
       "host availability without an observed attachment cannot expose queueing");
-    const waitFor = (condition: string) => evaluate(`new Promise(resolve => { const end = Date.now() + 4000; const check = () => {
-      if (${condition}) resolve('ready'); else if (Date.now() > end) resolve('timed out'); else setTimeout(check, 25); }; check(); })`);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Compact observed idle attachment"]')`), false,
       "host availability without an observed entry cannot imply idle");
     await evaluate(`window.fixture.observe(null, 12); document.querySelector('#refresh-session-context').click()`);

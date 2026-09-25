@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
-import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection } from "#neoastra";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import { sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, refreshSubmissions, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, type createCompactionSubmissions } from "./sessionCompaction";
@@ -15,8 +15,10 @@ import { changeSelection } from "./sessionSelection";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { dispatchComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
+import type { createReminderActions } from "./reminderActions";
+import { validReminderList } from "./reminderListObservation";
 
-export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders }: {
+export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, reminderActions, readReminderCount }: {
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
@@ -31,6 +33,8 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   remindersTrigger?: Ref<HTMLButtonElement>;
   compactTrigger?: Ref<HTMLButtonElement>;
   onOpenReminders?: () => void;
+  reminderActions?: ReturnType<typeof createReminderActions>;
+  readReminderCount?: (request: ReminderListRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ReminderListResponse>;
 }) {
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
   const text = draft.text;
@@ -94,6 +98,33 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
   const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
   const invalidEpoch = observedInvalidEpoch || !canMutate;
+  const reminderOperation = useSyncExternalStore(reminderActions?.subscribe ?? capability.subscribe,
+    useCallback(() => reminderActions?.get({ epoch, sessionId }), [reminderActions, epoch, sessionId]));
+  const [reminderReload, setReminderReload] = useState(0);
+  const [reminderObservation, setReminderObservation] = useState<{
+    epoch: string; sessionId: string; reload: number; count: number; operation: typeof reminderOperation;
+  }>();
+  const reminderRevision = useRef(0);
+  useEffect(() => {
+    const revision = ++reminderRevision.current;
+    setReminderObservation(undefined);
+    if (!onOpenReminders || !readReminderCount || !reminderActions || invalidEpoch) return;
+    const controller = new AbortController();
+    const operation = reminderActions.get({ epoch, sessionId });
+    void readReminderCount({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 15000 })
+      .then(value => {
+        if (!controller.signal.aborted && reminderRevision.current === revision &&
+          validReminderList({ epoch, sessionId }, value) && reminderActions.get({ epoch, sessionId }) === operation)
+          setReminderObservation({ epoch, sessionId, reload: reminderReload, count: value.activeCount, operation });
+      }).catch(() => { /* An error is unknown, never an observed zero or an automatic retry. */ });
+    return () => { controller.abort(); reminderRevision.current++; };
+  }, [epoch, sessionId, !!onOpenReminders, readReminderCount, reminderActions, reminderReload, invalidEpoch]);
+  const observedReminderCount = !invalidEpoch && readReminderCount && reminderActions &&
+    !reminderOperation?.pending && !reminderOperation?.hold && reminderObservation?.epoch === epoch &&
+    reminderObservation.sessionId === sessionId && reminderObservation.reload === reminderReload &&
+    reminderObservation.operation === reminderOperation ? reminderObservation.count : null;
+  const reminderLabel = observedReminderCount === null ? "Reminders for selected session: active count unknown"
+    : `Reminders for selected session: ${observedReminderCount} active at last observation; may have changed`;
   const scope = useRef<AbortController | null>(null);
   const receiptRevision = useRef(0);
   useEffect(() => {
@@ -371,9 +402,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     </div>
     <div className="history-controls">
       <span className="sr-only">Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer</span>
-      {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" disabled={invalidEpoch}
-        aria-label="Reminders for selected session" title="Reminders for selected session (Ctrl+G, Ctrl+D)"
-        onClick={onOpenReminders}><AppIcon name="reminder" size={16} /></button>}
+      {onOpenReminders && <button ref={remindersTrigger} type="button" className="composer-icon-button" data-reminder-count=""
+        disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
+        onClick={onOpenReminders}><AppIcon name="reminder" size={16} /><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></button>}
       <button id="expand-session-prompt" type="button" className="composer-icon-button" disabled={!!pending || invalidEpoch} aria-label="Expand prompt editor" title="Edit prompt in a large window (F6)" onClick={() => setExpanded(true)}><AppIcon name="expand" size={16} /></button>
       {observedSteerRun && <button type="button" className="composer-icon-button" onClick={() => steer(true)}
         disabled={invalidEpoch || !!pending || !!pendingSteer || !availableComposerSteer || !capability.canSubmit(availableComposerSteer)}
@@ -440,6 +471,9 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     <p className="detail">Selections apply on Send; active runs and queued text are unchanged.</p>
     <button id="refresh-session-context" type="button" onClick={() => void runtimeScope.current?.refresh()} aria-label="Refresh context and runtime configuration" title={`Refresh context · ${runtimeConfiguration?.providerKey ?? "session provider"}`}><AppIcon name="refresh" size={14} /> Refresh context</button>
     <button type="button" disabled={!!pending || invalidEpoch} onClick={() => setChoicesRevision(value => value + 1)}><AppIcon name="refresh" size={14} /> Refresh choices</button>
+    {onOpenReminders && readReminderCount && reminderActions && <button type="button" disabled={invalidEpoch}
+      aria-label="Refresh observed reminder count" onClick={() => { reminderRevision.current++; setReminderObservation(undefined); setReminderReload(value => value + 1); }}>
+      <AppIcon name="refresh" size={14} /> Refresh reminder count</button>}
     <p className="detail">MCP: {mcpPlugin?.state ?? (configuration?.pluginRuntimeAvailable ? "Off" : "Unavailable")} · {runtimeState?.kind === "loading" ? "Reading context…" : runtimeConfiguration?.activeRunId ? "Run active" : runtimeConfiguration ? "Context ready" : "Context unavailable"}.</p>
     <p className="detail">Existing session only. {permissionReviewer ? "Supported plain commands require explicit review below; other permissions are denied." : "Permissions are denied by default. Relaunch with --review-owned-command-permissions in owned mode to opt in to supported plain command review."} User input is cancelled; plugins and host-contributed tools are disabled. A submitted receipt is not a completed run. Receipt capacity is 256 for this host lifetime.</p>
     <p className="detail">Send/Abort retains at most 256 local intents combined. Selection changes retain exact requests and live waiter exclusion. After document reload, browse host receipts manually; lost text and retry keys are not reconstructed. No automatic retry.</p>

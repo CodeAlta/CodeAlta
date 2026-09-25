@@ -74,7 +74,7 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     const chord = `(selector='#session-prompt') => { const target = document.querySelector(selector);
       target.focus(); target.dispatchEvent(new KeyboardEvent('keydown', {key:'g', ctrlKey:true, bubbles:true, cancelable:true}));
       target.dispatchEvent(new KeyboardEvent('keydown', {key:'d', ctrlKey:true, bubbles:true, cancelable:true})); }`;
-    assert.equal(await wait("document.querySelector('#session-prompt') && document.querySelector('[aria-label=\"Reminders for selected session\"]')"), "ready");
+    assert.equal(await wait("document.querySelector('#session-prompt') && document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('0 active at last observation')"), "ready");
     await evaluate(`(() => { const input = document.querySelector('#session-prompt');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'retained draft');
       input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
@@ -101,7 +101,7 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     assert.equal(await wait("document.querySelector('[role=dialog] input')"), "ready");
     await evaluate(`(${chord})('[role=dialog] input')`);
     assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
-    await evaluate("document.querySelector('[aria-label=\"Reminders for selected session\"]').click()");
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
     assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
     await evaluate(`document.querySelector('[role=dialog] input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))`);
     assert.equal(await wait("!document.querySelector('[role=dialog]')"), "ready");
@@ -118,17 +118,24 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     await evaluate(`(() => { const t=document.querySelector('#session-prompt'); t.focus();
       t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true})); })()`);
     await evaluate("window.reminderNavigationFixture.setProject('other')");
-    assert.equal(await wait("!!document.querySelector('[aria-label=\"Reminders for selected session\"]')"), "ready");
+    assert.equal(await wait("!!document.querySelector('[data-reminder-count]')"), "ready");
+    assert.match((await evaluate("document.querySelector('[data-reminder-count]').getAttribute('aria-label')")) ?? "", /active count unknown/i,
+      "invalid project scope cannot reuse the previous session's count");
     await evaluate(`document.querySelector('#session-prompt').dispatchEvent(new KeyboardEvent('keydown',{key:'d',ctrlKey:true,bubbles:true,cancelable:true}))`);
     assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
-    await evaluate("document.querySelector('[aria-label=\"Reminders for selected session\"]').click()");
-    assert.equal(await wait("document.querySelector('.reminder-page')?.textContent.includes('Session: two')"), "ready");
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
+    await evaluate("window.reminderNavigationFixture.setProject('project')");
+    assert.equal(await wait("document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('0 active at last observation')"), "ready");
+    await evaluate("document.querySelector('[data-reminder-count]').click()");
+    assert.equal(await wait("document.querySelector('.reminder-page')?.textContent.includes('Session: two')"), "ready",
+      "pointer activation opens Reminders for the exact selected session");
     await evaluate("window.reminderNavigationFixture.workspace()");
     assert.equal(await wait("!!document.querySelector('#session-prompt')"), "ready");
     await evaluate(`(() => { const t=document.querySelector('#session-prompt'); t.focus();
       t.dispatchEvent(new KeyboardEvent('keydown',{key:'g',ctrlKey:true,bubbles:true,cancelable:true})); })()`);
     await evaluate("window.reminderNavigationFixture.host('e2')");
-    assert.equal(await wait("!document.querySelector('[aria-label=\"Reminders for selected session\"]')"), "ready");
+    assert.equal(await wait("!document.querySelector('[data-reminder-count]')"), "ready");
     await evaluate(`document.querySelector('#workspace-shell').dispatchEvent(new KeyboardEvent('keydown',{key:'d',ctrlKey:true,bubbles:true,cancelable:true}))`);
     assert.equal(await evaluate("!!document.querySelector('.reminder-page')"), false);
     assert.equal(await evaluate("window.reminderNavigationFixture.writes.length"), 1);
@@ -170,6 +177,8 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
     await evaluate("window.reminderNavigationFixture.ambiguous(true)");
     assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.ambiguous === 'true'"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('[data-reminder-count]')"), false,
+      "catalog-only mode must not expose a reminder count");
     assert.equal(await evaluate(`(${infoChord})()`), false);
     assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
     await evaluate("window.reminderNavigationFixture.ambiguous(false); window.reminderNavigationFixture.setProject('other')");
@@ -177,6 +186,7 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     assert.equal(await evaluate(`(${infoChord})()`), false);
     await evaluate("window.reminderNavigationFixture.setProject('project'); window.reminderNavigationFixture.session('missing')");
     assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.session === 'missing' && !document.querySelector('[aria-expanded][type=button]')"), "ready");
+    assert.equal(await evaluate("!!document.querySelector('[data-reminder-count]')"), false);
     assert.equal(await evaluate(`(${infoChord})()`), false);
     await evaluate("window.reminderNavigationFixture.session('one')");
     assert.equal(await wait("document.querySelector('#workspace-shell')?.dataset.session === 'one'"), "ready");
@@ -189,6 +199,17 @@ test("mounted workspace dispatches reminders, session info and implemented palet
     assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
     await evaluate("window.reminderNavigationFixture.host('e1')");
     assert.equal(await wait("!!document.querySelector('#session-prompt')"), "ready");
+    assert.equal(await wait("document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('0 active at last observation')"), "ready");
+    await evaluate("window.reminderNavigationFixture.ambiguous(true)");
+    assert.equal(await wait("document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('active count unknown')"), "ready",
+      "an ambiguous owned catalog identity must clear the displayed count");
+    await evaluate("window.reminderNavigationFixture.ambiguous(false)");
+    assert.equal(await wait("document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('0 active at last observation')"), "ready");
+    await evaluate("window.reminderNavigationFixture.session('missing')");
+    assert.equal(await wait("document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('active count unknown')"), "ready",
+      "a missing owned target must not show another session's count");
+    await evaluate("window.reminderNavigationFixture.session('two')");
+    assert.equal(await wait("document.querySelector('[data-reminder-count]')?.getAttribute('aria-label')?.includes('0 active at last observation')"), "ready");
     assert.equal(await evaluate(`(${infoChord})('#session-prompt')`), true);
     assert.equal(await wait("document.querySelector('dialog[open] .session-info-fields code')?.textContent === 'two'"), "ready");
     await evaluate("document.querySelector('[aria-label=\"Close session info\"]').click()");
