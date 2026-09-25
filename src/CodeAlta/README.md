@@ -326,6 +326,13 @@ internal raw persistence records duplicated by typed events are hidden rather th
 Permissions and other stored requests are historical records, not actionable approvals. Previews can be
 shortened explicitly; arbitrary provider payloads are not sent to the frontend.
 
+Persisted user and assistant message bodies longer than 1,200 UTF-16 units initially show a plain-text,
+inert excerpt of at most 240 units (not sliced/rendered Markdown). **Show full message** renders the entire
+already retained body through the normal sanitized Markdown renderer; **Collapse message** restores the excerpt.
+Both controls work with keyboard or pointer. Copy Markdown still copies all retained text while collapsed;
+shortening/omission notices stay outside the disclosure. This is window-local per-record presentation state,
+not a read for omitted text, a stored preference or a reconstruction of live output.
+
 Tool and file cards keep available persisted diagnostic/output detail text behind their collapsed **Details**
 disclosure. Inside it, **Wrap lines** is on by default and can be switched per card with a pointer or keyboard;
 turning it off scrolls long lines inside the detail pane. This only changes how the already loaded plain text

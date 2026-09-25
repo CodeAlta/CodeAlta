@@ -11,21 +11,28 @@ function createFixture() {
   const calls: string[] = [];
   const longLine = "tool-diagnostic-" + "X".repeat(1200);
   let hold = false;
+  let longBodies = false;
+  let changedBody = false;
   let release: (() => void) | undefined;
   function row(index: number, session: string): HistoryResponse["entries"][number] {
     const omitted = session === "B" && index === 1;
     const tool = index === 0 || index === 1204 || omitted;
+    const longUser = longBodies && session === "A" && index === 1201;
+    const shortUser = longBodies && session === "A" && index === 1203;
+    const longAssistant = longBodies && index === 700;
+    const longText = `**First** [reference](https://example.invalid/path)\n\n\`\`\`js\nconst answer = 42;\n\`\`\`\n${"plain text ".repeat(135)}<img src=x onerror="window.toolFixture.injected=true"> FULL END`;
     return { offset: `${index * 200}`, eventType: tool ? "activity" : "contentCompleted", providerId: "fixture", sessionId: session,
-      runId: "test-run", timestamp: "2026-01-01T00:00:00Z", kind: tool ? "ToolCall" : "Assistant", phase: tool ? "failed" : null,
+      runId: "test-run", timestamp: "2026-01-01T00:00:00Z", kind: tool ? "ToolCall" : longUser || shortUser ? "User" : "Assistant", phase: tool ? "failed" : null,
       contentId: tool ? null : `${index}`, activityId: tool ? `tool-${index}` : null, parentActivityId: null, interactionId: null,
-      name: tool ? "fixture_tool" : null, text: omitted ? null : tool ? "**Failed** `literal code stays as Markdown`" : `turn-${index}`,
+      name: tool ? "fixture_tool" : null, text: omitted ? null : tool ? "**Failed** `literal code stays as Markdown`" :
+        longUser || longAssistant ? `${longText} ${changedBody ? "changed " : ""}${session}-${index}` : `turn-${index}`,
       details: tool && !omitted ? JSON.stringify({ command: longLine, result: { output: `${longLine}\n${longLine}\n<img src=x onerror=alert(1)>` } }) : null,
-      textTruncated: false, detailsTruncated: tool && !omitted, bodyOmitted: tool };
+      textTruncated: longUser, detailsTruncated: tool && !omitted, bodyOmitted: tool || longUser };
   }
   async function read(request: HistoryRequest): Promise<HistoryResponse> {
     calls.push(`${request.sessionId}:${request.cursor?.offset ?? "tail"}`);
     if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve; }); }
-    const total = request.sessionId === "A" ? 1205 : 3;
+    const total = request.sessionId === "A" || longBodies ? 1205 : 3;
     const end = request.cursor ? Number(request.cursor.offset) / 200 : total;
     const start = Math.max(0, end - 100);
     return { status: "ok", entries: Array.from({ length: end - start }, (_, i) => row(start + i, request.sessionId)),
@@ -33,6 +40,7 @@ function createFixture() {
         lastWriteUtcTicks: "7", offset: `${start * 200}` } : null, tailOmitted: false };
   }
   function Mounted({ sessionId }: { sessionId: string }) {
+    const [, rerender] = useState(0);
     const position = useTimelinePosition(sessionId, memory);
     const shell = useRef<HTMLDivElement>(null);
     const chord = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
@@ -49,7 +57,9 @@ function createFixture() {
     useLayoutEffect(() => {
       const fixture = Object.assign((window as Window & { toolFixture?: object }).toolFixture ?? {}, {
         select: (id: string) => window.dispatchEvent(new CustomEvent("tool-select", { detail: id })),
-        grow: setDeferredHeight, calls, hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
+        grow: setDeferredHeight, calls, enableLong: () => { longBodies = true; }, changeBody: () => { changedBody = true; },
+        rerender: () => rerender(value => value + 1),
+        hold: () => { hold = true; }, release: () => { release?.(); release = undefined; } });
       Object.assign(window, { toolFixture: fixture });
     }, []);
     useLayoutEffect(() => {

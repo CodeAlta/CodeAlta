@@ -144,7 +144,7 @@ export function History({ sessionId, onNotesChange, onSettled, onBeforeOlder, on
       <AppIcon name="history" size={14} />Load older history{timeline.entries.length === 1000 ? " (replace newest visible events)" : ""}</button>}
     {items.length === 0 && current?.kind === "ready" && <div className="empty-history">No visible events in this history.</div>}
     <div className="messages">
-      {items.map(item => item.source === "history" ? <TimelineMessage key={item.key} item={item.item} />
+      {items.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${window?.revision ?? "unversioned"}:${item.key}`} item={item.item} />
         : item.source === "liveText" ? <LiveTextMessage key={item.key} row={item.row} />
         : <LiveToolMessage key={item.key} row={item.row} />)}
     </div>

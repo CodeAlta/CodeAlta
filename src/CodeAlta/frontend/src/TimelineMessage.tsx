@@ -1,11 +1,20 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent } from "./MarkdownContent";
 import { writeMarkdown, type TimelineItem } from "./timeline";
 
+const longBodyThreshold = 1200;
+const previewLength = 240;
+
 export function TimelineMessage({ item }: { item: TimelineItem }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [wrapDetails, setWrapDetails] = useState(true);
+  const [disclosure, setDisclosure] = useState<{ source: string; expanded: boolean } | null>(null);
+  const bodyId = useId();
+  // A changed record at the same offset must not inherit the previous record's disclosure.
+  const body = item.markdown;
+  const longBody = (item.category === "user" || item.category === "assistant") && (body?.length ?? 0) > longBodyThreshold;
+  const expanded = longBody && disclosure?.source === body && disclosure.expanded;
   const reset = useRef<number | undefined>(undefined);
   async function copy() {
     if (!item.copyMarkdown) return;
@@ -29,7 +38,14 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
         </span>
       </div>
       {item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
-      {item.markdown && <MarkdownContent source={item.markdown} />}
+      {body && longBody ? <>
+        <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
+          aria-expanded={expanded} onClick={() => setDisclosure({ source: body, expanded: !expanded })}>
+          <AppIcon name="chevronDown" size={14} />{expanded ? "Collapse message" : "Show full message"}
+        </button>
+        <div id={bodyId}>{expanded ? <MarkdownContent source={body} />
+          : <p className="long-message-preview">Preview (plain text): {plainTextPreview(body)}…</p>}</div>
+      </> : body && <MarkdownContent source={body} />}
       {hasDetails && <details className="event-details"><summary><AppIcon name="chevronDown" size={14} />{item.detailsLabel}</summary>
         <div className="event-detail-body">
           {item.detailMarkdown && item.detailMarkdown !== item.markdown && <MarkdownContent source={item.detailMarkdown} />}
@@ -39,10 +55,18 @@ export function TimelineMessage({ item }: { item: TimelineItem }) {
           <ul className="event-meta-inline">{item.metadata.map(value => <li key={value}>{value}</li>)}</ul>
         </div>
       </details>}
-      {!item.markdown && !item.summary && !item.detailMarkdown && !item.details && item.bodyOmitted && <p className="muted-text">Additional diagnostic details were omitted.</p>}
+      {item.bodyOmitted && <p className="muted-text">{item.category === "user" || item.category === "assistant"
+        ? "Additional message content was omitted from this history record." : "Additional diagnostic details were omitted."}</p>}
       {item.truncated && <p className="muted-text">Some details were shortened to fit the desktop history window.</p>}
     </div>
   </article>;
+}
+
+// Never parse a cut Markdown document: React escapes this inert excerpt as plain text. Avoid splitting a surrogate pair.
+function plainTextPreview(source: string): string {
+  const last = source.charCodeAt(previewLength - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? previewLength - 1 : previewLength;
+  return source.slice(0, end);
 }
 
 function formatTimestamp(value: string) {

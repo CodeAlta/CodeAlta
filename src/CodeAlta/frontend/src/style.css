@@ -239,6 +239,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .copy-failed { color: var(--red); }
 .timeline-summary { overflow-wrap: anywhere; color: var(--muted) !important; font-size: 12px; }
 .timeline-primary-code { display: block; width: fit-content; max-width: 100%; margin-top: 5px; padding: 3px 6px; overflow: hidden; border-radius: 5px; background: var(--panel-3); font: 11px/1.45 "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.long-message-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; }
+.long-message-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.long-message-preview { overflow-wrap: anywhere; color: var(--muted) !important; font-size: 12px; }
 .event-details { margin-top: 6px; color: var(--muted); font-size: 10px; }
 .message-tool .event-details, .message-file .event-details { min-width: 0; }
 .event-details summary { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; list-style: none; }
