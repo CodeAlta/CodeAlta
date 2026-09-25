@@ -19,6 +19,7 @@ internal sealed partial class WorkspaceService
         if (!ValidEpoch(epoch)) throw new ArgumentException("A canonical host epoch is required.", nameof(epoch));
         _importCatalog = catalog;
         _importEpoch = epoch;
+        _directoryCompletionReader = (directory, prefix) => Task.Run(() => DirectoryCompletionReader.Read(directory, prefix));
         _import = async path => await catalog.GetByPathAsync(path, CancellationToken.None).ConfigureAwait(false)
             ?? await catalog.UpsertFromPathAsync(path, CancellationToken.None).ConfigureAwait(false);
         _projectNameWrite = (id, path, source, revision, name) =>
@@ -79,8 +80,10 @@ internal sealed partial class WorkspaceService
         Task? work;
         Task? read;
         Task? rename;
-        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; }
-        await Task.WhenAll(work ?? Task.CompletedTask, read ?? Task.CompletedTask, rename ?? Task.CompletedTask).ConfigureAwait(false);
+        Task? completion;
+        lock (_importGate) { _importsClosed = true; work = _importWork; read = _projectReadWork; rename = _projectRenameWork; completion = _directoryCompletionWork; }
+        await Task.WhenAll(work ?? Task.CompletedTask, read ?? Task.CompletedTask, rename ?? Task.CompletedTask,
+            completion ?? Task.CompletedTask).ConfigureAwait(false);
     }
 
     private async Task ImportAsync(string path, string requestedPath, TaskCompletionSource<WorkspaceOpenProjectResponse> completion)

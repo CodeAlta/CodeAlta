@@ -42,6 +42,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(WorkspaceSnapshot))]
 [JsonSerializable(typeof(WorkspaceOpenProjectRequest))]
 [JsonSerializable(typeof(WorkspaceOpenProjectResponse))]
+[JsonSerializable(typeof(WorkspaceDirectoryCompletionRequest))]
+[JsonSerializable(typeof(WorkspaceDirectoryCompletionResponse))]
 [JsonSerializable(typeof(WorkspaceReadProjectNameRequest))]
 [JsonSerializable(typeof(WorkspaceReadProjectNameResponse))]
 [JsonSerializable(typeof(WorkspaceRenameProjectRequest))]
