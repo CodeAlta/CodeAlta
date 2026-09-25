@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ReminderDetailRequest, ReminderDetailResponse, ReminderListRequest, ReminderListResponse } from "#neoastra";
 import type { ReminderTarget, createReminderActions } from "./reminderActions";
 import { reminderDelaySeconds } from "./reminderDuration";
@@ -25,6 +25,11 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
   const [editor, setEditor] = useState<{ base: ReminderDetailResponse; text: string }>();
   const [confirmSelection, setConfirmSelection] = useState<string | null>(null);
   const [confirmDiscardEdit, setConfirmDiscardEdit] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+  const refreshTrigger = useRef<HTMLButtonElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const saveTrigger = useRef<HTMLButtonElement>(null);
+  const confirmationTrigger = useRef<HTMLInputElement>(null);
   const selectionVersion = useRef(0);
   const [reload, setReload] = useState(0);
   const latest = useRef(target);
@@ -150,14 +155,44 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
       setDetailError("Reminder changed, finished or was deleted. Refresh before saving again; your edit draft is retained.");
     }
   }
-  return <main className="configuration-page reminder-page" aria-label="Reminders">
+  function panelKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    const source = event.target;
+    if (!(source instanceof HTMLElement) || !panelRef.current?.contains(source) ||
+      event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 ||
+      document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
+      confirmLoad !== null || confirmSelection !== null || confirmDiscardEdit ||
+      !target || !mutationAllowed || !canMutate()) return;
+    const editing = !!source.closest("input, textarea, select, [contenteditable]");
+    const key = event.key.toLowerCase();
+    const ctrl = event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+    const matchesTarget = (element: HTMLElement | null) => !!element?.isConnected && panelRef.current?.contains(element) === true &&
+      element.dataset.epoch === target.epoch && element.dataset.sessionId === target.sessionId;
+    let handled = false;
+    if (ctrl && key === "r" && !editing && matchesTarget(refreshTrigger.current) && !refreshTrigger.current!.disabled) {
+      refreshTrigger.current!.click(); handled = true;
+    } else if (ctrl && key === "e" && !editing && row?.state === "active" && shownDetail && !blocked &&
+      matchesTarget(editorRef.current) && editorRef.current!.dataset.reminderId === row.id && !editorRef.current!.disabled) {
+      editorRef.current!.focus(); handled = true;
+    } else if (ctrl && key === "s" && (!editing || source === editorRef.current) && row?.state === "active" &&
+      shownDetail && !blocked && matchesTarget(saveTrigger.current) && !saveTrigger.current!.disabled &&
+      saveTrigger.current!.dataset.reminderId === row.id && saveTrigger.current!.dataset.editRevision === shownDetail.editRevision) {
+      saveTrigger.current!.click(); handled = true;
+    } else if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "delete" &&
+      !editing && row && !blocked && matchesTarget(confirmationTrigger.current) &&
+      confirmationTrigger.current!.dataset.reminderId === row.id && !confirmationTrigger.current!.disabled) {
+      confirmationTrigger.current!.focus(); handled = true;
+    }
+    if (handled) { event.preventDefault(); event.stopPropagation(); }
+  }
+  return <main ref={panelRef} onKeyDown={panelKeyDown} className="configuration-page reminder-page" aria-label="Reminders">
     <header className="page-heading"><span className="eyebrow">Desktop / Reminders</span><h1>Reminders</h1>
       <p>Delayed prompts for the selected session. Schedules are in memory only and are lost when the host stops.
         At firing, the owned host attempts one Send; busy, unavailable or failed sends are not retried. Completion means the attempt finished, not that the agent answered.</p></header>
     {!target ? <p role="status">Select an owned session to manage its reminders.</p> : <>
       {!mutationAllowed && <p role="alert">Host identity is invalidated. Reload before changing reminders.</p>}
       <p>Session: <code>{target.sessionId}</code>.</p>
-      <button type="button" onClick={() => setReload(n => n + 1)}>Refresh reminders</button>
+      <button ref={refreshTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
+        onClick={() => setReload(n => n + 1)}>Refresh reminders</button>
       {error && <p role="alert" className="error-text">{error}</p>}
       {!active && !error && <p role="status">Loading reminders.</p>}
       {operation && <p role={operation.hold ? "alert" : "status"}>{operation.message}</p>}
@@ -211,9 +246,12 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
           {shownDetail && <><h4>Full scheduled message</h4>
             <p aria-label="Full reminder message" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{shownDetail.content}</p>
             <label htmlFor="reminder-edit">Edit full reminder message (active schedule only)</label>
-            <textarea id="reminder-edit" maxLength={4096} value={editor?.text ?? ""}
+            <textarea ref={editorRef} id="reminder-edit" data-epoch={target.epoch} data-session-id={target.sessionId}
+              data-reminder-id={row.id} maxLength={4096} value={editor?.text ?? ""}
               disabled={blocked || row.state !== "active"} onChange={event => { setEditor(previous => previous && { ...previous, text: event.target.value }); setConfirmDiscardEdit(false); }} />
-            <button type="button" disabled={blocked || row.state !== "active" || !dirtyEdit || !editor?.text.trim() ||
+            <button ref={saveTrigger} type="button" data-epoch={target.epoch} data-session-id={target.sessionId}
+              data-reminder-id={row.id} data-edit-revision={editor?.base.editRevision ?? ""}
+              disabled={blocked || row.state !== "active" || !dirtyEdit || !editor?.text.trim() ||
               editor.text.length > 4096 || editor.base.editRevision !== shownDetail.editRevision}
               onClick={() => void save()}>Save message</button>
             {dirtyEdit && <><button type="button" disabled={blocked} onClick={() => setConfirmDiscardEdit(true)}>Discard edit draft</button>
@@ -226,7 +264,8 @@ export function ReminderPanel({ target, read, readDetail, actions, mutationAllow
               <button type="button" disabled={blocked} onClick={() => useAsNew(true)}>Discard draft and use reminder</button>{" "}
               <button type="button" onClick={() => setConfirmLoad(null)}>Keep draft</button></p>}</>}
           <label htmlFor="reminder-confirm">To delete, type the exact reminder ID</label>
-          <input id="reminder-confirm" value={confirmation} onChange={event => setConfirmation(event.target.value)} />
+          <input ref={confirmationTrigger} id="reminder-confirm" data-epoch={target.epoch} data-session-id={target.sessionId}
+            data-reminder-id={row.id} value={confirmation} onChange={event => setConfirmation(event.target.value)} />
           <button type="button" disabled={blocked || confirmation !== row.id} onClick={() => void remove()}>Delete confirmed reminder</button>
           <p>Deletion cannot retract an already captured delivery or a submitted run.</p></section>}
       </section></div>}

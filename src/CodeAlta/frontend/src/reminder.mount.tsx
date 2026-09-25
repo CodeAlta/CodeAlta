@@ -15,7 +15,7 @@ const read = (request: ReminderListRequest) => new Promise<ReminderListResponse>
   reads.push({ sessionId: request.sessionId, resolve, reject }));
 const root = createRoot(document.getElementById("app")!);
 const fixture = {
-  reads, details, writes, epoch: "e1" as string | null, sessionId: "one" as string | null, mounted: true,
+  reads, details, writes, epoch: "e1" as string | null, sessionId: "one" as string | null, mounted: true, allowed: true,
   session(id: string | null) { fixture.sessionId = id; render(); },
   host(epoch: string | null) { fixture.epoch = epoch; render(); },
   leave() { fixture.mounted = false; render(); },
@@ -26,7 +26,7 @@ function render() {
   if (!fixture.mounted) { root.render(<div>Other screen</div>); return; }
   root.render(<ReminderPanel key={JSON.stringify([fixture.epoch, fixture.sessionId])}
     target={fixture.epoch && fixture.sessionId ? { epoch: fixture.epoch, sessionId: fixture.sessionId } : null}
-    actions={actions} mutationAllowed={true} canMutate={() => true}
+    actions={actions} mutationAllowed={true} canMutate={() => fixture.allowed}
     readDetail={readDetail} read={read} />);
 }
 render();

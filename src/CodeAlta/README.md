@@ -127,6 +127,13 @@ another session's retained message. While viewing that target, a local unsaved e
 selectable for recovery after conflict, failed detail/list refresh or deletion, even with an empty
 list; discarding that draft requires confirmation and never clears an outstanding Save admission.
 A refreshed detail does not silently rebase an old draft or retry it.
+Within the eligible panel, `Ctrl+R` refreshes from non-editor focus, `Ctrl+E` focuses the selected
+active message editor, and `Ctrl+S` saves a changed message from that editor or a non-editor panel
+control. `Delete` from non-editor focus only focuses the existing exact-ID confirmation field; it
+never submits deletion, and Delete in a text field remains text editing. Shortcuts do not run during
+inline discard confirmations, modal/IME input or without current host authority. Pending or uncertain
+Save blocks mutation/focus shortcuts; `Ctrl+R` remains read-only observation, never a retry. Create
+still requires its explicit button; `Ctrl+Enter` is not mapped in this panel.
 Schedules and results are **in memory, not persisted**:
 closing/restarting the host loses them. The host
 owns the timers and attempts one normal owned Send per firing, with the same permission policy
