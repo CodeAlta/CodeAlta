@@ -5,7 +5,7 @@ import { createOwnerChangeSignal } from "./ownerChangeSignal";
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 type CancelIntent = Readonly<{ request: Readonly<SessionCancelQueueRequest>; sessionId: string }>;
-type Pending = { request: Readonly<SessionQueueRequest>; inFlight: boolean };
+type Pending = { request: Readonly<SessionQueueRequest>; inFlight: boolean; source: "composer" | "editor"; draftRevision: number | null };
 type PendingCancel = { intent: CancelIntent; inFlight: boolean };
 
 function wellFormed(value: string): boolean {
@@ -129,10 +129,19 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
   invokeCancel: (request: SessionCancelQueueRequest, options: WaitOptions) => Promise<SessionAdmission>) {
   const queues = new Map<string, Pending>();
   const cancellations = new Map<string, PendingCancel>();
+  // Volatile, session-scoped secondary editor drafts are not the retained immutable queue requests.
+  const drafts = new Map<string, { text: string; revision: number }>();
   const change = createOwnerChangeSignal();
   const sessionKey = (sessionId: string) => sessionId.toLowerCase();
+  const draftKey = (epoch: string, sessionId: string) => JSON.stringify([epoch, sessionKey(sessionId)]);
   return {
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
+    draft(epoch: string, sessionId: string): string { return drafts.get(draftKey(epoch, sessionId))?.text ?? ""; },
+    draftRevision(epoch: string, sessionId: string): number { return drafts.get(draftKey(epoch, sessionId))?.revision ?? 0; },
+    editDraft(epoch: string, sessionId: string, text: string): void {
+      const key = draftKey(epoch, sessionId);
+      drafts.set(key, { text, revision: (drafts.get(key)?.revision ?? 0) + 1 });
+    },
     pending(sessionId: string): Readonly<Pending> | undefined {
       const entry = queues.get(sessionKey(sessionId)); return entry ? Object.freeze({ ...entry }) : undefined;
     },
@@ -158,13 +167,16 @@ export function createQueueSubmissions(invoke: (request: SessionQueueRequest, op
       if (recovered.queueRecovered || recovered.cancellationsRecovered) change.changed();
       return recovered;
     },
-    async submit(request: SessionQueueRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void): Promise<void> {
+    async submit(request: SessionQueueRequest, signal: AbortSignal, capability: Capability, publish: (result: SubmissionResult) => void,
+      source: "composer" | "editor" = "editor"): Promise<void> {
       if (signal.aborted || !capability.canSubmit(request) || !validRequest(request)) return;
       const key = sessionKey(request.sessionId); let entry = queues.get(key);
       if (entry && (entry.inFlight || entry.request !== request)) return;
       if (!entry) {
         if (queues.size + cancellations.size >= 256) { publish({ status: "capacity", epoch: request.expectedEpoch, receipt: null }); return; }
-        entry = { request: Object.freeze({ ...request }), inFlight: false }; queues.set(key, entry);
+        entry = { request: Object.freeze({ ...request }), inFlight: false, source,
+          draftRevision: source === "editor" ? drafts.get(draftKey(request.expectedEpoch, request.sessionId))?.revision ?? 0 : null };
+        queues.set(key, entry);
       }
       entry.inFlight = true;
       change.changed();

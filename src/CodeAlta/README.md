@@ -543,7 +543,13 @@ the same queue owner as the separate editor. A pending Send or retained queue re
 only the separate controls can manually retry the original queue key, attachment and text. The
 composer draft stays editable and is **not cleared by owner reservation**, because that reservation
 does not establish insertion, durability or execution; even newer draft edits are preserved. The
-secondary queue editor remains independent. Refresh receipts manually to inspect distinct phases.
+secondary queue editor keeps its own volatile draft per host epoch/session across panel selection
+changes. While a queue request is retained, that disabled editor shows the exact request text;
+after manual retry or receipt reconciliation of a composer-originated request, its separate draft
+returns unchanged. A successful direct secondary-editor submission clears only that editor's
+submitted draft if it has not been edited since capture, never a distinct later edit. These drafts
+are not persisted across document reload or host-owner replacement. Refresh receipts manually to
+inspect distinct phases.
 **Cancel this queued operation** uses `sessions.cancelQueue` with the original operation ID,
 never a later/current run.
 Cancellation signalling is not rollback or target cleanup completion. Uncertain queue/cancel intents

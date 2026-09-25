@@ -91,6 +91,32 @@ test("queue uncertainty survives remount and only explicit exact retry reuses im
   assert.equal(seen.length, 2); assert.equal(seen[0], seen[1]); assert.equal(seen[1].text, " exact text \n");
 });
 
+test("volatile secondary draft revision and original queue source survive retained exact retry", async () => {
+  const store = createQueueSubmissions(async () => { throw new Error("lost response"); }, async () => { throw new Error("unused"); });
+  const capability = createMutationCapability("epoch"); const signal = new AbortController().signal;
+  store.editDraft("epoch", "session", "independent secondary text");
+  const firstRevision = store.draftRevision("epoch", "session");
+  const toolbar = captureQueue("epoch", "session", observation(), "composer text", "toolbar-key")!;
+  await store.submit(toolbar, signal, capability, () => {}, "composer");
+  assert.equal(store.pending("session")?.source, "composer");
+  assert.equal(store.pending("session")?.draftRevision, null);
+  store.editDraft("epoch", "session", "newer secondary text");
+  await store.submit(store.pending("session")!.request, signal, capability, () => {}); // Manual editor retry cannot change origin.
+  assert.equal(store.pending("session")?.source, "composer");
+  assert.equal(store.pending("session")?.request.text, "composer text");
+  assert.deepEqual(store.reconcile("session", page({ ...row(), clientRequestId: "toolbar-key" }), capability),
+    { queueRecovered: true, cancellationsRecovered: 0 });
+  assert.equal(store.draft("epoch", "session"), "newer secondary text");
+  assert.equal(store.draft("epoch", "other"), "");
+  const editor = captureQueue("epoch", "session", observation(), "newer secondary text", "editor-key")!;
+  await store.submit(editor, signal, capability, () => {});
+  assert.equal(store.pending("session")?.source, "editor");
+  assert.equal(store.pending("session")?.draftRevision, store.draftRevision("epoch", "session"));
+  store.editDraft("epoch", "session", "newer secondary text"); // Identical text, distinct later edit.
+  assert.ok(store.draftRevision("epoch", "session") > firstRevision);
+  assert.notEqual(store.pending("session")?.draftRevision, store.draftRevision("epoch", "session"));
+});
+
 test("queue cancellation captures the original operation and session rather than later selection or run", async () => {
   const intent = cancelIntent(); assert.ok(intent); assert.ok(Object.isFrozen(intent)); assert.ok(Object.isFrozen(intent.request));
   assert.equal(intent.sessionId, "session"); assert.equal(intent.request.targetOperationId, operation);

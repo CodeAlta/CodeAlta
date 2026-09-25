@@ -76,7 +76,16 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
   const [abortRunMessage, setAbortRunMessage] = useState("Refresh runtime state explicitly before targeting cancellation.");
-  const [queueText, setQueueText] = useState("");
+  const [queueText, setQueueText] = useState(() => queue.draft(epoch, sessionId));
+  function editQueueText(value: string) {
+    queue.editDraft(epoch, sessionId, value);
+    setQueueText(value);
+  }
+  function clearSubmittedQueueDraft(source: "composer" | "editor", revision: number | null) {
+    // Neither toolbar-originated recovery nor a later secondary edit is the submitted editor draft.
+    if (source !== "editor" || revision !== queue.draftRevision(epoch, sessionId)) return;
+    editQueueText("");
+  }
   const [queueMessage, setQueueMessage] = useState("Refresh runtime state explicitly before queueing text in this host.");
   const [message, setMessage] = useState("Ready to send to this owned session.");
   const [page, setPage] = useState<SessionReceiptPage>();
@@ -95,7 +104,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     latestText.current = restored;
     setDraft({ text: restored, editGeneration: null });
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
-    setQueueText(queue.pending(sessionId)?.request.text ?? "");
+    setQueueText(queue.draft(epoch, sessionId));
     setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
       ? "Retained queue/cancellation intent exists. Manually refresh receipts or explicitly retry the exact request after its original waiter settles."
       : "Refresh runtime state explicitly before queueing text in this host.");
@@ -203,8 +212,10 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
         setCompactMessage("Compaction receipt recovered. Review its settled outcome; a busy outcome requires a new explicit action.");
       if (abortRuns.reconcile(sessionId, result, capability))
         setAbortRunMessage("Exact cancellation receipt recovered. Review its outcome; cancellation signalling is not run completion.");
+      const retainedQueue = queue.pending(sessionId);
       const recoveredQueue = queue.reconcile(sessionId, result, capability);
-      if (recoveredQueue.queueRecovered) setQueueText("");
+      if (recoveredQueue.queueRecovered && retainedQueue)
+        clearSubmittedQueueDraft(retainedQueue.source, retainedQueue.draftRevision);
       if (recoveredQueue.queueRecovered || recoveredQueue.cancellationsRecovered > 0) {
         setQueueMessage("Queue/cancellation receipt reconciled. Review reservation, host-only insertion and execution/cleanup separately.");
       }
@@ -278,18 +289,20 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
     if (fromComposer && (submissions.pending(sessionId) || retained)) return;
     const request = retained?.request ?? captureQueue(epoch, sessionId, observedTarget, fromComposer ? text : queueText, crypto.randomUUID());
     if (!request || retained?.inFlight || !capability.canSubmit(request)) return;
+    const source = retained?.source ?? (fromComposer ? "composer" : "editor");
+    const draftRevision = retained?.draftRevision ?? queue.draftRevision(epoch, sessionId);
     setQueueMessage("Owner reservation pending; host-only insertion and execution are not yet confirmed.");
     if (fromComposer) setMessage("Owner queue reservation pending; composer draft retained.");
     void queue.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (result.status === "accepted" || result.status === "replay") {
-        if (!fromComposer) setQueueText("");
+        clearSubmittedQueueDraft(source, draftRevision);
         setQueueMessage(`Owner reservation accepted. Refresh submissions manually for host-only insertion and execution/cleanup; neither durability nor run completion is implied.${fromComposer ? " Composer draft is retained." : ""}`);
       } else setQueueMessage(`Queue: ${result.status}. Uncertain requests retain exact text, key and attachment. No automatic retry.`);
       if (fromComposer) setMessage(result.status === "accepted" || result.status === "replay"
         ? "Queue reservation accepted; composer draft retained. Host-only insertion, durability and execution are not confirmed. Refresh receipts manually."
         : `Queue: ${result.status}. Composer draft retained. Review the exact queue request in the separate controls; no automatic retry.`);
-    });
+    }, source);
   }
   function cancelQueued(row?: SessionReceiptView, retainedOperationId?: string) {
     const signal = scope.current?.signal;
@@ -412,7 +425,7 @@ export function OwnedSessionPanel({ sessionId, epoch, projectId = null, submissi
         {pendingSteer && <p className="detail">Retained run {pendingSteer.request.expectedRunId} · attachment {pendingSteer.request.expectedAttachmentGeneration} · request {pendingSteer.request.clientRequestId}; refresh never retargets this request.</p>}
         <button type="button" disabled={invalidEpoch || !!pendingSteer?.inFlight || (pendingSteer ? !capability.canSubmit(pendingSteer.request) : !canCaptureSteer)} onClick={() => steer()}>{pendingSteer ? "Retry exact steering request" : "Steer observed run"}</button>
         {steerMessage !== "Refresh runtime state explicitly before targeting a run." && <p role="status">{steerMessage}</p>}</div>}
-      {showQueue && <div><label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => setQueueText(event.target.value)} /></label>
+      {showQueue && <div><label>Host-only queued text<textarea maxLength={32768} value={pendingQueue?.request.text ?? queueText} disabled={!!pendingQueue} onChange={event => editQueueText(event.target.value)} /></label>
         <p className="detail">Reservation is not insertion, execution or durable storage. Refresh receipts manually.</p>
         {pendingQueue && <p className="detail">Retained attachment {pendingQueue.request.expectedAttachmentGeneration} · request {pendingQueue.request.clientRequestId}; no durable recovery or retargeting.</p>}
         <button type="button" disabled={invalidEpoch || !!pendingQueue?.inFlight || (pendingQueue ? !capability.canSubmit(pendingQueue.request) : !canCaptureQueue)} onClick={() => queueTextInHost(false)}>{pendingQueue ? "Retry exact host-only queue request" : "Queue text — this host only"}</button>

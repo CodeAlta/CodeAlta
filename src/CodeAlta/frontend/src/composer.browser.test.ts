@@ -505,6 +505,19 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.queueCalls[3].clientRequestId === window.fixture.queueCalls[1].clientRequestId &&
       window.fixture.queueCalls[3].text === 'Edited after reservation'`), true);
     assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
+    assert.equal(await evaluate(`[...document.querySelectorAll('.context-actions label')].find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value`),
+      "Separate secondary queue text", "toolbar uncertainty and exact retry across selection preserve the independent secondary draft");
+    await evaluate(`(() => {const el=[...document.querySelectorAll('.context-actions label')]
+      .find(x=>x.textContent.includes('Host-only queued text')).querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,'Independent secondary draft across retry');
+      el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await evaluate(`window.fixture.switchSession('fixture-other')`);
+    assert.equal(await waitFor(`!!document.querySelector('#session-prompt')`), "ready");
+    await evaluate(`window.fixture.switchSession('fixture-session')`);
+    assert.equal(await waitFor(`[...document.querySelectorAll('.context-actions label')].some(x=>x.textContent.includes('Host-only queued text') &&
+      x.querySelector('textarea')?.value === 'Independent secondary draft across retry')`), "ready",
+      "switching sessions in the same host must not replace an editor draft with earlier retained toolbar text");
+    assert.equal(await waitFor(`!document.querySelector(${JSON.stringify(queueButton)})?.disabled`), "ready");
     await evaluate(`document.querySelector(${JSON.stringify(queueButton)})?.click()`);
     assert.equal(await evaluate(`window.fixture.queueCalls.length`), 5);
     assert.equal(await evaluate(`JSON.stringify([window.fixture.queueCalls[4].text,window.fixture.queueCalls[4].expectedAttachmentGeneration,
@@ -519,7 +532,41 @@ test("mounted composer stays compact and its controls remain legible in both the
     assert.equal(await evaluate(`window.fixture.queueCalls[5].clientRequestId === window.fixture.queueCalls[4].clientRequestId &&
       window.fixture.queueCalls[5].expectedAttachmentGeneration === '14'`), true);
     await evaluate(`window.fixture.settleQueue()`);
-    assert.equal(await waitFor(`!window.fixture.queuePending()`), "ready");
+    assert.equal(await waitFor(`!window.fixture.queuePending() && [...document.querySelectorAll('.context-actions label')]
+      .find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value === 'Independent secondary draft across retry'`),
+      "ready", "manual recovery of a toolbar queue request must not erase the independent secondary draft");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
+    await evaluate(`window.fixture.queueMode('uncertain');document.querySelector(${JSON.stringify(queueButton)})?.click()`);
+    assert.equal(await waitFor(`!!window.fixture.queuePending() && !window.fixture.queuePending().inFlight`), "ready");
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 7);
+    assert.equal(await evaluate(`[...document.querySelectorAll('.context-actions label')].find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value`),
+      "Newer independent queue draft", "the disabled queue editor shows the exact retained request for inspection");
+    await evaluate(`(() => {const request=window.fixture.queueCalls[6];window.fixtureReceiptRows=[{
+      kind:'Queue',clientRequestId:'wrong-key',sessionId:request.sessionId,operationId:'33333333-3333-4333-8333-333333333333',
+      targetOperationId:null,state:'pending',outcome:null,code:null,runId:null,
+      queueInsertion:{state:'pending',accepted:null,code:null}}];})()`);
+    const receiptReads = Number(await evaluate(`window.fixtureReceiptReads ?? 0`));
+    const refreshReceipts = () => evaluate(`[...document.querySelectorAll('.advanced-session-controls button')]
+      .find(b=>b.textContent==='Refresh submissions').click()`);
+    await refreshReceipts();
+    assert.equal(await waitFor(`window.fixtureReceiptReads === ${receiptReads + 1}`), "ready");
+    assert.equal(await evaluate(`!!window.fixture.queuePending()`), true, "unrelated receipt cannot reconcile a queue request");
+    await evaluate(`window.fixtureReceiptRows[0].clientRequestId=window.fixture.queueCalls[6].clientRequestId`);
+    await refreshReceipts();
+    assert.equal(await waitFor(`!window.fixture.queuePending() && [...document.querySelectorAll('.context-actions label')]
+      .find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value === 'Independent secondary draft across retry'`), "ready");
+    assert.equal(await evaluate(`window.fixtureReceiptReads`), receiptReads + 2, "only explicit receipt refreshes read the fixture");
+    assert.equal(await evaluate(`[...document.querySelectorAll('.context-actions label')].find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value`),
+      "Independent secondary draft across retry", "receipt recovery must not clear or replace the toolbar-independent queue draft");
+    assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
+    await evaluate(`window.fixture.queueMode('hold');[...document.querySelectorAll('.context-actions button')]
+      .find(b=>b.textContent==='Queue text — this host only').click()`);
+    assert.equal(await evaluate(`window.fixture.queueCalls.length`), 8);
+    assert.equal(await evaluate(`window.fixture.queueCalls[7].text`), "Independent secondary draft across retry");
+    await evaluate(`window.fixture.settleQueue()`);
+    assert.equal(await waitFor(`!window.fixture.queuePending() && [...document.querySelectorAll('.context-actions label')]
+      .find(x=>x.textContent.includes('Host-only queued text'))?.querySelector('textarea').value === ''`),
+      "ready", "a successful direct secondary submission still clears the exact editor draft");
     assert.equal(await evaluate(`document.querySelector('#session-prompt').value`), "Newer independent queue draft");
     await evaluate(`window.fixture.observe('run-two',14);document.querySelector('#refresh-session-context').click()`);
     assert.equal(await waitFor(`!!document.querySelector('.composer-toolbar [aria-label="Cancel observed run"]')`), "ready");
