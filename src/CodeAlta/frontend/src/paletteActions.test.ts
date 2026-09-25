@@ -8,7 +8,7 @@ const catalog: PaletteContext = { workspace: true, selection: { sessionId: "one"
 test("palette only lists implemented navigation and currently available inspection/focus actions", () => {
   const global = paletteCommands({ ...catalog, workspace: false, selection: null, infoReady: false,
     promptReady: false, searchReady: false }).map(command => command.label);
-  assert.deepEqual(global, ["Settings", "Application Logs", "Providers", "Models", "Agent Prompts", "MCP Servers"]);
+  assert.deepEqual(global, ["Settings", "About", "Application Logs", "Providers", "Models", "Agent Prompts", "MCP Servers"]);
   assert.deepEqual(paletteCommands(catalog).map(command => command.label), [...global,
     "Session Info", "Focus prompt", "Focus session search"]);
   assert.deepEqual(paletteCommands({ ...catalog, epoch: "e1" }).map(command => command.label), [...global,
@@ -18,6 +18,7 @@ test("palette only lists implemented navigation and currently available inspecti
 test("selected commands recheck captured session/project/host and real focus targets", () => {
   const captured = { ...catalog, epoch: "e1" };
   assert.equal(paletteAvailable("logs", { ...catalog, workspace: false }, { ...catalog, workspace: false }), true);
+  assert.equal(paletteAvailable("about", captured, { ...captured, epoch: "e2", workspace: false }), true);
   assert.equal(paletteAvailable("reminders", captured, { ...captured, epoch: "e2" }), false);
   assert.equal(paletteAvailable("reminders", captured, { ...captured, selection: { sessionId: "two", projectId: null } }), false);
   assert.equal(paletteAvailable("reminders", captured, { ...captured, selection: { sessionId: "one", projectId: "project" } }), false);

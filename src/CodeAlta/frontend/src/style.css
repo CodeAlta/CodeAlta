@@ -431,6 +431,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .session-info-fields small { display: block; color: var(--muted); }
 .session-info-dialog > footer { gap: 12px; flex-wrap: wrap; }
 .session-info-dialog > footer span { overflow-wrap: anywhere; }
+.about-dialog > footer { justify-content: flex-end; }
 .app-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .app-dialog > header h2 { margin: 0 0 14px; font-size: 21px; }
 .app-dialog .settings-search { flex: 0 0 auto; }

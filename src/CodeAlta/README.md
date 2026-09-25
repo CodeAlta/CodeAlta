@@ -45,6 +45,15 @@ change the selected project/session, draft, requests, pane widths or timeline po
 The TUI's recent-session count, language and command approval policy are **not** configurable
 from this desktop screen; this is not full General/Navigator parity.
 
+**Configuration → General → About** and the implemented-actions palette open the same
+read-only modal. In the packaged desktop it reports the product and informational version
+from the running host's boot response, with a separate build field only for a recognized
+version `+metadata` suffix. Missing or invalid/overlong fields are marked unavailable,
+rather than replaced with an advertised version. The dialog distinguishes a browser demo,
+a pending/failed boot, an owned host and catalog-only browsing; it is not a runtime health check. Inspecting it
+does not fetch updates or read files, send data, or write configuration. TUI update checks,
+downloads and installation are **not supported** in this desktop view; no update status is known.
+
 **Configuration → Application Logs** (also in the implemented-actions palette) offers an
 explicit **Refresh logs** and a **Wrap lines** toggle. It displays at most 64 newest
 plain-text rows from this desktop process's bounded in-memory capture (128 rows and
@@ -187,7 +196,7 @@ The **Commands** button or `Ctrl+P` outside editors and dialogs opens a searchab
 implemented navigation and inspection actions. Arrow keys choose a result, Enter opens it and
 Escape closes the palette. Session Info requires a verified selected session; Reminders requires
 an exact owned session with a mutable host. Selection-sensitive actions are rechecked on activation.
-This palette does not expose Send, deletion, configuration writes, Skills or plugin management,
+This palette also opens About; it does not expose Send, deletion, configuration writes, Skills or plugin management,
 and is not the full TUI command/shortcut set.
 
 ## Browse a task-owned catalog copy

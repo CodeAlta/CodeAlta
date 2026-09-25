@@ -62,6 +62,7 @@ import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from
 import { useWindowPreferences } from "./windowPreferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
+import { AboutDialog, AboutSettingsEntry, openAboutPaletteAction } from "./AboutDialog";
 import { ProjectDetailsEntry, type ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog } from "./SessionInfoDialog";
@@ -108,7 +109,19 @@ function App() {
   const [notesHeight, setNotesHeight] = useState(() => restoreNotesHeight(() => localStorage.getItem(notesHeightKey)));
   const [historyNotes, setHistoryNotes] = useState<{ sessionId: string | null; markdown: string }>({ sessionId: null, markdown: "" });
   const updateHistoryNotes = useCallback((markdown: string) => setHistoryNotes({ sessionId, markdown }), [sessionId]);
-  const [dialog, setDialog] = useState<"project" | "help" | null>(null);
+  const [dialog, setDialog] = useState<"project" | "help" | "about" | null>(null);
+  const aboutOrigin = useRef<{ element: HTMLElement | null; view: View } | null>(null);
+  function openAbout(element: HTMLElement | null) {
+    if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+    aboutOrigin.current = { element, view: currentView.current };
+    setDialog("about");
+  }
+  function closeAbout() {
+    const origin = aboutOrigin.current;
+    setDialog(null);
+    requestAnimationFrame(() => restorePaletteFocus(origin?.element ?? null, currentView.current === origin?.view,
+      !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')));
+  }
   const [paletteOpen, setPaletteOpen] = useState(false);
   const paletteCapture = useRef<PaletteContext | null>(null);
   const paletteOrigin = useRef<HTMLElement | null>(null);
@@ -386,6 +399,7 @@ function App() {
     palettePending.current = null;
     if (dialog || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ||
       !paletteAvailable(action, captured, paletteContext())) return;
+    if (openAboutPaletteAction(action, paletteOrigin.current, openAbout)) return;
     if (action === "sessionInfo") sessionInfoTrigger.current?.click();
     else if (action === "reminders") navigate("reminders");
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
@@ -890,7 +904,8 @@ function App() {
     {view === "configuration"
       ? <ConfigurationPanel status={status} selectedSession={selectedSession} configurationState={configurationState}
           preferences={{ theme, setTheme, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices }}
-          onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")} />
+          onOpenProviders={() => navigate("providers")} onOpenModels={() => navigate("models")} onOpenPrompts={() => navigate("prompts")} onOpenLogs={() => navigate("logs")}
+          onOpenAbout={openAbout} />
       : view === "logs" ? <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} />
       : view === "providers" ? <ProvidersPanel epoch={owned ? status!.hostEpoch : null}
@@ -1133,6 +1148,7 @@ function App() {
         return true;
       }} onClose={() => setDialog(null)} />}
     {dialog === "help" && <ShortcutHelp onClose={() => setDialog(null)} />}
+    {dialog === "about" && <AboutDialog status={status} bootError={!!error} demo={demoMode} onClose={closeAbout} />}
     {paletteOpen && paletteCapture.current && <CommandPalette context={paletteContext()} captured={paletteCapture.current}
       onChoose={choosePalette} onClose={dismissPalette} />}
   </div>;
@@ -1279,7 +1295,7 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ status, selectedSession, configurationState, preferences, onOpenProviders, onOpenModels, onOpenPrompts, onOpenLogs }: {
+function ConfigurationPanel({ status, selectedSession, configurationState, preferences, onOpenProviders, onOpenModels, onOpenPrompts, onOpenLogs, onOpenAbout }: {
   status: BootStatus | undefined;
   selectedSession: WorkspaceSession | undefined;
   configurationState: { snapshot?: ConfigurationSnapshot; error?: string };
@@ -1288,6 +1304,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, prefe
   onOpenProviders: () => void;
   onOpenPrompts: () => void;
   onOpenLogs: () => void;
+  onOpenAbout: (origin: HTMLElement | null) => void;
 }) {
   const inventory = configurationState.snapshot;
   const [scope, setScope] = useState<ConfigurationScope>("all");
@@ -1323,7 +1340,7 @@ function ConfigurationPanel({ status, selectedSession, configurationState, prefe
         {inventory && inventory.plugins.length === 0 && <StatusPill label={inventory.pluginRuntimeAvailable ? "No active plugins" : "Requires packaged host"} />}
         {inventory?.pluginsTruncated && <p className="muted-text">Showing the first 32 active plugins.</p>}
       </div></section>}
-      {visible.has("about") && <section className="settings-card"><div className="settings-icon">i</div><div><h2>About</h2><p>{status?.productName ?? "CodeAlta Desktop"} · {status?.version ?? "initializing"}</p><p className="muted-text">Use <code>altatui</code> for provider/account/plugin mutation until those commands are exposed by the desktop bridge.</p></div></section>}
+      {visible.has("about") && <AboutSettingsEntry onOpen={onOpenAbout} />}
       {visible.size === 0 && <div className="empty-settings"><h2>No matching settings</h2><p>Try a different search or configuration section.</p></div>}
       </div>
     </div>

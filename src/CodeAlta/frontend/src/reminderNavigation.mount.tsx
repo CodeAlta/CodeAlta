@@ -105,7 +105,7 @@ function App() {
       !paletteAvailable(action, context, paletteContext())) return;
     if (action === "sessionInfo") infoButton.current?.click();
     else if (action === "focusPrompt") document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt")?.focus();
-    else if (action !== "focusSearch") setView(action === "settings" ? "configuration" : action);
+    else if (action !== "focusSearch" && action !== "about") setView(action === "settings" ? "configuration" : action);
   });
   useLayoutEffect(() => {
     const keyDown = (event: KeyboardEvent) => {

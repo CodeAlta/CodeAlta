@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Desktop;
 using CodeAlta.Desktop.Rpc;
@@ -130,6 +131,15 @@ public sealed class DesktopStartupTests
         var json = JsonSerializer.Serialize(status, DesktopJsonContext.Default.BootStatus);
         Assert.AreEqual(status, JsonSerializer.Deserialize(json, DesktopJsonContext.Default.BootStatus));
         StringAssert.Contains(json, "\"hostAvailable\":false");
+    }
+
+    [TestMethod]
+    public void BootRpc_VersionMatchesTheRunningDesktopAssemblyInBothModes()
+    {
+        var runningVersion = typeof(DesktopCommandLine).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "development";
+        Assert.AreEqual(runningVersion, new BootService().Status(new()).Version);
+        Assert.AreEqual(runningVersion, new BootService("test-owned-epoch").Status(new()).Version);
     }
 
     [TestMethod]

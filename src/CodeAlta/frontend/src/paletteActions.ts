@@ -1,6 +1,6 @@
 import type { SessionInfoSelection } from "./sessionInfo";
 
-export type PaletteAction = "settings" | "logs" | "providers" | "models" | "prompts" | "mcp" | "reminders" | "sessionInfo" | "focusPrompt" | "focusSearch";
+export type PaletteAction = "settings" | "about" | "logs" | "providers" | "models" | "prompts" | "mcp" | "reminders" | "sessionInfo" | "focusPrompt" | "focusSearch";
 export type PaletteContext = Readonly<{
   workspace: boolean;
   selection: SessionInfoSelection | null;
@@ -12,7 +12,7 @@ export type PaletteContext = Readonly<{
 export type PaletteCommand = Readonly<{ id: PaletteAction; label: string }>;
 
 const commands: readonly PaletteCommand[] = Object.freeze(([
-  { id: "settings", label: "Settings" }, { id: "logs", label: "Application Logs" }, { id: "providers", label: "Providers" },
+  { id: "settings", label: "Settings" }, { id: "about", label: "About" }, { id: "logs", label: "Application Logs" }, { id: "providers", label: "Providers" },
   { id: "models", label: "Models" }, { id: "prompts", label: "Agent Prompts" },
   { id: "mcp", label: "MCP Servers" }, { id: "reminders", label: "Reminders" },
   { id: "sessionInfo", label: "Session Info" }, { id: "focusPrompt", label: "Focus prompt" },
