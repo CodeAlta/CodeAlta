@@ -16,6 +16,7 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
   infoSelection: SessionInfoSelection | null;
   selection: ShortcutSession | null;
   messageAvailable?: boolean;
+  latestAvailable?: boolean;
   run: (action: ShortcutAction) => void;
 }>): void {
   const target = event.target instanceof HTMLElement ? event.target : null;
@@ -48,7 +49,8 @@ export function dispatchWorkspaceShortcut(event: KeyboardEvent, state: Workspace
     state.reminderPrefix.projectId === context.selection.projectId &&
     sessionInfoChordContextAllowed({ ...common, triggerReady: ready(context.reminderTrigger) });
   const resolved = resolveShortcut(event, state.chordPending, editing, context.selectedProjectFocused,
-    infoAvailable, reminderAvailable, context.messageAvailable === true && common.workspaceActive && common.inWorkspace);
+    infoAvailable, reminderAvailable, context.messageAvailable === true && common.workspaceActive && common.inWorkspace,
+    context.latestAvailable === true && common.workspaceActive && common.inWorkspace);
   state.chordPending = resolved.chordPending;
   const prefix = sessionInfoPrefixFromKey(event, resolved);
   state.sessionInfoPrefix = prefix ? context.infoSelection : null;

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { NewestHistoryRequest, NewestHistoryResult } from "./HistoryPanel";
+import { historyMessage } from "./history";
 
 export type ScrollMetrics = Readonly<{ scrollTop: number; scrollHeight: number; clientHeight: number }>;
 
@@ -92,6 +94,12 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
   const resetMessageNavigation = useCallback(() => { messageAnchor.current = null; }, []);
+  const pauseIfUnfollowed = useCallback(() => {
+    if (selection.following()) return;
+    const element = elementRef.current;
+    if (element) selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+  }, [selection]);
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;
@@ -152,6 +160,11 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     }
     setFollowing(true);
   }
+  function pause() {
+    const element = elementRef.current;
+    if (element) selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+  }
   function messageReady() {
     const element = elementRef.current;
     return !!element?.querySelector('.history[data-window-ready="true"] .timeline-message.message-user, .history[data-window-ready="true"] .timeline-message.message-assistant');
@@ -180,6 +193,63 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     setFollowing(false);
     return { status: "moved", label: row.querySelector(".message-body")?.textContent?.trim().slice(0, 120) };
   }
-  return { elementRef, following, settled, scroll, jump, beforeOlderPage, afterOlderPage,
-    messageReady, navigateMessage, resetMessageNavigation };
+  return { elementRef, following, settled, scroll, jump, pause, beforeOlderPage, afterOlderPage,
+    messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed };
+}
+
+// Only a user-requested, generation-matched settled tail can opt a reader into follow.
+// Pending intent belongs to the mounted selection, never to a global history request.
+export function useExplicitNewestHistory(sessionId: string, projectId: string | null, epoch: string | null,
+  position: ReturnType<typeof useTimelinePosition>, onNotice: (message: string) => void) {
+  const requestRef = useRef<NewestHistoryRequest | null>(null);
+  const pending = useRef<{ generation: number; sessionId: string; projectId: string | null; epoch: string | null;
+    wasFollowing: boolean; anchor: HTMLElement | null; anchorTop: number } | null>(null);
+  useLayoutEffect(() => {
+    if (pending.current && (pending.current.sessionId !== sessionId || pending.current.projectId !== projectId ||
+      pending.current.epoch !== epoch)) {
+      pending.current = null;
+      onNotice("");
+    }
+  }, [sessionId, projectId, epoch, onNotice]);
+  function cancel() {
+    if (!pending.current) return;
+    pending.current = null;
+    onNotice("Newest history is still loading; automatic follow canceled by newer user navigation.");
+  }
+  const onTarget = useCallback((generation: number): boolean => {
+    if (pending.current?.generation === generation) return true;
+    pending.current = null;
+    return false;
+  }, []);
+  function latest() {
+    const generation = requestRef.current?.();
+    if (generation === undefined) return;
+    const element = position.elementRef.current;
+    const anchor = element ? Array.from(element.querySelectorAll<HTMLElement>(".timeline-message"))
+      .find(row => row.getBoundingClientRect().bottom > element.getBoundingClientRect().top) ?? null : null;
+    pending.current = { generation, sessionId, projectId, epoch, wasFollowing: position.following,
+      anchor, anchorTop: anchor?.getBoundingClientRect().top ?? 0 };
+    onNotice("Refreshing the newest persisted history window…");
+  }
+  function onScroll() {
+    const intent = pending.current;
+    if (intent?.anchor?.isConnected && Math.abs(intent.anchor.getBoundingClientRect().top - intent.anchorTop) > 2)
+      cancel(); // Layout anchoring keeps the row still; an independently moved viewport does not.
+  }
+  function onResult(result: NewestHistoryResult) {
+    const intent = pending.current;
+    if (!intent || intent.generation !== result.generation || intent.sessionId !== result.sessionId ||
+      intent.sessionId !== sessionId || intent.projectId !== projectId || intent.epoch !== epoch) return;
+    pending.current = null;
+    if (result.error) {
+      if (!intent.wasFollowing) position.pause();
+      onNotice(`Newest history refresh failed: ${historyMessage(result.error)} Follow preference unchanged.`);
+    }
+    else {
+      position.jump();
+      onNotice("Newest persisted history window loaded; following visible content.");
+    }
+  }
+  return { requestRef, available: () => requestRef.current !== null, pending: () => pending.current !== null,
+    latest, cancel, onScroll, onTarget, onResult };
 }

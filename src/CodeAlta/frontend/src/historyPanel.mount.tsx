@@ -3,12 +3,14 @@ import { createElement, useCallback, useLayoutEffect, useRef, useState, type UIE
 import { createRoot } from "react-dom/client";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
 import { History } from "./HistoryPanel";
-import { createTimelineScrollMemory, useTimelinePosition } from "./timelineScroll";
+import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition } from "./timelineScroll";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 
 const memory = createTimelineScrollMemory();
 const calls: string[] = [];
 let failCode: string | null = null;
+let failCursorCode: string | null = null;
+let mismatchCursor = false;
 let holdNext = false;
 let release: (() => void) | undefined;
 const stable = () => {};
@@ -23,56 +25,80 @@ async function read(request: HistoryRequest): Promise<HistoryResponse> {
   calls.push(`${request.sessionId}:${request.cursor?.version ?? "tail"}:${request.cursor?.offset ?? "end"}`);
   if (holdNext) { holdNext = false; await new Promise<void>(resolve => { release = resolve; }); }
   if (failCode) { const status = failCode; failCode = null; return { status, entries: [], next: null, tailOmitted: false }; }
+  if (request.cursor && failCursorCode) { const status = failCursorCode; failCursorCode = null;
+    return { status, entries: [], next: null, tailOmitted: false }; }
   const total = request.sessionId === "A" ? 1205 : request.sessionId === "C" ? 200 : 3;
   const end = request.cursor ? Number(request.cursor.offset) / 200 : total;
   const start = Math.max(0, end - 100);
-  const next = start ? { version: 2, sessionId: request.sessionId, length: `${total * 200}`, lastWriteUtcTicks: "7",
+  let next = start ? { version: 2, sessionId: request.sessionId, length: `${total * 200}`, lastWriteUtcTicks: "7",
     offset: `${start * 200}` } : null;
+  if (request.cursor && next && mismatchCursor) { mismatchCursor = false; next = { ...next, lastWriteUtcTicks: "8" }; }
   return { status: "ok", entries: request.sessionId === "C" && end === 200 ? [] :
     Array.from({ length: end - start }, (_, i) => row(start + i, request.sessionId)), next, tailOmitted: false };
 }
-function Mounted({ sessionId }: { sessionId: string }) {
+function Mounted({ sessionId, epoch }: { sessionId: string; epoch: string }) {
   const position = useTimelinePosition(sessionId, memory);
   const shell = useRef<HTMLDivElement>(null);
   const shortcut = useRef<WorkspaceShortcutState>({ chordPending: false, sessionInfoPrefix: null, reminderPrefix: null });
   const [notice, setNotice] = useState("");
-  const resetNotice = useCallback(() => { position.resetMessageNavigation(); setNotice(""); }, [position.resetMessageNavigation]);
+  const newest = useExplicitNewestHistory(sessionId, null, epoch, position, setNotice);
+  const resetNotice = useCallback((generation: number, explicitNewest: boolean) => {
+    position.resetMessageNavigation();
+    if (!newest.onTarget(generation)) {
+      if (explicitNewest) position.pauseIfUnfollowed();
+      setNotice("");
+    }
+  }, [position.resetMessageNavigation, position.pauseIfUnfollowed, newest.onTarget]);
   useLayoutEffect(() => {
-    const keyDown = (event: KeyboardEvent) => dispatchWorkspaceShortcut(event, shortcut.current, {
+    const keyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && shell.current?.contains(event.target) &&
+        !event.target.closest("input, textarea, select, [contenteditable='true']") &&
+        ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) newest.cancel();
+      dispatchWorkspaceShortcut(event, shortcut.current, {
       workspaceActive: true, workspaceShell: shell.current, modalOpen: false, selectedProjectFocused: false,
       infoTrigger: null, reminderTrigger: null, infoSelection: { sessionId, projectId: null }, selection: null,
-      messageAvailable: position.messageReady(),
+      messageAvailable: position.messageReady(), latestAvailable: newest.available(),
       run: action => {
+        if (action === "messageLatest") { newest.latest(); return; }
         if (action !== "messagePrevious" && action !== "messageNext" && action !== "messageFirst") return;
+        newest.cancel();
         const result = position.navigateMessage(action);
         setNotice(result.status === "boundary" ? action === "messageNext" ? "Last retained message; refresh newest history."
           : "First retained message; older journal history may exist." : result.label ?? result.status);
       },
-    });
+      });
+    };
     window.addEventListener("keydown", keyDown);
     return () => window.removeEventListener("keydown", keyDown);
   });
   return createElement("div", { className: "workspace-shell", ref: shell },
     createElement("button", { type: "button", className: "keyboard-target" }, "Timeline keyboard target"),
-    createElement("button", { type: "button", className: "follow-target", onClick: position.jump }, "Follow visible window"),
+    createElement("button", { type: "button", className: "follow-target", onClick: () => { newest.cancel(); position.jump(); } }, "Follow visible window"),
     createElement("div", { className: "timeline-scroll", ref: position.elementRef,
     "data-following": position.following,
-    onScroll: (event: UIEvent<HTMLDivElement>) => position.scroll(event.currentTarget),
+    onScroll: (event: UIEvent<HTMLDivElement>) => {
+      newest.onScroll(); if (!newest.pending()) position.scroll(event.currentTarget);
+    },
+    onWheel: newest.cancel, onPointerDown: newest.cancel,
     style: { height: "260px", overflowY: "scroll", width: "650px" } },
     createElement(History, { sessionId, read, live: null, onNotesChange: stable,
-      onSettled: position.settled, onBeforeOlder: position.beforeOlderPage, onAfterOlder: position.afterOlderPage,
-      onNavigationReset: resetNotice })),
+      onSettled: () => { position.settled(); if (!newest.pending()) position.pauseIfUnfollowed(); },
+      onBeforeOlder: position.beforeOlderPage, onAfterOlder: position.afterOlderPage,
+      onNavigationReset: resetNotice, newestRequest: newest.requestRef, onNewestResult: newest.onResult })),
     createElement("p", { role: "status", className: "navigation-notice" }, notice),
     createElement("textarea", { id: "session-prompt", "aria-label": "Prompt" }));
 }
 function Fixture() {
   const [session, setSession] = useState("A");
+  const [epoch, setEpoch] = useState("fixture");
   useLayoutEffect(() => {
-    Object.assign(window, { fixture: { select: setSession, calls, failNext: (code: string) => { failCode = code; },
+    Object.assign(window, { fixture: { select: setSession, host: setEpoch, calls, failNext: (code: string) => { failCode = code; },
+      failCursor: (code: string) => { failCursorCode = code; },
+      mismatchCursor: () => { mismatchCursor = true; },
       holdNext: () => { holdNext = true; }, release: () => { release?.(); release = undefined; } } });
   }, []);
   return createElement("div", { className: "outer-scroll", style: { height: "360px", overflowY: "scroll" } },
-    createElement(Mounted, { key: session, sessionId: session }),
+    createElement(Mounted, { key: session, sessionId: session, epoch }),
     createElement("button", { type: "button", className: "outside-target" }, "Outside workspace"),
     createElement("div", { style: { height: "600px" } }, "Outer filler"));
 }

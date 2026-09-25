@@ -98,13 +98,15 @@ test("F2 renames only a focused selected project outside editing, IME and modifi
     assert.equal(resolveShortcut({ key: "F2", ...modifier }, false, false, true).handled, false);
 });
 
-test("message navigation is retained-window-only; Ctrl+F4 remains unbound", () => {
-  const resolve = (key: string, modifiers = {}, editing = false, available = true) =>
-    resolveShortcut({ key, ...modifiers }, false, editing, false, false, false, available);
+test("retained navigation and explicit newest refresh respect editing, focus admission and IME", () => {
+  const resolve = (key: string, modifiers = {}, editing = false, available = true, newest = true) =>
+    resolveShortcut({ key, ...modifiers }, false, editing, false, false, false, available, newest);
   assert.equal(resolve("F3").action, "messagePrevious");
   assert.equal(resolve("F4").action, "messageNext");
   assert.equal(resolve("F3", { ctrlKey: true }).action, "messageFirst");
-  assert.equal(resolve("F4", { ctrlKey: true }).handled, false);
+  assert.equal(resolve("F4", { ctrlKey: true }).action, "messageLatest");
+  assert.equal(resolve("F4", { ctrlKey: true }, false, true, false).handled, false);
+  assert.equal(resolve("F4", { ctrlKey: true }, true).handled, false);
   for (const key of ["F3", "F4"]) {
     assert.equal(resolve(key, {}, true).handled, false);
     assert.equal(resolve(key, {}, false, false).handled, false);
@@ -112,4 +114,7 @@ test("message navigation is retained-window-only; Ctrl+F4 remains unbound", () =
       { isComposing: true }, { keyCode: 229 }, { repeat: true }, { defaultPrevented: true }])
       assert.equal(resolve(key, modifiers).handled, false);
   }
+  for (const modifiers of [{ altKey: true }, { shiftKey: true }, { metaKey: true },
+    { isComposing: true }, { keyCode: 229 }, { repeat: true }, { defaultPrevented: true }])
+    assert.equal(resolve("F4", { ctrlKey: true, ...modifiers }).handled, false);
 });

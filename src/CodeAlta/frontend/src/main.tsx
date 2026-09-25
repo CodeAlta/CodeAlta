@@ -33,7 +33,7 @@ import { notesHeightKey, defaultNotesHeight, restoreNotesHeight, persistNotesHei
 import { createUserInputReviewer } from "./sessionUserInput";
 import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
-import { createTimelineScrollMemory, useTimelinePosition, type MessageNavigation } from "./timelineScroll";
+import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, type MessageNavigation } from "./timelineScroll";
 import type { ShortcutAction } from "./shortcuts";
 import { dispatchWorkspaceShortcut, type WorkspaceShortcutState } from "./workspaceShortcutDispatch";
 import { activateContextShortcut } from "./contextShortcut";
@@ -62,7 +62,8 @@ import { paletteAvailable, paletteShortcut, restorePaletteFocus, type PaletteAct
 import "./style.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
-  ready: () => boolean; navigate: (action: MessageNavigation) => void }>;
+  ready: () => boolean; navigate: (action: MessageNavigation) => void;
+  latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 type View = "workspace" | "configuration" | "providers" | "models" | "prompts" | "reminders" | "mcp";
@@ -366,6 +367,10 @@ function App() {
         event.preventDefault(); openPalette(); return;
       }
       const target = event.target as HTMLElement | null;
+      if (target && workspaceShell.current?.contains(target) && !target.closest("input, textarea, select, [contenteditable='true']") &&
+        !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented &&
+        ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
+        timelineCommand.current?.cancelLatest();
       const infoSelection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
         selectedSessionId.current, selectedScope.current);
       const focusedProject = !!(view === "workspace" && owned && selectedProject && !selectedProject.archived
@@ -380,6 +385,9 @@ function App() {
         messageAvailable: !!infoSelection && timelineCommand.current?.sessionId === infoSelection.sessionId
           && timelineCommand.current.projectId === infoSelection.projectId
           && timelineCommand.current.epoch === (status?.hostEpoch ?? null) && timelineCommand.current.ready(),
+        latestAvailable: !!infoSelection && timelineCommand.current?.sessionId === infoSelection.sessionId
+          && timelineCommand.current.projectId === infoSelection.projectId
+          && timelineCommand.current.epoch === (status?.hostEpoch ?? null) && timelineCommand.current.latestReady(),
         run: runShortcut,
       });
     }
@@ -389,13 +397,16 @@ function App() {
 
   function runShortcut(action: ShortcutAction) {
     const projects = projectListing?.projects ?? [];
-    if (action === "messagePrevious" || action === "messageNext" || action === "messageFirst") {
+    if (action === "messagePrevious" || action === "messageNext" || action === "messageFirst" || action === "messageLatest") {
       const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
         selectedSessionId.current, selectedScope.current);
       const command = timelineCommand.current;
       if (view === "workspace" && selection && command?.sessionId === selection.sessionId
         && command.projectId === selection.projectId && command.epoch === (status?.hostEpoch ?? null)
-        && command.ready()) command.navigate(action);
+        && (action === "messageLatest" ? command.latestReady() : command.ready())) {
+        if (action === "messageLatest") command.latest();
+        else command.navigate(action);
+      }
     }
     else if (action === "sessionInfo") sessionInfoTrigger.current?.click();
     else if (action === "reminders") remindersTrigger.current?.click();
@@ -1102,22 +1113,28 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
   const timeline = useTimelinePosition(session.id, scrollMemory);
   const [messageNotice, setMessageNotice] = useState("");
   const [newerOmitted, setNewerOmitted] = useState(false);
-  const resetMessageNotice = useCallback(() => {
+  const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice);
+  // Stable across History's auto-pages; do not cancel an admitted request on a parent render.
+  const resetMessageNotice = useCallback((generation: number, explicitNewest: boolean) => {
     timeline.resetMessageNavigation();
+    if (newest.onTarget(generation)) return;
+    if (explicitNewest) timeline.pauseIfUnfollowed();
     setMessageNotice("");
-  }, [timeline.resetMessageNavigation]);
+  }, [timeline.resetMessageNavigation, timeline.pauseIfUnfollowed, newest.onTarget]);
   useLayoutEffect(() => {
     if (demoMode) return;
     const command: TimelineCommand = { sessionId: session.id, projectId: selectedProjectId, epoch: status?.hostEpoch ?? null,
       ready: timeline.messageReady,
       navigate: action => {
+        newest.cancel();
         const result = timeline.navigateMessage(action);
         setMessageNotice(result.status === "unavailable" ? "Retained history is not ready for message navigation."
           : result.status === "boundary" ? action === "messageNext"
             ? "Last retained message in this window. This may not be the newest persisted history; use Refresh newest history."
             : "First retained message in this window. Older journal history may be available via Load older history."
           : `${action === "messageFirst" ? "First retained message (not necessarily the first journal message): " : "Retained message: "}${result.label ?? "User or assistant message"}`);
-      } };
+      },
+      latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel };
     timelineCommand.current = command;
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
@@ -1137,10 +1154,14 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
     {demoMode
       ? <DemoConversation session={session} />
       : <>
-        <div className="timeline-scroll" ref={timeline.elementRef} onScroll={event => timeline.scroll(event.currentTarget)}>
-        <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={timeline.settled}
+        <div className="timeline-scroll" ref={timeline.elementRef}
+          onScroll={event => { newest.onScroll(); if (!newest.pending()) timeline.scroll(event.currentTarget); }}
+          onWheel={newest.cancel} onPointerDown={newest.cancel}>
+        <History sessionId={session.id} onNotesChange={onNotesChange} onSettled={() => {
+          timeline.settled(); if (!newest.pending()) timeline.pauseIfUnfollowed();
+        }}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
-          onNavigationReset={resetMessageNotice}
+          onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={workspace.historyTail}
           live={ownedSession ? live?.snapshot?.session ?? null : null} />
         {ownedSession && status?.hostEpoch
@@ -1151,7 +1172,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, infoTrigger, r
         </>
         : null}
         </div>
-        {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={timeline.jump}><AppIcon name="arrowDown" size={14} />{newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible"}</button>}
+        {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible"}</button>}
         {messageNotice && <p role="status" className="detail timeline-navigation-notice">{messageNotice}</p>}
         {ownedSession && status?.hostEpoch
           ? <OwnedSessionPanel sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation!.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
@@ -1354,6 +1375,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["F1 or ?", "Keyboard shortcuts"], ["Escape", "Close / cancel"], ["Enter / Shift+Enter", "Send / new line in prompt"],
     ["F3 / F4", "Previous / next retained user or assistant message"],
     ["Ctrl+F3", "First retained message (not journal first)"],
+    ["Ctrl+F4", "Refresh newest persisted history, then follow on success"],
     ["F6", "Expand prompt (owned session)"], ["Ctrl+Enter", "Steer in regular prompt; close in expanded editor"],
   ];
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>

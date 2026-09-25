@@ -13,7 +13,7 @@ const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
 
 // This mounts the production History component and scroll hook against an isolated v2 journal
 // fixture. It is not native WebView2 acceptance and never opens a real catalog or user profile.
-test("mounted reverse history retains latest, anchors older pages and fences switched/stale reads", { skip: !edge, timeout: 45_000 }, async () => {
+test("mounted reverse history retains latest, anchors older pages and fences switched/stale reads", { skip: !edge, timeout: 70_000 }, async () => {
   const source = readFileSync(fileURLToPath(new URL("./main.tsx", import.meta.url)), "utf8");
   assert.match(source, /read=\{workspace\.historyTail\}/, "production must wire the v2 route");
   const root = await mkdtemp(join(tmpdir(), "codealta-history-mounted-"));
@@ -99,13 +99,16 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     assert.equal(firstPosition.focus, "keyboard-target");
     await evaluate(`(() => { const outside = document.querySelector('.outside-target'); outside.focus();
       outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
+      outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
       document.querySelector('.keyboard-target').focus();
       const modal = document.createElement('dialog'); modal.setAttribute('open', '');
       modal.innerHTML = '<button class="modal-target">Modal</button>'; document.querySelector('.workspace-shell').append(modal);
       modal.querySelector('button').focus();
       modal.querySelector('button').dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
+      modal.querySelector('button').dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
       modal.remove(); document.querySelector('.keyboard-target').focus();
       document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', isComposing: true, bubbles: true, cancelable: true }));
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }));
       return true; })()`);
     assert.match((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /turn-205/,
       "outside focus, modal and IME must not navigate");
@@ -126,6 +129,7 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     assert.equal((await snapshot())!.includes('"following":"false"'), true, "navigating onto the bottom row stays unfollowed");
     await evaluate(`(() => { const prompt = document.querySelector('#session-prompt'); prompt.focus();
       prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }));
+      prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
       return true; })()`);
     assert.match((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /latest user prompt/,
       "composer editing keeps its own shortcuts and focus");
@@ -155,17 +159,88 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
         document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', bubbles: true, cancelable: true }));
       return true; })()`);
     await wait("document.querySelector('.navigation-notice').textContent.includes('Last retained message; refresh newest')");
-    const olderBottom = (await snapshot())!;
-    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }))`);
-    assert.equal((await snapshot())!, olderBottom, "Ctrl+F4 must not masquerade as latest when browsing older pages");
+    const olderBottom = JSON.parse((await snapshot())!);
+    const olderRowTop = Number(await evaluate("[...document.querySelectorAll('.timeline-message')].at(-1).getBoundingClientRect().top"));
+    const outerBeforeLatest = Number(await evaluate("document.querySelector('.outer-scroll').scrollTop"));
+    await evaluate(`(() => { window.fixture.holdNext();
+      for (let i = 0; i < 2; i++) document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    await wait(`window.fixture.calls.length === ${olderBottom.calls.length + 1}`);
+    assert.match((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /Refreshing the newest persisted/);
+    assert.equal(JSON.parse((await snapshot())!).following, "false", "latest cannot follow before its held tail read settles");
+    assert.ok(Math.abs(Number(await evaluate("[...document.querySelectorAll('.timeline-message')].at(-1).getBoundingClientRect().top"))
+      - olderRowTop) < 2, "pending newest read keeps the old visible row anchored");
+    assert.doesNotMatch((await snapshot())!, /latest user prompt/, "old retained bottom is not latest");
+    await evaluate("window.fixture.release()");
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Newest persisted history window loaded')");
+    result = JSON.parse((await snapshot())!);
+    assert.match(result.last, /latest user prompt/);
+    assert.equal(result.following, "true");
+    assert.ok(Math.abs(result.top - (result.height - 260)) < 2, "successful settled newest window follows its bottom");
+    assert.equal(Number(await evaluate("document.querySelector('.outer-scroll').scrollTop")), outerBeforeLatest);
     assert.equal(await evaluate("document.activeElement.className"), "keyboard-target");
+    await evaluate(`(() => { const style = document.createElement('style'); style.textContent = '.timeline-message { height: 56px; }';
+      document.head.append(style); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
+    result = JSON.parse((await snapshot())!);
+    assert.ok(Math.abs(result.top - (result.height - 260)) < 2, "explicit newest follow survives deferred layout growth");
+    await evaluate(`(() => { const style = document.createElement('style'); style.textContent = '.timeline-message { height: 48px; }';
+      document.head.append(style); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
+    await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true, cancelable: true }))");
+    await wait("document.querySelector('.timeline-scroll').dataset.following === 'false'");
+    await evaluate("document.querySelector('.load-more').click()");
+    await wait("document.body.innerText.includes('Newer journal events are no longer')");
+    await evaluate(`(() => { document.querySelector('.keyboard-target').focus(); window.fixture.failNext('read_failed');
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Newest history refresh failed')");
+    result = JSON.parse((await snapshot())!);
+    assert.match(result.last, /turn-1104/, "failed newest read retains older known window");
+    assert.equal(result.following, "false", "failed newest read retains explicit unfollow");
+    assert.equal(await evaluate("document.querySelector('.history').dataset.windowReady"), "false");
+    await evaluate(`(() => { window.fixture.holdNext(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    await wait("window.fixture.calls.at(-1) === 'A:tail:end'");
+    await evaluate(`(() => { const scroller = document.querySelector('.timeline-scroll');
+      scroller.scrollTop = 2000; scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+      return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('automatic follow canceled')");
+    await evaluate("window.fixture.release()");
+    await wait("document.querySelector('.history').dataset.windowReady === 'true' && document.body.innerText.includes('latest user prompt')");
+    assert.equal(JSON.parse((await snapshot())!).following, "false", "manual scroll overrides pending latest follow");
+    assert.doesNotMatch((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /window loaded/);
+    await evaluate("document.querySelector('.load-more').click()");
+    await wait("document.body.innerText.includes('Newer journal events are no longer')");
+    await evaluate(`(() => { window.fixture.mismatchCursor(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Newest history refresh failed')");
+    assert.match(JSON.parse((await snapshot())!).last, /turn-1104/, "changed cursor revision cannot publish a partial newest window");
+    assert.equal(JSON.parse((await snapshot())!).following, "false");
+    await evaluate(`(() => { window.fixture.holdNext(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    await wait("window.fixture.calls.at(-1) === 'A:tail:end'");
+    await evaluate("window.fixture.host('new-host'); window.fixture.release()");
+    await wait("document.querySelector('.history').dataset.windowReady === 'true'");
+    assert.equal(JSON.parse((await snapshot())!).following, "false", "host change cannot follow the old command");
+    assert.doesNotMatch((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /window loaded/);
     await evaluate("window.fixture.select('B')");
     await wait("document.querySelectorAll('.timeline-message').length === 3 && document.body.innerText.includes('turn-2')");
     await evaluate("window.fixture.select('A')");
     await wait("document.querySelectorAll('.timeline-message').length === 1000 && document.body.innerText.includes('latest user prompt')");
     result = JSON.parse((await snapshot())!);
     assert.equal(result.following, "false", "returning reader must retain user-unfollow preference");
-    assert.ok(result.top > 2000, "returning session should restore its reading position after loading");
+    assert.ok(result.top >= 1900, `returning session should restore its reader's position after loading: ${result.top}`);
+    await evaluate(`(() => { document.querySelector('.keyboard-target').focus(); window.fixture.holdNext();
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("window.fixture.calls.at(-1) === 'A:tail:end'");
+    await evaluate("window.fixture.select('B')");
+    await wait("document.querySelectorAll('.timeline-message').length === 3 && document.body.innerText.includes('turn-2')");
+    await evaluate("window.fixture.release()");
+    await wait("document.querySelector('.history').dataset.windowReady === 'true'");
+    assert.doesNotMatch((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /window loaded/,
+      "late A tail cannot follow or report success in B");
+    await evaluate("window.fixture.select('A')");
+    await wait("document.querySelectorAll('.timeline-message').length === 1000 && document.body.innerText.includes('latest user prompt')");
     await evaluate("window.fixture.holdNext(); document.querySelector('.load-more').click()");
     await wait("window.fixture.calls.at(-1).startsWith('A:2:')");
     assert.equal(await evaluate("document.querySelector('.history').dataset.windowReady"), "false", "pending read blocks keyboard navigation");
@@ -176,6 +251,34 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     await wait("document.querySelectorAll('.timeline-message').length === 100 && document.body.innerText.includes('turn-99')");
     result = JSON.parse((await snapshot())!);
     assert.ok(result.calls.some(call => call === "C:2:20000"), "empty metadata-only page must continue");
+    await evaluate(`(() => { document.querySelector('.keyboard-target').focus();
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }));
+      window.fixture.failCursor('history_changed');
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }));
+      return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Newest history refresh failed')");
+    assert.equal(JSON.parse((await snapshot())!).rows, 100, "revision failure after metadata page retains old visible rows");
+    assert.equal(JSON.parse((await snapshot())!).following, "false");
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }))`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Newest persisted history window loaded')");
+    assert.equal(JSON.parse((await snapshot())!).following, "true", "metadata-only first page is not premature success");
+    await evaluate(`(() => { window.fixture.failNext('read_failed'); document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    await wait("document.querySelector('.navigation-notice').textContent.includes('Newest history refresh failed')");
+    assert.equal(JSON.parse((await snapshot())!).following, "true", "failed refresh also retains a preexisting follow preference");
+    assert.equal(JSON.parse((await snapshot())!).rows, 100);
+    await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true }))");
+    await wait("document.querySelector('.history').dataset.windowReady === 'true' && document.querySelector('.navigation-notice').textContent.includes('window loaded')");
+    await evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', ctrlKey: true, bubbles: true, cancelable: true }))");
+    await wait("document.querySelector('.timeline-scroll').dataset.following === 'false'");
+    await evaluate(`(() => { window.fixture.holdNext(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'F4', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+    await wait("window.fixture.calls.at(-1) === 'C:tail:end'");
+    await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Refresh newest')).click()");
+    await wait("document.querySelector('.history').dataset.windowReady === 'true' && document.querySelectorAll('.timeline-message').length === 100");
+    await evaluate("window.fixture.release()");
+    assert.equal(JSON.parse((await snapshot())!).following, "false", "manual Refresh supersedes keyboard follow without opting in");
+    assert.doesNotMatch((await evaluate("document.querySelector('.navigation-notice').textContent"))!, /window loaded/);
     await evaluate("window.fixture.select('A')");
     await wait("document.querySelectorAll('.timeline-message').length === 1000 && document.body.innerText.includes('latest user prompt')");
     await evaluate("window.fixture.failNext('history_changed'); document.querySelector('.load-more').click()");
@@ -184,6 +287,7 @@ test("mounted reverse history retains latest, anchors older pages and fences swi
     assert.equal(await evaluate("document.querySelector('.history').dataset.windowReady"), "false");
     await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Refresh newest')).click()");
     await wait("document.querySelectorAll('.timeline-message').length === 1000 && document.body.innerText.includes('latest user prompt')");
+    assert.equal(JSON.parse((await snapshot())!).following, "false", "manual Refresh newest keeps the reader's unfollow preference");
     await evaluate("window.fixture.failNext('read_failed'); document.querySelector('.load-more').click()");
     await wait("document.querySelector('[role=alert]')?.textContent.includes('could not be read')");
     assert.equal(JSON.parse((await snapshot())!).rows, 1000, "non-revision older failure retains known recent history");

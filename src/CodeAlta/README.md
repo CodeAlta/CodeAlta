@@ -176,10 +176,15 @@ messages in the currently retained window** (not tool/status cards); `Ctrl+F3` m
 to its first retained message, which may not be the journal's first message. These
 keys unfollow the timeline and report retained-window boundaries. They do not fetch
 older pages or infer that a running session has finished persisting events. Use
-**Load older history** to browse older pages or **Refresh newest history** to explicitly
-read the newest persisted window. `Ctrl+F4` is not bound: jumping to the bottom of
-an older retained page is not a safe latest-history action. The bottom button follows
-the displayed window only and labels older windows accordingly.
+**Load older history** to browse older pages. **Refresh newest history** and `Ctrl+F4`
+explicitly read the newest persisted window (up to 1,000 events), including when
+browsing an older page; only `Ctrl+F4` opts into follow after all matching pages
+have settled. A failed or superseded read cannot claim success or move to an older
+window's bottom. Scrolling, changing selection/host or another navigation action
+cancels the pending keyboard follow intent; it does not cancel a completed read or
+automatically retry. The bottom button follows the displayed window only and labels
+older windows accordingly. This is a snapshot of the last successful explicit read,
+not proof that a running provider has finished writing its journal.
 
 The shared reader limits page input to 256 KiB, individual records to 128 KiB and work to
 100 physical records, plus bounded framing probes. Blank and metadata-only records count,
